@@ -23,6 +23,8 @@ private slots:
 	void roomRowsExposeActionsOnlySource();
 	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
 	void directMessageHistoryMergePublishesOnce();
+	void directMessageSummariesStayTypedAndIncremental();
+	void directMessageControllerKeepsConversationDraftsSeparate();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
@@ -49,6 +51,7 @@ private slots:
 	void sessionPublishesTypedStonksState();
 	void sessionPublishesSemanticMenus();
 	void commandsRouteTypedAppActions();
+	void commandsRouteActiveScopeMarkRead();
 	void commandsRejectEmptyStableIds();
 	void commandsValidateStableMoveIds();
 	void commandsBatchPreviewHydration();
@@ -223,6 +226,8 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QSignalSpy sendSpy(&scope, &ActiveScopeController::canSendChanged);
 	QSignalSpy replySpy(&scope, &ActiveScopeController::hasPendingReplyChanged);
 	QSignalSpy olderSpy(&scope, &ActiveScopeController::canLoadOlderChanged);
+	QSignalSpy unreadSpy(&scope, &ActiveScopeController::unreadCountChanged);
+	QSignalSpy canMarkReadSpy(&scope, &ActiveScopeController::canMarkReadChanged);
 	QSignalSpy loadingSpy(&scope, &ActiveScopeController::loadingStateChanged);
 	QSignalSpy screenShareSpy(&scope, &ActiveScopeController::screenShareChanged);
 	const QVariantMap screenShare { { QStringLiteral("mode"), QStringLiteral("available") },
@@ -236,6 +241,7 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
 					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
 					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canLoadOlder"), true },
+					   { QStringLiteral("unreadCount"), 7 }, { QStringLiteral("canMarkRead"), true },
 					   { QStringLiteral("loading"), true },
 					   { QStringLiteral("loadingState"), QStringLiteral("older") },
 					   { QStringLiteral("screenShare"), screenShare } });
@@ -247,6 +253,8 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QCOMPARE(scope.replySnippet(), QStringLiteral("Hello"));
 	QVERIFY(scope.canAttachImages());
 	QVERIFY(scope.canLoadOlder());
+	QCOMPARE(scope.unreadCount(), 7ULL);
+	QVERIFY(scope.canMarkRead());
 	QVERIFY(scope.loading());
 	QCOMPARE(scope.loadingState(), QStringLiteral("older"));
 	QCOMPARE(scope.screenShare(), screenShare);
@@ -254,6 +262,8 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QCOMPARE(sendSpy.count(), 1);
 	QCOMPARE(replySpy.count(), 1);
 	QCOMPARE(olderSpy.count(), 1);
+	QCOMPARE(unreadSpy.count(), 1);
+	QCOMPARE(canMarkReadSpy.count(), 1);
 	QCOMPARE(loadingSpy.count(), 1);
 	QCOMPARE(screenShareSpy.count(), 1);
 
@@ -675,6 +685,120 @@ void TestQmlClientModels::directMessageHistoryMergePublishesOnce() {
 	QVERIFY(QRegularExpression(QStringLiteral(
 		R"(buildModernShellDirectMessageConversationState\s*\(\s*conversation\s*,\s*false\s*\))"))
 			.match(summariesBody).hasMatch());
+}
+
+void TestQmlClientModels::directMessageSummariesStayTypedAndIncremental() {
+	DirectMessageSummaryModel model;
+	QSignalSpy insertedSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy removedSpy(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+
+	model.replaceConversationStates({
+		QVariantMap { { QStringLiteral("peerSession"), 7 }, { QStringLiteral("token"), QStringLiteral("-1:7") },
+			{ QStringLiteral("label"), QStringLiteral("Alice") },
+			{ QStringLiteral("subtitle"), QStringLiteral("In Lobby") },
+			{ QStringLiteral("lastMessagePreview"), QStringLiteral("Hello") },
+			{ QStringLiteral("unreadCount"), 2 }, { QStringLiteral("open"), false } },
+		QVariantMap { { QStringLiteral("peerSession"), QStringLiteral("0") },
+			{ QStringLiteral("label"), QStringLiteral("Invalid") } },
+		QVariantMap { { QStringLiteral("peerSession"), QStringLiteral("4294967296") },
+			{ QStringLiteral("label"), QStringLiteral("Too large") } }
+	});
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("7"));
+	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Alice"));
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("Hello"));
+	QCOMPARE(model.get(0).value(QStringLiteral("unreadCount")).toULongLong(), 2ULL);
+	QCOMPARE(insertedSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+
+	model.replaceConversationStates({
+		QVariantMap { { QStringLiteral("peerSession"), 7 }, { QStringLiteral("token"), QStringLiteral("-1:7") },
+			{ QStringLiteral("label"), QStringLiteral("Alice") },
+			{ QStringLiteral("lastMessagePreview"), QStringLiteral("Updated") },
+			{ QStringLiteral("unreadCount"), 0 }, { QStringLiteral("open"), true } },
+		QVariantMap { { QStringLiteral("peerSession"), 9 }, { QStringLiteral("token"), QStringLiteral("-1:9") },
+			{ QStringLiteral("label"), QStringLiteral("Bob") }, { QStringLiteral("unreadCount"), 1 } }
+	});
+	QCOMPARE(model.rowCount(), 2);
+	QVERIFY(changedSpy.count() >= 1);
+	QCOMPARE(insertedSpy.count(), 2);
+	QCOMPARE(resetSpy.count(), 0);
+
+	model.replaceConversationStates({ QVariantMap { { QStringLiteral("peerSession"), 9 },
+		{ QStringLiteral("label"), QStringLiteral("Bob") } } });
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("9"));
+	QCOMPARE(removedSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::directMessageControllerKeepsConversationDraftsSeparate() {
+	DirectMessageController controller;
+	QSignalSpy openSpy(&controller, &DirectMessageController::openRequested);
+	QSignalSpy closeSpy(&controller, &DirectMessageController::closeRequested);
+	QSignalSpy readSpy(&controller, &DirectMessageController::markReadRequested);
+	QSignalSpy modeSpy(&controller, &DirectMessageController::modeChangeRequested);
+	QSignalSpy sendSpy(&controller, &DirectMessageController::sendRequested);
+	QSignalSpy traySpy(&controller, &DirectMessageController::trayOpenChangeRequested);
+
+	const auto conversation = [](const int session, const QString &label, const bool open) {
+		return QVariantMap { { QStringLiteral("peerSession"), session },
+			{ QStringLiteral("token"), QStringLiteral("-1:%1").arg(session) },
+			{ QStringLiteral("label"), label }, { QStringLiteral("subtitle"), QStringLiteral("In Lobby") },
+			{ QStringLiteral("open"), open }, { QStringLiteral("canSend"), true },
+			{ QStringLiteral("unreadCount"), open ? 3 : 1 }, { QStringLiteral("mode"), QStringLiteral("private") },
+			{ QStringLiteral("persistentHistory"), false },
+			{ QStringLiteral("persistentHistoryAvailable"), true },
+			{ QStringLiteral("messages"), QVariantList { QVariantMap {
+				{ QStringLiteral("id"), QStringLiteral("local:%1").arg(session) },
+				{ QStringLiteral("actorName"), label }, { QStringLiteral("plainText"), QStringLiteral("Hello") },
+				{ QStringLiteral("own"), false }, { QStringLiteral("createdAtMs"), 1000 } } } } };
+	};
+
+	QVariantMap alice = conversation(7, QStringLiteral("Alice"), true);
+	controller.applyState({ { QStringLiteral("available"), true }, { QStringLiteral("title"), QStringLiteral("DMs") },
+		{ QStringLiteral("trayOpen"), false }, { QStringLiteral("unreadTotal"), 4 },
+		{ QStringLiteral("conversations"), QVariantList { alice, conversation(9, QStringLiteral("Bob"), false) } },
+		{ QStringLiteral("activeConversation"), alice } });
+	QVERIFY(controller.available());
+	QCOMPARE(controller.summaryModel()->rowCount(), 2);
+	QVERIFY(controller.conversationOpen());
+	QCOMPARE(controller.activeSessionId(), QStringLiteral("7"));
+	QCOMPARE(controller.activeLabel(), QStringLiteral("Alice"));
+	QCOMPARE(controller.timelineModel()->rowCount(), 1);
+	QCOMPARE(controller.timelineModel()->get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("Hello"));
+
+	controller.setDraft(QStringLiteral("Alice draft"));
+	QCOMPARE(controller.draft(), QStringLiteral("Alice draft"));
+	QVariantMap bob = conversation(9, QStringLiteral("Bob"), true);
+	controller.applyState({ { QStringLiteral("available"), true },
+		{ QStringLiteral("conversations"), QVariantList { conversation(7, QStringLiteral("Alice"), false), bob } },
+		{ QStringLiteral("activeConversation"), bob } });
+	controller.setDraft(QStringLiteral("Bob draft"));
+	QCOMPARE(controller.draft(), QStringLiteral("Bob draft"));
+	controller.applyState({ { QStringLiteral("available"), true },
+		{ QStringLiteral("conversations"), QVariantList { alice, conversation(9, QStringLiteral("Bob"), false) } },
+		{ QStringLiteral("activeConversation"), alice } });
+	QCOMPARE(controller.draft(), QStringLiteral("Alice draft"));
+
+	controller.openConversation(QStringLiteral("9"));
+	controller.markRead();
+	controller.setMode(QStringLiteral("history"));
+	controller.sendDraft();
+	controller.setTrayOpen(true);
+	controller.closeConversation();
+	QCOMPARE(openSpy.count(), 1);
+	QCOMPARE(openSpy.first().first().toString(), QStringLiteral("9"));
+	QCOMPARE(readSpy.count(), 1);
+	QCOMPARE(modeSpy.count(), 1);
+	QCOMPARE(sendSpy.count(), 1);
+	QCOMPARE(sendSpy.first().at(1).toString(), QStringLiteral("Alice draft"));
+	QCOMPARE(traySpy.count(), 1);
+	QCOMPARE(closeSpy.count(), 1);
+	controller.clearDraft();
+	QVERIFY(controller.draft().isEmpty());
 }
 
 void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
@@ -1931,6 +2055,13 @@ void TestQmlClientModels::commandsRouteTypedAppActions() {
 	const QList< QVariant > arguments = spy.takeFirst();
 	QCOMPARE(arguments.at(0).toString(), QStringLiteral("motd.dismiss"));
 	QCOMPARE(arguments.at(1).toMap(), payload);
+}
+
+void TestQmlClientModels::commandsRouteActiveScopeMarkRead() {
+	UiCommandController commands;
+	QSignalSpy markReadSpy(&commands, &UiCommandController::activeScopeMarkReadRequested);
+	commands.markActiveScopeRead();
+	QCOMPARE(markReadSpy.count(), 1);
 }
 
 void TestQmlClientModels::commandsRejectEmptyStableIds() {

@@ -12383,8 +12383,48 @@ void MainWindow::applyShellLayout() {
 					[this](const QString &message) { sendModernShellMessage(message); });
 			connect(commands, &UiCommandController::olderMessagesRequested, this,
 					&MainWindow::requestOlderPersistentChatHistory);
+			connect(commands, &UiCommandController::activeScopeMarkReadRequested, this,
+					[this]() { markPersistentChatRead(true, true); });
 			connect(commands, &UiCommandController::previewHydrationRequested, this,
 					&MainWindow::handleModernShellPreviewHydrationRequest);
+			DirectMessageController *directMessages = m_qmlShellHost->directMessageController();
+			connect(directMessages, &DirectMessageController::trayOpenChangeRequested, this,
+					[this](const bool open) {
+						m_modernDirectMessageTrayOpenProbe = open;
+						publishQmlDirectMessagesState();
+					});
+			connect(directMessages, &DirectMessageController::openRequested, this,
+					[this](const QString &sessionID) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession) handleModernShellDirectMessageOpen(session);
+					});
+			connect(directMessages, &DirectMessageController::closeRequested, this,
+					[this](const QString &sessionID) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession) handleModernShellDirectMessageClose(session);
+					});
+			connect(directMessages, &DirectMessageController::markReadRequested, this,
+					[this](const QString &sessionID) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession) handleModernShellDirectMessageMarkRead(session);
+					});
+			connect(directMessages, &DirectMessageController::modeChangeRequested, this,
+					[this](const QString &sessionID, const QString &mode) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession) handleModernShellDirectMessageModeChange(session, mode);
+					});
+			connect(directMessages, &DirectMessageController::sendRequested, this,
+					[this, directMessages](const QString &sessionID, const QString &message) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession && handleModernShellDirectMessageSend(session, message)) {
+							directMessages->clearDraft(sessionID);
+						}
+					});
 			ComposerController *composer = m_qmlShellHost->composerController();
 			connect(composer, &ComposerController::sendFailed, this,
 					[this](const QString &message) { publishModernToast(QStringLiteral("error"), tr("Send failed"), message); });
@@ -21693,10 +21733,11 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 		connected && target.valid && !target.readOnly && !target.serverLog && canSendToPersistentChatTarget(target, true);
 	activeScope.insert(QStringLiteral("canSend"), canSendToTarget);
 	activeScope.insert(QStringLiteral("canLoadOlder"), connected && target.valid && !target.serverLog
-														   && !target.directMessage && !target.ephemeralTextPath
-														   && m_visiblePersistentChatHasMore
-														   && !m_persistentChatLoadingOlder && m_persistentChatGateway);
-	activeScope.insert(QStringLiteral("canMarkRead"), canMarkPersistentChatRead(false));
+												   && !target.directMessage && !target.ephemeralTextPath
+												   && m_visiblePersistentChatHasMore
+												   && !m_persistentChatLoadingOlder && m_persistentChatGateway);
+	activeScope.insert(QStringLiteral("unreadCount"), static_cast< qulonglong >(unreadCount));
+	activeScope.insert(QStringLiteral("canMarkRead"), canMarkPersistentChatRead(true));
 	activeScope.insert(QStringLiteral("canReply"), canSendToTarget && !target.directMessage && !target.ephemeralTextPath);
 	activeScope.insert(QStringLiteral("canReact"), connected && target.valid && !target.readOnly && !target.serverLog
 													   && !target.directMessage && !target.ephemeralTextPath
@@ -22758,6 +22799,16 @@ bool MainWindow::closeModernDirectMessage(const unsigned int session) {
 	}
 
 	it->open = false;
+	if (!it->persistentHistory) {
+		it->messages.clear();
+		it->unreadCount       = 0;
+		it->lastActivityAtMs  = 0;
+		it->lastMessageID     = 0;
+		it->lastReadMessageID = 0;
+		it->historyLoaded     = false;
+		it->historyLoading    = false;
+		it->historyError.clear();
+	}
 	publishQmlDirectMessagesState();
 	return true;
 }
@@ -25685,10 +25736,26 @@ void MainWindow::applyQmlDirectMessagesState(const QVariantMap &state) {
 	m_qmlShellHost->navigationModel()->replaceDirectMessageStates(conversations);
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	if (!target.directMessage) return;
-	const unsigned int activeSession = target.user ? target.user->uiSession : target.scopeID;
+	unsigned int activeSession = target.directMessage ? (target.user ? target.user->uiSession : target.scopeID) : 0;
+	if (activeSession == 0) {
+		for (auto it = m_modernDirectMessageConversations.cbegin();
+			 it != m_modernDirectMessageConversations.cend(); ++it) {
+			if (it->open) {
+				activeSession = it.key();
+				break;
+			}
+		}
+	}
+
+	QVariantMap typedState = state;
 	const auto conversationIt = m_modernDirectMessageConversations.constFind(activeSession);
-	if (conversationIt == m_modernDirectMessageConversations.cend()) return;
+	if (conversationIt != m_modernDirectMessageConversations.cend()) {
+		typedState.insert(QStringLiteral("activeConversation"),
+			buildModernShellDirectMessageConversationState(conversationIt.value(), true));
+	}
+	m_qmlShellHost->directMessageController()->applyState(typedState);
+
+	if (!target.directMessage || conversationIt == m_modernDirectMessageConversations.cend()) return;
 
 	const QVariantMap activeConversation =
 		buildModernShellDirectMessageConversationState(conversationIt.value(), true);

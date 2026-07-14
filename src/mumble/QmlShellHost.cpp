@@ -44,6 +44,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
+	  m_directMessageController(std::make_unique< DirectMessageController >(this)),
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
 	  m_mediaProfileFactory(std::make_unique< QmlMediaProfileFactory >(m_mediaSession.get(), this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
@@ -99,6 +100,9 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_directMessageController.get()),
+						  static_cast< QObject * >(m_directMessageController->summaryModel()),
+						  static_cast< QObject * >(m_directMessageController->timelineModel()),
 						  static_cast< QObject * >(m_mediaSession.get()),
 						  static_cast< QObject * >(m_mediaProfileFactory.get()),
 						  static_cast< QObject * >(m_selectionState.get()),
@@ -118,6 +122,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
+	context->setContextProperty(QStringLiteral("directMessages"), m_directMessageController.get());
 	context->setContextProperty(QStringLiteral("mediaSession"), m_mediaSession.get());
 	context->setContextProperty(QStringLiteral("mediaProfiles"), m_mediaProfileFactory.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
@@ -238,6 +243,7 @@ ComposerController *QmlShellHost::composerController() const { return m_composer
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }
+DirectMessageController *QmlShellHost::directMessageController() const { return m_directMessageController.get(); }
 MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
@@ -255,6 +261,9 @@ void QmlShellHost::setVisualFixtureOverrideActive(const bool active) {
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_directMessageController.get()),
+						  static_cast< QObject * >(m_directMessageController->summaryModel()),
+						  static_cast< QObject * >(m_directMessageController->timelineModel()),
 						  static_cast< QObject * >(m_themeController.get()) }) {
 		object->setProperty(QmlVisualFixtureMutation::OverrideProperty, active);
 		if (!active) object->setProperty(QmlVisualFixtureMutation::WriteProperty, false);
@@ -271,6 +280,9 @@ void QmlShellHost::setVisualFixtureMutationActive(const bool active) {
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_directMessageController.get()),
+						  static_cast< QObject * >(m_directMessageController->summaryModel()),
+						  static_cast< QObject * >(m_directMessageController->timelineModel()),
 						  static_cast< QObject * >(m_themeController.get()) }) {
 		object->setProperty(QmlVisualFixtureMutation::WriteProperty, active);
 	}

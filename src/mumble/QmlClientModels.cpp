@@ -1299,6 +1299,8 @@ QString ActiveScopeController::replyActor() const { return m_replyActor; }
 QString ActiveScopeController::replySnippet() const { return m_replySnippet; }
 bool ActiveScopeController::canAttachImages() const { return m_canAttachImages; }
 bool ActiveScopeController::canLoadOlder() const { return m_canLoadOlder; }
+qulonglong ActiveScopeController::unreadCount() const { return m_unreadCount; }
+bool ActiveScopeController::canMarkRead() const { return m_canMarkRead; }
 bool ActiveScopeController::loading() const { return m_loading; }
 QString ActiveScopeController::loadingState() const { return m_loadingState; }
 QVariantMap ActiveScopeController::screenShare() const { return m_screenShare; }
@@ -1329,6 +1331,8 @@ void ActiveScopeController::setCanAttachImages(bool value) {
 	SET_SCOPE_VALUE(m_canAttachImages, canAttachImagesChanged);
 }
 void ActiveScopeController::setCanLoadOlder(bool value) { SET_SCOPE_VALUE(m_canLoadOlder, canLoadOlderChanged); }
+void ActiveScopeController::setUnreadCount(qulonglong value) { SET_SCOPE_VALUE(m_unreadCount, unreadCountChanged); }
+void ActiveScopeController::setCanMarkRead(bool value) { SET_SCOPE_VALUE(m_canMarkRead, canMarkReadChanged); }
 void ActiveScopeController::setLoading(bool value) { SET_SCOPE_VALUE(m_loading, loadingChanged); }
 void ActiveScopeController::setLoadingState(const QString &value) {
 	SET_SCOPE_VALUE(m_loadingState, loadingStateChanged);
@@ -1352,6 +1356,8 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setReplySnippet(state.value(QStringLiteral("replySnippet")).toString());
 	setCanAttachImages(state.value(QStringLiteral("canAttachImages")).toBool());
 	setCanLoadOlder(state.value(QStringLiteral("canLoadOlder")).toBool());
+	setUnreadCount(state.value(QStringLiteral("unreadCount")).toULongLong());
+	setCanMarkRead(state.value(QStringLiteral("canMarkRead")).toBool());
 	setLoading(state.value(QStringLiteral("loading")).toBool());
 	setLoadingState(state.value(QStringLiteral("loadingState")).toString());
 	setScreenShare(state.value(QStringLiteral("screenShare")).toMap());
@@ -2541,6 +2547,239 @@ namespace {
 	}
 }
 
+QVariantMap DirectMessageSummaryModel::conversationRow(const QVariantMap &conversation) {
+	qulonglong session = 0;
+	const QVariant sessionValue = conversation.value(QStringLiteral("peerSession"),
+		conversation.value(QStringLiteral("session")));
+	if (!parseProtocolId(sessionValue.toString(), false, &session)) return {};
+
+	const QString label = conversation.value(QStringLiteral("label")).toString().trimmed();
+	const QString preview = conversation.value(QStringLiteral("lastMessagePreview")).toString().trimmed();
+	const QString subtitle = preview.isEmpty()
+		? conversation.value(QStringLiteral("subtitle")).toString().trimmed() : preview;
+	const QString scopeToken = conversation.value(QStringLiteral("token")).toString().trimmed();
+
+	return { { QStringLiteral("id"), QString::number(session) },
+			 { QStringLiteral("title"), label.isEmpty() ? QObject::tr("User %1").arg(session) : label },
+			 { QStringLiteral("subtitle"), subtitle },
+			 { QStringLiteral("kind"), QStringLiteral("direct") },
+			 { QStringLiteral("selected"), conversation.value(QStringLiteral("open")).toBool() },
+			 { QStringLiteral("status"), conversation.value(QStringLiteral("status")).toString() },
+			 { QStringLiteral("unreadCount"), conversation.value(QStringLiteral("unreadCount")).toULongLong() },
+			 { QStringLiteral("avatarUrl"), conversation.value(QStringLiteral("avatarUrl")).toString() },
+			 { QStringLiteral("enabled"), true },
+			 { QStringLiteral("timestamp"), conversation.value(QStringLiteral("lastActivityAtMs")) },
+			 { QStringLiteral("scopeToken"), scopeToken },
+			 { QStringLiteral("source"), conversation } };
+}
+
+void DirectMessageSummaryModel::replaceConversationStates(const QVariantList &conversations) {
+	QVariantList rows;
+	rows.reserve(conversations.size());
+	for (const QVariant &value : conversations) {
+		const QVariantMap row = conversationRow(value.toMap());
+		if (!row.isEmpty()) rows.push_back(row);
+	}
+	synchronizeRows(rows);
+}
+
+DirectMessageController::DirectMessageController(QObject *parent)
+	: QObject(parent), m_summaryModel(this), m_timelineModel(this) {
+}
+
+DirectMessageSummaryModel *DirectMessageController::summaryModel() { return &m_summaryModel; }
+ChatTimelineModel *DirectMessageController::timelineModel() { return &m_timelineModel; }
+bool DirectMessageController::available() const { return m_state.value(QStringLiteral("available")).toBool(); }
+QString DirectMessageController::title() const {
+	return m_state.value(QStringLiteral("title"), tr("Direct messages")).toString();
+}
+QString DirectMessageController::description() const { return m_state.value(QStringLiteral("description")).toString(); }
+qulonglong DirectMessageController::unreadTotal() const {
+	return m_state.value(QStringLiteral("unreadTotal")).toULongLong();
+}
+bool DirectMessageController::hasUnread() const { return unreadTotal() > 0; }
+bool DirectMessageController::trayOpen() const { return m_trayOpen; }
+bool DirectMessageController::conversationOpen() const {
+	return !m_activeSessionId.isEmpty() && m_activeConversation.value(QStringLiteral("open")).toBool();
+}
+QString DirectMessageController::activeSessionId() const { return m_activeSessionId; }
+QString DirectMessageController::activeScopeToken() const {
+	return m_activeConversation.value(QStringLiteral("token")).toString();
+}
+QString DirectMessageController::activeLabel() const { return m_activeConversation.value(QStringLiteral("label")).toString(); }
+QString DirectMessageController::activeSubtitle() const {
+	return m_activeConversation.value(QStringLiteral("subtitle")).toString();
+}
+QString DirectMessageController::activeAvatarUrl() const {
+	return m_activeConversation.value(QStringLiteral("avatarUrl")).toString();
+}
+qulonglong DirectMessageController::activeUnreadCount() const {
+	return m_activeConversation.value(QStringLiteral("unreadCount")).toULongLong();
+}
+bool DirectMessageController::canSend() const { return m_activeConversation.value(QStringLiteral("canSend")).toBool(); }
+QString DirectMessageController::mode() const {
+	return m_activeConversation.value(QStringLiteral("persistentHistory")).toBool()
+		? QStringLiteral("history") : QStringLiteral("private");
+}
+bool DirectMessageController::persistentHistoryAvailable() const {
+	return m_activeConversation.value(QStringLiteral("persistentHistoryAvailable")).toBool();
+}
+bool DirectMessageController::historyLoading() const {
+	return m_activeConversation.value(QStringLiteral("historyLoading")).toBool();
+}
+QString DirectMessageController::historyError() const {
+	return m_activeConversation.value(QStringLiteral("historyError")).toString();
+}
+QString DirectMessageController::emptyCopy() const {
+	return m_activeConversation.value(QStringLiteral("emptyCopy"), tr("Direct messages will appear here.")).toString();
+}
+QString DirectMessageController::draft() const { return m_drafts.value(m_activeSessionId); }
+bool DirectMessageController::windowDocked() const { return m_windowDocked; }
+bool DirectMessageController::windowMinimized() const { return m_windowMinimized; }
+
+QString DirectMessageController::normalizedSessionId(const QVariant &value) {
+	qulonglong session = 0;
+	return parseProtocolId(value.toString(), false, &session) ? QString::number(session) : QString();
+}
+
+void DirectMessageController::switchActiveConversation(const QVariantMap &conversation) {
+	const QString previousSession = m_activeSessionId;
+	const QString previousDraft = draft();
+	const QString session = normalizedSessionId(conversation.value(QStringLiteral("peerSession"),
+		conversation.value(QStringLiteral("session"))));
+	m_activeSessionId = session;
+	m_activeConversation = session.isEmpty() ? QVariantMap {} : conversation;
+
+	QVariantList normalizedMessages;
+	for (const QVariant &value : m_activeConversation.value(QStringLiteral("messages")).toList()) {
+		QVariantMap message = value.toMap();
+		if (!message.contains(QStringLiteral("bodyHtml"))) {
+			message.insert(QStringLiteral("bodyHtml"), message.value(QStringLiteral("messageHtml")));
+		}
+		if (!message.contains(QStringLiteral("bodyText"))) {
+			message.insert(QStringLiteral("bodyText"), message.value(QStringLiteral("plainText")));
+		}
+		if (!message.contains(QStringLiteral("timeLabel"))) {
+			const qint64 createdAtMs = message.value(QStringLiteral("createdAtMs")).toLongLong();
+			message.insert(QStringLiteral("timeLabel"), createdAtMs > 0
+				? QDateTime::fromMSecsSinceEpoch(createdAtMs).toString(QStringLiteral("HH:mm")) : QString());
+		}
+		normalizedMessages.push_back(message);
+	}
+	m_timelineModel.replaceMessages(normalizedMessages);
+
+	if (previousSession != m_activeSessionId || previousDraft != draft()) emit draftChanged();
+	if (!conversationOpen() && m_windowMinimized) {
+		m_windowMinimized = false;
+		emit windowMinimizedChanged();
+	}
+}
+
+void DirectMessageController::applyState(const QVariantMap &state) {
+	if (!acceptsFrontendStateMutation(this)) return;
+
+	const QVariantMap previousState = m_state;
+	const QVariantMap previousConversation = m_activeConversation;
+	const bool previousTrayOpen = m_trayOpen;
+	const QVariantList conversations = state.value(QStringLiteral("conversations")).toList();
+	m_summaryModel.replaceConversationStates(conversations);
+
+	QVariantMap activeConversation = state.value(QStringLiteral("activeConversation")).toMap();
+	if (activeConversation.isEmpty()) {
+		for (const QVariant &value : conversations) {
+			const QVariantMap candidate = value.toMap();
+			if (candidate.value(QStringLiteral("open")).toBool()) {
+				activeConversation = candidate;
+				break;
+			}
+		}
+	}
+
+	m_state = state;
+	m_trayOpen = state.value(QStringLiteral("trayOpen"), previousTrayOpen).toBool();
+	switchActiveConversation(activeConversation);
+	if (previousTrayOpen != m_trayOpen) emit trayOpenChanged();
+	if (previousState != m_state || previousConversation != m_activeConversation) emit stateChanged();
+}
+
+void DirectMessageController::setTrayOpen(const bool open) {
+	if (m_trayOpen == open) return;
+	m_trayOpen = open;
+	emit trayOpenChanged();
+	emit trayOpenChangeRequested(open);
+}
+
+void DirectMessageController::openConversation(const QString &sessionId) {
+	const QString session = normalizedSessionId(sessionId);
+	if (session.isEmpty()) return;
+	if (m_windowMinimized) {
+		m_windowMinimized = false;
+		emit windowMinimizedChanged();
+	}
+	emit openRequested(session);
+}
+
+void DirectMessageController::closeConversation() {
+	if (m_activeSessionId.isEmpty()) return;
+	emit closeRequested(m_activeSessionId);
+}
+
+void DirectMessageController::markRead(const QString &sessionId) {
+	const QString session = normalizedSessionId(sessionId.isEmpty() ? m_activeSessionId : sessionId);
+	if (!session.isEmpty()) emit markReadRequested(session);
+}
+
+void DirectMessageController::setMode(const QString &modeValue) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QString normalized = modeValue.trimmed().toLower();
+	if (normalized != QLatin1String("history") && normalized != QLatin1String("private")) return;
+	if (normalized == mode()) return;
+	emit modeChangeRequested(m_activeSessionId, normalized);
+}
+
+void DirectMessageController::setDraft(const QString &draftValue) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QString bounded = draftValue.left(16384);
+	if (m_drafts.value(m_activeSessionId) == bounded) return;
+	if (bounded.isEmpty()) m_drafts.remove(m_activeSessionId);
+	else m_drafts.insert(m_activeSessionId, bounded);
+	pruneDrafts();
+	emit draftChanged();
+}
+
+void DirectMessageController::clearDraft(const QString &sessionId) {
+	const QString session = normalizedSessionId(sessionId.isEmpty() ? m_activeSessionId : sessionId);
+	if (session.isEmpty() || !m_drafts.remove(session)) return;
+	if (session == m_activeSessionId) emit draftChanged();
+}
+
+void DirectMessageController::sendDraft() {
+	if (m_activeSessionId.isEmpty() || !canSend()) return;
+	const QString message = draft().trimmed();
+	if (!message.isEmpty()) emit sendRequested(m_activeSessionId, message);
+}
+
+void DirectMessageController::setWindowDocked(const bool docked) {
+	if (m_windowDocked == docked) return;
+	m_windowDocked = docked;
+	emit windowDockedChanged();
+}
+
+void DirectMessageController::setWindowMinimized(const bool minimized) {
+	if (m_windowMinimized == minimized) return;
+	m_windowMinimized = minimized;
+	emit windowMinimizedChanged();
+}
+
+void DirectMessageController::pruneDrafts() {
+	constexpr qsizetype MaxDraftConversations = 32;
+	while (m_drafts.size() > MaxDraftConversations) {
+		auto it = m_drafts.begin();
+		if (it.key() == m_activeSessionId && m_drafts.size() > 1) ++it;
+		m_drafts.erase(it);
+	}
+}
+
 void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
 										 const bool cancellable) {
 	startStructuredOperation(operationId, QString(), title, subtitle, -1, cancellable);
@@ -2857,6 +3096,7 @@ void UiCommandController::sendMessage(const QString &message) {
 	if (!message.trimmed().isEmpty()) emit messageSendRequested(message);
 }
 void UiCommandController::requestOlderMessages() { emit olderMessagesRequested(); }
+void UiCommandController::markActiveScopeRead() { emit activeScopeMarkReadRequested(); }
 void UiCommandController::requestPreviewHydration(const QString &scopeToken, const QVariantList &messageIds,
 												  const bool highPriority) {
 	constexpr qsizetype MaxHydrationBatchSize = 32;

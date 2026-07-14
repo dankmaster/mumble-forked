@@ -501,13 +501,102 @@ ApplicationWindow {
 		} else {
 			handled = false
 		}
+		const menuVisible = handled && menu !== null && menu.visible
+		const surfaceId = handled && menu !== null
+			? String(menu.objectName || (normalized + "Menu")) : ""
+		let captureRect = ({})
+		if (menuVisible) {
+			const surface = menu.contentItem || menu
+			let origin = Qt.point(Number(menu.x || 0), Number(menu.y || 0))
+			if (surface && surface.mapToItem) {
+				const mapped = surface.mapToItem(root.contentItem || null, 0, 0)
+				if (mapped)
+					origin = mapped
+			}
+			captureRect = {
+				"x": Math.round(Number(origin.x || 0)),
+				"y": Math.round(Number(origin.y || 0)),
+				"width": Math.round(Number((surface && surface.width) || menu.width || 0)),
+				"height": Math.round(Number((surface && surface.height) || menu.height || 0))
+			}
+		}
 		return {
 			"handled": handled,
 			"variant": normalized,
 			"inputVariant": inputVariant,
 			"open": handled && menu !== null && (menu.opened || menu.visible),
-			"visible": handled && menu !== null && menu.visible,
+			"visible": menuVisible,
+			"surfaceId": surfaceId,
+			"objectName": surfaceId,
+			"captureRect": captureRect,
+			"viewportWidth": Math.round(root.width),
+			"viewportHeight": Math.round(root.height),
 			"labels": handled ? visibleMenuLabels(menu) : []
+		}
+	}
+
+	function directMessageAutomationSurfaceState(variant) {
+		const inputVariant = String(variant || "main").trim().toLowerCase()
+		const normalized = inputVariant === "private" ? "window" : inputVariant
+		let surface = null
+		let visible = false
+		let surfaceId = ""
+		let objectName = ""
+		let captureRect = ({})
+		let viewportWidth = Math.round(root.width)
+		let viewportHeight = Math.round(root.height)
+		let windowId = "main"
+
+		if (normalized === "main") {
+			surface = timeline
+			visible = root.visible && timeline.visible
+				&& String(activeScope.scopeToken || "").indexOf("-2:") === 0
+			surfaceId = "directMessage.main"
+		} else if (normalized === "tray") {
+			surface = directMessageTrayLoader.item
+			visible = !!surface && directMessageTrayLoader.visible && surface.visible
+			surfaceId = "directMessage.tray"
+		} else if (normalized === "window") {
+			surface = directMessageWindowLoader.item
+			visible = !!surface && surface.visible
+			surfaceId = "directMessage.window"
+			windowId = "direct-message"
+			if (surface) {
+				viewportWidth = Math.round(Number(surface.width || 0))
+				viewportHeight = Math.round(Number(surface.height || 0))
+				captureRect = {
+					"x": 0,
+					"y": 0,
+					"width": viewportWidth,
+					"height": viewportHeight
+				}
+			}
+		}
+
+		if (surface) {
+			objectName = String(surface.objectName || surfaceId)
+			if (normalized !== "window" && surface.mapToItem) {
+				const mapped = surface.mapToItem(root.contentItem || null, 0, 0)
+				captureRect = {
+					"x": Math.round(Number(mapped ? mapped.x : 0)),
+					"y": Math.round(Number(mapped ? mapped.y : 0)),
+					"width": Math.round(Number(surface.width || 0)),
+					"height": Math.round(Number(surface.height || 0))
+				}
+			}
+		}
+
+		return {
+			"handled": !!surface,
+			"variant": normalized,
+			"inputVariant": inputVariant,
+			"visible": visible,
+			"surfaceId": surfaceId,
+			"objectName": objectName,
+			"windowId": windowId,
+			"captureRect": captureRect,
+			"viewportWidth": viewportWidth,
+			"viewportHeight": viewportHeight
 		}
 	}
 
@@ -987,7 +1076,8 @@ ApplicationWindow {
             spacing: 0
 			layoutDirection: Theme.railSide === "left" ? Qt.RightToLeft : Qt.LeftToRight
 
-            ColumnLayout {
+			ColumnLayout {
+				id: mainContentColumn
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
@@ -1155,6 +1245,50 @@ ApplicationWindow {
 							Accessible.name: qsTr("Search users and rooms")
 							onClicked: uiCommands.invokeAction("server.search")
 						}
+						ModernIconButton {
+							objectName: "activeScopeMarkRead"
+							visible: activeScope.canMarkRead && Number(activeScope.unreadCount || 0) > 0
+							iconName: "check"
+							Accessible.name: qsTr("Mark this conversation as read")
+							Accessible.description: qsTr("%1 unread messages").arg(activeScope.unreadCount)
+							onClicked: uiCommands.markActiveScopeRead()
+						}
+						ModernIconButton {
+							id: directMessageTrayButton
+							objectName: "directMessageTrayButton"
+							visible: directMessages && (directMessages.available
+								|| Number(directMessages.summaryModel.count) > 0)
+							iconName: "direct"
+							selected: directMessages && directMessages.trayOpen
+							Accessible.name: directMessages && directMessages.hasUnread
+								? qsTr("Direct messages, %1 unread").arg(directMessages.unreadTotal)
+								: qsTr("Direct messages")
+							Accessible.checked: selected
+							onClicked: directMessages.setTrayOpen(!directMessages.trayOpen)
+
+							Rectangle {
+								visible: directMessages && directMessages.hasUnread
+								anchors.right: parent.right
+								anchors.top: parent.top
+								anchors.margins: 2
+								width: Math.max(16, unreadBadgeLabel.implicitWidth + 6)
+								height: 16
+								radius: height / 2
+								color: Theme.accent
+								z: 2
+								Label {
+									id: unreadBadgeLabel
+									anchors.centerIn: parent
+									textFormat: Text.PlainText
+									text: directMessages && directMessages.unreadTotal > 99
+										? "99+" : String(directMessages ? directMessages.unreadTotal : 0)
+									color: Theme.contrastText(Theme.accent)
+									font.pixelSize: 9
+									font.bold: true
+									Accessible.ignored: true
+								}
+							}
+						}
 					ModernIconButton {
 						id: appMenuButton
 						objectName: "visualFixtureApplicationMenu"
@@ -1183,9 +1317,24 @@ ApplicationWindow {
 							? qsTr("%1 · %2").arg(clientSession.selfName).arg(clientSession.selfStatusLabel)
 							: qsTr("Choose a server to get started")
 						headerTone: clientSession.connected ? "success" : ""
-						groups: clientSession.appMenus
-						onActionRequested: (actionId, payload) =>
-							uiCommands.invokeAppAction(actionId, payload && payload.payload ? payload.payload : ({}))
+						groups: activeScope.canMarkRead && Number(activeScope.unreadCount || 0) > 0
+							? (clientSession.appMenus || []).concat([{
+								"id": "active-conversation",
+								"label": qsTr("Conversation"),
+								"items": [{
+									"kind": "action",
+									"id": "activeScope.markRead",
+									"label": qsTr("Mark read"),
+									"enabled": true
+								}]
+							}]) : clientSession.appMenus
+						onActionRequested: (actionId, payload) => {
+							if (actionId === "activeScope.markRead")
+								uiCommands.markActiveScopeRead()
+							else
+								uiCommands.invokeAppAction(actionId,
+									payload && payload.payload ? payload.payload : ({}))
+						}
                     }
                 }
 
@@ -2229,7 +2378,35 @@ ApplicationWindow {
 				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
 					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
-            }
-        }
-    }
+			}
+		}
+
+		Loader {
+			id: directMessageTrayLoader
+			objectName: "directMessageTrayLoader"
+			parent: mainContentColumn
+			anchors.right: parent.right
+			anchors.rightMargin: Theme.space4
+			anchors.bottom: parent.bottom
+			anchors.bottomMargin: Theme.space4
+			active: directMessages && directMessages.trayOpen
+			visible: active && status === Loader.Ready
+			z: 40
+			sourceComponent: Component {
+				DirectMessageTray { controller: directMessages }
+			}
+		}
+	}
+
+	Loader {
+		id: directMessageWindowLoader
+		objectName: "directMessageWindowLoader"
+		active: directMessages && directMessages.conversationOpen
+		sourceComponent: Component {
+			DirectMessageWindow {
+				controller: directMessages
+				parentWindow: root
+			}
+		}
+	}
 }

@@ -5480,6 +5480,11 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("variant"), result.value(QStringLiteral("variant"), variant));
 		response.insert(QStringLiteral("open"), result.value(QStringLiteral("open")).toBool());
 		response.insert(QStringLiteral("visible"), result.value(QStringLiteral("visible")).toBool());
+		response.insert(QStringLiteral("surfaceId"), result.value(QStringLiteral("surfaceId")).toString());
+		response.insert(QStringLiteral("objectName"), result.value(QStringLiteral("objectName")).toString());
+		response.insert(QStringLiteral("captureRect"), result.value(QStringLiteral("captureRect")).toMap());
+		response.insert(QStringLiteral("viewportWidth"), result.value(QStringLiteral("viewportWidth")).toInt());
+		response.insert(QStringLiteral("viewportHeight"), result.value(QStringLiteral("viewportHeight")).toInt());
 		response.insert(QStringLiteral("labels"), result.value(QStringLiteral("labels")).toList());
 		return response;
 	}
@@ -6323,6 +6328,15 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			window->scheduleQmlShellStateSyncImmediate();
 			return selected;
 		};
+		const auto inspectProbeSurface = [variant](MainWindow *window) {
+			QmlShellHost *qmlHost = window ? window->qmlShellHost() : nullptr;
+			if (!qmlHost || !qmlHost->window()) return QVariantMap();
+			QVariant result;
+			const bool invoked = QMetaObject::invokeMethod(
+				qmlHost->window(), "directMessageAutomationSurfaceState", Q_RETURN_ARG(QVariant, result),
+				Q_ARG(QVariant, QVariant::fromValue(variant)));
+			return invoked ? result.toMap() : QVariantMap();
+		};
 
 		if (async) {
 			scheduleAction([applyProbe](MainWindow *window) { applyProbe(window); });
@@ -6333,11 +6347,22 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return response;
 		}
 
+		const bool backendHandled = applyProbe(m_mainWindow);
+		const QVariantMap surface = backendHandled ? inspectProbeSurface(m_mainWindow) : QVariantMap();
 		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("handled"), applyProbe(m_mainWindow));
+		response.insert(QStringLiteral("result"), surface);
+		response.insert(QStringLiteral("handled"),
+			backendHandled && surface.value(QStringLiteral("handled")).toBool());
 		response.insert(QStringLiteral("session"), static_cast< qulonglong >(session));
 		response.insert(QStringLiteral("variant"), variant);
 		response.insert(QStringLiteral("syntheticPeer"), syntheticPeer);
+		response.insert(QStringLiteral("visible"), surface.value(QStringLiteral("visible")).toBool());
+		response.insert(QStringLiteral("surfaceId"), surface.value(QStringLiteral("surfaceId")).toString());
+		response.insert(QStringLiteral("objectName"), surface.value(QStringLiteral("objectName")).toString());
+		response.insert(QStringLiteral("windowId"), surface.value(QStringLiteral("windowId")).toString());
+		response.insert(QStringLiteral("captureRect"), surface.value(QStringLiteral("captureRect")).toMap());
+		response.insert(QStringLiteral("viewportWidth"), surface.value(QStringLiteral("viewportWidth")).toInt());
+		response.insert(QStringLiteral("viewportHeight"), surface.value(QStringLiteral("viewportHeight")).toInt());
 		return response;
 	}
 

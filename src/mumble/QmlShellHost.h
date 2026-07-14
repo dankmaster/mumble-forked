@@ -19,6 +19,7 @@ class ComposerController;
 class ClientActionRegistry;
 class ClientSessionController;
 class DialogStateController;
+class DirectMessageController;
 class MediaSessionBackend;
 class ManualPluginController;
 class NavigationRailModel;
@@ -58,6 +59,7 @@ public:
 	AsyncOperationModel *operationModel() const;
 	ActionModel *actionModel() const;
 	DialogStateController *dialogController() const;
+	DirectMessageController *directMessageController() const;
 	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
 	QmlPerformanceMonitor *performanceMonitor() const;
@@ -109,6 +111,7 @@ private:
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
 	std::unique_ptr< ActionModel > m_actionModel;
 	std::unique_ptr< DialogStateController > m_dialogController;
+	std::unique_ptr< DirectMessageController > m_directMessageController;
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
 	std::unique_ptr< QmlMediaProfileFactory > m_mediaProfileFactory;
 	std::unique_ptr< QmlSelectionState > m_selectionState;

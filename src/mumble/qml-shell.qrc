@@ -20,6 +20,8 @@
 	<file alias="NavigationRail.qml">qml-shell/NavigationRail.qml</file>
 	<file alias="PayloadMenuItem.qml">qml-shell/PayloadMenuItem.qml</file>
 	<file alias="ConnectionBanner.qml">qml-shell/ConnectionBanner.qml</file>
+	<file alias="DirectMessageTray.qml">qml-shell/DirectMessageTray.qml</file>
+	<file alias="DirectMessageWindow.qml">qml-shell/DirectMessageWindow.qml</file>
 	<file alias="MotdPanel.qml">qml-shell/MotdPanel.qml</file>
 	<file alias="UpdateBanner.qml">qml-shell/UpdateBanner.qml</file>
 	<file alias="ScreenShareEditor.qml">qml-shell/ScreenShareEditor.qml</file>

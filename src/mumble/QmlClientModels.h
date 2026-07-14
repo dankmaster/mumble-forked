@@ -188,6 +188,8 @@ class ActiveScopeController final : public QObject {
 	Q_PROPERTY(QString replySnippet READ replySnippet WRITE setReplySnippet NOTIFY replySnippetChanged)
 	Q_PROPERTY(bool canAttachImages READ canAttachImages WRITE setCanAttachImages NOTIFY canAttachImagesChanged)
 	Q_PROPERTY(bool canLoadOlder READ canLoadOlder WRITE setCanLoadOlder NOTIFY canLoadOlderChanged)
+	Q_PROPERTY(qulonglong unreadCount READ unreadCount WRITE setUnreadCount NOTIFY unreadCountChanged)
+	Q_PROPERTY(bool canMarkRead READ canMarkRead WRITE setCanMarkRead NOTIFY canMarkReadChanged)
 	Q_PROPERTY(bool loading READ loading WRITE setLoading NOTIFY loadingChanged)
 	Q_PROPERTY(QString loadingState READ loadingState WRITE setLoadingState NOTIFY loadingStateChanged)
 	Q_PROPERTY(QVariantMap screenShare READ screenShare WRITE setScreenShare NOTIFY screenShareChanged)
@@ -206,6 +208,8 @@ public:
 	QString replySnippet() const;
 	bool canAttachImages() const;
 	bool canLoadOlder() const;
+	qulonglong unreadCount() const;
+	bool canMarkRead() const;
 	bool loading() const;
 	QString loadingState() const;
 	QVariantMap screenShare() const;
@@ -221,6 +225,8 @@ public:
 	void setReplySnippet(const QString &value);
 	void setCanAttachImages(bool value);
 	void setCanLoadOlder(bool value);
+	void setUnreadCount(qulonglong value);
+	void setCanMarkRead(bool value);
 	void setLoading(bool value);
 	void setLoadingState(const QString &value);
 	void setScreenShare(const QVariantMap &value);
@@ -239,6 +245,8 @@ signals:
 	void replySnippetChanged();
 	void canAttachImagesChanged();
 	void canLoadOlderChanged();
+	void unreadCountChanged();
+	void canMarkReadChanged();
 	void loadingChanged();
 	void loadingStateChanged();
 	void screenShareChanged();
@@ -256,6 +264,8 @@ private:
 	QString m_replySnippet;
 	bool m_canAttachImages = false;
 	bool m_canLoadOlder = false;
+	qulonglong m_unreadCount = 0;
+	bool m_canMarkRead = false;
 	bool m_loading = false;
 	QString m_loadingState;
 	QVariantMap m_screenShare;
@@ -440,6 +450,112 @@ private:
 	std::deque< ReadyRichBody > m_readyRichBodies;
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
+};
+
+class DirectMessageSummaryModel final : public StableListModel {
+	Q_OBJECT
+
+public:
+	using StableListModel::StableListModel;
+
+	void replaceConversationStates(const QVariantList &conversations);
+	static QVariantMap conversationRow(const QVariantMap &conversation);
+};
+
+class DirectMessageController final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(DirectMessageSummaryModel *summaryModel READ summaryModel CONSTANT)
+	Q_PROPERTY(ChatTimelineModel *timelineModel READ timelineModel CONSTANT)
+	Q_PROPERTY(bool available READ available NOTIFY stateChanged)
+	Q_PROPERTY(QString title READ title NOTIFY stateChanged)
+	Q_PROPERTY(QString description READ description NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong unreadTotal READ unreadTotal NOTIFY stateChanged)
+	Q_PROPERTY(bool hasUnread READ hasUnread NOTIFY stateChanged)
+	Q_PROPERTY(bool trayOpen READ trayOpen WRITE setTrayOpen NOTIFY trayOpenChanged)
+	Q_PROPERTY(bool conversationOpen READ conversationOpen NOTIFY stateChanged)
+	Q_PROPERTY(QString activeSessionId READ activeSessionId NOTIFY stateChanged)
+	Q_PROPERTY(QString activeScopeToken READ activeScopeToken NOTIFY stateChanged)
+	Q_PROPERTY(QString activeLabel READ activeLabel NOTIFY stateChanged)
+	Q_PROPERTY(QString activeSubtitle READ activeSubtitle NOTIFY stateChanged)
+	Q_PROPERTY(QString activeAvatarUrl READ activeAvatarUrl NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong activeUnreadCount READ activeUnreadCount NOTIFY stateChanged)
+	Q_PROPERTY(bool canSend READ canSend NOTIFY stateChanged)
+	Q_PROPERTY(QString mode READ mode NOTIFY stateChanged)
+	Q_PROPERTY(bool persistentHistoryAvailable READ persistentHistoryAvailable NOTIFY stateChanged)
+	Q_PROPERTY(bool historyLoading READ historyLoading NOTIFY stateChanged)
+	Q_PROPERTY(QString historyError READ historyError NOTIFY stateChanged)
+	Q_PROPERTY(QString emptyCopy READ emptyCopy NOTIFY stateChanged)
+	Q_PROPERTY(QString draft READ draft WRITE setDraft NOTIFY draftChanged)
+	Q_PROPERTY(bool windowDocked READ windowDocked WRITE setWindowDocked NOTIFY windowDockedChanged)
+	Q_PROPERTY(bool windowMinimized READ windowMinimized WRITE setWindowMinimized NOTIFY windowMinimizedChanged)
+
+public:
+	explicit DirectMessageController(QObject *parent = nullptr);
+
+	DirectMessageSummaryModel *summaryModel();
+	ChatTimelineModel *timelineModel();
+	bool available() const;
+	QString title() const;
+	QString description() const;
+	qulonglong unreadTotal() const;
+	bool hasUnread() const;
+	bool trayOpen() const;
+	bool conversationOpen() const;
+	QString activeSessionId() const;
+	QString activeScopeToken() const;
+	QString activeLabel() const;
+	QString activeSubtitle() const;
+	QString activeAvatarUrl() const;
+	qulonglong activeUnreadCount() const;
+	bool canSend() const;
+	QString mode() const;
+	bool persistentHistoryAvailable() const;
+	bool historyLoading() const;
+	QString historyError() const;
+	QString emptyCopy() const;
+	QString draft() const;
+	bool windowDocked() const;
+	bool windowMinimized() const;
+
+	void applyState(const QVariantMap &state);
+	Q_INVOKABLE void setTrayOpen(bool open);
+	Q_INVOKABLE void openConversation(const QString &sessionId);
+	Q_INVOKABLE void closeConversation();
+	Q_INVOKABLE void markRead(const QString &sessionId = QString());
+	Q_INVOKABLE void setMode(const QString &mode);
+	Q_INVOKABLE void setDraft(const QString &draft);
+	Q_INVOKABLE void clearDraft(const QString &sessionId = QString());
+	Q_INVOKABLE void sendDraft();
+	Q_INVOKABLE void setWindowDocked(bool docked);
+	Q_INVOKABLE void setWindowMinimized(bool minimized);
+
+signals:
+	void stateChanged();
+	void trayOpenChanged();
+	void draftChanged();
+	void windowDockedChanged();
+	void windowMinimizedChanged();
+	void trayOpenChangeRequested(bool open);
+	void openRequested(const QString &sessionId);
+	void closeRequested(const QString &sessionId);
+	void markReadRequested(const QString &sessionId);
+	void modeChangeRequested(const QString &sessionId, const QString &mode);
+	void sendRequested(const QString &sessionId, const QString &message);
+
+private:
+	static QString normalizedSessionId(const QVariant &value);
+	void switchActiveConversation(const QVariantMap &conversation);
+	void pruneDrafts();
+
+	DirectMessageSummaryModel m_summaryModel;
+	ChatTimelineModel m_timelineModel;
+	QVariantMap m_state;
+	QVariantMap m_activeConversation;
+	QHash< QString, QString > m_drafts;
+	QString m_activeSessionId;
+	bool m_trayOpen = false;
+	bool m_windowDocked = false;
+	bool m_windowMinimized = false;
 };
 
 class AsyncOperationModel final : public StableListModel {
@@ -791,6 +907,7 @@ public:
 						   const QString &placement);
 	Q_INVOKABLE void sendMessage(const QString &message);
 	Q_INVOKABLE void requestOlderMessages();
+	Q_INVOKABLE void markActiveScopeRead();
 	Q_INVOKABLE void requestPreviewHydration(const QString &scopeToken, const QVariantList &messageIds,
 									  bool highPriority = false);
 	Q_INVOKABLE void cancelPendingReply();
@@ -829,6 +946,7 @@ signals:
 						const QString &placement);
 	void messageSendRequested(const QString &message);
 	void olderMessagesRequested();
+	void activeScopeMarkReadRequested();
 	void previewHydrationRequested(const QString &scopeToken, const QVariantList &messageIds, bool highPriority);
 	void pendingReplyCancelRequested();
 	void attachmentChooseRequested();
