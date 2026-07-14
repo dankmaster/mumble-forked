@@ -159,75 +159,15 @@ inline Selection normalizeSelection(Selection selection) {
 	return selection;
 }
 
-inline bool isBackendAvailable(Settings::SpeechCleanupBackend backend) {
-	switch (backend) {
-		case Settings::RNNoiseBackend:
-#ifdef USE_RNNOISE
-			return true;
-#else
-			return false;
-#endif
-		case Settings::DTLNBackend:
-#ifdef USE_DTLN
-			return true;
-#else
-			return false;
-#endif
-		case Settings::DeepFilterNetBackend:
-#ifdef USE_DEEPFILTERNET
-			return true;
-#else
-			return false;
-#endif
-	}
-
-	return false;
-}
-
-inline QString unavailableReason(Settings::SpeechCleanupBackend backend) {
-	switch (backend) {
-		case Settings::RNNoiseBackend:
-#ifdef USE_RNNOISE
-			return QString();
-#else
-			return QObject::tr("RNNoise support is not compiled into this build.");
-#endif
-		case Settings::DTLNBackend:
-#ifdef USE_DTLN
-			return QString();
-#else
-			return QObject::tr("DTLN support is not compiled into this build.");
-#endif
-		case Settings::DeepFilterNetBackend:
-#ifdef USE_DEEPFILTERNET
-			return QString();
-#else
-			return QObject::tr("DeepFilterNet support is not compiled into this build.");
-#endif
-	}
-
-	return QObject::tr("This speech cleanup backend is not available.");
-}
-
-inline bool hasAnyAvailableBackend() {
-	for (Settings::SpeechCleanupBackend backend : supportedBackends) {
-		if (isBackendAvailable(backend)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-inline Settings::SpeechCleanupBackend fallbackBackend() {
-	for (Settings::SpeechCleanupBackend backend : supportedBackends) {
-		if (isBackendAvailable(backend)) {
-			return backend;
-		}
-	}
-
-	return Settings::RNNoiseBackend;
-}
+// These functions deliberately live in SpeechCleanup.cpp. Keeping their
+// USE_* dependent definitions inline makes consumers such as benchmarks and
+// tests compile a different function body when the feature definitions are
+// private to the client object library, which violates the ODR and can make a
+// compiled-in backend appear unavailable.
+bool isBackendAvailable(Settings::SpeechCleanupBackend backend);
+QString unavailableReason(Settings::SpeechCleanupBackend backend);
+bool hasAnyAvailableBackend();
+Settings::SpeechCleanupBackend fallbackBackend();
 
 } // namespace Mumble::SpeechCleanup
 

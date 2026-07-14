@@ -112,6 +112,14 @@ namespace {
 #endif
 		}
 
+		unsigned int latencySamples() const override {
+#ifdef USE_DTLN
+			return m_dtln ? m_dtln->latencySamples() : 0;
+#else
+			return 0;
+#endif
+		}
+
 		void processInPlace(float *samples, unsigned int sampleCount, float mixFactor) override {
 #ifdef USE_DTLN
 			if (m_dtln) {

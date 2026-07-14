@@ -138,6 +138,17 @@ pub unsafe extern "C" fn df_get_frame_length(st: *mut DFState) -> usize {
     state.m.hop_size
 }
 
+/// Get the algorithmic delay of the DeepFilterNet model in samples.
+///
+/// This covers the STFT overlap and neural-model lookahead. A caller that
+/// accepts arbitrary input chunk sizes must additionally account for the
+/// frame it has to collect before calling `df_process_frame()`.
+#[no_mangle]
+pub unsafe extern "C" fn df_get_latency(st: *mut DFState) -> usize {
+    let state = st.as_mut().expect("Invalid pointer");
+    (state.m.fft_size - state.m.hop_size) + state.m.lookahead * state.m.hop_size
+}
+
 /// Get the next log message. Must be freed via `df_free_log_msg(ptr)`
 #[no_mangle]
 pub unsafe extern "C" fn df_next_log_msg(st: *mut DFState) -> *mut c_char {

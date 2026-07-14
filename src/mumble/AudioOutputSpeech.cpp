@@ -46,6 +46,16 @@ namespace {
 				return 0.65f;
 		}
 	}
+
+	constexpr unsigned int fullSpanFadeIndex(unsigned int position, unsigned int span,
+									 unsigned int tableSize) {
+		return span > 1 ? (position * (tableSize - 1)) / (span - 1) : tableSize - 1;
+	}
+
+	static_assert(fullSpanFadeIndex(0, 480, 480) == 0);
+	static_assert(fullSpanFadeIndex(479, 480, 480) == 479);
+	static_assert(fullSpanFadeIndex(335, 336, 480) == 479);
+	static_assert(fullSpanFadeIndex(0, 1, 480) == 479);
 } // namespace
 
 void AudioOutputSpeech::invalidateAudioOutputCache(void *maskedIndex) {
@@ -113,8 +123,18 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 	opus_decoder_ctl(opusState,
 					 OPUS_SET_PHASE_INVERSION_DISABLED(1)); // Disable phase inversion for better mono downmix.
 
+	// Remote cleanup is an utterance-scoped processor. Settings and the per-user
+	// enable decision are snapshotted here, off the mixer thread, and changes made
+	// while somebody is speaking deliberately take effect on their next utterance.
+	// This avoids model creation/reload and state discontinuities in the callback.
 	m_remoteSpeechCleanupSelection = currentRemoteSpeechCleanupSelection();
-	m_remoteSpeechCleanup          = createSpeechCleanupProcessor(m_remoteSpeechCleanupSelection);
+	m_remoteSpeechCleanupRequested = user && user->isRemoteSpeechCleanupEnabled();
+	m_remoteSpeechCleanupPreset    = Global::get().s.remoteSpeechCleanupPreset;
+	m_remoteSpeechCleanupMixFactor = remoteSpeechCleanupMixFactor(m_remoteSpeechCleanupPreset);
+	if (m_remoteSpeechCleanupRequested) {
+		m_remoteSpeechCleanup       = createSpeechCleanupProcessor(m_remoteSpeechCleanupSelection);
+		m_remoteSpeechCleanupActive = m_remoteSpeechCleanup && m_remoteSpeechCleanup->isReady();
+	}
 
 	// iAudioBufferSize: size (in unit of float) of the buffer used to store decoded pcm data.
 	// For opus, the maximum frame size of a packet is 120ms (the maximum duration for a single frame
@@ -217,25 +237,16 @@ bool AudioOutputSpeech::isEffectivelyDualMono(const float *samples, unsigned int
 	return true;
 }
 
-void AudioOutputSpeech::applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount) {
-	if (!samples || !p || !p->isRemoteSpeechCleanupEnabled() || !bStereo || sampleCount == 0
+bool AudioOutputSpeech::applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount) {
+	if (!samples || !m_remoteSpeechCleanupRequested || !m_remoteSpeechCleanupActive
+		|| !m_remoteSpeechCleanup || !bStereo || sampleCount == 0
 		|| !isEffectivelyDualMono(samples, sampleCount)) {
-		return;
-	}
-
-	const Mumble::SpeechCleanup::Selection selection = currentRemoteSpeechCleanupSelection();
-	if (selection != m_remoteSpeechCleanupSelection || !m_remoteSpeechCleanup) {
-		m_remoteSpeechCleanupSelection = selection;
-		m_remoteSpeechCleanup          = createSpeechCleanupProcessor(selection);
-	}
-
-	if (!m_remoteSpeechCleanup || !m_remoteSpeechCleanup->isReady()) {
-		return;
+		return false;
 	}
 
 	const unsigned int samplesPerChannel = sampleCount / 2;
 	if (samplesPerChannel > REMOTE_SPEECH_CLEANUP_MAX_MONO_SAMPLES) {
-		return;
+		return false;
 	}
 
 	for (unsigned int i = 0; i < samplesPerChannel; ++i) {
@@ -243,13 +254,72 @@ void AudioOutputSpeech::applyRemoteSpeechCleanup(float *samples, unsigned int sa
 	}
 
 	m_remoteSpeechCleanup->processInPlace(m_remoteSpeechCleanupMonoBuffer.data(), samplesPerChannel,
-										  remoteSpeechCleanupMixFactor(Global::get().s.remoteSpeechCleanupPreset));
+										  m_remoteSpeechCleanupMixFactor);
+	m_remoteSpeechCleanupWasApplied = true;
 
 	for (unsigned int i = 0; i < samplesPerChannel; ++i) {
 		samples[2 * i]     = m_remoteSpeechCleanupMonoBuffer[i];
 		samples[2 * i + 1] = m_remoteSpeechCleanupMonoBuffer[i];
 	}
+
+	return true;
 }
+
+bool AudioOutputSpeech::beginRemoteSpeechCleanupDrain() noexcept {
+	if (m_remoteSpeechCleanupDrainSamplesRemaining > 0) {
+		return true;
+	}
+	if (!m_remoteSpeechCleanupWasApplied || !m_remoteSpeechCleanup) {
+		return false;
+	}
+
+	const unsigned int cleanupLatency = m_remoteSpeechCleanup->latencySamples();
+	if (cleanupLatency == 0) {
+		return false;
+	}
+
+	m_remoteSpeechCleanupDrainSamplesRemaining = cleanupLatency;
+	m_remoteSpeechCleanupDrainCompleted        = false;
+	return true;
+}
+
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+bool AudioOutputSpeech::remoteSpeechCleanupRequestedForE2E() const {
+	return m_remoteSpeechCleanupRequested;
+}
+
+const Mumble::SpeechCleanup::Selection &AudioOutputSpeech::remoteSpeechCleanupSelectionForE2E() const {
+	return m_remoteSpeechCleanupSelection;
+}
+
+const SpeechCleanupProcessor *AudioOutputSpeech::remoteSpeechCleanupProcessorForE2E() const {
+	return m_remoteSpeechCleanup.get();
+}
+
+bool AudioOutputSpeech::remoteSpeechCleanupActiveForE2E() const {
+	return m_remoteSpeechCleanupActive;
+}
+
+bool AudioOutputSpeech::remoteSpeechCleanupWasAppliedForE2E() const {
+	return m_remoteSpeechCleanupWasApplied;
+}
+
+Settings::RemoteSpeechCleanupPreset AudioOutputSpeech::remoteSpeechCleanupPresetForE2E() const {
+	return m_remoteSpeechCleanupPreset;
+}
+
+float AudioOutputSpeech::remoteSpeechCleanupMixFactorForE2E() const {
+	return m_remoteSpeechCleanupMixFactor;
+}
+
+unsigned int AudioOutputSpeech::remoteSpeechCleanupDrainedSamplesForE2E() const {
+	return m_remoteSpeechCleanupDrainedSamples;
+}
+
+bool AudioOutputSpeech::remoteSpeechCleanupDrainCompletedForE2E() const {
+	return m_remoteSpeechCleanupDrainCompleted;
+}
+#endif
 
 Settings::TalkState AudioOutputSpeech::talkStateForAudioContext(Mumble::Protocol::audio_context_t context) const {
 	switch (context) {
@@ -331,50 +401,85 @@ void AudioOutputSpeech::addFrameToBuffer(const Mumble::Protocol::AudioData &audi
 }
 
 bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
-	unsigned int channels = bStereo ? 2 : 1;
-	// Note: all stereo supports are crafted for opus, since other codecs are deprecated and will soon be removed.
+	const unsigned int channels    = bStereo ? 2 : 1;
+	const unsigned int sampleCount = frameCount * channels;
+	// Note: all stereo support is crafted for Opus, since the other codecs are deprecated.
 
-	unsigned int sampleCount = frameCount * channels;
-
-	// we can not control exactly how many frames decoder returns
-	// so we need a buffer to keep unused frames
-	// shift the buffer, remove decoded and played frames
-	for (unsigned int i = iLastConsume; i < iBufferFilled; ++i)
-		pfBuffer[i - iLastConsume] = pfBuffer[i];
-
-	iBufferFilled -= iLastConsume;
-
+	const unsigned int previouslyConsumed = iLastConsume;
+	for (unsigned int i = previouslyConsumed; i < iBufferFilled; ++i) {
+		pfBuffer[i - previouslyConsumed] = pfBuffer[i];
+	}
+	iBufferFilled -= previouslyConsumed;
+	if (m_outputEndKnown) {
+		m_outputEndBufferOffset = previouslyConsumed >= m_outputEndBufferOffset
+									? 0
+									: m_outputEndBufferOffset - previouslyConsumed;
+	}
 	iLastConsume = sampleCount;
 
-	// Maximum interaural delay is accounted for to prevent audio glitches
-	if (iBufferFilled >= sampleCount + INTERAURAL_DELAY)
-		return bLastAlive;
+	// Maximum interaural delay is accounted for to prevent audio glitches.
+	if (iBufferFilled >= sampleCount + INTERAURAL_DELAY) {
+		const bool wasAlive = bLastAlive;
+		if (m_outputEndKnown && m_outputEndBufferOffset <= sampleCount) {
+			bLastAlive = false;
+		}
+		return wasAlive;
+	}
 
-	float *pOut;
+	float *pOut   = nullptr;
 	bool nextalive = bLastAlive;
 
 	while (iBufferFilled < sampleCount + INTERAURAL_DELAY) {
-		int decodedSamples = static_cast< int >(iFrameSize);
+		if (m_outputEndKnown) {
+			// The final cleaned sample is already buffered. Add only the small
+			// positional-delay safety margin; it is not part of the stream and must
+			// not move the recorded end offset.
+			const unsigned int requiredSamples = sampleCount + INTERAURAL_DELAY;
+			resizeBuffer(requiredSamples);
+			memset(pfBuffer + iBufferFilled, 0,
+				   static_cast< std::size_t >(requiredSamples - iBufferFilled) * sizeof(float));
+			iBufferFilled = requiredSamples;
+			break;
+		}
+
+		int decodedSamples           = static_cast< int >(iFrameSize);
+		bool finishStreamAfterChunk  = false;
+		bool applyFadeInForChunk     = false;
+		bool tickJitterForChunk      = false;
 		resizeBuffer(iBufferFilled + iOutputSize + INTERAURAL_DELAY);
 		// TODO: allocating memory in the audio callback will crash mumble in some cases.
 		//       we need to initialize the buffer with an appropriate size when initializing
 		//       this class. See #4250.
 
-		pOut = (srs) ? fResamplerBuffer : (pfBuffer + iBufferFilled);
+		pOut = srs ? fResamplerBuffer : pfBuffer + iBufferFilled;
 
 		if (!bLastAlive) {
 			memset(pOut, 0, iFrameSize * sizeof(float));
+		} else if (m_remoteSpeechCleanupDrainSamplesRemaining > 0) {
+			const unsigned int drainFrames =
+				std::min(iFrameSizePerChannel, m_remoteSpeechCleanupDrainSamplesRemaining);
+			decodedSamples = static_cast< int >(drainFrames * channels);
+			memset(pOut, 0, static_cast< std::size_t >(decodedSamples) * sizeof(float));
+			(void) applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
+			m_remoteSpeechCleanupDrainSamplesRemaining -= drainFrames;
+			m_remoteSpeechCleanupDrainedSamples += drainFrames;
+			if (m_remoteSpeechCleanupDrainSamplesRemaining == 0) {
+				m_remoteSpeechCleanupDrainCompleted = true;
+				finishStreamAfterChunk              = true;
+			}
 		} else {
 			if (p == &LoopUser::lpLoopy) {
 				LoopUser::lpLoopy.fetchFrames();
 			}
 
 			int avail = 0;
-			int ts    = jitter_buffer_get_pointer_timestamp(jbJitter);
+			const int ts = jitter_buffer_get_pointer_timestamp(jbJitter);
+			applyFadeInForChunk = ts == 0;
+			tickJitterForChunk  = true;
 			jitter_buffer_ctl(jbJitter, JITTER_BUFFER_GET_AVAILABLE_COUNT, &avail);
 
-			if (p && (ts == 0)) {
-				int want = static_cast< int >(p->fAverageAvailable);
+			if (p && ts == 0) {
+				const int want = static_cast< int >(p->fAverageAvailable);
 				if (avail < want) {
 					++iMissCount;
 					if (iMissCount < 20) {
@@ -386,35 +491,28 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 
 			if (qlFrames.isEmpty()) {
 				QMutexLocker lock(&qmJitter);
-
 				JitterBufferPacket jbp;
-
 				spx_int32_t startofs = 0;
-				if (jitter_buffer_get(jbJitter, &jbp, static_cast< int >(iFrameSize), &startofs) == JITTER_BUFFER_OK) {
+				if (jitter_buffer_get(jbJitter, &jbp, static_cast< int >(iFrameSize), &startofs)
+					== JITTER_BUFFER_OK) {
 					std::lock_guard< std::mutex > audioChunkLock(s_audioCachesMutex);
-
 					iMissCount = 0;
 
-					// The "data pointer" that is stored in the buffer is actually just an index to s_audioCaches
+					// The "data pointer" stored in the jitter buffer is an index into s_audioCaches.
 					const std::size_t index = reinterpret_cast< std::size_t >(jbp.data) - 1;
 					assert(jbp.len == 0);
 					assert(index < s_audioCaches.size());
-
 					AudioOutputCache &cache = s_audioCaches[index];
 					assert(cache.isValid());
 
 					bHasTerminator = cache.isLastFrame();
-
 					assert(m_codec == Mumble::Protocol::AudioCodec::Opus);
-
-					// Copy audio data into qlFrames
 					qlFrames << QByteArray(reinterpret_cast< const char * >(cache.getAudioData().data()),
 										   static_cast< int >(cache.getAudioData().size()));
 
 					if (cache.containsPositionalInformation()) {
 						assert(cache.getPositionalInformation().size() == 3);
 						assert(fPos.size() == 3);
-
 						for (unsigned int i = 0; i < 3; ++i) {
 							fPos[i] = cache.getPositionalInformation()[i];
 						}
@@ -424,157 +522,157 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 
 					m_suggestedVolumeAdjustment = cache.getVolumeAdjustment();
 					m_audioContext              = cache.getContext();
-
 					if (p) {
-						float a = static_cast< float >(avail);
-						if (static_cast< float >(avail) >= p->fAverageAvailable)
-							p->fAverageAvailable = a;
-						else
+						const float available = static_cast< float >(avail);
+						if (available >= p->fAverageAvailable) {
+							p->fAverageAvailable = available;
+						} else {
 							p->fAverageAvailable *= 0.99f;
+						}
 					}
 
-					// If a destroy callback has been registered, jitter_buffer_get expects the caller to
-					// invoke the destroy callback on the returned packet.
-					// We registered a destroy callback in our constructor, so we clean up the packet here.
+					// We registered a destroy callback, so the returned cache entry is ours to clear.
 					cache.clear();
 				} else {
-					// Let the jitter buffer know it's the right time to adjust the buffering delay to the network
-					// conditions.
 					jitter_buffer_update_delay(jbJitter, &jbp, nullptr);
-
-					iMissCount++;
-					if (iMissCount > 10)
+					++iMissCount;
+					if (iMissCount > 10 && !beginRemoteSpeechCleanupDrain()) {
 						nextalive = false;
+					}
 				}
 			}
 
 			if (!qlFrames.isEmpty()) {
-				QByteArray qba = qlFrames.takeFirst();
-
+				const QByteArray qba = qlFrames.takeFirst();
 				assert(m_codec == Mumble::Protocol::AudioCodec::Opus);
-
 				if (qba.isEmpty() || !(p && p->bLocalMute)) {
-					// If qba is empty, we have to let Opus know about the packet loss
-					// Otherwise if the associated user is not locally muted, we want to decode the audio
-					// packet normally in order to be able to play it.
 					decodedSamples = opus_decode_float(
 						opusState, qba.isEmpty() ? nullptr : reinterpret_cast< const unsigned char * >(qba.constData()),
 						static_cast< opus_int32 >(qba.size()), pOut, static_cast< int >(iAudioBufferSize / channels),
 						0);
 				} else {
-					// If the packet is non-empty, but the associated user is locally muted,
-					// we don't have to decode the packet. Instead it is enough to know how many
-					// samples it contained so that we can then mute the appropriate output length
 					decodedSamples = opus_packet_get_samples_per_frame(
 						reinterpret_cast< const unsigned char * >(qba.constData()), SAMPLE_RATE);
 				}
 
-				// The returned sample count we get from the Opus functions refer to samples per channel.
-				// Thus in order to get the total amount, we have to multiply by the channel count.
 				decodedSamples *= static_cast< int >(channels);
-
 				if (decodedSamples < 0) {
 					decodedSamples = static_cast< int >(iFrameSize);
 					memset(pOut, 0, iFrameSize * sizeof(float));
 				}
-
 				if (decodedSamples > 0 && !(p && p->bLocalMute)) {
 					applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
 				}
 
 				bool update = true;
-				if (p) {
+				if (p && decodedSamples > 0) {
 					float &fPowerMax = p->fPowerMax;
 					float &fPowerMin = p->fPowerMin;
-
-					float pow = 0.0f;
+					float power      = 0.0f;
 					for (int i = 0; i < decodedSamples; ++i) {
-						pow += pOut[i] * pOut[i];
+						power += pOut[i] * pOut[i];
 					}
-					pow = sqrtf(pow / static_cast< float >(decodedSamples)); // Average over both L and R channel.
-
-					if (pow >= fPowerMax) {
-						fPowerMax = pow;
+					power = sqrtf(power / static_cast< float >(decodedSamples));
+					if (power >= fPowerMax) {
+						fPowerMax = power;
+					} else if (power <= fPowerMin) {
+						fPowerMin = power;
 					} else {
-						if (pow <= fPowerMin) {
-							fPowerMin = pow;
-						} else {
-							fPowerMax = 0.99f * fPowerMax;
-							fPowerMin += 0.0001f * pow;
-						}
+						fPowerMax = 0.99f * fPowerMax;
+						fPowerMin += 0.0001f * power;
 					}
-
-					update = (pow < (fPowerMin + 0.01f * (fPowerMax - fPowerMin))); // Update jitter buffer when quiet.
+					update = power < (fPowerMin + 0.01f * (fPowerMax - fPowerMin));
 				}
 
 				if (qlFrames.isEmpty() && update) {
 					jitter_buffer_update_delay(jbJitter, nullptr, nullptr);
 				}
-
 				if (qlFrames.isEmpty() && bHasTerminator) {
-					nextalive = false;
+					bHasTerminator = false;
+					if (!beginRemoteSpeechCleanupDrain()) {
+						m_remoteSpeechCleanupDrainCompleted = true;
+						finishStreamAfterChunk              = true;
+					}
 				}
 			} else {
 				assert(m_codec == Mumble::Protocol::AudioCodec::Opus);
 				decodedSamples =
 					opus_decode_float(opusState, nullptr, 0, pOut, static_cast< int >(iFrameSizePerChannel), 0);
 				decodedSamples *= static_cast< int >(channels);
-
 				if (decodedSamples < 0) {
 					decodedSamples = static_cast< int >(iFrameSize);
 					memset(pOut, 0, iFrameSize * sizeof(float));
 				}
-			}
-
-			if (!nextalive) {
-				for (unsigned int i = 0; i < static_cast< unsigned int >(iFrameSizePerChannel); ++i) {
-					for (unsigned int s = 0; s < channels; ++s)
-						pOut[i * channels + s] *= fFadeOut[i];
-				}
-			} else if (ts == 0) {
-				for (unsigned int i = 0; i < static_cast< unsigned int >(iFrameSizePerChannel); ++i) {
-					for (unsigned int s = 0; s < channels; ++s)
-						pOut[i * channels + s] *= fFadeIn[i];
+				// Keep causal cleanup state moving across Opus packet-loss concealment frames.
+				if (decodedSamples > 0 && !(p && p->bLocalMute)) {
+					applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
 				}
 			}
 
-			for (unsigned int i = static_cast< unsigned int >(decodedSamples) / iFrameSize; i > 0; --i) {
-				jitter_buffer_tick(jbJitter);
+			if (finishStreamAfterChunk || !nextalive) {
+				const unsigned int decodedFrames = static_cast< unsigned int >(decodedSamples) / channels;
+				const unsigned int fadeFrames    = std::min(iFrameSizePerChannel, decodedFrames);
+				const unsigned int fadeStart     = decodedFrames - fadeFrames;
+				for (unsigned int i = 0; i < fadeFrames; ++i) {
+					// A final causal-drain chunk can be shorter than the regular
+					// 10 ms frame (for example DTLN's latency leaves a 336-sample
+					// remainder). Map that shorter span across the complete fade
+					// table so its final sample still reaches zero.
+					const unsigned int fadeIndex = fullSpanFadeIndex(i, fadeFrames, iFrameSizePerChannel);
+					for (unsigned int channel = 0; channel < channels; ++channel) {
+						pOut[(fadeStart + i) * channels + channel] *= fFadeOut[fadeIndex];
+					}
+				}
+			} else if (applyFadeInForChunk) {
+				for (unsigned int i = 0; i < iFrameSizePerChannel; ++i) {
+					for (unsigned int channel = 0; channel < channels; ++channel) {
+						pOut[i * channels + channel] *= fFadeIn[i];
+					}
+				}
+			}
+
+			if (tickJitterForChunk) {
+				for (unsigned int i = static_cast< unsigned int >(decodedSamples) / iFrameSize; i > 0; --i) {
+					jitter_buffer_tick(jbJitter);
+				}
 			}
 		}
+
 	nextframe:
 		if (p && p->bLocalMute) {
-			// Overwrite the output with zeros as this user is muted
-			// NOTE: If Opus is used, then in this case no samples have actually been decoded and thus
-			// we don't discard previously done work (in form of decoding the audio stream) by overwriting
-			// it with zeros.
-			memset(pOut, 0, static_cast< unsigned int >(decodedSamples) * sizeof(float));
+			memset(pOut, 0, static_cast< std::size_t >(decodedSamples) * sizeof(float));
 		}
 
-		spx_uint32_t inlen  = static_cast< unsigned int >(decodedSamples) / channels; // per channel
+		spx_uint32_t inlen  = static_cast< unsigned int >(decodedSamples) / channels;
 		spx_uint32_t outlen = static_cast< unsigned int >(
 			ceilf(static_cast< float >(static_cast< unsigned int >(decodedSamples) / channels * iMixerFreq)
 				  / static_cast< float >(iSampleRate)));
 		if (srs && bLastAlive) {
 			if (channels == 1) {
 				speex_resampler_process_float(srs, 0, fResamplerBuffer, &inlen, pfBuffer + iBufferFilled, &outlen);
-			} else if (channels == 2) {
+			} else {
 				speex_resampler_process_interleaved_float(srs, fResamplerBuffer, &inlen, pfBuffer + iBufferFilled,
-														  &outlen);
+													  &outlen);
 			}
 		}
 		iBufferFilled += outlen * channels;
+		if (finishStreamAfterChunk) {
+			m_outputEndKnown        = true;
+			m_outputEndBufferOffset = iBufferFilled;
+		}
 	}
 
+	if (m_outputEndKnown && m_outputEndBufferOffset <= sampleCount) {
+		nextalive = false;
+	}
 	if (p) {
 		if (!nextalive) {
 			m_audioContext = Mumble::Protocol::AudioContext::INVALID;
 		}
-
 		updateTalkingStateFromAudioContext(m_audioContext);
 	}
 
-	bool tmp   = bLastAlive;
-	bLastAlive = nextalive;
-	return tmp;
+	const bool wasAlive = bLastAlive;
+	bLastAlive          = nextalive;
+	return wasAlive;
 }

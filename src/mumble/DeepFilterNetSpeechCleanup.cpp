@@ -12,6 +12,8 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -20,6 +22,7 @@ namespace {
 
 	using DfCreateFn            = DFState *(*)(const char *path, float attenLim, const char *logLevel);
 	using DfGetFrameLengthFn    = std::size_t (*)(DFState *state);
+	using DfGetLatencyFn        = std::size_t (*)(DFState *state);
 	using DfProcessFrameFn      = float (*)(DFState *state, float *input, float *output);
 	using DfSetAttenLimFn       = void (*)(DFState *state, float limitDb);
 	using DfSetPostFilterBetaFn = void (*)(DFState *state, float beta);
@@ -118,12 +121,14 @@ public:
 
 		m_create            = reinterpret_cast< DfCreateFn >(m_library.resolve("df_create"));
 		m_getFrameLength    = reinterpret_cast< DfGetFrameLengthFn >(m_library.resolve("df_get_frame_length"));
+		m_getLatency        = reinterpret_cast< DfGetLatencyFn >(m_library.resolve("df_get_latency"));
 		m_processFrame      = reinterpret_cast< DfProcessFrameFn >(m_library.resolve("df_process_frame"));
 		m_setAttenLim       = reinterpret_cast< DfSetAttenLimFn >(m_library.resolve("df_set_atten_lim"));
 		m_setPostFilterBeta = reinterpret_cast< DfSetPostFilterBetaFn >(m_library.resolve("df_set_post_filter_beta"));
 		m_free              = reinterpret_cast< DfFreeFn >(m_library.resolve("df_free"));
 
-		if (!m_create || !m_getFrameLength || !m_processFrame || !m_setAttenLim || !m_setPostFilterBeta || !m_free) {
+		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrame || !m_setAttenLim
+			|| !m_setPostFilterBeta || !m_free) {
 			qWarning("DeepFilterNetSpeechCleanup: deepfilter runtime library is missing required C API symbols");
 			m_library.unload();
 			return;
@@ -158,8 +163,6 @@ public:
 
 	void reset() {
 #ifdef USE_DEEPFILTERNET
-		m_pendingInput.clear();
-		m_outputQueue.clear();
 		if (!m_library.isLoaded()) {
 			m_ready = false;
 			return;
@@ -170,6 +173,10 @@ public:
 #endif
 	}
 
+	unsigned int latencySamples() const {
+		return m_latencySamples;
+	}
+
 	void processInPlace(float *samples, unsigned int sampleCount, float mixFactor) {
 #ifdef USE_DEEPFILTERNET
 		if (!m_ready || !samples || sampleCount == 0) {
@@ -177,37 +184,26 @@ public:
 		}
 
 		mixFactor = std::clamp(mixFactor, 0.0f, 1.0f);
-		if (mixFactor <= 0.0f) {
-			return;
-		}
-
-		const std::vector< float > original(samples, samples + sampleCount);
-
-		for (unsigned int i = 0; i < sampleCount; ++i) {
-			m_pendingInput.push_back(original[i]);
-			if (m_pendingInput.size() == m_frameLength) {
-				for (std::size_t frameIndex = 0; frameIndex < m_frameLength; ++frameIndex) {
-					m_inputFrame[frameIndex] = m_pendingInput[frameIndex];
-				}
-
-				m_processFrame(m_state, m_inputFrame.data(), m_outputFrame.data());
-				for (float sample : m_outputFrame) {
-					m_outputQueue.push_back(sample);
-				}
-
-				m_pendingInput.clear();
-			}
-		}
-
 		const float dryFactor = 1.0f - mixFactor;
 		for (unsigned int i = 0; i < sampleCount; ++i) {
-			float cleaned = original[i];
-			if (!m_outputQueue.empty()) {
-				cleaned = m_outputQueue.front();
-				m_outputQueue.pop_front();
+			const float inputSample = std::isfinite(samples[i]) ? std::clamp(samples[i], -1.0f, 1.0f) : 0.0f;
+			const float rawCleanedSample = m_outputFramePosition < m_frameLength
+										   ? m_outputFrame[m_outputFramePosition++]
+										   : 0.0f;
+			const float cleanedSample = std::isfinite(rawCleanedSample) ? rawCleanedSample : 0.0f;
+			const float delayedDry = m_dryDelay[m_dryDelayPosition];
+			m_dryDelay[m_dryDelayPosition] = inputSample;
+			m_dryDelayPosition = (m_dryDelayPosition + 1) % m_dryDelay.size();
+
+			m_inputFrame[m_inputFrameSize++] = inputSample;
+			if (m_inputFrameSize == m_frameLength) {
+				m_processFrame(m_state, m_inputFrame.data(), m_outputFrame.data());
+				m_inputFrameSize = 0;
+				m_outputFramePosition = 0;
 			}
 
-			samples[i] = std::clamp(cleaned * mixFactor + original[i] * dryFactor, -1.0f, 1.0f);
+			const float blendedSample = cleanedSample * mixFactor + delayedDry * dryFactor;
+			samples[i] = std::isfinite(blendedSample) ? std::clamp(blendedSample, -1.0f, 1.0f) : 0.0f;
 		}
 #else
 		(void) samples;
@@ -230,8 +226,8 @@ public:
 
 private:
 	bool initializeState() {
-		if (!m_create || !m_getFrameLength || !m_processFrame || !m_setAttenLim || !m_setPostFilterBeta || !m_free
-			|| m_modelPath.isEmpty()) {
+		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrame || !m_setAttenLim
+			|| !m_setPostFilterBeta || !m_free || m_modelPath.isEmpty()) {
 			return false;
 		}
 
@@ -242,15 +238,22 @@ private:
 		}
 
 		m_frameLength = m_getFrameLength(m_state);
-		if (m_frameLength == 0 || m_frameLength > 4096) {
+		const std::size_t algorithmicLatency = m_getLatency(m_state);
+		if (m_frameLength == 0 || m_frameLength > 4096 || algorithmicLatency > 48000
+			|| algorithmicLatency > (std::numeric_limits< unsigned int >::max() - m_frameLength)) {
 			releaseState();
 			return false;
 		}
+		m_latencySamples = static_cast< unsigned int >(algorithmicLatency + m_frameLength);
 
 		m_setAttenLim(m_state, m_profile.attenuationLimitDb);
 		m_setPostFilterBeta(m_state, m_profile.postFilterBeta);
 		m_inputFrame.assign(m_frameLength, 0.0f);
 		m_outputFrame.assign(m_frameLength, 0.0f);
+		m_inputFrameSize = 0;
+		m_outputFramePosition = m_frameLength;
+		m_dryDelay.assign(m_latencySamples, 0.0f);
+		m_dryDelayPosition = 0;
 		return true;
 	}
 
@@ -260,6 +263,7 @@ private:
 		}
 		m_state = nullptr;
 		m_frameLength = 0;
+		m_latencySamples = 0;
 	}
 
 	QLibrary m_library;
@@ -269,6 +273,7 @@ private:
 	DFState *m_state = nullptr;
 	DfCreateFn m_create = nullptr;
 	DfGetFrameLengthFn m_getFrameLength = nullptr;
+	DfGetLatencyFn m_getLatency = nullptr;
 	DfProcessFrameFn m_processFrame = nullptr;
 	DfSetAttenLimFn m_setAttenLim = nullptr;
 	DfSetPostFilterBetaFn m_setPostFilterBeta = nullptr;
@@ -276,8 +281,11 @@ private:
 	std::size_t m_frameLength = 0;
 	std::vector< float > m_inputFrame;
 	std::vector< float > m_outputFrame;
-	std::vector< float > m_pendingInput;
-	std::deque< float > m_outputQueue;
+	std::size_t m_inputFrameSize = 0;
+	std::size_t m_outputFramePosition = 0;
+	std::vector< float > m_dryDelay;
+	std::size_t m_dryDelayPosition = 0;
+	unsigned int m_latencySamples = 0;
 	bool m_usedFallback = false;
 	bool m_ready = false;
 };
@@ -296,6 +304,10 @@ void DeepFilterNetSpeechCleanup::reset() {
 	if (m_impl) {
 		m_impl->reset();
 	}
+}
+
+unsigned int DeepFilterNetSpeechCleanup::latencySamples() const {
+	return m_impl ? m_impl->latencySamples() : 0;
 }
 
 void DeepFilterNetSpeechCleanup::processInPlace(float *samples, unsigned int sampleCount, float mixFactor) {

@@ -18,6 +18,12 @@ public:
 
 	virtual bool isReady() const = 0;
 	virtual void reset()         = 0;
+	/// Returns the fixed causal delay, in 48 kHz mono samples, introduced by
+	/// this processor. Both the cleaned signal and the dry signal used by
+	/// processInPlace() are placed on this timeline.
+	virtual unsigned int latencySamples() const {
+		return 0;
+	}
 	virtual void processInPlace(float *samples, unsigned int sampleCount, float mixFactor = 1.0f) = 0;
 	virtual QString activeModelId() const {
 		return {};

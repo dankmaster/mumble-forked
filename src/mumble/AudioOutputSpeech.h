@@ -66,9 +66,20 @@ protected:
 	std::unique_ptr< SpeechCleanupProcessor > m_remoteSpeechCleanup;
 	Mumble::SpeechCleanup::Selection m_remoteSpeechCleanupSelection = {};
 	std::array< float, 5760 > m_remoteSpeechCleanupMonoBuffer = {};
+	bool m_remoteSpeechCleanupRequested = false;
+	bool m_remoteSpeechCleanupActive = false;
+	bool m_remoteSpeechCleanupWasApplied = false;
+	Settings::RemoteSpeechCleanupPreset m_remoteSpeechCleanupPreset = Settings::Normal;
+	float m_remoteSpeechCleanupMixFactor = 0.65f;
+	unsigned int m_remoteSpeechCleanupDrainSamplesRemaining = 0;
+	unsigned int m_remoteSpeechCleanupDrainedSamples = 0;
+	bool m_remoteSpeechCleanupDrainCompleted = false;
+	bool m_outputEndKnown = false;
+	unsigned int m_outputEndBufferOffset = 0;
 
 	bool isEffectivelyDualMono(const float *samples, unsigned int sampleCount) const;
-	void applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount);
+	bool applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount);
+	bool beginRemoteSpeechCleanupDrain() noexcept;
 	Settings::TalkState talkStateForAudioContext(Mumble::Protocol::audio_context_t context) const;
 	void updateTalkingStateFromAudioContext(Mumble::Protocol::audio_context_t context);
 
@@ -89,6 +100,20 @@ public:
 	AudioOutputSpeech(ClientUser *, unsigned int freq, Mumble::Protocol::AudioCodec codec,
 					  unsigned int systemMaxBufferSize);
 	~AudioOutputSpeech() Q_DECL_OVERRIDE;
+
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	/// Read-only state used by the developer-only deterministic E2E harness.
+	/// These accessors never create, reset, or run a cleanup model.
+	bool remoteSpeechCleanupRequestedForE2E() const;
+	const Mumble::SpeechCleanup::Selection &remoteSpeechCleanupSelectionForE2E() const;
+	const SpeechCleanupProcessor *remoteSpeechCleanupProcessorForE2E() const;
+	bool remoteSpeechCleanupActiveForE2E() const;
+	bool remoteSpeechCleanupWasAppliedForE2E() const;
+	Settings::RemoteSpeechCleanupPreset remoteSpeechCleanupPresetForE2E() const;
+	float remoteSpeechCleanupMixFactorForE2E() const;
+	unsigned int remoteSpeechCleanupDrainedSamplesForE2E() const;
+	bool remoteSpeechCleanupDrainCompletedForE2E() const;
+#endif
 };
 
 #endif // AUDIOOUTPUTSPEECH_H_

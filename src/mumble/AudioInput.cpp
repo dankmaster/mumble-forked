@@ -893,6 +893,7 @@ void AudioInput::resetAudioProcessor() {
 	m_inputGateOpen          = false;
 	m_inputGateAttackFrames  = 0;
 	m_inputGateReleaseFrames = 0;
+	m_speechCleanupTransmitDrain.cancel();
 	selectNoiseCancel();
 
 	m_preprocessor.setVAD(true);
@@ -1007,6 +1008,40 @@ void AudioInput::selectNoiseCancel() {
 	m_preprocessor.setDenoise(preprocessorDenoise);
 }
 
+const SpeechCleanupProcessor *AudioInput::speechCleanupProcessorForDiagnostics() const noexcept {
+	return m_speechCleanupProcessor.get();
+}
+
+const Mumble::SpeechCleanup::Selection &AudioInput::speechCleanupSelectionForDiagnostics() const noexcept {
+	return m_speechCleanupSelection;
+}
+
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+unsigned int AudioInput::finishSpeechCleanupE2ETransmission() {
+	if (!bPreviousVoice) {
+		return 0;
+	}
+
+	// This is an explicit release rather than a VAD decision, so begin the drain
+	// before submitting the first zero frame. That makes the deterministic path
+	// consume exactly latencySamples() zeros instead of one decision frame plus
+	// the reported latency.
+	unsigned int requestedDrainSamples = 0;
+	if ((noiseCancel == Settings::NoiseCancelRNN || noiseCancel == Settings::NoiseCancelBoth)
+		&& m_speechCleanupProcessor && m_speechCleanupProcessor->isReady()) {
+		requestedDrainSamples = m_speechCleanupProcessor->latencySamples();
+		m_speechCleanupTransmitDrain.begin(m_speechCleanupProcessor->latencySamples());
+	}
+	std::vector< short > silence(iFrameSize, 0);
+	m_forceSpeechCleanupE2ERelease = true;
+	do {
+		encodeAudioFrame(AudioChunk(silence.data()));
+	} while (bRunning && m_speechCleanupTransmitDrain.active());
+	m_forceSpeechCleanupE2ERelease = false;
+	return requestedDrainSamples - m_speechCleanupTransmitDrain.remainingSamples();
+}
+#endif
+
 int AudioInput::encodeOpusFrame(short *source, int size, EncodingOutputBuffer &buffer) {
 	int len;
 	if (bResetEncoder) {
@@ -1068,6 +1103,51 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		m_preprocessor.setNoiseSuppress(Global::get().s.iSpeexNoiseCancelStrength - gainValue);
 	}
 
+	const bool neuralCleanupReady =
+		(noiseCancel == Settings::NoiseCancelRNN || noiseCancel == Settings::NoiseCancelBoth)
+		&& m_speechCleanupProcessor && m_speechCleanupProcessor->isReady();
+
+	// If Global::get().iPushToTalk > 0 that means that we are currently in some sort of PTT action. For
+	// instance this could mean we're currently whispering.
+	bool isPTT = Global::get().iPushToTalk > 0;
+	if (Global::get().s.atTransmit == Settings::PushToTalk) {
+		const bool doublePush = Global::get().s.uiDoublePush > 0
+							&& ((Global::get().uiDoublePush < Global::get().s.uiDoublePush)
+								|| (static_cast< quint64 >(Global::get().tDoublePush.elapsed().count())
+									< Global::get().s.uiDoublePush));
+		// With double push enabled, we might be in a PTT state without pressing any PTT key.
+		isPTT = isPTT || doublePush;
+	}
+
+	const bool continuousTransmission = Global::get().s.atTransmit == Settings::Continuous
+									|| API::PluginData::get().overwriteMicrophoneActivation.load();
+	bool forceSpeechCleanupE2ERelease = false;
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	forceSpeechCleanupE2ERelease = m_forceSpeechCleanupE2ERelease;
+#endif
+
+	// A fresh activation must take over the existing streaming state without a
+	// processor reset. Raw amplitude is used while draining because the cleanup
+	// input itself has to remain exact zero until its causal tail has been sent.
+	const float rawAmplitudeLevel = std::clamp(1.0f + dPeakMic / 96.0f, 0.0f, 1.0f);
+	const bool rawVADRestart = Global::get().s.atTransmit == Settings::VAD
+							   && voiceActivityTriggers(rawAmplitudeLevel, Global::get().s.fVADmin,
+													Global::get().s.fVADmax, false);
+	const bool speechCleanupDrainActivation =
+		isPTT || rawVADRestart || (continuousTransmission && !forceSpeechCleanupE2ERelease);
+	bool speechCleanupDrainCancelledForActivation = false;
+	if (m_speechCleanupTransmitDrain.active() && !neuralCleanupReady) {
+		m_speechCleanupTransmitDrain.cancel();
+	} else if (m_speechCleanupTransmitDrain.active() && speechCleanupDrainActivation) {
+		m_speechCleanupTransmitDrain.cancel();
+		speechCleanupDrainCancelledForActivation = true;
+	}
+
+	Mumble::SpeechCleanup::TransmitDrain::Frame speechCleanupDrainFrame;
+	if (m_speechCleanupTransmitDrain.active()) {
+		speechCleanupDrainFrame = m_speechCleanupTransmitDrain.takeFrame(iFrameSize);
+	}
+
 	short psClean[iFrameSize];
 	if (chunk.speaker && Global::get().s.echoOption == EchoCancelOptionID::WEBRTC_AEC && m_webrtcEchoCanceller
 		&& m_webrtcEchoCanceller->isReady()
@@ -1081,17 +1161,24 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		psSource = chunk.mic;
 	}
 
-	if ((noiseCancel == Settings::NoiseCancelRNN || noiseCancel == Settings::NoiseCancelBoth)
-		&& m_speechCleanupProcessor && m_speechCleanupProcessor->isReady()) {
+	if (neuralCleanupReady) {
 		std::array< float, 480 > cleanupFrame = {};
-		for (unsigned int i = 0; i < cleanupFrame.size(); ++i) {
-			cleanupFrame[i] = static_cast< float >(psSource[i]) / 32768.0f;
+		unsigned int cleanupSampleCount = static_cast< unsigned int >(cleanupFrame.size());
+		if (speechCleanupDrainFrame.draining) {
+			cleanupSampleCount = speechCleanupDrainFrame.zeroInputSamples;
+		} else {
+			for (unsigned int i = 0; i < cleanupFrame.size(); ++i) {
+				cleanupFrame[i] = static_cast< float >(psSource[i]) / 32768.0f;
+			}
 		}
 
-		m_speechCleanupProcessor->processInPlace(cleanupFrame.data(), static_cast< unsigned int >(cleanupFrame.size()));
+		m_speechCleanupProcessor->processInPlace(cleanupFrame.data(), cleanupSampleCount);
 
-		for (unsigned int i = 0; i < cleanupFrame.size(); ++i) {
+		for (unsigned int i = 0; i < cleanupSampleCount; ++i) {
 			psSource[i] = clampFloatSample(cleanupFrame[i] * 32768.0f);
+		}
+		if (speechCleanupDrainFrame.draining) {
+			std::fill(psSource + cleanupSampleCount, psSource + iFrameSize, 0);
 		}
 	}
 
@@ -1122,51 +1209,70 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 
 	bool bIsSpeech = false;
 
-	bIsSpeech = voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
-	bIsSpeech = inputGateAllowsSpeech(bIsSpeech, amplitudeLevel, fSpeechProb);
-	if (!bIsSpeech && Global::get().s.inputGateMode != Settings::InputGateOff) {
-		iHoldFrames = Global::get().s.iVoiceHold;
+	if (!speechCleanupDrainFrame.draining) {
+		bIsSpeech = voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
+		bIsSpeech = inputGateAllowsSpeech(bIsSpeech, amplitudeLevel, fSpeechProb);
+		if (!bIsSpeech && Global::get().s.inputGateMode != Settings::InputGateOff) {
+			iHoldFrames = Global::get().s.iVoiceHold;
+		}
+
+		if (!bIsSpeech) {
+			iHoldFrames++;
+			if (iHoldFrames < Global::get().s.iVoiceHold)
+				// Hold mic open until iVoiceHold threshold is reached
+				bIsSpeech = true;
+		} else {
+			iHoldFrames = 0;
+		}
 	}
 
-	if (!bIsSpeech) {
-		iHoldFrames++;
-		if (iHoldFrames < Global::get().s.iVoiceHold)
-			// Hold mic open until iVoiceHold threshold is reached
-			bIsSpeech = true;
-	} else {
-		iHoldFrames = 0;
-	}
-
-	// If Global::get().iPushToTalk > 0 that means that we are currently in some sort of PTT action. For
-	// instance this could mean we're currently whispering
-	bool isPTT = Global::get().iPushToTalk > 0;
-
-	if (Global::get().s.atTransmit == Settings::Continuous
-		|| API::PluginData::get().overwriteMicrophoneActivation.load()) {
+	if (continuousTransmission) {
 		// Continuous transmission is enabled
 		bIsSpeech = true;
 	} else if (Global::get().s.atTransmit == Settings::PushToTalk) {
-		// PTT is enabled, so check if it is currently active
-		bool doublePush = Global::get().s.uiDoublePush > 0
-						  && ((Global::get().uiDoublePush < Global::get().s.uiDoublePush)
-							  || (static_cast< quint64 >(Global::get().tDoublePush.elapsed().count())
-								  < Global::get().s.uiDoublePush));
-
-		// With double push enabled, we might be in a PTT state without pressing any PTT key
-		isPTT     = isPTT || doublePush;
+		// PTT is enabled, so check if it is currently active.
 		bIsSpeech = isPTT;
 	}
 
 	bIsSpeech = bIsSpeech || isPTT;
+	if (forceSpeechCleanupE2ERelease) {
+		bIsSpeech = false;
+	}
 
 	ClientUser *p          = ClientUser::get(Global::get().uiSession);
 	bool bTalkingWhenMuted = false;
-	if (Global::get().s.bMute || ((Global::get().s.lmLoopMode != Settings::Local) && p && (p->bMute || p->bSuppress))
-		|| Global::get().bPushToMute || (voiceTargetID < 0)) {
+	const bool transmissionBlocked =
+		Global::get().s.bMute || ((Global::get().s.lmLoopMode != Settings::Local) && p && (p->bMute || p->bSuppress))
+		|| Global::get().bPushToMute || (voiceTargetID < 0);
+	if (transmissionBlocked) {
 		bTalkingWhenMuted = bIsSpeech;
 		bIsSpeech         = false;
 	}
 
+	bool speechCleanupDrainStarted = false;
+	if (transmissionBlocked) {
+		m_speechCleanupTransmitDrain.cancel();
+	} else if (speechCleanupDrainCancelledForActivation) {
+		// The current frame contains the fresh activation that cancelled the
+		// zero-input drain. Keep the existing utterance open while the normal VAD
+		// and input-gate state catch up on the real processor output.
+		bIsSpeech = true;
+	} else if (speechCleanupDrainFrame.draining) {
+		// Keep sending until all causal output has been recovered. Only the frame
+		// that consumes the final outstanding samples carries the terminator.
+		bIsSpeech = !speechCleanupDrainFrame.terminator;
+	} else if (!bIsSpeech && bPreviousVoice && neuralCleanupReady
+			   && (!continuousTransmission || forceSpeechCleanupE2ERelease)) {
+		m_speechCleanupTransmitDrain.begin(m_speechCleanupProcessor->latencySamples());
+		if (m_speechCleanupTransmitDrain.active()) {
+			speechCleanupDrainStarted = true;
+			bIsSpeech                 = true;
+			m_inputGateOpen           = false;
+			m_inputGateAttackFrames   = 0;
+			m_inputGateReleaseFrames  = 0;
+			iHoldFrames               = Global::get().s.iVoiceHold;
+		}
+	}
 	if (bIsSpeech) {
 		iSilentFrames = 0;
 	} else {
@@ -1310,7 +1416,10 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		iBitrate = 0;
 
 	bPreviousVoice = bIsSpeech;
-	previousPTT    = isPTT;
+	if (!speechCleanupDrainStarted
+		&& !(speechCleanupDrainFrame.draining && !speechCleanupDrainFrame.terminator)) {
+		previousPTT = isPTT;
+	}
 }
 
 static void sendAudioFrame(std::span< const Mumble::Protocol::byte > encodedPacket) {

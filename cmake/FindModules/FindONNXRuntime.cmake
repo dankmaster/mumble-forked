@@ -46,9 +46,19 @@ else()
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(ONNXRuntime
-	REQUIRED_VARS ONNXRUNTIME_INCLUDE_DIR ONNXRUNTIME_LIBRARY
+set(_ONNXRUNTIME_REQUIRED_VARS
+	ONNXRUNTIME_INCLUDE_DIR
+	ONNXRUNTIME_LIBRARY
 )
+if(WIN32)
+	# Windows links through the import library but still needs the matching DLL
+	# in every runnable/packaged payload.
+	list(APPEND _ONNXRUNTIME_REQUIRED_VARS ONNXRUNTIME_RUNTIME)
+endif()
+find_package_handle_standard_args(ONNXRuntime
+	REQUIRED_VARS ${_ONNXRUNTIME_REQUIRED_VARS}
+)
+unset(_ONNXRUNTIME_REQUIRED_VARS)
 
 if(ONNXRUNTIME_FOUND AND NOT TARGET ONNXRuntime::ONNXRuntime)
 	if(WIN32)

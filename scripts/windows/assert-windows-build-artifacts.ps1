@@ -111,47 +111,146 @@ function Assert-BinarySet {
 	return $verifiedPaths
 }
 
+function Get-CMakeBooleanOption {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string[]]$CacheLines,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Name
+	)
+
+	$pattern = "^$([System.Text.RegularExpressions.Regex]::Escape($Name)):BOOL=(.*)$"
+	$matches = @($CacheLines | Where-Object { $_ -match $pattern })
+	if ($matches.Count -ne 1) {
+		throw "CMake cache does not contain exactly one BOOL entry for '$Name'."
+	}
+
+	$value = [System.Text.RegularExpressions.Regex]::Match($matches[0], $pattern).Groups[1].Value.Trim()
+	if ($value -match '^(?i:1|ON|TRUE|YES|Y)$') {
+		return $true
+	}
+	if ($value -match '^(?i:0|OFF|FALSE|NO|N|IGNORE|.*-NOTFOUND)$') {
+		return $false
+	}
+
+	throw "CMake cache option '$Name' has unsupported BOOL value '$value'."
+}
+
+function Get-SpeechCleanupFeatureSet {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$BuildRoot
+	)
+
+	$cachePath = Join-Path $BuildRoot "CMakeCache.txt"
+	if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+		throw "Speech-cleanup payload validation requires a CMake cache at '$cachePath'."
+	}
+
+	$cacheLines = @(Get-Content -LiteralPath $cachePath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+	$features = [pscustomobject]@{
+		RNNoise        = Get-CMakeBooleanOption -CacheLines $cacheLines -Name "rnnoise"
+		BundledRNNoise = Get-CMakeBooleanOption -CacheLines $cacheLines -Name "bundled-rnnoise"
+		DTLN           = Get-CMakeBooleanOption -CacheLines $cacheLines -Name "dtln"
+		DeepFilterNet  = Get-CMakeBooleanOption -CacheLines $cacheLines -Name "deepfilternet"
+	}
+
+	if (-not $features.RNNoise -and -not $features.DTLN -and -not $features.DeepFilterNet) {
+		throw "Speech-cleanup payload validation was requested, but all speech-cleanup backends are disabled in '$cachePath'."
+	}
+
+	return $features
+}
+
 function Assert-SpeechCleanupPayload {
 	param(
 		[Parameter(Mandatory = $true)]
 		[string]$Label,
 
 		[Parameter(Mandatory = $true)]
-		[string]$Root
+		[string]$Root,
+
+		[Parameter(Mandatory = $true)]
+		[pscustomobject]$Features
 	)
 
-	$requiredRelativePaths = @(
-		"onnxruntime.dll",
-		"deepfilter.dll",
-		"rnnoise.dll",
-		"dtln\baseline\model_1.onnx",
-		"dtln\baseline\model_2.onnx",
-		"dtln\norm_500h\model_1.onnx",
-		"dtln\norm_500h\model_2.onnx",
-		"dtln\norm_40h\model_1.onnx",
-		"dtln\norm_40h\model_2.onnx",
-		"rnnoise\rnnoise_little.weights_blob.bin"
-	)
+	$requiredRelativePaths = New-Object System.Collections.Generic.List[string]
+	$enabledBackendNames = New-Object System.Collections.Generic.List[string]
 
-	$missing = New-Object System.Collections.Generic.List[string]
-	foreach ($relativePath in $requiredRelativePaths) {
-		$fullPath = Join-Path $Root $relativePath
-		if (-not (Test-Path -LiteralPath $fullPath)) {
-			$missing.Add($relativePath)
+	if ($Features.RNNoise) {
+		$enabledBackendNames.Add("RNNoise")
+		if ($Features.BundledRNNoise) {
+			# The bundled Windows RNNoise target is a shared library and also produces
+			# the selectable little-model blob. External RNNoise packages may link
+			# statically, so they intentionally have no generic payload requirement.
+			$requiredRelativePaths.Add("rnnoise.dll")
+			$requiredRelativePaths.Add("rnnoise\rnnoise_little.weights_blob.bin")
 		}
 	}
 
-	$deepFilterArchive = Get-ChildItem -Path (Join-Path $Root "deepfilternet") -File -Filter "*.tar.gz" -ErrorAction SilentlyContinue |
-		Select-Object -First 1
-	if (-not $deepFilterArchive) {
-		$missing.Add("deepfilternet\*.tar.gz")
+	if ($Features.DTLN) {
+		$enabledBackendNames.Add("DTLN")
+		$requiredRelativePaths.Add("onnxruntime.dll")
+		# DTLN uses the SpeexDSP resampler at runtime. Keep this explicit so a
+		# staged DLL that predates a newly exported resampler API cannot survive
+		# packaging and fail only when the client starts.
+		$requiredRelativePaths.Add("speexdsp.dll")
+		foreach ($variant in @("baseline", "norm_500h", "norm_40h")) {
+			$requiredRelativePaths.Add("dtln\$variant\model_1.onnx")
+			$requiredRelativePaths.Add("dtln\$variant\model_2.onnx")
+		}
+	}
+
+	if ($Features.DeepFilterNet) {
+		$enabledBackendNames.Add("DeepFilterNet")
+		$requiredRelativePaths.Add("deepfilter.dll")
+		$requiredRelativePaths.Add("deepfilternet\DeepFilterNet3_onnx.tar.gz")
+		$requiredRelativePaths.Add("deepfilternet\DeepFilterNet3_ll_onnx.tar.gz")
+	}
+
+	$missing = New-Object System.Collections.Generic.List[string]
+	$empty = New-Object System.Collections.Generic.List[string]
+	foreach ($relativePath in $requiredRelativePaths) {
+		$fullPath = Join-Path $Root $relativePath
+		if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+			$missing.Add($relativePath)
+		} elseif ((Get-Item -LiteralPath $fullPath).Length -eq 0) {
+			$empty.Add($relativePath)
+		}
 	}
 
 	if ($missing.Count -gt 0) {
 		throw "$Label is missing required speech-cleanup payload files: $($missing -join ', ')."
 	}
+	if ($empty.Count -gt 0) {
+		throw "$Label contains empty required speech-cleanup payload files: $($empty -join ', ')."
+	}
 
-	Write-Host "$Label speech-cleanup payload verified."
+	Write-Host "$Label speech-cleanup payload verified for: $($enabledBackendNames -join ', ')."
+}
+
+function Assert-MatchingPayloadFile {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$BuildRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$StageRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$RelativePath
+	)
+
+	$buildPath = Join-Path $BuildRoot $RelativePath
+	$stagePath = Join-Path $StageRoot $RelativePath
+	$buildHash = (Get-FileHash -LiteralPath $buildPath -Algorithm SHA256).Hash
+	$stageHash = (Get-FileHash -LiteralPath $stagePath -Algorithm SHA256).Hash
+	if ($buildHash -ne $stageHash) {
+		throw "Stage payload '$RelativePath' does not match the build output (build SHA256: $buildHash; stage SHA256: $stageHash)."
+	}
+
+	Write-Host "Stage payload '$RelativePath' matches the build output."
 }
 
 function Assert-UpdaterRuntimePayload {
@@ -294,13 +393,18 @@ function Assert-EnglishOnlyInstallers {
 $buildRootPath = Resolve-ExistingPath -Path $BuildRoot
 $allArtifacts = New-Object System.Collections.Generic.List[string]
 $requiredBinaryNames = Get-RequiredBinaryNames
+$speechCleanupFeatures = if ($RequireSpeechCleanup) {
+	Get-SpeechCleanupFeatureSet -BuildRoot $buildRootPath
+} else {
+	$null
+}
 
 foreach ($verifiedPath in Assert-BinarySet -Label "Build root '$buildRootPath'" -Root $buildRootPath -BinaryNames $requiredBinaryNames) {
 	$allArtifacts.Add($verifiedPath)
 }
 
 if ($RequireSpeechCleanup) {
-	Assert-SpeechCleanupPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
+	Assert-SpeechCleanupPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath -Features $speechCleanupFeatures
 }
 if ($RequireUpdaterRuntime) {
 	Assert-UpdaterRuntimePayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
@@ -345,7 +449,10 @@ if ($RequireStage) {
 		$allArtifacts.Add($verifiedPath)
 	}
 	if ($RequireSpeechCleanup) {
-		Assert-SpeechCleanupPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
+		Assert-SpeechCleanupPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath -Features $speechCleanupFeatures
+		if ($speechCleanupFeatures.DTLN) {
+			Assert-MatchingPayloadFile -BuildRoot $buildRootPath -StageRoot $stageRootPath -RelativePath "speexdsp.dll"
+		}
 	}
 	if ($RequireUpdaterRuntime) {
 		Assert-UpdaterRuntimePayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
