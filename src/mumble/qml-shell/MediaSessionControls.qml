@@ -22,6 +22,12 @@ Rectangle {
 	readonly property bool confirmationVisible: closeDialog.opened
 	readonly property bool compactVolumeVisible: compactControls
 	readonly property bool volumePopupVisible: volumePopup.opened
+	readonly property string surfaceId: "mediaSession.controls"
+	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
+	readonly property color stateTone: session.state === "error" ? Theme.danger
+		: session.state === "loading" ? Theme.warning
+		: session.sharedHost || session.sharedJoined ? Theme.accent
+		: session.state === "playing" ? Theme.success : Theme.textMuted
 
 	signal fullscreenRequested(bool fullscreen)
 	signal externalRequested()
@@ -90,7 +96,7 @@ Rectangle {
 	}
 
 	implicitHeight: controlsLayout.implicitHeight + Theme.space4
-	color: Theme.panel
+	color: Theme.chatSurface
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.ToolBar
 	Accessible.name: qsTr("Media playback controls")
@@ -157,6 +163,7 @@ Rectangle {
 				id: playButton
 				objectName: "mediaPlayButton"
 				text: session.state === "playing" ? "Ⅱ" : "▶"
+				iconName: session.state === "playing" ? "" : "play"
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
 				visible: !root.providerControlled
 				Accessible.name: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
@@ -172,8 +179,7 @@ Rectangle {
 				height: Theme.controlHeight
 				textFormat: Text.PlainText
 				text: root.stateLabel()
-				color: session.sharedHost ? Theme.accent
-					: session.state === "error" ? Theme.danger : Theme.textMuted
+				color: root.stateTone
 				font.pixelSize: Theme.fontCaption
 				font.weight: session.sharedHost ? Font.DemiBold : Font.Normal
 				elide: Text.ElideRight
@@ -187,6 +193,8 @@ Rectangle {
 				width: Math.min(implicitWidth, Math.max(Theme.controlHeight, transportActions.width))
 				dense: true
 				text: qsTr("Open externally")
+				tone: session.state === "error" ? "accent" : "neutral"
+				highlighted: session.state === "error"
 				Accessible.description: qsTr("Open the provider in your default browser")
 				onClicked: root.externalRequested()
 			}
@@ -195,6 +203,7 @@ Rectangle {
 				id: muteButton
 				objectName: "mediaMuteButton"
 				text: session.muted || session.volume === 0 ? "M" : "A"
+				iconName: session.muted || session.volume === 0 ? "" : "volume"
 				selected: session.muted
 				visible: !root.providerControlled
 				Accessible.name: session.muted ? qsTr("Unmute media") : qsTr("Mute media")

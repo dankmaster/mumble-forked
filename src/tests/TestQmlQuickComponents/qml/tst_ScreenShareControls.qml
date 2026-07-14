@@ -1,11 +1,13 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 import "../../../mumble/qml-shell" as Shell
 
 TestCase {
 	id: testCase
 	name: "ScreenShareControls"
 	when: windowShown
+	visible: true
 	width: 640
 	height: 260
 
@@ -17,6 +19,8 @@ TestCase {
 		property bool audioAvailable: true
 		property bool audioMuted: false
 		property int audioVolume: 72
+		property string operationStatus: "ready"
+		property string operationError: ""
 		property int pauseCalls: 0
 		property int muteCalls: 0
 		property int volumeCalls: 0
@@ -45,6 +49,8 @@ TestCase {
 		shareBackend.audioAvailable = true
 		shareBackend.audioMuted = false
 		shareBackend.audioVolume = 72
+		shareBackend.operationStatus = "ready"
+		shareBackend.operationError = ""
 		shareBackend.pauseCalls = 0
 		shareBackend.muteCalls = 0
 		shareBackend.volumeCalls = 0
@@ -60,7 +66,8 @@ TestCase {
 		verify(control.width > 0 && control.height > 0, name + " keeps an operable hit target")
 		verify(control.Accessible.name.length > 0, name + " keeps an accessible name")
 		verify(control.x >= -0.5 && control.x + control.width <= flow.width + 0.5,
-			name + " remains inside the responsive action flow")
+			name + " remains inside the responsive action flow; x=" + control.x
+				+ ", width=" + control.width + ", flow=" + flow.width)
 	}
 
 	function test_minimum_width_keeps_every_control_inside_the_action_flow() {
@@ -82,6 +89,7 @@ TestCase {
 		stopButton.text = "Stop receiving this shared desktop stream"
 
 		tryVerify(function() { return controls.controlsWrapped })
+		wait(0)
 		verifyControlFits(flow, pauseButton, "long pause action")
 		verifyControlFits(flow, muteButton, "long mute action")
 		verifyControlFits(flow, stopButton, "long stop action")
@@ -102,5 +110,28 @@ TestCase {
 		slider.moved()
 		compare(shareBackend.volumeCalls, 1)
 		compare(shareBackend.audioVolume, 41)
+	}
+
+	function test_operation_states_disable_transport_but_keep_close_available() {
+		const pauseButton = findChild(controls, "screenSharePauseButton")
+		const muteButton = findChild(controls, "screenShareMuteButton")
+		const volumeSlider = findChild(controls, "screenShareVolumeSlider")
+		const stopButton = findChild(controls, "screenShareStopButton")
+		const badge = findChild(controls, "screenShareStateBadge")
+		verify(badge !== null)
+
+		shareBackend.operationStatus = "loading"
+		tryCompare(controls, "stateLabel", "Reconnecting")
+		verify(!pauseButton.enabled)
+		verify(!muteButton.enabled)
+		verify(!volumeSlider.enabled)
+		verify(stopButton.enabled)
+		compare(controls.stateTone, Theme.warning)
+
+		shareBackend.operationStatus = "error"
+		tryCompare(controls, "stateLabel", "Viewer unavailable")
+		compare(controls.stateTone, Theme.danger)
+		verify(controls.focusInitialControl())
+		tryCompare(stopButton, "activeFocus", true)
 	}
 }

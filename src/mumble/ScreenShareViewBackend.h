@@ -30,6 +30,7 @@ class ScreenShareViewBackend final : public QObject {
 	Q_PROPERTY(QString nativeFrameTransportBlocker READ nativeFrameTransportBlocker CONSTANT)
 	Q_PROPERTY(bool nativeFrameActive READ nativeFrameActive NOTIFY nativeFrameActiveChanged)
 	Q_PROPERTY(QImage currentFrame READ currentFrame NOTIFY frameChanged)
+	Q_PROPERTY(bool hasCurrentFrame READ hasCurrentFrame NOTIFY frameChanged)
 	Q_PROPERTY(QString operationStatus READ operationStatus NOTIFY operationStateChanged)
 	Q_PROPERTY(QString operationError READ operationError NOTIFY operationStateChanged)
 	Q_PROPERTY(bool operationCancellable READ operationCancellable NOTIFY operationStateChanged)
@@ -53,6 +54,7 @@ public:
 	QString nativeFrameTransportBlocker() const;
 	bool nativeFrameActive() const;
 	QImage currentFrame() const;
+	bool hasCurrentFrame() const;
 	QString operationStatus() const;
 	QString operationError() const;
 	bool operationCancellable() const;

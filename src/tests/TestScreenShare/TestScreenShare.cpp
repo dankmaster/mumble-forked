@@ -99,6 +99,7 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
 	ScreenShareSession session;
 	ScreenShareViewBackend backend(session);
+	QVERIFY(!backend.hasCurrentFrame());
 
 	QCOMPARE(backend.renderTransport(), QStringLiteral("external-process-window"));
 	QVERIFY(backend.nativeFrameTransportAvailable());
@@ -162,10 +163,12 @@ void TestScreenShare::qmlViewBackendConsumesNativeFramesOffThread() {
 	frame.bgra = QByteArray(16, '\xff');
 	QVERIFY(producer.publish(frame));
 	QTRY_VERIFY(!backend.currentFrame().isNull());
+	QVERIFY(backend.hasCurrentFrame());
 	QCOMPARE(backend.currentFrame().size(), QSize(2, 2));
 	QCOMPARE(backend.renderTransport(), QStringLiteral("native-shared-memory-bgra"));
 	backend.setNativeFrameTransport({}, 0);
 	QTRY_VERIFY(!backend.nativeFrameActive());
+	QVERIFY(!backend.hasCurrentFrame());
 }
 
 void TestScreenShare::rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog() {

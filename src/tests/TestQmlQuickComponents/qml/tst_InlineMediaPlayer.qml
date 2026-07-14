@@ -175,6 +175,10 @@ TestCase {
 		const player = playerLoader.item
 		compare(player.Accessible.role, Accessible.Pane)
 		compare(player.Accessible.name, "Inline media player")
+		compare(player.surfaceId, "mediaSession.inline")
+		verify(player.captureRect.width > 0)
+		verify(!player.webSurfaceActive)
+		compare(player.rendererState, "empty")
 
 		const popoutButton = findChild(player, "inlineMediaPopoutButton")
 		const externalButton = findChild(player, "inlineMediaExternalButton")
@@ -203,6 +207,8 @@ TestCase {
 		session.error = "The provider renderer stopped."
 		session.active = true
 		tryCompare(failureOverlay, "visible", true)
+		compare(player.rendererState, "error")
+		verify(!player.webSurfaceActive)
 		tryCompare(retryButton, "activeFocus", true)
 		verify(player.focusInitialControl())
 		compare(retryButton.activeFocus, true)

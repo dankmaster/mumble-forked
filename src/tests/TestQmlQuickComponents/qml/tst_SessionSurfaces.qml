@@ -7,6 +7,7 @@ TestCase {
     id: testCase
     name: "SessionSurfaces"
     when: windowShown
+	visible: true
     width: 720
     height: 520
 
@@ -387,6 +388,16 @@ TestCase {
 		compare(banner.participantModel, participants)
 		compare(banner.participantLabel("42"), "Guest")
 		compare(banner.participantLabel("999"), "Session 999")
+		compare(banner.surfaceId, "watchTogether.banner")
+		verify(banner.captureRect.width > 0)
+		compare(banner.color, Theme.chatSurface)
+		verify(banner.focusInitialControl())
+		const transferButton = findChild(banner, "watchTogetherTransferButton")
+		tryCompare(transferButton, "activeFocus", true)
+		const endButton = findChild(banner, "watchTogetherEndButton")
+		compare(endButton.tone, "danger")
+		const stateBadge = findChild(banner, "watchTogetherStateBadge")
+		verify(stateBadge !== null && stateBadge.visible)
 	}
 
 	function test_connection_and_compact_motd_actions_stay_bounded_at_420() {

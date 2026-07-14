@@ -9,7 +9,29 @@ ApplicationWindow {
     required property var backend
 	property bool hostClosing: false
 	property bool closeRequestPending: false
+	property bool hasShownLiveFrame: false
 	readonly property bool controlsWrapped: screenShareControls.controlsWrapped
+	readonly property string surfaceId: "screenShare.viewer"
+	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
+	readonly property string operationStatus: String(backend.operationStatus || "idle")
+	readonly property bool operationBusy: operationStatus === "loading"
+	readonly property bool operationFailed: operationStatus === "error"
+	readonly property bool nativeSurfaceReady: Boolean(backend.nativeFrameActive && backend.hasCurrentFrame)
+	readonly property bool externalSurfaceReady: backend.videoWindow !== null
+	readonly property bool playbackSurfaceReady: nativeSurfaceReady || externalSurfaceReady
+	readonly property string displayState: operationFailed ? "error"
+		: backend.paused ? "paused"
+		: operationBusy ? (hasShownLiveFrame ? "reconnecting" : "loading")
+		: playbackSurfaceReady ? "active" : "empty"
+	readonly property string stateHeading: displayState === "error" ? qsTr("Screen share unavailable")
+		: displayState === "paused" ? qsTr("Paused locally")
+		: displayState === "reconnecting" ? qsTr("Reconnecting to the live share")
+		: displayState === "loading" ? qsTr("Connecting to the live share")
+		: qsTr("Waiting for the first frame")
+	readonly property string stateDetail: displayState === "error"
+		? String(backend.operationError || backend.status || qsTr("The viewer could not be started."))
+		: displayState === "paused" ? qsTr("Resume returns to the current live edge.")
+		: String(backend.status || qsTr("The viewer is starting."))
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -73,6 +95,12 @@ ApplicationWindow {
     visible: true
     title: qsTr("Mumble Screen Share - %1").arg(backend.detail)
     color: Theme.shellBackground
+	Component.onCompleted: Qt.callLater(screenShareControls.focusInitialControl)
+	onPlaybackSurfaceReadyChanged: if (playbackSurfaceReady) hasShownLiveFrame = true
+	onOperationFailedChanged: if (operationFailed) Qt.callLater(function() {
+		if (screenShareFailureClose.visible)
+			screenShareFailureClose.forceActiveFocus()
+	})
 	function closeFromHost() {
 		hostClosing = true
 		closeRequestPending = false
@@ -93,44 +121,172 @@ ApplicationWindow {
 		})
 	}
 
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 10
-		ScreenShareControls {
-			id: screenShareControls
+		anchors.margins: Theme.space3
+		spacing: Theme.space3
+
+		Rectangle {
 			Layout.fillWidth: true
-			backend: root.backend
+			Layout.preferredHeight: screenShareControls.implicitHeight + Theme.space4
+			radius: Theme.innerRadius
+			color: Theme.chatSurface
+			border.color: Theme.surfaceBorder
+			border.width: 1
+			ScreenShareControls {
+				id: screenShareControls
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				backend: root.backend
+			}
 		}
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: "#05070a"
-            border.color: Theme.divider
-            radius: Theme.innerRadius
-            clip: true
-            ScreenShareVideoItem {
-                anchors.fill: parent
-                backend: root.backend
-                visible: backend.nativeFrameActive && !backend.paused
-            }
-            WindowContainer {
-                anchors.fill: parent
-                anchors.margins: 1
-                window: backend.videoWindow
-                visible: !backend.nativeFrameActive && window !== null && !backend.paused
-            }
-            Label {
+
+		Rectangle {
+			id: viewerCanvas
+			objectName: "screenShareCanvas"
+			Layout.fillWidth: true
+			Layout.fillHeight: true
+			color: Theme.mediaCanvas
+			border.color: root.displayState === "error" ? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
+			radius: Theme.innerRadius
+			clip: true
+
+			ScreenShareVideoItem {
+				anchors.fill: parent
+				backend: root.backend
+				visible: root.displayState === "active" && root.nativeSurfaceReady
+			}
+			WindowContainer {
+				anchors.fill: parent
+				anchors.margins: 1
+				window: backend.videoWindow
+				visible: root.displayState === "active" && !root.nativeSurfaceReady && window !== null
+			}
+
+			Rectangle {
+				objectName: "screenShareLiveBadge"
+				anchors.left: parent.left
+				anchors.top: parent.top
+				anchors.margins: Theme.space3
+				width: liveBadgeRow.implicitWidth + Theme.space3
+				height: 26
+				radius: height / 2
+				visible: root.displayState === "active"
+				color: Theme.withAlpha(Theme.mediaCanvas, 0.78)
+				border.color: Theme.withAlpha(Theme.success, 0.55)
+				z: 3
+				Row {
+					id: liveBadgeRow
+					anchors.centerIn: parent
+					spacing: Theme.space1
+					Rectangle {
+						anchors.verticalCenter: parent.verticalCenter
+						width: 7
+						height: 7
+						radius: width / 2
+						color: Theme.success
+					}
+					Label {
+						textFormat: Text.PlainText
+						text: qsTr("LIVE")
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontCaption
+						font.weight: Font.DemiBold
+					}
+				}
+			}
+
+			Rectangle {
+				id: stateSurface
+				objectName: "screenShareStateSurface"
+				anchors.fill: parent
+				visible: root.displayState !== "active"
+				color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
+				Accessible.role: root.displayState === "error" ? Accessible.AlertMessage : Accessible.Pane
+				Accessible.name: root.stateHeading
+				Accessible.description: root.stateDetail
+				z: 4
+
+				ColumnLayout {
+					anchors.centerIn: parent
+					width: Math.min(parent.width - Theme.space6 * 2, 520)
+					spacing: Theme.space3
+
+					ModernBusyIndicator {
+						id: screenShareBusy
+						objectName: "screenShareBusyIndicator"
+						Layout.alignment: Qt.AlignHCenter
+						visible: root.displayState === "loading" || root.displayState === "reconnecting"
+						running: visible
+						Accessible.name: root.stateHeading
+					}
+					Rectangle {
+						Layout.alignment: Qt.AlignHCenter
+						Layout.preferredWidth: 52
+						Layout.preferredHeight: 52
+						visible: !screenShareBusy.visible
+						radius: Theme.innerRadius
+						color: root.displayState === "error"
+							? Theme.withAlpha(Theme.danger, 0.15) : Theme.accentSubtle
+						ModernIcon {
+							anchors.centerIn: parent
+							name: root.displayState === "error" ? "warning" : "screen-share"
+							size: 24
+							color: root.displayState === "error" ? Theme.danger : Theme.accent
+						}
+					}
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: root.stateHeading
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontHeading
+						font.weight: Font.DemiBold
+						horizontalAlignment: Text.AlignHCenter
+						wrapMode: Text.Wrap
+					}
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: root.stateDetail
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontBody
+						horizontalAlignment: Text.AlignHCenter
+						wrapMode: Text.Wrap
+					}
+					ModernButton {
+						id: screenShareFailureClose
+						objectName: "screenShareFailureCloseButton"
+						Layout.alignment: Qt.AlignHCenter
+						visible: root.displayState === "error"
+						text: qsTr("Close viewer")
+						tone: "danger"
+						Accessible.description: qsTr("Stop receiving this unavailable screen share")
+						onClicked: root.backend.requestStop()
+					}
+				}
+			}
+		}
+
+		RowLayout {
+			Layout.fillWidth: true
+			spacing: Theme.space2
+			Label {
+				Layout.fillWidth: true
 				textFormat: Text.PlainText
-                anchors.centerIn: parent
-                width: parent.width - 48
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                color: Theme.textMuted
-                visible: (!backend.nativeFrameActive && backend.videoWindow === null) || backend.paused
-                text: backend.paused ? qsTr("Paused locally\n\nResume returns to the live edge.") : backend.status
-            }
-        }
-        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: backend.status; color: Theme.textMuted; elide: Text.ElideRight }
+				text: backend.status
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+				elide: Text.ElideRight
+			}
+			Label {
+				textFormat: Text.PlainText
+				text: root.nativeSurfaceReady ? qsTr("Native Qt video") : qsTr("Windows viewer")
+				color: Theme.textFaint
+				font.pixelSize: Theme.fontCaption
+				visible: root.playbackSurfaceReady
+			}
+		}
     }
 }

@@ -107,6 +107,9 @@ TestCase {
 		compare(controls.formatTime(65), "1:05")
 		compare(controls.formatTime(3665), "1:01:05")
 		compare(controls.Accessible.role, Accessible.ToolBar)
+		compare(controls.surfaceId, "mediaSession.controls")
+		compare(controls.color, Theme.chatSurface)
+		verify(controls.captureRect.width > 0)
 		verify(controls.focusInitialControl())
 	}
 
@@ -232,10 +235,13 @@ TestCase {
 		session.loadProgress = 48
 		tryVerify(function() { return stateLabel.text.indexOf("48%") >= 0 })
 		verify(!playButton.enabled)
+		compare(controlsLoader.item.stateTone, Theme.warning)
 
 		session.state = "error"
 		controlsLoader.item.externalAvailable = true
 		tryCompare(controlsLoader.item, "externalActionAvailable", true)
+		compare(controlsLoader.item.stateTone, Theme.danger)
+		verify(externalButton.highlighted)
 		verify(controlsLoader.item.focusInitialControl())
 		compare(externalButton.activeFocus, true)
 		externalButton.clicked()

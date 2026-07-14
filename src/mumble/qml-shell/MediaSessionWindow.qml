@@ -7,6 +7,14 @@ import Mumble.Theme 1.0
 ApplicationWindow {
     id: mediaWindow
 	readonly property string mediaAspect: inferMediaAspect()
+	readonly property string surfaceId: "mediaSession.window"
+	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
+	readonly property bool hasMediaSource: String(mediaSession.url || "").trim().length > 0
+	readonly property bool webSurfaceActive: playerLoader.active
+	readonly property string rendererState: !mediaSession.active ? "empty"
+		: mediaSession.error.length > 0 ? "error"
+		: !hasMediaSource ? "empty"
+		: mediaSession.state === "loading" ? "loading" : "active"
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -231,6 +239,9 @@ ApplicationWindow {
 		anchors.top: parent.top
 		anchors.bottom: controls.top
 		color: Theme.mediaCanvas
+		border.color: mediaWindow.rendererState === "error"
+			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
+		border.width: 1
 		clip: true
 	}
 
@@ -242,7 +253,11 @@ ApplicationWindow {
 		height: mediaWindow.fittedMediaHeight(playerCanvas.width, playerCanvas.height)
 		x: Math.round((playerCanvas.width - width) / 2)
 		y: Math.round((playerCanvas.height - height) / 2)
-        active: mediaSession.active
+		// The main application creates this window only after explicit user
+		// interaction. Tear the provider surface down on errors as well so a
+		// crashed renderer is not kept alive behind the native failure state.
+		active: mediaSession.active && mediaWindow.hasMediaSource
+			&& mediaSession.error.length === 0
         sourceComponent: WebEngineView {
             id: player
 			property int missingStatePolls: 0
@@ -337,8 +352,8 @@ ApplicationWindow {
 
     Loader {
         id: audioPlayerLoader
-        active: mediaSession.active && mediaSession.playbackControllable
-			&& mediaSession.audioUrl.toString().length > 0
+		active: mediaSession.active && mediaSession.error.length === 0
+			&& mediaSession.playbackControllable && mediaSession.audioUrl.toString().length > 0
         width: 1
         height: 1
         opacity: 0.01
@@ -388,11 +403,54 @@ ApplicationWindow {
     }
 
 	Rectangle {
+		objectName: "mediaSessionProviderBadge"
+		parent: playerCanvas
+		anchors.left: parent.left
+		anchors.top: parent.top
+		anchors.margins: Theme.space3
+		width: providerBadgeRow.implicitWidth + Theme.space3
+		height: 28
+		radius: height / 2
+		visible: mediaWindow.rendererState === "active"
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.82)
+		border.color: Theme.withAlpha(Theme.accent, 0.42)
+		z: 3
+		Row {
+			id: providerBadgeRow
+			anchors.centerIn: parent
+			spacing: Theme.space1
+			ModernIcon {
+				anchors.verticalCenter: parent.verticalCenter
+				name: "play"
+				size: 14
+				color: Theme.accent
+			}
+			Label {
+				textFormat: Text.PlainText
+				text: String(mediaSession.provider || qsTr("media")).toUpperCase()
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+			}
+			Label {
+				visible: mediaSession.sharedAvailable && mediaSession.sharedJoined
+				textFormat: Text.PlainText
+				text: mediaSession.sharedHost ? qsTr("· HOSTING") : qsTr("· SYNCED")
+				color: Theme.success
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+			}
+		}
+	}
+
+	Rectangle {
+		id: loadingSurface
+		objectName: "mediaSessionLoadingSurface"
 		parent: playerCanvas
 		anchors.fill: playerLoader
 		visible: mediaSession.active && mediaSession.state === "loading"
 			&& mediaSession.error.length === 0
-		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.94)
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Loading media")
@@ -409,6 +467,21 @@ ApplicationWindow {
 				Layout.alignment: Qt.AlignHCenter
 				running: parent.parent.visible
 				Accessible.name: qsTr("Loading media player")
+			}
+			Rectangle {
+				Layout.alignment: Qt.AlignHCenter
+				Layout.preferredWidth: 44
+				Layout.preferredHeight: 24
+				radius: height / 2
+				color: Theme.accentSubtle
+				Label {
+					anchors.centerIn: parent
+					textFormat: Text.PlainText
+					text: String(mediaSession.provider || qsTr("media")).toUpperCase()
+					color: Theme.accent
+					font.pixelSize: Theme.fontCaption
+					font.weight: Font.DemiBold
+				}
 			}
 			Label {
 				Layout.fillWidth: true
@@ -428,14 +501,79 @@ ApplicationWindow {
 				color: Theme.textMuted
 				horizontalAlignment: Text.AlignHCenter
 			}
+			Rectangle {
+				Layout.fillWidth: true
+				Layout.preferredHeight: 3
+				visible: mediaSession.loadProgress > 0
+				radius: height / 2
+				color: Theme.surfaceBorder
+				Rectangle {
+					width: parent.width * Math.max(0, Math.min(100, mediaSession.loadProgress)) / 100
+					height: parent.height
+					radius: height / 2
+					color: Theme.accent
+					Behavior on width { NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic } }
+				}
+			}
+		}
+	}
+
+	Rectangle {
+		objectName: "mediaSessionEmptySurface"
+		parent: playerCanvas
+		anchors.fill: playerLoader
+		visible: mediaSession.active && !mediaWindow.hasMediaSource
+			&& mediaSession.error.length === 0
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
+		z: 4
+		Accessible.role: Accessible.Pane
+		Accessible.name: qsTr("No media source")
+		Accessible.description: qsTr("Choose a supported preview to start playback")
+
+		ColumnLayout {
+			anchors.centerIn: parent
+			width: Math.min(parent.width - Theme.space6 * 2, 420)
+			spacing: Theme.space3
+			Rectangle {
+				Layout.alignment: Qt.AlignHCenter
+				Layout.preferredWidth: 52
+				Layout.preferredHeight: 52
+				radius: Theme.innerRadius
+				color: Theme.accentSubtle
+				ModernIcon {
+					anchors.centerIn: parent
+					name: "play"
+					size: 24
+					color: Theme.accent
+				}
+			}
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: qsTr("Choose something to play")
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontHeading
+				font.weight: Font.DemiBold
+				horizontalAlignment: Text.AlignHCenter
+			}
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: qsTr("Open a supported rich preview or rejoin the room session.")
+				color: Theme.textMuted
+				wrapMode: Text.Wrap
+				horizontalAlignment: Text.AlignHCenter
+			}
 		}
 	}
 
     Rectangle {
+		id: failureSurface
+		objectName: "mediaSessionFailureSurface"
 		parent: playerCanvas
         anchors.fill: playerLoader
 		visible: mediaSession.error.length > 0
-		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.9)
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
         z: 5
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Media playback failed")
@@ -446,12 +584,26 @@ ApplicationWindow {
 			width: Math.min(parent.width - Theme.space6 - Theme.space4, 520)
 			spacing: Theme.space3
 
-            Label {
+			Rectangle {
+				Layout.alignment: Qt.AlignHCenter
+				Layout.preferredWidth: 52
+				Layout.preferredHeight: 52
+				radius: Theme.innerRadius
+				color: Theme.withAlpha(Theme.danger, 0.15)
+				ModernIcon {
+					anchors.centerIn: parent
+					name: "warning"
+					size: 24
+					color: Theme.danger
+				}
+			}
+
+			Label {
 				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: qsTr("Media playback failed")
                 color: Theme.textStrong
-                font.bold: true
+				font.weight: Font.DemiBold
 				font.pixelSize: Theme.fontHeading
                 horizontalAlignment: Text.AlignHCenter
             }
@@ -466,8 +618,16 @@ ApplicationWindow {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
 				spacing: Theme.space2
-				ModernButton { text: qsTr("Retry"); onClicked: mediaSession.retry() }
 				ModernButton {
+					objectName: "mediaSessionRetryButton"
+					text: qsTr("Retry")
+					tone: "accent"
+					highlighted: true
+					Accessible.description: qsTr("Create a fresh isolated provider renderer")
+					onClicked: mediaSession.retry()
+				}
+				ModernButton {
+					objectName: "mediaSessionFailureExternalButton"
 					visible: mediaWindow.externalMediaUrl().length > 0
 					text: qsTr("Open externally")
 					onClicked: Qt.openUrlExternally(mediaWindow.externalMediaUrl())

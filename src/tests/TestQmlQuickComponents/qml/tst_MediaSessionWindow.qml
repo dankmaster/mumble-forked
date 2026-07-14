@@ -49,7 +49,37 @@ TestCase {
 		tryVerify(function() { return windowLoader.item !== null })
 		session.provider = "youtube"
 		session.url = "https://www.youtube.com/embed/test"
+		session.active = false
+		session.error = ""
+		session.state = "paused"
 		wait(0)
+	}
+
+	function test_provider_surface_stays_lazy_until_an_explicit_session_is_active() {
+		const window = windowLoader.item
+		compare(window.surfaceId, "mediaSession.window")
+		verify(window.captureRect.width > 0)
+		verify(!window.webSurfaceActive)
+
+		session.url = ""
+		session.active = true
+		wait(0)
+		compare(window.rendererState, "empty")
+		verify(!window.webSurfaceActive)
+		const empty = findChild(window.contentItem, "mediaSessionEmptySurface")
+		verify(empty !== null)
+		verify(empty.visible)
+
+		session.error = "The renderer stopped."
+		session.state = "error"
+		session.url = "https://www.youtube.com/embed/test"
+		wait(0)
+		compare(window.rendererState, "error")
+		verify(!window.webSurfaceActive)
+		const failure = findChild(window.contentItem, "mediaSessionFailureSurface")
+		verify(failure !== null)
+		verify(failure.visible)
+		verify(findChild(window.contentItem, "mediaSessionRetryButton") !== null)
 	}
 
 	function test_provider_and_url_inference_covers_every_supported_shape() {

@@ -19,6 +19,12 @@ Rectangle {
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
 		&& _mediaGeneration > 0
 	readonly property bool rendererHealthy: _rendererHealthy
+	readonly property string surfaceId: "mediaSession.inline"
+	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
+	readonly property bool webSurfaceActive: playerLoader.active
+	readonly property string rendererState: !ready ? "empty"
+		: String(session ? session.error || "" : "").length > 0 ? "error"
+		: session.state === "loading" ? "loading" : "active"
 	property int _mediaGeneration: 0
 	property int _documentReadyGeneration: -1
 	property int _statePollGeneration: -1
@@ -224,17 +230,50 @@ Rectangle {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		height: Theme.controlHeight + Theme.space2
-		color: Theme.panel
+		height: Theme.controlHeight + Theme.space3
+		color: Theme.chatSurface
+		border.color: Theme.surfaceBorder
+		border.width: 1
+
+		Rectangle {
+			id: inlineProviderBadge
+			objectName: "inlineMediaProviderBadge"
+			anchors.left: parent.left
+			anchors.leftMargin: Theme.space3
+			anchors.verticalCenter: parent.verticalCenter
+			width: inlineProviderRow.implicitWidth + Theme.space2
+			height: 24
+			radius: height / 2
+			color: Theme.accentSubtle
+			Row {
+				id: inlineProviderRow
+				anchors.centerIn: parent
+				spacing: Theme.space1
+				ModernIcon {
+					anchors.verticalCenter: parent.verticalCenter
+					name: "play"
+					size: 13
+					color: Theme.accent
+				}
+				Label {
+					textFormat: Text.PlainText
+					text: String(session ? session.provider || qsTr("media") : qsTr("media")).toUpperCase()
+					color: Theme.accent
+					font.pixelSize: Theme.fontCaption
+					font.weight: Font.DemiBold
+				}
+			}
+		}
 
 		Label {
-			anchors.left: parent.left
+			anchors.left: inlineProviderBadge.right
 			anchors.right: toolbarActions.left
-			anchors.leftMargin: Theme.space3
+			anchors.leftMargin: Theme.space2
 			anchors.rightMargin: Theme.space2
 			anchors.verticalCenter: parent.verticalCenter
 			textFormat: Text.PlainText
-			text: qsTr("Playing in chat")
+			text: session && session.sharedAvailable && session.sharedJoined
+				? qsTr("Watching together in chat") : qsTr("Playing in chat")
 			color: Theme.textStrong
 			font.pixelSize: Theme.fontLabel
 			font.bold: true
@@ -271,6 +310,9 @@ Rectangle {
 		anchors.top: inlineToolbar.bottom
 		anchors.bottom: inlineControls.top
 		color: Theme.mediaCanvas
+		border.color: inlinePlayer.rendererState === "error"
+			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
+		border.width: 1
 		clip: true
 	}
 
@@ -383,24 +425,55 @@ Rectangle {
 	}
 
 	Rectangle {
+		id: loadingOverlay
+		objectName: "inlineMediaLoadingSurface"
 		parent: playerCanvas
 		anchors.fill: playerLoader
 		visible: inlinePlayer.ready && session.state === "loading" && session.error.length === 0
-		color: Theme.mediaCanvas
+		color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
+		Accessible.role: Accessible.AlertMessage
+		Accessible.name: qsTr("Loading inline media")
+		Accessible.description: session && session.loadProgress > 0
+			? qsTr("%1 percent loaded").arg(session.loadProgress) : qsTr("Contacting provider")
 		ColumnLayout {
 			anchors.centerIn: parent
-			spacing: Theme.space2
+			width: Math.min(parent.width - Theme.space6 * 2, 420)
+			spacing: Theme.space3
 			ModernBusyIndicator {
 				Layout.alignment: Qt.AlignHCenter
 				running: parent.parent.visible
 				Accessible.name: qsTr("Loading inline media")
 			}
 			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: qsTr("Loading %1").arg(String(session ? session.provider || qsTr("media") : qsTr("media")))
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontTitle
+				font.weight: Font.DemiBold
+				horizontalAlignment: Text.AlignHCenter
+			}
+			Label {
+				Layout.fillWidth: true
 				textFormat: Text.PlainText
 				text: session && session.loadProgress > 0
-					? qsTr("Loading · %1%").arg(session.loadProgress) : qsTr("Loading media…")
+					? qsTr("%1% loaded").arg(session.loadProgress) : qsTr("The isolated provider player is starting…")
 				color: Theme.textMuted
+				horizontalAlignment: Text.AlignHCenter
+			}
+			Rectangle {
+				Layout.fillWidth: true
+				Layout.preferredHeight: 3
+				visible: session && session.loadProgress > 0
+				radius: height / 2
+				color: Theme.surfaceBorder
+				Rectangle {
+					width: parent.width * Math.max(0, Math.min(100, session.loadProgress)) / 100
+					height: parent.height
+					radius: height / 2
+					color: Theme.accent
+				}
 			}
 		}
 	}
@@ -411,19 +484,33 @@ Rectangle {
 		parent: playerCanvas
 		anchors.fill: playerLoader
 		visible: inlinePlayer.ready && session.error.length > 0
-		color: Theme.mediaCanvas
+		color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 5
 		onVisibleChanged: if (visible) Qt.callLater(inlinePlayer.focusFailureControl)
 		ColumnLayout {
 			anchors.centerIn: parent
 			width: Math.min(parent.width - Theme.space5 * 2, 480)
 			spacing: Theme.space3
+			Rectangle {
+				Layout.alignment: Qt.AlignHCenter
+				Layout.preferredWidth: 52
+				Layout.preferredHeight: 52
+				radius: Theme.innerRadius
+				color: Theme.withAlpha(Theme.danger, 0.15)
+				ModernIcon {
+					anchors.centerIn: parent
+					name: "warning"
+					size: 24
+					color: Theme.danger
+				}
+			}
 			Label {
 				Layout.fillWidth: true
 				textFormat: Text.PlainText
 				text: qsTr("Media playback failed")
 				color: Theme.textStrong
-				font.bold: true
+				font.weight: Font.DemiBold
+				font.pixelSize: Theme.fontTitle
 				horizontalAlignment: Text.AlignHCenter
 			}
 			Label {

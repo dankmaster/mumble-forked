@@ -198,6 +198,7 @@ QString ScreenShareViewBackend::nativeFrameTransportBlocker() const {
 }
 bool ScreenShareViewBackend::nativeFrameActive() const { return m_nativeFrameActive; }
 QImage ScreenShareViewBackend::currentFrame() const { return m_currentFrame; }
+bool ScreenShareViewBackend::hasCurrentFrame() const { return !m_currentFrame.isNull(); }
 QString ScreenShareViewBackend::operationStatus() const { return m_operationStatus; }
 QString ScreenShareViewBackend::operationError() const { return m_operationError; }
 bool ScreenShareViewBackend::operationCancellable() const { return m_operationCancellable; }

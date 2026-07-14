@@ -8,6 +8,8 @@ Rectangle {
 
     required property var session
     required property var participantModel
+	readonly property string surfaceId: "watchTogether.banner"
+	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 
     readonly property real naturalActionWidth: {
         const widths = []
@@ -31,10 +33,27 @@ Rectangle {
     visible: session.sharedAvailable
     implicitHeight: visible ? content.implicitHeight + Theme.space4 : 0
     radius: Theme.innerRadius
-    color: Theme.panel
-    border.color: session.sharedHost ? Theme.accent : Theme.divider
+	color: Theme.chatSurface
+	border.color: session.sharedHost ? Theme.withAlpha(Theme.accent, 0.52) : Theme.chatIncomingBorder
+	border.width: 1
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Watch Together: %1").arg(session.sharedTitle || qsTr("shared media"))
+	Accessible.description: session.sharedHost
+		? qsTr("You are hosting synchronized playback for %1 participant(s)").arg(session.sharedParticipantCount)
+		: (session.sharedJoined ? qsTr("Synchronized with the room host")
+			: qsTr("A synchronized media session is available in this voice room"))
+
+	function focusInitialControl() {
+		const candidates = [ joinButton, openButton, transferButton, leaveButton, endButton ]
+		for (let index = 0; index < candidates.length; ++index) {
+			const control = candidates[index]
+			if (!control || !control.visible || !control.enabled)
+				continue
+			control.forceActiveFocus()
+			return true
+		}
+		return false
+	}
 
     function participantLabel(sessionId) {
         const wanted = String(sessionId)
@@ -67,14 +86,14 @@ Rectangle {
                 Layout.preferredWidth: Theme.controlHeight
                 Layout.preferredHeight: Theme.controlHeight
                 Layout.alignment: Qt.AlignVCenter
-                radius: width / 2
-                color: Theme.selected
-                Label {
-                    textFormat: Text.PlainText
+                radius: Theme.innerRadius
+				color: Theme.accentSubtle
+				border.color: Theme.withAlpha(Theme.accent, 0.28)
+				ModernIcon {
                     anchors.centerIn: parent
-                    text: "▶"
+					name: "play"
+					size: 18
                     color: Theme.accent
-                    font.pixelSize: 15
                 }
             }
 
@@ -88,21 +107,40 @@ Rectangle {
                     Layout.fillWidth: true
                     text: session.sharedTitle || qsTr("Shared media session")
                     color: Theme.textStrong
-                    font.bold: true
+					font.weight: Font.DemiBold
+					font.pixelSize: Theme.fontBody
                     elide: Text.ElideRight
                 }
-                Label {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    text: session.sharedHost
-                          ? qsTr("You are hosting · %1 participant(s)").arg(session.sharedParticipantCount)
-                          : (session.sharedJoined
-                             ? qsTr("Watching together · %1 participant(s)").arg(session.sharedParticipantCount)
-                             : qsTr("Available in this voice room · %1 participant(s)").arg(session.sharedParticipantCount))
-                    color: Theme.textMuted
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
-                }
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						objectName: "watchTogetherStateBadge"
+						Layout.preferredWidth: watchStateLabel.implicitWidth + Theme.space2
+						Layout.preferredHeight: 20
+						radius: height / 2
+						color: Theme.withAlpha(session.sharedHost || session.sharedJoined
+							? Theme.success : Theme.accent, 0.12)
+						Label {
+							id: watchStateLabel
+							anchors.centerIn: parent
+							textFormat: Text.PlainText
+							text: session.sharedHost ? qsTr("HOSTING")
+								: (session.sharedJoined ? qsTr("SYNCED") : qsTr("AVAILABLE"))
+							color: session.sharedHost || session.sharedJoined ? Theme.success : Theme.accent
+							font.pixelSize: Theme.fontCaption
+							font.weight: Font.DemiBold
+						}
+					}
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("%1 participant(s)").arg(session.sharedParticipantCount)
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						elide: Text.ElideRight
+					}
+				}
             }
         }
 
@@ -123,6 +161,8 @@ Rectangle {
             visible: !session.sharedJoined
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("Join")
+			tone: "accent"
+			highlighted: true
             Accessible.description: qsTr("Open the isolated media player and join synchronized playback")
             onClicked: session.joinShared()
         }
@@ -132,16 +172,22 @@ Rectangle {
             visible: session.sharedJoined && !session.active
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("Open player")
+			tone: "accent"
+			highlighted: true
+			Accessible.description: qsTr("Reopen the isolated synchronized media player")
             onClicked: session.reopenSharedPlayer()
         }
-        ModernButton {
+		ModernIconButton {
             id: transferButton
             objectName: "watchTogetherTransferButton"
             visible: session.sharedHost && session.sharedParticipantCount > 1
             dense: true
-            width: Theme.controlHeight
-            text: "⇄"
+			width: Theme.controlHeight
+			height: Theme.controlHeight
+			iconName: "move"
+			text: qsTr("Transfer host")
             Accessible.name: qsTr("Transfer host")
+			Accessible.description: qsTr("Choose another participant to control synchronized playback")
             onClicked: transferMenu.open()
             ModernMenu {
                 id: transferMenu
@@ -163,6 +209,7 @@ Rectangle {
             visible: session.sharedJoined && !session.sharedHost
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("Leave")
+			Accessible.description: qsTr("Leave synchronized playback in this room")
             onClicked: session.leaveShared()
         }
         ModernButton {
@@ -171,6 +218,8 @@ Rectangle {
             visible: session.sharedHost
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("End")
+			tone: "danger"
+			Accessible.description: qsTr("End synchronized playback for every participant")
             onClicked: session.endShared()
         }
         }
