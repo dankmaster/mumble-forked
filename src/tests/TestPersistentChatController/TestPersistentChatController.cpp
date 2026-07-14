@@ -67,7 +67,7 @@ void PersistentChatGateway::requestOlder(MumbleProto::ChatScope, unsigned int, u
 }
 
 void PersistentChatGateway::send(MumbleProto::ChatScope, unsigned int, const QString &, MumbleProto::ChatBodyFormat,
-								 std::optional< unsigned int >) {
+								 std::optional< unsigned int >, const QList< unsigned int > &, const QStringList &) {
 }
 
 void PersistentChatGateway::toggleReaction(MumbleProto::ChatScope, unsigned int, unsigned int, unsigned int,

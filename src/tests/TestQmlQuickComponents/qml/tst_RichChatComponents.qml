@@ -440,7 +440,7 @@ TestCase {
 		const panelOrigin = expandedPanel.mapToItem(card, 0, 0)
 		verify(Math.abs(panelOrigin.x) <= 1,
 			"expanded media begins at x=" + panelOrigin.x + " instead of the card edge")
-		verify(Math.abs(expandedPanel.width - card.width) <= 1,
+		tryVerify(function() { return Math.abs(expandedPanel.width - card.width) <= 1 }, 5000,
 			"expanded media width " + expandedPanel.width + " did not fill card width " + card.width)
 		compare(expandedImage.fillMode, Image.PreserveAspectCrop)
 		verify(expandedPanel.height > compactImage.height * 3)

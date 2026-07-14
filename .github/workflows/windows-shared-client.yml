@@ -175,6 +175,8 @@ jobs:
         shell: powershell
         run: |
           $testTargets = @(
+            'TestChatAttachmentUploader',
+            'TestChatFeature',
             'TestComposerController',
             'TestModernDialogControllers',
             'TestModernShellMenuSerializer',
@@ -223,7 +225,7 @@ jobs:
 
           ctest --test-dir .\build-shared-webengine -C $env:BUILD_TYPE `
             --output-on-failure `
-            -R '^(TestComposerController|TestModernDialogControllers|TestModernShellMenuSerializer|TestModernTheme|TestMumbleProtocol|TestPersistentChatController|TestPersistentChatRender|TestPluginAbiWorker|TestPluginOperation|TestPluginUpdatePreparation|TestQmlAccessibilitySnapshot|TestQmlClientModels|TestQmlImageProvider|TestQmlMediaProfileFactory|TestQmlPerformanceMonitor|TestQmlQuickComponents|TestQmlThemeController|TestQmlWindowStateController|TestScreenShare|TestScreenShareProtocol|TestScreenShareVideoItem|TestServerHandlerState|TestSettingsJSONSerialization|TestUserModelNavigator|TestXMLTools)$'
+            -R '^(TestChatAttachmentUploader|TestChatFeature|TestComposerController|TestModernDialogControllers|TestModernShellMenuSerializer|TestModernTheme|TestMumbleProtocol|TestPersistentChatController|TestPersistentChatRender|TestPluginAbiWorker|TestPluginOperation|TestPluginUpdatePreparation|TestQmlAccessibilitySnapshot|TestQmlClientModels|TestQmlImageProvider|TestQmlMediaProfileFactory|TestQmlPerformanceMonitor|TestQmlQuickComponents|TestQmlThemeController|TestQmlWindowStateController|TestScreenShare|TestScreenShareProtocol|TestScreenShareVideoItem|TestServerHandlerState|TestSettingsJSONSerialization|TestUserModelNavigator|TestXMLTools)$'
 
       - name: Verify shared helper runtime
         if: ${{ github.event_name == 'workflow_dispatch' }}
