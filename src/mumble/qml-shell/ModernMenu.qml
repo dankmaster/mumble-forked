@@ -6,7 +6,9 @@ Menu {
 	id: menu
 	modal: false
 	dim: false
+	focus: true
 	padding: Theme.space1
+	spacing: 1
 	transformOrigin: Item.TopRight
 	enter: Transition {
 		NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motionFast; easing.type: Easing.OutCubic }
@@ -22,12 +24,12 @@ Menu {
 			menu["popupType"] = 0 // Popup.Item
 	}
 
-	palette.window: Theme.surfaceRaised
-	palette.active.base: Theme.surfaceRaised
-	palette.inactive.base: Theme.surfaceRaised
+	palette.window: Theme.popupBackground
+	palette.active.base: Theme.popupBackground
+	palette.inactive.base: Theme.popupBackground
 	palette.alternateBase: Theme.panel
-	palette.active.button: Theme.surfaceRaised
-	palette.inactive.button: Theme.surfaceRaised
+	palette.active.button: Theme.popupBackground
+	palette.inactive.button: Theme.popupBackground
 	palette.active.text: Theme.textMain
 	palette.inactive.text: Theme.textMain
 	palette.active.windowText: Theme.textMain
@@ -36,8 +38,8 @@ Menu {
 	palette.inactive.buttonText: Theme.textMain
 	palette.active.brightText: Theme.textStrong
 	palette.inactive.brightText: Theme.textStrong
-	palette.active.highlight: Theme.selected
-	palette.inactive.highlight: Theme.selected
+	palette.active.highlight: Theme.popupSelected
+	palette.inactive.highlight: Theme.popupSelected
 	palette.active.highlightedText: Theme.textStrong
 	palette.inactive.highlightedText: Theme.textStrong
 	palette.placeholderText: Theme.textMuted
@@ -45,19 +47,19 @@ Menu {
 	palette.inactive.link: Theme.accent
 	palette.active.linkVisited: Theme.accentHover
 	palette.inactive.linkVisited: Theme.accentHover
-	palette.active.toolTipBase: Theme.surfaceRaised
-	palette.inactive.toolTipBase: Theme.surfaceRaised
+	palette.active.toolTipBase: Theme.popupBackground
+	palette.inactive.toolTipBase: Theme.popupBackground
 	palette.active.toolTipText: Theme.textStrong
 	palette.inactive.toolTipText: Theme.textStrong
-	palette.active.light: Theme.surfaceHover
-	palette.inactive.light: Theme.surfaceHover
-	palette.active.midlight: Theme.surfaceRaised
-	palette.inactive.midlight: Theme.surfaceRaised
-	palette.active.mid: Theme.surfaceBorder
-	palette.inactive.mid: Theme.surfaceBorder
+	palette.active.light: Theme.popupHover
+	palette.inactive.light: Theme.popupHover
+	palette.active.midlight: Theme.popupBackground
+	palette.inactive.midlight: Theme.popupBackground
+	palette.active.mid: Theme.popupBorder
+	palette.inactive.mid: Theme.popupBorder
 	palette.dark: Theme.rail
 	palette.shadow: Theme.strip
-	palette.disabled.window: Theme.surfaceRaised
+	palette.disabled.window: Theme.popupBackground
 	palette.disabled.base: Theme.panel
 	palette.disabled.alternateBase: Theme.panel
 	palette.disabled.button: Theme.panel
@@ -65,10 +67,10 @@ Menu {
 	palette.disabled.windowText: Theme.textMuted
 	palette.disabled.buttonText: Theme.textMuted
 	palette.disabled.brightText: Theme.textMuted
-	palette.disabled.highlight: Theme.surfaceBorder
+	palette.disabled.highlight: Theme.popupBorder
 	palette.disabled.highlightedText: Theme.textMuted
 	palette.disabled.placeholderText: Theme.textMuted
-	palette.disabled.light: Theme.surfaceBorder
+	palette.disabled.light: Theme.popupBorder
 	palette.disabled.midlight: Theme.panel
 	palette.disabled.mid: Theme.divider
 	palette.disabled.dark: Theme.rail
@@ -79,9 +81,39 @@ Menu {
 	palette.disabled.toolTipText: Theme.textMuted
 
 	background: Rectangle {
-		color: Theme.surfaceRaised
-		border.color: Theme.surfaceBorder
+		id: menuSurface
+		objectName: "modernMenuSurface"
+		implicitWidth: 220
+		implicitHeight: Theme.controlHeight
+		color: Theme.popupBackground
+		border.color: menu.activeFocus ? Theme.focus : Theme.popupBorder
 		border.width: 1
 		radius: Theme.innerRadius
+
+		// A pair of ordinary scene-graph rectangles gives the popup depth without
+		// allocating an offscreen layer or invoking a shader effect.
+		Rectangle {
+			id: menuShadow
+			objectName: "modernMenuShadow"
+			z: -1
+			x: Math.max(1, Math.round(Theme.elevationMenuOffset / 2))
+			y: Theme.elevationMenuOffset
+			width: parent.width
+			height: parent.height
+			radius: parent.radius + 1
+			color: Theme.elevationShadow
+			border.width: 0
+			Accessible.ignored: true
+		}
+
+		Rectangle {
+			objectName: "modernMenuHighlight"
+			x: 1
+			y: 1
+			width: Math.max(0, parent.width - 2)
+			height: 1
+			color: Theme.elevationHighlight
+			Accessible.ignored: true
+		}
 	}
 }

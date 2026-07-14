@@ -3,6 +3,8 @@
 
 #include "ClientActionRegistry.h"
 
+#include "ModernShellMenuSerializer.h"
+
 #include <QtGui/QAction>
 
 ClientActionList::ClientActionList(QObject *parent) : QObject(parent) {}
@@ -48,6 +50,7 @@ QVariantList ClientActionRegistry::stateSnapshot() const {
 		QVariantMap state;
 		state.insert(QStringLiteral("id"), id);
 		state.insert(QStringLiteral("text"), entry->text());
+		state.insert(QStringLiteral("icon"), ModernShellMenuSerializer::actionIconId(id));
 		state.insert(QStringLiteral("enabled"), entry->isEnabled());
 		state.insert(QStringLiteral("checked"), entry->isChecked());
 		state.insert(QStringLiteral("checkable"), entry->isCheckable());
@@ -56,6 +59,9 @@ QVariantList ClientActionRegistry::stateSnapshot() const {
 					 entry->shortcut().toString(QKeySequence::PortableText));
 		state.insert(QStringLiteral("menuRole"), static_cast< int >(entry->menuRole()));
 		state.insert(QStringLiteral("toolTip"), entry->toolTip());
+		const QString statusTip = entry->statusTip().trimmed();
+		const QString secondary = statusTip.isEmpty() ? entry->toolTip().trimmed() : statusTip;
+		state.insert(QStringLiteral("secondary"), secondary == entry->text().trimmed() ? QString() : secondary);
 		state.insert(QStringLiteral("visible"), entry->isVisible());
 		state.insert(QStringLiteral("iconAvailable"), !entry->icon().isNull());
 		result.push_back(state);

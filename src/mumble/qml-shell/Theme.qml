@@ -23,7 +23,35 @@ QtObject {
     readonly property color danger: uiTheme ? uiTheme.danger : "#ef4444"
     readonly property color success: uiTheme ? uiTheme.success : "#5fd0a3"
     readonly property color warning: uiTheme ? uiTheme.warning : "#e0c574"
-    readonly property color focus: uiTheme ? uiTheme.focus : accent
+	readonly property color focus: uiTheme ? uiTheme.focus : accent
+
+	// Product-level semantic roles. Keep these derived from the canonical
+	// uiTheme palette so built-in, accent-overridden and custom themes all gain
+	// the same component vocabulary without growing their manifest schema.
+	readonly property color chatCanvas: shellBackground
+	readonly property color chatSurface: panel
+	readonly property color chatIncomingSurface: panel
+	readonly property color chatIncomingBorder: divider
+	readonly property color chatHover: surfaceHover
+	readonly property color chatOwnSurface: accentSubtle
+	readonly property color chatOwnBorder: withAlpha(accent, 0.30)
+	readonly property color chatMetadata: textMuted
+	readonly property color chatReplySurface: strip
+	readonly property color composerBackground: surfaceRaised
+	readonly property color composerBorder: surfaceBorder
+	readonly property color composerFocusBorder: focus
+	readonly property color composerShadow: withAlpha(mediaCanvas, 0.28)
+	readonly property color popupBackground: surfaceRaised
+	readonly property color popupBorder: surfaceBorder
+	readonly property color popupHover: surfaceHover
+	readonly property color popupSelected: selected
+	readonly property color selfCardBackground: rail
+	readonly property color selfCardHover: surfaceRaised
+	readonly property color selfCardBorder: divider
+	readonly property color elevationShadow: withAlpha(mediaCanvas, 0.46)
+	readonly property color elevationHighlight: withAlpha(textStrong, 0.08)
+	readonly property color onAccent: contrastText(accent)
+	readonly property color textFaint: withAlpha(textMuted, 0.72)
     readonly property int shellRadius: uiTheme ? uiTheme.shellRadius : 16
     readonly property int innerRadius: uiTheme ? uiTheme.innerRadius : 11
     readonly property int spacing: uiTheme ? uiTheme.spacing : 12
@@ -49,12 +77,18 @@ QtObject {
 	readonly property int fontTitle: 15
 	readonly property int fontHeading: 20
 	readonly property int focusRingWidth: 2
+	readonly property int elevationLowOffset: compact ? 1 : 2
+	readonly property int elevationMenuOffset: compact ? 3 : 4
 	readonly property int motionFast: 90
 	readonly property int motionNormal: 160
 	readonly property int motionSlow: 240
 
 	function linearColorChannel(channel) {
 		return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
+	}
+
+	function withAlpha(source, alpha) {
+		return Qt.rgba(source.r, source.g, source.b, Math.max(0, Math.min(1, alpha)))
 	}
 
 	function contrastText(background) {

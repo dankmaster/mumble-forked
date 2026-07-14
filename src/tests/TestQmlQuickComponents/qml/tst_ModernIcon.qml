@@ -60,6 +60,7 @@ TestCase {
 	function test_default_tone_uses_theme_text_token() {
 		verify(defaultToneLoader.item !== null)
 		compare(defaultToneLoader.item.color, Theme.textStrong)
+		compare(defaultToneLoader.item.Accessible.ignored, true)
 	}
 
 	function test_unknown_icon_is_safely_hidden() {
@@ -79,6 +80,20 @@ TestCase {
 
 	function test_semantic_navigation_and_media_icons_have_vector_paths() {
 		const names = ["chevron-down", "chevron-up", "previous", "next", "external", "play", "warning"]
+		for (let index = 0; index < names.length; ++index) {
+			loader.item.name = names[index]
+			verify(loader.item.pathData.length > 0, names[index])
+			verify(iconShape().visible, names[index])
+		}
+	}
+
+	function test_action_menu_vocabulary_has_stable_vector_paths() {
+		const names = [
+			"action", "add", "certificate", "connect", "copy", "delete", "disconnect", "edit",
+			"eye", "eye-off", "info", "join", "key", "link", "message", "move", "pin",
+			"plugin", "quit", "record", "refresh", "reply", "screen-share", "settings", "shield",
+			"terminal", "unlink", "user", "user-add", "user-remove", "volume"
+		]
 		for (let index = 0; index < names.length; ++index) {
 			loader.item.name = names[index]
 			verify(loader.item.pathData.length > 0, names[index])

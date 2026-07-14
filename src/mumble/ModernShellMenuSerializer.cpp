@@ -30,14 +30,17 @@ QVariantMap ModernShellMenuSerializer::separatorItem() {
 }
 
 QVariantMap ModernShellMenuSerializer::actionItem(const QString &id, const QString &label, const bool enabled,
-												  const bool checked, const QString &tone, const QString &hint) {
+												  const bool checked, const QString &tone, const QString &hint,
+												  const QString &icon, const QString &secondary, const bool checkable) {
 	QVariantMap item;
 	item.insert(QStringLiteral("kind"), QStringLiteral("action"));
 	item.insert(QStringLiteral("id"), id);
 	item.insert(QStringLiteral("label"), label);
 	item.insert(QStringLiteral("enabled"), enabled);
 	item.insert(QStringLiteral("checked"), checked);
-	item.insert(QStringLiteral("checkable"), checked);
+	item.insert(QStringLiteral("checkable"), checkable || checked);
+	item.insert(QStringLiteral("icon"), icon.trimmed().isEmpty() ? actionIconId(id) : icon.trimmed());
+	item.insert(QStringLiteral("secondary"), secondary.trimmed());
 	if (!tone.isEmpty()) {
 		item.insert(QStringLiteral("tone"), tone);
 	}
@@ -107,6 +110,20 @@ QVariantList ModernShellMenuSerializer::normalize(const QVariantList &items) {
 			continue;
 		}
 
+		// A heading is already a visual group boundary. Removing an adjacent
+		// separator keeps compact menus from accumulating double gutters when
+		// data from different controllers is combined.
+		if (kind == QLatin1String("section") || kind == QLatin1String("header")) {
+			if (!normalized.isEmpty()
+				&& normalized.back().toMap().value(QStringLiteral("kind")).toString()
+					   == QLatin1String("separator")) {
+				normalized.removeLast();
+			}
+			normalized.push_back(item);
+			previousWasSeparator = true;
+			continue;
+		}
+
 		normalized.push_back(item);
 		previousWasSeparator = false;
 	}
@@ -157,8 +174,11 @@ QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * 
 								 : normalizedActionLabel(
 									   action->toolTip().trimmed().isEmpty() ? action->statusTip() : action->toolTip());
 		QVariantMap item = actionItem(definition.id, label, action->isEnabled(),
-								  action->isCheckable() && action->isChecked(), definition.tone, hint);
-		item.insert(QStringLiteral("checkable"), action->isCheckable());
+								  action->isCheckable() && action->isChecked(), definition.tone, hint,
+								  definition.icon, definition.secondary, action->isCheckable());
+		item.insert(QStringLiteral("shortcut"), action->shortcut().toString(QKeySequence::NativeText));
+		item.insert(QStringLiteral("shortcutPortableText"),
+					action->shortcut().toString(QKeySequence::PortableText));
 		items.push_back(item);
 	}
 

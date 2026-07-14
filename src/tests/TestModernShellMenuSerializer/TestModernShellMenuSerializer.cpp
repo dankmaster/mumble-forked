@@ -16,11 +16,13 @@ private slots:
 	void serializesActionsAndDynamicContextActionWithoutWidgets();
 	void omitsUnavailableContextActionsAndRegistryEntries();
 	void buildsTypedLabelAndSliderItems();
+	void mapsStableActionIconsAndCompactsGroupBoundaries();
 };
 
 void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWithoutWidgets() {
 	QObject owner;
 	QAction regularAction(QObject::tr("Plain Action"), &owner);
+	regularAction.setShortcut(QKeySequence(QStringLiteral("Ctrl+K")));
 	QAction checkableAction(QObject::tr("Checkable Action"), &owner);
 	checkableAction.setCheckable(true);
 	QAction separator(&owner);
@@ -35,6 +37,8 @@ void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWith
 			ModernShellMenuSerializer::ActionDefinition definition;
 			if (action == &regularAction) {
 				definition.id = QStringLiteral("plainAction");
+				definition.icon = QStringLiteral("settings");
+				definition.secondary = QStringLiteral("Current profile");
 			} else if (action == &checkableAction) {
 				definition.id = QStringLiteral("checkableAction");
 			} else if (action == &dynamicAction) {
@@ -47,12 +51,17 @@ void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWith
 
 	QCOMPARE(items.size(), 4);
 	QCOMPARE(items.at(0).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("action"));
+	QCOMPARE(items.at(0).toMap().value(QStringLiteral("icon")).toString(), QStringLiteral("settings"));
+	QCOMPARE(items.at(0).toMap().value(QStringLiteral("secondary")).toString(), QStringLiteral("Current profile"));
+	QCOMPARE(items.at(0).toMap().value(QStringLiteral("shortcutPortableText")).toString(),
+			 QStringLiteral("Ctrl+K"));
 	QVERIFY(!items.at(0).toMap().value(QStringLiteral("checkable")).toBool());
 	QVERIFY(items.at(1).toMap().value(QStringLiteral("checkable")).toBool());
 	QVERIFY(!items.at(1).toMap().value(QStringLiteral("checked")).toBool());
 	QCOMPARE(items.at(2).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("separator"));
 	QCOMPARE(items.at(3).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("context:channel:dynamic-token"));
+	QCOMPARE(items.at(3).toMap().value(QStringLiteral("icon")).toString(), QStringLiteral("plugin"));
 
 	const auto dynamicRegistryEntry = registry.value(QStringLiteral("context:channel:dynamic-token"));
 	QVERIFY(dynamicRegistryEntry.action == &dynamicAction);
@@ -112,6 +121,40 @@ void TestModernShellMenuSerializer::buildsTypedLabelAndSliderItems() {
 	QCOMPARE(slider.value(QStringLiteral("min")).toInt(), -30);
 	QCOMPARE(slider.value(QStringLiteral("max")).toInt(), 30);
 	QVERIFY(slider.value(QStringLiteral("finalOnRelease")).toBool());
+}
+
+void TestModernShellMenuSerializer::mapsStableActionIconsAndCompactsGroupBoundaries() {
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("server.disconnect")),
+			 QStringLiteral("disconnect"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("qaConfigDialog")),
+			 QStringLiteral("settings"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("qaAudioReset")),
+			 QStringLiteral("refresh"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("screenShareStart")),
+			 QStringLiteral("screen-share"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("friendRemove")),
+			 QStringLiteral("user-remove"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("context:user:plugin-action")),
+			 QStringLiteral("plugin"));
+	QCOMPARE(ModernShellMenuSerializer::actionIconId(QStringLiteral("future.action")),
+			 QStringLiteral("action"));
+
+	const QVariantMap disconnect = ModernShellMenuSerializer::actionItem(
+		QStringLiteral("server.disconnect"), QStringLiteral("Disconnect"), true, false,
+		QStringLiteral("danger"));
+	QCOMPARE(disconnect.value(QStringLiteral("icon")).toString(), QStringLiteral("disconnect"));
+	QCOMPARE(disconnect.value(QStringLiteral("secondary")).toString(), QString());
+
+	QVariantMap section;
+	section.insert(QStringLiteral("kind"), QStringLiteral("section"));
+	section.insert(QStringLiteral("label"), QStringLiteral("Administration"));
+	const QVariantList normalized = ModernShellMenuSerializer::normalize(
+		{ disconnect, ModernShellMenuSerializer::separatorItem(), section,
+		  ModernShellMenuSerializer::separatorItem(), disconnect });
+	QCOMPARE(normalized.size(), 3);
+	QCOMPARE(normalized.at(0).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("action"));
+	QCOMPARE(normalized.at(1).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("section"));
+	QCOMPARE(normalized.at(2).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("action"));
 }
 
 QTEST_MAIN(TestModernShellMenuSerializer)
