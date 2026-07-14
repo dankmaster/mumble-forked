@@ -3279,10 +3279,10 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															0, 100, 1, QStringLiteral("%")),
 														!customAccentSelected),
 											boolField(QStringLiteral("look.modernTickerBannerEnabled"),
-													  QObject::tr("Show ticker bar"),
+													  QObject::tr("Show Stonks ticker banner"),
 													  m_draft.bModernShellTickerBannerEnabled),
 											enabledField(boolField(QStringLiteral("look.modernTickerAlwaysScroll"),
-																   QObject::tr("Always scroll ticker banner"),
+																   QObject::tr("Keep ticker moving"),
 																   m_draft.bModernShellTickerBannerAlwaysScroll),
 														 m_draft.bModernShellTickerBannerEnabled) })
 	};

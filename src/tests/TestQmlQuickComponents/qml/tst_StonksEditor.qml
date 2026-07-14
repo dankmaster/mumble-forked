@@ -20,6 +20,7 @@ TestCase {
 		return {
 			"supported": true,
 			"enabled": true,
+			"feature": { "tickerBannerEnabled": false, "tickerBannerAlwaysScroll": true },
 			"registered": true,
 			"canAdmin": true,
 			"selfUserId": 1,
@@ -70,6 +71,29 @@ TestCase {
 			"textChannels": [{ "textChannelId": 7, "name": "stonks" }, { "textChannelId": 8, "name": "trading" }],
 			"leaderboardDescription": "Portfolio returns over 30 days."
 		}
+	}
+
+	function test_ticker_banner_is_an_explicit_client_opt_in() {
+		const editor = loader.item
+		const enabled = findChild(editor, "stonksTickerBannerEnabled")
+		const alwaysScroll = findChild(editor, "stonksTickerBannerAlwaysScroll")
+		verify(enabled !== null)
+		verify(alwaysScroll !== null)
+		compare(enabled.checked, false)
+		compare(alwaysScroll.checked, true)
+		compare(alwaysScroll.enabled, false)
+
+		mouseClick(enabled, enabled.width / 2, enabled.height / 2, Qt.LeftButton)
+		compare(dialogState.lastAction, "setTickerBannerEnabled")
+		compare(dialogState.lastPayload.tickerBannerEnabled, true)
+
+		const activeState = populatedState()
+		activeState.feature.tickerBannerEnabled = true
+		editor.stonks = activeState
+		tryCompare(alwaysScroll, "enabled", true)
+		mouseClick(alwaysScroll, alwaysScroll.width / 2, alwaysScroll.height / 2, Qt.LeftButton)
+		compare(dialogState.lastAction, "setTickerBannerAlwaysScroll")
+		compare(dialogState.lastPayload.tickerBannerAlwaysScroll, false)
 	}
 
 	function init() {

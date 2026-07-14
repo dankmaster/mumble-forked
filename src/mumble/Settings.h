@@ -324,8 +324,8 @@ struct Settings {
 	QString qsModernShellAccent               = QStringLiteral("auto");
 	QString qsModernShellCustomAccent         = QStringLiteral("#5ec8b0");
 	int iModernShellCustomAccentStrength      = 50;
-	bool bModernShellTickerBannerEnabled      = true;
-	bool bModernShellTickerBannerAlwaysScroll = false;
+	bool bModernShellTickerBannerEnabled      = false;
+	bool bModernShellTickerBannerAlwaysScroll = true;
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};
 	WindowLayout wlWindowLayout               = LayoutModern;

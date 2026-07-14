@@ -10,6 +10,8 @@ AbstractButton {
 	property string scopeToken: ""
 	property string scopeLabel: ""
 	property bool narrowLayout: false
+	property bool tickerBannerEnabled: false
+	property bool tickerBannerAlwaysScroll: true
 	readonly property bool loading: stonks.loading === true
 	readonly property string errorText: String(stonks.error || "").trim()
 	readonly property bool automationVisible: stonks.automationHeaderVisible === true
@@ -21,7 +23,11 @@ AbstractButton {
 	readonly property int maximumTickerCount: narrowLayout || width < 300 ? 1 : width < 430 ? 2 : 3
 	readonly property var visibleTickerRows: tickerRows.slice(0, maximumTickerCount)
 	readonly property bool hasVisibleState: loading || errorText.length > 0 || tickerRows.length > 0
-	readonly property bool shouldShow: supported && enabledForServer && activeStonksScope && hasVisibleState
+	readonly property bool shouldShow: tickerBannerEnabled && supported && enabledForServer
+		&& hasVisibleState
+	readonly property bool marqueeShouldRun: tickerRows.length > 0
+		&& (tickerBannerAlwaysScroll || marqueePrimary.width > tickerViewport.width)
+	readonly property bool marqueeRunning: marqueeAnimation.running && !marqueeAnimation.paused
 
 	signal openRequested()
 
@@ -100,6 +106,15 @@ AbstractButton {
 			: change > 0 ? Theme.success : Theme.danger
 	}
 
+	function updateMarqueePause() {
+		if (!marqueeAnimation.running)
+			return
+		if (hovered || activeFocus)
+			marqueeAnimation.pause()
+		else
+			marqueeAnimation.resume()
+	}
+
 	visible: shouldShow
 	enabled: shouldShow
 	hoverEnabled: true
@@ -114,6 +129,8 @@ AbstractButton {
 	Accessible.description: loading ? String(stonks.status || qsTr("Loading ticker quotes"))
 		: errorText.length > 0 ? errorText : qsTr("Shows pinned, portfolio, and popular ticker quotes")
 	onClicked: openRequested()
+	onHoveredChanged: updateMarqueePause()
+	onActiveFocusChanged: updateMarqueePause()
 	Keys.onReturnPressed: event => {
 		root.openRequested()
 		event.accepted = true
@@ -197,41 +214,58 @@ AbstractButton {
 				elide: Text.ElideRight
 			}
 
-			Row {
-				id: tickerRow
-				objectName: "stonksHeaderTickerRow"
+			Item {
+				id: tickerViewport
+				objectName: "stonksHeaderTickerViewport"
 				anchors.left: parent.left
-				anchors.verticalCenter: parent.verticalCenter
-				spacing: Theme.space3
+				anchors.right: parent.right
+				anchors.top: parent.top
+				anchors.bottom: parent.bottom
+				clip: true
 				visible: !root.loading && root.errorText.length === 0
 
-				Repeater {
-					model: root.visibleTickerRows
-					delegate: Row {
-						required property var modelData
-						objectName: "stonksHeaderTicker_" + String(modelData.symbol || "")
-						spacing: Theme.space1
-						Label {
-							textFormat: Text.PlainText
-							text: String(modelData.symbol || "")
-							color: Theme.textStrong
-							font.pixelSize: Theme.fontCaption
-							font.weight: Font.DemiBold
+				Row {
+					id: tickerTrack
+					objectName: "stonksHeaderTickerRow"
+					anchors.verticalCenter: parent.verticalCenter
+					spacing: Theme.space4
+
+					Row {
+						id: marqueePrimary
+						spacing: Theme.space4
+						Repeater {
+							model: root.tickerRows
+							delegate: tickerDelegate
 						}
-						Label {
-							textFormat: Text.PlainText
-							text: root.quoteLabel(modelData)
-							color: Theme.textMain
-							font.pixelSize: Theme.fontCaption
+					}
+					Row {
+						id: marqueeDuplicate
+						visible: root.marqueeShouldRun
+						spacing: Theme.space4
+						Repeater {
+							model: root.tickerRows
+							delegate: tickerDelegate
 						}
-						Label {
-							visible: text.length > 0 && !root.narrowLayout
-							textFormat: Text.PlainText
-							text: root.changeLabel(modelData)
-							color: root.quoteTone(modelData)
-							font.pixelSize: Theme.fontCaption
-							font.weight: Font.DemiBold
-						}
+					}
+				}
+
+				NumberAnimation {
+					id: marqueeAnimation
+					objectName: "stonksHeaderMarqueeAnimation"
+					target: tickerTrack
+					property: "x"
+					from: 0
+					to: -(marqueePrimary.width + tickerTrack.spacing)
+					duration: Math.max(4500,
+						Math.round((marqueePrimary.width + tickerTrack.spacing) * 28))
+					easing.type: Easing.Linear
+					loops: Animation.Infinite
+					running: root.visible && root.marqueeShouldRun && tickerViewport.visible
+					onRunningChanged: {
+						if (!running)
+							tickerTrack.x = 0
+						else
+							root.updateMarqueePause()
 					}
 				}
 			}
@@ -242,6 +276,36 @@ AbstractButton {
 			name: "next"
 			size: 14
 			color: Theme.textMuted
+		}
+	}
+
+	Component {
+		id: tickerDelegate
+		Row {
+			required property var modelData
+			objectName: "stonksHeaderTicker_" + String(modelData.symbol || "")
+			spacing: Theme.space1
+			Label {
+				textFormat: Text.PlainText
+				text: String(modelData.symbol || "")
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+			}
+			Label {
+				textFormat: Text.PlainText
+				text: root.quoteLabel(modelData)
+				color: Theme.textMain
+				font.pixelSize: Theme.fontCaption
+			}
+			Label {
+				visible: text.length > 0 && !root.narrowLayout
+				textFormat: Text.PlainText
+				text: root.changeLabel(modelData)
+				color: root.quoteTone(modelData)
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+			}
 		}
 	}
 }

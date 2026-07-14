@@ -223,6 +223,7 @@ Current capabilities:
 - server database tables for scores, follows, feed preferences, pinned tickers,
   portfolio history, and saved positions
 - Modern Stonks panel for overview, portfolio ledger, leaderboard, following, and admin config
+- client-local, opt-in rolling Stonks ticker banner for the Modern conversation header
 - optional social announcements in the configured Stonks text channel
 
 Typical commands:

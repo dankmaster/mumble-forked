@@ -1234,6 +1234,8 @@ ApplicationWindow {
 						width: Math.max(140, Math.min(root.narrowShell ? 190 : 480,
 							parent.width - headerActions.width - (root.narrowShell ? 170 : 300)))
 						stonks: clientSession.stonks || ({})
+						tickerBannerEnabled: stonks.tickerBannerEnabled === true
+						tickerBannerAlwaysScroll: stonks.tickerBannerAlwaysScroll !== false
 						scopeToken: activeScope.scopeToken
 						scopeLabel: activeScope.label
 						narrowLayout: root.narrowShell || width < 300

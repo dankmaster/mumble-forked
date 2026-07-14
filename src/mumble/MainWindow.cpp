@@ -14607,6 +14607,10 @@ namespace {
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
 		state.insert(QStringLiteral("enabled"), Global::get().bStonksEnabled);
+		state.insert(QStringLiteral("tickerBannerEnabled"),
+					 Global::get().s.bModernShellTickerBannerEnabled);
+		state.insert(QStringLiteral("tickerBannerAlwaysScroll"),
+					 Global::get().s.bModernShellTickerBannerAlwaysScroll);
 		state.insert(QStringLiteral("textChannelId"), Global::get().uiStonksTextChannelID);
 		state.insert(QStringLiteral("socialAnnouncementsEnabled"),
 					 Global::get().bStonksSocialAnnouncementsEnabled);
@@ -15752,6 +15756,7 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
 	}
+	scheduleQmlRoomStateUpdate();
 }
 
 void MainWindow::openModernDeveloperConsoleDialog() {
@@ -15784,6 +15789,7 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		Global::get().s.bModernShellTickerBannerAlwaysScroll =
 			payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
 		Global::get().s.save();
+		scheduleQmlRoomStateUpdate();
 		if (m_modernDialogController
 			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 			openModernGenericDialog(buildModernStonksDialog());
@@ -15792,8 +15798,9 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 	}
 	if (action == QLatin1String("setTickerBannerEnabled")) {
 		Global::get().s.bModernShellTickerBannerEnabled =
-			payload.value(QStringLiteral("tickerBannerEnabled"), true).toBool();
+			payload.value(QStringLiteral("tickerBannerEnabled"), false).toBool();
 		Global::get().s.save();
+		scheduleQmlRoomStateUpdate();
 		if (m_modernDialogController
 			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 			openModernGenericDialog(buildModernStonksDialog());
@@ -24927,6 +24934,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 		Global::get().s.save();
 		if (m_qmlShellHost) m_qmlShellHost->themeController()->refresh();
+		scheduleQmlRoomStateUpdate();
 		publishModernToast(QStringLiteral("success"), tr("Tweaks"), tr("Tweaks saved."));
 		return true;
 	}

@@ -24,6 +24,9 @@ ColumnLayout {
 
 	readonly property var snapshots: stonks.snapshots || []
 	readonly property var latestSnapshot: snapshots.length > 0 ? snapshots[0] : null
+	readonly property var tickerSettings: stonks.feature || stonks || ({})
+	readonly property bool tickerBannerEnabled: tickerSettings.tickerBannerEnabled === true
+	readonly property bool tickerBannerAlwaysScroll: tickerSettings.tickerBannerAlwaysScroll !== false
 	readonly property bool loading: stonks.loading === true
 	readonly property bool contentAvailable: stonks.supported !== false
 		&& (stonks.enabled !== false || stonks.canAdmin === true)
@@ -606,6 +609,53 @@ ColumnLayout {
 				checked: (root.stonks.feedPreferences || {}).showPins !== false
 				onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": (root.stonks.feedPreferences || {}).showMine !== false,
 					"showPopular": (root.stonks.feedPreferences || {}).showPopular !== false, "showPins": checked })
+			}
+		}
+		Rectangle {
+			Layout.fillWidth: true
+			Layout.preferredHeight: tickerBannerSettingsLayout.implicitHeight + 24
+			color: Theme.strip
+			border.color: root.tickerBannerEnabled ? Theme.accent : Theme.divider
+			radius: Theme.innerRadius
+			RowLayout {
+				id: tickerBannerSettingsLayout
+				anchors.fill: parent
+				anchors.margins: 12
+				spacing: 12
+				ColumnLayout {
+					Layout.fillWidth: true
+					spacing: 3
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Stonks ticker banner")
+						color: Theme.textStrong
+						font.bold: true
+					}
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Show your selected ticker feed in the conversation header. Off by default on this client.")
+						color: Theme.textMuted
+						font.pixelSize: 10
+						wrapMode: Text.Wrap
+					}
+				}
+				ModernCheckBox {
+					objectName: "stonksTickerBannerEnabled"
+					text: qsTr("Show banner")
+					checked: root.tickerBannerEnabled
+					onToggled: dialogState.invokeAction("setTickerBannerEnabled",
+						{ "tickerBannerEnabled": checked })
+				}
+				ModernCheckBox {
+					objectName: "stonksTickerBannerAlwaysScroll"
+					text: qsTr("Keep moving")
+					checked: root.tickerBannerAlwaysScroll
+					enabled: root.tickerBannerEnabled
+					onToggled: dialogState.invokeAction("setTickerBannerAlwaysScroll",
+						{ "tickerBannerAlwaysScroll": checked })
+				}
 			}
 		}
 		Flow {

@@ -32,6 +32,8 @@ TestCase {
 		return {
 			"supported": true,
 			"enabled": true,
+			"tickerBannerEnabled": true,
+			"tickerBannerAlwaysScroll": true,
 			"automationHeaderVisible": true,
 			"textChannelId": 7,
 			"feedPreferences": { "showPins": true, "showMine": true, "showPopular": true },
@@ -48,11 +50,15 @@ TestCase {
 
 	function init() {
 		verify(loader.item !== null)
+		testCase.forceActiveFocus()
 		loader.width = 620
 		loader.item.narrowLayout = false
 		loader.item.scopeToken = "text:7"
 		loader.item.scopeLabel = "stonks"
-		loader.item.stonks = populatedState()
+		const state = populatedState()
+		loader.item.stonks = state
+		loader.item.tickerBannerEnabled = state.tickerBannerEnabled
+		loader.item.tickerBannerAlwaysScroll = state.tickerBannerAlwaysScroll
 		openSpy.clear()
 		tryCompare(loader.item, "supported", true)
 		tryCompare(loader.item, "enabledForServer", true)
@@ -60,6 +66,36 @@ TestCase {
 		tryCompare(loader.item, "hasVisibleState", true)
 		tryCompare(loader.item, "shouldShow", true)
 		tryCompare(loader.item, "visible", true)
+	}
+
+	function test_client_opt_in_gate_is_off_until_enabled() {
+		const header = loader.item
+		header.tickerBannerEnabled = false
+		tryCompare(header, "visible", false)
+		compare(header.tickerRows.length, 3)
+
+		header.tickerBannerEnabled = true
+		tryCompare(header, "visible", true)
+	}
+
+	function test_ticker_scrolls_continuously_and_can_fall_back_to_overflow_only() {
+		const header = loader.item
+		header.tickerBannerAlwaysScroll = true
+		tryCompare(header, "marqueeShouldRun", true)
+		tryCompare(header, "marqueeRunning", true)
+
+		header.tickerBannerAlwaysScroll = false
+		const singleTickerState = populatedState()
+		singleTickerState.personalTickers = []
+		singleTickerState.popularTickers = []
+		header.stonks = singleTickerState
+		loader.width = 680
+		tryCompare(header, "marqueeShouldRun", false)
+		tryCompare(header, "marqueeRunning", false)
+
+		loader.width = 170
+		tryCompare(header, "marqueeShouldRun", true)
+		tryCompare(header, "marqueeRunning", true)
 	}
 
 	function test_populated_state_is_visible_typed_and_keyboard_accessible() {
@@ -108,16 +144,18 @@ TestCase {
 		compare(loader.item.Accessible.name, "Stonks quotes unavailable")
 	}
 
-	function test_scope_gate_and_narrow_layout_remain_bounded() {
+	function test_opted_in_banner_remains_visible_across_scopes_and_narrow_layout_is_bounded() {
 		const state = populatedState()
 		state.automationHeaderVisible = false
 		state.textChannelId = 12
 		loader.item.scopeToken = "text:7"
 		loader.item.scopeLabel = "general"
 		loader.item.stonks = state
-		tryCompare(loader.item, "visible", false)
+		tryCompare(loader.item, "activeStonksScope", false)
+		tryCompare(loader.item, "visible", true)
 
 		loader.item.scopeLabel = "#stonks"
+		tryCompare(loader.item, "activeStonksScope", true)
 		tryCompare(loader.item, "visible", true)
 		loader.width = 180
 		loader.item.narrowLayout = true

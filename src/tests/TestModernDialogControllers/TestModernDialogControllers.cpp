@@ -259,8 +259,15 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 			 QStringLiteral("about.openQt"));
 	const QString tickerEnabledFieldID = QStringLiteral("look.modernTickerBannerEnabled");
 	const QString tickerScrollFieldID  = QStringLiteral("look.modernTickerAlwaysScroll");
-	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerEnabledFieldID).isEmpty());
-	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerScrollFieldID).isEmpty());
+	const QVariantMap defaultTickerEnabledField =
+		findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerEnabledFieldID);
+	const QVariantMap defaultTickerScrollField =
+		findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerScrollFieldID);
+	QVERIFY(!defaultTickerEnabledField.isEmpty());
+	QVERIFY(!defaultTickerScrollField.isEmpty());
+	QCOMPARE(defaultTickerEnabledField.value(QStringLiteral("value")).toBool(), false);
+	QCOMPARE(defaultTickerScrollField.value(QStringLiteral("value")).toBool(), true);
+	QCOMPARE(defaultTickerScrollField.value(QStringLiteral("enabled"), true).toBool(), false);
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerEnabledFieldID).isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerScrollFieldID).isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerEnabledFieldID).isEmpty());
