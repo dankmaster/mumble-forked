@@ -932,6 +932,29 @@ namespace {
 		return Mumble::ModernTheme::normalizedCustomAccentStrength(value);
 	}
 
+	bool isModernAppearancePreviewField(const QString &fieldID) {
+		static const QSet< QString > previewFields {
+			QStringLiteral("look.modernTheme"),
+			QStringLiteral("look.modernDensity"),
+			QStringLiteral("look.modernAccent"),
+			QStringLiteral("look.modernCustomAccent"),
+			QStringLiteral("look.modernCustomAccentStrength")
+		};
+		return previewFields.contains(fieldID);
+	}
+
+	ModernSettingsController::AppearancePreview modernAppearancePreview(
+		const Settings &settings, const QList< Mumble::ModernTheme::ThemeDefinition > &catalog) {
+		ModernSettingsController::AppearancePreview preview;
+		preview.theme = normalizedModernShellTheme(settings.qsModernShellTheme, catalog);
+		preview.density = normalizedModernShellDensity(settings.qsModernShellDensity);
+		preview.accent = normalizedModernShellAccent(settings.qsModernShellAccent);
+		preview.customAccent = normalizedModernShellCustomAccent(settings.qsModernShellCustomAccent);
+		preview.customAccentStrength =
+			normalizedModernShellCustomAccentStrength(settings.iModernShellCustomAccentStrength);
+		return preview;
+	}
+
 	QString previewColor(const QColor &color) {
 		return color.alpha() < 255 ? color.name(QColor::HexArgb) : color.name(QColor::HexRgb);
 	}
@@ -1888,6 +1911,7 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	m_voiceReplayPreviousPacketLoss.reset();
 	m_voiceReplayPreviousMaxPacketDelay.reset();
 	m_runtimePreviewDiffersFromOriginal = false;
+	m_appearancePreviewActive = false;
 	refreshModernThemeCatalog();
 	forceModernLayout();
 	setActivePage(pageName);
@@ -1915,9 +1939,12 @@ QVariantMap ModernSettingsController::state() const {
 	dialog.insert(QStringLiteral("sections"), sectionsForActivePage());
 
 	QVariantList actions;
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("cancel"), QObject::tr("Close"), true, false));
+	actions.push_back(
+		ModernShellMenuSerializer::actionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), true, false));
+	actions.push_back(
+		ModernShellMenuSerializer::actionItem(QStringLiteral("apply"), QObject::tr("Apply"), true, false));
 	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("ok"), QObject::tr("Done"), true, false,
-															QStringLiteral("accent")));
+																	  QStringLiteral("accent")));
 	dialog.insert(QStringLiteral("actions"), actions);
 	return dialog;
 }
@@ -2262,6 +2289,18 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		return result;
 	}
 
+	if (action == QLatin1String("look.previewAppearance")) {
+		const QString fieldID = payload.value(QStringLiteral("fieldId")).toString().trimmed();
+		if (!isModernAppearancePreviewField(fieldID) || !payload.contains(QStringLiteral("value"))) {
+			result.stateChanged = false;
+			return result;
+		}
+		updateField(fieldID, payload.value(QStringLiteral("value")));
+		result.appearanceToPreview = modernAppearancePreview(m_draft, m_modernThemeCatalog);
+		m_appearancePreviewActive = true;
+		return result;
+	}
+
 	if (action == QLatin1String("cancel")) {
 		m_shortcutCaptureIndex = -1;
 		restoreVoiceReplayDraft();
@@ -2269,6 +2308,10 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			result.settingsToApply = m_original;
 			result.announceApply   = false;
 			m_runtimePreviewDiffersFromOriginal = false;
+		}
+		if (m_appearancePreviewActive) {
+			result.appearanceToPreview = modernAppearancePreview(m_original, m_modernThemeCatalog);
+			m_appearancePreviewActive = false;
 		}
 		result.closeDialog = true;
 		return result;
@@ -2285,6 +2328,10 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			result.settingsToApply = m_original;
 			result.announceApply   = false;
 			m_runtimePreviewDiffersFromOriginal = false;
+		}
+		if (m_appearancePreviewActive) {
+			result.appearanceToPreview = modernAppearancePreview(m_original, m_modernThemeCatalog);
+			m_appearancePreviewActive = false;
 		}
 		forceModernLayout();
 		return result;
@@ -2326,6 +2373,8 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		refreshModernThemeCatalog();
 		m_draft.qsModernShellTheme =
 			normalizedModernShellTheme(m_draft.qsModernShellTheme, m_modernThemeCatalog);
+		result.appearanceToPreview = modernAppearancePreview(m_draft, m_modernThemeCatalog);
+		m_appearancePreviewActive = true;
 		return result;
 	}
 
@@ -2559,10 +2608,13 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		refreshShortcutRestartFlag();
 		forceModernLayout();
 		result.settingsToApply = m_draft;
-		result.accepted        = action == QLatin1String("ok");
-		result.closeDialog     = result.accepted;
+		// Apply commits and persists the current baseline without closing;
+		// Done performs the same commit and then closes the dialog.
+		result.accepted        = true;
+		result.closeDialog     = action == QLatin1String("ok");
 		m_original             = m_draft;
 		m_runtimePreviewDiffersFromOriginal = false;
+		m_appearancePreviewActive = false;
 		return result;
 	}
 
@@ -3176,15 +3228,16 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		sectionItem(QObject::tr("Modern layout"), QVariantList {
 											 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
 		sectionItem(QObject::tr("Tweaks"), QVariantList {
-										hintedField(presentationField(
-																selectField(
-																	QStringLiteral("look.modernTheme"), QObject::tr("Theme"),
-																	normalizedModernShellTheme(
-																		m_draft.qsModernShellTheme, m_modernThemeCatalog),
-																	modernShellThemeOptions(m_modernThemeCatalog),
-																	QStringLiteral("string")),
-															QStringLiteral("themeGrid")),
-														QObject::tr("Catppuccin, standard light/dark, and more")),
+										hintedField(
+											presentationField(
+												selectField(
+													QStringLiteral("look.modernTheme"), QObject::tr("Theme"),
+													normalizedModernShellTheme(
+														m_draft.qsModernShellTheme, m_modernThemeCatalog),
+													modernShellThemeOptions(m_modernThemeCatalog),
+													QStringLiteral("string")),
+												QStringLiteral("themeGrid")),
+											QObject::tr("Select a theme to preview it instantly. Apply saves without closing; Done saves and closes.")),
 										actionField(QStringLiteral("look.modernThemesDirectory"),
 													QObject::tr("Custom theme folder"),
 													QObject::tr("Open folder"),

@@ -97,7 +97,9 @@ community feature set on top. The long-form inventory lives in
 For most users, the easiest path is the latest `mumble-forked` Windows MSI from
 this fork's GitHub releases. Install it, connect to your server as usual, and
 use **Settings > Appearance** to pick a built-in Modern theme, density, accent,
-or a custom theme file.
+or a custom theme file. Appearance choices preview live; **Apply** saves without
+closing Settings, while **Done** saves and closes. **Auto** always follows the
+selected theme's own accent rather than a universal color.
 
 If you are running a server for the fork features:
 
@@ -156,6 +158,7 @@ Quick theme flow:
 3. Click **Reload themes** in Appearance.
 4. Pick the custom theme and optionally combine it with a built-in or custom
    accent.
+5. Click **Apply** or **Done** to save the live preview.
 
 The full guide, including a minimal theme template and the supported token
 contract, lives in [`docs/modern-custom-themes.md`](docs/modern-custom-themes.md).

@@ -61,8 +61,11 @@ QString engineThemeId();
 QStringList builtInThemeIds();
 bool isBuiltInThemeId(const QString &themeID);
 QString normalizedThemeId(const QString &themeID);
+QString automaticAccentId();
 QString customAccentId();
 QString normalizedAccentId(const QString &accentID);
+// Returns an invalid color for Auto because Auto preserves the selected
+// theme's own accent tokens instead of supplying an override color.
 QColor accentColorOverride(const QString &accentID, const QString &customColor = QString());
 QString normalizedCustomAccentColor(const QString &color);
 int normalizedCustomAccentStrength(int strength);

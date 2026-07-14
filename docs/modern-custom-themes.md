@@ -4,13 +4,16 @@ Modern custom themes are versioned JSON token manifests. They contain data only:
 
 Themes are loaded from the bundled and profile `ModernThemes` directories. The app ships `catppuccin-nord.mumble-theme.json` as an example and copies it to a new profile theme directory without overwriting user files.
 
-The built-in catalog contains Dark, Light, Mocha, Macchiato, Frappe, Latte, Nord, and Gruvbox. Accent choices are Auto, Teal, Blue, Violet, Amber, Rose, and Custom. Auto keeps the accent from the selected theme; every other choice replaces the accent, hover, subtle-selection, and focus roles as one consistent family.
+The built-in catalog contains Dark, Light, Mocha, Macchiato, Frappe, Latte, Nord, and Gruvbox. Accent choices are Auto, Teal, Blue, Violet, Amber, Rose, and Custom. Auto is not a fixed color: it keeps the accent, hover, subtle-selection, and focus roles declared by the selected theme. Every other choice replaces those roles as one consistent family.
+
+Theme, density, and accent choices preview immediately across the running Modern UI without changing the saved profile. **Apply** saves the current preview and keeps Settings open; **Done** saves and closes. **Cancel**, Escape, and the close button restore the most recently applied appearance.
 
 ## Install a theme
 
 1. Open **Settings > Appearance > Custom theme folder > Open folder**.
 2. Copy a `*.mumble-theme.json` file into the folder.
 3. Click **Reload themes**, then select the theme from its preview card.
+4. Use **Apply** or **Done** to save the preview.
 
 The selected ID remains local to the profile. Existing IDs use the `custom:<id>` form and do not change during the JSON migration.
 

@@ -78,6 +78,9 @@ struct UiThemeWindowChrome {
 std::optional< UiThemeTokens > activeUiThemeTokens();
 UiThemeTokens uiThemeTokensForThemeId(const QString &themeId);
 UiThemeTokens uiThemeTokensForThemeDefinition(const Mumble::ModernTheme::ThemeDefinition &theme);
+// Returns false for Auto and preserves all accent roles already declared by
+// the selected theme. Fixed and custom accent selections return true and
+// replace those roles with the requested override.
 bool applyUiThemeAccentOverride(UiThemeTokens &tokens, const QString &accentId, const QString &customAccent,
 								int customAccentStrength);
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha);

@@ -16,10 +16,19 @@
 
 class ModernSettingsController {
 public:
+	struct AppearancePreview {
+		QString theme;
+		QString density;
+		QString accent;
+		QString customAccent;
+		int customAccentStrength = 50;
+	};
+
 	struct ActionResult {
 		bool stateChanged = true;
 		bool closeDialog  = false;
 		std::optional< Settings > settingsToApply;
+		std::optional< AppearancePreview > appearanceToPreview;
 		bool accepted = false;
 		bool announceApply = true;
 		QString externalActionID;
@@ -49,6 +58,7 @@ private:
 	std::optional< float > m_voiceReplayPreviousPacketLoss;
 	std::optional< float > m_voiceReplayPreviousMaxPacketDelay;
 	bool m_runtimePreviewDiffersFromOriginal = false;
+	bool m_appearancePreviewActive = false;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;

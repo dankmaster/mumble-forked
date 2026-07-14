@@ -22,6 +22,7 @@ public:
 		std::optional< ModernConnectController::ConnectionRequest > connectionRequest;
 		std::optional< QList< FavoriteServer > > favoritesToSave;
 		std::optional< Settings > settingsToApply;
+		std::optional< ModernSettingsController::AppearancePreview > appearanceToPreview;
 		bool settingsAccepted = false;
 		bool announceSettingsApply = true;
 		bool openCertificateWizard = false;

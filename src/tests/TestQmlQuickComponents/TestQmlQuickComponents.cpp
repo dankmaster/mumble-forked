@@ -203,6 +203,29 @@ public:
 			m_activePage = payload.value(QStringLiteral("pageId")).toString();
 			++m_revision;
 			emit stateChanged();
+		} else if (id == QLatin1String("look.previewAppearance")) {
+			const QString fieldId = payload.value(QStringLiteral("fieldId")).toString();
+			if (!fieldId.isEmpty() && payload.contains(QStringLiteral("value"))) {
+				const QVariant value = payload.value(QStringLiteral("value"));
+				m_values.insert(fieldId, value);
+				for (int sectionIndex = 0; sectionIndex < m_sections.size(); ++sectionIndex) {
+					QVariantMap section = m_sections.at(sectionIndex).toMap();
+					QVariantList fields = section.value(QStringLiteral("fields")).toList();
+					for (int fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex) {
+						QVariantMap field = fields.at(fieldIndex).toMap();
+						if (field.value(QStringLiteral("id")).toString() == fieldId) {
+							field.insert(QStringLiteral("value"), value);
+							fields[fieldIndex] = field;
+							section.insert(QStringLiteral("fields"), fields);
+							m_sections[sectionIndex] = section;
+							break;
+						}
+					}
+				}
+				m_errors.remove(fieldId);
+				++m_revision;
+				emit stateChanged();
+			}
 		}
 		m_lastAction = id;
 		m_lastPayload = payload;

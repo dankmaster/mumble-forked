@@ -48,6 +48,16 @@ QtObject {
 	readonly property color selfCardBackground: rail
 	readonly property color selfCardHover: surfaceRaised
 	readonly property color selfCardBorder: divider
+	readonly property color previewCardBackground: surfaceRaised
+	readonly property color previewCardHover: surfaceHover
+	readonly property color previewCardBorder: surfaceBorder
+	readonly property color embedCanvas: mediaCanvas
+	readonly property color embedSurface: panel
+	readonly property color embedBorder: surfaceBorder
+	readonly property color embedHover: surfaceHover
+	readonly property color embedRevealSurface: strip
+	readonly property color embedSelection: selected
+	readonly property color embedOverlayBase: strip
 	readonly property color elevationShadow: withAlpha(mediaCanvas, 0.46)
 	readonly property color elevationHighlight: withAlpha(textStrong, 0.08)
 	readonly property color onAccent: contrastText(accent)

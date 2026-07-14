@@ -279,6 +279,24 @@ Dialog {
 		if (normalized === "danger" || normalized === "error") return Theme.danger
 		return Theme.accent
 	}
+	function isAppearancePreviewField(fieldId) {
+		const id = String(fieldId || "")
+		return id === "look.modernTheme"
+			|| id === "look.modernDensity"
+			|| id === "look.modernAccent"
+			|| id === "look.modernCustomAccent"
+			|| id === "look.modernCustomAccentStrength"
+	}
+	function updateFieldValue(fieldId, value) {
+		if (isAppearancePreviewField(fieldId)) {
+			dialogState.invokeAction("look.previewAppearance", {
+				"fieldId": String(fieldId),
+				"value": value
+			})
+			return
+		}
+		dialogState.updateField(fieldId, value)
+	}
 	function syncVisibility() {
 		const shouldBeVisible = dialogState.open && dialogState.kind !== "imageViewer"
 		if (shouldBeVisible && !visible) {
@@ -1511,7 +1529,7 @@ Dialog {
             text: field.label || ""
             checked: !!field.value
             enabled: field.enabled === undefined || field.enabled
-            onToggled: dialogState.updateField(field.id, checked)
+            onToggled: dialog.updateFieldValue(field.id, checked)
         }
     }
     Component {
@@ -1542,7 +1560,7 @@ Dialog {
                 onModelChanged: selectRoot.syncCurrentIndex()
 				onActivated: {
 					if (currentIndex >= 0 && optionEnabled(currentIndex))
-						dialogState.updateField(selectRoot.field.id, currentValue)
+						dialog.updateFieldValue(selectRoot.field.id, currentValue)
 				}
             }
 			Label {
@@ -1569,7 +1587,7 @@ Dialog {
                 to: numberRoot.field.maximum ?? numberRoot.field.max ?? 100000
                 value: Number(numberRoot.field.value || 0)
                 editable: true
-                onValueModified: dialogState.updateField(numberRoot.field.id, value)
+                onValueModified: dialog.updateFieldValue(numberRoot.field.id, value)
             }
         }
     }
@@ -1592,7 +1610,7 @@ Dialog {
                 echoMode: textRoot.field.type === "password" ? TextInput.Password : TextInput.Normal
 				onEditingFinished: {
 					if (text !== String(textRoot.field.value ?? ""))
-						dialogState.updateField(textRoot.field.id, text)
+						dialog.updateFieldValue(textRoot.field.id, text)
 				}
             }
         }
@@ -1615,7 +1633,7 @@ Dialog {
 					}
 					onEditingFinished: {
 						if (text !== String(pathRoot.field.value ?? ""))
-							dialogState.updateField(pathRoot.field.id, text)
+							dialog.updateFieldValue(pathRoot.field.id, text)
 					}
                 }
                 ModernButton {
@@ -1801,7 +1819,7 @@ Dialog {
 				}
 				function applyDraft() {
 					if (!isValidHex(draftColor)) return
-					dialogState.updateField(colorRoot.field.id, normalizedHex(draftColor))
+					dialog.updateFieldValue(colorRoot.field.id, normalizedHex(draftColor))
 					close()
 				}
 				onOpened: {
@@ -2284,7 +2302,7 @@ Dialog {
 						Accessible.name: modelData.label || String(modelData.value)
 						Accessible.description: modelData.source === "custom" ? qsTr("Custom theme") : qsTr("Built-in theme")
 						Accessible.checked: selected
-						onClicked: dialogState.updateField(themeGridRoot.field.id, modelData.value)
+						onClicked: dialog.updateFieldValue(themeGridRoot.field.id, modelData.value)
 						background: Rectangle {
 							radius: 9
 							color: themeCard.palette.shell || themeCard.palette.bg || Theme.shellBackground
@@ -2383,7 +2401,7 @@ Dialog {
 						Accessible.name: modelData.label || String(modelData.value)
 						Accessible.description: modelData.hint || ""
 						Accessible.checked: selected
-						onClicked: dialogState.updateField(accentGridRoot.field.id, modelData.value)
+						onClicked: dialog.updateFieldValue(accentGridRoot.field.id, modelData.value)
 						background: Rectangle {
 							radius: 9
 							color: accentCard.selected ? Theme.selected
@@ -2434,7 +2452,7 @@ Dialog {
                 wrapMode: TextEdit.Wrap
 				onActiveFocusChanged: {
 					if (!activeFocus && text !== String(textareaRoot.field.value ?? ""))
-						dialogState.updateField(textareaRoot.field.id, text)
+						dialog.updateFieldValue(textareaRoot.field.id, text)
 				}
             }
         }

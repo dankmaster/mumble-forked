@@ -20146,6 +20146,12 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	if (result.settingsToApply) {
 		applyModernSettings(*result.settingsToApply, result.settingsAccepted, result.announceSettingsApply);
 	}
+	if (result.appearanceToPreview && m_qmlShellHost) {
+		const ModernSettingsController::AppearancePreview &appearance = *result.appearanceToPreview;
+		m_qmlShellHost->themeController()->applyProductAppearance(
+			appearance.theme, appearance.density, appearance.accent,
+			appearance.customAccent, appearance.customAccentStrength);
+	}
 	if (result.connectionRequest) {
 		if (dialogID == QLatin1String("failedConnection") && !Global::get().s.bSuppressIdentity) {
 			Global::get().db->setPassword(result.connectionRequest->host, result.connectionRequest->port,

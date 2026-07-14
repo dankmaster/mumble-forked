@@ -379,6 +379,7 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 		result.stateChanged                                         = settingsResult.stateChanged;
 		result.closeDialog                                          = settingsResult.closeDialog;
 		result.settingsToApply                                      = settingsResult.settingsToApply;
+		result.appearanceToPreview                                  = settingsResult.appearanceToPreview;
 		result.settingsAccepted                                     = settingsResult.accepted;
 		result.announceSettingsApply                                = settingsResult.announceApply;
 		if (!settingsResult.externalActionID.isEmpty()) {

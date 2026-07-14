@@ -6,6 +6,8 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 
+#include <cmath>
+
 namespace {
 	QString normalizedDensityId(const QString &density) {
 		const QString normalized = density.trimmed().toLower();
@@ -24,6 +26,20 @@ namespace {
 
 	QString colorStateValue(const QColor &color) {
 		return color.alpha() < 255 ? color.name(QColor::HexArgb) : color.name(QColor::HexRgb);
+	}
+
+	qreal linearColorChannel(const qreal channel) {
+		return channel <= 0.04045 ? channel / 12.92 : std::pow((channel + 0.055) / 1.055, 2.4);
+	}
+
+	QColor contrastTextColor(const QColor &background) {
+		const qreal luminance = 0.2126 * linearColorChannel(background.redF())
+			+ 0.7152 * linearColorChannel(background.greenF())
+			+ 0.0722 * linearColorChannel(background.blueF());
+		constexpr qreal darkLuminance = 0.007;
+		const qreal darkContrast = (luminance + 0.05) / (darkLuminance + 0.05);
+		const qreal lightContrast = 1.05 / (luminance + 0.05);
+		return darkContrast >= lightContrast ? QColor(QStringLiteral("#10151c")) : QColor(Qt::white);
 	}
 }
 
@@ -114,6 +130,7 @@ void QmlThemeController::applyProductTokens(UiThemeTokens tokens, Mumble::Modern
 }
 
 QVariantMap QmlThemeController::state() const {
+	const QColor onAccent = contrastTextColor(m_accent);
 	QVariantMap effectiveTokens {
 		{ QStringLiteral("shellBackground"), colorStateValue(m_shellBackground) },
 		{ QStringLiteral("panel"), colorStateValue(m_panel) },
@@ -135,6 +152,40 @@ QVariantMap QmlThemeController::state() const {
 		{ QStringLiteral("success"), colorStateValue(m_success) },
 		{ QStringLiteral("warning"), colorStateValue(m_warning) },
 		{ QStringLiteral("focus"), colorStateValue(m_focus) },
+		{ QStringLiteral("chatCanvas"), colorStateValue(m_shellBackground) },
+		{ QStringLiteral("chatSurface"), colorStateValue(m_panel) },
+		{ QStringLiteral("chatIncomingSurface"), colorStateValue(m_panel) },
+		{ QStringLiteral("chatIncomingBorder"), colorStateValue(m_divider) },
+		{ QStringLiteral("chatHover"), colorStateValue(m_surfaceHover) },
+		{ QStringLiteral("chatOwnSurface"), colorStateValue(m_accentSubtle) },
+		{ QStringLiteral("chatOwnBorder"), colorStateValue(uiThemeColorWithAlpha(m_accent, 0.30)) },
+		{ QStringLiteral("chatMetadata"), colorStateValue(m_textMuted) },
+		{ QStringLiteral("chatReplySurface"), colorStateValue(m_strip) },
+		{ QStringLiteral("composerBackground"), colorStateValue(m_surfaceRaised) },
+		{ QStringLiteral("composerBorder"), colorStateValue(m_surfaceBorder) },
+		{ QStringLiteral("composerFocusBorder"), colorStateValue(m_focus) },
+		{ QStringLiteral("composerShadow"), colorStateValue(uiThemeColorWithAlpha(m_mediaCanvas, 0.28)) },
+		{ QStringLiteral("popupBackground"), colorStateValue(m_surfaceRaised) },
+		{ QStringLiteral("popupBorder"), colorStateValue(m_surfaceBorder) },
+		{ QStringLiteral("popupHover"), colorStateValue(m_surfaceHover) },
+		{ QStringLiteral("popupSelected"), colorStateValue(m_selected) },
+		{ QStringLiteral("selfCardBackground"), colorStateValue(m_rail) },
+		{ QStringLiteral("selfCardHover"), colorStateValue(m_surfaceRaised) },
+		{ QStringLiteral("selfCardBorder"), colorStateValue(m_divider) },
+		{ QStringLiteral("previewCardBackground"), colorStateValue(m_surfaceRaised) },
+		{ QStringLiteral("previewCardHover"), colorStateValue(m_surfaceHover) },
+		{ QStringLiteral("previewCardBorder"), colorStateValue(m_surfaceBorder) },
+		{ QStringLiteral("embedCanvas"), colorStateValue(m_mediaCanvas) },
+		{ QStringLiteral("embedSurface"), colorStateValue(m_panel) },
+		{ QStringLiteral("embedBorder"), colorStateValue(m_surfaceBorder) },
+		{ QStringLiteral("embedHover"), colorStateValue(m_surfaceHover) },
+		{ QStringLiteral("embedRevealSurface"), colorStateValue(m_strip) },
+		{ QStringLiteral("embedSelection"), colorStateValue(m_selected) },
+		{ QStringLiteral("embedOverlayBase"), colorStateValue(m_strip) },
+		{ QStringLiteral("elevationShadow"), colorStateValue(uiThemeColorWithAlpha(m_mediaCanvas, 0.46)) },
+		{ QStringLiteral("elevationHighlight"), colorStateValue(uiThemeColorWithAlpha(m_textStrong, 0.08)) },
+		{ QStringLiteral("onAccent"), colorStateValue(onAccent) },
+		{ QStringLiteral("textFaint"), colorStateValue(uiThemeColorWithAlpha(m_textMuted, 0.72)) },
 		{ QStringLiteral("shellRadius"), m_shellRadius },
 		{ QStringLiteral("innerRadius"), m_innerRadius },
 		{ QStringLiteral("spacing"), m_spacing }
@@ -148,7 +199,7 @@ QVariantMap QmlThemeController::state() const {
 	effectiveTokens.insert(QStringLiteral("--accent-rgb"),
 		QStringLiteral("%1, %2, %3").arg(m_accent.red()).arg(m_accent.green()).arg(m_accent.blue()));
 	effectiveTokens.insert(QStringLiteral("--surface-border"), colorStateValue(m_surfaceBorder));
-	effectiveTokens.insert(QStringLiteral("--on-accent"), colorStateValue(m_strip));
+	effectiveTokens.insert(QStringLiteral("--on-accent"), colorStateValue(onAccent));
 	return {
 		{ QStringLiteral("theme"), m_themeId },
 		{ QStringLiteral("themeId"), m_themeId },

@@ -104,7 +104,11 @@ void TestModernTheme::legacyCssRequiresExplicitCompatibilityMode() {
 
 void TestModernTheme::resolvesSharedAccentOverrides() {
 	using namespace Mumble::ModernTheme;
-	QVERIFY(!accentColorOverride(QStringLiteral("auto")).isValid());
+	QCOMPARE(automaticAccentId(), QStringLiteral("auto"));
+	QCOMPARE(normalizedAccentId(QStringLiteral(" AUTO ")), automaticAccentId());
+	QCOMPARE(normalizedAccentId(QStringLiteral("not-an-accent")), automaticAccentId());
+	QVERIFY(!accentColorOverride(automaticAccentId()).isValid());
+	QVERIFY(!accentColorOverride(automaticAccentId(), QStringLiteral("#123456")).isValid());
 	QCOMPARE(accentColorOverride(QStringLiteral("teal")), QColor(QStringLiteral("#5ec8b0")));
 	QCOMPARE(accentColorOverride(QStringLiteral("blue")), QColor(QStringLiteral("#73b7ff")));
 	QCOMPARE(accentColorOverride(QStringLiteral("violet")), QColor(QStringLiteral("#b59cff")));

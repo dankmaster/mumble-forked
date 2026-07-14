@@ -340,13 +340,31 @@ TestCase {
 		tryCompare(lightCard, "activeFocus", true)
 		compare(lightCard.background.border.width, 2)
 		lightCard.clicked()
+		compare(dialogState.lastAction, "look.previewAppearance")
+		compare(dialogState.lastPayload.fieldId, "look.modernTheme")
+		compare(String(dialogState.lastPayload.value), "light")
 		compare(String(dialogState.fieldValue("look.modernTheme")), "light")
-		verify(blueAccent.enabled)
-		blueAccent.forceActiveFocus()
-		tryCompare(blueAccent, "activeFocus", true)
-		compare(blueAccent.background.border.width, 2)
-		blueAccent.clicked()
+		tryVerify(function() {
+			const selectedLightCard = findChild(loader.item.contentItem, "dialogThemeOption_light")
+			const liveOverview = findChild(loader.item.contentItem, "appearanceThemeOverview")
+			return selectedLightCard !== null && selectedLightCard.Accessible.checked
+				&& liveOverview !== null && String(liveOverview.color).toLowerCase() === "#f7f9fc"
+		})
+		const liveBlueAccent = findChild(loader.item.contentItem, "dialogAccentOption_blue")
+		verify(liveBlueAccent !== null && liveBlueAccent.enabled)
+		liveBlueAccent.forceActiveFocus()
+		tryCompare(liveBlueAccent, "activeFocus", true)
+		compare(liveBlueAccent.background.border.width, 2)
+		liveBlueAccent.clicked()
+		compare(dialogState.lastAction, "look.previewAppearance")
+		compare(dialogState.lastPayload.fieldId, "look.modernAccent")
+		compare(String(dialogState.lastPayload.value), "blue")
 		compare(String(dialogState.fieldValue("look.modernAccent")), "blue")
+		tryVerify(function() {
+			const liveOverview = findChild(loader.item.contentItem, "appearanceThemeOverview")
+			return liveOverview !== null
+				&& String(liveOverview.border.color).toLowerCase() === "#73b7ff"
+		})
 	}
 
 	function test_special_editor_state_stays_live() {

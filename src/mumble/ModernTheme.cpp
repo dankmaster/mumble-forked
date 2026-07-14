@@ -292,20 +292,27 @@ bool isBuiltInThemeId(const QString &themeID) {
 	return builtIns.contains(themeID.trimmed().toLower());
 }
 
+QString automaticAccentId() {
+	return QStringLiteral("auto");
+}
+
 QString customAccentId() {
 	return QStringLiteral("custom");
 }
 
 QString normalizedAccentId(const QString &accentID) {
 	const QString normalized = accentID.trimmed().toLower();
-	return normalized == QLatin1String("auto") || normalized == customAccentId()
+	return normalized == automaticAccentId() || normalized == customAccentId()
 			   || fixedAccentColors().contains(normalized)
 			   ? normalized
-			   : QStringLiteral("auto");
+			   : automaticAccentId();
 }
 
 QColor accentColorOverride(const QString &accentID, const QString &customColor) {
 	const QString normalized = normalizedAccentId(accentID);
+	if (normalized == automaticAccentId()) {
+		return {};
+	}
 	if (normalized == customAccentId()) {
 		return QColor(normalizedCustomAccentColor(customColor));
 	}

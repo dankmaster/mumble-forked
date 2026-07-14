@@ -15,6 +15,8 @@ private slots:
 	void appliesVisualGateAppearance();
 	void exposesCompleteDistinctBuiltInThemes();
 	void appliesProductDensityAccentAndTypedState();
+	void autoAccentTracksThemeAndManualOverridesRemainStable();
+	void exposesSemanticPreviewAndEmbedTokens();
 	void mapsCustomFocusAppearanceAndLegacyFallback();
 	void exposesDarkMediaCanvasForBuiltInAndCustomThemes();
 	void fallsBackToNeutralMediaCanvas();
@@ -136,6 +138,97 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QCOMPARE(controller.accent(), QColor(QStringLiteral("#3366cc")));
 }
 
+void TestQmlThemeController::autoAccentTracksThemeAndManualOverridesRemainStable() {
+	QmlThemeController controller;
+
+	for (const QString &themeID : Mumble::ModernTheme::builtInThemeIds()) {
+		const UiThemeTokens themeTokens = uiThemeTokensForThemeId(themeID);
+		QVERIFY(controller.applyProductAppearance(
+			themeID, QStringLiteral("comfortable"), QStringLiteral("auto")));
+		QCOMPARE(controller.themeId(), themeID);
+		QCOMPARE(controller.accentId(), QStringLiteral("auto"));
+		QCOMPARE(controller.accent(), themeTokens.accent);
+		QCOMPARE(controller.accentHover(), themeTokens.accentHover);
+		QCOMPARE(controller.accentSubtle(), themeTokens.accentSubtle);
+		QCOMPARE(controller.focus(), themeTokens.focusAccent);
+	}
+
+	const QString firstTheme = QStringLiteral("nord");
+	const QString secondTheme = QStringLiteral("gruvbox");
+	const QColor firstThemeAccent = uiThemeTokensForThemeId(firstTheme).accent;
+	const QColor secondThemeAccent = uiThemeTokensForThemeId(secondTheme).accent;
+	QVERIFY(firstThemeAccent != secondThemeAccent);
+
+	QVERIFY(controller.applyProductAppearance(
+		firstTheme, QStringLiteral("comfortable"), QStringLiteral("auto")));
+	QCOMPARE(controller.accent(), firstThemeAccent);
+	QVERIFY(controller.applyProductAppearance(
+		secondTheme, QStringLiteral("comfortable"), QStringLiteral("auto")));
+	QCOMPARE(controller.accent(), secondThemeAccent);
+
+	const QColor fixedAccent = Mumble::ModernTheme::accentColorOverride(QStringLiteral("violet"));
+	QVERIFY(controller.applyProductAppearance(
+		firstTheme, QStringLiteral("comfortable"), QStringLiteral("violet")));
+	QCOMPARE(controller.accent(), fixedAccent);
+	QVERIFY(controller.applyProductAppearance(
+		secondTheme, QStringLiteral("comfortable"), QStringLiteral("violet")));
+	QCOMPARE(controller.accent(), fixedAccent);
+
+	const QColor customAccent(QStringLiteral("#3366cc"));
+	QVERIFY(controller.applyProductAppearance(firstTheme, QStringLiteral("comfortable"),
+		QStringLiteral("custom"), customAccent.name(), 75));
+	QCOMPARE(controller.accent(), customAccent);
+	QVERIFY(controller.applyProductAppearance(secondTheme, QStringLiteral("comfortable"),
+		QStringLiteral("custom"), customAccent.name(), 75));
+	QCOMPARE(controller.accent(), customAccent);
+}
+
+void TestQmlThemeController::exposesSemanticPreviewAndEmbedTokens() {
+	QmlThemeController controller;
+	QVERIFY(controller.applyProductAppearance(
+		QStringLiteral("nord"), QStringLiteral("comfortable"), QStringLiteral("rose")));
+
+	QVariantMap effectiveTokens =
+		controller.state().value(QStringLiteral("effectiveTokens")).toMap();
+	const auto colorValue = [](const QColor &color) {
+		return color.alpha() < 255 ? color.name(QColor::HexArgb) : color.name(QColor::HexRgb);
+	};
+	QCOMPARE(effectiveTokens.value(QStringLiteral("previewCardBackground")).toString(),
+		colorValue(controller.surfaceRaised()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("previewCardHover")).toString(),
+		colorValue(controller.surfaceHover()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("previewCardBorder")).toString(),
+		colorValue(controller.surfaceBorder()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedCanvas")).toString(),
+		colorValue(controller.mediaCanvas()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedSurface")).toString(),
+		colorValue(controller.panel()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedBorder")).toString(),
+		colorValue(controller.surfaceBorder()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedHover")).toString(),
+		colorValue(controller.surfaceHover()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedRevealSurface")).toString(),
+		colorValue(controller.strip()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedSelection")).toString(),
+		colorValue(controller.selected()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedOverlayBase")).toString(),
+		colorValue(controller.strip()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("onAccent")).toString(), QStringLiteral("#10151c"));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("--on-accent")).toString(),
+		effectiveTokens.value(QStringLiteral("onAccent")).toString());
+	QVERIFY(effectiveTokens.value(QStringLiteral("--on-accent")).toString()
+		!= colorValue(controller.strip()));
+
+	QVERIFY(controller.applyProductAppearance(QStringLiteral("gruvbox"), QStringLiteral("compact"),
+		QStringLiteral("custom"), QStringLiteral("#3366cc"), 75));
+	effectiveTokens = controller.state().value(QStringLiteral("effectiveTokens")).toMap();
+	QCOMPARE(effectiveTokens.value(QStringLiteral("onAccent")).toString(), QStringLiteral("#ffffff"));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("previewCardBackground")).toString(),
+		colorValue(controller.surfaceRaised()));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("embedSelection")).toString(),
+		colorValue(controller.selected()));
+}
+
 void TestQmlThemeController::exposesCompleteDistinctBuiltInThemes() {
 	QSet< QString > signatures;
 	const QStringList themeIDs = Mumble::ModernTheme::builtInThemeIds();
@@ -205,6 +298,16 @@ void TestQmlThemeController::mapsCustomFocusAppearanceAndLegacyFallback() {
 	QCOMPARE(controller.accent(), typedTokens.accent);
 	QCOMPARE(controller.focus(), typedTokens.focusAccent);
 	QCOMPARE(controller.selected(), typedTokens.accentSubtle);
+	const QVariantMap customEffectiveTokens =
+		controller.state().value(QStringLiteral("effectiveTokens")).toMap();
+	QCOMPARE(customEffectiveTokens.value(QStringLiteral("previewCardBackground")).toString(),
+		typedTokens.surface0.name(QColor::HexRgb));
+	QCOMPARE(customEffectiveTokens.value(QStringLiteral("previewCardBorder")).toString(),
+		typedTokens.surface2.name(QColor::HexRgb));
+	QCOMPARE(customEffectiveTokens.value(QStringLiteral("embedSurface")).toString(),
+		typedTokens.base.name(QColor::HexRgb));
+	QCOMPARE(customEffectiveTokens.value(QStringLiteral("embedBorder")).toString(),
+		typedTokens.surface2.name(QColor::HexRgb));
 
 	for (const QString &accentID : { QStringLiteral("teal"), QStringLiteral("blue"),
 			 QStringLiteral("violet"), QStringLiteral("amber"), QStringLiteral("rose") }) {

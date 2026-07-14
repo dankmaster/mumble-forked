@@ -140,9 +140,9 @@ Rectangle {
 
 	implicitHeight: content.implicitHeight + Theme.space4 * 2
 	radius: Theme.innerRadius
-	color: cardHover.hovered ? Theme.surfaceHover : Theme.surfaceRaised
+	color: cardHover.hovered ? Theme.previewCardHover : Theme.previewCardBackground
 	border.color: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
-		: cardHover.hovered ? root.withAlpha(providerDetails.providerAccent, 0.72) : Theme.surfaceBorder
+		: cardHover.hovered ? root.withAlpha(providerDetails.providerAccent, 0.72) : Theme.previewCardBorder
 	border.width: 1
 	Behavior on color { ColorAnimation { duration: root.animationDuration } }
 	Behavior on border.color { ColorAnimation { duration: root.animationDuration } }
@@ -536,7 +536,7 @@ Rectangle {
 			Layout.preferredHeight: root.hasEmbedPreview ? root.embedMediaHeight : 0
 			visible: root.hasEmbedPreview
 			radius: Theme.innerRadius
-			color: Theme.panel
+			color: Theme.embedSurface
 			gradient: Gradient {
 				GradientStop {
 					position: 0.0
@@ -544,7 +544,7 @@ Rectangle {
 				}
 				GradientStop {
 					position: 1.0
-					color: root.withAlpha(Theme.panel, 0.98)
+					color: root.withAlpha(Theme.embedSurface, 0.98)
 				}
 			}
 			border.color: root.withAlpha(providerDetails.providerAccent, 0.46)
@@ -573,7 +573,7 @@ Rectangle {
 			Rectangle {
 				anchors.fill: parent
 				visible: !root.inlinePlaybackActive
-				color: root.withAlpha(Theme.strip, embedPoster.status === Image.Ready ? 0.30 : 0.18)
+				color: root.withAlpha(Theme.embedOverlayBase, embedPoster.status === Image.Ready ? 0.30 : 0.18)
 			}
 
 			Button {
@@ -587,7 +587,7 @@ Rectangle {
 				focusPolicy: Qt.NoFocus
 				background: Rectangle {
 					color: embedPosterAction.down ? root.withAlpha(Theme.accentSubtle, 0.28)
-						: embedPosterAction.hovered ? root.withAlpha(Theme.surfaceHover, 0.18)
+						: embedPosterAction.hovered ? root.withAlpha(Theme.embedHover, 0.18)
 						: "transparent"
 					radius: Theme.innerRadius
 					Behavior on color {
@@ -776,7 +776,7 @@ Rectangle {
 				anchors.fill: parent
 				z: 2
 				visible: !root.inlinePlaybackActive && root.mediaRequiresReveal
-				color: Theme.strip
+				color: Theme.embedRevealSurface
 				ColumnLayout {
 					anchors.centerIn: parent
 					width: Math.min(parent.width - Theme.space4 * 2, 360)
@@ -841,7 +841,7 @@ Rectangle {
 					|| root.previewState !== "ready" || root.hasExternalImage
 					|| root.hasDirectMedia || root.hasExternalMedia)
 				radius: Theme.innerRadius
-				color: Theme.panel
+				color: Theme.embedSurface
                 clip: true
 
                 Image {
@@ -896,9 +896,9 @@ Rectangle {
 						visible: compactMediaAction.visible && (!compactMediaAction.enabled
 							|| compactMediaAction.hovered || compactMediaAction.down)
 						color: !compactMediaAction.enabled
-							? root.withAlpha(Theme.panel, 0.48)
-							: compactMediaAction.down ? Theme.accentSubtle
-							: root.withAlpha(Theme.surfaceHover, 0.34)
+							? root.withAlpha(Theme.embedSurface, 0.48)
+							: compactMediaAction.down ? Theme.embedSelection
+							: root.withAlpha(Theme.embedHover, 0.34)
 						radius: Theme.innerRadius
 						Behavior on color {
 							ColorAnimation { duration: root.animationDuration }
@@ -923,9 +923,9 @@ Rectangle {
 					objectName: "previewCompactRevealSurface"
 					anchors.fill: parent
 					visible: root.mediaRequiresReveal && !root.expanded
-					color: Theme.strip
+					color: Theme.embedRevealSurface
 					radius: parent.radius
-					border.color: Theme.surfaceBorder
+					border.color: Theme.embedBorder
 
 					Button {
 						id: compactRevealButton
@@ -936,8 +936,8 @@ Rectangle {
 						background: Rectangle {
 							objectName: "previewCompactRevealState"
 							visible: compactRevealButton.hovered || compactRevealButton.down
-							color: compactRevealButton.down ? Theme.accentSubtle
-								: root.withAlpha(Theme.surfaceHover, 0.42)
+							color: compactRevealButton.down ? Theme.embedSelection
+								: root.withAlpha(Theme.embedHover, 0.42)
 							radius: Theme.innerRadius
 							Behavior on color {
 								ColorAnimation { duration: root.animationDuration }
@@ -1072,9 +1072,9 @@ Rectangle {
                                     || root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
             visible: Layout.preferredHeight > 0
-            color: Theme.panel
+			color: Theme.embedSurface
 			radius: 0
-			border.color: Theme.surfaceBorder
+			border.color: Theme.embedBorder
 			border.width: 1
             clip: true
 
@@ -1132,7 +1132,7 @@ Rectangle {
 				anchors.fill: parent
 				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal && (root.hasDirectMedia || root.hasExternalMedia
 					|| root.hasExternalImage || root.mediaItems.length > 1)
-				color: root.withAlpha(Theme.strip, 0.38)
+				color: root.withAlpha(Theme.embedOverlayBase, 0.38)
 			}
 			Label {
 				objectName: "previewExpandedError"
@@ -1177,9 +1177,9 @@ Rectangle {
 					visible: expandedMediaAction.visible && (!expandedMediaAction.enabled
 						|| expandedMediaAction.hovered || expandedMediaAction.down)
 					color: !expandedMediaAction.enabled
-						? root.withAlpha(Theme.panel, 0.48)
-						: expandedMediaAction.down ? Theme.accentSubtle
-						: root.withAlpha(Theme.surfaceHover, 0.34)
+						? root.withAlpha(Theme.embedSurface, 0.48)
+						: expandedMediaAction.down ? Theme.embedSelection
+						: root.withAlpha(Theme.embedHover, 0.34)
 					radius: Theme.innerRadius
 					Behavior on color {
 						ColorAnimation { duration: root.animationDuration }
@@ -1233,9 +1233,9 @@ Rectangle {
 				objectName: "previewExpandedRevealSurface"
 				anchors.fill: parent
 				visible: !root.inlinePlaybackActive && root.mediaRequiresReveal
-				color: Theme.strip
+				color: Theme.embedRevealSurface
 				radius: parent.radius
-				border.color: Theme.surfaceBorder
+				border.color: Theme.embedBorder
 
 				ColumnLayout {
 					anchors.centerIn: parent
@@ -1294,11 +1294,11 @@ Rectangle {
 				hoverEnabled: true
 				background: Rectangle {
 					radius: Theme.space1
-					color: steamMediaThumbnail.down ? Theme.selected
-						: steamMediaThumbnail.hovered ? Theme.surfaceHover : Theme.panel
+					color: steamMediaThumbnail.down ? Theme.embedSelection
+						: steamMediaThumbnail.hovered ? Theme.embedHover : Theme.embedSurface
 					border.width: steamMediaThumbnail.index === root.selectedMediaIndex ? 2 : 1
 					border.color: steamMediaThumbnail.index === root.selectedMediaIndex
-						? providerDetails.providerAccent : Theme.surfaceBorder
+						? providerDetails.providerAccent : Theme.embedBorder
 				}
 				contentItem: Item {
 					clip: true
@@ -1327,7 +1327,7 @@ Rectangle {
 						width: steamPlayLabel.implicitWidth + Theme.space1 * 2
 						height: Theme.space4
 						radius: height / 2
-						color: root.withAlpha(Theme.strip, 0.88)
+						color: root.withAlpha(Theme.embedOverlayBase, 0.88)
 						Label {
 							id: steamPlayLabel
 							anchors.centerIn: parent

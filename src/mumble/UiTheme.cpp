@@ -366,6 +366,12 @@ namespace {
 bool applyUiThemeAccentOverride(UiThemeTokens &tokens, const QString &accentId, const QString &customAccent,
 								const int customAccentStrength) {
 	const QString normalizedAccent = Mumble::ModernTheme::normalizedAccentId(accentId);
+	// Auto is deliberately a mode rather than a color. The caller supplies a
+	// freshly resolved built-in or custom theme, so leaving every accent role
+	// untouched makes Auto follow that theme's declared defaults.
+	if (normalizedAccent == Mumble::ModernTheme::automaticAccentId()) {
+		return false;
+	}
 	const QColor accent = Mumble::ModernTheme::accentColorOverride(normalizedAccent, customAccent);
 	if (!accent.isValid()) {
 		return false;

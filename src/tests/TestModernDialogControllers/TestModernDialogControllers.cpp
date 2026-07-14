@@ -39,6 +39,8 @@ class TestModernDialogControllers : public QObject {
 private slots:
 	void connectControllerSelectsAndSavesFavorites();
 	void settingsControllerForcesModernAndAppliesDraft();
+	void settingsAppearanceAutoAccentTracksDraftTheme();
+	void settingsAppearancePreviewCommitsAndRollsBack();
 	void settingsControllerEditsShortcutDataAndTargets();
 	void settingsControllerClampsAudioSetupPayload();
 	void settingsControllerRollsBackVoiceReplayPreview();
@@ -378,7 +380,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(audioOutputResult.settingsToApply.has_value());
 	QVERIFY(qFuzzyCompare(audioOutputResult.settingsToApply->fOtherVolume, 0.75f));
 	QCOMPARE(audioOutputResult.settingsToApply->bPositionalAudio, true);
-	QCOMPARE(audioOutputResult.accepted, false);
+	QCOMPARE(audioOutputResult.accepted, true);
 	QCOMPARE(audioOutputResult.closeDialog, false);
 
 	Settings audioInputSettings = settings;
@@ -549,6 +551,197 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(qFuzzyCompare(audioInputResult.settingsToApply->fVADmax, 0.70f));
 	QCOMPARE(audioInputResult.accepted, true);
 	QCOMPARE(audioInputResult.closeDialog, true);
+}
+
+void TestModernDialogControllers::settingsAppearanceAutoAccentTracksDraftTheme() {
+	const auto findField = [](const QVariantMap &state, const QString &fieldID) {
+		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("id")).toString() == fieldID) {
+					return field;
+				}
+			}
+		}
+		return QVariantMap();
+	};
+	const auto findOption = [](const QVariantMap &field, const QString &optionID) {
+		for (const QVariant &optionValue : field.value(QStringLiteral("options")).toList()) {
+			const QVariantMap option = optionValue.toMap();
+			if (option.value(QStringLiteral("value")).toString() == optionID) {
+				return option;
+			}
+		}
+		return QVariantMap();
+	};
+	const auto appearanceColors = [&findField, &findOption](const QVariantMap &state, const QString &themeID) {
+		const QVariantMap themeField = findField(state, QStringLiteral("look.modernTheme"));
+		const QVariantMap accentField = findField(state, QStringLiteral("look.modernAccent"));
+		const QVariantMap themeOption = findOption(themeField, themeID);
+		const QVariantMap automaticOption = findOption(accentField, QStringLiteral("auto"));
+		return qMakePair(
+			QColor(themeOption.value(QStringLiteral("preview")).toMap().value(QStringLiteral("accent")).toString()),
+			QColor(automaticOption.value(QStringLiteral("swatch")).toMap().value(QStringLiteral("accent")).toString()));
+	};
+
+	Settings settings;
+	settings.qsModernShellTheme = QStringLiteral("nord");
+	settings.qsModernShellAccent = QStringLiteral("auto");
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("look"));
+
+	QPair< QColor, QColor > colors = appearanceColors(controller.state(), QStringLiteral("nord"));
+	QVERIFY(colors.first.isValid());
+	QCOMPARE(colors.second, colors.first);
+	const QColor nordAccent = colors.second;
+
+	controller.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("gruvbox"));
+	colors = appearanceColors(controller.state(), QStringLiteral("gruvbox"));
+	QVERIFY(colors.first.isValid());
+	QCOMPARE(colors.second, colors.first);
+	QVERIFY(colors.second != nordAccent);
+	QCOMPARE(controller.draft().qsModernShellAccent, QStringLiteral("auto"));
+
+	controller.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("violet"));
+	controller.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));
+	QVariantMap state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("uiTweaks")).toMap().value(QStringLiteral("accent")).toString(),
+		QStringLiteral("violet"));
+	const QVariantMap violetOption = findOption(
+		findField(state, QStringLiteral("look.modernAccent")), QStringLiteral("violet"));
+	QCOMPARE(QColor(violetOption.value(QStringLiteral("swatch")).toMap()
+		.value(QStringLiteral("accent")).toString()),
+		Mumble::ModernTheme::accentColorOverride(QStringLiteral("violet")));
+
+	controller.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("custom"));
+	controller.updateField(QStringLiteral("look.modernCustomAccent"), QStringLiteral("#3366cc"));
+	controller.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("dark"));
+	state = controller.state();
+	const QVariantMap customDetails = state.value(QStringLiteral("uiTweaks")).toMap()
+		.value(QStringLiteral("accentDetails")).toMap();
+	QCOMPARE(customDetails.value(QStringLiteral("id")).toString(), QStringLiteral("custom"));
+	QCOMPARE(customDetails.value(QStringLiteral("color")).toString(), QStringLiteral("#3366cc"));
+}
+
+void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack() {
+	Settings settings;
+	settings.qsModernShellTheme = QStringLiteral("dark");
+	settings.qsModernShellDensity = QStringLiteral("comfortable");
+	settings.qsModernShellAccent = QStringLiteral("auto");
+	settings.qsModernShellCustomAccent = QStringLiteral("#112233");
+	settings.iModernShellCustomAccentStrength = 40;
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("look"));
+	const QVariantList actions = controller.state().value(QStringLiteral("actions")).toList();
+	QCOMPARE(actions.size(), 3);
+	QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("apply"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Apply"));
+	QCOMPARE(actions.at(2).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("ok"));
+	const auto previewField = [&controller](const QString &fieldID, const QVariant &value) {
+		return controller.invokeAction(QStringLiteral("look.previewAppearance"),
+			QVariantMap { { QStringLiteral("fieldId"), fieldID }, { QStringLiteral("value"), value } });
+	};
+
+	ModernSettingsController::ActionResult preview =
+		previewField(QStringLiteral("look.modernTheme"), QStringLiteral("nord"));
+	QVERIFY(preview.stateChanged);
+	QVERIFY(!preview.settingsToApply.has_value());
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->theme, QStringLiteral("nord"));
+	QCOMPARE(preview.appearanceToPreview->density, QStringLiteral("comfortable"));
+	QCOMPARE(preview.appearanceToPreview->accent, QStringLiteral("auto"));
+	QCOMPARE(controller.draft().qsModernShellTheme, QStringLiteral("nord"));
+
+	preview = previewField(QStringLiteral("look.modernAccent"), QStringLiteral("custom"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->theme, QStringLiteral("nord"));
+	QCOMPARE(preview.appearanceToPreview->accent, QStringLiteral("custom"));
+	QCOMPARE(preview.appearanceToPreview->customAccent, QStringLiteral("#112233"));
+	QCOMPARE(preview.appearanceToPreview->customAccentStrength, 40);
+
+	preview = previewField(QStringLiteral("look.modernCustomAccent"), QStringLiteral("#3366cc"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->customAccent, QStringLiteral("#3366cc"));
+	preview = previewField(QStringLiteral("look.modernCustomAccentStrength"), 75);
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->customAccentStrength, 75);
+	preview = previewField(QStringLiteral("look.modernTheme"), QStringLiteral("gruvbox"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->theme, QStringLiteral("gruvbox"));
+	QCOMPARE(preview.appearanceToPreview->accent, QStringLiteral("custom"));
+	QCOMPARE(preview.appearanceToPreview->customAccent, QStringLiteral("#3366cc"));
+
+	ModernSettingsController::ActionResult apply =
+		controller.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(apply.settingsToApply.has_value());
+	QVERIFY(!apply.appearanceToPreview.has_value());
+	QVERIFY(apply.accepted);
+	QVERIFY(!apply.closeDialog);
+	QCOMPARE(apply.settingsToApply->qsModernShellTheme, QStringLiteral("gruvbox"));
+	QCOMPARE(apply.settingsToApply->qsModernShellAccent, QStringLiteral("custom"));
+	QCOMPARE(apply.settingsToApply->qsModernShellCustomAccent, QStringLiteral("#3366cc"));
+	QCOMPARE(apply.settingsToApply->iModernShellCustomAccentStrength, 75);
+
+	preview = previewField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->theme, QStringLiteral("latte"));
+	ModernSettingsController::ActionResult cancel =
+		controller.invokeAction(QStringLiteral("cancel"), QVariantMap());
+	QVERIFY(cancel.closeDialog);
+	QVERIFY(!cancel.settingsToApply.has_value());
+	QVERIFY(cancel.appearanceToPreview.has_value());
+	QCOMPARE(cancel.appearanceToPreview->theme, QStringLiteral("gruvbox"));
+	QCOMPARE(cancel.appearanceToPreview->accent, QStringLiteral("custom"));
+	QCOMPARE(cancel.appearanceToPreview->customAccent, QStringLiteral("#3366cc"));
+	QCOMPARE(cancel.appearanceToPreview->customAccentStrength, 75);
+
+	controller.open(*apply.settingsToApply, QStringLiteral("look"));
+	preview = previewField(QStringLiteral("look.modernDensity"), QStringLiteral("compact"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->density, QStringLiteral("compact"));
+	const ModernSettingsController::ActionResult reset =
+		controller.invokeAction(QStringLiteral("reset"), QVariantMap());
+	QVERIFY(reset.appearanceToPreview.has_value());
+	QCOMPARE(reset.appearanceToPreview->theme, QStringLiteral("gruvbox"));
+	QCOMPARE(reset.appearanceToPreview->density, QStringLiteral("comfortable"));
+	QCOMPARE(controller.draft().qsModernShellDensity, QStringLiteral("comfortable"));
+
+	preview = previewField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	const ModernSettingsController::ActionResult done =
+		controller.invokeAction(QStringLiteral("ok"), QVariantMap());
+	QVERIFY(done.settingsToApply.has_value());
+	QVERIFY(done.accepted);
+	QVERIFY(done.closeDialog);
+	QVERIFY(!done.appearanceToPreview.has_value());
+	QCOMPARE(done.settingsToApply->qsModernShellTheme, QStringLiteral("latte"));
+	QCOMPARE(done.settingsToApply->qsModernShellDensity, QStringLiteral("comfortable"));
+	QCOMPARE(done.settingsToApply->qsModernShellAccent, QStringLiteral("custom"));
+	QCOMPARE(done.settingsToApply->qsModernShellCustomAccent, QStringLiteral("#3366cc"));
+
+	const ModernSettingsController::ActionResult ignored =
+		previewField(QStringLiteral("network.autoReconnect"), true);
+	QVERIFY(!ignored.stateChanged);
+	QVERIFY(!ignored.appearanceToPreview.has_value());
+
+	ModernDialogController dialogController;
+	dialogController.openSettings(settings, QStringLiteral("look"));
+	ModernDialogController::ActionResult dialogPreview = dialogController.invokeAction(
+		QStringLiteral("settings"), QStringLiteral("look.previewAppearance"),
+		QVariantMap { { QStringLiteral("fieldId"), QStringLiteral("look.modernTheme") },
+			{ QStringLiteral("value"), QStringLiteral("nord") } });
+	QVERIFY(dialogPreview.appearanceToPreview.has_value());
+	QCOMPARE(dialogPreview.appearanceToPreview->theme, QStringLiteral("nord"));
+	QCOMPARE(dialogController.activeDialogID(), QStringLiteral("settings"));
+	const ModernDialogController::ActionResult dialogCancel = dialogController.invokeAction(
+		QStringLiteral("settings"), QStringLiteral("cancel"), QVariantMap());
+	QVERIFY(dialogCancel.closeDialog);
+	QVERIFY(dialogCancel.appearanceToPreview.has_value());
+	QCOMPARE(dialogCancel.appearanceToPreview->theme, QStringLiteral("dark"));
+	QCOMPARE(dialogCancel.appearanceToPreview->accent, QStringLiteral("auto"));
+	QVERIFY(dialogController.activeDialogID().isEmpty());
 }
 
 void TestModernDialogControllers::settingsControllerEditsShortcutDataAndTargets() {
