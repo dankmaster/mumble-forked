@@ -899,29 +899,32 @@ endif()
 if(deepfilternet)
 	set(DEEPFILTERNET_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deepfilternet")
 	set(DEEPFILTERNET_MODEL_OUTPUT_DIR "${CMAKE_BINARY_DIR}/deepfilternet")
-	file(GLOB DEEPFILTERNET_MODEL_FILES
-		"${DEEPFILTERNET_MODEL_SOURCE_DIR}/*.tar.gz"
+	set(DEEPFILTERNET_MODEL_FILES
+		"${DEEPFILTERNET_MODEL_SOURCE_DIR}/DeepFilterNet3_onnx.tar.gz"
+		"${DEEPFILTERNET_MODEL_SOURCE_DIR}/DeepFilterNet3_ll_onnx.tar.gz"
 	)
-	file(GLOB DEEPFILTERNET_PACKAGED_RUNTIME_FILES
-		"${DEEPFILTERNET_MODEL_SOURCE_DIR}/*.dll"
-	)
+	set(DEEPFILTERNET_PACKAGED_RUNTIME_FILES "")
+	set(DEEPFILTERNET_PACKAGED_RUNTIME_FILE "${DEEPFILTERNET_MODEL_SOURCE_DIR}/deepfilter.dll")
+	if(EXISTS "${DEEPFILTERNET_PACKAGED_RUNTIME_FILE}")
+		list(APPEND DEEPFILTERNET_PACKAGED_RUNTIME_FILES "${DEEPFILTERNET_PACKAGED_RUNTIME_FILE}")
+	endif()
 	set(DEEPFILTERNET_RUNTIME_FILES ${DEEPFILTERNET_PACKAGED_RUNTIME_FILES})
 	set(DEEPFILTERNET_RUNTIME_ENABLED OFF)
 
-	if(DEEPFILTERNET_MODEL_FILES)
-		foreach(DEEPFILTERNET_MODEL_FILE ${DEEPFILTERNET_MODEL_FILES})
-			add_custom_command(TARGET mumble POST_BUILD
-				COMMAND ${CMAKE_COMMAND} -E make_directory "${DEEPFILTERNET_MODEL_OUTPUT_DIR}"
-				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEEPFILTERNET_MODEL_FILE}" "${DEEPFILTERNET_MODEL_OUTPUT_DIR}"
-			)
-		endforeach()
+	foreach(DEEPFILTERNET_MODEL_FILE ${DEEPFILTERNET_MODEL_FILES})
+		if(NOT EXISTS "${DEEPFILTERNET_MODEL_FILE}")
+			message(FATAL_ERROR "DeepFilterNet model archive missing: ${DEEPFILTERNET_MODEL_FILE}")
+		endif()
 
-		install(FILES ${DEEPFILTERNET_MODEL_FILES} DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}/deepfilternet" COMPONENT mumble_client)
-	else()
-		message(WARNING "DeepFilterNet support was enabled but no model archives were found in ${DEEPFILTERNET_MODEL_SOURCE_DIR}")
-	endif()
+		add_custom_command(TARGET mumble POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${DEEPFILTERNET_MODEL_OUTPUT_DIR}"
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEEPFILTERNET_MODEL_FILE}" "${DEEPFILTERNET_MODEL_OUTPUT_DIR}"
+		)
+	endforeach()
 
-	if(WIN32)
+	install(FILES ${DEEPFILTERNET_MODEL_FILES} DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}/deepfilternet" COMPONENT mumble_client)
+
+	if(WIN32 AND NOT DEEPFILTERNET_PACKAGED_RUNTIME_FILES)
 		add_subdirectory("${3RDPARTY_DIR}/deepfilternet-libdf-build" "${CMAKE_CURRENT_BINARY_DIR}/deepfilternet-libdf" EXCLUDE_FROM_ALL)
 		if(DEEPFILTERNET_RUNTIME_ENABLED AND NOT "${DEEPFILTERNET_RUNTIME_FILE}" STREQUAL "")
 			list(APPEND DEEPFILTERNET_RUNTIME_FILES "${DEEPFILTERNET_RUNTIME_FILE}")
@@ -943,9 +946,10 @@ if(deepfilternet)
 			)
 		endforeach()
 
-		if(DEEPFILTERNET_PACKAGED_RUNTIME_FILES)
-			install(FILES ${DEEPFILTERNET_PACKAGED_RUNTIME_FILES} DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}" COMPONENT mumble_client)
-		endif()
+		# Install both explicitly packaged runtimes and the generated Cargo runtime.
+		# The latter is a build byproduct and therefore did not exist at configure
+		# time, but the mumble -> deepfilternet_runtime dependency creates it first.
+		install(FILES ${DEEPFILTERNET_RUNTIME_FILES} DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}" COMPONENT mumble_client)
 	else()
 		message(WARNING "DeepFilterNet support was enabled but no runtime DLLs were found or configured.")
 	endif()
