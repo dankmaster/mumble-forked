@@ -43,11 +43,24 @@ TestCase {
 	function exposedProviderGroupingCount(item) {
 		let count = item.visible && !item.Accessible.ignored
 			&& item.Accessible.role === Accessible.Grouping ? 1 : 0
-		const cardNames = ["providerSteamCard", "providerGoogleSearch", "providerFlashbackThread"]
+		const cardNames = ["providerSteamCard", "providerGoogleSearch", "providerFlashbackThread",
+			"providerXPost", "providerInstagramPost", "providerGitHubRepository",
+			"providerTwitchStream"]
 		for (let index = 0; index < cardNames.length; ++index) {
 			const card = findChild(item, cardNames[index])
 			if (card && card.visible && !card.Accessible.ignored
 					&& card.Accessible.role === Accessible.Grouping)
+				++count
+		}
+		return count
+	}
+
+	function instantiatedSocialCardCount(item) {
+		const cardNames = ["providerXPost", "providerInstagramPost", "providerGitHubRepository",
+			"providerTwitchStream"]
+		let count = 0
+		for (let index = 0; index < cardNames.length; ++index) {
+			if (findChild(item, cardNames[index]) !== null)
 				++count
 		}
 		return count
@@ -189,10 +202,11 @@ TestCase {
 		compare(item.presentation, "identity")
 		compare(item.identityTitle, "Mumble Design")
 		verify(item.identitySubtitle.indexOf("@mumbledesign") >= 0)
-		compare(findChild(item, "providerIdentityMarkLabel").text, "X")
-		verify(findChild(item, "providerVerifiedBadge").visible)
-		compare(findChild(item, "providerIdentityBody").text, "Frame pacing is a feature.")
-		compare(findChild(item, "providerStat_0").presentation, "metric")
+		verify(findChild(item, "providerXPost").visible)
+		verify(findChild(item, "providerXVerified").visible)
+		compare(findChild(item, "providerXPostText").text, "Frame pacing is a feature.")
+		compare(findChild(item, "providerIdentity").visible, false)
+		compare(findChild(item, "providerDetailsStats").visible, false)
 
 		item = setFixture({
 			"provider": "instagram", "previewKind": "instagram",
@@ -202,10 +216,10 @@ TestCase {
 		}, "instagram", true)
 		compare(item.presentation, "identity")
 		compare(item.identityTitle, "Mumble Quick")
-		compare(findChild(item, "providerIdentityMarkLabel").text, "IG")
-		compare(findChild(item, "providerIdentityBody").text,
+		verify(findChild(item, "providerInstagramPost").visible)
+		compare(findChild(item, "providerInstagramCaption").text,
 			"Stable scrolling with bounded delegates.")
-		compare(findChild(item, "providerStat_0").presentation, "metric")
+		compare(findChild(item, "providerIdentity").visible, false)
 
 		item = setFixture({
 			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
@@ -214,9 +228,10 @@ TestCase {
 			"twitchViewerCount": 1842
 		}, "video", true, "twitch")
 		compare(item.presentation, "identity")
-		compare(findChild(item, "providerIdentityMarkLabel").text, "TV")
-		verify(findChild(item, "providerVerifiedBadge").visible)
-		compare(findChild(item, "providerStat_0").presentation, "metric")
+		verify(findChild(item, "providerTwitchStream").visible)
+		compare(findChild(item, "providerTwitchState").visible, true)
+		compare(findChild(item, "providerTwitchAudience").text, "1.8K watching now")
+		compare(findChild(item, "providerIdentity").visible, false)
 	}
 
 	function test_stable_kind_and_provider_routing_precedes_field_heuristics() {
@@ -365,17 +380,76 @@ TestCase {
 		compare(findChild(item, "providerFlashbackLinkContext").text, "Thread")
 		verify(card.Accessible.description.indexOf("..") < 0)
 
-		item = setFixture({
-			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
-			"twitchChannel": "mumbledev", "twitchPlaybackNote": "Starts after interaction."
-		}, "twitch", true, "twitch", "Mumble Dev", "mumbledev.", "Starts after interaction.")
-		verify(item.Accessible.description.indexOf("..") < 0)
+		const socialFixtures = [
+			{ "kind": "x", "name": "providerXPost", "metadata": {
+				"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
+				"xLikeCount": 42 }, "description": "Frame pacing." },
+			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
+				"provider": "instagram", "instagramDisplayName": "Mumble Quick",
+				"instagramHandle": "@mumblequick", "instagramCaption": "Stable delegates." } },
+			{ "kind": "github", "name": "providerGitHubRepository", "metadata": {
+				"provider": "github", "githubFullName": "dankmaster/mumble",
+				"githubStars": 4200, "githubLanguage": "C++" } },
+			{ "kind": "twitch", "name": "providerTwitchStream", "metadata": {
+				"provider": "twitch", "twitchDisplayName": "Mumble Dev",
+				"twitchChannel": "mumbledev", "twitchPlaybackNote": "Starts after interaction." } }
+		]
+		for (let index = 0; index < socialFixtures.length; ++index) {
+			const fixture = socialFixtures[index]
+			item = setFixture(fixture.metadata, fixture.kind, true,
+				fixture.metadata.provider || "", "", "", fixture.description || "")
+			card = findChild(item, fixture.name)
+			compare(item.Accessible.ignored, true)
+			compare(card.visible, true)
+			compare(card.Accessible.ignored, false)
+			verify(card.Accessible.role === Accessible.Grouping
+				|| card.Accessible.role === Accessible.AlertMessage)
+			compare(exposedProviderGroupingCount(item), 1)
+			verify(card.Accessible.name.length > 0)
+			verify(card.Accessible.description.indexOf("..") < 0)
+		}
 
 		item = setFixture({
 			"previewKind": "product", "productPrice": "1 499 kr"
 		}, "product", true, "", "Generic product")
 		compare(item.Accessible.ignored, false)
 		compare(exposedProviderGroupingCount(item), 1)
+	}
+
+	function test_social_provider_presentations_are_lazy_and_mutually_exclusive() {
+		let item = setFixture({ "previewKind": "product", "productPrice": "10 kr" },
+			"product", false)
+		const loader = findChild(item, "providerSocialPresentationLoader")
+		verify(loader !== null)
+		compare(loader.active, false)
+		compare(loader.item, null)
+		compare(instantiatedSocialCardCount(item), 0)
+
+		const fixtures = [
+			{ "kind": "x", "name": "providerXPost", "metadata": {
+				"previewKind": "x", "xHandle": "@mumble" } },
+			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
+				"provider": "instagram", "instagramHandle": "@mumble" } },
+			{ "kind": "github", "name": "providerGitHubRepository", "metadata": {
+				"provider": "github", "githubRepo": "mumble" } },
+			{ "kind": "twitch", "name": "providerTwitchStream", "metadata": {
+				"provider": "twitch", "twitchChannel": "mumbledev" } }
+		]
+		for (let index = 0; index < fixtures.length; ++index) {
+			const fixture = fixtures[index]
+			item = setFixture(fixture.metadata, fixture.kind, false,
+				fixture.metadata.provider || "")
+			tryCompare(loader, "active", true)
+			tryVerify(function() { return loader.item !== null })
+			compare(loader.item.objectName, fixture.name)
+			compare(instantiatedSocialCardCount(item), 1)
+		}
+
+		item = setFixture({ "previewKind": "audio", "audioProgram": "Morning" },
+			"audio", false)
+		tryCompare(loader, "active", false)
+		tryCompare(loader, "item", null)
+		compare(instantiatedSocialCardCount(item), 0)
 	}
 
 	function test_google_search_preserves_result_identity_and_active_tab() {
@@ -560,7 +634,9 @@ TestCase {
 		compare(item.identityTitle, "Mumble Dev")
 		compare(item.allChips[0].tone, "success")
 		compare(item.allChips.length, 1)
-		verify(findChild(item, "providerIdentity") !== null)
+		compare(findChild(item, "providerIdentity").visible, false)
+		verify(findChild(item, "providerTwitchStream").visible)
+		compare(findChild(item, "providerTwitchNote").visible, false)
 
 		item.metadata = {
 			"provider": "twitch", "twitchChannel": "mumbledev", "twitchLiveState": "unavailable",
@@ -605,6 +681,74 @@ TestCase {
 		compare(item.variant, "twitch")
 		compare(item.allChips.length, 1)
 		compare(item.allChips[0].text, "Live")
+	}
+
+	function test_social_provider_cards_have_distinct_compact_and_expanded_hierarchy() {
+		detailsLoader.width = 680
+		let item = setFixture({
+			"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
+			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
+			"xRepostCount": 12000, "xQuoteCount": 420, "xLikeCount": 362000,
+			"xViewCount": 8100000, "xBookmarkCount": 9000
+		}, "x", false, "", "", "", "Frame pacing is a product feature.")
+		let card = findChild(item, "providerXPost")
+		verify(card.visible)
+		compare(findChild(item, "providerXDisplayName").text, "Mumble Design")
+		verify(findChild(item, "providerXByline").text.indexOf("Mumble Design") < 0)
+		verify(findChild(item, "providerXMetric_2") !== null)
+		compare(findChild(item, "providerXMetric_3"), null)
+		item.expanded = true
+		tryVerify(function() { return findChild(item, "providerXMetric_5") !== null })
+
+		item = setFixture({
+			"provider": "instagram", "instagramDisplayName": "Mumble Quick",
+			"instagramHandle": "@mumblequick", "instagramCreatedAt": "18:30",
+			"instagramCaption": "A native caption with stable delegate reuse.",
+			"instagramMediaKind": "reel", "instagramLikeCount": 18420,
+			"instagramCommentCount": 318
+		}, "instagram", false)
+		card = findChild(item, "providerInstagramPost")
+		verify(card.visible)
+		compare(findChild(item, "providerInstagramDisplayName").text, "Mumble Quick")
+		verify(findChild(item, "providerInstagramByline").text.indexOf("Mumble Quick") < 0)
+		compare(findChild(item, "providerInstagramCaption").textFormat, Text.PlainText)
+		compare(findChild(item, "providerInstagramExpandedMeta").visible, false)
+		item.expanded = true
+		tryCompare(findChild(item, "providerInstagramExpandedMeta"), "visible", true)
+
+		item = setFixture({
+			"provider": "github", "githubFullName": "dankmaster/mumble",
+			"githubOwnerLogin": "dankmaster", "githubDescription": "Native voice client.",
+			"githubLanguage": "C++", "githubLicense": "BSD-3-Clause",
+			"githubStars": 4200, "githubForks": 318, "githubOpenIssues": 27,
+			"githubDefaultBranch": "master", "githubPushedAt": "18:00",
+			"githubTopics": ["qml", "voice"], "githubLatestReleaseTag": "v2.0"
+		}, "github", false)
+		card = findChild(item, "providerGitHubRepository")
+		verify(card.visible)
+		compare(findChild(item, "providerGitHubRepoName").text, "dankmaster/mumble")
+		verify(item.identitySubtitle.indexOf("dankmaster") < 0)
+		compare(findChild(item, "providerGitHubTopics").visible, false)
+		compare(findChild(item, "providerGitHubRelease").visible, false)
+		item.expanded = true
+		tryCompare(findChild(item, "providerGitHubTopics"), "visible", true)
+		tryCompare(findChild(item, "providerGitHubRelease"), "visible", true)
+
+		item = setFixture({
+			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
+			"twitchChannel": "mumbledev", "twitchLiveState": "live", "twitchBadge": "Live",
+			"twitchGame": "Software Development", "twitchViewerCount": 1842,
+			"twitchEmbedMode": "live-player", "twitchPlaybackNote": "Starts after interaction."
+		}, "twitch", false)
+		card = findChild(item, "providerTwitchStream")
+		verify(card.visible)
+		compare(findChild(item, "providerTwitchDisplayName").text, "Mumble Dev")
+		verify(findChild(item, "providerTwitchByline").text.indexOf("Mumble Dev") < 0)
+		compare(findChild(item, "providerTwitchPlayback").visible, false)
+		compare(findChild(item, "providerTwitchNote").visible, false)
+		item.expanded = true
+		tryCompare(findChild(item, "providerTwitchPlayback"), "visible", true)
+		tryCompare(findChild(item, "providerTwitchNote"), "visible", true)
 	}
 
 	function test_github_release_summary_actions_and_flashback_context() {
@@ -690,7 +834,7 @@ TestCase {
 		let item = setFixture({
 			"provider": "github", "previewKind": "github", "githubRepo": "mumble",
 			"githubLatestReleaseLoading": true
-		}, "link", false)
+		}, "link", true)
 		let releaseCard = findChild(item, "providerGitHubRelease")
 		verify(releaseCard.visible)
 		compare(releaseCard.Accessible.description, "Checking for the latest release")
@@ -704,7 +848,7 @@ TestCase {
 		item = setFixture({
 			"provider": "github", "previewKind": "github", "githubRepo": "mumble",
 			"githubLatestReleaseMissing": true
-		}, "link", false)
+		}, "link", true)
 		releaseCard = findChild(item, "providerGitHubRelease")
 		compare(releaseCard.Accessible.description, "No published release found")
 
@@ -741,7 +885,7 @@ TestCase {
 			"instagramCaption": "<b>Native identity stays plain text.</b>" }, "link", false)
 		compare(item.variant, "instagram")
 		compare(item.identityTitle, "Mumble Design")
-		compare(findChild(item, "providerIdentityBody").textFormat, Text.PlainText)
+		compare(findChild(item, "providerInstagramCaption").textFormat, Text.PlainText)
 		compare(item.bodyText, "<b>Native identity stays plain text.</b>")
 	}
 

@@ -32,8 +32,14 @@ FocusScope {
 	readonly property bool steamPresentation: variant === "game" && providerToken === "steam"
 	readonly property bool googlePresentation: variant === "googleSearch"
 	readonly property bool flashbackPresentation: variant === "forum" && providerToken === "flashback"
+	readonly property bool xPresentation: variant === "x"
+	readonly property bool instagramPresentation: variant === "instagram"
+	readonly property bool githubPresentation: variant === "github"
+	readonly property bool twitchPresentation: variant === "twitch"
+	readonly property bool socialBespokePresentation: xPresentation || instagramPresentation
+		|| githubPresentation || twitchPresentation
 	readonly property bool bespokeSemanticOwner: steamPresentation || googlePresentation
-		|| flashbackPresentation
+		|| flashbackPresentation || socialBespokePresentation
 	readonly property string flashbackAuthorAvatarSource: safeManagedImageSource(firstValue([
 		"forumPostAuthorAvatarUrl"
 	]))
@@ -71,6 +77,7 @@ FocusScope {
 	readonly property var contextPosts: buildContextPosts()
 	readonly property var sparklinePoints: buildSparklinePoints()
 	readonly property var releaseInfo: buildReleaseInfo()
+	readonly property var githubTopics: buildGithubTopics()
 	readonly property int collapsedStatCount: compactLayout ? 2 : 3
 	readonly property int collapsedChipCount: 4
 	readonly property bool releaseCanExpand: releaseInfo.notes.length > 0
@@ -83,7 +90,14 @@ FocusScope {
 		|| identitySubtitle.length > 0 || bodyText.length > 0 || releaseInfo.hasSummary
 	readonly property bool canExpand: allStats.length > collapsedStatCount
 		|| allChips.length > collapsedChipCount || contextPosts.length > 0
-		|| releaseCanExpand
+		|| releaseCanExpand || socialCanExpand
+	readonly property bool socialCanExpand: xPresentation
+		? allStats.length > 3 || contextPosts.length > 0
+		: instagramPresentation ? allStats.length > 2
+		: githubPresentation ? allStats.length > 3 || githubTopics.length > 0
+			|| releaseInfo.hasSummary || (metadata
+				&& (metadata.githubArchived === true || metadata.githubFork === true))
+		: twitchPresentation ? allStats.length > 2 || bodyText.length > 0 : false
 	readonly property bool ownsDescription: bodyText.length > 0
 	readonly property string steamReviewSummary: safeText(firstValue([
 		"steamReviewSummary", "gameStoreRating"
@@ -208,7 +222,8 @@ FocusScope {
 			"vehicleProvider", "articlePublisher", "audioProvider", "marketplaceProvider"]), 128)
 		const names = {
 			"youtube": "YouTube", "spotify": "Spotify", "tiktok": "TikTok",
-			"instagram": "Instagram", "twitch": "Twitch", "google": "Google",
+			"x": "X", "instagram": "Instagram", "github": "GitHub",
+			"twitch": "Twitch", "google": "Google",
 			"steam": "Steam", "yahoofinance": "Yahoo Finance", "blocket": "Blocket",
 			"tradera": "Tradera", "bytbil": "Bytbil", "bilweb": "Bilweb",
 			"booli": "Booli", "hemnet": "Hemnet", "flashback": "Flashback",
@@ -227,7 +242,8 @@ FocusScope {
 	function buildProviderAccent() {
 		const colors = {
 			"youtube": "#ff5a5f", "spotify": "#1ed760", "tiktok": "#25f4ee",
-			"instagram": "#e45aa5", "twitch": "#a970ff", "google": "#4285f4",
+			"x": "#8fa3b8", "instagram": "#e45aa5", "github": "#8fa3b8",
+			"twitch": "#a970ff", "google": "#4285f4",
 			"steam": "#66c0f4", "yahoofinance": "#78d6a3", "blocket": "#ff6b61",
 			"tradera": "#ffd64c", "bytbil": "#f4c95d", "bilweb": "#f4c95d",
 			"booli": "#72d7a3", "hemnet": "#72d7a3", "flashback": "#f2c36e",
@@ -237,7 +253,7 @@ FocusScope {
 			"gp": "#62b3ff", "svt": "#ff5a5f", "aftonbladet": "#ff5a5f",
 			"omni": "#ffd447", "expressen": "#71b8ff", "dn": "#e7edf3"
 		}
-		return colors[providerToken] || Theme.accent
+		return colors[providerToken] || colors[variant] || Theme.accent
 	}
 
 	function buildProviderStateLabel() {
@@ -456,8 +472,12 @@ FocusScope {
 			return [handle !== identityTitle ? handle : "", createdAt]
 				.filter(function(value) { return value.length > 0 }).join(" · ")
 		}
-		if (variant === "twitch")
-			return joinedValue(["twitchChannel", "twitchGame"], " · ")
+		if (variant === "twitch") {
+			const channel = safeText(firstValue(["twitchChannel"]), 128)
+			const game = safeText(firstValue(["twitchGame"]), 256)
+			return [channel !== identityTitle ? channel : "", game]
+				.filter(function(value) { return value.length > 0 }).join(" · ")
+		}
 		if (variant === "instagram") {
 			const handle = safeText(firstValue(["instagramHandle"]), 128)
 			const createdAt = safeText(firstValue(["instagramCreatedAt"]), 128)
@@ -465,7 +485,7 @@ FocusScope {
 				.filter(function(value) { return value.length > 0 }).join(" · ")
 		}
 		if (variant === "github")
-			return joinedValue(["githubOwnerLogin", "githubLanguage"], " · ")
+			return joinedValue(["githubLanguage", "githubLicense"], " · ")
 		if (variant === "audio") {
 			const provider = safeText(firstValue(["audioProvider", "providerName"]), 256)
 			const published = safeText(firstValue(["articlePublishedAt"]), 128)
@@ -646,6 +666,28 @@ FocusScope {
 			"assetCount": assetCount,
 			"downloadCount": downloadCount
 		}
+	}
+
+	function buildGithubTopics() {
+		if (variant !== "github" || !metadata || !Array.isArray(metadata.githubTopics))
+			return []
+		const result = []
+		for (let index = 0; index < metadata.githubTopics.length && result.length < 8; ++index) {
+			const topic = safeText(metadata.githubTopics[index], 64)
+			if (topic.length > 0 && result.indexOf(topic) < 0)
+				result.push(topic)
+		}
+		return result
+	}
+
+	function githubExpandedMeta() {
+		const parts = [safeText(firstValue(["githubDefaultBranch"]), 128),
+			safeText(firstValue(["githubPushedAt"]), 128)]
+		if (metadata && metadata.githubArchived === true)
+			parts.push(qsTr("Archived"))
+		if (metadata && metadata.githubFork === true)
+			parts.push(qsTr("Fork"))
+		return parts.filter(function(value) { return value.length > 0 }).join(" · ")
 	}
 
 	function buildPrimaryValue() {
@@ -991,6 +1033,37 @@ FocusScope {
 		const reply = safeText(firstValue(["forumPostExcerpt", "forumFirstPostExcerpt"]), 1024)
 			|| bodyText
 		return joinAccessibleSentences([identitySubtitle, author, quote, reply])
+	}
+
+	function socialAccessibleSummary() {
+		const parts = [identitySubtitle]
+		if (variant !== "twitch" || expanded)
+			parts.push(bodyText)
+		if (variant === "x") {
+			const limit = expanded ? 6 : 3
+			for (let index = 0; index < allStats.length && index < limit; ++index)
+				parts.push(allStats[index].label + ": " + allStats[index].value)
+		} else if (variant === "instagram") {
+			if (hasValue("instagramLikeCount"))
+				parts.push(qsTr("Likes: %1").arg(countLabel(firstValue(["instagramLikeCount"]))))
+			if (hasValue("instagramCommentCount"))
+				parts.push(qsTr("Comments: %1").arg(countLabel(firstValue(["instagramCommentCount"]))))
+			if (expanded && hasValue("instagramMediaKind"))
+				parts.push(qsTr("Media: %1").arg(safeText(firstValue(["instagramMediaKind"]), 64)))
+		} else if (variant === "github") {
+			for (let index = 0; index < allStats.length && index < 3; ++index)
+				parts.push(allStats[index].label + ": " + allStats[index].value)
+			if (expanded)
+				parts.push(githubExpandedMeta())
+		} else if (variant === "twitch") {
+			if (hasValue("twitchViewerCount"))
+				parts.push(qsTr("Viewers: %1").arg(countLabel(firstValue(["twitchViewerCount"]))))
+			if (expanded && hasAny(["twitchEmbedMode", "twitchKind"]))
+				parts.push(qsTr("Playback: %1").arg(safeText(firstValue([
+					"twitchEmbedMode", "twitchKind"
+				]), 128)))
+		}
+		return joinAccessibleSentences(parts)
 	}
 
 	ColumnLayout {
@@ -1690,6 +1763,592 @@ FocusScope {
 			}
 		}
 
+		Component {
+			id: xCardComponent
+			Rectangle {
+			id: xCard
+			objectName: "providerXPost"
+			implicitHeight: xLayout.implicitHeight + Theme.space3 * 2
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: Theme.surfaceBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("X post")
+			Accessible.description: root.socialAccessibleSummary()
+
+			ColumnLayout {
+				id: xLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space3
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						Layout.preferredWidth: 38
+						Layout.preferredHeight: 38
+						radius: width / 2
+						color: Theme.textStrong
+						Label {
+							anchors.centerIn: parent
+							text: "X"
+							textFormat: Text.PlainText
+							color: Theme.contrastText(parent.color)
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							objectName: "providerXDisplayName"
+							Layout.fillWidth: true
+							text: root.identityTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontLabel
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerXByline"
+							Layout.fillWidth: true
+							text: root.identitySubtitle
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					Rectangle {
+						objectName: "providerXVerified"
+						Layout.preferredWidth: 18
+						Layout.preferredHeight: 18
+						visible: root.metadata && root.metadata.xVerified === true
+						radius: width / 2
+						color: root.providerAccent
+						Label {
+							anchors.centerIn: parent
+							text: "✓"
+							textFormat: Text.PlainText
+							color: Theme.contrastText(parent.color)
+							font.pixelSize: 11
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerXPostText"
+					Layout.fillWidth: true
+					visible: root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontTitle
+					lineHeight: 1.25
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 8 : 4
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Flow {
+					id: xMetrics
+					objectName: "providerXMetrics"
+					Layout.fillWidth: true
+					Layout.preferredHeight: implicitHeight
+					spacing: Theme.space3
+					Repeater {
+						model: root.allStats.slice(0, root.expanded ? 6 : 3)
+						delegate: Label {
+							required property var modelData
+							required property int index
+							objectName: "providerXMetric_" + index
+							text: modelData.value + " " + modelData.label
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+			}
+			}
+		}
+
+		Component {
+			id: instagramCardComponent
+			Rectangle {
+			id: instagramCard
+			objectName: "providerInstagramPost"
+			implicitHeight: instagramLayout.implicitHeight + Theme.space3 * 2
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: root.providerAccentBorder
+			clip: true
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("Instagram post")
+			Accessible.description: root.socialAccessibleSummary()
+
+			Rectangle {
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				height: 3
+				gradient: Gradient {
+					orientation: Gradient.Horizontal
+					GradientStop { position: 0; color: "#f9ce34" }
+					GradientStop { position: 0.5; color: "#ee2a7b" }
+					GradientStop { position: 1; color: "#6228d7" }
+				}
+			}
+
+			ColumnLayout {
+				id: instagramLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				anchors.topMargin: Theme.space3 + 3
+				spacing: Theme.space3
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						Layout.preferredWidth: 42
+						Layout.preferredHeight: 42
+						radius: width / 2
+						color: root.providerAccentSubtle
+						border.color: root.providerAccentBorder
+						Label {
+							anchors.centerIn: parent
+							text: "IG"
+							textFormat: Text.PlainText
+							color: root.providerAccent
+							font.pixelSize: Theme.fontLabel
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							objectName: "providerInstagramDisplayName"
+							Layout.fillWidth: true
+							text: root.identityTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontLabel
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerInstagramByline"
+							Layout.fillWidth: true
+							text: root.identitySubtitle
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					Label {
+						objectName: "providerInstagramBrand"
+						text: "Instagram"
+						textFormat: Text.PlainText
+						color: root.providerAccent
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						font.capitalization: Font.AllUppercase
+						Accessible.ignored: true
+					}
+				}
+
+				Label {
+					objectName: "providerInstagramCaption"
+					Layout.fillWidth: true
+					visible: root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					lineHeight: 1.3
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 8 : 3
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				RowLayout {
+					objectName: "providerInstagramEngagement"
+					Layout.fillWidth: true
+					visible: root.hasAny(["instagramLikeCount", "instagramCommentCount"])
+					spacing: Theme.space4
+					Label {
+						objectName: "providerInstagramLikes"
+						visible: root.hasValue("instagramLikeCount")
+						text: qsTr("%1 likes").arg(root.countLabel(root.firstValue(["instagramLikeCount"])))
+						textFormat: Text.PlainText
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						Accessible.ignored: true
+					}
+					Label {
+						objectName: "providerInstagramComments"
+						visible: root.hasValue("instagramCommentCount")
+						text: qsTr("%1 comments").arg(root.countLabel(root.firstValue(["instagramCommentCount"])))
+						textFormat: Text.PlainText
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						Accessible.ignored: true
+					}
+					Item { Layout.fillWidth: true }
+				}
+
+				Label {
+					objectName: "providerInstagramExpandedMeta"
+					Layout.fillWidth: true
+					visible: root.expanded && root.hasValue("instagramMediaKind")
+					text: qsTr("Media: %1").arg(root.safeText(root.firstValue(["instagramMediaKind"]), 64))
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					Accessible.ignored: true
+				}
+			}
+			}
+		}
+
+		Component {
+			id: githubCardComponent
+			Rectangle {
+			id: githubCard
+			objectName: "providerGitHubRepository"
+			implicitHeight: githubLayout.implicitHeight + Theme.space3 * 2
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: Theme.surfaceBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("GitHub repository")
+			Accessible.description: root.socialAccessibleSummary()
+
+			ColumnLayout {
+				id: githubLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space3
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						Layout.preferredWidth: 34
+						Layout.preferredHeight: 34
+						radius: Theme.innerRadius
+						color: Theme.surfaceRaised
+						border.color: Theme.surfaceBorder
+						Label {
+							anchors.centerIn: parent
+							text: "GH"
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							text: "GitHub"
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerGitHubRepoName"
+							Layout.fillWidth: true
+							text: root.identityTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					Rectangle {
+						Layout.preferredWidth: githubVisibility.implicitWidth + Theme.space2 * 2
+						Layout.preferredHeight: 24
+						radius: height / 2
+						color: "transparent"
+						border.color: root.metadata && root.metadata.githubPrivate === true
+							? root.withAlpha(Theme.warning, 0.6) : Theme.surfaceBorder
+						Label {
+							id: githubVisibility
+							anchors.centerIn: parent
+							text: root.metadata && root.metadata.githubPrivate === true
+								? qsTr("Private") : qsTr("Public")
+							textFormat: Text.PlainText
+							color: root.metadata && root.metadata.githubPrivate === true
+								? Theme.warning : Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerGitHubDescription"
+					Layout.fillWidth: true
+					visible: root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					lineHeight: 1.25
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 6 : 2
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Flow {
+					objectName: "providerGitHubMetrics"
+					Layout.fillWidth: true
+					Layout.preferredHeight: implicitHeight
+					spacing: Theme.space3
+					Repeater {
+						model: root.allStats.slice(0, 3)
+						delegate: Label {
+							required property var modelData
+							required property int index
+							objectName: "providerGitHubMetric_" + index
+							text: modelData.value + " " + modelData.label
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerGitHubExpandedMeta"
+					Layout.fillWidth: true
+					visible: root.expanded && text.length > 0
+					text: root.githubExpandedMeta()
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					wrapMode: Text.Wrap
+					Accessible.ignored: true
+				}
+
+				Flow {
+					objectName: "providerGitHubTopics"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					visible: root.expanded && root.githubTopics.length > 0
+					spacing: Theme.space1
+					Repeater {
+						model: root.githubTopics
+						delegate: Rectangle {
+							required property var modelData
+							required property int index
+							objectName: "providerGitHubTopic_" + index
+							width: githubTopicLabel.implicitWidth + Theme.space2 * 2
+							height: 24
+							radius: height / 2
+							color: root.providerAccentSubtle
+							border.color: root.providerAccentBorder
+							Label {
+								id: githubTopicLabel
+								anchors.centerIn: parent
+								text: root.safeText(parent.modelData, 64)
+								textFormat: Text.PlainText
+								color: Theme.textMain
+								font.pixelSize: Theme.fontCaption
+								Accessible.ignored: true
+							}
+							Accessible.ignored: true
+						}
+					}
+				}
+			}
+			}
+		}
+
+		Component {
+			id: twitchCardComponent
+			Rectangle {
+			id: twitchCard
+			objectName: "providerTwitchStream"
+			implicitHeight: twitchLayout.implicitHeight + Theme.space3 * 2
+			radius: Theme.innerRadius
+			color: root.providerErrorText.length > 0
+				? root.withAlpha(Theme.danger, 0.08) : root.providerAccentSubtle
+			border.color: root.providerErrorText.length > 0
+				? root.withAlpha(Theme.danger, 0.6) : root.providerAccentBorder
+			Accessible.role: root.providerErrorText.length > 0
+				? Accessible.AlertMessage : Accessible.Grouping
+			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("Twitch stream")
+			Accessible.description: root.socialAccessibleSummary()
+
+			Rectangle {
+				anchors.left: parent.left
+				anchors.top: parent.top
+				anchors.bottom: parent.bottom
+				width: 4
+				color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+			}
+
+			ColumnLayout {
+				id: twitchLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				anchors.leftMargin: Theme.space3 + 4
+				spacing: Theme.space2
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						Layout.preferredWidth: 36
+						Layout.preferredHeight: 36
+						radius: Theme.innerRadius
+						color: root.providerAccent
+						Label {
+							anchors.centerIn: parent
+							text: "TV"
+							textFormat: Text.PlainText
+							color: Theme.contrastText(parent.color)
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							objectName: "providerTwitchDisplayName"
+							Layout.fillWidth: true
+							text: root.identityTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerTwitchByline"
+							Layout.fillWidth: true
+							text: root.identitySubtitle
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					Rectangle {
+						objectName: "providerTwitchState"
+						Layout.preferredWidth: twitchStateText.implicitWidth + Theme.space2 * 2
+						Layout.preferredHeight: 24
+						visible: root.providerStateLabel.length > 0
+						radius: height / 2
+						color: root.withAlpha(root.providerStateColor, 0.15)
+						border.color: root.withAlpha(root.providerStateColor, 0.55)
+						Label {
+							id: twitchStateText
+							anchors.centerIn: parent
+							text: root.providerStateLabel
+							textFormat: Text.PlainText
+							color: root.providerStateColor
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerTwitchAudience"
+					Layout.fillWidth: true
+					visible: root.hasValue("twitchViewerCount")
+					text: qsTr("%1 watching now").arg(root.countLabel(root.firstValue(["twitchViewerCount"])))
+					textFormat: Text.PlainText
+					color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+					font.pixelSize: Theme.fontLabel
+					font.bold: true
+					Accessible.ignored: true
+				}
+
+				Label {
+					objectName: "providerTwitchPlayback"
+					Layout.fillWidth: true
+					visible: root.expanded && root.hasAny(["twitchEmbedMode", "twitchKind"])
+					text: qsTr("Playback: %1").arg(root.safeText(root.firstValue([
+						"twitchEmbedMode", "twitchKind"
+					]), 128))
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					Accessible.ignored: true
+				}
+
+				Label {
+					objectName: "providerTwitchNote"
+					Layout.fillWidth: true
+					visible: root.expanded && root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: root.providerErrorText.length > 0 ? Theme.danger : Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					wrapMode: Text.Wrap
+					maximumLineCount: 5
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+			}
+			}
+		}
+
+		Loader {
+			id: socialPresentationLoader
+			objectName: "providerSocialPresentationLoader"
+			Layout.fillWidth: true
+			Layout.preferredHeight: item ? item.implicitHeight : 0
+			active: root.socialBespokePresentation
+			sourceComponent: root.xPresentation ? xCardComponent
+				: root.instagramPresentation ? instagramCardComponent
+				: root.githubPresentation ? githubCardComponent
+				: root.twitchPresentation ? twitchCardComponent : null
+		}
+
 		ColumnLayout {
 			id: summaryBlock
 			objectName: "providerSummary"
@@ -1825,6 +2484,7 @@ FocusScope {
 			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: !root.financeLayout && !root.commerceLayout
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.socialBespokePresentation
 				&& (root.identityTitle.length > 0
 				|| root.identitySubtitle.length > 0 || root.bodyText.length > 0)
 			radius: Theme.innerRadius
@@ -2058,6 +2718,7 @@ FocusScope {
 			Layout.preferredHeight: statsFlow.visible ? statsFlow.implicitHeight : 0
 			visible: root.visibleStats.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.socialBespokePresentation
 			columns: root.statColumnCount(width)
 			columnSpacing: Theme.space2
 			rowSpacing: Theme.space2
@@ -2144,6 +2805,7 @@ FocusScope {
 			Layout.preferredHeight: chipFlow.visible ? chipFlow.implicitHeight : 0
 			visible: root.visibleChips.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.socialBespokePresentation
 			spacing: Theme.space1
 
 			Repeater {
@@ -2193,13 +2855,14 @@ FocusScope {
 			objectName: "providerGitHubRelease"
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? releaseLayout.implicitHeight + Theme.space3 * 2 : 0
-			visible: root.releaseInfo.hasSummary
+			visible: root.releaseInfo.hasSummary && (!root.githubPresentation || root.expanded)
 			radius: Theme.innerRadius
 			color: Theme.panel
 			border.color: Theme.surfaceBorder
 			Accessible.role: Accessible.Grouping
 			Accessible.name: qsTr("Latest release")
 			Accessible.description: root.releaseAccessibleDescription()
+			Accessible.ignored: root.githubPresentation
 
 			ColumnLayout {
 				id: releaseLayout
@@ -2354,6 +3017,7 @@ FocusScope {
 						return value.length > 0
 					}).join(" ")
 					Accessible.description: contextCard.modelData.text
+					Accessible.ignored: root.socialBespokePresentation
 
 					ColumnLayout {
 						id: contextLayout
