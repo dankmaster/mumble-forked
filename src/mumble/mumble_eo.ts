@@ -423,6 +423,169 @@
     </message>
 </context>
 <context>
+    <name>ChanACL</name>
+    <message>
+        <source>This represents no privileges.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents total access to the channel, including the ability to change group and ACL information. This privilege implies most other privileges, but speaking, whispering, and persistent chat history access are controlled separately.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to traverse the channel. If a user is denied this privilege, he will be unable to access this channel and any sub-channels in any way, regardless of other permissions in the sub-channels.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to join the channel. If you have a hierarchical channel structure, you might want to give everyone Traverse, but restrict Enter in the root of your hierarchy.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to speak in a channel. Users without this privilege will be suppressed by the server (seen as muted), and will be unable to speak until they are unmuted by someone with the appropriate privileges.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to whisper to this channel from the outside. This works exactly like the &lt;i&gt;speak&lt;/i&gt; privilege, but applies to packets spoken with the Whisper key held down. This may be used to broadcast to a hierarchy of channels without linking.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to mute and deafen other users. Once muted, a user will stay muted until he is unmuted by another privileged user or reconnects to the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to move a user to another channel or kick him from the server. To actually move the user, either the moving user must have Move privileges in the destination channel, or the user must normally be allowed to enter the channel. Users with this privilege can move users into channels the target user normally wouldn&apos;t have permission to enter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to make sub-channels. The user making the sub-channel will be added to the admin group of the sub-channel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to make a temporary subchannel. The user making the sub-channel will be added to the admin group of the sub-channel. Temporary channels are not stored and disappear when the last user leaves.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to link channels. Users in linked channels hear each other, as long as the speaking user has the &lt;i&gt;speak&lt;/i&gt; privilege in the channel of the listener. You need the link privilege in both channels to create a link, but just in either channel to remove it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to write text messages to other users in this channel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to delete persistent text messages from this channel&apos;s history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to view persistent text message history in this channel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to forcibly remove users from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to permanently remove users from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to reset the comment or avatar of a user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to register and unregister users on the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to register oneself on the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This represents the permission to use the listen-feature allowing to listen to a channel without being in it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation type="unfinished">Neniu</translation>
+    </message>
+    <message>
+        <source>Write ACL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Traverse</source>
+        <translation type="unfinished">Trairi</translation>
+    </message>
+    <message>
+        <source>Enter</source>
+        <translation type="unfinished">Eniri</translation>
+    </message>
+    <message>
+        <source>Speak</source>
+        <translation type="unfinished">Paroli</translation>
+    </message>
+    <message>
+        <source>Whisper</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute/Deafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move</source>
+        <translation type="unfinished">Movi</translation>
+    </message>
+    <message>
+        <source>Make channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Make temporary</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text message</source>
+        <translation type="unfinished">Tekst-mesaĝo</translation>
+    </message>
+    <message>
+        <source>Delete text messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View chat history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kick</source>
+        <translation type="unfinished">Forpeli</translation>
+    </message>
+    <message>
+        <source>Ban</source>
+        <translation type="unfinished">Forbari</translation>
+    </message>
+    <message>
+        <source>Reset User Content</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register User</source>
+        <translation type="unfinished">Registri Uzanton</translation>
+    </message>
+    <message>
+        <source>Register Self</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listen</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ClientSessionController</name>
     <message>
         <source>Show welcome message</source>
@@ -654,6 +817,17 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
+    <name>GlobalShortcutMac</name>
+    <message>
+        <source>Mouse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keyboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>GlobalShortcutWin</name>
     <message>
         <source>Mouse</source>
@@ -715,6 +889,65 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Image zoom controls</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>InlineMediaPlayer</name>
+    <message>
+        <source>Inline media player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playing in chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pop out</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move playback to a separate movable window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browser</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Embedded media provider playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The inline media renderer stopped unexpectedly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This provider did not expose playback controls. Open it externally instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading inline media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading · %1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading media…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media playback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open externally</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6686,6 +6919,26 @@ Please describe what you were doing before the crash.</source>
         <source>The isolated provider player is starting…</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Minimize media player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore media player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximize media player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close media player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading media player</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MessageEventEditor</name>
@@ -6715,6 +6968,13 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Event</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ModernBusyIndicator</name>
+    <message>
+        <source>In progress</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8079,6 +8339,10 @@ Please describe what you were doing before the crash.</source>
     <name>QApplication</name>
     <message>
         <source>Mumble failed to restart itself. Please restart it manually.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble is currently connected to a server</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -14151,6 +14415,22 @@ Server feedback: fallback</source>
         <source>Ambiguous plugin transaction for %1 was left untouched to protect the installed file</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Unknown Version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default Device</source>
+        <translation type="unfinished">Implicita aparato</translation>
+    </message>
+    <message>
+        <source>Access to the microphone was denied. Please allow Mumble to use the microphone by changing the settings in System Preferences -&gt; Security &amp; Privacy -&gt; Privacy -&gt; Microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlDialog</name>
@@ -14352,6 +14632,25 @@ Server feedback: fallback</source>
         <source>Retry</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Fermi</translation>
+    </message>
+    <message>
+        <source>Loading dialog content</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading results</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>QmlDialogWindow</name>
+    <message>
+        <source>Mumble</source>
+        <translation type="unfinished">Mumble</translation>
+    </message>
 </context>
 <context>
     <name>QmlShellHost</name>
@@ -14404,6 +14703,18 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Press Enter to open the link.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading server image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image unavailable</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -14463,10 +14774,6 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Open</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Play</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -14531,6 +14838,26 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Show this preview until the card is reused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading link preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading preview media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playing here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open player</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -15313,6 +15640,69 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>Save server settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>StonksHeader</name>
+    <message>
+        <source>Pinned</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Popular</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks market data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks quotes unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Stonks ticker details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading ticker quotes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shows pinned, portfolio, and popular ticker quotes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>STONKS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks ticker quotes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quotes unavailable</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
