@@ -141,6 +141,54 @@ TestCase {
 		compare(dialogState.lastPayload.pageId, "general");
 	}
 
+	function test_settings_uses_icon_navigation_page_hierarchy_and_sticky_advanced_footer() {
+		dialogState.setSections([{ "title": "Input device", "fields": [
+			{ "id": "device", "type": "text", "label": "Device", "value": "Default" },
+			{ "id": "expert", "type": "text", "label": "Expert", "value": "Hidden", "advanced": true }
+		] }]);
+		dialogState.setSpecialState("settings", {
+			"id": "settings", "width": 920, "height": 700,
+			"pages": [
+				{ "id": "general", "label": "Audio Input" },
+				{ "id": "appearance", "label": "Appearance" }
+			],
+			"primaryActionId": "save"
+		});
+
+		const railHeading = findChild(loader.item.contentItem, "dialogPageRailHeading");
+		const pageHeading = findChild(loader.item.contentItem, "dialogSettingsPageHeading");
+		const pageTitle = findChild(loader.item.contentItem, "dialogSettingsPageTitle");
+		const pageCategory = findChild(loader.item.contentItem, "dialogSettingsPageCategory");
+		const inputIcon = findChild(loader.item.contentItem, "dialogPageIcon_general");
+		const appearanceIcon = findChild(loader.item.contentItem, "dialogPageIcon_appearance");
+		const headerAdvanced = findChild(loader.item.contentItem, "dialogAdvancedToggle");
+		const footerAdvanced = findChild(loader.item.contentItem, "dialogSettingsAdvancedFooter");
+		const footerToggle = findChild(loader.item.contentItem, "dialogSettingsAdvancedToggle");
+		tryVerify(function() {
+			return railHeading !== null && railHeading.visible
+				&& pageHeading !== null && pageHeading.visible
+				&& pageTitle !== null && pageTitle.text === "Audio Input"
+				&& inputIcon !== null && appearanceIcon !== null
+				&& footerAdvanced !== null && footerAdvanced.visible
+				&& footerToggle !== null && footerToggle.visible;
+		});
+		compare(railHeading.Accessible.role, Accessible.Heading);
+		compare(pageTitle.Accessible.role, Accessible.Heading);
+		compare(inputIcon.name, "microphone");
+		compare(appearanceIcon.name, "eye");
+		compare(pageCategory.text, "AUDIO");
+		verify(headerAdvanced !== null && !headerAdvanced.visible);
+		compare(footerToggle.tone, "secondary");
+
+		const footer = findChild(loader.item.contentItem, "dialogFooter");
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		verify(footer !== null && scroll !== null);
+		verify(scroll.y + scroll.height <= footer.y + 1,
+			"The Settings action and advanced controls must stay in the sticky footer");
+		mouseClick(footerToggle);
+		tryVerify(function() { return findChild(loader.item.contentItem, "dialogField_expert") !== null; });
+	}
+
 	function test_initial_focus_scrolls_long_content_clear_of_footer() {
 		const fields = [];
 		for (let index = 0; index < 18; ++index) {
@@ -331,8 +379,12 @@ TestCase {
 		});
 		const list = findChild(loader.item.contentItem, "connectFavoriteList");
 		const surface = findChild(loader.item.contentItem, "connectFavoriteSurface");
+		const connectEyebrow = findChild(loader.item.contentItem, "dialogProductEyebrow");
+		const addServer = findChild(loader.item.contentItem, "connectNewFavoriteButton");
 		verify(list !== null);
 		verify(surface !== null);
+		verify(connectEyebrow !== null && connectEyebrow.visible && connectEyebrow.text === "MUMBLE");
+		verify(addServer !== null && addServer.tone === "secondary");
 		tryCompare(list, "count", 2);
 		tryVerify(function() { return surface.height < 260 && loader.item.height < 500; });
 		tryCompare(list, "activeFocus", true);
@@ -363,8 +415,11 @@ TestCase {
 		compare(dialogState.lastPayload.edit, false);
 
 		const connectAction = findChild(list.itemAtIndex(0), "connectFavoriteAction_0");
-		verify(connectAction !== null);
-		mouseClick(connectAction);
+		compare(connectAction, null);
+		const selectionIndicator = findChild(list.itemAtIndex(0), "connectFavoriteSelection_0");
+		verify(selectionIndicator !== null);
+		compare(selectionIndicator.name, "check");
+		firstFavorite.doubleClicked();
 		compare(dialogState.lastAction, "connectFavorite");
 		compare(dialogState.lastPayload.index, 0);
 
@@ -375,6 +430,75 @@ TestCase {
 		});
 		const editorTitle = findChild(loader.item.contentItem, "connectEditorTitle");
 		tryVerify(function() { return editorTitle !== null && editorTitle.visible && editorTitle.text === "Edit server"; });
+	}
+
+	function test_certificate_uses_summary_cards_and_two_column_workflow() {
+		dialogState.setSections([
+			{ "id": "certificate-current", "title": "Current certificate", "fields": [
+				{ "id": "cert.status", "type": "readonly", "label": "Status", "value": "A valid certificate is installed" },
+				{ "id": "cert.name", "type": "readonly", "label": "Name", "value": "Alice" },
+				{ "id": "cert.expires", "type": "readonly", "label": "Expires", "value": "2042-04-06" }
+			] },
+			{ "id": "certificate-action", "title": "Certificate action",
+				"subtitle": "Choose one operation.", "fields": [
+					{ "id": "cert.mode", "type": "select", "label": "Action", "value": "export",
+						"options": [{ "value": "export", "label": "Export current certificate" }] },
+					{ "id": "cert.exportPath", "type": "text", "label": "Export file", "value": "C:/cert.p12" }
+				] }
+		]);
+		dialogState.setSpecialState("certificate", {
+			"id": "certificate", "pages": [], "width": 820, "height": 680,
+			"primaryActionId": "save",
+			"highlights": [
+				{ "label": "Status", "value": "Installed", "tone": "good" },
+				{ "label": "Action", "value": "Export" },
+				{ "label": "Expires", "value": "2042-04-06" }
+			]
+		});
+
+		const highlights = findChild(loader.item.contentItem, "certificateHighlights");
+		const certificateEyebrow = findChild(loader.item.contentItem, "dialogProductEyebrow");
+		const statusCard = findChild(loader.item.contentItem, "certificateHighlight_0");
+		const currentSection = findChild(loader.item.contentItem, "dialogSection_certificate-current");
+		const actionSection = findChild(loader.item.contentItem, "dialogSection_certificate-action");
+		tryVerify(function() {
+			return highlights !== null && highlights.visible
+				&& certificateEyebrow !== null && certificateEyebrow.visible
+				&& statusCard !== null && statusCard.visible
+				&& currentSection !== null && actionSection !== null
+				&& currentSection.width > 250 && actionSection.width > 250;
+		});
+		compare(highlights.Accessible.role, Accessible.Pane);
+		compare(certificateEyebrow.text, "MUMBLE");
+		compare(highlights.Accessible.name, "Certificate summary");
+		compare(statusCard.Accessible.name, "Status: Installed");
+		compare(currentSection.Accessible.role, Accessible.Pane);
+		compare(currentSection.Accessible.name, "Current certificate");
+		const certificateColumns = findChild(loader.item.contentItem, "dialogCertificateColumns");
+		verify(certificateColumns !== null);
+		let currentPoint = currentSection.mapToItem(certificateColumns, 0, 0);
+		let actionPoint = actionSection.mapToItem(certificateColumns, 0, 0);
+		verify(Math.abs(currentPoint.y - actionPoint.y) <= 1,
+			"Certificate details and actions must share a two-column row");
+		verify(actionPoint.x >= currentPoint.x + currentSection.width - 1,
+			"The certificate workflow belongs beside the current certificate summary; current="
+				+ currentPoint.x + "/" + currentSection.width + ", action="
+				+ actionPoint.x + "/" + actionSection.width);
+
+		dialogState.setSpecialState("certificate", {
+			"id": "certificate-compact", "pages": [], "width": 620, "height": 680,
+			"primaryActionId": "save", "highlights": [
+				{ "label": "Status", "value": "Installed", "tone": "good" },
+				{ "label": "Action", "value": "Export" },
+				{ "label": "Expires", "value": "2042-04-06" }
+			]
+		});
+		tryVerify(function() {
+			currentPoint = currentSection.mapToItem(certificateColumns, 0, 0);
+			actionPoint = actionSection.mapToItem(certificateColumns, 0, 0);
+			return loader.item.compactDialogLayout
+				&& actionPoint.y >= currentPoint.y + currentSection.height;
+		});
 	}
 
 	function test_voice_meter_renders_live_level_and_routes_setup_actions() {

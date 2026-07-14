@@ -12,7 +12,8 @@ Dialog {
 		: Theme.densityId === "spacious" ? 84 : 76
 	readonly property int footerHeight: Math.max(Theme.densityId === "compact" ? 56
 		: Theme.densityId === "spacious" ? 72 : 64,
-		footerActions.childrenRect.height + (Theme.spacing * 2))
+		footerActions.childrenRect.height + (Theme.spacing * 2),
+		settingsAdvancedFooter.implicitHeight + (Theme.spacing * 2))
 	readonly property int statusHeight: String(dialogState.statusMessage || "").length > 0
 		? statusLabel.implicitHeight + (Theme.spacing * 2) : 0
 	readonly property int compactPageBarHeight: compactDialogLayout && dialogState.pages.length > 0
@@ -218,6 +219,66 @@ Dialog {
 		}
 		return ({})
 	}
+	function settingsPageIcon(pageId, pageLabel) {
+		const value = (String(pageId || "") + " " + String(pageLabel || "")).toLowerCase()
+		if (value.indexOf("audio input") >= 0 || value.indexOf("input") >= 0) return "microphone"
+		if (value.indexOf("audio output") >= 0 || value.indexOf("output") >= 0) return "volume"
+		if (value.indexOf("appearance") >= 0 || value.indexOf("look") >= 0) return "eye"
+		if (value.indexOf("message") >= 0 || value.indexOf("sound") >= 0) return "message"
+		if (value.indexOf("key") >= 0 || value.indexOf("binding") >= 0
+			|| value.indexOf("shortcut") >= 0) return "key"
+		if (value.indexOf("network") >= 0) return "connect"
+		if (value.indexOf("screen") >= 0 || value.indexOf("share") >= 0) return "screen-share"
+		if (value.indexOf("plugin") >= 0) return "plugin"
+		if (value.indexOf("about") >= 0) return "info"
+		return "settings"
+	}
+	function activeSettingsPage() {
+		dialogState.revision
+		const pages = dialogState.pages || []
+		for (let index = 0; index < pages.length; ++index) {
+			const page = pages[index] || {}
+			if (String(page.id || "") === String(dialogState.activePage || "")) return page
+		}
+		return pages.length > 0 ? (pages[0] || {}) : ({})
+	}
+	function settingsPageCategory(page) {
+		const id = String(page.id || "").toLowerCase()
+		const value = (String(page.id || "") + " " + String(page.label || page.title || "")).toLowerCase()
+		if (id === "audioinput" || id === "audiooutput" || value.indexOf("audio") >= 0
+			|| value.indexOf("input") >= 0 || value.indexOf("output") >= 0)
+			return qsTr("Audio")
+		if (id === "look" || id === "ui" || value.indexOf("appearance") >= 0
+			|| value.indexOf("interface") >= 0)
+			return qsTr("Experience")
+		if (id === "messages" || id === "keys" || value.indexOf("message") >= 0
+			|| value.indexOf("binding") >= 0)
+			return qsTr("Interaction")
+		if (id === "network" || id === "screenshare" || id === "plugins"
+			|| value.indexOf("network") >= 0 || value.indexOf("screen") >= 0 || value.indexOf("plugin") >= 0)
+			return qsTr("Connectivity")
+		return qsTr("Settings")
+	}
+	function advancedFieldCount() {
+		dialogState.revision
+		let count = 0
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const section = sections[sectionIndex] || {}
+			const fields = section.fields || []
+			if (section.advanced) count += Math.max(1, fields.length)
+			else for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex)
+				if (fields[fieldIndex] && fields[fieldIndex].advanced) ++count
+		}
+		return count
+	}
+	function highlightColor(tone) {
+		const normalized = String(tone || "").toLowerCase()
+		if (normalized === "good" || normalized === "success") return Theme.success
+		if (normalized === "warning") return Theme.warning
+		if (normalized === "danger" || normalized === "error") return Theme.danger
+		return Theme.accent
+	}
 	function syncVisibility() {
 		const shouldBeVisible = dialogState.open && dialogState.kind !== "imageViewer"
 		if (shouldBeVisible && !visible) {
@@ -297,6 +358,17 @@ Dialog {
                     Layout.fillWidth: true
                     spacing: 3
 					Label {
+						objectName: "dialogProductEyebrow"
+						visible: dialogState.kind === "certificate" || dialogState.kind === "connect"
+						textFormat: Text.PlainText
+						text: qsTr("Mumble").toUpperCase()
+						color: Theme.accent
+						font.pixelSize: 9
+						font.bold: true
+						font.letterSpacing: 0.8
+						Accessible.ignored: true
+					}
+					Label {
 						objectName: "dialogTitleLabel"
 						textFormat: Text.PlainText
 						text: dialogState.title
@@ -318,9 +390,11 @@ Dialog {
                 }
 				ModernButton {
 					visible: dialog.hasAdvancedContent
+						&& (dialogState.kind !== "settings" || dialog.compactDialogLayout)
 					dense: true
 					objectName: "dialogAdvancedToggle"
 					text: dialog.showAdvanced ? qsTr("Basic") : qsTr("Advanced")
+					tone: "secondary"
 					checkable: true
 					checked: dialog.showAdvanced
 					Accessible.name: dialog.showAdvanced ? qsTr("Hide advanced settings") : qsTr("Show advanced settings")
@@ -368,16 +442,41 @@ Dialog {
 
             Rectangle {
 				objectName: "dialogPageRail"
-				Layout.preferredWidth: visible ? 200 : 0
+				Layout.preferredWidth: visible ? 214 : 0
                 Layout.fillHeight: true
 				visible: dialogState.pages.length > 0 && !dialog.compactDialogLayout
                 color: Theme.rail
                 border.color: Theme.divider
+				Label {
+					id: settingsRailLabel
+					objectName: "dialogPageRailHeading"
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					anchors.leftMargin: Theme.space3
+					anchors.rightMargin: Theme.space3
+					anchors.topMargin: Theme.space3
+					visible: dialogState.kind === "settings"
+					textFormat: Text.PlainText
+					text: qsTr("Settings").toUpperCase()
+					color: Theme.textMuted
+					font.pixelSize: 10
+					font.bold: true
+					font.letterSpacing: 1.1
+					Accessible.role: Accessible.Heading
+					Accessible.name: qsTr("Settings categories")
+				}
                 ListView {
 					id: dialogPageList
 					objectName: "dialogPageList"
-                    anchors.fill: parent
-                    anchors.margins: Math.max(8, Theme.spacing - 2)
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.bottom: parent.bottom
+					anchors.top: settingsRailLabel.visible ? settingsRailLabel.bottom : parent.top
+					anchors.leftMargin: Math.max(8, Theme.spacing - 2)
+					anchors.rightMargin: Math.max(8, Theme.spacing - 2)
+					anchors.bottomMargin: Math.max(8, Theme.spacing - 2)
+					anchors.topMargin: settingsRailLabel.visible ? Theme.space2 : Math.max(8, Theme.spacing - 2)
                     model: dialogState.pages
                     clip: true
                     spacing: Math.max(2, Math.round(Theme.spacing / 4))
@@ -410,14 +509,24 @@ Dialog {
 						Accessible.role: Accessible.ListItem
 						Accessible.name: text
 						Accessible.selected: highlighted
-						contentItem: Label {
-							textFormat: Text.PlainText
-							text: pageDelegate.text
-							color: Theme.textStrong
-							font.pixelSize: 12
-							font.bold: pageDelegate.highlighted
-							verticalAlignment: Text.AlignVCenter
-							elide: Text.ElideRight
+						contentItem: RowLayout {
+							spacing: Theme.space2
+							ModernIcon {
+								objectName: "dialogPageIcon_" + String(pageDelegate.modelData.id || pageDelegate.index)
+								name: dialog.settingsPageIcon(pageDelegate.modelData.id, pageDelegate.text)
+								size: 17
+								color: pageDelegate.highlighted ? Theme.accent : Theme.textMuted
+							}
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: pageDelegate.text
+								color: pageDelegate.highlighted ? Theme.textStrong : Theme.textMain
+								font.pixelSize: 12
+								font.bold: pageDelegate.highlighted
+								verticalAlignment: Text.AlignVCenter
+								elide: Text.ElideRight
+							}
 						}
 						background: Rectangle {
 							color: pageDelegate.highlighted ? Theme.selected
@@ -475,6 +584,62 @@ Dialog {
 								dialogState.invokeAction("selectPage", { "pageId": page.id })
 						}
 						Accessible.name: qsTr("Settings page")
+					}
+				}
+				Rectangle {
+					id: settingsPageHeading
+					objectName: "dialogSettingsPageHeading"
+					readonly property var page: dialog.activeSettingsPage()
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? 62 : 0
+					visible: dialogState.kind === "settings" && dialogState.pages.length > 0
+					color: Theme.shellBackground
+					border.color: Theme.divider
+					Accessible.role: Accessible.Pane
+					Accessible.name: String(page.label || page.title || page.id || qsTr("Settings page"))
+					RowLayout {
+						anchors.fill: parent
+						anchors.leftMargin: dialog.densityInset
+						anchors.rightMargin: dialog.densityInset
+						spacing: Theme.space3
+						Rectangle {
+							Layout.preferredWidth: 34
+							Layout.preferredHeight: 34
+							radius: 9
+							color: Theme.selected
+							ModernIcon {
+								anchors.centerIn: parent
+								name: dialog.settingsPageIcon(settingsPageHeading.page.id,
+									settingsPageHeading.page.label || settingsPageHeading.page.title)
+								size: 18
+								color: Theme.accent
+							}
+						}
+						ColumnLayout {
+							Layout.fillWidth: true
+							spacing: 1
+							Label {
+								objectName: "dialogSettingsPageCategory"
+								textFormat: Text.PlainText
+								text: dialog.settingsPageCategory(settingsPageHeading.page).toUpperCase()
+								color: Theme.textMuted
+								font.pixelSize: 9
+								font.bold: true
+								font.letterSpacing: 0.9
+							}
+							Label {
+								objectName: "dialogSettingsPageTitle"
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: settingsPageHeading.page.label || settingsPageHeading.page.title || ""
+								color: Theme.textStrong
+								font.pixelSize: 17
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.role: Accessible.Heading
+								Accessible.name: text
+							}
+						}
 					}
 				}
 				ScrollView {
@@ -547,6 +712,66 @@ Dialog {
 						}
 					}
 					Rectangle {
+						id: certificateHighlights
+						objectName: "certificateHighlights"
+						readonly property var highlightRows: dialogState.state.highlights || []
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
+						height: visible ? 66 : 0
+						visible: dialogState.kind === "certificate" && highlightRows.length > 0
+						color: "transparent"
+						Accessible.role: Accessible.Pane
+						Accessible.name: qsTr("Certificate summary")
+						RowLayout {
+							anchors.fill: parent
+							spacing: Theme.space2
+							Repeater {
+								model: certificateHighlights.highlightRows
+								delegate: Rectangle {
+									required property var modelData
+									required property int index
+									objectName: "certificateHighlight_" + index
+									readonly property color highlightTone: dialog.highlightColor(modelData.tone)
+									Layout.fillWidth: true
+									Layout.fillHeight: true
+									radius: Theme.innerRadius
+									color: Qt.rgba(highlightTone.r, highlightTone.g, highlightTone.b,
+										String(modelData.tone || "").length > 0 ? 0.1 : 0.035)
+									border.color: String(modelData.tone || "").length > 0
+										? Qt.rgba(highlightTone.r, highlightTone.g, highlightTone.b, 0.58)
+										: Theme.surfaceBorder
+									Accessible.role: Accessible.Pane
+									Accessible.name: qsTr("%1: %2").arg(modelData.label || "").arg(modelData.value || "")
+									ColumnLayout {
+										anchors.fill: parent
+										anchors.margins: Theme.space2
+										spacing: 2
+										Label {
+											Layout.fillWidth: true
+											textFormat: Text.PlainText
+											text: String(modelData.label || "").toUpperCase()
+											color: Theme.textMuted
+											font.pixelSize: 9
+											font.bold: true
+											font.letterSpacing: 0.7
+											Accessible.ignored: true
+										}
+										Label {
+											Layout.fillWidth: true
+											textFormat: Text.PlainText
+											text: modelData.value || ""
+											color: String(modelData.tone || "").length > 0 ? highlightTone : Theme.textStrong
+											font.pixelSize: 13
+											font.bold: true
+											elide: Text.ElideRight
+											Accessible.ignored: true
+										}
+									}
+								}
+							}
+						}
+					}
+					Rectangle {
 						id: connectSurface
 						objectName: "connectFavoriteSurface"
 						width: parent.width - (dialog.densityInset * 2)
@@ -576,9 +801,9 @@ Dialog {
 									}
 								}
 								ModernButton {
-									objectName: "connectNewFavoriteButton"
-									text: qsTr("Add server")
-									tone: "accent"
+					objectName: "connectNewFavoriteButton"
+					text: qsTr("Add server")
+					tone: "secondary"
 									onClicked: dialogState.invokeAction("newFavorite", {})
 								}
 							}
@@ -633,11 +858,11 @@ Dialog {
 										}
 										Label { textFormat: Text.PlainText; text: modelData.usersValue || "–"; color: Theme.textMuted; Accessible.name: modelData.usersLabel || "" }
 										Label { textFormat: Text.PlainText; text: modelData.pingValue || "–"; color: Theme.textMuted; Accessible.name: modelData.pingLabel || "" }
-										ModernButton {
-											objectName: "connectFavoriteAction_" + index
-											text: qsTr("Connect")
-											tone: "accent"
-											onClicked: dialogState.invokeAction("connectFavorite", { "index": index })
+										ModernIcon {
+											objectName: "connectFavoriteSelection_" + index
+											name: favoriteDelegate.highlighted ? "check" : "next"
+											size: 16
+											color: favoriteDelegate.highlighted ? Theme.accent : Theme.textMuted
 										}
 									}
 									onClicked: dialogState.invokeAction("selectFavorite", { "index": index, "edit": false })
@@ -665,8 +890,8 @@ Dialog {
                     Loader {
                         id: screenShareLoader
 						objectName: "screenShareEditorLoader"
-                        width: parent.width - (dialog.densityInset * 2)
-                        x: dialog.densityInset
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
                         active: dialogState.kind === "screenShare"
                         visible: active
                         sourceComponent: screenShareEditorComponent
@@ -688,8 +913,8 @@ Dialog {
                     Loader {
 						id: stonksLoader
 						objectName: "stonksEditorLoader"
-                        width: parent.width - (dialog.densityInset * 2)
-                        x: dialog.densityInset
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
                         active: dialogState.kind === "stonks"
                         visible: active
                         sourceComponent: stonksEditorComponent
@@ -701,21 +926,74 @@ Dialog {
 						when: stonksLoader.status === Loader.Ready && stonksLoader.item !== null
 						restoreMode: Binding.RestoreNone
 					}
-                    Repeater {
+					GridLayout {
+						id: certificateSectionRow
+						objectName: "dialogCertificateColumns"
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
+						height: visible ? implicitHeight : 0
+						visible: dialogState.kind === "certificate" && !dialogState.loading
+						columns: dialog.compactDialogLayout ? 1 : 2
+						columnSpacing: Theme.spacing + 4
+						rowSpacing: Theme.spacing + 4
+						Loader {
+							id: certificateCurrentSection
+							readonly property var sectionData: dialogState.sections.length > 0
+								? dialogState.sections[0] : ({})
+							Layout.fillWidth: true
+							Layout.alignment: Qt.AlignTop
+							Layout.preferredHeight: item ? item.implicitHeight : 0
+							active: certificateSectionRow.visible && dialogState.sections.length > 0
+							sourceComponent: certificateSectionCardComponent
+							onLoaded: item.sectionData = sectionData
+							Binding {
+								target: certificateCurrentSection.item
+								property: "sectionData"
+								value: certificateCurrentSection.sectionData
+								when: certificateCurrentSection.status === Loader.Ready
+									&& certificateCurrentSection.item !== null
+								restoreMode: Binding.RestoreNone
+							}
+						}
+						Loader {
+							id: certificateActionSection
+							readonly property var sectionData: dialogState.sections.length > 1
+								? dialogState.sections[1] : ({})
+							Layout.fillWidth: true
+							Layout.alignment: Qt.AlignTop
+							Layout.preferredHeight: item ? item.implicitHeight : 0
+							active: certificateSectionRow.visible && dialogState.sections.length > 1
+							sourceComponent: certificateSectionCardComponent
+							onLoaded: item.sectionData = sectionData
+							Binding {
+								target: certificateActionSection.item
+								property: "sectionData"
+								value: certificateActionSection.sectionData
+								when: certificateActionSection.status === Loader.Ready
+									&& certificateActionSection.item !== null
+								restoreMode: Binding.RestoreNone
+							}
+						}
+					}
+					Repeater {
 						visible: dialogState.kind !== "screenShare" && dialogState.kind !== "stonks"
-								 && !dialogState.loading
-                        model: dialogState.sections
-                        delegate: Rectangle {
+								 && dialogState.kind !== "certificate" && !dialogState.loading
+						model: visible ? dialogState.sections : []
+						delegate: Rectangle {
                             required property var modelData
+							required property int index
+							objectName: "dialogSection_" + String(modelData.id || index)
 							property bool sectionAdvanced: !!modelData.advanced
 							property bool sectionVisible: !modelData.advanced || dialog.showAdvanced
-                            width: parent.width - (dialog.densityInset * 2)
-                            x: dialog.densityInset
+							width: parent.width - (dialog.densityInset * 2)
+							x: dialog.densityInset
 							height: sectionVisible ? sectionColumn.implicitHeight + (dialog.sectionPadding * 2) : 0
 							visible: sectionVisible
                             color: Theme.panel
                             border.color: Theme.divider
                             radius: Theme.innerRadius
+							Accessible.role: Accessible.Pane
+							Accessible.name: String(modelData.title || qsTr("Dialog section"))
                             Column {
                                 id: sectionColumn
                                 anchors.left: parent.left
@@ -818,8 +1096,8 @@ Dialog {
                                     }
                                 }
                             }
-                        }
-                    }
+						}
+					}
 					Item {
 						objectName: "dialogContentEndPadding"
 						width: 1
@@ -837,11 +1115,45 @@ Dialog {
             color: Theme.strip
             border.color: Theme.divider
 			border.width: 1
+			Row {
+				id: settingsAdvancedFooter
+				objectName: "dialogSettingsAdvancedFooter"
+				anchors.left: parent.left
+				anchors.leftMargin: Theme.spacing
+				anchors.verticalCenter: parent.verticalCenter
+				visible: dialogState.kind === "settings" && dialog.hasAdvancedContent
+					&& !dialog.compactDialogLayout
+				spacing: Theme.space2
+				Accessible.role: Accessible.Pane
+				Accessible.name: dialog.showAdvanced ? qsTr("Advanced settings are visible")
+					: qsTr("Advanced settings are hidden")
+				Label {
+					anchors.verticalCenter: parent.verticalCenter
+					textFormat: Text.PlainText
+					text: dialog.showAdvanced ? qsTr("Advanced options visible")
+						: qsTr("%n advanced option(s) hidden", "", dialog.advancedFieldCount())
+					color: Theme.textMuted
+					font.pixelSize: 10
+					Accessible.ignored: true
+				}
+				ModernButton {
+					objectName: "dialogSettingsAdvancedToggle"
+					dense: true
+					text: dialog.showAdvanced ? qsTr("Hide advanced") : qsTr("Show advanced")
+					tone: "secondary"
+					checkable: true
+					checked: dialog.showAdvanced
+					Accessible.name: dialog.showAdvanced ? qsTr("Hide advanced settings") : qsTr("Show advanced settings")
+					onClicked: dialog.showAdvanced = !dialog.showAdvanced
+				}
+			}
 			Flow {
 				id: footerActions
-				x: Theme.spacing
-				y: Theme.spacing
-				width: parent.width - (Theme.spacing * 2)
+				anchors.right: parent.right
+				anchors.rightMargin: Theme.spacing
+				anchors.verticalCenter: parent.verticalCenter
+				width: Math.max(0, parent.width - (Theme.spacing * 2)
+					- (settingsAdvancedFooter.visible ? settingsAdvancedFooter.width + Theme.spacing : 0))
 				spacing: Math.max(6, Math.round(Theme.spacing / 2))
 				layoutDirection: Qt.RightToLeft
                 Repeater {
@@ -851,10 +1163,14 @@ Dialog {
 						readonly property bool primaryAction: String(modelData.id || "") === String(dialogState.primaryActionId || "")
                         objectName: "dialogAction_" + modelData.id
                         text: modelData.label || modelData.text || modelData.id
+						width: dialogState.kind === "connect" && !dialogState.editorOpen
+							? Math.floor((footerActions.width - Math.max(0, dialogState.actions.length - 1)
+								* footerActions.spacing) / Math.max(1, dialogState.actions.length)) : implicitWidth
+						dense: dialogState.kind === "settings"
 						enabled: (!dialogState.loading || modelData.id === "close" || modelData.id === "cancel")
 								 && (modelData.enabled === undefined || modelData.enabled)
 						highlighted: primaryAction
-						tone: String(modelData.tone || (primaryAction ? "accent" : ""))
+						tone: String(modelData.tone || (primaryAction ? "accent" : "secondary"))
 						Accessible.description: primaryAction ? qsTr("Primary action") : ""
 						onClicked: {
                             const payload = dialogState.kind === "screenShare"
@@ -877,6 +1193,107 @@ Dialog {
         }
     }
 
+	Component {
+		id: certificateSectionCardComponent
+		Rectangle {
+			id: certificateSectionCard
+			property var sectionData: ({})
+			objectName: "dialogSection_" + String(sectionData.id || "certificate")
+			width: parent ? parent.width : 0
+			implicitHeight: certificateSectionColumn.implicitHeight + (dialog.sectionPadding * 2)
+			height: implicitHeight
+			color: Theme.panel
+			border.color: Theme.divider
+			radius: Theme.innerRadius
+			Accessible.role: Accessible.Pane
+			Accessible.name: String(sectionData.title || qsTr("Certificate section"))
+			Column {
+				id: certificateSectionColumn
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				anchors.margins: dialog.sectionPadding
+				spacing: Math.max(6, Theme.spacing - 2)
+				Label {
+					width: parent.width
+					textFormat: Text.PlainText
+					text: certificateSectionCard.sectionData.title || ""
+					visible: text.length > 0
+					color: Theme.textStrong
+					font.pixelSize: 13
+					font.bold: true
+					Accessible.role: Accessible.Heading
+					Accessible.name: text
+				}
+				Label {
+					width: parent.width
+					textFormat: Text.PlainText
+					text: certificateSectionCard.sectionData.subtitle || ""
+					visible: text.length > 0
+					color: Theme.textMuted
+					font.pixelSize: 11
+					wrapMode: Text.Wrap
+				}
+				Repeater {
+					model: certificateSectionCard.sectionData.fields || []
+					delegate: Item {
+						id: certificateFieldContainer
+						required property var modelData
+						property var field: modelData
+						property bool conditionVisible: {
+							dialogState.revision
+							return !field.visibleWhen || (field.visibleWhen.values || []).indexOf(
+								String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
+						}
+						width: certificateSectionColumn.width
+						visible: conditionVisible
+						height: visible ? certificateFieldLoader.height
+							+ (certificateFieldError.visible
+								? certificateFieldError.implicitHeight + Theme.space1 : 0) : 0
+						onFieldChanged: if (certificateFieldLoader.item) certificateFieldLoader.item.field = field
+						Loader {
+							id: certificateFieldLoader
+							width: parent.width
+							active: certificateFieldContainer.visible
+							onLoaded: item.field = certificateFieldContainer.field
+							onItemChanged: if (item) item.field = certificateFieldContainer.field
+							sourceComponent: {
+								const field = certificateFieldContainer.field
+								const type = field.type || "text"
+								if (type === "hidden") return hiddenField
+								if (type === "note") return noteField
+								if (type === "readonly" || type === "status") return readonlyField
+								if (type === "select" || type === "combo" || type === "dropdown") return selectField
+								if (type === "pathPicker" || type === "filePicker"
+									|| type === "folderPicker" || type === "imagePicker") return pathField
+								return textField
+							}
+						}
+						Label {
+							id: certificateFieldError
+							objectName: "dialogFieldError_" + certificateFieldContainer.field.id
+							anchors.left: parent.left
+							anchors.right: parent.right
+							anchors.top: certificateFieldLoader.bottom
+							anchors.topMargin: Theme.space1
+							textFormat: Text.PlainText
+							text: {
+								dialogState.revision
+								return dialogState.fieldError(certificateFieldContainer.field.id)
+							}
+							visible: text.length > 0
+							color: Theme.danger
+							font.pixelSize: Theme.fontCaption
+							wrapMode: Text.Wrap
+							Accessible.role: Accessible.AlertMessage
+							Accessible.name: text
+						}
+					}
+				}
+			}
+		}
+	}
+
     Component { id: hiddenField; Item { property var field; width: parent ? parent.width : 0; height: 0 } }
     Component { id: screenShareEditorComponent; ScreenShareEditor { } }
     Component { id: stonksEditorComponent; StonksEditor { } }
@@ -893,12 +1310,35 @@ Dialog {
     }
     Component {
         id: readonlyField
-        ColumnLayout {
+        GridLayout {
             id: readonlyRoot
             property var field
+			readonly property bool certificateDetail: dialogState.kind === "certificate"
+				&& String(field.id || "").indexOf("cert.") === 0
             width: parent ? parent.width : 0
-			Label { textFormat: Text.PlainText; text: readonlyRoot.field.label || ""; visible: text.length > 0; color: Theme.textMuted; font.pixelSize: 11 }
-            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: String(readonlyRoot.field.value ?? ""); color: Theme.textMain; wrapMode: Text.Wrap }
+			columns: certificateDetail ? 2 : 1
+			columnSpacing: Theme.space3
+			rowSpacing: 2
+			Label {
+				textFormat: Text.PlainText
+				text: readonlyRoot.field.label || ""
+				visible: text.length > 0
+				color: Theme.textMuted
+				font.pixelSize: certificateDetail ? 9 : 11
+				font.bold: certificateDetail
+				font.letterSpacing: certificateDetail ? 0.45 : 0
+				Layout.preferredWidth: certificateDetail ? 100 : implicitWidth
+				Layout.alignment: Qt.AlignTop
+			}
+            Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: String(readonlyRoot.field.value ?? "")
+				color: Theme.textMain
+				wrapMode: Text.WrapAnywhere
+				font.family: readonlyRoot.field.monospace ? "Consolas" : ""
+				font.pixelSize: readonlyRoot.field.monospace ? 11 : Theme.fontBody
+			}
         }
     }
 	Component {
