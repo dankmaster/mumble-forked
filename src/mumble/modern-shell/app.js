@@ -125,6 +125,18 @@
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
 	let voiceReplayStopTimer = 0;
+	let inputEnhancementCalibrationUi = {
+		expanded: false,
+		state: -1,
+		enteredAt: 0,
+		includeOptionalNoise: true,
+		evaluationRequested: false,
+		playingToken: "",
+		playbackError: ""
+	};
+	let inputEnhancementCalibrationPollTimer = 0;
+	let inputEnhancementCalibrationPlayback = null;
+	let inputEnhancementCalibrationPlaybackRequest = 0;
 	let modernDialogReturnFocus = null;
 	let modernDialogSelectState = null;
 	let detachedModernDialogUiTweaks = null;
@@ -20620,6 +20632,455 @@
 			: (element.dataset.serverConnected === "true" ? "Server replay" : "Local replay");
 	}
 
+	function inputEnhancementCalibrationActiveState(state) {
+		return state >= 1 && state <= 11;
+	}
+
+	function inputEnhancementCalibrationCaptureDuration(state) {
+		if (state === 1) {
+			return 1000;
+		}
+		if (state === 3) {
+			return 8000;
+		}
+		if (state === 5) {
+			return 12000;
+		}
+		if (state === 7) {
+			return 8000;
+		}
+		return 0;
+	}
+
+	function inputEnhancementCalibrationStep(state) {
+		if (state <= 2) {
+			return 1;
+		}
+		if (state <= 4) {
+			return 2;
+		}
+		if (state <= 6) {
+			return 3;
+		}
+		if (state <= 8) {
+			return 4;
+		}
+		return 5;
+	}
+
+	function syncInputEnhancementCalibrationUi(element) {
+		const state = Number(element.dataset.inputEnhancementCalibrationState || 0);
+		if (inputEnhancementCalibrationUi.state !== state) {
+			inputEnhancementCalibrationUi.state = state;
+			inputEnhancementCalibrationUi.enteredAt = Date.now();
+			if (state !== 9) {
+				inputEnhancementCalibrationUi.evaluationRequested = false;
+			}
+		}
+		if (inputEnhancementCalibrationActiveState(state)) {
+			inputEnhancementCalibrationUi.expanded = true;
+		}
+		return state;
+	}
+
+	function inputEnhancementCalibrationButton(label, tone, action) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "chip-button modern-dialog-input-enhancement-button"
+			+ (tone ? " is-" + tone : "");
+		button.textContent = label;
+		button.addEventListener("click", function(event) {
+			event.preventDefault();
+			action();
+		});
+		return button;
+	}
+
+	function rebuildInputEnhancementCalibrationActions(element, signature, build) {
+		const actions = element.querySelector(".modern-dialog-input-enhancement-actions");
+		if (!actions || actions.dataset.signature === signature) {
+			return;
+		}
+		actions.dataset.signature = signature;
+		actions.replaceChildren();
+		build(actions);
+	}
+
+	function invokeInputEnhancementCalibration(element, dataKey, payload) {
+		const actionId = String(element.dataset[dataKey] || "");
+		if (actionId) {
+			invokeModernDialogAction(actionId, payload || {});
+		}
+	}
+
+	function clearInputEnhancementCalibrationPlayback() {
+		const playback = inputEnhancementCalibrationPlayback;
+		inputEnhancementCalibrationPlayback = null;
+		inputEnhancementCalibrationPlaybackRequest += 1;
+		inputEnhancementCalibrationUi.playingToken = "";
+		if (!playback) {
+			return;
+		}
+		try {
+			playback.source.onended = null;
+			playback.source.stop();
+		} catch (error) {
+			// The source may already have completed.
+		}
+		if (playback.channelData) {
+			playback.channelData.fill(0);
+		}
+		if (playback.bytes) {
+			playback.bytes.fill(0);
+		}
+		try {
+			playback.context.close();
+		} catch (error) {
+			// Context shutdown is best effort after the PCM has been cleared.
+		}
+	}
+
+	function playInputEnhancementCalibration(element, playbackToken) {
+		clearInputEnhancementCalibrationPlayback();
+		inputEnhancementCalibrationUi.playbackError = "";
+		if (!modernBridge || typeof modernBridge.inputEnhancementCalibrationPlayback !== "function") {
+			inputEnhancementCalibrationUi.playbackError = "Local playback is unavailable.";
+			updateInputEnhancementCalibrationWizard(element);
+			return;
+		}
+		const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+		if (!AudioContextCtor) {
+			inputEnhancementCalibrationUi.playbackError = "Local playback is unavailable.";
+			updateInputEnhancementCalibrationWizard(element);
+			return;
+		}
+		const requestId = inputEnhancementCalibrationPlaybackRequest;
+		let context = null;
+		try {
+			// Construct/resume while still handling the user's click. The WebChannel
+			// response is asynchronous and may otherwise lose browser user activation.
+			context = new AudioContextCtor();
+			inputEnhancementCalibrationPlayback = { context: context, source: null,
+				channelData: null, bytes: null, requestId: requestId };
+			if (context.state === "suspended") {
+				const resumed = context.resume();
+				if (resumed && typeof resumed.catch === "function") {
+					resumed.catch(function() {});
+				}
+			}
+			modernBridge.inputEnhancementCalibrationPlayback(String(playbackToken || ""), function(payload) {
+				let encoded = String(payload && payload.pcmS16Base64 || "");
+				if (payload && typeof payload === "object") {
+					payload.pcmS16Base64 = "";
+				}
+				const activeRequest = inputEnhancementCalibrationPlayback;
+				if (!activeRequest || activeRequest.requestId !== requestId || activeRequest.context !== context) {
+					encoded = "";
+					return;
+				}
+				const sampleRate = Number(payload && payload.sampleRate || 48000);
+				const sampleCount = Number(payload && payload.sampleCount || 0);
+				if (!payload || !payload.ok || !encoded || sampleCount <= 0 || sampleCount > 576000
+					|| sampleRate < 8000 || sampleRate > 192000) {
+					encoded = "";
+					clearInputEnhancementCalibrationPlayback();
+					inputEnhancementCalibrationUi.playbackError = "The local comparison clip is unavailable.";
+					updateInputEnhancementCalibrationWizard(element);
+					return;
+				}
+				try {
+					let binary = window.atob(encoded);
+					encoded = "";
+					if (binary.length !== sampleCount * 2) {
+						throw new Error("Unexpected PCM size");
+					}
+					const bytes = new Uint8Array(binary.length);
+					for (let index = 0; index < binary.length; index += 1) {
+						bytes[index] = binary.charCodeAt(index) & 0xff;
+					}
+					binary = "";
+					const audioBuffer = context.createBuffer(1, sampleCount, sampleRate);
+					const channelData = audioBuffer.getChannelData(0);
+					const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+					for (let index = 0; index < sampleCount; index += 1) {
+						channelData[index] = view.getInt16(index * 2, true) / 32768;
+					}
+					bytes.fill(0);
+					const source = context.createBufferSource();
+					source.buffer = audioBuffer;
+					source.connect(context.destination);
+					inputEnhancementCalibrationPlayback = { context: context, source: source,
+						channelData: channelData, bytes: bytes, requestId: requestId };
+					inputEnhancementCalibrationUi.playingToken = String(playbackToken);
+					source.onended = function() {
+						if (inputEnhancementCalibrationPlayback
+							&& inputEnhancementCalibrationPlayback.source === source) {
+							clearInputEnhancementCalibrationPlayback();
+							updateInputEnhancementCalibrationWizard(element);
+						}
+					};
+					source.start();
+					updateInputEnhancementCalibrationWizard(element);
+				} catch (error) {
+					clearInputEnhancementCalibrationPlayback();
+					inputEnhancementCalibrationUi.playbackError = "The local comparison clip could not be played.";
+					updateInputEnhancementCalibrationWizard(element);
+				}
+			});
+		} catch (error) {
+			if (inputEnhancementCalibrationPlayback
+				&& inputEnhancementCalibrationPlayback.requestId === requestId) {
+				clearInputEnhancementCalibrationPlayback();
+			} else if (context) {
+				try {
+					context.close();
+				} catch (closeError) {
+					// Best effort for a context that was never published.
+				}
+			}
+			inputEnhancementCalibrationUi.playbackError = "The local comparison clip could not be requested.";
+			updateInputEnhancementCalibrationWizard(element);
+		}
+	}
+
+	function updateInputEnhancementCalibrationWizard(element) {
+		const wizard = element.querySelector(".modern-dialog-input-enhancement");
+		if (!wizard) {
+			return;
+		}
+		const state = syncInputEnhancementCalibrationUi(element);
+		const workerState = String(element.dataset.inputEnhancementCalibrationWorkerState || "idle");
+		const workerProgress = clampPercent(element.dataset.inputEnhancementCalibrationProgress || 0);
+		const transmissionBlocked = element.dataset.inputEnhancementCalibrationTransmissionBlocked === "true";
+		const levelStatus = Number(element.dataset.inputEnhancementCalibrationLevelStatus || 0);
+		const peak = clampNumber(element.dataset.inputEnhancementCalibrationLevelPeakPercent, 0, 100, 0);
+		const rms = clampNumber(element.dataset.inputEnhancementCalibrationLevelRmsPercent, 0, 100, 0);
+		const leftToken = String(element.dataset.inputEnhancementCalibrationLeftPlaybackToken || "");
+		const rightToken = String(element.dataset.inputEnhancementCalibrationRightPlaybackToken || "");
+		const probationRunning = element.dataset.inputEnhancementProbationRunning === "true";
+		const undoAvailable = element.dataset.inputEnhancementProbationUndoAvailable === "true";
+		const title = wizard.querySelector(".modern-dialog-input-enhancement-title");
+		const instruction = wizard.querySelector(".modern-dialog-input-enhancement-instruction");
+		const timer = wizard.querySelector(".modern-dialog-input-enhancement-timer");
+		const progressFill = wizard.querySelector(".modern-dialog-input-enhancement-progress-fill");
+		const privacy = wizard.querySelector(".modern-dialog-input-enhancement-privacy");
+		const level = wizard.querySelector(".modern-dialog-input-enhancement-level");
+		const optional = wizard.querySelector(".modern-dialog-input-enhancement-optional");
+		const duration = inputEnhancementCalibrationCaptureDuration(state);
+		const elapsed = Math.max(0, Date.now() - inputEnhancementCalibrationUi.enteredAt);
+		let progress = duration ? Math.min(100, Math.round((elapsed / duration) * 100)) : 0;
+		let heading = "Tune input cleanup";
+		let message = "Compare locally processed voice and choose what sounds most natural to you.";
+		let timeText = "About 30 seconds plus comparison";
+		let showLevel = false;
+
+		wizard.classList.toggle("is-expanded", inputEnhancementCalibrationUi.expanded);
+		wizard.classList.toggle("is-active", inputEnhancementCalibrationActiveState(state));
+		wizard.classList.toggle("is-blocking", transmissionBlocked);
+		const toggle = wizard.querySelector(".modern-dialog-input-enhancement-toggle");
+		if (toggle) {
+			toggle.textContent = inputEnhancementCalibrationUi.expanded ? "Hide" : "Calibrate";
+		}
+		if (!inputEnhancementCalibrationUi.expanded) {
+			return;
+		}
+
+		if (state === 1) {
+			heading = "1. Check microphone level";
+			message = "Speak normally while Mumble checks that the signal is clear and not clipping.";
+			timeText = "1 second";
+			showLevel = true;
+		} else if (state === 2) {
+			heading = levelStatus === 1 ? "Microphone level looks good" : "Adjust the microphone level";
+			message = levelStatus === 2
+				? "The signal is too quiet. Move closer or increase the input level, then retry."
+				: (levelStatus === 3
+					? "The signal is clipping. Lower the input level or move slightly away, then retry."
+					: "Continue when the level is steady.");
+			timeText = "Level check complete";
+			progress = 100;
+			showLevel = true;
+		} else if (state === 3) {
+			heading = "2. Capture room sound";
+			message = "Stay quiet. Mumble is learning the fan, hum and other steady background sound.";
+			timeText = Math.max(0, Math.ceil((duration - elapsed) / 1000)) + " seconds left";
+		} else if (state === 4) {
+			heading = "Room sound captured";
+			message = "Next, read the short phrase in your normal speaking voice.";
+			timeText = "8 seconds captured";
+			progress = 100;
+		} else if (state === 5) {
+			heading = "3. Read the test phrase";
+			message = "Say clearly: ‘Peter packs crisp paper, six soft sounds, bright blue buttons.’ Keep speaking naturally until the timer ends.";
+			timeText = Math.max(0, Math.ceil((duration - elapsed) / 1000)) + " seconds left";
+		} else if (state === 6) {
+			heading = "Voice sample captured";
+			message = inputEnhancementCalibrationUi.includeOptionalNoise
+				? "Continue to add a local keyboard, fan or handling-noise sample."
+				: "Continue to analyze the captured room and voice samples.";
+			timeText = "12 seconds captured";
+			progress = 100;
+		} else if (state === 7) {
+			heading = "4. Add local noise (optional)";
+			message = "Type, click the mouse, move the cable or reproduce the sound you want reduced. You can skip this step.";
+			timeText = Math.max(0, Math.ceil((duration - elapsed) / 1000)) + " seconds left";
+		} else if (state === 8) {
+			heading = "Local noise captured";
+			message = "The samples are ready for local analysis.";
+			timeText = "8 seconds captured";
+			progress = 100;
+		} else if (state === 9) {
+			heading = workerState === "failed" ? "Analysis could not finish" : "5. Analyze local candidates";
+			message = workerState === "running" || workerState === "cancelling"
+				? "Mumble is running the product pipeline and the current Opus encode/decode locally."
+				: (element.dataset.inputEnhancementCalibrationErrorText
+					? String(element.dataset.inputEnhancementCalibrationErrorText)
+					: "Ready to compare the approved Original, Light, Balanced and Crisp recipes.");
+			timeText = workerState === "cancelling" ? "Cancelling and securely clearing audio…"
+				: (workerState === "running" ? "Analyzing… " + workerProgress + "%" : "Ready to analyze");
+			progress = workerState === "running" || workerState === "cancelling" ? workerProgress : 0;
+		} else if (state === 10) {
+			heading = "Blind A/B comparison";
+			message = "Listen to both loudness-matched clips. Choose the one that keeps your voice most natural while reducing noise.";
+			timeText = inputEnhancementCalibrationUi.playbackError
+				|| (inputEnhancementCalibrationUi.playingToken ? "Playing selected clip locally" : "Nothing is sent to the server");
+			progress = 100;
+		} else if (state === 11) {
+			heading = "Your choice is ready";
+			message = "Apply starts a 60-second safety probation. Mumble will roll back automatically if processing becomes unhealthy.";
+			timeText = "Apply or cancel";
+			progress = 100;
+		} else if (state === 12 || probationRunning) {
+			heading = "Enhancement is in safety probation";
+			message = "Mumble is monitoring deadlines and output validity locally. You can undo the change at any time.";
+			timeText = "60 seconds / at least 10 seconds of speech";
+			progress = 100;
+		} else if (state === 13 || state === 14) {
+			heading = "Calibration cancelled";
+			message = "The previous input setting was restored and captured audio was securely cleared from memory.";
+			timeText = "Nothing was saved";
+		} else if (state === 15) {
+			heading = "Calibration stopped safely";
+			message = element.dataset.inputEnhancementCalibrationErrorText
+				? String(element.dataset.inputEnhancementCalibrationErrorText)
+				: "The previous input setting was restored and captured audio was cleared.";
+			timeText = "Original settings preserved";
+		}
+
+		if (title) {
+			title.textContent = heading;
+		}
+		if (instruction) {
+			instruction.textContent = message;
+		}
+		if (timer) {
+			timer.textContent = timeText;
+		}
+		if (progressFill) {
+			progressFill.style.width = String(progress) + "%";
+		}
+		if (privacy) {
+			privacy.textContent = transmissionBlocked
+				? "Microphone transmission is paused for the entire calibration. No voice packets are sent."
+				: "Raw calibration audio stays in memory only and is cleared on apply, cancel or error.";
+		}
+		if (level) {
+			level.style.display = showLevel ? "flex" : "none";
+			level.textContent = "Peak " + Math.round(peak) + "% · average " + Math.round(rms) + "%";
+			level.classList.toggle("is-good", levelStatus === 1);
+			level.classList.toggle("is-warning", levelStatus === 2 || levelStatus === 3);
+		}
+		if (optional) {
+			optional.style.display = state === 0 ? "flex" : "none";
+			const checkbox = optional.querySelector("input");
+			if (checkbox) {
+				checkbox.checked = inputEnhancementCalibrationUi.includeOptionalNoise;
+			}
+		}
+
+		const currentStep = inputEnhancementCalibrationStep(state);
+		Array.prototype.slice.call(wizard.querySelectorAll(".modern-dialog-input-enhancement-step")).forEach(function(step) {
+			const index = Number(step.dataset.step || 0);
+			step.classList.toggle("is-current", index === currentStep && inputEnhancementCalibrationActiveState(state));
+			step.classList.toggle("is-complete", index < currentStep || state === 11 || state === 12);
+		});
+
+		const signature = [state, workerState, leftToken, rightToken, undoAvailable ? 1 : 0].join(":");
+		rebuildInputEnhancementCalibrationActions(element, signature, function(actions) {
+			if (state === 0 || state === 12 || state === 13 || state === 14 || state === 15) {
+				actions.appendChild(inputEnhancementCalibrationButton("Start calibration", "accent", function() {
+					clearInputEnhancementCalibrationPlayback();
+					inputEnhancementCalibrationUi.evaluationRequested = false;
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationStartActionId", {
+						captureOptionalLocalNoise: inputEnhancementCalibrationUi.includeOptionalNoise
+					});
+				}));
+				if (undoAvailable) {
+					actions.appendChild(inputEnhancementCalibrationButton("Undo", "", function() {
+						invokeInputEnhancementCalibration(element, "inputEnhancementProbationUndoActionId", {});
+					}));
+				}
+				return;
+			}
+			if (state === 2) {
+				actions.appendChild(inputEnhancementCalibrationButton(levelStatus === 1 ? "Continue" : "Retry level", "accent", function() {
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationAdvanceActionId", {});
+				}));
+			} else if (state === 4 || state === 6 || state === 8) {
+				actions.appendChild(inputEnhancementCalibrationButton(state === 8 ? "Continue to analysis" : "Continue", "accent", function() {
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationAdvanceActionId", {});
+				}));
+			} else if (state === 7) {
+				actions.appendChild(inputEnhancementCalibrationButton("Skip optional noise", "", function() {
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationSkipNoiseActionId", {});
+				}));
+			} else if (state === 9 && workerState !== "running" && workerState !== "cancelling") {
+				actions.appendChild(inputEnhancementCalibrationButton(workerState === "failed" ? "Retry analysis" : "Analyze locally", "accent", function() {
+					inputEnhancementCalibrationUi.evaluationRequested = true;
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationEvaluateActionId", {});
+				}));
+			} else if (state === 10) {
+				[["A", leftToken], ["B", rightToken]].forEach(function(pair) {
+					if (!pair[1]) {
+						return;
+					}
+					actions.appendChild(inputEnhancementCalibrationButton("Play " + pair[0], "", function() {
+						inputEnhancementCalibrationUi.playingToken = pair[1];
+						playInputEnhancementCalibration(element, pair[1]);
+					}));
+					actions.appendChild(inputEnhancementCalibrationButton("Prefer " + pair[0], "accent", function() {
+						clearInputEnhancementCalibrationPlayback();
+						invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationSelectActionId", {
+							playbackToken: pair[1]
+						});
+					}));
+				});
+			} else if (state === 11) {
+				[["Play A", leftToken], ["Play B", rightToken]].forEach(function(pair) {
+					if (pair[1]) {
+						actions.appendChild(inputEnhancementCalibrationButton(pair[0], "", function() {
+							playInputEnhancementCalibration(element, pair[1]);
+						}));
+					}
+				});
+				actions.appendChild(inputEnhancementCalibrationButton("Apply choice", "accent", function() {
+					clearInputEnhancementCalibrationPlayback();
+					invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationApplyActionId", {});
+				}));
+			}
+			if (inputEnhancementCalibrationActiveState(state)) {
+				actions.appendChild(inputEnhancementCalibrationButton(
+					workerState === "running" || workerState === "cancelling" ? "Cancel analysis" : "Cancel calibration",
+					"danger",
+					function() {
+						clearInputEnhancementCalibrationPlayback();
+						invokeInputEnhancementCalibration(element, "inputEnhancementCalibrationCancelActionId", {});
+					}
+				));
+			}
+		});
+	}
+
 	function updateVoiceMeterElement(element, payload) {
 		const meter = payload || {};
 		const silenceThreshold = clampPercent(element.dataset.silenceThreshold);
@@ -20670,6 +21131,7 @@
 		syncVoiceCalibrationChrome(element);
 		syncVoiceReplayChrome(element);
 		updateVoiceMeterCoach(element, meter, level, available);
+		updateInputEnhancementCalibrationWizard(element);
 	}
 
 	function updateVoiceMeterThreshold(fieldId, value) {
@@ -20715,6 +21177,20 @@
 		}
 	}
 
+	function refreshInputEnhancementCalibrationStatus() {
+		const meter = document.querySelector(".modern-dialog-voice-meter[data-input-enhancement-calibration-refresh-action-id]");
+		if (!meter) {
+			return;
+		}
+		const state = Number(meter.dataset.inputEnhancementCalibrationState || 0);
+		const workerState = String(meter.dataset.inputEnhancementCalibrationWorkerState || "idle");
+		if (!inputEnhancementCalibrationActiveState(state)
+			&& workerState !== "running" && workerState !== "cancelling") {
+			return;
+		}
+		invokeInputEnhancementCalibration(meter, "inputEnhancementCalibrationRefreshActionId", {});
+	}
+
 	function syncAudioInputMeterTimer() {
 		const shouldRun = !!(modernDialogState && modernDialogState.open
 			&& document.querySelector(".modern-dialog-voice-meter"));
@@ -20726,6 +21202,15 @@
 			audioInputMeterTimer = 0;
 			clearVoiceCalibration();
 			clearVoiceReplayStopTimer();
+			clearInputEnhancementCalibrationPlayback();
+		}
+		const shouldPollCalibration = !!(shouldRun
+			&& document.querySelector(".modern-dialog-voice-meter[data-input-enhancement-calibration-refresh-action-id]"));
+		if (shouldPollCalibration && !inputEnhancementCalibrationPollTimer) {
+			inputEnhancementCalibrationPollTimer = window.setInterval(refreshInputEnhancementCalibrationStatus, 500);
+		} else if (!shouldPollCalibration && inputEnhancementCalibrationPollTimer) {
+			window.clearInterval(inputEnhancementCalibrationPollTimer);
+			inputEnhancementCalibrationPollTimer = 0;
 		}
 	}
 
@@ -23207,6 +23692,28 @@
 			meter.dataset.recommendedMaxAmplification = String(field.recommendedMaxAmplification == null
 				? field.maxAmplification || 0
 				: field.recommendedMaxAmplification);
+			meter.dataset.inputEnhancementCalibrationState = String(field.inputEnhancementCalibrationState || 0);
+			meter.dataset.inputEnhancementCalibrationTransmissionBlocked = field.inputEnhancementCalibrationTransmissionBlocked
+				? "true" : "false";
+			meter.dataset.inputEnhancementCalibrationLevelStatus = String(field.inputEnhancementCalibrationLevelStatus || 0);
+			meter.dataset.inputEnhancementCalibrationLevelPeakPercent = String(field.inputEnhancementCalibrationLevelPeakPercent || 0);
+			meter.dataset.inputEnhancementCalibrationLevelRmsPercent = String(field.inputEnhancementCalibrationLevelRmsPercent || 0);
+			meter.dataset.inputEnhancementCalibrationWorkerState = String(field.inputEnhancementCalibrationWorkerState || "idle");
+			meter.dataset.inputEnhancementCalibrationProgress = String(field.inputEnhancementCalibrationProgress || 0);
+			meter.dataset.inputEnhancementCalibrationErrorText = String(field.inputEnhancementCalibrationErrorText || "");
+			meter.dataset.inputEnhancementCalibrationStartActionId = String(field.inputEnhancementCalibrationStartActionId || "");
+			meter.dataset.inputEnhancementCalibrationAdvanceActionId = String(field.inputEnhancementCalibrationAdvanceActionId || "");
+			meter.dataset.inputEnhancementCalibrationCancelActionId = String(field.inputEnhancementCalibrationCancelActionId || "");
+			meter.dataset.inputEnhancementCalibrationSkipNoiseActionId = String(field.inputEnhancementCalibrationSkipNoiseActionId || "");
+			meter.dataset.inputEnhancementCalibrationEvaluateActionId = String(field.inputEnhancementCalibrationEvaluateActionId || "");
+			meter.dataset.inputEnhancementCalibrationRefreshActionId = String(field.inputEnhancementCalibrationRefreshActionId || "");
+			meter.dataset.inputEnhancementCalibrationSelectActionId = String(field.inputEnhancementCalibrationSelectActionId || "");
+			meter.dataset.inputEnhancementCalibrationApplyActionId = String(field.inputEnhancementCalibrationApplyActionId || "");
+			meter.dataset.inputEnhancementCalibrationLeftPlaybackToken = String(field.inputEnhancementCalibrationLeftPlaybackToken || "");
+			meter.dataset.inputEnhancementCalibrationRightPlaybackToken = String(field.inputEnhancementCalibrationRightPlaybackToken || "");
+			meter.dataset.inputEnhancementProbationRunning = field.inputEnhancementProbationRunning ? "true" : "false";
+			meter.dataset.inputEnhancementProbationUndoAvailable = field.inputEnhancementProbationUndoAvailable ? "true" : "false";
+			meter.dataset.inputEnhancementProbationUndoActionId = String(field.inputEnhancementProbationUndoActionId || "");
 			if (fieldTooltip) {
 				meter.setAttribute("aria-label", fieldTooltip);
 			}
@@ -23311,10 +23818,99 @@
 			coachActions.appendChild(cancelButton);
 			coach.appendChild(coachActions);
 
+			let inputEnhancementCalibration = null;
+			if (field.inputEnhancementCalibrationStartActionId) {
+				inputEnhancementCalibration = document.createElement("section");
+				inputEnhancementCalibration.className = "modern-dialog-input-enhancement";
+
+				const enhancementHeader = document.createElement("div");
+				enhancementHeader.className = "modern-dialog-input-enhancement-header";
+				const enhancementHeading = document.createElement("div");
+				enhancementHeading.className = "modern-dialog-input-enhancement-heading";
+				const enhancementKicker = document.createElement("span");
+				enhancementKicker.className = "modern-dialog-input-enhancement-kicker";
+				enhancementKicker.textContent = "Input enhancement";
+				const enhancementTitle = document.createElement("strong");
+				enhancementTitle.className = "modern-dialog-input-enhancement-title";
+				enhancementTitle.textContent = "Tune input cleanup";
+				enhancementHeading.appendChild(enhancementKicker);
+				enhancementHeading.appendChild(enhancementTitle);
+				const enhancementToggle = document.createElement("button");
+				enhancementToggle.type = "button";
+				enhancementToggle.className = "chip-button modern-dialog-input-enhancement-toggle";
+				enhancementToggle.textContent = "Calibrate";
+				enhancementToggle.addEventListener("click", function(event) {
+					event.preventDefault();
+					inputEnhancementCalibrationUi.expanded = !inputEnhancementCalibrationUi.expanded;
+					updateInputEnhancementCalibrationWizard(meter);
+					enhancementToggle.textContent = inputEnhancementCalibrationUi.expanded ? "Hide" : "Calibrate";
+				});
+				enhancementHeader.appendChild(enhancementHeading);
+				enhancementHeader.appendChild(enhancementToggle);
+				inputEnhancementCalibration.appendChild(enhancementHeader);
+
+				const enhancementBody = document.createElement("div");
+				enhancementBody.className = "modern-dialog-input-enhancement-body";
+				const steps = document.createElement("div");
+				steps.className = "modern-dialog-input-enhancement-steps";
+				["Level", "Room", "Voice", "Noise", "Compare"].forEach(function(label, index) {
+					const step = document.createElement("span");
+					step.className = "modern-dialog-input-enhancement-step";
+					step.dataset.step = String(index + 1);
+					step.textContent = String(index + 1) + " " + label;
+					steps.appendChild(step);
+				});
+				enhancementBody.appendChild(steps);
+
+				const instruction = document.createElement("p");
+				instruction.className = "modern-dialog-input-enhancement-instruction";
+				enhancementBody.appendChild(instruction);
+				const progressRow = document.createElement("div");
+				progressRow.className = "modern-dialog-input-enhancement-progress-row";
+				const progressTrack = document.createElement("span");
+				progressTrack.className = "modern-dialog-input-enhancement-progress";
+				const progressFill = document.createElement("span");
+				progressFill.className = "modern-dialog-input-enhancement-progress-fill";
+				progressTrack.appendChild(progressFill);
+				const enhancementTimer = document.createElement("span");
+				enhancementTimer.className = "modern-dialog-input-enhancement-timer";
+				progressRow.appendChild(progressTrack);
+				progressRow.appendChild(enhancementTimer);
+				enhancementBody.appendChild(progressRow);
+
+				const enhancementLevel = document.createElement("div");
+				enhancementLevel.className = "modern-dialog-input-enhancement-level";
+				enhancementBody.appendChild(enhancementLevel);
+				const enhancementOptional = document.createElement("label");
+				enhancementOptional.className = "modern-dialog-input-enhancement-optional";
+				const optionalCheckbox = document.createElement("input");
+				optionalCheckbox.type = "checkbox";
+				optionalCheckbox.checked = inputEnhancementCalibrationUi.includeOptionalNoise;
+				optionalCheckbox.addEventListener("change", function() {
+					inputEnhancementCalibrationUi.includeOptionalNoise = optionalCheckbox.checked;
+				});
+				const optionalText = document.createElement("span");
+				optionalText.textContent = "Include 8 seconds of keyboard, fan or handling noise";
+				enhancementOptional.appendChild(optionalCheckbox);
+				enhancementOptional.appendChild(optionalText);
+				enhancementBody.appendChild(enhancementOptional);
+
+				const privacy = document.createElement("div");
+				privacy.className = "modern-dialog-input-enhancement-privacy";
+				enhancementBody.appendChild(privacy);
+				const enhancementActions = document.createElement("div");
+				enhancementActions.className = "modern-dialog-input-enhancement-actions";
+				enhancementBody.appendChild(enhancementActions);
+				inputEnhancementCalibration.appendChild(enhancementBody);
+			}
+
 			meter.appendChild(header);
 			meter.appendChild(track);
 			meter.appendChild(footer);
 			meter.appendChild(coach);
+			if (inputEnhancementCalibration) {
+				meter.appendChild(inputEnhancementCalibration);
+			}
 			updateVoiceMeterElement(meter, voiceMeterInitialPayload(field));
 			row.appendChild(meter);
 		} else if (type === "textarea") {

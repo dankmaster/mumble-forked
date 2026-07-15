@@ -22148,6 +22148,17 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	cancelModernShortcutCapture();
 	Audio::stop();
 	Global::get().s = settings;
+	bool probationPersistedBeforeAudioStart = false;
+	for (const Mumble::InputEnhancement::DeviceProfileState &device :
+		 Global::get().s.inputEnhancement.deviceProfiles) {
+		if (device.pendingValidation) {
+			// The candidate can fail while Audio::start initializes its model.
+			// Arm crash recovery on disk before executing any candidate code.
+			Global::get().s.save();
+			probationPersistedBeforeAudioStart = true;
+			break;
+		}
+	}
 	if (!Global::get().s.bAttenuateOthersOnTalk) {
 		Global::get().bAttenuateOthers = false;
 	}
@@ -22176,7 +22187,9 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 		if (Global::get().sh && Global::get().sh->hasSynchronized()) {
 			Global::get().db->setShortcuts(Global::get().sh->qbaDigest, Global::get().s.qlShortcuts);
 		}
-		Global::get().s.save();
+		if (!probationPersistedBeforeAudioStart) {
+			Global::get().s.save();
+		}
 	}
 	publishModernToast(QStringLiteral("success"), tr("Settings"),
 					   accepted ? tr("Settings saved.") : tr("Settings applied."));
@@ -27480,7 +27493,8 @@ bool MainWindow::restartForPreparedForkUpdate() {
 	prepareUpdateResumeState();
 	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode, true, true,
 											m_modernPreparedFallbackInstallerPath,
-											VersionCheck::expectedUpdateSha256ForInfo(m_modernVersionCheckInfo))) {
+											VersionCheck::expectedUpdateSha256ForInfo(m_modernVersionCheckInfo),
+											VersionCheck::expectedInstallerSha256ForInfo(m_modernVersionCheckInfo))) {
 		clearPendingUpdateResumeState();
 		QVariantMap failureBanner;
 		failureBanner.insert(QStringLiteral("visible"), true);

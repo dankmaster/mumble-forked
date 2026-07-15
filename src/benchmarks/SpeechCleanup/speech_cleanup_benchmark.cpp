@@ -4,6 +4,8 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "Audio.h"
+#include "AudioPreprocessor.h"
+#include "InputEnhancement.h"
 #include "SpeechCleanup.h"
 #include "SpeechCleanupProcessor.h"
 
@@ -18,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -72,12 +75,128 @@ namespace {
 		float rms               = 0.0f;
 		QString activeModelId;
 		QString activeModelPath;
+		QString activeModelSha256;
+		QString requestedRecipeId;
+		QString requestedProfile;
+		QString activeProfile;
+		QString activeEngine;
+		QString fallbackReason;
+		std::uint32_t recipeRevision = 0;
+		std::uint64_t processedFrames = 0;
+		std::uint64_t neuralFrames = 0;
+		std::uint64_t deadlineMisses = 0;
+		std::uint64_t fallbackCount = 0;
+		std::uint64_t maximumProcessingNanoseconds = 0;
+		std::uint64_t workerProcessingFrames = 0;
+		std::uint64_t workerTotalProcessingNanoseconds = 0;
+		std::uint64_t workerMaximumProcessingNanoseconds = 0;
+		std::uint64_t workerProcessingP99Nanoseconds = 0;
+		std::uint64_t callbackP50Nanoseconds = 0;
+		std::uint64_t callbackP95Nanoseconds = 0;
+		std::uint64_t callbackP99Nanoseconds = 0;
 		bool usedFallback       = false;
 		unsigned int reportedLatencySamples = 0;
 		int alignmentLagSamples = 0;
 		std::optional< double > siSdr;
 		std::optional< double > segmentalSnr;
 	};
+
+	std::uint64_t nearestRankPercentile(std::vector< std::uint64_t > values, double percentile) {
+		if (values.empty()) {
+			return 0;
+		}
+		std::sort(values.begin(), values.end());
+		const double rank = std::ceil(std::clamp(percentile, 0.0, 1.0) * static_cast< double >(values.size()));
+		const std::size_t index = static_cast< std::size_t >(std::max(1.0, rank)) - 1;
+		return values[std::min(index, values.size() - 1)];
+	}
+
+	QString profileName(Mumble::InputEnhancement::Profile profile) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		switch (profile) {
+			case Profile::Original:
+				return QStringLiteral("Original");
+			case Profile::Light:
+				return QStringLiteral("Light");
+			case Profile::Balanced:
+				return QStringLiteral("Balanced");
+			case Profile::Crisp:
+				return QStringLiteral("Crisp");
+			case Profile::Auto:
+				return QStringLiteral("Auto");
+		}
+		return QStringLiteral("Original");
+	}
+
+	Mumble::InputEnhancement::Profile parseProfile(const QString &value) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		const QString normalized = value.trimmed();
+		for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Crisp,
+									   Profile::Auto }) {
+			if (profileName(profile).compare(normalized, Qt::CaseInsensitive) == 0) {
+				return profile;
+			}
+		}
+		throw std::runtime_error(QStringLiteral("Unsupported input enhancement profile: %1").arg(value).toStdString());
+	}
+
+	QString engineName(Mumble::InputEnhancement::Engine engine) {
+		using Engine = Mumble::InputEnhancement::Engine;
+		switch (engine) {
+			case Engine::None:
+				return QStringLiteral("None");
+			case Engine::Speex:
+				return QStringLiteral("Speex");
+			case Engine::RNNoise:
+				return QStringLiteral("RNNoise");
+			case Engine::DeepFilterNet:
+				return QStringLiteral("DeepFilterNet");
+			case Engine::DTLN:
+				return QStringLiteral("DTLN");
+		}
+		return QStringLiteral("None");
+	}
+
+	QString fallbackReasonName(Mumble::InputEnhancement::FallbackReason reason) {
+		using Reason = Mumble::InputEnhancement::FallbackReason;
+		switch (reason) {
+			case Reason::None:
+				return QStringLiteral("None");
+			case Reason::ProcessorUnavailable:
+				return QStringLiteral("ProcessorUnavailable");
+			case Reason::ProcessorNotReady:
+				return QStringLiteral("ProcessorNotReady");
+			case Reason::ProcessorFallback:
+				return QStringLiteral("ProcessorFallback");
+			case Reason::UnexpectedModel:
+				return QStringLiteral("UnexpectedModel");
+			case Reason::LatencyBudgetExceeded:
+				return QStringLiteral("LatencyBudgetExceeded");
+			case Reason::InvalidFrame:
+				return QStringLiteral("InvalidFrame");
+			case Reason::InvalidOutput:
+				return QStringLiteral("InvalidOutput");
+			case Reason::DeadlineExceeded:
+				return QStringLiteral("DeadlineExceeded");
+			case Reason::ProcessorException:
+				return QStringLiteral("ProcessorException");
+		}
+		return QStringLiteral("Unknown");
+	}
+
+	Mumble::InputEnhancement::CpuClass parseCpuClass(const QString &value) {
+		using CpuClass = Mumble::InputEnhancement::CpuClass;
+		if (value.compare(QLatin1String("low"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::Low;
+		}
+		if (value.compare(QLatin1String("standard"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::Standard;
+		}
+		if (value.compare(QLatin1String("high"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::High;
+		}
+		throw std::runtime_error(QStringLiteral("Unsupported CPU class: %1").arg(value).toStdString());
+	}
 
 	struct SignalMetrics {
 		std::size_t saturatedSampleCount = 0;
@@ -541,12 +660,18 @@ namespace {
 		std::copy(samples.begin(), samples.end(), framedInput.begin());
 		std::vector< float > processed(metrics.outputSampleCount, 0.0f);
 		const auto startTime = std::chrono::steady_clock::now();
+		std::vector< std::uint64_t > callbackDurations;
+		callbackDurations.reserve(framedInput.size() / kFrameSize);
 
 		std::vector< float > frameBuffer(kFrameSize, 0.0f);
 		for (std::size_t offset = 0; offset < framedInput.size(); offset += kFrameSize) {
 			std::copy_n(framedInput.data() + offset, frameBuffer.size(), frameBuffer.data());
+			const auto callbackStartedAt = std::chrono::steady_clock::now();
 			processor.processInPlace(frameBuffer.data(), static_cast< unsigned int >(frameBuffer.size()),
 									 metrics.mixFactor);
+			const auto callbackFinishedAt = std::chrono::steady_clock::now();
+			callbackDurations.push_back(static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count()));
 			for (std::size_t frameIndex = 0; frameIndex < frameBuffer.size(); ++frameIndex) {
 				if (!std::isfinite(frameBuffer[frameIndex])) {
 					throw std::runtime_error(
@@ -567,6 +692,9 @@ namespace {
 		metrics.audioMs = static_cast< double >(metrics.inputSampleCount) * 1000.0 / SAMPLE_RATE;
 		metrics.processedAudioMs = static_cast< double >(framedSampleCount) * 1000.0 / SAMPLE_RATE;
 		metrics.realTimeFactor = (metrics.audioMs > 0.0) ? (metrics.cpuMs / metrics.audioMs) : 0.0;
+		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
+		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
+		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
 
 		const SignalMetrics outputMetrics = measureSignal(processed);
 		metrics.saturatedSampleCount = outputMetrics.saturatedSampleCount;
@@ -600,6 +728,161 @@ namespace {
 		BenchmarkMetrics metrics = processPreparedProcessor(*processor, samples, mixFactor);
 		metrics.initializationMs =
 			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
+		return metrics;
+	}
+
+	BenchmarkMetrics processProductProfile(const Mumble::InputEnhancement::ResolveRequest &request,
+										std::vector< float > &samples, const QString &authorizedModelSha256,
+										const QString &authorizedModelPath) {
+		using namespace Mumble::InputEnhancement;
+		if (samples.empty()) {
+			throw std::runtime_error("Input contains no audio samples");
+		}
+		requireFiniteSignal(samples, QStringLiteral("Input audio"));
+
+		const Recipe recipe = RecipeCatalog::resolve(request);
+		// Product fallback uses the 10 ms catastrophe limit. Balanced/Crisp
+		// p99 targets (5/8 ms) are evaluated from benchmark diagnostics instead
+		// of turning one scheduling outlier into an audible profile rollback.
+		constexpr std::uint64_t deadline = 10'000'000;
+		const auto initializationStart = std::chrono::steady_clock::now();
+		Pipeline pipeline(Pipeline::ProcessorFactory {}, Pipeline::NanosecondClock {}, deadline);
+		if (!pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath)) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Product recipe %1 failed to initialize: %2")
+					.arg(recipe.id(), fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+
+		std::unique_ptr< AudioPreprocessor > lightProcessor;
+		if (recipe.effectiveProfile() == Profile::Light) {
+			lightProcessor = std::make_unique< AudioPreprocessor >();
+			if (!lightProcessor->init(SAMPLE_RATE, frameSamples) || !lightProcessor->setEchoState(nullptr)
+				|| !lightProcessor->setAGC(false) || !lightProcessor->setVAD(false)
+				|| !lightProcessor->setDereverb(false) || !lightProcessor->setDenoise(true)
+				|| !lightProcessor->setNoiseSuppress(-recipe.noiseReduction())) {
+				throw std::runtime_error("Failed to initialize the product Light Speex recipe");
+			}
+		}
+		const auto initializationEnd = std::chrono::steady_clock::now();
+
+		BenchmarkMetrics metrics;
+		metrics.initializationMs =
+			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
+		metrics.mixFactor        = recipe.mixFactor();
+		metrics.inputSampleCount = samples.size();
+		metrics.reportedLatencySamples = pipeline.latencySamples();
+		const SignalMetrics inputMetrics = measureSignal(samples);
+		metrics.inputSaturatedSampleCount = inputMetrics.saturatedSampleCount;
+		metrics.inputOutOfRangeSampleCount = inputMetrics.outOfRangeSampleCount;
+
+		if (metrics.inputSampleCount
+			> std::numeric_limits< std::size_t >::max() - metrics.reportedLatencySamples) {
+			throw std::runtime_error("Input plus product-pipeline latency exceeds the supported sample count");
+		}
+		metrics.outputSampleCount = metrics.inputSampleCount + metrics.reportedLatencySamples;
+		metrics.drainSampleCount  = metrics.reportedLatencySamples;
+		const std::size_t framedSampleCount = roundUpToFrameSize(metrics.outputSampleCount);
+		metrics.processingPaddingSampleCount = framedSampleCount - metrics.outputSampleCount;
+
+		std::vector< float > framedInput(framedSampleCount, 0.0f);
+		std::copy(samples.begin(), samples.end(), framedInput.begin());
+		std::vector< float > processed(metrics.outputSampleCount, 0.0f);
+		std::array< float, frameSamples > frame = {};
+		std::array< std::int16_t, frameSamples > lightFrame = {};
+		std::vector< std::uint64_t > callbackDurations;
+		callbackDurations.reserve(framedInput.size() / frameSamples);
+		const auto startedAt = std::chrono::steady_clock::now();
+		for (std::size_t offset = 0; offset < framedInput.size(); offset += frameSamples) {
+			std::copy_n(framedInput.data() + offset, frame.size(), frame.data());
+			// Offline playback has no hardware callback interval in which an
+			// asynchronous processor can advance. Pace it before starting the
+			// callback timer so latency/RTF remain causal while callback timing
+			// still measures only the real-time processFrame() path.
+			if (!pipeline.prepareOfflineFrame()) {
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				throw std::runtime_error(
+					QStringLiteral("Product pipeline offline drain failed at frame %1: %2")
+						.arg(static_cast< quint64 >(offset / frameSamples))
+						.arg(fallbackReasonName(diagnostics.fallbackReason()))
+						.toStdString());
+			}
+			const auto callbackStartedAt = std::chrono::steady_clock::now();
+			const bool neuralProcessed = pipeline.processFrame(frame);
+			if (recipe.usesNeuralProcessor() && !neuralProcessed) {
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				throw std::runtime_error(
+					QStringLiteral("Product pipeline failed at frame %1: %2")
+						.arg(static_cast< quint64 >(offset / frameSamples))
+						.arg(fallbackReasonName(diagnostics.fallbackReason()))
+						.toStdString());
+			}
+			if (lightProcessor) {
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					const float scaled = std::clamp(frame[index] * 32768.0f, -32768.0f, 32767.0f);
+					lightFrame[index] = static_cast< std::int16_t >(std::lrint(scaled));
+				}
+				lightProcessor->run(lightFrame.front());
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					frame[index] = static_cast< float >(lightFrame[index]) / 32768.0f;
+				}
+			}
+			const auto callbackFinishedAt = std::chrono::steady_clock::now();
+			callbackDurations.push_back(static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count()));
+			if (offset < processed.size()) {
+				const std::size_t count = std::min< std::size_t >(frame.size(), processed.size() - offset);
+				std::copy_n(frame.data(), count, processed.data() + offset);
+			}
+		}
+		// Observe the two jobs still in flight at the fixed scheduling horizon.
+		// This emits no extra audio and therefore leaves the 2400-sample timeline
+		// and tail unchanged.
+		if (!pipeline.finishOfflineProcessing()) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Product pipeline final offline drain failed: %1")
+					.arg(fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+		const auto finishedAt = std::chrono::steady_clock::now();
+		metrics.cpuMs = std::chrono::duration< double, std::milli >(finishedAt - startedAt).count();
+		metrics.audioMs = static_cast< double >(metrics.inputSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.processedAudioMs = static_cast< double >(framedSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.realTimeFactor = metrics.audioMs > 0.0 ? metrics.cpuMs / metrics.audioMs : 0.0;
+		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
+		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
+		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
+
+		const Diagnostics diagnostics = pipeline.diagnostics();
+		metrics.requestedRecipeId = diagnostics.requestedRecipeId();
+		metrics.recipeRevision    = diagnostics.recipeRevision();
+		metrics.requestedProfile  = profileName(diagnostics.requestedProfile());
+		metrics.activeProfile     = profileName(diagnostics.activeProfile());
+		metrics.activeEngine      = engineName(diagnostics.activeEngine());
+		metrics.activeModelId     = diagnostics.activeModelId();
+		metrics.activeModelSha256 = diagnostics.activeModelSha256();
+		metrics.processedFrames   = diagnostics.processedFrames();
+		metrics.neuralFrames      = diagnostics.neuralFrames();
+		metrics.deadlineMisses    = diagnostics.deadlineMisses();
+		metrics.fallbackCount     = diagnostics.fallbackCount();
+		metrics.maximumProcessingNanoseconds = diagnostics.maximumProcessingNanoseconds();
+		metrics.workerProcessingFrames = diagnostics.workerProcessingFrames();
+		metrics.workerTotalProcessingNanoseconds = diagnostics.workerTotalProcessingNanoseconds();
+		metrics.workerMaximumProcessingNanoseconds = diagnostics.workerMaximumProcessingNanoseconds();
+		metrics.workerProcessingP99Nanoseconds = diagnostics.workerProcessingP99Nanoseconds();
+		metrics.usedFallback      = diagnostics.fallbackActive();
+		metrics.fallbackReason    = fallbackReasonName(diagnostics.fallbackReason());
+
+		const SignalMetrics outputMetrics = measureSignal(processed);
+		metrics.saturatedSampleCount = outputMetrics.saturatedSampleCount;
+		metrics.outOfRangeSampleCount = outputMetrics.outOfRangeSampleCount;
+		metrics.nonFiniteSampleCount = outputMetrics.nonFiniteSampleCount;
+		metrics.clippingCount = outputMetrics.saturatedSampleCount;
+		metrics.peak = outputMetrics.peak;
+		metrics.rms  = outputMetrics.rms;
+		samples = std::move(processed);
 		return metrics;
 	}
 
@@ -690,6 +973,24 @@ namespace {
 		for (std::size_t index = 0; index < original.size(); ++index) {
 			require(input[index + delay] == original[index], "Drain self-test tail recovery failed");
 		}
+
+		Mumble::InputEnhancement::ResolveRequest originalRequest;
+		originalRequest.profile = Mumble::InputEnhancement::Profile::Original;
+		originalRequest.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+		std::vector< float > productOriginal(kFrameSize + 13, 0.0f);
+		for (std::size_t index = 0; index < productOriginal.size(); ++index) {
+			productOriginal[index] = static_cast< float >(static_cast< int >(index % 101) - 50) / 100.0f;
+		}
+		const std::vector< float > productOriginalReference = productOriginal;
+		const BenchmarkMetrics productMetrics = processProductProfile(originalRequest, productOriginal, {}, {});
+		require(productOriginal == productOriginalReference,
+				"Product Original benchmark path changed PCM samples");
+		require(productMetrics.reportedLatencySamples == 0 && productMetrics.drainSampleCount == 0,
+				"Product Original benchmark path added latency");
+		require(productMetrics.requestedProfile == QLatin1String("Original")
+				&& productMetrics.activeProfile == QLatin1String("Original")
+				&& productMetrics.activeEngine == QLatin1String("None") && !productMetrics.usedFallback,
+				"Product Original benchmark diagnostics failed");
 	}
 } // namespace
 
@@ -711,6 +1012,30 @@ int main(int argc, char **argv) {
 	const QCommandLineOption mixFactorOption(QStringList() << QStringLiteral("mix-factor"),
 											 QStringLiteral("Dry/wet cleanup mix factor from 0.0 to 1.0"),
 											 QStringLiteral("factor"), QStringLiteral("1.0"));
+	const QCommandLineOption profileOption(
+		QStringList() << QStringLiteral("profile"),
+		QStringLiteral("Run the production input-enhancement recipe: Original, Light, Balanced, Crisp, or Auto"),
+		QStringLiteral("profile"));
+	const QCommandLineOption noiseReductionOption(
+		QStringList() << QStringLiteral("noise-reduction"),
+		QStringLiteral("Product noise-reduction control from 0 to 100"), QStringLiteral("value"),
+		QStringLiteral("50"));
+	const QCommandLineOption naturalCrispOption(
+		QStringList() << QStringLiteral("natural-crisp"),
+		QStringLiteral("Product Natural-to-Crisp control from 0 to 100"), QStringLiteral("value"),
+		QStringLiteral("50"));
+	const QCommandLineOption cpuClassOption(
+		QStringList() << QStringLiteral("cpu-class"),
+		QStringLiteral("CPU capability used by Auto: Low, Standard, or High"), QStringLiteral("class"),
+		QStringLiteral("Standard"));
+	const QCommandLineOption authorizedModelSha256Option(
+		QStringList() << QStringLiteral("authorized-model-sha256"),
+		QStringLiteral("Verified lowercase SHA-256 to attest in product-pipeline diagnostics"),
+		QStringLiteral("sha256"));
+	const QCommandLineOption authorizedModelPathOption(
+		QStringList() << QStringLiteral("authorized-model-path"),
+		QStringLiteral("Canonical model asset path bound to --authorized-model-sha256"),
+		QStringLiteral("path"));
 	const QCommandLineOption analysisOnlyOption(
 		QStringList() << QStringLiteral("analysis-only"),
 		QStringLiteral("Measure the input against --clean-reference without running a cleanup processor"));
@@ -749,6 +1074,12 @@ int main(int argc, char **argv) {
 	parser.addOption(modelIdOption);
 	parser.addOption(customModelPathOption);
 	parser.addOption(mixFactorOption);
+	parser.addOption(profileOption);
+	parser.addOption(noiseReductionOption);
+	parser.addOption(naturalCrispOption);
+	parser.addOption(cpuClassOption);
+	parser.addOption(authorizedModelSha256Option);
+	parser.addOption(authorizedModelPathOption);
 	parser.addOption(analysisOnlyOption);
 	parser.addOption(selfTestOption);
 	parser.addOption(inputOption);
@@ -776,18 +1107,39 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 
-		const bool analysisOnly = parser.isSet(analysisOnlyOption);
+		const bool analysisOnly  = parser.isSet(analysisOnlyOption);
+		const bool productProfileMode = parser.isSet(profileOption);
+		const bool directBackendMode  = parser.isSet(backendOption) || parser.isSet(modelIdOption)
+									|| parser.isSet(customModelPathOption);
 		if (!parser.isSet(inputOption) || !parser.isSet(outputOption) || !parser.isSet(reportOption)
-			|| (!analysisOnly && (!parser.isSet(backendOption) || !parser.isSet(modelIdOption)))) {
+			|| (!analysisOnly && !productProfileMode
+				&& (!parser.isSet(backendOption) || !parser.isSet(modelIdOption)))) {
 			throw std::runtime_error(
-				"Required options: --input, --output, --report and, unless --analysis-only is used, --backend and --model-id");
+				"Required options: --input, --output, --report and either --profile or --backend plus --model-id");
 		}
 		if (analysisOnly && !parser.isSet(cleanReferenceOption)) {
 			throw std::runtime_error("--analysis-only requires --clean-reference");
 		}
+		if (analysisOnly && (productProfileMode || directBackendMode)) {
+			throw std::runtime_error("--analysis-only cannot be combined with --profile or backend selection");
+		}
+		if (productProfileMode && directBackendMode) {
+			throw std::runtime_error("--profile cannot be combined with --backend, --model-id, or --custom-model-path");
+		}
+		if (productProfileMode && parser.isSet(mixFactorOption)) {
+			throw std::runtime_error("--mix-factor is Expert-only; product profiles use their versioned safe recipe");
+		}
+		if (!productProfileMode
+			&& (parser.isSet(authorizedModelSha256Option) || parser.isSet(authorizedModelPathOption))) {
+			throw std::runtime_error("Model authorization requires --profile");
+		}
+		if (parser.isSet(authorizedModelSha256Option) != parser.isSet(authorizedModelPathOption)) {
+			throw std::runtime_error(
+				"--authorized-model-sha256 and --authorized-model-path must be supplied together");
+		}
 
 		Mumble::SpeechCleanup::Selection selection;
-		if (!analysisOnly) {
+		if (!analysisOnly && !productProfileMode) {
 			selection = Mumble::SpeechCleanup::normalizeSelection({
 				parseBackend(parser.value(backendOption)),
 				parser.value(modelIdOption),
@@ -800,6 +1152,25 @@ int main(int argc, char **argv) {
 			throw std::runtime_error("--mix-factor must be a finite number");
 		}
 		const float mixFactor = std::clamp(parsedMixFactor, 0.0f, 1.0f);
+
+		Mumble::InputEnhancement::ResolveRequest productRequest;
+		if (productProfileMode) {
+			bool noiseReductionValid = false;
+			bool naturalCrispValid    = false;
+			const int noiseReduction = parser.value(noiseReductionOption).toInt(&noiseReductionValid);
+			const int naturalCrisp    = parser.value(naturalCrispOption).toInt(&naturalCrispValid);
+			if (!noiseReductionValid || noiseReduction < 0 || noiseReduction > 100) {
+				throw std::runtime_error("--noise-reduction must be an integer from 0 to 100");
+			}
+			if (!naturalCrispValid || naturalCrisp < 0 || naturalCrisp > 100) {
+				throw std::runtime_error("--natural-crisp must be an integer from 0 to 100");
+			}
+			productRequest.profile             = parseProfile(parser.value(profileOption));
+			productRequest.noiseReduction      = noiseReduction;
+			productRequest.naturalCrisp        = naturalCrisp;
+			productRequest.cpuClass            = parseCpuClass(parser.value(cpuClassOption));
+			productRequest.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+		}
 
 		const LoadedAudio input = loadAudio(parser.value(inputOption), parseInputFormat(parser.value(inputFormatOption)),
 											parser.value(inputSampleRateOption).toInt(),
@@ -831,6 +1202,10 @@ int main(int argc, char **argv) {
 			metrics.rms  = signalMetrics.rms;
 			metrics.audioMs = static_cast< double >(processed.size()) * 1000.0 / SAMPLE_RATE;
 			metrics.processedAudioMs = metrics.audioMs;
+		} else if (productProfileMode) {
+			metrics = processProductProfile(productRequest, processed,
+										parser.value(authorizedModelSha256Option),
+										parser.value(authorizedModelPathOption));
 		} else {
 			metrics = processSamples(selection, processed, mixFactor);
 		}
@@ -861,12 +1236,45 @@ int main(int argc, char **argv) {
 
 		nlohmann::json report = {
 			{ "analysis_only", analysisOnly },
-			{ "backend", analysisOnly ? "AnalysisOnly" : Mumble::SpeechCleanup::backendDisplayName(selection.backend) },
-			{ "model_id", analysisOnly ? std::string() : selection.modelId.toStdString() },
-			{ "custom_model_path", analysisOnly ? std::string() : selection.customModelPath.toStdString() },
+			{ "processing_mode", analysisOnly ? "analysis-only" : (productProfileMode ? "product-profile" : "expert-backend") },
+			{ "backend", analysisOnly ? "AnalysisOnly" : (productProfileMode ? metrics.activeEngine.toStdString() : Mumble::SpeechCleanup::backendDisplayName(selection.backend)) },
+			{ "model_id", analysisOnly ? std::string() : (productProfileMode ? metrics.activeModelId.toStdString() : selection.modelId.toStdString()) },
+			{ "custom_model_path", (!analysisOnly && !productProfileMode) ? selection.customModelPath.toStdString() : std::string() },
+			{ "requested_profile", metrics.requestedProfile.toStdString() },
+			{ "active_profile", metrics.activeProfile.toStdString() },
+			{ "active_engine", metrics.activeEngine.toStdString() },
+			{ "requested_recipe_id", metrics.requestedRecipeId.toStdString() },
+			{ "recipe_revision", metrics.recipeRevision },
 			{ "active_model_id", metrics.activeModelId.toStdString() },
 			{ "active_model_path", metrics.activeModelPath.toStdString() },
+			{ "active_model_sha256", metrics.activeModelSha256.toStdString() },
 			{ "used_fallback", metrics.usedFallback },
+			{ "fallback_reason", metrics.fallbackReason.toStdString() },
+			{ "fallback_count", metrics.fallbackCount },
+			{ "deadline_misses", metrics.deadlineMisses },
+			{ "processed_frames", metrics.processedFrames },
+			{ "neural_frames", metrics.neuralFrames },
+			{ "maximum_processing_ns", metrics.maximumProcessingNanoseconds },
+			{ "maximum_processing_ms", static_cast< double >(metrics.maximumProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_frames", metrics.workerProcessingFrames },
+			{ "worker_processing_total_ms",
+			  static_cast< double >(metrics.workerTotalProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_average_ms",
+			  metrics.workerProcessingFrames > 0
+				  ? static_cast< double >(metrics.workerTotalProcessingNanoseconds)
+						/ static_cast< double >(metrics.workerProcessingFrames) / 1'000'000.0
+				  : 0.0 },
+			{ "worker_processing_maximum_ms",
+			  static_cast< double >(metrics.workerMaximumProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_p99_ms",
+			  static_cast< double >(metrics.workerProcessingP99Nanoseconds) / 1'000'000.0 },
+			{ "worker_rtf",
+			  metrics.audioMs > 0.0
+				  ? static_cast< double >(metrics.workerTotalProcessingNanoseconds) / 1'000'000.0 / metrics.audioMs
+				  : 0.0 },
+			{ "callback_p50_ms", static_cast< double >(metrics.callbackP50Nanoseconds) / 1'000'000.0 },
+			{ "callback_p95_ms", static_cast< double >(metrics.callbackP95Nanoseconds) / 1'000'000.0 },
+			{ "callback_p99_ms", static_cast< double >(metrics.callbackP99Nanoseconds) / 1'000'000.0 },
 			{ "reported_latency_samples", metrics.reportedLatencySamples },
 			{ "reported_latency_ms",
 			  static_cast< double >(metrics.reportedLatencySamples) * 1000.0 / SAMPLE_RATE },
@@ -884,6 +1292,9 @@ int main(int argc, char **argv) {
 			{ "initialization_ms", metrics.initializationMs },
 			{ "cold_start_ms", metrics.initializationMs },
 			{ "cpu_ms", metrics.cpuMs },
+			// Kept alongside the historical cpu_ms key: the benchmark uses elapsed
+			// wall time so asynchronous inference and bounded waits are included.
+			{ "processing_wall_ms", metrics.cpuMs },
 			{ "total_cpu_ms", metrics.initializationMs + metrics.cpuMs },
 			{ "audio_ms", metrics.audioMs },
 			{ "processed_audio_ms", metrics.processedAudioMs },

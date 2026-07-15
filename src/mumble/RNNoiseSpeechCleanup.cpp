@@ -16,7 +16,12 @@ extern "C" {
 #include <QFile>
 #include <QFileInfo>
 
+#ifdef Q_OS_WIN
+#	include <qt_windows.h>
+#endif
+
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
@@ -28,6 +33,26 @@ namespace {
 	QString resolvePackagedLittleModelPath() {
 		return QDir(QCoreApplication::applicationDirPath())
 			.filePath(QStringLiteral("rnnoise/rnnoise_little.weights_blob.bin"));
+	}
+
+	QString resolveEmbeddedRnnoiseModulePath() {
+#if defined(USE_RNNOISE) && defined(Q_OS_WIN)
+		// rnnoise_create() is declared without dllimport, so its address may be a
+		// linker thunk in the executable. Querying the import module by the exact
+		// DLL name yields the loader's actual module handle and full resolved path.
+		const HMODULE module = GetModuleHandleW(L"rnnoise.dll");
+		if (!module) {
+			return {};
+		}
+		std::array< wchar_t, 32768 > path = {};
+		const DWORD length = GetModuleFileNameW(module, path.data(), static_cast< DWORD >(path.size()));
+		if (length == 0 || length >= path.size()) {
+			return {};
+		}
+		return QFileInfo(QString::fromWCharArray(path.data(), static_cast< qsizetype >(length))).absoluteFilePath();
+#else
+		return {};
+#endif
 	}
 
 	void logRnnoiseFallback(const QString &requestedModelId, const QString &requestedCustomModelPath,
@@ -220,8 +245,17 @@ void RNNoiseSpeechCleanup::reset() {
 	if (m_model) {
 		m_activeModelId   = normalizedModelId;
 		m_activeModelPath = modelPath;
-	} else if (normalizedModelId != QLatin1String("rnnoise:embedded")) {
-		m_usedFallback = true;
+	} else {
+		if (normalizedModelId != QLatin1String("rnnoise:embedded")) {
+			m_usedFallback = true;
+		}
+		// The embedded weights are compiled into the loaded RNNoise module. Its
+		// actual loader-resolved path is the model asset identity used by the
+		// signed package catalog; an app-directory guess would not prove which
+		// DLL supplied the weights.
+		if (m_activeModelId == QLatin1String("rnnoise:embedded")) {
+			m_activeModelPath = resolveEmbeddedRnnoiseModulePath();
+		}
 	}
 
 	qInfo("RNNoiseSpeechCleanup: Initialized backend=RNNoise requestedModelId=%s activeModelId=%s "

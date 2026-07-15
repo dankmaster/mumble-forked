@@ -54,6 +54,8 @@ public:
 	virtual const QVariant getDeviceChoice();
 	virtual const QList< audioDevice > getDeviceChoices();
 	virtual void setDeviceChoice(const QVariant &, Settings &);
+	Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity() override;
+	Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity(const Settings &settings) override;
 	virtual bool canEcho(EchoCancelOptionID echoCancelID, const QString &outputSystem) const;
 	virtual bool canExclusive() const;
 	virtual bool isMicrophoneAccessDeniedByOS();
@@ -227,6 +229,14 @@ void WASAPIInputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s) 
 	s.qsWASAPIInput = choice.toString();
 }
 
+Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIdentity() {
+	return resolveDeviceIdentity(Global::get().s);
+}
+
+Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIdentity(const Settings &settings) {
+	return WASAPISystem::resolveInputDeviceIdentity(settings.qsWASAPIInput, WASAPIRoleFromSettings());
+}
+
 bool WASAPIInputRegistrar::canEcho(EchoCancelOptionID echoOptionIDs, const QString &outputSystem) const {
 	return (echoOptionIDs == EchoCancelOptionID::SPEEX_MIXED || echoOptionIDs == EchoCancelOptionID::SPEEX_MULTICHANNEL
 #ifdef USE_WEBRTC_AEC
@@ -345,7 +355,42 @@ WASAPIInput::~WASAPIInput() {
 	wait();
 }
 
-static IMMDevice *openNamedOrDefaultDevice(const QString &name, EDataFlow dataFlow, ERole role) {
+static Mumble::InputEnhancement::DeviceIdentity identityForWASAPIDevice(IMMDevice *device,
+																				 const bool followsSystemDefault) {
+	Mumble::InputEnhancement::DeviceIdentity identity;
+	identity.backendId            = QStringLiteral("WASAPI");
+	identity.followsSystemDefault = followsSystemDefault;
+	identity.stable               = false;
+	if (!device) {
+		return identity;
+	}
+
+	LPWSTR endpointId = nullptr;
+	if (SUCCEEDED(device->GetId(&endpointId)) && endpointId) {
+		identity.physicalId = QString::fromWCharArray(endpointId);
+		CoTaskMemFree(endpointId);
+	}
+
+	IPropertyStore *properties = nullptr;
+	if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties)) && properties) {
+		PROPVARIANT friendlyName;
+		PropVariantInit(&friendlyName);
+		if (SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &friendlyName))
+			&& friendlyName.vt == VT_LPWSTR && friendlyName.pwszVal) {
+			identity.displayName = QString::fromWCharArray(friendlyName.pwszVal);
+		}
+		PropVariantClear(&friendlyName);
+		properties->Release();
+	}
+
+	identity.stable = !identity.physicalId.isEmpty();
+	return identity;
+}
+
+static IMMDevice *openNamedOrDefaultDevice(
+	const QString &name, EDataFlow dataFlow, ERole role,
+	Mumble::InputEnhancement::DeviceIdentity *resolvedIdentity = nullptr, const bool enlistNotifications = true,
+	const bool namedDeviceFollowsSystemDefault = false) {
 	HRESULT hr;
 	IMMDeviceEnumerator *pEnumerator = nullptr;
 
@@ -357,6 +402,7 @@ static IMMDevice *openNamedOrDefaultDevice(const QString &name, EDataFlow dataFl
 	}
 
 	IMMDevice *pDevice = nullptr;
+	bool followsSystemDefault = name.isEmpty() || namedDeviceFollowsSystemDefault;
 	// Try to find a device pointer for |name|.
 	if (!name.isEmpty()) {
 		std::vector< wchar_t > devname;
@@ -367,8 +413,7 @@ static IMMDevice *openNamedOrDefaultDevice(const QString &name, EDataFlow dataFl
 		if (FAILED(hr)) {
 			qWarning("WASAPI: Failed to open selected device %s %ls (df=%d, e=%d, hr=0x%08lx), falling back to default",
 					 qPrintable(name), devname.data(), dataFlow, role, hr);
-		} else {
-			WASAPINotificationClient::get().enlistDeviceAsUsed(devname.data());
+			followsSystemDefault = true;
 		}
 	}
 
@@ -377,6 +422,7 @@ static IMMDevice *openNamedOrDefaultDevice(const QString &name, EDataFlow dataFl
 	// open the device by it's real name to work around triggering the automatic
 	// ducking behavior.
 	if (!pDevice) {
+		followsSystemDefault = true;
 		hr = pEnumerator->GetDefaultAudioEndpoint(dataFlow, role, &pDevice);
 		if (FAILED(hr)) {
 			qWarning("WASAPI: Failed to open device: df=%d, e=%d, hr=0x%08lx", dataFlow, role, hr);
@@ -389,13 +435,32 @@ static IMMDevice *openNamedOrDefaultDevice(const QString &name, EDataFlow dataFl
 			goto cleanup;
 		}
 		pDevice->Release();
+		pDevice = nullptr;
 		hr = pEnumerator->GetDevice(devname, &pDevice);
 		if (FAILED(hr)) {
 			qWarning("WASAPI: Failed to reopen default device: df=%d, e=%d, hr=0x%08lx", dataFlow, role, hr);
+			CoTaskMemFree(devname);
 			goto cleanup;
 		}
-		WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(devname);
 		CoTaskMemFree(devname);
+	}
+
+	if (pDevice) {
+		const Mumble::InputEnhancement::DeviceIdentity identity =
+			identityForWASAPIDevice(pDevice, followsSystemDefault);
+		if (resolvedIdentity) {
+			*resolvedIdentity = identity;
+		}
+		if (enlistNotifications && !identity.physicalId.isEmpty()) {
+			if (followsSystemDefault) {
+				std::vector< wchar_t > endpointId(static_cast< std::size_t >(identity.physicalId.size()) + 1);
+				const int length = identity.physicalId.toWCharArray(endpointId.data());
+				endpointId[static_cast< std::size_t >(length)] = L'\0';
+				WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(endpointId.data());
+			} else {
+				WASAPINotificationClient::get().enlistDeviceAsUsed(identity.physicalId);
+			}
+		}
 	}
 
 cleanup:
@@ -403,6 +468,16 @@ cleanup:
 		pEnumerator->Release();
 
 	return pDevice;
+}
+
+Mumble::InputEnhancement::DeviceIdentity WASAPISystem::resolveInputDeviceIdentity(const QString &configuredDevice,
+																				   const ERole role) {
+	Mumble::InputEnhancement::DeviceIdentity identity;
+	IMMDevice *device = openNamedOrDefaultDevice(configuredDevice, eCapture, role, &identity, false);
+	if (device) {
+		device->Release();
+	}
+	return identity;
 }
 
 void WASAPIInput::run() {
@@ -442,10 +517,18 @@ void WASAPIInput::run() {
 		qWarning("WASAPIInput: Failed to set Pro Audio thread priority");
 	}
 
-	// Open mic device.
-	pMicDevice = openNamedOrDefaultDevice(Global::get().s.qsWASAPIInput, eCapture, WASAPIRoleFromSettings());
+	// Open the exact endpoint for which enhancement was pre-warmed. If the
+	// configured/default endpoint disappeared during startup, the helper reports
+	// the actual fallback and AudioInput fails closed to Original below.
+	const Mumble::InputEnhancement::DeviceIdentity plannedInputIdentity = inputDeviceIdentity();
+	const QString plannedInputId = plannedInputIdentity.stable ? plannedInputIdentity.physicalId
+															  : Global::get().s.qsWASAPIInput;
+	Mumble::InputEnhancement::DeviceIdentity openedInputIdentity;
+	pMicDevice = openNamedOrDefaultDevice(plannedInputId, eCapture, WASAPIRoleFromSettings(), &openedInputIdentity,
+										true, plannedInputIdentity.followsSystemDefault);
 	if (!pMicDevice)
 		goto cleanup;
+	confirmOpenedInputDeviceIdentity(std::move(openedInputIdentity));
 
 	// Open echo capture device.
 	if (doecho) {
@@ -529,7 +612,7 @@ void WASAPIInput::run() {
 		goto cleanup;
 	}
 
-	pMicAudioClient->SetEventHandle(hEvent);
+	hr = pMicAudioClient->SetEventHandle(hEvent);
 	if (FAILED(hr)) {
 		qWarning("WASAPIInput: Failed to set mic event: hr=0x%08lx", hr);
 		goto cleanup;
@@ -570,7 +653,7 @@ void WASAPIInput::run() {
 			goto cleanup;
 		}
 
-		pEchoAudioClient->SetEventHandle(hEvent);
+		hr = pEchoAudioClient->SetEventHandle(hEvent);
 		if (FAILED(hr)) {
 			qWarning("WASAPIInput: Failed to set echo event: hr=0x%08lx", hr);
 			goto cleanup;
@@ -589,6 +672,10 @@ void WASAPIInput::run() {
 	}
 
 	initializeMixer();
+	// Only a fully started microphone/echo chain counts as use for per-device
+	// profile retention. Identity mismatch handling stays above, before the first
+	// callback, but failed Activate/Initialize/Start attempts must not affect LRU.
+	markOpenedInputDeviceProfileUsed();
 
 	allocLength = (iMicLength / 2) * micpwfx->nChannels;
 

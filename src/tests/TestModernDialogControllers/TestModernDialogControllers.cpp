@@ -10,6 +10,39 @@
 #include "ModernDialogController.h"
 #include "ModernSettingsController.h"
 
+namespace {
+	class DraftInputRegistrar final : public AudioInputRegistrar {
+	public:
+		DraftInputRegistrar() : AudioInputRegistrar(QStringLiteral("DraftTestInput"), 999) {}
+
+		AudioInput *create() override { return nullptr; }
+		const QVariant getDeviceChoice() override { return m_choice; }
+		const QList< audioDevice > getDeviceChoices() override {
+			return { audioDevice(QStringLiteral("Microphone A"), QStringLiteral("mic-a")),
+					 audioDevice(QStringLiteral("Microphone B"), QStringLiteral("mic-b")) };
+		}
+		void setDeviceChoice(const QVariant &choice, Settings &settings) override {
+			m_choice           = choice.toString();
+			settings.qsOSSInput = m_choice.toString();
+		}
+		Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity(const Settings &settings) override {
+			Mumble::InputEnhancement::DeviceIdentity identity;
+			identity.backendId  = name;
+			identity.physicalId = settings.qsOSSInput;
+			identity.displayName = identity.physicalId == QLatin1String("mic-b")
+								   ? QStringLiteral("Microphone B")
+								   : QStringLiteral("Microphone A");
+			identity.stable = true;
+			return identity;
+		}
+		bool canEcho(EchoCancelOptionID, const QString &) const override { return false; }
+		bool isMicrophoneAccessDeniedByOS() override { return false; }
+
+	private:
+		QVariant m_choice = QStringLiteral("mic-a");
+	};
+}
+
 class TestModernDialogControllers : public QObject {
 	Q_OBJECT
 
@@ -17,6 +50,8 @@ private slots:
 	void connectControllerSelectsAndSavesFavorites();
 	void settingsControllerForcesModernAndAppliesDraft();
 	void settingsControllerClampsAudioSetupPayload();
+	void settingsControllerAutoProfileAlwaysAdapts();
+	void settingsControllerEnhancementFollowsDraftSelectedMicrophone();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
@@ -530,6 +565,82 @@ void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 	QVERIFY(neuralResult.settingsToApply.has_value());
 	QCOMPARE(fallbackController.draft().noiseCancelMode,
 			 neuralCleanupAvailable ? Settings::NoiseCancelRNN : Settings::NoiseCancelSpeex);
+}
+
+void TestModernDialogControllers::settingsControllerAutoProfileAlwaysAdapts() {
+	Settings settings;
+	settings.inputEnhancement.defaultPreference.autoAdapt = false;
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.inputEnhancementProfile"),
+						   static_cast< int >(Mumble::InputEnhancement::Profile::Auto));
+	controller.updateField(QStringLiteral("audio.inputEnhancementAutoAdapt"), false);
+
+	bool foundDisabledAutoToggle = false;
+	bool foundAutoProfile        = false;
+	bool foundCalibrationError   = false;
+	for (const QVariant &sectionValue : controller.state().value(QStringLiteral("sections")).toList()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("id")).toString()
+				== QLatin1String("audio.inputEnhancementProfile")) {
+				foundAutoProfile = field.value(QStringLiteral("value")).toInt()
+							   == static_cast< int >(Mumble::InputEnhancement::Profile::Auto);
+			}
+			if (field.value(QStringLiteral("id")).toString()
+				== QLatin1String("audio.inputEnhancementAutoAdapt")) {
+				foundDisabledAutoToggle = field.value(QStringLiteral("value")).toBool()
+								  && !field.value(QStringLiteral("enabled"), true).toBool();
+			}
+			if (field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
+				foundCalibrationError =
+					field.value(QStringLiteral("inputEnhancementCalibrationErrorText"))
+						.toString()
+						.contains(QStringLiteral("Auto"));
+			}
+		}
+	}
+	QVERIFY(foundAutoProfile);
+	QVERIFY(foundDisabledAutoToggle);
+	QVERIFY(foundCalibrationError);
+}
+
+void TestModernDialogControllers::settingsControllerEnhancementFollowsDraftSelectedMicrophone() {
+	DraftInputRegistrar registrar;
+	Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	Mumble::InputEnhancement::DeviceProfileState first;
+	first.identity.backendId  = registrar.name;
+	first.identity.physicalId = QStringLiteral("mic-a");
+	first.identity.stable     = true;
+	first.preference.profile  = Mumble::InputEnhancement::Profile::Balanced;
+	QVERIFY(Mumble::InputEnhancement::upsertDeviceProfile(settings.inputEnhancement, first));
+	Mumble::InputEnhancement::DeviceProfileState second;
+	second.identity.backendId  = registrar.name;
+	second.identity.physicalId = QStringLiteral("mic-b");
+	second.identity.stable     = true;
+	second.preference.profile  = Mumble::InputEnhancement::Profile::Light;
+	QVERIFY(Mumble::InputEnhancement::upsertDeviceProfile(settings.inputEnhancement, second));
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.inputDevice"), 1);
+	controller.updateField(QStringLiteral("audio.inputEnhancementProfile"),
+						   static_cast< int >(Mumble::InputEnhancement::Profile::Crisp));
+
+	Mumble::InputEnhancement::DeviceIdentity firstIdentity = first.identity;
+	Mumble::InputEnhancement::DeviceIdentity secondIdentity = second.identity;
+	const auto *savedFirst = Mumble::InputEnhancement::findDeviceProfile(
+		controller.draft().inputEnhancement, firstIdentity);
+	const auto *savedSecond = Mumble::InputEnhancement::findDeviceProfile(
+		controller.draft().inputEnhancement, secondIdentity);
+	QVERIFY(savedFirst);
+	QVERIFY(savedSecond);
+	QCOMPARE(static_cast< int >(savedFirst->preference.profile),
+			 static_cast< int >(Mumble::InputEnhancement::Profile::Balanced));
+	QCOMPARE(static_cast< int >(savedSecond->preference.profile),
+			 static_cast< int >(Mumble::InputEnhancement::Profile::Crisp));
 }
 
 void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignals() {

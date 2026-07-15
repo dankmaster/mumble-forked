@@ -136,7 +136,12 @@ void TestSpeechCleanup::verifyEmbeddedFallback(const QString &path) {
 	QVERIFY(cleanup.isReady());
 	QVERIFY(cleanup.usedFallback());
 	QCOMPARE(cleanup.activeModelId(), QStringLiteral("rnnoise:embedded"));
+#ifdef Q_OS_WIN
+	QVERIFY(QFileInfo(cleanup.activeModelPath()).isFile());
+	QCOMPARE(QFileInfo(cleanup.activeModelPath()).fileName().toLower(), QStringLiteral("rnnoise.dll"));
+#else
 	QVERIFY(cleanup.activeModelPath().isEmpty());
+#endif
 
 	std::array< float, 480 > silence = {};
 	cleanup.processInPlace(silence.data(), static_cast< unsigned int >(silence.size()));
@@ -351,6 +356,13 @@ void TestSpeechCleanup::rnnoiseAdapterReportsAndPreservesTheRawApiLatency() {
 	auto processor = createSpeechCleanupProcessor(embeddedSelection(Settings::RNNoiseBackend));
 	QVERIFY(processor);
 	QVERIFY(processor->isReady());
+#ifdef Q_OS_WIN
+	// Embedded weights live in the loader-resolved RNNoise module. Reporting
+	// this exact path lets the product pipeline bind its signed hash to the DLL
+	// that actually supplied those weights.
+	QVERIFY(QFileInfo(processor->activeModelPath()).isFile());
+	QCOMPARE(QFileInfo(processor->activeModelPath()).fileName().toLower(), QStringLiteral("rnnoise.dll"));
+#endif
 	// This value is intentionally independent of the implementation constant: it
 	// protects the two-frame RNNoise transform delay plus the adapter's one-frame
 	// collection delay from being collapsed into the same mistaken expectation.

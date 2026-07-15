@@ -11,10 +11,18 @@
 #include <QtCore/QString>
 #include <QtCore/QVariant>
 
+#include <memory>
 #include <optional>
+
+namespace Mumble::InputEnhancement {
+class CalibrationEvaluationWorker;
+}
 
 class ModernSettingsController {
 public:
+	ModernSettingsController();
+	~ModernSettingsController();
+
 	struct ActionResult {
 		bool stateChanged = true;
 		bool closeDialog  = false;
@@ -35,12 +43,18 @@ private:
 	Settings m_draft;
 	QString m_activePage = QStringLiteral("look");
 	int m_shortcutCaptureIndex = -1;
+	std::unique_ptr< Mumble::InputEnhancement::CalibrationEvaluationWorker >
+		m_inputEnhancementCalibrationWorker;
+	std::optional< Mumble::InputEnhancement::DefaultPreference >
+		m_inputEnhancementCalibrationControls;
+	QString m_inputEnhancementCalibrationUiError;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;
 	void setActivePage(const QString &pageID);
 	void forceModernLayout();
 	void refreshShortcutRestartFlag();
+	void cancelInputEnhancementCalibration();
 };
 
 #endif // MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_

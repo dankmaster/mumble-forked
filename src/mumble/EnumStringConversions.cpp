@@ -5,6 +5,8 @@
 
 #include "EnumStringConversions.h"
 
+#include "InputEnhancement.h"
+
 #define AUDIO_TRANSMIT_VALUES                                  \
 	PROCESS(Settings::AudioTransmit, Continuous, "Continuous") \
 	PROCESS(Settings::AudioTransmit, VAD, "VAD")               \
@@ -67,6 +69,13 @@
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Light, "Light")   \
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Normal, "Normal") \
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Aggressive, "Aggressive")
+
+#define INPUT_ENHANCEMENT_PROFILE_VALUES                                      \
+	PROCESS(Mumble::InputEnhancement::Profile, Original, "Original")           \
+	PROCESS(Mumble::InputEnhancement::Profile, Light, "Light")                 \
+	PROCESS(Mumble::InputEnhancement::Profile, Balanced, "Balanced")           \
+	PROCESS(Mumble::InputEnhancement::Profile, Crisp, "Crisp")                 \
+	PROCESS(Mumble::InputEnhancement::Profile, Auto, "Auto")
 
 #define ECHO_CANCEL_VALUES                                                \
 	PROCESS(EchoCancelOptionID, DISABLED, "Disabled")                     \
@@ -194,6 +203,9 @@
 	BEFORE_CODE(Settings::RemoteSpeechCleanupPreset)   \
 	REMOTE_SPEECH_CLEANUP_PRESET_VALUES                \
 	AFTER_CODE                                         \
+	BEFORE_CODE(Mumble::InputEnhancement::Profile)     \
+	INPUT_ENHANCEMENT_PROFILE_VALUES                   \
+	AFTER_CODE                                         \
 	BEFORE_CODE(EchoCancelOptionID)                    \
 	ECHO_CANCEL_VALUES                                 \
 	AFTER_CODE                                         \
@@ -276,6 +288,7 @@ PROCESS_ALL_ENUMS
 #undef QUIT_VALUES
 #undef PROXY_TYPE_VALUES
 #undef ECHO_CANCEL_VALUES
+#undef INPUT_ENHANCEMENT_PROFILE_VALUES
 #undef SPEECH_CLEANUP_BACKEND_VALUES
 #undef NOISE_CANCEL_VALUES
 #undef IDLE_ACTION_VALUES

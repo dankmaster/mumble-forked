@@ -26,6 +26,7 @@
 #	include <QtWidgets/QApplication>
 
 #	include <cmath>
+#	include <algorithm>
 
 namespace {
 constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_TEXT_BYTES   = 1024 * 1024;
@@ -196,6 +197,49 @@ QVariantMap ModernShellBridge::currentAudioInputMeter() const {
 	meter.insert(QStringLiteral("transmitting"), transmitting);
 	meter.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(audioInput->dPeakCleanMic));
 	return meter;
+}
+
+QVariantMap ModernShellBridge::inputEnhancementCalibrationPlayback(const QString &playbackToken) const {
+	QVariantMap result;
+	result.insert(QStringLiteral("ok"), false);
+	bool validToken = false;
+	const std::uint64_t token = playbackToken.trimmed().toULongLong(&validToken);
+	const AudioInputPtr input = Global::get().ai;
+	auto *runtime = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
+	if (!validToken || token == 0 || !runtime) {
+		return result;
+	}
+
+	const std::span< const float > playback = runtime->playbackForToken(token);
+	if (playback.empty()
+		|| playback.size() > Mumble::InputEnhancement::CalibrationSession::guidedVoiceSamples) {
+		return result;
+	}
+
+	QByteArray pcm;
+	pcm.resize(static_cast< qsizetype >(playback.size() * sizeof(std::int16_t)));
+	for (std::size_t index = 0; index < playback.size(); ++index) {
+		if (!std::isfinite(playback[index])) {
+			pcm.fill('\0');
+			return result;
+		}
+		const float scaled = std::clamp(playback[index] * 32768.0f, -32768.0f, 32767.0f);
+		const std::int16_t sample = static_cast< std::int16_t >(std::lrint(scaled));
+		const std::uint16_t bits = static_cast< std::uint16_t >(sample);
+		pcm[static_cast< qsizetype >(index * 2)]     = static_cast< char >(bits & 0xffU);
+		pcm[static_cast< qsizetype >(index * 2 + 1)] = static_cast< char >((bits >> 8U) & 0xffU);
+	}
+
+	QByteArray encoded = pcm.toBase64();
+	result.insert(QStringLiteral("ok"), true);
+	result.insert(QStringLiteral("sampleRate"),
+				  static_cast< int >(Mumble::InputEnhancement::CalibrationSession::sampleRate));
+	result.insert(QStringLiteral("channels"), 1);
+	result.insert(QStringLiteral("sampleCount"), static_cast< qulonglong >(playback.size()));
+	result.insert(QStringLiteral("pcmS16Base64"), QString::fromLatin1(encoded));
+	pcm.fill('\0');
+	encoded.fill('\0');
+	return result;
 }
 
 void ModernShellBridge::ready() {

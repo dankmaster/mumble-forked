@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -366,6 +367,7 @@ void Settings::save() const {
 }
 
 void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
+	bool loadedBackupInstead = false;
 	if (path.endsWith(QLatin1String(BACKUP_FILE_EXTENSION))) {
 		// Trim away the backup extension
 		settingsLocation = path.left(path.size() - static_cast< int >(std::strlen(BACKUP_FILE_EXTENSION)));
@@ -380,6 +382,7 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 		stream >> settingsJSON;
 
 		settingsJSON.get_to(*this);
+		const bool previousRunAbnormal = !mumbleQuitNormally;
 
 		if (!mumbleQuitNormally && !skipSettingsBackupPrompt) {
 			// These settings were saved without Mumble quitting normally afterwards. In order to prevent loading
@@ -398,6 +401,7 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 							QObject::tr("Load backup"), QObject::tr("Keep current"))) {
 						// Load the backup instead
 						qWarning() << "Loading backup settings from" << backupPath;
+						loadedBackupInstead = true;
 						load(backupPath, skipSettingsBackupPrompt);
 					}
 				}
@@ -418,6 +422,12 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 						.arg(modernStartupBreakablePath(settingsPath), modernStartupBreakablePath(path)));
 			}
 		}
+
+		if (!loadedBackupInstead && previousRunAbnormal
+			&& Mumble::InputEnhancement::rollbackPendingValidationAfterAbnormalExit(inputEnhancement)) {
+			inputEnhancementProbationRecoveryNeedsSave = true;
+			qWarning("Rolled back pending input enhancement validation after an abnormal previous exit");
+		}
 	} catch (const nlohmann::json::parse_error &e) {
 		qWarning() << "Failed to load settings from" << path << "due to invalid format: " << e.what();
 
@@ -434,9 +444,20 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 
 	// Always reset this flag to false
 	mumbleQuitNormally = false;
+
+	// A recovery decision must survive another crash during this startup. For
+	// recursive backup loading, the outer regular-settings call performs the
+	// save after the backup stream has closed.
+	stream.close();
+	if (inputEnhancementProbationRecoveryNeedsSave
+		&& !path.endsWith(QLatin1String(BACKUP_FILE_EXTENSION))) {
+		save();
+		inputEnhancementProbationRecoveryNeedsSave = false;
+	}
 }
 
 void Settings::load(bool skipSettingsBackupPrompt) {
+	inputEnhancementProbationRecoveryNeedsSave = false;
 	bool foundExisting = false;
 
 	QString settingsPath = findSettingsLocation(false, &foundExisting);
@@ -465,6 +486,13 @@ void Settings::load(bool skipSettingsBackupPrompt) {
 			legacyLoad(QLatin1String(REGISTRY_ID));
 		}
 #endif
+	}
+
+	// The only existing file may itself be a backup. Persist any recovery now
+	// that its input stream has closed, using the regular settings location.
+	if (inputEnhancementProbationRecoveryNeedsSave) {
+		save();
+		inputEnhancementProbationRecoveryNeedsSave = false;
 	}
 }
 
@@ -722,6 +750,8 @@ void Settings::legacyLoad(const QString &path) {
 #endif
 		settings_ptr = std::make_unique< QSettings >(path.isEmpty() ? findSettingsLocation(true) : path, format);
 
+	const bool hasLegacySettings = !settings_ptr->allKeys().isEmpty();
+	std::optional< Mumble::InputEnhancement::LegacyOverride > legacyInputOverride;
 
 	LOAD(qsDatabaseLocation, "databaselocation");
 
@@ -758,6 +788,19 @@ void Settings::legacyLoad(const QString &path) {
 	iSpeexNoiseCancelStrength = std::min(oldNoiseSuppress, iSpeexNoiseCancelStrength);
 
 	LOADENUM(noiseCancelMode, "audio/noiseCancelMode");
+	LOADENUM(noiseCancelBackend, "audio/noiseCancelBackend");
+	LOAD(noiseCancelModelId, "audio/noiseCancelModelId");
+	LOAD(noiseCancelCustomModelPath, "audio/noiseCancelCustomModelPath");
+
+	if (hasLegacySettings) {
+		Mumble::InputEnhancement::LegacyOverride captured;
+		captured.noiseCancelMode = static_cast< int >(noiseCancelMode);
+		captured.backend         = static_cast< int >(noiseCancelBackend);
+		captured.modelId         = noiseCancelModelId;
+		captured.customModelPath = noiseCancelCustomModelPath;
+		captured.speexNoiseCancelStrength = iSpeexNoiseCancelStrength;
+		legacyInputOverride = std::move(captured);
+	}
 
 #if !defined(USE_RNNOISE) && !defined(USE_DTLN) && !defined(USE_DEEPFILTERNET)
 	if (noiseCancelMode == NoiseCancelRNN || noiseCancelMode == NoiseCancelBoth) {
@@ -1103,6 +1146,21 @@ void Settings::legacyLoad(const QString &path) {
 			shortcuts = migratedShortcuts;
 		}
 #endif
+	}
+
+	if (legacyInputOverride) {
+		if (Mumble::InputEnhancement::isValidLegacyOverride(*legacyInputOverride)) {
+			inputEnhancement = Mumble::InputEnhancement::Settings();
+			inputEnhancement.defaultPreference.profile = Mumble::InputEnhancement::profileForLegacy(
+				legacyInputOverride->noiseCancelMode, legacyInputOverride->backend);
+			inputEnhancement.defaultPreference.reduction =
+				Mumble::InputEnhancement::reductionForLegacySpeexStrength(
+					legacyInputOverride->speexNoiseCancelStrength);
+			inputEnhancement.defaultPreference.autoAdapt = false;
+			inputEnhancement.legacyOverride              = std::move(legacyInputOverride);
+		} else {
+			inputEnhancement = Mumble::InputEnhancement::safeOriginalSettings();
+		}
 	}
 }
 

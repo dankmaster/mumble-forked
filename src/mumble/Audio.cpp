@@ -187,6 +187,15 @@ void Audio::stopInput() {
 	ai.reset();
 }
 
+void Audio::restartInput() {
+	stopInput();
+	startInput();
+	if (Global::get().ai && Global::get().pluginManager) {
+		QObject::connect(Global::get().ai.get(), &AudioInput::audioInputEncountered, Global::get().pluginManager,
+						 &PluginManager::on_audioInput, Qt::DirectConnection);
+	}
+}
+
 void Audio::start(const QString &input, const QString &output) {
 	startInput(input);
 	startOutput(output);

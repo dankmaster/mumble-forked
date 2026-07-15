@@ -3,6 +3,8 @@
 // that can be found in the LICENSE file at the root of the
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
+#include "UpdateHealth.h"
+
 #include <windows.h>
 #include <dwmapi.h>
 #include <shellapi.h>
@@ -14,8 +16,8 @@
 #include <cstdlib>
 #include <cwctype>
 #include <filesystem>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -25,6 +27,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <wincrypt.h>
@@ -34,17 +37,17 @@
 
 namespace {
 
-constexpr DWORD ParentExitTimeoutMsec = 180000;
-constexpr DWORD RestartRequired       = 3010;
-constexpr DWORD InstallerUserExit     = 1602;
-constexpr std::uint16_t ZipMethodStore = 0;
-constexpr std::uint16_t ZipMethodDeflate = 8;
-constexpr std::size_t ZipReadBufferSize = 1024 * 1024;
-constexpr std::uint32_t ZipLocalFileHeaderSignature = 0x04034b50;
-constexpr std::uint32_t ZipCentralDirectorySignature = 0x02014b50;
+constexpr DWORD ParentExitTimeoutMsec                     = 180000;
+constexpr DWORD RestartRequired                           = 3010;
+constexpr DWORD InstallerUserExit                         = 1602;
+constexpr std::uint16_t ZipMethodStore                    = 0;
+constexpr std::uint16_t ZipMethodDeflate                  = 8;
+constexpr std::size_t ZipReadBufferSize                   = 1024 * 1024;
+constexpr std::uint32_t ZipLocalFileHeaderSignature       = 0x04034b50;
+constexpr std::uint32_t ZipCentralDirectorySignature      = 0x02014b50;
 constexpr std::uint32_t ZipEndOfCentralDirectorySignature = 0x06054b50;
-constexpr std::uint32_t Zip64Marker32 = 0xffffffffu;
-constexpr std::uint16_t Zip64Marker16 = 0xffffu;
+constexpr std::uint32_t Zip64Marker32                     = 0xffffffffu;
+constexpr std::uint16_t Zip64Marker16                     = 0xffffu;
 
 using json = nlohmann::json;
 
@@ -66,12 +69,20 @@ struct Options {
 	std::wstring msiLogPath;
 	std::wstring uiTheme;
 	std::wstring packageSha256;
-	bool passive = true;
-	bool noRelaunch = false;
-	bool elevatedRetry = false;
-	bool noUi = false;
-	bool prepareOnly = false;
+	std::wstring installerSha256;
+	bool passive       = true;
+	bool noRelaunch    = false;
+	bool noUi          = false;
+	bool prepareOnly   = false;
+	bool recoverOnly   = false;
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+	bool testCrashAfterJournal       = false;
+	bool testCrashAfterFirstMutation = false;
+	bool testSkipRecoveryWatchdog    = false;
+#endif
 };
+
+std::wstring recoveryUpdaterArguments(const Options &options);
 
 void postUiStatus(const std::wstring &message);
 void postUiProgress(int percent, bool indeterminate);
@@ -81,8 +92,8 @@ std::string utf8FromWide(const std::wstring &value) {
 		return {};
 	}
 
-	const int byteCount = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast< int >(value.size()), nullptr, 0,
-											  nullptr, nullptr);
+	const int byteCount =
+		WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast< int >(value.size()), nullptr, 0, nullptr, nullptr);
 	if (byteCount <= 0) {
 		return {};
 	}
@@ -144,6 +155,15 @@ std::filesystem::path packageWorkRoot(const Options &options) {
 	return std::filesystem::temp_directory_path();
 }
 
+bool normalizeSha256Argument(std::wstring &value) {
+	value.erase(std::remove_if(value.begin(), value.end(), [](const wchar_t ch) { return std::iswspace(ch) != 0; }),
+				value.end());
+	std::transform(value.begin(), value.end(), value.begin(),
+				   [](const wchar_t ch) { return static_cast< wchar_t >(std::towlower(ch)); });
+	return value.size() == 64
+		   && std::all_of(value.begin(), value.end(), [](const wchar_t ch) { return std::iswxdigit(ch) != 0; });
+}
+
 void appendLog(const Options &options, const std::wstring &message) {
 	postUiStatus(message);
 	if (options.updaterLogPath.empty()) {
@@ -160,8 +180,8 @@ void appendLog(const Options &options, const std::wstring &message) {
 	GetLocalTime(&now);
 	std::wostringstream line;
 	line << L'[' << std::setfill(L'0') << std::setw(4) << now.wYear << L'-' << std::setw(2) << now.wMonth << L'-'
-		 << std::setw(2) << now.wDay << L' ' << std::setw(2) << now.wHour << L':' << std::setw(2) << now.wMinute
-		 << L':' << std::setw(2) << now.wSecond << L"] " << message;
+		 << std::setw(2) << now.wDay << L' ' << std::setw(2) << now.wHour << L':' << std::setw(2) << now.wMinute << L':'
+		 << std::setw(2) << now.wSecond << L"] " << message;
 
 	std::string bytes = utf8FromWide(line.str());
 	bytes.push_back('\n');
@@ -189,10 +209,10 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 	for (int i = 1; i < argc; ++i) {
 		const std::wstring arg = argv[i];
 		const auto nextValue   = [&]() -> std::wstring {
-			if (i + 1 >= argc) {
-				return {};
-			}
-			return argv[++i];
+            if (i + 1 >= argc) {
+                return {};
+            }
+            return argv[++i];
 		};
 
 		if (arg == L"--parent-pid") {
@@ -213,18 +233,28 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.uiTheme = nextValue();
 		} else if (arg == L"--package-sha256") {
 			options.packageSha256 = nextValue();
+		} else if (arg == L"--installer-sha256") {
+			options.installerSha256 = nextValue();
 		} else if (arg == L"--passive") {
 			options.passive = true;
 		} else if (arg == L"--no-passive") {
 			options.passive = false;
 		} else if (arg == L"--no-relaunch") {
 			options.noRelaunch = true;
-		} else if (arg == L"--elevated-retry") {
-			options.elevatedRetry = true;
 		} else if (arg == L"--no-ui") {
 			options.noUi = true;
 		} else if (arg == L"--prepare") {
 			options.prepareOnly = true;
+		} else if (arg == L"--recover") {
+			options.recoverOnly = true;
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+		} else if (arg == L"--test-crash-after-journal") {
+			options.testCrashAfterJournal = true;
+		} else if (arg == L"--test-crash-after-first-mutation") {
+			options.testCrashAfterFirstMutation = true;
+		} else if (arg == L"--test-skip-recovery-watchdog") {
+			options.testSkipRecoveryWatchdog = true;
+#endif
 		}
 	}
 
@@ -236,7 +266,14 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 	if (!hasPackage) {
 		options.packagePath.clear();
 	}
-	return fileExists(options.appPath) && (hasInstaller || hasPackage);
+	if (hasPackage && !normalizeSha256Argument(options.packageSha256)) {
+		return false;
+	}
+	if (hasInstaller && !normalizeSha256Argument(options.installerSha256)) {
+		return false;
+	}
+	return !options.appPath.empty()
+		   && (options.recoverOnly || (fileExists(options.appPath) && (hasInstaller || hasPackage)));
 }
 
 void waitForParent(const Options &options) {
@@ -268,11 +305,29 @@ DWORD runInstaller(const Options &options) {
 		parameters += L" /log " + quoteArgument(options.msiLogPath);
 	}
 
-	SHELLEXECUTEINFOW executeInfo {};
+	std::wstring systemDirectory(MAX_PATH, L'\0');
+	UINT systemLength = GetSystemDirectoryW(systemDirectory.data(), static_cast< UINT >(systemDirectory.size()));
+	if (systemLength >= systemDirectory.size()) {
+		systemDirectory.resize(static_cast< std::size_t >(systemLength) + 1);
+		systemLength = GetSystemDirectoryW(systemDirectory.data(), static_cast< UINT >(systemDirectory.size()));
+	}
+	if (systemLength == 0 || systemLength >= systemDirectory.size()) {
+		appendLog(options, L"Unable to resolve the trusted Windows system directory for msiexec.exe.");
+		return ERROR_FILE_NOT_FOUND;
+	}
+	systemDirectory.resize(systemLength);
+	const std::filesystem::path msiexecPath = std::filesystem::path(systemDirectory) / L"msiexec.exe";
+	if (!fileExists(msiexecPath.wstring())) {
+		appendLog(options, L"The trusted system msiexec.exe is missing.");
+		return ERROR_FILE_NOT_FOUND;
+	}
+	const std::wstring msiexecExecutable = msiexecPath.wstring();
+
+	SHELLEXECUTEINFOW executeInfo{};
 	executeInfo.cbSize       = sizeof(executeInfo);
 	executeInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
 	executeInfo.lpVerb       = L"open";
-	executeInfo.lpFile       = L"msiexec.exe";
+	executeInfo.lpFile       = msiexecExecutable.c_str();
 	executeInfo.lpParameters = parameters.c_str();
 	executeInfo.nShow        = SW_SHOWNORMAL;
 
@@ -294,7 +349,8 @@ DWORD runInstaller(const Options &options) {
 		return exitCode;
 	}
 
-	return 0;
+	appendLog(options, L"Windows Installer launch returned no process handle; refusing an unobserved update.");
+	return ERROR_INVALID_HANDLE;
 }
 
 bool directoryWritable(const Options &options, const std::filesystem::path &directory) {
@@ -320,6 +376,19 @@ bool directoryWritable(const Options &options, const std::filesystem::path &dire
 	return true;
 }
 
+bool processIsElevated() {
+	HANDLE token = nullptr;
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+		return true;
+	}
+	TOKEN_ELEVATION elevation{};
+	DWORD returned = 0;
+	const bool queried = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &returned) != FALSE;
+	CloseHandle(token);
+	// Fail closed if the token cannot be classified.
+	return !queried || elevation.TokenIsElevated != 0;
+}
+
 std::wstring currentExecutablePath() {
 	std::wstring path(MAX_PATH, L'\0');
 	DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast< DWORD >(path.size()));
@@ -331,84 +400,12 @@ std::wstring currentExecutablePath() {
 	return path;
 }
 
-std::wstring packageUpdaterArguments(const Options &options, const bool elevatedRetry, const bool noUi = false) {
-	std::wstring arguments;
-	if (options.parentPid != 0) {
-		arguments += L"--parent-pid " + std::to_wstring(options.parentPid) + L' ';
-	}
-	arguments += L"--package " + quoteArgument(options.packagePath);
-	if (!options.installerPath.empty()) {
-		arguments += L" --installer " + quoteArgument(options.installerPath);
-	}
-	arguments += L" --app " + quoteArgument(options.appPath);
-	if (!options.workingDirectory.empty()) {
-		arguments += L" --working-dir " + quoteArgument(options.workingDirectory);
-	}
-	if (!options.updaterLogPath.empty()) {
-		arguments += L" --updater-log " + quoteArgument(options.updaterLogPath);
-	}
-	if (!options.msiLogPath.empty()) {
-		arguments += L" --msi-log " + quoteArgument(options.msiLogPath);
-	}
-	if (!options.uiTheme.empty()) {
-		arguments += L" --ui-theme " + quoteArgument(options.uiTheme);
-	}
-	if (!options.packageSha256.empty()) {
-		arguments += L" --package-sha256 " + quoteArgument(options.packageSha256);
-	}
-	if (!options.passive) {
-		arguments += L" --no-passive";
-	}
-	if (options.noRelaunch) {
-		arguments += L" --no-relaunch";
-	}
-	if (elevatedRetry) {
-		arguments += L" --elevated-retry";
-	}
-	if (noUi) {
-		arguments += L" --no-ui";
-	}
-	return arguments;
-}
-
-DWORD relaunchElevatedForPackage(const Options &options) {
-	const std::wstring executable = currentExecutablePath();
-	const std::wstring parameters = packageUpdaterArguments(options, true, true);
-
-	SHELLEXECUTEINFOW executeInfo {};
-	executeInfo.cbSize       = sizeof(executeInfo);
-	executeInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
-	executeInfo.lpVerb       = L"runas";
-	executeInfo.lpFile       = executable.c_str();
-	executeInfo.lpParameters = parameters.c_str();
-	executeInfo.lpDirectory  = options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str();
-	executeInfo.nShow        = SW_SHOWNORMAL;
-
-	appendLog(options, L"App directory is not writable; relaunching updater elevated.");
-	if (!ShellExecuteExW(&executeInfo)) {
-		const DWORD error = GetLastError();
-		appendLog(options, L"Failed to relaunch updater elevated. Error " + std::to_wstring(error) + L'.');
-		return error == 0 ? 1 : error;
-	}
-
-	if (executeInfo.hProcess) {
-		WaitForSingleObject(executeInfo.hProcess, INFINITE);
-		DWORD exitCode = 0;
-		if (!GetExitCodeProcess(executeInfo.hProcess, &exitCode)) {
-			exitCode = GetLastError();
-		}
-		CloseHandle(executeInfo.hProcess);
-		return exitCode;
-	}
-
-	return 0;
-}
-
 bool writePackageApplyScript(const Options &options, const std::filesystem::path &scriptPath) {
 	std::error_code error;
 	std::filesystem::create_directories(scriptPath.parent_path(), error);
 	if (error) {
-		appendLog(options, L"Unable to create package script directory. Error " + std::to_wstring(error.value()) + L'.');
+		appendLog(options,
+				  L"Unable to create package script directory. Error " + std::to_wstring(error.value()) + L'.');
 		return false;
 	}
 
@@ -538,7 +535,7 @@ try {
 		throw "Unsupported update package apply mode: $($manifest.applyMode)"
 	}
 	$minUpdaterVersion = [int] $manifest.minUpdaterVersion
-	if ($minUpdaterVersion -gt 2) {
+	if ($minUpdaterVersion -gt 3) {
 		throw "Update package requires updater version $minUpdaterVersion."
 	}
 
@@ -676,7 +673,7 @@ DWORD runPowerShellPackageApply(const Options &options, const std::filesystem::p
 		parameters += L" -NoRelaunch";
 	}
 
-	SHELLEXECUTEINFOW executeInfo {};
+	SHELLEXECUTEINFOW executeInfo{};
 	executeInfo.cbSize       = sizeof(executeInfo);
 	executeInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
 	executeInfo.lpVerb       = L"open";
@@ -711,8 +708,8 @@ std::wstring wideFromUtf8(const std::string &value) {
 		return {};
 	}
 
-	int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast< int >(value.size()),
-									nullptr, 0);
+	int length =
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast< int >(value.size()), nullptr, 0);
 	if (length <= 0) {
 		length = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast< int >(value.size()), nullptr, 0);
 	}
@@ -726,9 +723,8 @@ std::wstring wideFromUtf8(const std::string &value) {
 }
 
 std::string lowerAscii(std::string value) {
-	std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
-		return static_cast< char >(std::tolower(ch));
-	});
+	std::transform(value.begin(), value.end(), value.begin(),
+				   [](const unsigned char ch) { return static_cast< char >(std::tolower(ch)); });
 	return value;
 }
 
@@ -740,15 +736,14 @@ std::string lowerSha256(const std::wstring &value) {
 }
 
 std::wstring lowerWide(std::wstring value) {
-	std::transform(value.begin(), value.end(), value.begin(), [](const wchar_t ch) {
-		return static_cast< wchar_t >(std::towlower(ch));
-	});
+	std::transform(value.begin(), value.end(), value.begin(),
+				   [](const wchar_t ch) { return static_cast< wchar_t >(std::towlower(ch)); });
 	return value;
 }
 
 bool pathStartsWithRoot(const std::filesystem::path &path, const std::filesystem::path &root) {
-	std::wstring pathText = lowerWide(std::filesystem::absolute(path).wstring());
-	std::wstring rootText = lowerWide(std::filesystem::absolute(root).wstring());
+	std::wstring pathText = lowerWide(std::filesystem::absolute(path).lexically_normal().wstring());
+	std::wstring rootText = lowerWide(std::filesystem::absolute(root).lexically_normal().wstring());
 	if (!rootText.empty() && rootText.back() != L'\\' && rootText.back() != L'/') {
 		rootText.push_back(L'\\');
 	}
@@ -762,15 +757,20 @@ bool isSafePackageRelativePath(const std::string &relativePath) {
 	if (relativePath.empty() || relativePath.front() == '/' || relativePath.front() == '\\') {
 		return false;
 	}
-	if (relativePath.find(':') != std::string::npos) {
+	// Package manifests use one canonical separator. Accepting a backslash here
+	// would let a value such as "directory\\..\\outside" bypass the component
+	// checks below and become a traversal only when std::filesystem parses it on
+	// Windows.
+	if (relativePath.find(':') != std::string::npos || relativePath.find('\\') != std::string::npos
+		|| relativePath.back() == '/') {
 		return false;
 	}
 
 	std::size_t start = 0;
 	while (start <= relativePath.size()) {
-		const std::size_t end = relativePath.find('/', start);
+		const std::size_t end  = relativePath.find('/', start);
 		const std::string part = relativePath.substr(start, end == std::string::npos ? std::string::npos : end - start);
-		if (part == "..") {
+		if (part.empty() || part == "." || part == ".." || part.back() == ' ' || part.back() == '.') {
 			return false;
 		}
 		if (end == std::string::npos) {
@@ -786,13 +786,22 @@ std::filesystem::path resolvePackagePathUnderRoot(const std::filesystem::path &r
 		throw std::runtime_error("Unsafe package path: " + relativePath);
 	}
 
+	const DWORD rootAttributes = GetFileAttributesW(root.wstring().c_str());
+	if (rootAttributes != INVALID_FILE_ATTRIBUTES && (rootAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+		throw std::runtime_error("Package root is a reparse point: " + relativePath);
+	}
+
 	std::filesystem::path result = root;
-	std::size_t start = 0;
+	std::size_t start            = 0;
 	while (start <= relativePath.size()) {
-		const std::size_t end = relativePath.find('/', start);
+		const std::size_t end  = relativePath.find('/', start);
 		const std::string part = relativePath.substr(start, end == std::string::npos ? std::string::npos : end - start);
 		if (!part.empty() && part != ".") {
 			result /= wideFromUtf8(part);
+			const DWORD attributes = GetFileAttributesW(result.wstring().c_str());
+			if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+				throw std::runtime_error("Package path traverses a reparse point: " + relativePath);
+			}
 		}
 		if (end == std::string::npos) {
 			break;
@@ -854,7 +863,7 @@ public:
 	}
 
 	std::string finishHex() {
-		BYTE hash[32] {};
+		BYTE hash[32]{};
 		DWORD hashLength = static_cast< DWORD >(sizeof(hash));
 		if (!CryptGetHashParam(m_hash, HP_HASHVAL, hash, &hashLength, 0)) {
 			throw std::runtime_error("Unable to finish SHA256 hash.");
@@ -864,7 +873,7 @@ public:
 
 private:
 	HCRYPTPROV m_provider = 0;
-	HCRYPTHASH m_hash = 0;
+	HCRYPTHASH m_hash     = 0;
 };
 
 std::string fileSha256(const std::filesystem::path &path) {
@@ -885,6 +894,324 @@ std::string fileSha256(const std::filesystem::path &path) {
 	return hasher.finishHex();
 }
 
+class VerifiedArtifactFile final {
+public:
+	VerifiedArtifactFile(const std::filesystem::path &path, const std::string &expectedSha256,
+					 const std::string &artifactName) {
+		m_file = CreateFileW(path.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+						 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+		if (m_file == INVALID_HANDLE_VALUE) {
+			throw std::runtime_error("Unable to lock the " + artifactName + " for verification.");
+		}
+		FILE_ATTRIBUTE_TAG_INFO attributes{};
+		if (!GetFileInformationByHandleEx(m_file, FileAttributeTagInfo, &attributes, sizeof(attributes))
+			|| (attributes.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+			fail("Update artifact must be a regular non-reparse file.");
+		}
+
+		Sha256Hasher hasher;
+		std::vector< char > buffer(ZipReadBufferSize);
+		for (;;) {
+			DWORD read = 0;
+			if (!ReadFile(m_file, buffer.data(), static_cast< DWORD >(buffer.size()), &read, nullptr)) {
+				fail("Unable to hash the locked update artifact.");
+			}
+			if (read == 0) {
+				break;
+			}
+			hasher.add(buffer.data(), read);
+		}
+		if (hasher.finishHex() != expectedSha256) {
+			fail("Update artifact SHA256 does not match its mandatory digest.");
+		}
+		LARGE_INTEGER start{};
+		if (!SetFilePointerEx(m_file, start, nullptr, FILE_BEGIN)) {
+			fail("Unable to rewind the verified update artifact.");
+		}
+
+		std::wstring finalPath(1024, L'\0');
+		DWORD length = GetFinalPathNameByHandleW(m_file, finalPath.data(), static_cast< DWORD >(finalPath.size()),
+										 FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+		if (length >= finalPath.size()) {
+			finalPath.resize(static_cast< std::size_t >(length) + 1);
+			length = GetFinalPathNameByHandleW(m_file, finalPath.data(), static_cast< DWORD >(finalPath.size()),
+										 FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+		}
+		if (length == 0 || length >= finalPath.size()) {
+			fail("Unable to resolve the verified update artifact's final path.");
+		}
+		finalPath.resize(length);
+		m_finalPath = std::filesystem::path(finalPath);
+	}
+
+	~VerifiedArtifactFile() {
+		if (m_file != INVALID_HANDLE_VALUE) {
+			CloseHandle(m_file);
+		}
+	}
+
+	VerifiedArtifactFile(const VerifiedArtifactFile &)            = delete;
+	VerifiedArtifactFile &operator=(const VerifiedArtifactFile &) = delete;
+
+	const std::filesystem::path &finalPath() const noexcept {
+		return m_finalPath;
+	}
+
+private:
+	[[noreturn]] void fail(const char *message) {
+		CloseHandle(m_file);
+		m_file = INVALID_HANDLE_VALUE;
+		throw std::runtime_error(message);
+	}
+
+	HANDLE m_file = INVALID_HANDLE_VALUE;
+	std::filesystem::path m_finalPath;
+};
+
+class InstallationMutex final {
+public:
+	explicit InstallationMutex(const std::filesystem::path &appPath) {
+		const std::filesystem::path requestedDirectory = appPath.parent_path();
+		m_directory = CreateFileW(requestedDirectory.wstring().c_str(), FILE_READ_ATTRIBUTES,
+							  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+							  FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+		if (m_directory == INVALID_HANDLE_VALUE) {
+			throw std::runtime_error("Unable to lease the physical installation directory.");
+		}
+		std::wstring finalDirectory(1024, L'\0');
+		DWORD length = GetFinalPathNameByHandleW(m_directory, finalDirectory.data(),
+										 static_cast< DWORD >(finalDirectory.size()),
+										 FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+		if (length >= finalDirectory.size()) {
+			finalDirectory.resize(static_cast< std::size_t >(length) + 1);
+			length = GetFinalPathNameByHandleW(m_directory, finalDirectory.data(),
+											 static_cast< DWORD >(finalDirectory.size()),
+											 FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+		}
+		if (length == 0 || length >= finalDirectory.size()) {
+			fail("Unable to resolve the physical installation directory.");
+		}
+		finalDirectory.resize(length);
+		m_finalDirectory = std::filesystem::path(finalDirectory);
+		CloseHandle(m_directory);
+		m_directory = INVALID_HANDLE_VALUE;
+
+		const std::wstring name = L"Global\\MumbleUpdater-v3-"
+							  + wideFromUtf8(Mumble::UpdateHealth::installationKey(m_finalDirectory));
+		m_mutex = CreateMutexW(nullptr, FALSE, name.c_str());
+		if (!m_mutex) {
+			fail("Unable to create the cross-session per-installation updater mutex.");
+		}
+		const DWORD wait = WaitForSingleObject(m_mutex, 10U * 60U * 1000U);
+		if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+			fail("Timed out acquiring the cross-session per-installation updater mutex.");
+		}
+		m_owned = true;
+	}
+
+	~InstallationMutex() {
+		if (m_owned) {
+			ReleaseMutex(m_mutex);
+		}
+		if (m_mutex) {
+			CloseHandle(m_mutex);
+		}
+		if (m_directory != INVALID_HANDLE_VALUE) {
+			CloseHandle(m_directory);
+		}
+	}
+
+	InstallationMutex(const InstallationMutex &)            = delete;
+	InstallationMutex &operator=(const InstallationMutex &) = delete;
+
+	std::filesystem::path resolvedAppPath(const std::filesystem::path &requestedAppPath) const {
+		return m_finalDirectory / requestedAppPath.filename();
+	}
+
+private:
+	[[noreturn]] void fail(const char *message) {
+		if (m_mutex) {
+			CloseHandle(m_mutex);
+			m_mutex = nullptr;
+		}
+		if (m_directory != INVALID_HANDLE_VALUE) {
+			CloseHandle(m_directory);
+			m_directory = INVALID_HANDLE_VALUE;
+		}
+		throw std::runtime_error(message);
+	}
+
+	HANDLE m_mutex = nullptr;
+	HANDLE m_directory = INVALID_HANDLE_VALUE;
+	bool m_owned    = false;
+	std::filesystem::path m_finalDirectory;
+};
+
+std::string newTransactionId() {
+	HCRYPTPROV provider = 0;
+	if (!CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+		throw std::runtime_error("Unable to initialize transaction randomness.");
+	}
+	BYTE bytes[16]{};
+	const bool generated = CryptGenRandom(provider, static_cast< DWORD >(sizeof(bytes)), bytes) != FALSE;
+	CryptReleaseContext(provider, 0);
+	if (!generated) {
+		throw std::runtime_error("Unable to generate a transaction identifier.");
+	}
+	return hexFromBytes(bytes, sizeof(bytes));
+}
+
+bool flushFileDurably(const std::filesystem::path &path) {
+	HANDLE file =
+		CreateFileW(path.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+					nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+	if (file == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	const bool flushed = FlushFileBuffers(file) != FALSE;
+	CloseHandle(file);
+	return flushed;
+}
+
+std::filesystem::path recoveryUpdaterPath(const Options &options) {
+	const std::filesystem::path appDir = parentPath(options.appPath);
+	const std::string executableHash   = fileSha256(currentExecutablePath());
+	return packageWorkRoot(options) / L"recovery" / wideFromUtf8(Mumble::UpdateHealth::installationKey(appDir))
+		   / wideFromUtf8(executableHash.substr(0, 16)) / L"mumble-updater-recovery.exe";
+}
+
+std::wstring recoveryRunOnceValueName(const Options &options) {
+	return L"MumbleUpdateRecovery-" + wideFromUtf8(Mumble::UpdateHealth::installationKey(parentPath(options.appPath)));
+}
+
+std::wstring recoveryUpdaterArguments(const Options &options) {
+	std::wstring arguments             = L"--recover --app " + quoteArgument(options.appPath);
+	const std::filesystem::path appDir = parentPath(options.appPath);
+	if (!appDir.empty()) {
+		arguments += L" --working-dir " + quoteArgument(appDir.wstring());
+	}
+	if (!options.updaterLogPath.empty()) {
+		arguments += L" --updater-log " + quoteArgument(options.updaterLogPath);
+	}
+	arguments += L" --no-ui";
+	if (options.noRelaunch) {
+		arguments += L" --no-relaunch";
+	}
+	return arguments;
+}
+
+bool setRecoveryRunOnce(const Options &options, const std::filesystem::path &recoveryExecutable) {
+	HKEY key                         = nullptr;
+	// Use a persistent Run value. RunOnce is deleted before execution and leaves
+	// a power-loss window in which recovery is no longer armed.
+	constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	if (RegCreateKeyExW(HKEY_CURRENT_USER, registryPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr)
+		!= ERROR_SUCCESS) {
+		return false;
+	}
+	const std::wstring command = quoteArgument(recoveryExecutable.wstring()) + L" " + recoveryUpdaterArguments(options);
+	const std::wstring name    = recoveryRunOnceValueName(options);
+	const LSTATUS status =
+		RegSetValueExW(key, name.c_str(), 0, REG_SZ, reinterpret_cast< const BYTE * >(command.c_str()),
+					   static_cast< DWORD >((command.size() + 1) * sizeof(wchar_t)));
+	const LSTATUS flushStatus = status == ERROR_SUCCESS ? RegFlushKey(key) : status;
+	RegCloseKey(key);
+	return status == ERROR_SUCCESS && flushStatus == ERROR_SUCCESS;
+}
+
+bool clearRecoveryRunOnce(const Options &options) {
+	HKEY key                         = nullptr;
+	constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, registryPath, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) {
+		return false;
+	}
+	const LSTATUS deleteStatus = RegDeleteValueW(key, recoveryRunOnceValueName(options).c_str());
+	const LSTATUS flushStatus  = (deleteStatus == ERROR_SUCCESS || deleteStatus == ERROR_FILE_NOT_FOUND)
+								 ? RegFlushKey(key)
+								 : deleteStatus;
+	RegCloseKey(key);
+	return (deleteStatus == ERROR_SUCCESS || deleteStatus == ERROR_FILE_NOT_FOUND) && flushStatus == ERROR_SUCCESS;
+}
+
+bool ensureDurableRecoveryFile(const std::filesystem::path &source, const std::filesystem::path &target) {
+	if (!fileExists(source.wstring())) {
+		return false;
+	}
+	const std::string sourceHash = fileSha256(source);
+	std::error_code error;
+	std::filesystem::create_directories(target.parent_path(), error);
+	if (error) {
+		return false;
+	}
+
+	const bool samePath = lowerWide(std::filesystem::absolute(source).wstring())
+						  == lowerWide(std::filesystem::absolute(target).wstring());
+	const bool reusableTarget = fileExists(target.wstring()) && fileSha256(target) == sourceHash;
+	if (!samePath && !reusableTarget) {
+		std::filesystem::path temporary = target;
+		temporary += L".tmp-" + std::to_wstring(GetCurrentProcessId());
+		std::filesystem::remove(temporary, error);
+		error.clear();
+		std::filesystem::copy_file(source, temporary, std::filesystem::copy_options::overwrite_existing, error);
+		if (error || !flushFileDurably(temporary) || fileSha256(temporary) != sourceHash) {
+			std::filesystem::remove(temporary, error);
+			return false;
+		}
+		if (!MoveFileExW(temporary.wstring().c_str(), target.wstring().c_str(),
+						 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+			std::filesystem::remove(temporary, error);
+			return fileExists(target.wstring()) && fileSha256(target) == sourceHash;
+		}
+	}
+	return true;
+}
+
+bool armRecoveryBootstrap(const Options &options) {
+	const std::filesystem::path source = currentExecutablePath();
+	const std::filesystem::path target = recoveryUpdaterPath(options);
+	if (!ensureDurableRecoveryFile(source, target)) {
+		return false;
+	}
+	const std::filesystem::path zlibSource = source.parent_path() / L"zlib1.dll";
+	const std::filesystem::path zlibTarget = target.parent_path() / L"zlib1.dll";
+	if (!ensureDurableRecoveryFile(zlibSource, zlibTarget)) {
+		return false;
+	}
+	return setRecoveryRunOnce(options, target);
+}
+
+bool launchRecoveryWatchdog(const Options &options) {
+	const std::filesystem::path executable = recoveryUpdaterPath(options);
+	if (!fileExists(executable.wstring())) {
+		return false;
+	}
+	std::wstring command = quoteArgument(executable.wstring()) + L" " + recoveryUpdaterArguments(options)
+						   + L" --parent-pid " + std::to_wstring(GetCurrentProcessId());
+	std::vector< wchar_t > mutableCommand(command.begin(), command.end());
+	mutableCommand.push_back(L'\0');
+
+	STARTUPINFOW startup{};
+	startup.cb = sizeof(startup);
+	PROCESS_INFORMATION process{};
+	const std::wstring workingDirectory = packageWorkRoot(options).wstring();
+	auto create                         = [&](const DWORD flags) {
+        process = {};
+        return CreateProcessW(executable.wstring().c_str(), mutableCommand.data(), nullptr, nullptr, FALSE, flags,
+													  nullptr, workingDirectory.c_str(), &startup, &process)
+               != FALSE;
+	};
+	if (!create(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB)) {
+		mutableCommand.assign(command.begin(), command.end());
+		mutableCommand.push_back(L'\0');
+		if (!create(CREATE_NO_WINDOW)) {
+			return false;
+		}
+	}
+	CloseHandle(process.hThread);
+	CloseHandle(process.hProcess);
+	return true;
+}
+
 std::uint16_t readLe16(const char *data) {
 	const auto *bytes = reinterpret_cast< const unsigned char * >(data);
 	return static_cast< std::uint16_t >(bytes[0] | (bytes[1] << 8));
@@ -897,11 +1224,11 @@ std::uint32_t readLe32(const char *data) {
 
 struct ZipEntry {
 	std::string name;
-	std::uint16_t flags = 0;
-	std::uint16_t method = 0;
-	std::uint32_t crc32 = 0;
-	std::uint64_t compressedSize = 0;
-	std::uint64_t uncompressedSize = 0;
+	std::uint16_t flags             = 0;
+	std::uint16_t method            = 0;
+	std::uint32_t crc32             = 0;
+	std::uint64_t compressedSize    = 0;
+	std::uint64_t uncompressedSize  = 0;
 	std::uint64_t localHeaderOffset = 0;
 };
 
@@ -942,9 +1269,9 @@ std::unordered_map< std::string, ZipEntry > readZipDirectory(const std::filesyst
 		throw std::runtime_error("Update package is not a supported ZIP archive.");
 	}
 
-	const std::uint16_t entryCountDisk = readLe16(tail.data() + eocdOffset + 8);
-	const std::uint16_t entryCount = readLe16(tail.data() + eocdOffset + 10);
-	const std::uint32_t centralDirectorySize32 = readLe32(tail.data() + eocdOffset + 12);
+	const std::uint16_t entryCountDisk           = readLe16(tail.data() + eocdOffset + 8);
+	const std::uint16_t entryCount               = readLe16(tail.data() + eocdOffset + 10);
+	const std::uint32_t centralDirectorySize32   = readLe32(tail.data() + eocdOffset + 12);
 	const std::uint32_t centralDirectoryOffset32 = readLe32(tail.data() + eocdOffset + 16);
 	if (entryCountDisk == Zip64Marker16 || entryCount == Zip64Marker16 || centralDirectorySize32 == Zip64Marker32
 		|| centralDirectoryOffset32 == Zip64Marker32) {
@@ -961,20 +1288,19 @@ std::unordered_map< std::string, ZipEntry > readZipDirectory(const std::filesyst
 	std::unordered_map< std::string, ZipEntry > entries;
 	std::size_t offset = 0;
 	for (std::uint16_t index = 0; index < entryCount; ++index) {
-		if (offset + 46 > directory.size()
-			|| readLe32(directory.data() + offset) != ZipCentralDirectorySignature) {
+		if (offset + 46 > directory.size() || readLe32(directory.data() + offset) != ZipCentralDirectorySignature) {
 			throw std::runtime_error("Update package central directory is corrupt.");
 		}
 
 		ZipEntry entry;
-		entry.flags = readLe16(directory.data() + offset + 8);
-		entry.method = readLe16(directory.data() + offset + 10);
-		entry.crc32 = readLe32(directory.data() + offset + 16);
-		const std::uint32_t compressedSize32 = readLe32(directory.data() + offset + 20);
-		const std::uint32_t uncompressedSize32 = readLe32(directory.data() + offset + 24);
-		const std::uint16_t nameLength = readLe16(directory.data() + offset + 28);
-		const std::uint16_t extraLength = readLe16(directory.data() + offset + 30);
-		const std::uint16_t commentLength = readLe16(directory.data() + offset + 32);
+		entry.flags                             = readLe16(directory.data() + offset + 8);
+		entry.method                            = readLe16(directory.data() + offset + 10);
+		entry.crc32                             = readLe32(directory.data() + offset + 16);
+		const std::uint32_t compressedSize32    = readLe32(directory.data() + offset + 20);
+		const std::uint32_t uncompressedSize32  = readLe32(directory.data() + offset + 24);
+		const std::uint16_t nameLength          = readLe16(directory.data() + offset + 28);
+		const std::uint16_t extraLength         = readLe16(directory.data() + offset + 30);
+		const std::uint16_t commentLength       = readLe16(directory.data() + offset + 32);
 		const std::uint32_t localHeaderOffset32 = readLe32(directory.data() + offset + 42);
 		if (compressedSize32 == Zip64Marker32 || uncompressedSize32 == Zip64Marker32
 			|| localHeaderOffset32 == Zip64Marker32) {
@@ -992,8 +1318,8 @@ std::unordered_map< std::string, ZipEntry > readZipDirectory(const std::filesyst
 
 		entry.name.assign(directory.data() + nameOffset, directory.data() + nameOffset + nameLength);
 		std::replace(entry.name.begin(), entry.name.end(), '\\', '/');
-		entry.compressedSize = compressedSize32;
-		entry.uncompressedSize = uncompressedSize32;
+		entry.compressedSize    = compressedSize32;
+		entry.uncompressedSize  = uncompressedSize32;
 		entry.localHeaderOffset = localHeaderOffset32;
 
 		if (!entry.name.empty() && entry.name.back() != '/') {
@@ -1011,14 +1337,14 @@ void readZipEntryPayload(const std::filesystem::path &packagePath, const ZipEntr
 		throw std::runtime_error("Unable to open update package for extraction.");
 	}
 
-	char localHeader[30] {};
+	char localHeader[30]{};
 	stream.seekg(static_cast< std::streamoff >(entry.localHeaderOffset), std::ios::beg);
 	stream.read(localHeader, sizeof(localHeader));
 	if (stream.gcount() != sizeof(localHeader) || readLe32(localHeader) != ZipLocalFileHeaderSignature) {
 		throw std::runtime_error("Update package local file header is corrupt.");
 	}
 
-	const std::uint16_t nameLength = readLe16(localHeader + 26);
+	const std::uint16_t nameLength  = readLe16(localHeader + 26);
 	const std::uint16_t extraLength = readLe16(localHeader + 28);
 	stream.seekg(static_cast< std::streamoff >(entry.localHeaderOffset + 30 + nameLength + extraLength), std::ios::beg);
 
@@ -1040,7 +1366,7 @@ void readZipEntryPayload(const std::filesystem::path &packagePath, const ZipEntr
 			uncompressedWritten += chunkSize;
 		}
 	} else if (entry.method == ZipMethodDeflate) {
-		z_stream zstream {};
+		z_stream zstream{};
 		if (inflateInit2(&zstream, -MAX_WBITS) != Z_OK) {
 			throw std::runtime_error("Unable to initialize ZIP deflate stream.");
 		}
@@ -1056,13 +1382,13 @@ void readZipEntryPayload(const std::filesystem::path &packagePath, const ZipEntr
 						throw std::runtime_error("Deflated update package entry is truncated.");
 					}
 					compressedRemaining -= chunkSize;
-					zstream.next_in = reinterpret_cast< Bytef * >(input.data());
+					zstream.next_in  = reinterpret_cast< Bytef * >(input.data());
 					zstream.avail_in = static_cast< uInt >(chunkSize);
 				}
 
-				zstream.next_out = reinterpret_cast< Bytef * >(output.data());
+				zstream.next_out  = reinterpret_cast< Bytef * >(output.data());
 				zstream.avail_out = static_cast< uInt >(output.size());
-				const int result = inflate(&zstream, Z_NO_FLUSH);
+				const int result  = inflate(&zstream, Z_NO_FLUSH);
 				if (result != Z_OK && result != Z_STREAM_END) {
 					throw std::runtime_error("Unable to inflate update package entry.");
 				}
@@ -1095,9 +1421,8 @@ void readZipEntryPayload(const std::filesystem::path &packagePath, const ZipEntr
 std::string readZipEntryText(const std::filesystem::path &packagePath, const ZipEntry &entry) {
 	std::string contents;
 	contents.reserve(static_cast< std::size_t >(std::min< std::uint64_t >(entry.uncompressedSize, 1024 * 1024)));
-	readZipEntryPayload(packagePath, entry, [&contents](const char *data, const std::size_t size) {
-		contents.append(data, data + size);
-	});
+	readZipEntryPayload(packagePath, entry,
+						[&contents](const char *data, const std::size_t size) { contents.append(data, data + size); });
 	return contents;
 }
 
@@ -1159,82 +1484,75 @@ struct PackagePlan {
 	std::filesystem::path sidecarPath;
 	std::vector< PackageFile > files;
 	std::vector< PackageFile > changedFiles;
+	std::vector< PackageFile > staleFiles;
+	std::string previousPackageIdentity;
+	bool healthCheckRequired                       = false;
+	std::uint64_t minimumStableRuntimeMilliseconds = Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds;
+	std::uint64_t healthTimeoutMilliseconds        = Mumble::UpdateHealth::DefaultHealthTimeoutMilliseconds;
 };
 
 std::string appDirManifestKey(const std::filesystem::path &appDir) {
-	const std::wstring text = lowerWide(std::filesystem::absolute(appDir).wstring());
-	std::uint64_t hash = 14695981039346656037ull;
-	for (const wchar_t ch : text) {
-		hash ^= static_cast< std::uint64_t >(ch);
-		hash *= 1099511628211ull;
-	}
-	std::ostringstream stream;
-	stream << std::hex << std::setw(16) << std::setfill('0') << hash;
-	return stream.str();
+	return Mumble::UpdateHealth::installationKey(appDir);
 }
 
 std::filesystem::path installedManifestPath(const PackagePlan &plan) {
 	return plan.updateRoot / L"installed-manifests" / (wideFromUtf8(appDirManifestKey(plan.appDir)) + L".json");
 }
 
-std::string fallbackPackageIdentity(const std::filesystem::path &packagePath) {
-	std::error_code error;
-	const std::uintmax_t size = std::filesystem::file_size(packagePath, error);
-	std::string identity = utf8FromWide(packagePath.filename().wstring());
-	identity += "-";
-	identity += std::to_string(error ? 0 : size);
-	std::replace_if(identity.begin(), identity.end(), [](const char ch) {
-		return !std::isalnum(static_cast< unsigned char >(ch)) && ch != '-' && ch != '_';
-	}, '-');
-	return identity;
-}
-
 PackagePlan makePackagePlan(const Options &options) {
 	PackagePlan plan;
 	plan.packageIdentity = lowerSha256(options.packageSha256);
-	if (plan.packageIdentity.empty()) {
-		plan.packageIdentity = fallbackPackageIdentity(options.packagePath);
+	if (plan.packageIdentity.size() != 64 || fileSha256(options.packagePath) != plan.packageIdentity) {
+		throw std::runtime_error("Update package is not bound to its required SHA256.");
 	}
 	plan.packagePath = std::filesystem::path(options.packagePath);
-	plan.appPath = std::filesystem::path(options.appPath);
-	plan.appDir = plan.appPath.parent_path();
-	plan.updateRoot = packageWorkRoot(options);
-	plan.stageRoot = plan.updateRoot / L"prepared-packages" / wideFromUtf8(plan.packageIdentity);
+	plan.appPath     = std::filesystem::path(options.appPath);
+	plan.appDir      = plan.appPath.parent_path();
+	plan.updateRoot  = packageWorkRoot(options);
+	plan.stageRoot   = plan.updateRoot / L"prepared-packages" / wideFromUtf8(plan.packageIdentity);
 	plan.sidecarPath = std::filesystem::path(pathWithSuffix(plan.packagePath, L".prepared.json"));
 	return plan;
 }
 
-std::unordered_map< std::string, std::string > loadInstalledHashes(const PackagePlan &plan) {
-	std::unordered_map< std::string, std::string > hashes;
+struct InstalledPackageState {
+	std::string packageIdentity;
+	std::unordered_map< std::string, PackageFile > files;
+};
+
+InstalledPackageState loadInstalledPackageState(const PackagePlan &plan) {
+	InstalledPackageState state;
 	const std::filesystem::path manifestPath = installedManifestPath(plan);
 	if (!fileExists(manifestPath.wstring())) {
-		return hashes;
+		return state;
 	}
 
 	try {
 		std::ifstream stream(manifestPath, std::ios::binary);
-		const json manifest = json::parse(stream);
+		const json manifest   = json::parse(stream);
+		state.packageIdentity = manifest.value("packageIdentity", "");
 		for (const json &file : manifest.value("files", json::array())) {
-			const std::string path = file.value("path", "");
-			const std::string sha256 = lowerAscii(file.value("sha256", ""));
-			if (!path.empty() && !sha256.empty()) {
-				hashes[path] = sha256;
+			PackageFile installed;
+			installed.path   = file.value("path", "");
+			installed.size   = file.value("size", static_cast< std::uint64_t >(0));
+			installed.sha256 = lowerAscii(file.value("sha256", ""));
+			if (isSafePackageRelativePath(installed.path) && !installed.sha256.empty()) {
+				state.files[installed.path] = std::move(installed);
 			}
 		}
 	} catch (...) {
-		hashes.clear();
+		state = {};
 	}
-	return hashes;
+	return state;
 }
 
 std::uint64_t fileSizeOrMissing(const std::filesystem::path &path, bool &exists) {
 	std::error_code error;
 	const std::uintmax_t size = std::filesystem::file_size(path, error);
-	exists = !error;
+	exists                    = !error;
 	return exists ? static_cast< std::uint64_t >(size) : 0;
 }
 
-std::vector< PackageFile > parsePackageManifest(const std::string &manifestText) {
+std::vector< PackageFile > parsePackageManifest(const std::string &manifestText, PackagePlan &plan) {
 	const json manifest = json::parse(manifestText);
 	if (manifest.value("format", "") != "mumble-update-v1") {
 		throw std::runtime_error("Unsupported update package format.");
@@ -1243,23 +1561,36 @@ std::vector< PackageFile > parsePackageManifest(const std::string &manifestText)
 		throw std::runtime_error("Unsupported update package apply mode.");
 	}
 	const int minUpdaterVersion = manifest.value("minUpdaterVersion", -1);
-	if (minUpdaterVersion > 2) {
+	if (minUpdaterVersion > 3) {
 		throw std::runtime_error("Update package requires a newer updater.");
 	}
+	const json healthCheck                = manifest.value("healthCheck", json::object());
+	plan.healthCheckRequired              = healthCheck.value("required", false);
+	plan.minimumStableRuntimeMilliseconds = std::max< std::uint64_t >(
+		Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds,
+		healthCheck.value("minimumStableRuntimeMilliseconds", Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds));
+	plan.healthTimeoutMilliseconds =
+		std::max(plan.minimumStableRuntimeMilliseconds,
+				 healthCheck.value("timeoutMilliseconds", Mumble::UpdateHealth::DefaultHealthTimeoutMilliseconds));
 
 	std::vector< PackageFile > files;
-	bool hasMumble = false;
+	std::unordered_set< std::string > uniquePaths;
+	bool hasMumble  = false;
 	bool hasUpdater = false;
 	for (const json &entry : manifest.value("files", json::array())) {
 		PackageFile file;
 		file.path = entry.value("path", "");
 		std::replace(file.path.begin(), file.path.end(), '\\', '/');
-		file.size = entry.value("size", static_cast< std::uint64_t >(0));
+		file.size   = entry.value("size", static_cast< std::uint64_t >(0));
 		file.sha256 = lowerAscii(entry.value("sha256", ""));
-		if (!isSafePackageRelativePath(file.path) || file.sha256.empty()) {
+		const bool validHash = file.sha256.size() == 64
+						   && std::all_of(file.sha256.begin(), file.sha256.end(), [](const unsigned char ch) {
+							  return std::isxdigit(ch) != 0;
+						   });
+		if (!isSafePackageRelativePath(file.path) || !validHash || !uniquePaths.insert(file.path).second) {
 			throw std::runtime_error("Update package manifest contains an invalid file entry.");
 		}
-		hasMumble = hasMumble || file.path == "mumble.exe";
+		hasMumble  = hasMumble || file.path == "mumble.exe";
 		hasUpdater = hasUpdater || file.path == "mumble-updater.exe";
 		files.push_back(std::move(file));
 	}
@@ -1288,21 +1619,23 @@ void writeJsonFile(const std::filesystem::path &path, const json &document) {
 		stream << document.dump(2);
 		stream << '\n';
 	}
-	std::filesystem::rename(tempPath, path, error);
-	if (error) {
-		std::filesystem::remove(path, error);
-		std::filesystem::rename(tempPath, path, error);
+	if (!flushFileDurably(tempPath)) {
+		std::filesystem::remove(tempPath, error);
+		throw std::runtime_error("Unable to durably finish JSON output file.");
 	}
-	if (error) {
-		throw std::runtime_error("Unable to commit JSON output file.");
+	if (!MoveFileExW(tempPath.wstring().c_str(), path.wstring().c_str(),
+					 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		std::filesystem::remove(tempPath, error);
+		throw std::runtime_error("Unable to durably commit JSON output file.");
 	}
 }
 
 void writePreparedSidecar(const PackagePlan &plan) {
-	json files = json::array();
+	json files        = json::array();
 	json changedFiles = json::array();
+	json staleFiles   = json::array();
 	for (const PackageFile &file : plan.files) {
-		json entry {
+		json entry{
 			{ "path", file.path },
 			{ "size", file.size },
 			{ "sha256", file.sha256 },
@@ -1313,16 +1646,28 @@ void writePreparedSidecar(const PackagePlan &plan) {
 			changedFiles.push_back(entry);
 		}
 	}
+	for (const PackageFile &file : plan.staleFiles) {
+		staleFiles.push_back(json{
+			{ "path", file.path },
+			{ "size", file.size },
+			{ "sha256", file.sha256 },
+		});
+	}
 
-	writeJsonFile(plan.sidecarPath, json {
-									{ "schema", 1 },
-									{ "packageIdentity", plan.packageIdentity },
-									{ "packagePath", utf8FromWide(plan.packagePath.wstring()) },
-									{ "appPath", utf8FromWide(plan.appPath.wstring()) },
-									{ "stageRoot", utf8FromWide(plan.stageRoot.wstring()) },
-									{ "files", files },
-									{ "changedFiles", changedFiles },
-								});
+	writeJsonFile(plan.sidecarPath, json{
+										{ "schema", 1 },
+										{ "packageIdentity", plan.packageIdentity },
+										{ "packagePath", utf8FromWide(plan.packagePath.wstring()) },
+										{ "appPath", utf8FromWide(plan.appPath.wstring()) },
+										{ "stageRoot", utf8FromWide(plan.stageRoot.wstring()) },
+										{ "previousPackageIdentity", plan.previousPackageIdentity },
+										{ "healthCheckRequired", plan.healthCheckRequired },
+										{ "minimumStableRuntimeMilliseconds", plan.minimumStableRuntimeMilliseconds },
+										{ "healthTimeoutMilliseconds", plan.healthTimeoutMilliseconds },
+										{ "files", files },
+										{ "changedFiles", changedFiles },
+										{ "staleFiles", staleFiles },
+									});
 }
 
 PackagePlan loadPreparedSidecar(const Options &options) {
@@ -1331,9 +1676,12 @@ PackagePlan loadPreparedSidecar(const Options &options) {
 	if (!stream) {
 		throw std::runtime_error("Prepared update sidecar is missing.");
 	}
-	const json sidecar = json::parse(stream);
+	const json sidecar         = json::parse(stream);
+	if (sidecar.value("schema", 0) != 1) {
+		throw std::runtime_error("Prepared update sidecar has an unsupported schema.");
+	}
 	const std::string identity = lowerAscii(sidecar.value("packageIdentity", ""));
-	if (!plan.packageIdentity.empty() && identity != plan.packageIdentity) {
+	if (identity != plan.packageIdentity) {
 		throw std::runtime_error("Prepared update identity does not match the requested package.");
 	}
 	const std::wstring sidecarPackagePath = wideFromUtf8(sidecar.value("packagePath", ""));
@@ -1349,30 +1697,56 @@ PackagePlan loadPreparedSidecar(const Options &options) {
 		throw std::runtime_error("Prepared update app path does not match the requested app.");
 	}
 
-	const std::wstring stageRoot = wideFromUtf8(sidecar.value("stageRoot", ""));
-	if (!stageRoot.empty()) {
-		plan.stageRoot = std::filesystem::path(stageRoot);
-	}
-	if (!pathStartsWithRoot(plan.stageRoot, plan.updateRoot / L"prepared-packages")) {
-		throw std::runtime_error("Prepared update stage root is outside the update directory.");
+	const std::wstring sidecarStageRoot = wideFromUtf8(sidecar.value("stageRoot", ""));
+	if (sidecarStageRoot.empty()
+		|| lowerWide(std::filesystem::absolute(sidecarStageRoot).lexically_normal().wstring())
+			   != lowerWide(std::filesystem::absolute(plan.stageRoot).lexically_normal().wstring())) {
+		throw std::runtime_error("Prepared update stage root does not match the verified package identity.");
 	}
 
-	for (const json &entry : sidecar.value("files", json::array())) {
-		PackageFile file;
-		file.path = entry.value("path", "");
-		file.size = entry.value("size", static_cast< std::uint64_t >(0));
-		file.sha256 = lowerAscii(entry.value("sha256", ""));
-		file.changed = entry.value("changed", true);
-		if (!isSafePackageRelativePath(file.path) || file.sha256.empty()) {
-			throw std::runtime_error("Prepared update sidecar contains an invalid file entry.");
-		}
+	// The public sidecar is only a cache-complete signal. Paths, hashes, health
+	// policy, changed files, and stale files are reconstructed from the locked,
+	// SHA-verified ZIP and current installation; none are trusted from sidecar.
+	const auto zipEntries = readZipDirectory(plan.packagePath);
+	const auto manifestIt = zipEntries.find("manifest.json");
+	if (manifestIt == zipEntries.end()) {
+		throw std::runtime_error("Verified update package is missing manifest.json.");
+	}
+	plan.files = parsePackageManifest(readZipEntryText(plan.packagePath, manifestIt->second), plan);
+
+	const InstalledPackageState installedState = loadInstalledPackageState(plan);
+	plan.previousPackageIdentity               = installedState.packageIdentity;
+	std::unordered_set< std::string > nextPaths;
+	for (PackageFile &file : plan.files) {
+		nextPaths.insert(file.path);
+		const auto target              = resolvePackagePathUnderRoot(plan.appDir, file.path);
+		bool targetExists              = false;
+		const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
+		file.changed                   = !targetExists || targetSize != file.size || fileSha256(target) != file.sha256;
 		if (file.changed) {
+			const auto source              = resolvePackagePathUnderRoot(plan.stageRoot / L"payload", file.path);
+			bool sourceExists              = false;
+			const std::uint64_t sourceSize = fileSizeOrMissing(source, sourceExists);
+			if (!sourceExists || sourceSize != file.size || fileSha256(source) != file.sha256) {
+				throw std::runtime_error("Prepared package cache is incomplete for " + file.path + ".");
+			}
 			plan.changedFiles.push_back(file);
 		}
-		plan.files.push_back(std::move(file));
 	}
-	if (plan.files.empty()) {
-		throw std::runtime_error("Prepared update sidecar does not list any files.");
+	for (const auto &[path, installed] : installedState.files) {
+		if (nextPaths.find(path) != nextPaths.end()) {
+			continue;
+		}
+		const auto target = resolvePackagePathUnderRoot(plan.appDir, path);
+		if (!fileExists(target.wstring())) {
+			continue;
+		}
+		bool targetExists              = false;
+		const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
+		if (!targetExists || targetSize != installed.size || fileSha256(target) != installed.sha256) {
+			throw std::runtime_error("Refusing to delete a locally modified stale managed file: " + path);
+		}
+		plan.staleFiles.push_back(installed);
 	}
 	return plan;
 }
@@ -1380,20 +1754,20 @@ PackagePlan loadPreparedSidecar(const Options &options) {
 void writeInstalledManifest(const PackagePlan &plan) {
 	json files = json::array();
 	for (const PackageFile &file : plan.files) {
-		files.push_back(json {
+		files.push_back(json{
 			{ "path", file.path },
 			{ "size", file.size },
 			{ "sha256", file.sha256 },
 		});
 	}
 
-	writeJsonFile(installedManifestPath(plan), json {
-											  { "schema", 1 },
-											  { "appPath", utf8FromWide(plan.appPath.wstring()) },
-											  { "appDir", utf8FromWide(plan.appDir.wstring()) },
-											  { "packageIdentity", plan.packageIdentity },
-											  { "files", files },
-										  });
+	writeJsonFile(installedManifestPath(plan), json{
+												   { "schema", 1 },
+												   { "appPath", utf8FromWide(plan.appPath.wstring()) },
+												   { "appDir", utf8FromWide(plan.appDir.wstring()) },
+												   { "packageIdentity", plan.packageIdentity },
+												   { "files", files },
+											   });
 }
 
 DWORD prepareNativePackageUpdate(const Options &options) {
@@ -1407,7 +1781,7 @@ DWORD prepareNativePackageUpdate(const Options &options) {
 		if (manifestIt == zipEntries.end()) {
 			throw std::runtime_error("Update package is missing manifest.json.");
 		}
-		plan.files = parsePackageManifest(readZipEntryText(plan.packagePath, manifestIt->second));
+		plan.files = parsePackageManifest(readZipEntryText(plan.packagePath, manifestIt->second), plan);
 
 		std::error_code error;
 		if (std::filesystem::exists(plan.stageRoot, error)) {
@@ -1421,24 +1795,25 @@ DWORD prepareNativePackageUpdate(const Options &options) {
 			throw std::runtime_error("Unable to create prepared package directory.");
 		}
 
-		const std::unordered_map< std::string, std::string > installedHashes = loadInstalledHashes(plan);
-		int progress = 0;
-		int totalProgress = 1;
-		const auto progressLog = [&](const std::wstring &message) {
-			++progress;
-			appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress)
-								   + L": " + message);
+		const InstalledPackageState installedState = loadInstalledPackageState(plan);
+		plan.previousPackageIdentity               = installedState.packageIdentity;
+		int progress                               = 0;
+		int totalProgress                          = 1;
+		const auto progressLog                     = [&](const std::wstring &message) {
+            ++progress;
+            appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress) + L": "
+													   + message);
 		};
 
 		for (PackageFile &file : plan.files) {
 			appendLog(options, L"Planning file " + wideFromUtf8(file.path) + L'.');
-			const auto target = resolvePackagePathUnderRoot(plan.appDir, file.path);
-			bool targetExists = false;
+			const auto target              = resolvePackagePathUnderRoot(plan.appDir, file.path);
+			bool targetExists              = false;
 			const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
-			file.changed = true;
-			const auto installedIt = installedHashes.find(file.path);
-			if (targetExists && targetSize == file.size && installedIt != installedHashes.end()
-				&& installedIt->second == file.sha256) {
+			file.changed                   = true;
+			const auto installedIt         = installedState.files.find(file.path);
+			if (targetExists && targetSize == file.size && installedIt != installedState.files.end()
+				&& installedIt->second.sha256 == file.sha256) {
 				file.changed = false;
 			} else if (targetExists && targetSize == file.size) {
 				file.changed = fileSha256(target) != file.sha256;
@@ -1448,12 +1823,26 @@ DWORD prepareNativePackageUpdate(const Options &options) {
 			}
 		}
 
-		progress = 0;
+		std::unordered_set< std::string > nextPaths;
+		for (const PackageFile &file : plan.files) {
+			nextPaths.insert(file.path);
+		}
+		for (const auto &[path, installed] : installedState.files) {
+			if (nextPaths.find(path) != nextPaths.end()) {
+				continue;
+			}
+			const auto target = resolvePackagePathUnderRoot(plan.appDir, path);
+			if (fileExists(target.wstring())) {
+				plan.staleFiles.push_back(installed);
+			}
+		}
+
+		progress      = 0;
 		totalProgress = static_cast< int >(plan.changedFiles.size() + 1);
 		for (const PackageFile &file : plan.changedFiles) {
 			progressLog(L"Staging file " + wideFromUtf8(file.path));
 			const std::string zipName = "payload/" + file.path;
-			const auto entryIt = zipEntries.find(zipName);
+			const auto entryIt        = zipEntries.find(zipName);
 			if (entryIt == zipEntries.end()) {
 				throw std::runtime_error("Update package payload is missing " + file.path + ".");
 			}
@@ -1463,7 +1852,9 @@ DWORD prepareNativePackageUpdate(const Options &options) {
 
 		writePreparedSidecar(plan);
 		progressLog(L"Prepared update package");
-		appendLog(options, L"Prepared update package with " + std::to_wstring(plan.changedFiles.size()) + L" changed files.");
+		appendLog(options, L"Prepared update package with " + std::to_wstring(plan.changedFiles.size())
+							   + L" changed files and " + std::to_wstring(plan.staleFiles.size())
+							   + L" stale managed files.");
 		postUiProgress(100, false);
 		return 0;
 	} catch (const std::exception &exception) {
@@ -1473,10 +1864,137 @@ DWORD prepareNativePackageUpdate(const Options &options) {
 }
 
 struct BackupEntry {
+	std::string relativePath;
 	std::filesystem::path target;
 	std::filesystem::path backup;
-	bool existed = false;
+	bool existed       = false;
+	std::uint64_t size = 0;
+	std::string sha256;
 };
+
+BackupEntry backupManagedTarget(const PackagePlan &plan, const std::filesystem::path &backupRoot,
+								const std::string &relativePath) {
+	BackupEntry backup;
+	backup.relativePath = relativePath;
+	backup.target       = resolvePackagePathUnderRoot(plan.appDir, relativePath);
+	backup.backup       = resolvePackagePathUnderRoot(backupRoot, relativePath);
+	backup.existed      = fileExists(backup.target.wstring());
+	if (!backup.existed) {
+		return backup;
+	}
+
+	std::error_code error;
+	std::filesystem::create_directories(backup.backup.parent_path(), error);
+	if (error) {
+		throw std::runtime_error("Unable to create backup directory for " + relativePath);
+	}
+	std::filesystem::copy_file(backup.target, backup.backup, std::filesystem::copy_options::overwrite_existing, error);
+	if (error) {
+		throw std::runtime_error("Unable to back up " + relativePath);
+	}
+	if (!flushFileDurably(backup.backup)) {
+		throw std::runtime_error("Unable to durably back up " + relativePath);
+	}
+	bool backupExists = false;
+	backup.size       = fileSizeOrMissing(backup.backup, backupExists);
+	backup.sha256     = backupExists ? fileSha256(backup.backup) : std::string();
+	if (!backupExists || backup.sha256.empty()) {
+		throw std::runtime_error("Unable to verify backup for " + relativePath);
+	}
+	return backup;
+}
+
+void restoreBackupEntries(const std::vector< BackupEntry > &backups) {
+	std::error_code error;
+	for (auto it = backups.rbegin(); it != backups.rend(); ++it) {
+		if (!it->existed) {
+			if (fileExists(it->target.wstring())) {
+				std::filesystem::remove(it->target, error);
+				if (error || fileExists(it->target.wstring())) {
+					throw std::runtime_error("Unable to remove newly installed file " + it->relativePath);
+				}
+			}
+			continue;
+		}
+		bool backupExists              = false;
+		const std::uint64_t backupSize = fileSizeOrMissing(it->backup, backupExists);
+		if (!backupExists || backupSize != it->size || fileSha256(it->backup) != it->sha256) {
+			throw std::runtime_error("Known-good backup failed verification for " + it->relativePath);
+		}
+		std::filesystem::create_directories(it->target.parent_path(), error);
+		if (error) {
+			throw std::runtime_error("Unable to recreate target directory for " + it->relativePath);
+		}
+		std::filesystem::copy_file(it->backup, it->target, std::filesystem::copy_options::overwrite_existing, error);
+		if (error || !flushFileDurably(it->target)) {
+			throw std::runtime_error("Unable to restore " + it->relativePath);
+		}
+		bool restoredExists              = false;
+		const std::uint64_t restoredSize = fileSizeOrMissing(it->target, restoredExists);
+		if (!restoredExists || restoredSize != it->size || fileSha256(it->target) != it->sha256) {
+			throw std::runtime_error("Restored file failed verification for " + it->relativePath);
+		}
+	}
+}
+
+bool pendingOwnsExpectedBackupRoot(const std::filesystem::path &updateRoot,
+								  const Mumble::UpdateHealth::PendingUpdate &pending) {
+	std::filesystem::path expected;
+	try {
+		const std::string relative = "known-good/"
+								 + Mumble::UpdateHealth::installationKey(pending.appPath.parent_path())
+								 + "/transaction-" + pending.transactionId;
+		expected = resolvePackagePathUnderRoot(updateRoot, relative);
+	} catch (...) {
+		return false;
+	}
+	if (lowerWide(std::filesystem::absolute(pending.backupRoot).lexically_normal().wstring())
+		!= lowerWide(std::filesystem::absolute(expected).lexically_normal().wstring())) {
+		return false;
+	}
+	const DWORD attributes = GetFileAttributesW(pending.backupRoot.wstring().c_str());
+	return attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+}
+
+bool persistTerminalTransaction(const Options &options, const std::filesystem::path &updateRoot,
+								 Mumble::UpdateHealth::PendingUpdate &pending,
+								 const Mumble::UpdateHealth::TransactionState terminalState,
+								 std::string &healthError) {
+	pending.state = terminalState;
+	if (!Mumble::UpdateHealth::writePendingState(updateRoot, pending, &healthError)) {
+		return false;
+	}
+	if (!pendingOwnsExpectedBackupRoot(updateRoot, pending)) {
+		healthError = "Terminal transaction backup root is not its expected non-reparse snapshot.";
+		appendLog(options, L"Refusing terminal cleanup outside the transaction-owned backup root.");
+		return false;
+	}
+
+	// Terminal state is written before cleanup. If power is lost during any
+	// following deletion, recovery can only resume cleanup and can never roll a
+	// fully committed transaction back (or reapply a completed rollback).
+	std::error_code error;
+	std::filesystem::remove(Mumble::UpdateHealth::healthMarkerPath(updateRoot, pending), error);
+	if (error) {
+		appendLog(options, L"Terminal transaction retained because its health marker could not be removed.");
+		return true;
+	}
+	std::filesystem::remove_all(pending.backupRoot, error);
+	if (error) {
+		appendLog(options, L"Terminal transaction retained because its backup could not be removed.");
+		return true;
+	}
+	if (!Mumble::UpdateHealth::removePendingState(updateRoot, pending.appPath, &healthError)) {
+		appendLog(options, L"Terminal transaction retained for retry. " + wideFromUtf8(healthError));
+		return true;
+	}
+	if (!clearRecoveryRunOnce(options)) {
+		// The persistent trigger is safe to leave behind: on the next logon it
+		// observes no journal and retries its own removal.
+		appendLog(options, L"Persistent recovery trigger will remove itself on its next run.");
+	}
+	return true;
+}
 
 DWORD commitNativePackageUpdate(const Options &options) {
 	try {
@@ -1484,8 +2002,8 @@ DWORD commitNativePackageUpdate(const Options &options) {
 		try {
 			plan = loadPreparedSidecar(options);
 		} catch (const std::exception &exception) {
-			appendLog(options, L"Prepared package is unavailable; preparing during install. "
-								   + wideFromUtf8(exception.what()));
+			appendLog(options,
+					  L"Prepared package is unavailable; preparing during install. " + wideFromUtf8(exception.what()));
 			const DWORD prepareExitCode = prepareNativePackageUpdate(options);
 			if (prepareExitCode != 0) {
 				return prepareExitCode;
@@ -1494,9 +2012,10 @@ DWORD commitNativePackageUpdate(const Options &options) {
 		}
 
 		appendLog(options, L"Committing prepared update package.");
-		const std::wstring backupName =
-			L"package-backup-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(GetCurrentProcessId());
-		const std::filesystem::path backupRoot = plan.updateRoot / backupName;
+		const std::string transactionId = newTransactionId();
+		const std::string backupRelative = "known-good/" + Mumble::UpdateHealth::installationKey(plan.appDir)
+										   + "/transaction-" + transactionId;
+		const std::filesystem::path backupRoot = resolvePackagePathUnderRoot(plan.updateRoot, backupRelative);
 		std::vector< BackupEntry > backups;
 		std::error_code error;
 		std::filesystem::create_directories(backupRoot, error);
@@ -1505,72 +2024,188 @@ DWORD commitNativePackageUpdate(const Options &options) {
 		}
 
 		int progress = 0;
-		const int totalProgress = static_cast< int >(std::max< std::size_t >(1, plan.changedFiles.size()) + 2);
+		const int totalProgress =
+			static_cast< int >(std::max< std::size_t >(1, plan.changedFiles.size() + plan.staleFiles.size()) + 2);
 		const auto progressLog = [&](const std::wstring &message) {
 			++progress;
-			appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress)
-								   + L": " + message);
+			appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress) + L": "
+								   + message);
 		};
 
+		const std::filesystem::path currentManifest        = installedManifestPath(plan);
+		const std::filesystem::path previousManifestBackup = backupRoot / L"installed-manifest.json";
+		const bool previousManifestExisted                 = fileExists(currentManifest.wstring());
+		std::uint64_t previousManifestSize                 = 0;
+		std::string previousManifestSha256;
+		if (previousManifestExisted) {
+			std::filesystem::copy_file(currentManifest, previousManifestBackup,
+									   std::filesystem::copy_options::overwrite_existing, error);
+			if (error) {
+				throw std::runtime_error("Unable to preserve the installed package manifest.");
+			}
+			if (!flushFileDurably(previousManifestBackup)) {
+				throw std::runtime_error("Unable to durably preserve the installed package manifest.");
+			}
+			bool copied            = false;
+			previousManifestSize   = fileSizeOrMissing(previousManifestBackup, copied);
+			previousManifestSha256 = copied ? fileSha256(previousManifestBackup) : std::string();
+			if (!copied || previousManifestSha256.empty()) {
+				throw std::runtime_error("Unable to verify the preserved installed package manifest.");
+			}
+		}
+
+		// Validate every staged source and durably capture every previous target
+		// before the pending journal permits the first application mutation.
+		for (const PackageFile &file : plan.changedFiles) {
+			const auto source              = resolvePackagePathUnderRoot(plan.stageRoot / L"payload", file.path);
+			bool sourceExists              = false;
+			const std::uint64_t sourceSize = fileSizeOrMissing(source, sourceExists);
+			if (!sourceExists || sourceSize != file.size || fileSha256(source) != file.sha256) {
+				throw std::runtime_error("Prepared payload file is missing or invalid: " + file.path);
+			}
+		}
+		for (const PackageFile &file : plan.changedFiles) {
+			backups.push_back(backupManagedTarget(plan, backupRoot, file.path));
+		}
+		for (const PackageFile &file : plan.staleFiles) {
+			BackupEntry backup = backupManagedTarget(plan, backupRoot, file.path);
+			if (!backup.existed || backup.size != file.size || backup.sha256 != file.sha256) {
+				throw std::runtime_error("Refusing to delete a stale managed file whose snapshot changed: " + file.path);
+			}
+			backups.push_back(std::move(backup));
+		}
+
+		Mumble::UpdateHealth::PendingUpdate pending;
+		pending.transactionId                    = transactionId;
+		pending.state                            = Mumble::UpdateHealth::TransactionState::RollbackArmed;
+		pending.packageIdentity                  = plan.packageIdentity;
+		pending.previousPackageIdentity          = plan.previousPackageIdentity;
+		pending.appPath                          = plan.appPath;
+		pending.backupRoot                       = backupRoot;
+		pending.previousInstalledManifestExisted = previousManifestExisted;
+		pending.previousInstalledManifestSize    = previousManifestSize;
+		pending.previousInstalledManifestSha256  = previousManifestSha256;
+		pending.minimumStableRuntimeMilliseconds = plan.minimumStableRuntimeMilliseconds;
+		pending.healthTimeoutMilliseconds        = plan.healthTimeoutMilliseconds;
+		for (const BackupEntry &backup : backups) {
+			pending.rollbackFiles.push_back(Mumble::UpdateHealth::RollbackFile{
+				backup.relativePath,
+				backup.existed,
+				backup.size,
+				backup.sha256,
+			});
+		}
+
+		if (!armRecoveryBootstrap(options)) {
+			throw std::runtime_error("Unable to install the persistent update recovery bootstrap.");
+		}
+		std::string healthError;
+		if (!Mumble::UpdateHealth::writePendingState(plan.updateRoot, pending, &healthError)) {
+			clearRecoveryRunOnce(options);
+			throw std::runtime_error("Unable to durably arm update rollback before mutation: " + healthError);
+		}
+		appendLog(options, L"Durably armed update rollback before the first managed-file mutation.");
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+		const bool skipRecoveryWatchdog = options.testSkipRecoveryWatchdog;
+#else
+		constexpr bool skipRecoveryWatchdog = false;
+#endif
+		if (!skipRecoveryWatchdog && !launchRecoveryWatchdog(options)) {
+			Mumble::UpdateHealth::removePendingState(plan.updateRoot, plan.appPath, &healthError);
+			clearRecoveryRunOnce(options);
+			throw std::runtime_error("Unable to launch the update recovery watchdog before mutation.");
+		}
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+		if (options.testCrashAfterJournal) {
+			ExitProcess(ERROR_PROCESS_ABORTED);
+		}
+#endif
+
 		try {
+			std::size_t mutationCount = 0;
 			for (const PackageFile &file : plan.changedFiles) {
 				progressLog(L"Installing file " + wideFromUtf8(file.path));
 				const auto source = resolvePackagePathUnderRoot(plan.stageRoot / L"payload", file.path);
 				const auto target = resolvePackagePathUnderRoot(plan.appDir, file.path);
-				bool sourceExists = false;
-				const std::uint64_t sourceSize = fileSizeOrMissing(source, sourceExists);
-				if (!sourceExists || sourceSize != file.size || fileSha256(source) != file.sha256) {
-					throw std::runtime_error("Prepared payload file is missing or invalid: " + file.path);
-				}
-
 				std::filesystem::create_directories(target.parent_path(), error);
 				if (error) {
 					throw std::runtime_error("Unable to create target directory for " + file.path);
 				}
 
-				BackupEntry backup;
-				backup.target = target;
-				backup.backup = resolvePackagePathUnderRoot(backupRoot, file.path);
-				backup.existed = fileExists(target.wstring());
-				if (backup.existed) {
-					std::filesystem::create_directories(backup.backup.parent_path(), error);
-					if (error) {
-						throw std::runtime_error("Unable to create backup directory for " + file.path);
-					}
-					std::filesystem::copy_file(target, backup.backup, std::filesystem::copy_options::overwrite_existing,
-											   error);
-					if (error) {
-						throw std::runtime_error("Unable to back up " + file.path);
-					}
-				}
-				backups.push_back(backup);
-
 				std::filesystem::copy_file(source, target, std::filesystem::copy_options::overwrite_existing, error);
-				if (error) {
-					throw std::runtime_error("Unable to install " + file.path);
+				if (error || !flushFileDurably(target)) {
+					throw std::runtime_error("Unable to durably install " + file.path);
 				}
 
-				bool targetExists = false;
+				bool targetExists              = false;
 				const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
-				if (!targetExists || targetSize != file.size) {
-					throw std::runtime_error("Installed file size mismatch for " + file.path);
+				if (!targetExists || targetSize != file.size || fileSha256(target) != file.sha256) {
+					throw std::runtime_error("Installed file size or SHA256 mismatch for " + file.path);
+				}
+				++mutationCount;
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+				if (options.testCrashAfterFirstMutation && mutationCount == 1) {
+					ExitProcess(ERROR_PROCESS_ABORTED);
+				}
+#endif
+			}
+
+			for (const PackageFile &file : plan.staleFiles) {
+				progressLog(L"Removing stale managed file " + wideFromUtf8(file.path));
+				const auto target = resolvePackagePathUnderRoot(plan.appDir, file.path);
+				bool targetExists              = false;
+				const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
+				if (!targetExists || targetSize != file.size || fileSha256(target) != file.sha256) {
+					throw std::runtime_error("Refusing to delete a stale managed file modified during update: " + file.path);
+				}
+				if (!std::filesystem::remove(target, error) || error || fileExists(target.wstring())) {
+					throw std::runtime_error("Unable to remove stale managed file " + file.path);
+				}
+				++mutationCount;
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+				if (options.testCrashAfterFirstMutation && mutationCount == 1) {
+					ExitProcess(ERROR_PROCESS_ABORTED);
+				}
+#endif
+			}
+
+			writeInstalledManifest(plan);
+			progressLog(L"Recorded installed package manifest");
+			if (plan.healthCheckRequired) {
+				pending.state = Mumble::UpdateHealth::TransactionState::AwaitingHealth;
+				if (!Mumble::UpdateHealth::writePendingState(plan.updateRoot, pending, &healthError)) {
+					throw std::runtime_error("Unable to enter durable awaiting-health state: " + healthError);
+				}
+				appendLog(options, L"Awaiting ten seconds of stable client audio before committing the update.");
+			} else {
+				if (!persistTerminalTransaction(options, plan.updateRoot, pending,
+											Mumble::UpdateHealth::TransactionState::Committed, healthError)) {
+					throw std::runtime_error("Unable to durably commit completed update transaction: " + healthError);
 				}
 			}
 		} catch (...) {
 			appendLog(options, L"Package apply failed; restoring backup.");
-			for (auto it = backups.rbegin(); it != backups.rend(); ++it) {
-				if (it->existed) {
-					std::filesystem::copy_file(it->backup, it->target, std::filesystem::copy_options::overwrite_existing,
-											   error);
-				} else {
-					std::filesystem::remove(it->target, error);
+			restoreBackupEntries(backups);
+			if (previousManifestExisted) {
+				std::filesystem::copy_file(previousManifestBackup, currentManifest,
+										   std::filesystem::copy_options::overwrite_existing, error);
+				if (error || !flushFileDurably(currentManifest)
+					|| fileSha256(currentManifest) != previousManifestSha256) {
+					throw std::runtime_error("Unable to durably restore the installed package manifest.");
 				}
+			} else {
+				std::filesystem::remove(currentManifest, error);
+				if (error || fileExists(currentManifest.wstring())) {
+					throw std::runtime_error("Unable to remove the replacement installed package manifest.");
+				}
+			}
+			if (!persistTerminalTransaction(options, plan.updateRoot, pending,
+										Mumble::UpdateHealth::TransactionState::RolledBack, healthError)) {
+				throw std::runtime_error("Unable to record the restored update transaction: " + healthError);
 			}
 			throw;
 		}
 
-		writeInstalledManifest(plan);
-		progressLog(L"Recorded installed package manifest");
 		std::filesystem::remove_all(plan.stageRoot, error);
 		std::filesystem::remove(plan.sidecarPath, error);
 		progressLog(L"Update package applied successfully");
@@ -1583,7 +2218,17 @@ DWORD commitNativePackageUpdate(const Options &options) {
 	}
 }
 
+bool rollbackPendingPackage(const Options &options);
+
 DWORD runPackageUpdate(const Options &options) {
+	// Native package transactions intentionally remain same-user. Elevating this
+	// generic file-replacement path would turn user-writable ZIP/journal state
+	// into a trusted Program Files writer. Machine installs use the verified MSI
+	// fallback and Windows Installer's privileged transaction boundary instead.
+	if (processIsElevated()) {
+		appendLog(options, L"Refusing native package apply from an elevated token; use the signed MSI fallback.");
+		return ERROR_ELEVATION_REQUIRED;
+	}
 	if (options.prepareOnly) {
 		return prepareNativePackageUpdate(options);
 	}
@@ -1595,24 +2240,139 @@ DWORD runPackageUpdate(const Options &options) {
 	}
 
 	if (!directoryWritable(options, appDir)) {
-		if (options.elevatedRetry) {
-			appendLog(options, L"App directory is still not writable after elevation retry.");
-			return ERROR_ACCESS_DENIED;
+		appendLog(options, L"App directory requires elevation; native package apply is disabled for this installation.");
+		return ERROR_ACCESS_DENIED;
+	}
+
+	const PackagePlan pendingPlan = makePackagePlan(options);
+	std::string pendingError;
+	const std::filesystem::path statePath =
+		Mumble::UpdateHealth::pendingStatePath(pendingPlan.updateRoot, pendingPlan.appPath);
+	std::error_code stateFilesystemError;
+	const bool stateExists = std::filesystem::exists(statePath, stateFilesystemError);
+	auto pending = Mumble::UpdateHealth::readPendingState(pendingPlan.updateRoot, pendingPlan.appPath, &pendingError);
+	if (!pending && (stateExists || stateFilesystemError)) {
+		appendLog(options, L"Refusing a new update because the existing recovery journal is unreadable. "
+						   + wideFromUtf8(pendingError));
+		return ERROR_RECOVERY_FAILURE;
+	}
+	if (pending) {
+		if (pending->state == Mumble::UpdateHealth::TransactionState::Committed
+			|| pending->state == Mumble::UpdateHealth::TransactionState::RolledBack) {
+			if (!persistTerminalTransaction(options, pendingPlan.updateRoot, *pending, pending->state, pendingError)) {
+				return ERROR_RECOVERY_FAILURE;
+			}
+			appendLog(options, L"Finished cleanup for a terminal package transaction.");
+		} else if (Mumble::UpdateHealth::markerConfirmsHealthy(pendingPlan.updateRoot, *pending, &pendingError)) {
+			if (!persistTerminalTransaction(options, pendingPlan.updateRoot, *pending,
+											Mumble::UpdateHealth::TransactionState::Committed, pendingError)) {
+				return ERROR_RECOVERY_FAILURE;
+			}
+			appendLog(options, L"Finalized a previously healthy package update.");
+		} else {
+			appendLog(options, L"A previous package never reached its health marker; restoring it before this update.");
+			if (!rollbackPendingPackage(options)) {
+				return ERROR_RECOVERY_FAILURE;
+			}
 		}
-		return relaunchElevatedForPackage(options);
 	}
 
 	return commitNativePackageUpdate(options);
 }
 
-bool relaunchMumble(const Options &options) {
-	if (!fileExists(options.appPath)) {
-		appendLog(options, L"Mumble executable is missing after installation.");
+bool rollbackPendingPackage(const Options &options) {
+	const std::filesystem::path appPath(options.appPath);
+	const std::filesystem::path appDir     = parentPath(options.appPath);
+	const std::filesystem::path updateRoot = packageWorkRoot(options);
+	std::string healthError;
+	auto pending = Mumble::UpdateHealth::readPendingState(updateRoot, appPath, &healthError);
+	if (!pending) {
+		appendLog(options, L"No valid pending update rollback was available. " + wideFromUtf8(healthError));
+		return false;
+	}
+	if (pending->state == Mumble::UpdateHealth::TransactionState::Committed
+		|| pending->state == Mumble::UpdateHealth::TransactionState::RolledBack) {
+		return persistTerminalTransaction(options, updateRoot, *pending, pending->state, healthError);
+	}
+
+	if (!pendingOwnsExpectedBackupRoot(updateRoot, *pending)) {
+		appendLog(options, L"Refusing update rollback because its backup is not the transaction-owned snapshot.");
 		return false;
 	}
 
-	SHELLEXECUTEINFOW executeInfo {};
+	std::vector< BackupEntry > backups;
+	for (const Mumble::UpdateHealth::RollbackFile &file : pending->rollbackFiles) {
+		BackupEntry backup;
+		backup.relativePath = file.path;
+		try {
+			backup.target = resolvePackagePathUnderRoot(appDir, file.path);
+			backup.backup = resolvePackagePathUnderRoot(pending->backupRoot, file.path);
+		} catch (const std::exception &exception) {
+			appendLog(options, L"Refusing invalid rollback file path. " + wideFromUtf8(exception.what()));
+			return false;
+		}
+		backup.existed = file.existed;
+		backup.size    = file.size;
+		backup.sha256  = file.sha256;
+		backups.push_back(std::move(backup));
+	}
+
+	try {
+		restoreBackupEntries(backups);
+		const std::filesystem::path currentManifest =
+			updateRoot / L"installed-manifests" / (wideFromUtf8(appDirManifestKey(appDir)) + L".json");
+		const std::filesystem::path manifestBackup = pending->backupRoot / L"installed-manifest.json";
+		std::error_code error;
+		if (pending->previousInstalledManifestExisted) {
+			bool backupExists              = false;
+			const std::uint64_t backupSize = fileSizeOrMissing(manifestBackup, backupExists);
+			if (!backupExists || backupSize != pending->previousInstalledManifestSize
+				|| fileSha256(manifestBackup) != pending->previousInstalledManifestSha256) {
+				throw std::runtime_error("Known-good installed manifest failed verification.");
+			}
+			std::filesystem::create_directories(currentManifest.parent_path(), error);
+			std::filesystem::copy_file(manifestBackup, currentManifest,
+									   std::filesystem::copy_options::overwrite_existing, error);
+			if (error || !flushFileDurably(currentManifest)
+				|| fileSha256(currentManifest) != pending->previousInstalledManifestSha256) {
+				throw std::runtime_error("Unable to restore the installed package manifest.");
+			}
+		} else {
+			std::filesystem::remove(currentManifest, error);
+			if (error || fileExists(currentManifest.wstring())) {
+				throw std::runtime_error("Unable to remove the replacement installed package manifest.");
+			}
+		}
+
+		if (!persistTerminalTransaction(options, updateRoot, *pending,
+										Mumble::UpdateHealth::TransactionState::RolledBack, healthError)) {
+			throw std::runtime_error("Unable to record terminal rollback state: " + healthError);
+		}
+		appendLog(options, L"Restored the last known-good immutable application payload.");
+		return true;
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Update rollback failed. " + wideFromUtf8(exception.what()));
+		return false;
+	}
+}
+
+struct RelaunchResult {
+	bool launched  = false;
+	HANDLE process = nullptr;
+	DWORD error    = 0;
+};
+
+RelaunchResult relaunchMumble(const Options &options) {
+	RelaunchResult result;
+	if (!fileExists(options.appPath)) {
+		appendLog(options, L"Mumble executable is missing after installation.");
+		result.error = ERROR_FILE_NOT_FOUND;
+		return result;
+	}
+
+	SHELLEXECUTEINFOW executeInfo{};
 	executeInfo.cbSize      = sizeof(executeInfo);
+	executeInfo.fMask       = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
 	executeInfo.lpVerb      = L"open";
 	executeInfo.lpFile      = options.appPath.c_str();
 	executeInfo.lpDirectory = options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str();
@@ -1620,67 +2380,305 @@ bool relaunchMumble(const Options &options) {
 
 	appendLog(options, L"Restarting Mumble.");
 	if (!ShellExecuteExW(&executeInfo)) {
-		const DWORD error = GetLastError();
-		appendLog(options, L"Failed to restart Mumble. Error " + std::to_wstring(error) + L'.');
-		return false;
+		result.error = GetLastError();
+		appendLog(options, L"Failed to restart Mumble. Error " + std::to_wstring(result.error) + L'.');
+		return result;
 	}
-	return true;
+	result.launched = true;
+	result.process  = executeInfo.hProcess;
+	return result;
 }
 
-constexpr UINT UiStatusMessage   = WM_APP + 1;
-constexpr UINT UiProgressMessage = WM_APP + 2;
-constexpr UINT UiDoneMessage     = WM_APP + 3;
-constexpr UINT_PTR UiRefreshTimer = 1;
-constexpr UINT_PTR UiAutoCloseTimer = 2;
-constexpr DWORD UiRefreshIntervalMsec = 350;
-constexpr DWORD UiAutoCloseDelayMsec = 1800;
-constexpr std::uintmax_t MaxLogTailBytes = 256 * 1024;
+bool waitForPackageHealth(const Options &options, HANDLE process, Mumble::UpdateHealth::PendingUpdate pending) {
+	const PackagePlan plan = makePackagePlan(options);
+	std::string healthError;
+	if (!process) {
+		appendLog(options, L"Unable to monitor the restarted client; update health cannot be confirmed.");
+		return false;
+	}
+
+	appendLog(options, L"Waiting for the restarted client to publish its stable audio health marker.");
+	const ULONGLONG deadline = GetTickCount64() + pending.healthTimeoutMilliseconds;
+	while (GetTickCount64() < deadline) {
+		if (Mumble::UpdateHealth::markerConfirmsHealthy(plan.updateRoot, pending, &healthError)) {
+			if (!persistTerminalTransaction(options, plan.updateRoot, pending,
+											Mumble::UpdateHealth::TransactionState::Committed, healthError)) {
+				appendLog(options, L"Unable to durably finalize the healthy transaction. " + wideFromUtf8(healthError));
+				return false;
+			}
+			appendLog(options, L"Restarted client passed update health qualification.");
+			return true;
+		}
+		const DWORD waitResult = WaitForSingleObject(process, 250);
+		if (waitResult == WAIT_OBJECT_0) {
+			appendLog(options, L"Restarted client exited before publishing its health marker.");
+			return false;
+		}
+		if (waitResult == WAIT_FAILED) {
+			appendLog(options, L"Unable to monitor the restarted client process.");
+			return false;
+		}
+	}
+
+	appendLog(options, L"Restarted client did not publish its health marker before the deadline.");
+	return false;
+}
+
+DWORD restartPackageAndQualify(const Options &options) {
+	PackagePlan plan = makePackagePlan(options);
+	std::string healthError;
+	try {
+		const auto entries = readZipDirectory(plan.packagePath);
+		const auto manifest = entries.find("manifest.json");
+		if (manifest == entries.end()) {
+			appendLog(options, L"Verified update package lost manifest.json before restart qualification.");
+			return ERROR_INVALID_DATA;
+		}
+		parsePackageManifest(readZipEntryText(plan.packagePath, manifest->second), plan);
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Unable to recover the package health contract. " + wideFromUtf8(exception.what()));
+		return ERROR_INVALID_DATA;
+	}
+
+	const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(plan.updateRoot, plan.appPath);
+	std::error_code stateFilesystemError;
+	const bool stateExists = std::filesystem::exists(statePath, stateFilesystemError);
+	auto pending = Mumble::UpdateHealth::readPendingState(plan.updateRoot, plan.appPath, &healthError);
+	if (plan.healthCheckRequired
+		&& (!pending || pending->state != Mumble::UpdateHealth::TransactionState::AwaitingHealth)) {
+		appendLog(options, L"Required package health journal is missing or invalid; refusing fail-open restart. "
+						   + wideFromUtf8(healthError));
+		return ERROR_RECOVERY_FAILURE;
+	}
+	if (!pending && (stateExists || stateFilesystemError)) {
+		appendLog(options, L"Package health journal exists but is unreadable; refusing fail-open restart. "
+						   + wideFromUtf8(healthError));
+		return ERROR_RECOVERY_FAILURE;
+	}
+	const bool healthRequired = pending.has_value();
+
+	RelaunchResult restart = relaunchMumble(options);
+	if (!restart.launched) {
+		if (healthRequired && !rollbackPendingPackage(options)) {
+			return ERROR_RECOVERY_FAILURE;
+		}
+		return restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+	}
+
+	if (!healthRequired) {
+		if (restart.process) {
+			CloseHandle(restart.process);
+		}
+		return 0;
+	}
+
+	const bool healthy = waitForPackageHealth(options, restart.process, *pending);
+	if (healthy) {
+		CloseHandle(restart.process);
+		return 0;
+	}
+
+	DWORD processExitCode = 0;
+	if (GetExitCodeProcess(restart.process, &processExitCode) && processExitCode == STILL_ACTIVE) {
+		appendLog(options, L"Stopping the unqualified client before rollback.");
+		TerminateProcess(restart.process, ERROR_PROCESS_ABORTED);
+		WaitForSingleObject(restart.process, 5000);
+	}
+	CloseHandle(restart.process);
+
+	if (!rollbackPendingPackage(options)) {
+		return ERROR_RECOVERY_FAILURE;
+	}
+
+	RelaunchResult restored = relaunchMumble(options);
+	if (restored.process) {
+		CloseHandle(restored.process);
+	}
+	if (!restored.launched) {
+		appendLog(options, L"Known-good payload was restored but could not be restarted.");
+		return restored.error == 0 ? ERROR_PROCESS_ABORTED : restored.error;
+	}
+	appendLog(options, L"Known-good payload was restored and restarted after failed health qualification.");
+	return ERROR_PROCESS_ABORTED;
+}
+
+DWORD runPendingRecovery(const Options &options) {
+	appendLog(options, L"Starting persistent update recovery.");
+	try {
+		if (processIsElevated()) {
+			appendLog(options, L"Refusing user-state package recovery from an elevated token.");
+			return ERROR_ELEVATION_REQUIRED;
+		}
+		if (options.parentPid != 0) {
+			appendLog(options, L"Recovery watchdog is waiting for the owning updater to exit.");
+			constexpr ULONGLONG maximumParentWaitMilliseconds = 10ULL * 60ULL * 1000ULL;
+			const ULONGLONG deadline                          = GetTickCount64() + maximumParentWaitMilliseconds;
+			while (GetTickCount64() < deadline) {
+				HANDLE parent = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, options.parentPid);
+				if (!parent) {
+					break;
+				}
+				DWORD exitCode    = 0;
+				const bool active = GetExitCodeProcess(parent, &exitCode) && exitCode == STILL_ACTIVE;
+				CloseHandle(parent);
+				if (!active) {
+					break;
+				}
+				Sleep(100);
+			}
+			HANDLE parent = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, options.parentPid);
+			if (parent) {
+				DWORD exitCode         = 0;
+				const bool stillActive = GetExitCodeProcess(parent, &exitCode) && exitCode == STILL_ACTIVE;
+				CloseHandle(parent);
+				if (stillActive) {
+					appendLog(options, L"Recovery watchdog timed out without touching the active update transaction.");
+					return ERROR_TIMEOUT;
+				}
+			}
+		}
+		if (!armRecoveryBootstrap(options)) {
+			appendLog(options, L"Unable to re-arm persistent update recovery.");
+			return ERROR_RECOVERY_FAILURE;
+		}
+
+		const std::filesystem::path appPath(options.appPath);
+		const std::filesystem::path updateRoot = packageWorkRoot(options);
+		const std::filesystem::path statePath  = Mumble::UpdateHealth::pendingStatePath(updateRoot, appPath);
+		std::error_code filesystemError;
+		const bool stateExists = std::filesystem::exists(statePath, filesystemError);
+		std::string healthError;
+		auto pending = Mumble::UpdateHealth::readPendingState(updateRoot, appPath, &healthError);
+		if (!pending) {
+			if (stateExists || filesystemError) {
+				appendLog(options,
+						  L"Persistent recovery found an unreadable pending journal. " + wideFromUtf8(healthError));
+				return ERROR_RECOVERY_FAILURE;
+			}
+			clearRecoveryRunOnce(options);
+			appendLog(options, L"No pending update transaction remains.");
+			return 0;
+		}
+		if (pending->state == Mumble::UpdateHealth::TransactionState::Committed
+			|| pending->state == Mumble::UpdateHealth::TransactionState::RolledBack) {
+			const auto terminalState = pending->state;
+			if (!persistTerminalTransaction(options, updateRoot, *pending, terminalState, healthError)) {
+				appendLog(options, L"Unable to finish terminal transaction cleanup. " + wideFromUtf8(healthError));
+				return ERROR_RECOVERY_FAILURE;
+			}
+			appendLog(options, terminalState == Mumble::UpdateHealth::TransactionState::Committed
+								   ? L"Persistent recovery completed a committed transaction cleanup."
+								   : L"Persistent recovery completed a rolled-back transaction cleanup.");
+			if (options.noRelaunch) {
+				return 0;
+			}
+			RelaunchResult restart = relaunchMumble(options);
+			if (restart.process) {
+				CloseHandle(restart.process);
+			}
+			return restart.launched ? 0 : (restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error);
+		}
+
+		if (Mumble::UpdateHealth::markerConfirmsHealthy(updateRoot, *pending, &healthError)) {
+			if (!persistTerminalTransaction(options, updateRoot, *pending,
+											Mumble::UpdateHealth::TransactionState::Committed, healthError)) {
+				appendLog(options, L"Unable to finalize the healthy pending update. " + wideFromUtf8(healthError));
+				return ERROR_RECOVERY_FAILURE;
+			}
+			appendLog(options, L"Recovered updater state by accepting the durable client health marker.");
+			if (options.noRelaunch) {
+				return 0;
+			}
+			RelaunchResult restart = relaunchMumble(options);
+			if (restart.process) {
+				CloseHandle(restart.process);
+			}
+			return restart.launched ? 0 : (restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error);
+		}
+
+		const std::filesystem::path appDir = parentPath(options.appPath);
+		if (!directoryWritable(options, appDir)) {
+			appendLog(options, L"Persistent native recovery cannot write this installation; use MSI repair.");
+			return ERROR_ACCESS_DENIED;
+		}
+
+		appendLog(options, L"The interrupted payload never qualified; rolling back from the durable journal.");
+		if (!rollbackPendingPackage(options)) {
+			return ERROR_RECOVERY_FAILURE;
+		}
+		if (options.noRelaunch) {
+			return 0;
+		}
+		RelaunchResult restart = relaunchMumble(options);
+		if (restart.process) {
+			CloseHandle(restart.process);
+		}
+		if (!restart.launched) {
+			appendLog(options, L"Known-good payload was restored but could not be restarted by persistent recovery.");
+			return restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+		}
+		appendLog(options, L"Persistent recovery restored and restarted the known-good payload.");
+		return 0;
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Persistent update recovery failed. " + wideFromUtf8(exception.what()));
+		return ERROR_RECOVERY_FAILURE;
+	}
+}
+
+constexpr UINT UiStatusMessage            = WM_APP + 1;
+constexpr UINT UiProgressMessage          = WM_APP + 2;
+constexpr UINT UiDoneMessage              = WM_APP + 3;
+constexpr UINT_PTR UiRefreshTimer         = 1;
+constexpr UINT_PTR UiAutoCloseTimer       = 2;
+constexpr DWORD UiRefreshIntervalMsec     = 350;
+constexpr DWORD UiAutoCloseDelayMsec      = 1800;
+constexpr std::uintmax_t MaxLogTailBytes  = 256 * 1024;
 constexpr int MumbleUpdaterIconResourceId = 101;
 
-enum : int {
-	ControlTitle = 1001,
-	ControlStatus,
-	ControlDetails,
-	ControlClose,
-	ControlLog
-};
+enum : int { ControlTitle = 1001, ControlStatus, ControlDetails, ControlClose, ControlLog };
 
 struct UiProgressPayload {
-	int percent = 0;
+	int percent        = 0;
 	bool indeterminate = true;
 };
 
-std::atomic< HWND > g_updaterWindow { nullptr };
+std::atomic< HWND > g_updaterWindow{ nullptr };
 
 struct UpdaterTheme {
-	COLORREF crust = RGB(25, 31, 38);
-	COLORREF mantle = RGB(37, 44, 52);
-	COLORREF base = RGB(25, 31, 38);
-	COLORREF surface0 = RGB(49, 58, 68);
-	COLORREF surface1 = RGB(57, 66, 77);
-	COLORREF surface2 = RGB(52, 61, 72);
-	COLORREF text = RGB(224, 231, 239);
-	COLORREF subtext0 = RGB(125, 137, 150);
-	COLORREF overlay0 = RGB(125, 137, 150);
-	COLORREF accent = RGB(106, 166, 207);
-	COLORREF accentHover = RGB(130, 193, 224);
-	COLORREF success = RGB(105, 178, 140);
-	COLORREF warning = RGB(199, 146, 91);
-	COLORREF danger = RGB(196, 106, 116);
-	COLORREF onAccent = RGB(25, 31, 38);
-	COLORREF caption = RGB(25, 31, 38);
-	COLORREF captionText = RGB(224, 231, 239);
+	COLORREF crust         = RGB(25, 31, 38);
+	COLORREF mantle        = RGB(37, 44, 52);
+	COLORREF base          = RGB(25, 31, 38);
+	COLORREF surface0      = RGB(49, 58, 68);
+	COLORREF surface1      = RGB(57, 66, 77);
+	COLORREF surface2      = RGB(52, 61, 72);
+	COLORREF text          = RGB(224, 231, 239);
+	COLORREF subtext0      = RGB(125, 137, 150);
+	COLORREF overlay0      = RGB(125, 137, 150);
+	COLORREF accent        = RGB(106, 166, 207);
+	COLORREF accentHover   = RGB(130, 193, 224);
+	COLORREF success       = RGB(105, 178, 140);
+	COLORREF warning       = RGB(199, 146, 91);
+	COLORREF danger        = RGB(196, 106, 116);
+	COLORREF onAccent      = RGB(25, 31, 38);
+	COLORREF caption       = RGB(25, 31, 38);
+	COLORREF captionText   = RGB(224, 231, 239);
 	COLORREF captionBorder = RGB(57, 66, 77);
-	bool dark = true;
+	bool dark              = true;
 };
 
-int colorRed(const COLORREF color) { return GetRValue(color); }
-int colorGreen(const COLORREF color) { return GetGValue(color); }
-int colorBlue(const COLORREF color) { return GetBValue(color); }
+int colorRed(const COLORREF color) {
+	return GetRValue(color);
+}
+int colorGreen(const COLORREF color) {
+	return GetGValue(color);
+}
+int colorBlue(const COLORREF color) {
+	return GetBValue(color);
+}
 
 COLORREF mixColors(const COLORREF base, const COLORREF overlay, const double overlayRatio) {
 	const double clampedRatio = std::clamp(overlayRatio, 0.0, 1.0);
-	const double baseRatio = 1.0 - clampedRatio;
+	const double baseRatio    = 1.0 - clampedRatio;
 	return RGB(static_cast< int >(colorRed(base) * baseRatio + colorRed(overlay) * clampedRatio),
 			   static_cast< int >(colorGreen(base) * baseRatio + colorGreen(overlay) * clampedRatio),
 			   static_cast< int >(colorBlue(base) * baseRatio + colorBlue(overlay) * clampedRatio));
@@ -1723,8 +2721,8 @@ bool parseHexColor(std::wstring value, COLORREF &color) {
 	}
 
 	const unsigned long raw = std::wcstoul(value.c_str(), nullptr, 16);
-	color = RGB(static_cast< int >((raw >> 16) & 0xff), static_cast< int >((raw >> 8) & 0xff),
-				static_cast< int >(raw & 0xff));
+	color                   = RGB(static_cast< int >((raw >> 16) & 0xff), static_cast< int >((raw >> 8) & 0xff),
+								  static_cast< int >(raw & 0xff));
 	return true;
 }
 
@@ -1746,9 +2744,9 @@ UpdaterTheme themeFromOptions(const Options &options) {
 			options.uiTheme.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
 		const std::size_t separator = entry.find(L'=');
 		if (separator != std::wstring::npos) {
-			const std::wstring key = lowerAscii(entry.substr(0, separator));
+			const std::wstring key   = lowerAscii(entry.substr(0, separator));
 			const std::wstring value = entry.substr(separator + 1);
-			COLORREF parsedColor = 0;
+			COLORREF parsedColor     = 0;
 			if (key == L"dark") {
 				theme.dark = parseBoolean(value, theme.dark);
 			} else if (parseHexColor(value, parsedColor)) {
@@ -1827,11 +2825,11 @@ std::wstring decodeTextBytes(const std::vector< char > &bytes) {
 		return {};
 	}
 
-	const unsigned char *raw = reinterpret_cast< const unsigned char * >(bytes.data());
-	const bool hasUtf16LeBom = bytes.size() >= 2 && raw[0] == 0xff && raw[1] == 0xfe;
+	const unsigned char *raw     = reinterpret_cast< const unsigned char * >(bytes.data());
+	const bool hasUtf16LeBom     = bytes.size() >= 2 && raw[0] == 0xff && raw[1] == 0xfe;
 	const std::size_t sampleSize = std::min< std::size_t >(bytes.size(), 4096);
-	std::size_t evenNuls = 0;
-	std::size_t oddNuls  = 0;
+	std::size_t evenNuls         = 0;
+	std::size_t oddNuls          = 0;
 	for (std::size_t index = 0; index < sampleSize; ++index) {
 		if (raw[index] == 0) {
 			if (index % 2 == 0) {
@@ -1850,8 +2848,8 @@ std::wstring decodeTextBytes(const std::vector< char > &bytes) {
 		result.reserve(count);
 		for (std::size_t index = 0; index < count; ++index) {
 			const std::size_t byteIndex = start + index * 2;
-			const wchar_t ch = static_cast< wchar_t >(static_cast< unsigned char >(bytes[byteIndex])
-													  | (static_cast< unsigned char >(bytes[byteIndex + 1]) << 8));
+			const wchar_t ch            = static_cast< wchar_t >(static_cast< unsigned char >(bytes[byteIndex])
+																 | (static_cast< unsigned char >(bytes[byteIndex + 1]) << 8));
 			result.push_back(ch);
 		}
 		return result;
@@ -1891,14 +2889,13 @@ std::wstring readFileTail(const std::wstring &path) {
 		return {};
 	}
 
-	HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
-							  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-							  FILE_ATTRIBUTE_NORMAL, nullptr);
+	HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+							  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file == INVALID_HANDLE_VALUE) {
 		return {};
 	}
 
-	LARGE_INTEGER size {};
+	LARGE_INTEGER size{};
 	if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0) {
 		CloseHandle(file);
 		return {};
@@ -1912,7 +2909,7 @@ std::wstring readFileTail(const std::wstring &path) {
 		}
 	}
 
-	LARGE_INTEGER distance {};
+	LARGE_INTEGER distance{};
 	distance.QuadPart = static_cast< LONGLONG >(start);
 	if (!SetFilePointerEx(file, distance, nullptr, FILE_BEGIN)) {
 		CloseHandle(file);
@@ -1922,7 +2919,7 @@ std::wstring readFileTail(const std::wstring &path) {
 	const DWORD bytesToRead = static_cast< DWORD >(
 		std::min< std::uintmax_t >(MaxLogTailBytes, static_cast< std::uintmax_t >(size.QuadPart) - start));
 	std::vector< char > buffer(bytesToRead);
-	DWORD bytesRead = 0;
+	DWORD bytesRead   = 0;
 	const BOOL readOk = ReadFile(file, buffer.data(), bytesToRead, &bytesRead, nullptr);
 	CloseHandle(file);
 	if (!readOk || bytesRead == 0) {
@@ -1960,9 +2957,9 @@ std::wstring lastLogMessage(const std::wstring &text) {
 		return {};
 	}
 
-	std::size_t start = text.find_last_of(L"\r\n", end);
-	start = start == std::wstring::npos ? 0 : start + 1;
-	std::wstring line = text.substr(start, end - start + 1);
+	std::size_t start        = text.find_last_of(L"\r\n", end);
+	start                    = start == std::wstring::npos ? 0 : start + 1;
+	std::wstring line        = text.substr(start, end - start + 1);
 	const std::size_t marker = line.find(L"] ");
 	if (!line.empty() && line.front() == L'[' && marker != std::wstring::npos) {
 		line.erase(0, marker + 2);
@@ -1977,12 +2974,12 @@ bool parsePackageProgress(const std::wstring &text, int &percent) {
 	}
 
 	const wchar_t *cursor = text.c_str() + marker + 9;
-	wchar_t *end = nullptr;
-	const long current = std::wcstol(cursor, &end, 10);
+	wchar_t *end          = nullptr;
+	const long current    = std::wcstol(cursor, &end, 10);
 	if (!end || *end != L'/') {
 		return false;
 	}
-	cursor = end + 1;
+	cursor           = end + 1;
 	const long total = std::wcstol(cursor, &end, 10);
 	if (total <= 0 || current < 0) {
 		return false;
@@ -1997,12 +2994,12 @@ public:
 	explicit UpdaterProgressWindow(const Options &options) : m_options(options), m_theme(themeFromOptions(options)) {}
 
 	bool create(HINSTANCE instance) {
-		HICON largeIcon = reinterpret_cast< HICON >(LoadImageW(
-			instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
-			GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
-		HICON smallIcon = reinterpret_cast< HICON >(LoadImageW(
-			instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-			GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+		HICON largeIcon = reinterpret_cast< HICON >(LoadImageW(instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId),
+															   IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+															   GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+		HICON smallIcon = reinterpret_cast< HICON >(LoadImageW(instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId),
+															   IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+															   GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
 		if (!largeIcon) {
 			largeIcon = LoadIconW(nullptr, IDI_APPLICATION);
 		}
@@ -2010,7 +3007,7 @@ public:
 			smallIcon = largeIcon;
 		}
 
-		WNDCLASSEXW windowClass {};
+		WNDCLASSEXW windowClass{};
 		windowClass.cbSize        = sizeof(windowClass);
 		windowClass.lpfnWndProc   = &UpdaterProgressWindow::windowProc;
 		windowClass.hInstance     = instance;
@@ -2022,7 +3019,7 @@ public:
 		RegisterClassExW(&windowClass);
 
 		const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-		RECT rect { 0, 0, collapsedWidth(), collapsedHeight() };
+		RECT rect{ 0, 0, collapsedWidth(), collapsedHeight() };
 		AdjustWindowRectEx(&rect, style, FALSE, 0);
 
 		m_hwnd = CreateWindowExW(0, windowClass.lpszClassName, L"Mumble update", style, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -2039,7 +3036,7 @@ public:
 	}
 
 	int run() {
-		MSG message {};
+		MSG message{};
 		while (GetMessageW(&message, nullptr, 0, 0) > 0) {
 			TranslateMessage(&message);
 			DispatchMessageW(&message);
@@ -2051,26 +3048,26 @@ public:
 private:
 	Options m_options;
 	UpdaterTheme m_theme;
-	HWND m_hwnd = nullptr;
-	HWND m_title = nullptr;
-	HWND m_status = nullptr;
+	HWND m_hwnd          = nullptr;
+	HWND m_title         = nullptr;
+	HWND m_status        = nullptr;
 	HWND m_detailsButton = nullptr;
-	HWND m_closeButton = nullptr;
-	HWND m_log = nullptr;
-	RECT m_badgeRect {};
-	RECT m_progressRect {};
-	HFONT m_uiFont = nullptr;
-	HFONT m_titleFont = nullptr;
-	HFONT m_logFont = nullptr;
+	HWND m_closeButton   = nullptr;
+	HWND m_log           = nullptr;
+	RECT m_badgeRect{};
+	RECT m_progressRect{};
+	HFONT m_uiFont           = nullptr;
+	HFONT m_titleFont        = nullptr;
+	HFONT m_logFont          = nullptr;
 	HBRUSH m_backgroundBrush = nullptr;
-	HBRUSH m_panelBrush = nullptr;
-	HBRUSH m_logBrush = nullptr;
-	bool m_detailsVisible = false;
-	bool m_completed = false;
-	bool m_indeterminate = true;
-	int m_exitCode = 1;
-	int m_progressPercent = 0;
-	int m_activityFrame = 0;
+	HBRUSH m_panelBrush      = nullptr;
+	HBRUSH m_logBrush        = nullptr;
+	bool m_detailsVisible    = false;
+	bool m_completed         = false;
+	bool m_indeterminate     = true;
+	int m_exitCode           = 1;
+	int m_progressPercent    = 0;
+	int m_activityFrame      = 0;
 	std::wstring m_lastLogText;
 	std::wstring m_statusText = L"Preparing update...";
 
@@ -2079,10 +3076,10 @@ private:
 	int expandedHeight() const { return 500; }
 
 	static constexpr DWORD DwmUseImmersiveDarkModeLegacyAttribute = 19;
-	static constexpr DWORD DwmUseImmersiveDarkModeAttribute = 20;
-	static constexpr DWORD DwmBorderColorAttribute = 34;
-	static constexpr DWORD DwmCaptionColorAttribute = 35;
-	static constexpr DWORD DwmTextColorAttribute = 36;
+	static constexpr DWORD DwmUseImmersiveDarkModeAttribute       = 20;
+	static constexpr DWORD DwmBorderColorAttribute                = 34;
+	static constexpr DWORD DwmCaptionColorAttribute               = 35;
+	static constexpr DWORD DwmTextColorAttribute                  = 36;
 
 	void applyNativeTitleBar() const {
 		if (!m_hwnd) {
@@ -2106,7 +3103,7 @@ private:
 		UpdaterProgressWindow *self = nullptr;
 		if (message == WM_NCCREATE) {
 			auto *create = reinterpret_cast< CREATESTRUCTW * >(lParam);
-			self = static_cast< UpdaterProgressWindow * >(create->lpCreateParams);
+			self         = static_cast< UpdaterProgressWindow * >(create->lpCreateParams);
 			self->m_hwnd = hwnd;
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast< LONG_PTR >(self));
 		} else {
@@ -2223,10 +3220,10 @@ private:
 
 	void drawRoundedRect(HDC hdc, const RECT &rect, const COLORREF fill, const COLORREF border,
 						 const int radius) const {
-		HBRUSH brush = CreateSolidBrush(fill);
-		HPEN pen = CreatePen(PS_SOLID, 1, border);
+		HBRUSH brush           = CreateSolidBrush(fill);
+		HPEN pen               = CreatePen(PS_SOLID, 1, border);
 		const HGDIOBJ oldBrush = SelectObject(hdc, brush);
-		const HGDIOBJ oldPen = SelectObject(hdc, pen);
+		const HGDIOBJ oldPen   = SelectObject(hdc, pen);
 		RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
 		SelectObject(hdc, oldBrush);
 		SelectObject(hdc, oldPen);
@@ -2235,10 +3232,10 @@ private:
 	}
 
 	void drawFilledEllipse(HDC hdc, const RECT &rect, const COLORREF fill, const COLORREF border) const {
-		HBRUSH brush = CreateSolidBrush(fill);
-		HPEN pen = CreatePen(PS_SOLID, 1, border);
+		HBRUSH brush           = CreateSolidBrush(fill);
+		HPEN pen               = CreatePen(PS_SOLID, 1, border);
 		const HGDIOBJ oldBrush = SelectObject(hdc, brush);
-		const HGDIOBJ oldPen = SelectObject(hdc, pen);
+		const HGDIOBJ oldPen   = SelectObject(hdc, pen);
 		Ellipse(hdc, rect.left, rect.top, rect.right, rect.bottom);
 		SelectObject(hdc, oldBrush);
 		SelectObject(hdc, oldPen);
@@ -2248,16 +3245,17 @@ private:
 
 	void drawStatusBadgeGlyph(HDC hdc, const RECT &badge) const {
 		if (!m_completed) {
-			const int dotSize = 5;
-			const int gap = 4;
+			const int dotSize    = 5;
+			const int gap        = 4;
 			const int totalWidth = dotSize * 3 + gap * 2;
-			const int left = badge.left + ((badge.right - badge.left - totalWidth) / 2);
-			const int top = badge.top + ((badge.bottom - badge.top - dotSize) / 2);
+			const int left       = badge.left + ((badge.right - badge.left - totalWidth) / 2);
+			const int top        = badge.top + ((badge.bottom - badge.top - dotSize) / 2);
 			for (int index = 0; index < 3; ++index) {
 				const bool active = index == (m_activityFrame % 3);
-				const RECT dot { left + index * (dotSize + gap), top, left + index * (dotSize + gap) + dotSize,
-								 top + dotSize };
-				const COLORREF dotColor = active ? m_theme.accentHover : mixColors(m_theme.surface2, m_theme.accent, 0.22);
+				const RECT dot{ left + index * (dotSize + gap), top, left + index * (dotSize + gap) + dotSize,
+								top + dotSize };
+				const COLORREF dotColor =
+					active ? m_theme.accentHover : mixColors(m_theme.surface2, m_theme.accent, 0.22);
 				drawFilledEllipse(hdc, dot, dotColor, dotColor);
 			}
 			return;
@@ -2265,7 +3263,7 @@ private:
 
 		const bool success = m_exitCode == 0 || static_cast< DWORD >(m_exitCode) == RestartRequired;
 		if (success) {
-			HPEN pen = CreatePen(PS_SOLID, 3, m_theme.success);
+			HPEN pen             = CreatePen(PS_SOLID, 3, m_theme.success);
 			const HGDIOBJ oldPen = SelectObject(hdc, pen);
 			MoveToEx(hdc, badge.left + 9, badge.top + 17, nullptr);
 			LineTo(hdc, badge.left + 14, badge.top + 22);
@@ -2275,34 +3273,34 @@ private:
 			return;
 		}
 
-		HPEN pen = CreatePen(PS_SOLID, 3, m_theme.danger);
+		HPEN pen             = CreatePen(PS_SOLID, 3, m_theme.danger);
 		const HGDIOBJ oldPen = SelectObject(hdc, pen);
 		MoveToEx(hdc, badge.left + 16, badge.top + 9, nullptr);
 		LineTo(hdc, badge.left + 16, badge.top + 19);
 		SelectObject(hdc, oldPen);
 		DeleteObject(pen);
-		const RECT dot { badge.left + 14, badge.top + 23, badge.left + 18, badge.top + 27 };
+		const RECT dot{ badge.left + 14, badge.top + 23, badge.left + 18, badge.top + 27 };
 		drawFilledEllipse(hdc, dot, m_theme.danger, m_theme.danger);
 	}
 
 	void paintWindow() {
-		PAINTSTRUCT paint {};
+		PAINTSTRUCT paint{};
 		HDC hdc = BeginPaint(m_hwnd, &paint);
-		RECT client {};
+		RECT client{};
 		GetClientRect(m_hwnd, &client);
 		FillRect(hdc, &client, m_backgroundBrush);
 
-		RECT panel { 12, 12, client.right - 12, client.bottom - 12 };
+		RECT panel{ 12, 12, client.right - 12, client.bottom - 12 };
 		drawRoundedRect(hdc, panel, m_theme.base, mixColors(m_theme.surface1, m_theme.text, 0.08), 14);
 
-		RECT accentStrip { panel.left, panel.top + 8, panel.left + 3, panel.bottom - 8 };
+		RECT accentStrip{ panel.left, panel.top + 8, panel.left + 3, panel.bottom - 8 };
 		fillRectColor(hdc, accentStrip, m_theme.accent);
 
 		const int buttonTop = m_detailsVisible ? expandedHeight() - 56 : collapsedHeight() - 56;
-		RECT actionDivider { panel.left + 1, buttonTop - 13, panel.right - 1, buttonTop - 12 };
+		RECT actionDivider{ panel.left + 1, buttonTop - 13, panel.right - 1, buttonTop - 12 };
 		fillRectColor(hdc, actionDivider, mixColors(m_theme.surface1, m_theme.text, 0.045));
 
-		RECT badge = m_badgeRect;
+		RECT badge               = m_badgeRect;
 		const COLORREF badgeFill = m_completed ? mixColors(m_theme.surface0, m_theme.success, 0.18)
 											   : mixColors(m_theme.surface0, m_theme.accent, 0.16);
 		const COLORREF badgeBorder =
@@ -2317,10 +3315,10 @@ private:
 		paintProgress(hdc);
 
 		if (m_detailsVisible) {
-			RECT logRect {};
+			RECT logRect{};
 			GetWindowRect(m_log, &logRect);
 			MapWindowPoints(nullptr, m_hwnd, reinterpret_cast< POINT * >(&logRect), 2);
-			RECT frame { logRect.left - 1, logRect.top - 1, logRect.right + 1, logRect.bottom + 1 };
+			RECT frame{ logRect.left - 1, logRect.top - 1, logRect.right + 1, logRect.bottom + 1 };
 			drawRoundedRect(hdc, frame, m_theme.crust, mixColors(m_theme.surface1, m_theme.text, 0.06), 8);
 		}
 
@@ -2339,16 +3337,16 @@ private:
 			return;
 		}
 
-		RECT fill = track;
+		RECT fill            = track;
 		const int trackWidth = track.right - track.left;
 		if (m_indeterminate && !m_completed) {
 			const int pulseWidth = std::max(70, trackWidth / 3);
-			const int travel = trackWidth + pulseWidth;
-			const int offset = (m_activityFrame * 22) % std::max(1, travel);
-			fill.left = track.left + offset - pulseWidth;
-			fill.right = fill.left + pulseWidth;
-			fill.left = std::max(fill.left, track.left);
-			fill.right = std::min(fill.right, track.right);
+			const int travel     = trackWidth + pulseWidth;
+			const int offset     = (m_activityFrame * 22) % std::max(1, travel);
+			fill.left            = track.left + offset - pulseWidth;
+			fill.right           = fill.left + pulseWidth;
+			fill.left            = std::max(fill.left, track.left);
+			fill.right           = std::min(fill.right, track.right);
 			if (fill.right <= fill.left) {
 				return;
 			}
@@ -2388,10 +3386,10 @@ private:
 		}
 
 		const bool disabled = (item->itemState & ODS_DISABLED) != 0;
-		const bool pressed = (item->itemState & ODS_SELECTED) != 0;
-		const bool focused = (item->itemState & ODS_FOCUS) != 0;
-		const bool primary = item->CtlID == ControlClose && m_completed && !disabled;
-		COLORREF fill = primary ? m_theme.accent : m_theme.surface0;
+		const bool pressed  = (item->itemState & ODS_SELECTED) != 0;
+		const bool focused  = (item->itemState & ODS_FOCUS) != 0;
+		const bool primary  = item->CtlID == ControlClose && m_completed && !disabled;
+		COLORREF fill       = primary ? m_theme.accent : m_theme.surface0;
 		if (pressed) {
 			fill = primary ? mixColors(m_theme.accent, m_theme.crust, 0.16)
 						   : mixColors(m_theme.surface0, m_theme.text, 0.08);
@@ -2404,7 +3402,7 @@ private:
 												   : mixColors(m_theme.surface1, m_theme.text, 0.08));
 		drawRoundedRect(item->hDC, item->rcItem, fill, border, 8);
 
-		wchar_t text[128] {};
+		wchar_t text[128]{};
 		GetWindowTextW(item->hwndItem, text, static_cast< int >(sizeof(text) / sizeof(text[0])));
 		SetBkMode(item->hDC, TRANSPARENT);
 		SetTextColor(item->hDC, disabled ? m_theme.overlay0 : (primary ? m_theme.onAccent : m_theme.text));
@@ -2417,35 +3415,32 @@ private:
 
 	void createControls() {
 		m_backgroundBrush = CreateSolidBrush(m_theme.mantle);
-		m_panelBrush = CreateSolidBrush(m_theme.base);
-		m_logBrush = CreateSolidBrush(m_theme.crust);
+		m_panelBrush      = CreateSolidBrush(m_theme.base);
+		m_logBrush        = CreateSolidBrush(m_theme.crust);
 
-		m_uiFont = CreateFontW(-15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-							   CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
-		m_titleFont = CreateFontW(-20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-								  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-								  VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
-		m_logFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-								CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Cascadia Mono");
+		m_uiFont    = CreateFontW(-15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+								  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
+		m_titleFont = CreateFontW(-20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+								  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
+		m_logFont   = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+								  CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Cascadia Mono");
 		if (!m_logFont) {
-			m_logFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-									OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-									FIXED_PITCH | FF_MODERN, L"Consolas");
+			m_logFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+									CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
 		}
 
-		m_title = CreateWindowExW(0, L"STATIC", L"Installing Mumble update", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
-								  m_hwnd, reinterpret_cast< HMENU >(ControlTitle), nullptr, nullptr);
+		m_title  = CreateWindowExW(0, L"STATIC", L"Installing Mumble update", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, m_hwnd,
+								   reinterpret_cast< HMENU >(ControlTitle), nullptr, nullptr);
 		m_status = CreateWindowExW(0, L"STATIC", m_statusText.c_str(), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, m_hwnd,
-									reinterpret_cast< HMENU >(ControlStatus), nullptr, nullptr);
-		m_detailsButton = CreateWindowExW(0, L"BUTTON", L"Show details",
-										  WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0, m_hwnd,
-										  reinterpret_cast< HMENU >(ControlDetails), nullptr, nullptr);
-		m_closeButton = CreateWindowExW(0, L"BUTTON", L"Close",
-										WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_OWNERDRAW, 0, 0, 0,
-										0, m_hwnd, reinterpret_cast< HMENU >(ControlClose), nullptr, nullptr);
-		m_log = CreateWindowExW(0, L"EDIT", nullptr,
-								WS_CHILD | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL,
-								0, 0, 0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlLog), nullptr, nullptr);
+								   reinterpret_cast< HMENU >(ControlStatus), nullptr, nullptr);
+		m_detailsButton =
+			CreateWindowExW(0, L"BUTTON", L"Show details", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0,
+							0, m_hwnd, reinterpret_cast< HMENU >(ControlDetails), nullptr, nullptr);
+		m_closeButton =
+			CreateWindowExW(0, L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_OWNERDRAW, 0,
+							0, 0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlClose), nullptr, nullptr);
+		m_log = CreateWindowExW(0, L"EDIT", nullptr, WS_CHILD | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL, 0, 0, 0, 0,
+								m_hwnd, reinterpret_cast< HMENU >(ControlLog), nullptr, nullptr);
 
 		for (HWND control : { m_title, m_status, m_detailsButton, m_closeButton, m_log }) {
 			SendMessageW(control, WM_SETFONT,
@@ -2459,14 +3454,14 @@ private:
 	}
 
 	void layoutControls() {
-		RECT client {};
+		RECT client{};
 		GetClientRect(m_hwnd, &client);
-		const int width = client.right - client.left;
-		const int margin = 22;
-		const int buttonWidth = 118;
+		const int width        = client.right - client.left;
+		const int margin       = 22;
+		const int buttonWidth  = 118;
 		const int buttonHeight = 34;
-		const int badgeSize = 32;
-		const int contentLeft = margin + badgeSize + 12;
+		const int badgeSize    = 32;
+		const int contentLeft  = margin + badgeSize + 12;
 
 		m_badgeRect = { margin, 22, margin + badgeSize, 22 + badgeSize };
 		MoveWindow(m_title, contentLeft, 22, width - contentLeft - margin, 26, TRUE);
@@ -2486,13 +3481,13 @@ private:
 	}
 
 	void resizeForDetails() {
-		RECT window {};
+		RECT window{};
 		GetWindowRect(m_hwnd, &window);
 		const DWORD style = static_cast< DWORD >(GetWindowLongPtrW(m_hwnd, GWL_STYLE));
-		RECT desired { 0, 0, collapsedWidth(), m_detailsVisible ? expandedHeight() : collapsedHeight() };
+		RECT desired{ 0, 0, collapsedWidth(), m_detailsVisible ? expandedHeight() : collapsedHeight() };
 		AdjustWindowRectEx(&desired, style, FALSE, 0);
-		SetWindowPos(m_hwnd, nullptr, window.left, window.top, desired.right - desired.left, desired.bottom - desired.top,
-					 SWP_NOZORDER | SWP_NOACTIVATE);
+		SetWindowPos(m_hwnd, nullptr, window.left, window.top, desired.right - desired.left,
+					 desired.bottom - desired.top, SWP_NOZORDER | SWP_NOACTIVATE);
 		layoutControls();
 	}
 
@@ -2580,7 +3575,7 @@ private:
 
 	void finish(const DWORD exitCode) {
 		m_completed = true;
-		m_exitCode = static_cast< int >(exitCode);
+		m_exitCode  = static_cast< int >(exitCode);
 		refreshLogs(true);
 		EnableWindow(m_closeButton, TRUE);
 
@@ -2620,19 +3615,70 @@ void postUiProgress(const int percent, const bool indeterminate) {
 		return;
 	}
 
-	auto payload = std::make_unique< UiProgressPayload >();
-	payload->percent = percent;
+	auto payload           = std::make_unique< UiProgressPayload >();
+	payload->percent       = percent;
 	payload->indeterminate = indeterminate;
 	if (PostMessageW(hwnd, UiProgressMessage, 0, reinterpret_cast< LPARAM >(payload.get()))) {
 		payload.release();
 	}
 }
 
-DWORD runUpdate(const Options &options) {
+bool installerFallbackHasNoPendingNativeTransaction(const Options &options) {
+	const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(
+		packageWorkRoot(options), std::filesystem::path(options.appPath));
+	std::error_code error;
+	const bool exists = std::filesystem::exists(statePath, error);
+	return !error && !exists;
+}
+
+DWORD runUpdate(const Options &requestedOptions) {
+	Options options = requestedOptions;
 	appendLog(options, L"MumbleUpdater started.");
 	postUiProgress(-1, true);
-
 	const bool packageMode = !options.packagePath.empty();
+	std::unique_ptr< InstallationMutex > installationMutex;
+	std::unique_ptr< VerifiedArtifactFile > verifiedPackage;
+	std::unique_ptr< VerifiedArtifactFile > verifiedInstaller;
+	if (options.recoverOnly || packageMode || !options.installerPath.empty()) {
+		try {
+			installationMutex = std::make_unique< InstallationMutex >(std::filesystem::path(options.appPath));
+			options.appPath = installationMutex->resolvedAppPath(std::filesystem::path(options.appPath)).wstring();
+			options.workingDirectory = parentPath(options.appPath).wstring();
+			if (!options.updaterLogPath.empty()) {
+				std::error_code updateRootError;
+				const std::filesystem::path physicalUpdateRoot =
+					std::filesystem::canonical(packageWorkRoot(options), updateRootError);
+				if (updateRootError || physicalUpdateRoot.empty()) {
+					throw std::runtime_error("Unable to resolve the physical updater work directory.");
+				}
+				options.updaterLogPath =
+					(physicalUpdateRoot / std::filesystem::path(options.updaterLogPath).filename()).wstring();
+				if (!options.msiLogPath.empty()) {
+					options.msiLogPath =
+						(physicalUpdateRoot / std::filesystem::path(options.msiLogPath).filename()).wstring();
+				}
+			}
+			if (packageMode) {
+				verifiedPackage = std::make_unique< VerifiedArtifactFile >(
+					std::filesystem::path(options.packagePath), lowerSha256(options.packageSha256), "update package");
+				options.packagePath = verifiedPackage->finalPath().wstring();
+			}
+			if (!options.installerPath.empty()) {
+				verifiedInstaller = std::make_unique< VerifiedArtifactFile >(
+					std::filesystem::path(options.installerPath), lowerSha256(options.installerSha256), "MSI installer");
+				options.installerPath = verifiedInstaller->finalPath().wstring();
+			}
+		} catch (const std::exception &exception) {
+			appendLog(options, L"Updater transaction admission failed. " + wideFromUtf8(exception.what()));
+			return ERROR_LOCK_FAILED;
+		}
+	}
+	if (options.recoverOnly) {
+		const DWORD recoveryExitCode = runPendingRecovery(options);
+		appendLog(options, L"MumbleUpdater recovery finished.");
+		return recoveryExitCode;
+	}
+
 	if (packageMode && options.prepareOnly) {
 		appendLog(options, L"Preparing update package.");
 		const DWORD prepareExitCode = runPackageUpdate(options);
@@ -2644,46 +3690,88 @@ DWORD runUpdate(const Options &options) {
 
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
 	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runInstaller(options);
-	bool installerRan = !packageMode;
+	bool installerRan    = !packageMode;
 
 	if (packageMode && !updateSucceeded(updateExitCode) && !updateCancelled(updateExitCode)
-		&& fileExists(options.installerPath)) {
+		&& fileExists(options.installerPath) && installerFallbackHasNoPendingNativeTransaction(options)) {
 		appendLog(options, L"Package update failed with code " + std::to_wstring(updateExitCode)
 							   + L"; running verified MSI fallback.");
 		postUiProgress(-1, true);
 		updateExitCode = runInstaller(options);
-		installerRan = true;
+		installerRan   = true;
 	} else if (packageMode && updateCancelled(updateExitCode)) {
 		appendLog(options, L"Package update was cancelled; MSI fallback will not run.");
 	} else if (packageMode && !updateSucceeded(updateExitCode)) {
-		appendLog(options, L"Package update failed and no verified MSI fallback was available.");
+		appendLog(options,
+				  L"Package update failed and no safe verified MSI fallback was available; any native recovery journal "
+				  L"must be resolved first.");
+	}
+	if (packageMode && !installerRan && options.noRelaunch && updateSucceeded(updateExitCode)) {
+		const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(
+			packageWorkRoot(options), std::filesystem::path(options.appPath));
+		std::error_code stateError;
+		const bool stateExists = std::filesystem::exists(statePath, stateError);
+		std::string healthError;
+		auto pending = Mumble::UpdateHealth::readPendingState(packageWorkRoot(options),
+													  std::filesystem::path(options.appPath), &healthError);
+		if (stateError || (stateExists && !pending)) {
+			appendLog(options, L"No-relaunch update left an unreadable health journal; refusing success.");
+			updateExitCode = ERROR_RECOVERY_FAILURE;
+		} else if (pending && pending->state == Mumble::UpdateHealth::TransactionState::AwaitingHealth) {
+			appendLog(options, L"A health-required package cannot succeed with --no-relaunch; rolling it back now.");
+			updateExitCode = rollbackPendingPackage(options) ? ERROR_PROCESS_ABORTED : ERROR_RECOVERY_FAILURE;
+		}
 	}
 
 	if (installerRan && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Windows Installer completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);
-		relaunchMumble(options);
+		RelaunchResult restart = relaunchMumble(options);
+		if (restart.process) {
+			CloseHandle(restart.process);
+		}
+		if (!restart.launched) {
+			updateExitCode = restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+		}
 	} else if (packageMode && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Package update completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);
-		relaunchMumble(options);
+		updateExitCode = restartPackageAndQualify(options);
 	} else if (packageMode && updateCancelled(updateExitCode) && !options.noRelaunch) {
 		appendLog(options, L"Update was cancelled; restarting Mumble without applying the MSI fallback.");
 		postUiProgress(100, false);
 		Sleep(800);
-		relaunchMumble(options);
+		RelaunchResult restart = relaunchMumble(options);
+		if (restart.process) {
+			CloseHandle(restart.process);
+		}
+		if (!restart.launched) {
+			updateExitCode = restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+		}
 	}
 
 	appendLog(options, L"MumbleUpdater finished.");
 	return updateExitCode;
 }
 
+DWORD runUpdateSafely(const Options &options) noexcept {
+	try {
+		return runUpdate(options);
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Unhandled updater failure was contained. " + wideFromUtf8(exception.what()));
+		return ERROR_UNHANDLED_EXCEPTION;
+	} catch (...) {
+		appendLog(options, L"Unhandled non-standard updater failure was contained.");
+		return ERROR_UNHANDLED_EXCEPTION;
+	}
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
-	int argc        = 0;
+	int argc       = 0;
 	wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 	if (!argv) {
 		return 1;
@@ -2699,17 +3787,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 	}
 
 	if (options.noUi) {
-		return static_cast< int >(runUpdate(options));
+		return static_cast< int >(runUpdateSafely(options));
 	}
 
 	UpdaterProgressWindow window(options);
 	if (!window.create(instance)) {
-		return static_cast< int >(runUpdate(options));
+		return static_cast< int >(runUpdateSafely(options));
 	}
 
 	std::thread worker([options]() {
-		const DWORD exitCode = runUpdate(options);
-		HWND hwnd = g_updaterWindow.load();
+		const DWORD exitCode = runUpdateSafely(options);
+		HWND hwnd            = g_updaterWindow.load();
 		if (hwnd) {
 			PostMessageW(hwnd, UiDoneMessage, exitCode, 0);
 		}

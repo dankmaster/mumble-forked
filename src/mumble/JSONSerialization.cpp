@@ -5,11 +5,13 @@
 
 #include "JSONSerialization.h"
 #include "Cert.h"
+#include "InputEnhancementSettings.h"
 #include "SettingsMacros.h"
 #include "SpeechCleanup.h"
 
 #include <QDebug>
 
+#include <cstdlib>
 
 template< typename T, bool isEnum > struct SaveValueConverter {
 	static const T &getValue(const T &value) { return value; }
@@ -128,6 +130,12 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 
 #undef PROCESS
 
+	// This product-facing block is deliberately explicit, including for default
+	// settings. Its own schema evolves independently of the legacy flat audio
+	// keys, which remain present for compatibility with older clients.
+	j["audio"]["input_enhancement"] =
+		Mumble::InputEnhancement::serializeSettings(settings.inputEnhancement);
+
 	if (settings.qlShortcuts != defaultValues.qlShortcuts) {
 		// We only remove server specific shortcuts since they are saved in the DB.
 		// We should consider moving those out of the DB into the JSON settings.
@@ -198,6 +206,36 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	PROCESS_ALL_SETTINGS
 
 #undef PROCESS
+
+	const bool hasInputEnhancement = json.contains("audio") && json.at("audio").is_object()
+								 && json.at("audio").contains("input_enhancement");
+	if (hasInputEnhancement) {
+		if (!Mumble::InputEnhancement::deserializeSettings(json.at("audio").at("input_enhancement"),
+												 settings.inputEnhancement)) {
+			qWarning("Ignoring corrupt or unsupported audio.input_enhancement settings; using safe Original profile");
+		}
+	} else {
+		// Capture the complete legacy tuple before model/backend normalization so
+		// upgrading cannot silently alter the user's audible input path.
+		Mumble::InputEnhancement::LegacyOverride legacy;
+		legacy.noiseCancelMode = static_cast< int >(settings.noiseCancelMode);
+		legacy.backend         = static_cast< int >(settings.noiseCancelBackend);
+		legacy.modelId         = settings.noiseCancelModelId;
+		legacy.customModelPath = settings.noiseCancelCustomModelPath;
+		legacy.speexNoiseCancelStrength = settings.iSpeexNoiseCancelStrength;
+
+		if (Mumble::InputEnhancement::isValidLegacyOverride(legacy)) {
+			settings.inputEnhancement = Mumble::InputEnhancement::Settings();
+			settings.inputEnhancement.defaultPreference.profile =
+				Mumble::InputEnhancement::profileForLegacy(legacy.noiseCancelMode, legacy.backend);
+			settings.inputEnhancement.defaultPreference.reduction =
+				Mumble::InputEnhancement::reductionForLegacySpeexStrength(legacy.speexNoiseCancelStrength);
+			settings.inputEnhancement.defaultPreference.autoAdapt = false;
+			settings.inputEnhancement.legacyOverride              = legacy;
+		} else {
+			settings.inputEnhancement = Mumble::InputEnhancement::safeOriginalSettings();
+		}
+	}
 
 	if (json.contains("shortcuts") && json.at("shortcuts").contains("defined")) {
 		settings.qlShortcuts = json.at("shortcuts").at("defined");

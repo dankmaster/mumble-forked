@@ -6,6 +6,12 @@
 include(project-utils)
 
 find_pkg(Qt6 COMPONENTS Test REQUIRED)
+if(NOT TARGET Qt6::QOffscreenIntegrationPlugin AND DEFINED Qt6Gui_DIR)
+	# Shared Qt does not import platform-plugin targets automatically. Import the
+	# offscreen target explicitly so CTest can locate qoffscreen.dll without a
+	# machine-specific plugin path (and without triggering a modal qFatal dialog).
+	find_package(Qt6QOffscreenIntegrationPlugin CONFIG QUIET PATHS "${Qt6Gui_DIR}" NO_DEFAULT_PATH)
+endif()
 
 option(online-tests "Whether or not tests that need a working internet connection should be included" OFF)
 option(test-lto "Whether to use LTO when building test cases" ${lto})
@@ -24,11 +30,18 @@ function(configure_client_test_runtime TEST_NAME TARGET_NAME)
 		)
 	endif()
 
+	set(client_test_environment "QT_QPA_PLATFORM=offscreen")
+	if(TARGET Qt6::QOffscreenIntegrationPlugin)
+		list(APPEND client_test_environment
+			"QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+		)
+	endif()
+
 	set_tests_properties(
 		${TEST_NAME}
 		PROPERTIES
 			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-			ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+			ENVIRONMENT "${client_test_environment}"
 	)
 endfunction()
 
@@ -45,6 +58,15 @@ if (static)
 endif()
 
 if(client)
+	add_subdirectory("TestInputEnhancement")
+	add_subdirectory("TestInputEnhancementAuto")
+	add_subdirectory("TestInputEnhancementCalibration")
+	add_subdirectory("TestInputEnhancementCalibrationRuntime")
+	add_subdirectory("TestInputEnhancementPolicy")
+	add_subdirectory("TestInputEnhancementPolicyController")
+	add_subdirectory("TestInputEnhancementPackageVerifier")
+	add_subdirectory("TestInputEnhancementSettings")
+	add_subdirectory("TestUpdateHealth")
 	add_subdirectory("TestModernDialogControllers")
 	add_subdirectory("TestModernShellMenuSerializer")
 	if(rnnoise OR dtln OR deepfilternet)

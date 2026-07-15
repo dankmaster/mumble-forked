@@ -97,6 +97,8 @@ Global::Global(const QString &qsConfigPath) {
 	db              = nullptr;
 	pluginManager   = nullptr;
 	nam             = nullptr;
+	inputEnhancementPackageVerifier = nullptr;
+	inputEnhancementPolicyController = nullptr;
 	c               = nullptr;
 	uiSession       = 0;
 	uiDoublePush    = 1000000;
@@ -151,6 +153,7 @@ Global::Global(const QString &qsConfigPath) {
 	bQuit            = false;
 	bDebugDumpInput  = false;
 	bDebugPrintQueue = false;
+	bDisableInputEnhancement = false;
 
 	channelListenerManager = std::make_unique< ChannelListenerManager >();
 

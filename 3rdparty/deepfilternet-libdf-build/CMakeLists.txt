@@ -49,6 +49,7 @@ if(CARGO_EXECUTABLE)
 			${DEEPFILTERNET_CARGO_ENV}
 			"${CARGO_EXECUTABLE}" build
 				--manifest-path "${DEEPFILTERNET_LIBDF_ROOT}/Cargo.toml"
+				--locked
 				--release
 				--no-default-features
 				--features capi,default-model
@@ -60,6 +61,23 @@ if(CARGO_EXECUTABLE)
 		USES_TERMINAL
 		VERBATIM
 	)
+
+	if(tests)
+		add_test(
+			NAME DeepFilterNetCapiTests
+			COMMAND ${CMAKE_COMMAND} -E env
+				${DEEPFILTERNET_CARGO_ENV}
+				"${CARGO_EXECUTABLE}" test
+					--manifest-path "${DEEPFILTERNET_LIBDF_ROOT}/Cargo.toml"
+					--locked
+					--no-default-features
+					--features capi,default-model
+					--lib capi::tests
+		)
+		set_tests_properties(DeepFilterNetCapiTests PROPERTIES
+			WORKING_DIRECTORY "${DEEPFILTERNET_LIBDF_ROOT}"
+		)
+	endif()
 else()
 	add_custom_target(deepfilternet_runtime)
 	message(WARNING "DeepFilterNet support was requested but cargo was not found. The runtime DLL will not be built automatically.")

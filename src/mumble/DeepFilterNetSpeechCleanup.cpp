@@ -5,6 +5,8 @@
 
 #include "DeepFilterNetSpeechCleanup.h"
 
+#include "DeepFilterNetRealtimeWorker.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -12,6 +14,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -23,7 +26,7 @@ namespace {
 	using DfCreateFn            = DFState *(*)(const char *path, float attenLim, const char *logLevel);
 	using DfGetFrameLengthFn    = std::size_t (*)(DFState *state);
 	using DfGetLatencyFn        = std::size_t (*)(DFState *state);
-	using DfProcessFrameFn      = float (*)(DFState *state, float *input, float *output);
+	using DfProcessFrameV2Fn    = int (*)(DFState *state, const float *input, float *output, float *localSnr);
 	using DfSetAttenLimFn       = void (*)(DFState *state, float limitDb);
 	using DfSetPostFilterBetaFn = void (*)(DFState *state, float beta);
 	using DfFreeFn              = void (*)(DFState *state);
@@ -122,14 +125,14 @@ public:
 		m_create            = reinterpret_cast< DfCreateFn >(m_library.resolve("df_create"));
 		m_getFrameLength    = reinterpret_cast< DfGetFrameLengthFn >(m_library.resolve("df_get_frame_length"));
 		m_getLatency        = reinterpret_cast< DfGetLatencyFn >(m_library.resolve("df_get_latency"));
-		m_processFrame      = reinterpret_cast< DfProcessFrameFn >(m_library.resolve("df_process_frame"));
+		m_processFrameV2    = reinterpret_cast< DfProcessFrameV2Fn >(m_library.resolve("df_process_frame_v2"));
 		m_setAttenLim       = reinterpret_cast< DfSetAttenLimFn >(m_library.resolve("df_set_atten_lim"));
 		m_setPostFilterBeta = reinterpret_cast< DfSetPostFilterBetaFn >(m_library.resolve("df_set_post_filter_beta"));
 		m_free              = reinterpret_cast< DfFreeFn >(m_library.resolve("df_free"));
 
-		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrame || !m_setAttenLim
+		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrameV2 || !m_setAttenLim
 			|| !m_setPostFilterBeta || !m_free) {
-			qWarning("DeepFilterNetSpeechCleanup: deepfilter runtime library is missing required C API symbols");
+			qWarning("DeepFilterNetSpeechCleanup: deepfilter runtime library is missing the fail-closed v2 C API");
 			m_library.unload();
 			return;
 		}
@@ -150,6 +153,7 @@ public:
 
 	~Implementation() {
 #ifdef USE_DEEPFILTERNET
+		m_realtimeWorker.stop();
 		releaseState();
 		if (m_library.isLoaded()) {
 			m_library.unload();
@@ -158,11 +162,13 @@ public:
 	}
 
 	bool isReady() const {
-		return m_ready;
+		return m_ready && (!m_realtimePrepared || m_realtimeWorker.healthy());
 	}
 
 	void reset() {
 #ifdef USE_DEEPFILTERNET
+		m_realtimeWorker.stop();
+		m_realtimePrepared = false;
 		if (!m_library.isLoaded()) {
 			m_ready = false;
 			return;
@@ -173,6 +179,44 @@ public:
 #endif
 	}
 
+	bool prepareRealtime() {
+#ifdef USE_DEEPFILTERNET
+		if (!m_ready || !m_state || !m_processFrameV2
+			|| m_frameLength != DeepFilterNetRealtimeWorker::frameSamples) {
+			m_ready = false;
+			return false;
+		}
+
+		m_latencySamples = m_realtimeLatencySamples;
+		m_dryDelay.assign(m_latencySamples, 0.0f);
+		m_dryDelayPosition = 0;
+		m_realtimeOutputFrame.fill(0.0f);
+		m_realtimePrepared = m_realtimeWorker.start(this, &Implementation::processRealtimeFrame);
+		if (!m_realtimePrepared) {
+			m_ready = false;
+		}
+		return m_realtimePrepared;
+#else
+		return false;
+#endif
+	}
+
+	bool prepareOfflineFrame() noexcept {
+#ifdef USE_DEEPFILTERNET
+		return m_ready && (!m_realtimePrepared || m_realtimeWorker.prepareOfflineFrame());
+#else
+		return false;
+#endif
+	}
+
+	bool finishOfflineProcessing() noexcept {
+#ifdef USE_DEEPFILTERNET
+		return m_ready && (!m_realtimePrepared || m_realtimeWorker.finishOfflineProcessing());
+#else
+		return false;
+#endif
+	}
+
 	unsigned int latencySamples() const {
 		return m_latencySamples;
 	}
@@ -180,6 +224,10 @@ public:
 	void processInPlace(float *samples, unsigned int sampleCount, float mixFactor) {
 #ifdef USE_DEEPFILTERNET
 		if (!m_ready || !samples || sampleCount == 0) {
+			return;
+		}
+		if (m_realtimePrepared) {
+			processRealtimeInPlace(samples, sampleCount, mixFactor);
 			return;
 		}
 
@@ -197,13 +245,22 @@ public:
 
 			m_inputFrame[m_inputFrameSize++] = inputSample;
 			if (m_inputFrameSize == m_frameLength) {
-				m_processFrame(m_state, m_inputFrame.data(), m_outputFrame.data());
+				float localSnr   = std::numeric_limits< float >::quiet_NaN();
+				const int status = m_processFrameV2(m_state, m_inputFrame.data(), m_outputFrame.data(), &localSnr);
 				m_inputFrameSize = 0;
 				m_outputFramePosition = 0;
+				if (status != DeepFilterNetRealtimeWorker::statusOk) {
+					std::fill(m_outputFrame.begin(), m_outputFrame.end(), 0.0f);
+					m_ready = false;
+				}
 			}
 
 			const float blendedSample = cleanedSample * mixFactor + delayedDry * dryFactor;
 			samples[i] = std::isfinite(blendedSample) ? std::clamp(blendedSample, -1.0f, 1.0f) : 0.0f;
+			if (!m_ready) {
+				std::fill(samples + i + 1, samples + sampleCount, 0.0f);
+				return;
+			}
 		}
 #else
 		(void) samples;
@@ -224,9 +281,74 @@ public:
 		return m_ready && m_usedFallback;
 	}
 
+	std::uint64_t workerProcessingFrames() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.processingFrames() : 0;
+	}
+
+	std::uint64_t lastWorkerProcessingNanoseconds() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.lastProcessingNanoseconds() : 0;
+	}
+
+	std::uint64_t workerTotalProcessingNanoseconds() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.totalProcessingNanoseconds() : 0;
+	}
+
+	std::uint64_t workerMaximumProcessingNanoseconds() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.maximumProcessingNanoseconds() : 0;
+	}
+
+	std::uint64_t workerProcessingP99Nanoseconds() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.processingP99Nanoseconds() : 0;
+	}
+
+	unsigned int workerPendingFrames() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.pendingFrames() : 0;
+	}
+
+	unsigned int workerSchedulingDelayFrames() const noexcept {
+		return m_realtimePrepared ? DeepFilterNetRealtimeWorker::schedulingDelayFrames : 0;
+	}
+
+	unsigned int workerSchedulingSlackFrames() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.schedulingSlackFrames() : 0;
+	}
+
 private:
+	static int processRealtimeFrame(void *context, const float *input, float *output) noexcept {
+		auto *self = static_cast< Implementation * >(context);
+		if (!self || !self->m_state || !self->m_processFrameV2) {
+			return 1;
+		}
+		float localSnr = std::numeric_limits< float >::quiet_NaN();
+		return self->m_processFrameV2(self->m_state, input, output, &localSnr);
+	}
+
+	void processRealtimeInPlace(float *samples, unsigned int sampleCount, float mixFactor) noexcept {
+		for (unsigned int i = 0; i < sampleCount; ++i) {
+			samples[i] = std::isfinite(samples[i]) ? std::clamp(samples[i], -1.0f, 1.0f) : 0.0f;
+		}
+		if (!m_realtimeWorker.processFrame(samples, m_realtimeOutputFrame.data(), sampleCount)) {
+			std::fill(samples, samples + sampleCount, 0.0f);
+			return;
+		}
+
+		mixFactor = std::clamp(mixFactor, 0.0f, 1.0f);
+		const float dryFactor = 1.0f - mixFactor;
+		for (unsigned int i = 0; i < sampleCount; ++i) {
+			const float inputSample = samples[i];
+			const float cleanedSample = std::isfinite(m_realtimeOutputFrame[i])
+									  ? std::clamp(m_realtimeOutputFrame[i], -1.0f, 1.0f)
+									  : 0.0f;
+			const float delayedDry = m_dryDelay[m_dryDelayPosition];
+			m_dryDelay[m_dryDelayPosition] = inputSample;
+			m_dryDelayPosition = (m_dryDelayPosition + 1) % m_dryDelay.size();
+			const float blendedSample = cleanedSample * mixFactor + delayedDry * dryFactor;
+			samples[i] = std::isfinite(blendedSample) ? std::clamp(blendedSample, -1.0f, 1.0f) : 0.0f;
+		}
+	}
+
 	bool initializeState() {
-		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrame || !m_setAttenLim
+		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrameV2 || !m_setAttenLim
 			|| !m_setPostFilterBeta || !m_free || m_modelPath.isEmpty()) {
 			return false;
 		}
@@ -239,12 +361,20 @@ private:
 
 		m_frameLength = m_getFrameLength(m_state);
 		const std::size_t algorithmicLatency = m_getLatency(m_state);
+		const std::size_t maximumAdapterLatency =
+			std::max< std::size_t >(m_frameLength, DeepFilterNetRealtimeWorker::schedulingDelaySamples);
 		if (m_frameLength == 0 || m_frameLength > 4096 || algorithmicLatency > 48000
-			|| algorithmicLatency > (std::numeric_limits< unsigned int >::max() - m_frameLength)) {
+			|| algorithmicLatency > (std::numeric_limits< unsigned int >::max() - maximumAdapterLatency)) {
 			releaseState();
 			return false;
 		}
-		m_latencySamples = static_cast< unsigned int >(algorithmicLatency + m_frameLength);
+		// The synchronous adapter emits a frame after collecting it. The worker
+		// instead grants inference two callback periods and emits frame N at N+2.
+		// For DFN3 (1440 algorithmic samples), that is 2400 samples / 50 ms.
+		m_synchronousLatencySamples = static_cast< unsigned int >(algorithmicLatency + m_frameLength);
+		m_realtimeLatencySamples = static_cast< unsigned int >(
+			algorithmicLatency + DeepFilterNetRealtimeWorker::schedulingDelaySamples);
+		m_latencySamples = m_synchronousLatencySamples;
 
 		m_setAttenLim(m_state, m_profile.attenuationLimitDb);
 		m_setPostFilterBeta(m_state, m_profile.postFilterBeta);
@@ -254,6 +384,7 @@ private:
 		m_outputFramePosition = m_frameLength;
 		m_dryDelay.assign(m_latencySamples, 0.0f);
 		m_dryDelayPosition = 0;
+		m_realtimeOutputFrame.fill(0.0f);
 		return true;
 	}
 
@@ -263,6 +394,8 @@ private:
 		}
 		m_state = nullptr;
 		m_frameLength = 0;
+		m_synchronousLatencySamples = 0;
+		m_realtimeLatencySamples = 0;
 		m_latencySamples = 0;
 	}
 
@@ -274,7 +407,7 @@ private:
 	DfCreateFn m_create = nullptr;
 	DfGetFrameLengthFn m_getFrameLength = nullptr;
 	DfGetLatencyFn m_getLatency = nullptr;
-	DfProcessFrameFn m_processFrame = nullptr;
+	DfProcessFrameV2Fn m_processFrameV2 = nullptr;
 	DfSetAttenLimFn m_setAttenLim = nullptr;
 	DfSetPostFilterBetaFn m_setPostFilterBeta = nullptr;
 	DfFreeFn m_free = nullptr;
@@ -285,9 +418,14 @@ private:
 	std::size_t m_outputFramePosition = 0;
 	std::vector< float > m_dryDelay;
 	std::size_t m_dryDelayPosition = 0;
+	DeepFilterNetRealtimeWorker m_realtimeWorker;
+	std::array< float, DeepFilterNetRealtimeWorker::frameSamples > m_realtimeOutputFrame = {};
+	unsigned int m_synchronousLatencySamples = 0;
+	unsigned int m_realtimeLatencySamples = 0;
 	unsigned int m_latencySamples = 0;
 	bool m_usedFallback = false;
 	bool m_ready = false;
+	bool m_realtimePrepared = false;
 };
 
 DeepFilterNetSpeechCleanup::DeepFilterNetSpeechCleanup(const Mumble::SpeechCleanup::Selection &selection)
@@ -304,6 +442,18 @@ void DeepFilterNetSpeechCleanup::reset() {
 	if (m_impl) {
 		m_impl->reset();
 	}
+}
+
+bool DeepFilterNetSpeechCleanup::prepareRealtime() {
+	return m_impl && m_impl->prepareRealtime();
+}
+
+bool DeepFilterNetSpeechCleanup::prepareOfflineFrame() noexcept {
+	return m_impl && m_impl->prepareOfflineFrame();
+}
+
+bool DeepFilterNetSpeechCleanup::finishOfflineProcessing() noexcept {
+	return m_impl && m_impl->finishOfflineProcessing();
 }
 
 unsigned int DeepFilterNetSpeechCleanup::latencySamples() const {
@@ -326,4 +476,36 @@ QString DeepFilterNetSpeechCleanup::activeModelPath() const {
 
 bool DeepFilterNetSpeechCleanup::usedFallback() const {
 	return m_impl ? m_impl->usedFallback() : false;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::workerProcessingFrames() const noexcept {
+	return m_impl ? m_impl->workerProcessingFrames() : 0;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::lastWorkerProcessingNanoseconds() const noexcept {
+	return m_impl ? m_impl->lastWorkerProcessingNanoseconds() : 0;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::workerTotalProcessingNanoseconds() const noexcept {
+	return m_impl ? m_impl->workerTotalProcessingNanoseconds() : 0;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::workerMaximumProcessingNanoseconds() const noexcept {
+	return m_impl ? m_impl->workerMaximumProcessingNanoseconds() : 0;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::workerProcessingP99Nanoseconds() const noexcept {
+	return m_impl ? m_impl->workerProcessingP99Nanoseconds() : 0;
+}
+
+unsigned int DeepFilterNetSpeechCleanup::workerPendingFrames() const noexcept {
+	return m_impl ? m_impl->workerPendingFrames() : 0;
+}
+
+unsigned int DeepFilterNetSpeechCleanup::workerSchedulingDelayFrames() const noexcept {
+	return m_impl ? m_impl->workerSchedulingDelayFrames() : 0;
+}
+
+unsigned int DeepFilterNetSpeechCleanup::workerSchedulingSlackFrames() const noexcept {
+	return m_impl ? m_impl->workerSchedulingSlackFrames() : 0;
 }

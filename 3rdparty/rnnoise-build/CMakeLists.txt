@@ -127,10 +127,80 @@ set(RNNOISE_CORE_SOURCES
 	"${RNNOISE_SRC_DIR}/src/celt_lpc.c"
 )
 
+# MSVC does not define the GNU-style __SSE2__ feature macro for x64 even
+# though SSE2 is part of the x86-64 ABI. RNNoise consequently selected its
+# scalar kernels in Windows release builds. Keep the x64 baseline portable
+# and add the upstream runtime dispatch sources so SSE4.1 and AVX2 are only
+# entered after CPUID selection; no /arch flag is applied to the library as a
+# whole.
+set(RNNOISE_X86_64 FALSE)
+set(RNNOISE_ARCHITECTURE_HINTS
+	"${CMAKE_SYSTEM_PROCESSOR};${CMAKE_C_COMPILER_ARCHITECTURE_ID};${MSVC_C_ARCHITECTURE_ID};${CMAKE_GENERATOR_PLATFORM}"
+)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+	RNNOISE_ARCHITECTURE_HINTS MATCHES "(^|;)(AMD64|amd64|x86_64|X86_64|x64)(;|$)")
+	set(RNNOISE_X86_64 TRUE)
+endif()
+
+if(RNNOISE_X86_64)
+	set(RNNOISE_SSE4_1_SOURCE "${RNNOISE_SRC_DIR}/src/x86/nnet_sse4_1.c")
+	set(RNNOISE_AVX2_SOURCE "${RNNOISE_SRC_DIR}/src/x86/nnet_avx2.c")
+	list(APPEND RNNOISE_CORE_SOURCES
+		"${CMAKE_CURRENT_SOURCE_DIR}/x86cpu_mumble.c"
+		"${RNNOISE_SRC_DIR}/src/x86/x86_dnn_map.c"
+		"${RNNOISE_SSE4_1_SOURCE}"
+		"${RNNOISE_AVX2_SOURCE}"
+	)
+
+	# MSVC accepts SSE4.1 intrinsics without a whole-target architecture flag.
+	# The source-local definition is safe because this object is only reached
+	# through RNNoise's CPUID dispatch table.
+	set_property(SOURCE "${RNNOISE_SSE4_1_SOURCE}" APPEND PROPERTY
+		COMPILE_DEFINITIONS "OPUS_X86_MAY_HAVE_SSE4_1"
+	)
+	if(MSVC)
+		set_property(SOURCE "${RNNOISE_AVX2_SOURCE}" APPEND PROPERTY COMPILE_OPTIONS "/arch:AVX2")
+	else()
+		set_property(SOURCE "${RNNOISE_SSE4_1_SOURCE}" APPEND PROPERTY COMPILE_OPTIONS "-msse4.1")
+		set_property(SOURCE "${RNNOISE_AVX2_SOURCE}" APPEND PROPERTY COMPILE_OPTIONS "-mavx2" "-mfma")
+	endif()
+
+	message(STATUS "RNNoise x86 SIMD: SSE2 baseline with runtime SSE4.1/AVX2 dispatch")
+endif()
+
+if(BUILD_TESTING)
+	add_executable(rnnoise_simd_dispatch_test "${CMAKE_CURRENT_SOURCE_DIR}/simd_dispatch_test.c")
+	target_include_directories(rnnoise_simd_dispatch_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	add_test(NAME rnnoise_simd_dispatch_guard COMMAND rnnoise_simd_dispatch_test)
+	set_tests_properties(rnnoise_simd_dispatch_guard PROPERTIES LABELS "audio;input-enhancement;rnnoise")
+endif()
+
+# This translation unit includes the same vec.h selection used by nnet.c and
+# turns an accidental scalar x64 configuration into a hard build failure.
+list(APPEND RNNOISE_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/simd_build_check.c")
+
+function(configure_rnnoise_simd target_name)
+	if(NOT RNNOISE_X86_64)
+		return()
+	endif()
+
+	target_compile_definitions(${target_name} PRIVATE
+		"MUMBLE_RNNOISE_REQUIRE_X86_SIMD"
+		"OPUS_X86_MAY_HAVE_SSE"
+		"OPUS_X86_MAY_HAVE_SSE2"
+		"RNN_ENABLE_X86_RTCD"
+	)
+	if(NOT MSVC)
+		target_compile_definitions(${target_name} PRIVATE "CPU_INFO_BY_C")
+	endif()
+endfunction()
+
 target_sources(rnnoise PRIVATE
 	"${RNNOISE_GENERATED_DIR}/rnnoise_data.c"
 	${RNNOISE_CORE_SOURCES}
 )
+
+configure_rnnoise_simd(rnnoise)
 
 add_dependencies(rnnoise rnnoise_generated_model_files)
 
@@ -147,6 +217,7 @@ add_executable(rnnoise_write_little_weights EXCLUDE_FROM_ALL
 	"${RNNOISE_GENERATED_DIR}/write_weights_little.c"
 	${RNNOISE_CORE_SOURCES}
 )
+configure_rnnoise_simd(rnnoise_write_little_weights)
 add_dependencies(rnnoise_write_little_weights rnnoise_generated_model_files)
 target_compile_definitions(rnnoise_write_little_weights PRIVATE "HAVE_CONFIG_H")
 target_include_directories(rnnoise_write_little_weights

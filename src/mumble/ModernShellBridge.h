@@ -66,6 +66,7 @@ public:
 	Q_INVOKABLE void invokeModernDialogAction(const QString &dialogId, const QString &actionId,
 											  const QVariantMap &payload);
 	Q_INVOKABLE QVariantMap currentAudioInputMeter() const;
+	Q_INVOKABLE QVariantMap inputEnhancementCalibrationPlayback(const QString &playbackToken) const;
 	Q_INVOKABLE bool clipboardHasImage() const;
 	Q_INVOKABLE QString clipboardText() const;
 	Q_INVOKABLE void setClipboardText(const QString &text);

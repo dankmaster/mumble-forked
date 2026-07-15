@@ -11722,6 +11722,208 @@ body[data-density="spacious"] .modern-dialog-field {
 	white-space: nowrap;
 }
 
+.modern-dialog-input-enhancement {
+	display: grid;
+	min-width: 0;
+	margin-top: 4px;
+	border: 1px solid rgba(var(--accent-rgb), 0.22);
+	border-radius: 10px;
+	background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.075), rgba(255, 255, 255, 0.018));
+	overflow: hidden;
+}
+
+.modern-dialog-input-enhancement.is-active {
+	border-color: rgba(var(--accent-rgb), 0.48);
+	box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.06);
+}
+
+.modern-dialog-input-enhancement.is-blocking {
+	border-color: rgba(var(--warning-rgb), 0.48);
+}
+
+.modern-dialog-input-enhancement-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 12px;
+}
+
+.modern-dialog-input-enhancement-heading {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.modern-dialog-input-enhancement-kicker {
+	color: var(--accent);
+	font-size: 9px;
+	font-weight: 750;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+}
+
+.modern-dialog-input-enhancement-title {
+	color: var(--text-strong);
+	font-size: 12px;
+	font-weight: 700;
+}
+
+.modern-dialog-input-enhancement-toggle {
+	min-height: 25px;
+	padding-inline: 10px;
+	font-size: 10px;
+}
+
+.modern-dialog-input-enhancement-body {
+	display: none;
+	gap: 10px;
+	padding: 0 12px 12px;
+	border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.modern-dialog-input-enhancement.is-expanded .modern-dialog-input-enhancement-body {
+	display: grid;
+}
+
+.modern-dialog-input-enhancement-steps {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 5px;
+	padding-top: 10px;
+}
+
+.modern-dialog-input-enhancement-step {
+	min-width: 0;
+	padding: 5px 4px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	background: rgba(0, 0, 0, 0.10);
+	color: var(--text-muted);
+	font-size: 9px;
+	font-weight: 620;
+	text-align: center;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-dialog-input-enhancement-step.is-current {
+	border-color: rgba(var(--accent-rgb), 0.46);
+	background: rgba(var(--accent-rgb), 0.13);
+	color: var(--text-strong);
+}
+
+.modern-dialog-input-enhancement-step.is-complete {
+	color: var(--accent);
+}
+
+.modern-dialog-input-enhancement-instruction {
+	margin: 0;
+	color: var(--text-main);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.modern-dialog-input-enhancement-progress-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+}
+
+.modern-dialog-input-enhancement-progress {
+	position: relative;
+	display: block;
+	height: 6px;
+	overflow: hidden;
+	border-radius: var(--radius-pill);
+	background: rgba(255, 255, 255, 0.09);
+}
+
+.modern-dialog-input-enhancement-progress-fill {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 0;
+	border-radius: inherit;
+	background: var(--accent);
+	transition: width 120ms linear;
+}
+
+.modern-dialog-input-enhancement-timer {
+	min-width: 92px;
+	color: var(--text-muted);
+	font-size: 10px;
+	text-align: right;
+}
+
+.modern-dialog-input-enhancement-level,
+.modern-dialog-input-enhancement-privacy {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	padding: 7px 9px;
+	border-radius: 7px;
+	background: rgba(0, 0, 0, 0.12);
+	color: var(--text-muted);
+	font-size: 10px;
+	line-height: 1.4;
+}
+
+.modern-dialog-input-enhancement-level.is-good {
+	background: rgba(var(--accent-rgb), 0.11);
+	color: var(--accent);
+}
+
+.modern-dialog-input-enhancement-level.is-warning,
+.modern-dialog-input-enhancement.is-blocking .modern-dialog-input-enhancement-privacy {
+	background: rgba(var(--warning-rgb), 0.12);
+	color: var(--warning);
+}
+
+.modern-dialog-input-enhancement-optional {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--text-main);
+	font-size: 10px;
+}
+
+.modern-dialog-input-enhancement-optional input {
+	width: 15px;
+	min-width: 15px;
+	height: 15px;
+	min-height: 15px;
+	accent-color: var(--accent);
+}
+
+.modern-dialog-input-enhancement-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 7px;
+}
+
+.modern-dialog-input-enhancement-button {
+	min-height: 27px;
+	padding-inline: 10px;
+	font-size: 10px;
+}
+
+@media (max-width: 720px) {
+	.modern-dialog-input-enhancement-steps {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.modern-dialog-input-enhancement-progress-row {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.modern-dialog-input-enhancement-timer {
+		text-align: left;
+	}
+}
+
 .modern-dialog-field-error {
 	grid-column: 2;
 	color: var(--danger);

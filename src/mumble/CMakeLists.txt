@@ -198,6 +198,8 @@ set(MUMBLE_SOURCES
 	"Database.h"
 	"DeepFilterNetSpeechCleanup.cpp"
 	"DeepFilterNetSpeechCleanup.h"
+	"DeepFilterNetRealtimeWorker.cpp"
+	"DeepFilterNetRealtimeWorker.h"
 	"DeveloperConsole.cpp"
 	"DeveloperConsole.h"
 	"DTLNSpeechCleanup.cpp"
@@ -220,6 +222,30 @@ set(MUMBLE_SOURCES
 	"GlobalShortcutButtons.ui"
 	"GlobalShortcutTarget.ui"
 	"GlobalShortcutTypes.h"
+	"InputEnhancement.cpp"
+	"InputEnhancement.h"
+	"InputEnhancementAuto.cpp"
+	"InputEnhancementAuto.h"
+	"InputEnhancementChannelPointer.cpp"
+	"InputEnhancementChannelPointer.h"
+	"InputEnhancementCalibration.cpp"
+	"InputEnhancementCalibration.h"
+	"InputEnhancementCalibrationRuntime.cpp"
+	"InputEnhancementCalibrationRuntime.h"
+	"InputEnhancementCalibrationWorker.cpp"
+	"InputEnhancementCalibrationWorker.h"
+	"InputEnhancementPolicy.cpp"
+	"InputEnhancementPolicy.h"
+	"InputEnhancementPolicyController.cpp"
+	"InputEnhancementPolicyController.h"
+	"InputEnhancementPackageVerifier.cpp"
+	"InputEnhancementPackageVerifier.h"
+	"InputEnhancementSettings.cpp"
+	"InputEnhancementSettings.h"
+	"../UpdateHealth.cpp"
+	"../UpdateHealth.h"
+	"UpdateHealthMonitor.cpp"
+	"UpdateHealthMonitor.h"
 	"JSONSerialization.cpp"
 	"JSONSerialization.h"
 	"LegacyPlugin.cpp"
@@ -441,6 +467,8 @@ if(speech-cleanup-e2e)
 	list(APPEND MUMBLE_SOURCES
 		"SpeechCleanupTestAudio.cpp"
 		"SpeechCleanupTestAudio.h"
+		"SpeechCleanupTestOpusObserver.cpp"
+		"SpeechCleanupTestOpusObserver.h"
 	)
 endif()
 
@@ -624,6 +652,8 @@ target_compile_definitions(mumble_client_object_lib
 	"MUMBLE_LIBRARY_PATH=${MUMBLE_INSTALL_ABS_LIBDIR}"
 	"MUMBLE_PLUGIN_PATH=${MUMBLE_INSTALL_ABS_PLUGINDIR}"
 )
+target_compile_definitions(mumble_client_object_lib PRIVATE
+	"MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX=\"${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}\"")
 
 set_target_properties(mumble PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 

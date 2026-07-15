@@ -8,7 +8,9 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
+#include "SpeechCleanupTestOpusObserver.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QString>
 
 #include <sndfile.h>
@@ -32,7 +34,16 @@ public:
 
 private:
 	void writeDone(bool ok, const QString &errorMessage, std::uint64_t sourceFrames,
-				   std::uint64_t submittedFrames) const;
+				   std::uint64_t submittedFrames);
+	void observeInputPcm(const float *samples, unsigned int sampleCount);
+	void beginVoiceContractObservation();
+	void finishVoiceContractObservation();
+	bool m_voiceContractEnabled = false;
+	bool m_voiceContractObservationStarted = false;
+	bool m_voiceContractObservationFinished = false;
+	bool m_pttHoldActivated = false;
+	QCryptographicHash m_inputPcmHash { QCryptographicHash::Sha256 };
+	Mumble::SpeechCleanupE2E::OpusObservation m_opusObservation;
 	bool m_terminatorSubmitted = false;
 	unsigned int m_drainedCleanupSamples = 0;
 };

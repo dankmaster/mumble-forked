@@ -63,6 +63,9 @@ public:
 namespace Audio {
 void startInput(const QString &input = QString());
 void stopInput();
+/// Recreates only capture input and restores its direct plugin callback. Used
+/// when a signed runtime policy changes the effective force-Original state.
+void restartInput();
 
 void startOutput(const QString &output = QString());
 void stopOutput();
