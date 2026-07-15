@@ -24,6 +24,7 @@
 
 #include "Channel.h"
 #include "EchoCancelOption.h"
+#include "InputEnhancementSettings.h"
 #include "MumbleConstants.h"
 #include "QuitBehavior.h"
 #include "SSL.h"
@@ -190,6 +191,7 @@ struct Settings {
 	QString noiseCancelModelId                          = QStringLiteral("rnnoise:embedded");
 	QString noiseCancelCustomModelPath                  = {};
 	int iSpeexNoiseCancelStrength                       = -30;
+	Mumble::InputEnhancement::Settings inputEnhancement = {};
 	bool remoteSpeechCleanupEnabled                     = false;
 	SpeechCleanupBackend remoteSpeechCleanupBackend     = RNNoiseBackend;
 	QString remoteSpeechCleanupModelId                  = QStringLiteral("rnnoise:embedded");
@@ -517,6 +519,7 @@ struct Settings {
 	void migratePluginSettings(const MigratedPath &path);
 
 private:
+	bool inputEnhancementProbationRecoveryNeedsSave = false;
 	void verifySettingsKeys() const;
 	QString findSettingsLocation(bool legacy = false, bool *foundExistingFile = nullptr) const;
 };

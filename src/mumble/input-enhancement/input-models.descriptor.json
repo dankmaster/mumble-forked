@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "catalogRevision": "input-recipes-v1",
+  "models": [
+    {
+      "id": "rnnoise:embedded",
+      "version": "rnnoise-70f1d256acd4",
+      "backend": "RNNoise",
+      "path": "rnnoise.dll",
+      "licenseSpdx": "BSD-3-Clause",
+      "sampleRateHz": 48000,
+      "algorithmicLatencyMs": 30,
+      "recipeCompatibility": [
+        "input.balanced.rnnoise-embedded",
+        "input.auto.balanced.rnnoise-embedded"
+      ]
+    },
+    {
+      "id": "rnnoise:little",
+      "version": "rnnoise-little-70f1d256acd4",
+      "backend": "RNNoise",
+      "path": "rnnoise/rnnoise_little.weights_blob.bin",
+      "licenseSpdx": "BSD-3-Clause",
+      "sampleRateHz": 48000,
+      "algorithmicLatencyMs": 30,
+      "recipeCompatibility": ["input.expert.rnnoise-little"]
+    },
+    {
+      "id": "dtln:baseline:model-1",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/baseline/model_1.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-baseline"]
+    },
+    {
+      "id": "dtln:baseline:model-2",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/baseline/model_2.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-baseline"]
+    },
+    {
+      "id": "dtln:norm500h:model-1",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/norm_500h/model_1.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-norm500h"]
+    },
+    {
+      "id": "dtln:norm500h:model-2",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/norm_500h/model_2.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-norm500h"]
+    },
+    {
+      "id": "dtln:norm40h:model-1",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/norm_40h/model_1.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-norm40h"]
+    },
+    {
+      "id": "dtln:norm40h:model-2",
+      "version": "mumble-package-c685f22e01fd",
+      "backend": "DTLN",
+      "path": "dtln/norm_40h/model_2.onnx",
+      "licenseSpdx": "MIT",
+      "sampleRateHz": 16000,
+      "algorithmicLatencyMs": 32,
+      "recipeCompatibility": ["input.expert.dtln-norm40h"]
+    },
+    {
+      "id": "deepfilternet:balanced",
+      "version": "DeepFilterNet3-mumble-package-25a1d8b07cdf",
+      "backend": "DeepFilterNet",
+      "path": "deepfilternet/DeepFilterNet3_onnx.tar.gz",
+      "licenseSpdx": "MIT OR Apache-2.0",
+      "sampleRateHz": 48000,
+      "algorithmicLatencyMs": 40,
+      "recipeCompatibility": [
+        "input.crisp.deepfilternet-balanced",
+        "input.auto.crisp.deepfilternet-balanced"
+      ]
+    },
+    {
+      "id": "deepfilternet:low-latency",
+      "version": "DeepFilterNet3-ll-mumble-package-25a1d8b07cdf",
+      "backend": "DeepFilterNet",
+      "path": "deepfilternet/DeepFilterNet3_ll_onnx.tar.gz",
+      "licenseSpdx": "MIT OR Apache-2.0",
+      "sampleRateHz": 48000,
+      "algorithmicLatencyMs": 20,
+      "recipeCompatibility": ["input.expert.deepfilternet-low-latency"]
+    }
+  ]
+}

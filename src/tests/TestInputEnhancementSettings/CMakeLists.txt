@@ -1,0 +1,13 @@
+find_pkg(Qt6 COMPONENTS Test REQUIRED)
+
+add_executable(TestInputEnhancementSettings TestInputEnhancementSettings.cpp)
+target_link_libraries(TestInputEnhancementSettings PRIVATE mumble_client_object_lib Qt6::Test)
+
+set_target_properties(TestInputEnhancementSettings PROPERTIES AUTOMOC ON)
+
+add_test(
+	NAME TestInputEnhancementSettings
+	COMMAND $<TARGET_FILE:TestInputEnhancementSettings>
+)
+
+configure_client_test_runtime(TestInputEnhancementSettings TestInputEnhancementSettings)

@@ -578,7 +578,9 @@ pub(crate) fn estimate_bandwidth(
     median(&mut idcs)
 }
 
-#[cfg(test)]
+// These upstream transform tests depend on the dataset-only util and WAV
+// modules. Keep them out of the lean C-API test build used by Mumble.
+#[cfg(all(test, feature = "dataset"))]
 mod tests {
     use std::sync::Once;
 

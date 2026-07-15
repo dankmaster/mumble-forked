@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QObject>
 #include <QThread>
+#include <QTimer>
 
 #include <array>
 #include <atomic>
@@ -26,6 +27,9 @@
 #include "AudioOutputToken.h"
 #include "AudioPreprocessor.h"
 #include "EchoCancelOption.h"
+#include "InputEnhancement.h"
+#include "InputEnhancementAuto.h"
+#include "InputEnhancementCalibrationRuntime.h"
 #include "MumbleProtocol.h"
 #include "SpeechCleanup.h"
 #include "SpeechCleanupTransmitDrain.h"
@@ -147,6 +151,16 @@ public:
 	virtual const QList< audioDevice > getDeviceChoices()      = 0;
 	virtual void setDeviceChoice(const QVariant &, Settings &) = 0;
 
+	/// Resolve the configured choice to the device identity that will be opened.
+	/// Backends that can resolve an OS default to a physical endpoint should
+	/// override this method. The generic implementation keeps unresolved/default
+	/// and PipeWire identities session-only.
+	virtual Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity();
+	virtual Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity(const Settings &settings);
+	static Mumble::InputEnhancement::DeviceIdentity resolveDeviceIdentity(const QString &backend,
+															 const Settings &settings);
+	static Mumble::InputEnhancement::DeviceIdentity resolveCurrentDeviceIdentity();
+
 	/// Check that given combination of echoOption and outputSystem combination is suitable for echo cancellation
 	virtual bool canEcho(EchoCancelOptionID echoOptionId, const QString &outputSystem) const = 0;
 	virtual bool canExclusive() const;
@@ -191,11 +205,67 @@ private:
 	void resetAudioProcessor();
 
 	OpusEncoder *opusState;
+	Mumble::InputEnhancement::DeviceIdentity m_inputDeviceIdentity;
+	mutable QMutex m_inputDeviceIdentityMutex;
+	std::unique_ptr< Mumble::InputEnhancement::Pipeline > m_inputEnhancementPipeline;
+	/// Auto owns all neural candidates in a lock-free handoff bank. Retired
+	/// processors are reconstructed by its lifecycle worker, never by the audio
+	/// callback.
+	std::unique_ptr< Mumble::InputEnhancement::AutoV1::PreparedPipelineBank >
+		m_inputEnhancementAutoPipelineBank;
+	Mumble::InputEnhancement::Engine m_inputEnhancementEngine = Mumble::InputEnhancement::Engine::None;
+	Mumble::InputEnhancement::Profile m_inputEnhancementConcreteProfile = Mumble::InputEnhancement::Profile::Original;
+	Mumble::InputEnhancement::CpuClass m_inputEnhancementCpuClass = Mumble::InputEnhancement::CpuClass::Standard;
+	Mumble::InputEnhancement::AutoV1::Policy m_inputEnhancementAutoPolicy;
+	Mumble::InputEnhancement::AutoV1::ObservationTracker m_inputEnhancementAutoTracker;
+	Mumble::InputEnhancement::AutoV1::SafeProfileSwitchGate m_inputEnhancementAutoSwitchGate;
+	Mumble::InputEnhancement::AutoV1::AcousticSilenceSwitchBoundary
+		m_inputEnhancementAutoSilenceBoundary;
+	Mumble::InputEnhancement::Profile m_inputEnhancementLastWorkingProfile =
+		Mumble::InputEnhancement::Profile::Original;
+	bool m_inputEnhancementRuntimeRecoveryPending = false;
+	std::atomic_bool m_inputEnhancementHealthyForUpdate        = true;
+	std::unique_ptr< Mumble::InputEnhancement::CalibrationRuntimeBridge >
+		m_inputEnhancementCalibrationRuntime;
+	Mumble::InputEnhancement::DefaultPreference m_inputEnhancementCalibrationBaselinePreference;
+	std::optional< Mumble::InputEnhancement::RecipeBinding > m_inputEnhancementCalibrationBaselineBinding;
+	bool m_inputEnhancementCalibrationBaselineAvailable = false;
+	std::atomic< Mumble::InputEnhancement::CalibrationRuntimeBridge * >
+		m_inputEnhancementCalibrationForCallback { nullptr };
+	Mumble::InputEnhancement::CalibrationTransmissionBlock m_inputEnhancementCalibrationTransmissionBlock;
+	Mumble::InputEnhancement::InputEnhancementProbationController m_inputEnhancementProbation;
+	QTimer m_inputEnhancementProbationServiceTimer;
+	bool m_usesLegacyInputEnhancement                        = false;
+	bool m_inputEnhancementAutoAdapt                         = false;
+	bool m_inputEnhancementAutoProfileSwitching              = false;
+	int m_inputEnhancementBaseReduction                     = 50;
+	int m_inputEnhancementBaseCharacter                     = 50;
+	int m_inputEnhancementActiveReduction                   = 50;
+	int m_inputEnhancementActiveCharacter                   = 50;
+	int m_inputEnhancementSpeexStrength                      = -30;
+	Settings::NoiseCancel m_configuredLegacyNoiseCancelMode = Settings::NoiseCancelOff;
 	std::unique_ptr< SpeechCleanupProcessor > m_speechCleanupProcessor;
 	Mumble::SpeechCleanup::Selection m_speechCleanupSelection = {};
 	Mumble::SpeechCleanup::TransmitDrain m_speechCleanupTransmitDrain;
 	std::unique_ptr< WebRTCAudioEchoCanceller > m_webrtcEchoCanceller;
 	bool selectCodec();
+	void initializeInputEnhancement();
+	void initializeInputEnhancementProbation(
+		const Mumble::InputEnhancement::DeviceProfileState *deviceProfile);
+	void failInputEnhancementProbation(
+		Mumble::InputEnhancement::ProbationHealthSignal signal) noexcept;
+	Mumble::InputEnhancement::Pipeline *activeInputEnhancementPipeline() noexcept;
+	const Mumble::InputEnhancement::Pipeline *activeInputEnhancementPipeline() const noexcept;
+	bool neuralInputEnhancementReady() const noexcept;
+	bool alignedInputEnhancementFallbackActive() const noexcept;
+	void finishAlignedInputEnhancementFallback() noexcept;
+	unsigned int inputEnhancementLatencySamples() const noexcept;
+	bool processInputEnhancementFrame(std::array< float, Mumble::InputEnhancement::frameSamples > &frame,
+									 unsigned int validSamples = Mumble::InputEnhancement::frameSamples) noexcept;
+	Mumble::InputEnhancement::AutoV1::DeadlinePressure inputEnhancementDeadlinePressure() const noexcept;
+	bool autoInputEnhancementCandidatePrepared(Mumble::InputEnhancement::Profile profile) const noexcept;
+	bool applyPreparedAutoInputEnhancementProfile(Mumble::InputEnhancement::Profile profile) noexcept;
+	void updateAutoInputEnhancement(float vadConfidence, bool acousticSpeech) noexcept;
 	void selectNoiseCancel();
 
 	using EncodingOutputBuffer = std::array< unsigned char, 1275 >;
@@ -212,7 +282,23 @@ protected:
 	/// Audio-thread-only diagnostics used by the opt-in deterministic E2E backend.
 	const SpeechCleanupProcessor *speechCleanupProcessorForDiagnostics() const noexcept;
 	const Mumble::SpeechCleanup::Selection &speechCleanupSelectionForDiagnostics() const noexcept;
+	bool speechCleanupReadyForDiagnostics() const noexcept;
+	QString speechCleanupActiveModelIdForDiagnostics() const;
+	QString speechCleanupActiveModelPathForDiagnostics() const;
+	bool speechCleanupUsedFallbackForDiagnostics() const;
+	unsigned int speechCleanupLatencyForDiagnostics() const noexcept;
+	/// Record the endpoint that the backend actually opened. If it differs from
+	/// the identity used for pre-warming, enhancement fails closed to Original;
+	/// model construction is never moved onto the audio thread.
+	void confirmOpenedInputDeviceIdentity(Mumble::InputEnhancement::DeviceIdentity identity) noexcept;
+	/// Touch the already confirmed per-device profile only after the backend has
+	/// fully started its capture chain.
+	void markOpenedInputDeviceProfileUsed() noexcept;
+	const Mumble::InputEnhancement::Pipeline *inputEnhancementPipelineForDiagnostics() const noexcept;
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	bool usesLegacyInputEnhancementForDiagnostics() const noexcept;
+	Mumble::InputEnhancement::Profile inputEnhancementProfileForDiagnostics() const noexcept;
+	std::uint64_t inputEnhancementModelInitializationAttemptsForDiagnostics() const noexcept;
 	/// Releases the current deterministic transmission, drains any causal
 	/// sender cleanup latency, and emits a real encoded Opus terminator without
 	/// mutating the process-wide transmit-mode setting.
@@ -276,6 +362,7 @@ protected:
 	int m_inputGateReleaseFrames;
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
 	bool m_forceSpeechCleanupE2ERelease = false;
+	std::atomic< std::uint64_t > m_speechCleanupE2EModelInitializationAttempts { 0 };
 #endif
 	int iBufferedFrames;
 
@@ -303,6 +390,16 @@ signals:
 							   unsigned int sampleRate, bool isSpeech);
 
 public:
+	enum class InputEnhancementCalibrationStartError : std::uint8_t {
+		None,
+		AlreadyRunning,
+		AutoUnsupported,
+		LegacyOverrideActive,
+		ActiveRecipeUnhealthy,
+		MissingExactActiveRecipe,
+		RuntimeRejected
+	};
+
 	typedef enum { ActivityStateIdle, ActivityStateReturnedFromIdle, ActivityStateActive } ActivityState;
 
 	// Race-free cross-thread telemetry for presentation surfaces. Individual fields may
@@ -359,6 +456,30 @@ public:
 	virtual bool isAlive() const;
 	bool isTransmitting() const;
 	VoiceActivitySnapshot voiceActivitySnapshot() const noexcept;
+	/// The physical/session microphone identity selected for this input object.
+	/// This is safe to query while the backend performs its startup handshake.
+	Mumble::InputEnhancement::DeviceIdentity inputDeviceIdentity() const;
+	/// Thread-safe startup/rollback health signal. Original and Light are
+	/// healthy without a model; a requested neural recipe is unhealthy after
+	/// any initialization or runtime fallback.
+	bool inputEnhancementHealthyForUpdate() const noexcept;
+	/// Starts a local-only capture session. Allocation and model/Opus setup are
+	/// completed here on the control thread before the bridge is published to
+	/// the audio callback. candidateControls only shape the recipes under test;
+	/// rollback always binds to the exact healthy recipe this AudioInput is
+	/// actually running.
+	bool startInputEnhancementCalibration(
+		const Mumble::InputEnhancement::DefaultPreference &candidateControls,
+		bool captureOptionalLocalNoise, std::uint64_t blindSeed,
+		InputEnhancementCalibrationStartError *error = nullptr);
+	Mumble::InputEnhancement::CalibrationRuntimeBridge *inputEnhancementCalibrationRuntime() noexcept;
+	/// Clear the independent final-encode block only after a terminal runtime
+	/// transition has quiesced capture callbacks.
+	void synchronizeInputEnhancementCalibrationTransmissionBlock() noexcept;
+	Mumble::InputEnhancement::ProbationSettingsResult serviceInputEnhancementProbation();
+	bool undoInputEnhancementProbationRollback(Mumble::InputEnhancement::Settings &settings);
+	bool inputEnhancementProbationRunning() const noexcept;
+	bool inputEnhancementProbationUndoAvailable() const noexcept;
 
 	void updateUserMuteDeafState(const ClientUser *user);
 
