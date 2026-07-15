@@ -1,0 +1,731 @@
+name: Input Enhancement Quality
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Quality suite to request from protected runners
+        required: true
+        default: policy_only
+        type: choice
+        options:
+          - policy_only
+          - master_quality
+          - nightly
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE: 2025-11
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG: build-env-2025-11-webengine-codecs
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v1
+  ONNXRUNTIME_VERSION: 1.18.1
+  GSTREAMER_VERSION: 1.26.7
+
+concurrency:
+  group: input-enhancement-quality-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+jobs:
+  classify:
+    name: audio-quality-scope
+    runs-on: ubuntu-24.04
+    outputs:
+      applicable: ${{ steps.scope.outputs.applicable }}
+      base_sha: ${{ steps.scope.outputs.base_sha }}
+      matched_count: ${{ steps.scope.outputs.matched_count }}
+      matched_files_json: ${{ steps.scope.outputs.matched_files_json }}
+      requested_suite: ${{ steps.suite.outputs.requested_suite }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Classify changed paths
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "$EVENT_NAME" in
+            pull_request)
+              base_sha="$PR_BASE_SHA"
+              ;;
+            push)
+              base_sha="$PUSH_BEFORE_SHA"
+              if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]] || ! git cat-file -e "${base_sha}^{commit}"; then
+                base_sha="$(git rev-parse HEAD^)"
+              fi
+              ;;
+            schedule|workflow_dispatch)
+              # Scheduled/manual requests are explicit quality runs, not path-filtered PR claims.
+              # Measured Original/legacy evidence is the behavioral contract for these runs.
+              base_sha="$(git rev-parse HEAD)"
+              echo "applicable=true" >> "$GITHUB_OUTPUT"
+              echo "changed_count=0" >> "$GITHUB_OUTPUT"
+              echo "matched_count=0" >> "$GITHUB_OUTPUT"
+              echo "matched_files_json=[]" >> "$GITHUB_OUTPUT"
+              echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            *)
+              echo "Unsupported event: $EVENT_NAME" >&2
+              exit 2
+              ;;
+          esac
+
+          git cat-file -e "${base_sha}^{commit}"
+          python3 scripts/audio-quality/detect-audio-quality-applicability.py \
+            --base "$base_sha" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Select requested suite
+        id: suite
+        shell: bash
+        env:
+          APPLICABLE: ${{ steps.scope.outputs.applicable }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+
+          case "$EVENT_NAME" in
+            pull_request)
+              [[ "$APPLICABLE" == "true" ]] && suite=pr_smoke || suite=none
+              ;;
+            push)
+              [[ "$APPLICABLE" == "true" ]] && suite=master_quality || suite=none
+              ;;
+            schedule)
+              suite=nightly
+              ;;
+            workflow_dispatch)
+              suite="$MANUAL_SUITE"
+              ;;
+            *)
+              echo "Unsupported event: $EVENT_NAME" >&2
+              exit 2
+              ;;
+          esac
+
+          echo "requested_suite=$suite" >> "$GITHUB_OUTPUT"
+          echo "Requested audio-quality suite: $suite"
+
+  policy:
+    name: audio-quality-policy-and-original-contract
+    needs: classify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Run dependency-free quality tool self-tests
+        shell: bash
+        run: python3 scripts/audio-quality/run-self-tests.py
+
+      - name: Protect the Original voice and transport contract
+        if: needs.classify.outputs.applicable == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+
+          git cat-file -e "${BASE_SHA}^{commit}"
+          python3 scripts/audio-quality/check-input-enhancement-boundary.py \
+            --self-test \
+            --base "$BASE_SHA" \
+            --head HEAD
+          python3 scripts/audio-quality/check-original-voice-contract.py \
+            --self-test \
+            --base "$BASE_SHA" \
+            --head HEAD
+
+      - name: Report gate scope without claiming missing evidence
+        if: always()
+        shell: bash
+        env:
+          APPLICABLE: ${{ needs.classify.outputs.applicable }}
+          MATCHED_COUNT: ${{ needs.classify.outputs.matched_count }}
+          MATCHED_FILES: ${{ needs.classify.outputs.matched_files_json }}
+          REQUESTED_SUITE: ${{ needs.classify.outputs.requested_suite }}
+        run: |
+          {
+            echo "## Input-enhancement quality scope"
+            echo
+            if [[ "$APPLICABLE" == "true" ]]; then
+              echo "**Applicable** — matched paths: $MATCHED_COUNT."
+              echo
+              echo '```json'
+              echo "$MATCHED_FILES"
+              echo '```'
+              echo
+              echo "Requested suite: \`$REQUESTED_SUITE\`."
+              if [[ "$REQUESTED_SUITE" == "pr_smoke" ]]; then
+                echo
+                echo "A separate ephemeral GitHub-hosted Windows job builds the candidate and runs 24 generated-fixture product-pipeline cases."
+                echo "That PR smoke is a catastrophe/correctness gate; licensed human-speech quality evidence remains restricted to the trusted harness."
+              fi
+            else
+              echo "**Not applicable** — no input/audio quality path changed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pr-smoke:
+    name: pr-audio-smoke-24-cases
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.applicable == 'true' &&
+      needs.policy.result == 'success'
+    needs:
+      - classify
+      - policy
+    runs-on: windows-2022
+    timeout-minutes: 240
+    env:
+      PR_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      QUALITY_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Confirm ephemeral unprivileged PR execution
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+              (git rev-parse HEAD).Trim().ToLowerInvariant() -cne $env:PR_SOURCE_SHA.ToLowerInvariant()) {
+            throw 'PR smoke must execute the exact pull-request head on the ephemeral hosted runner.'
+          }
+
+      - name: Initialize submodules with retry
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
+
+      - name: Pin shared codec environment
+        shell: bash
+        run: |
+          echo "MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE=https://github.com/${{ github.repository }}/releases/download/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_DIR_OVERRIDE=$GITHUB_WORKSPACE/build_env/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE}-${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}-shared" >> "$GITHUB_ENV"
+          echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=OFF" >> "$GITHUB_ENV"
+
+      - name: Set environment variables
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "windows-2022" "shared" "x86_64" "${{ github.workspace }}"
+
+      - id: restore-pr-shared-build-env-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.MUMBLE_ENVIRONMENT_DIR }}
+          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
+
+      - name: Verify shared build environment archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          archive_url="${MUMBLE_ENVIRONMENT_SOURCE}/${MUMBLE_ENVIRONMENT_VERSION}.7z"
+          if ! curl -I -f -L "$archive_url" >/dev/null && ! curl -I -f -L "${archive_url}.001" >/dev/null; then
+            echo "::error title=Missing shared build environment::Publish ${MUMBLE_ENVIRONMENT_VERSION}.7z before running PR smoke."
+            exit 1
+          fi
+
+      - id: setup-pr-windows-optional-runtimes
+        uses: ./.github/actions/setup-windows-optional-runtimes
+        with:
+          onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
+          gstreamer-version: ${{ env.GSTREAMER_VERSION }}
+          rnnoise-model-release-tag: ${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG }}
+          install-rust: 'true'
+          install-ffmpeg: 'false'
+          install-gstreamer: 'true'
+
+      - name: Install Windows installer tooling
+        uses: ./.github/actions/setup-windows-installer-tooling
+        with:
+          wixsharp-version: '1.19.0.0'
+
+      - name: Build candidate product pipeline, correctness gates, and staged models
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @{
+            BuildNumber = $env:QUALITY_BUILD_NUMBER
+            EnvironmentRelease = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}'
+            EnvironmentCommit = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}'
+            SharedWebEngine = $true
+            AdditionalCMakeOptions = @(
+              '-Dserver=OFF', '-Dtests=ON', '-Dbenchmarks=ON', '-Drnnoise=ON', '-Ddtln=ON',
+              '-Ddeepfilternet=ON', '-Dinput-enhancement-signed-policy-required=OFF',
+              '-Dmodern-layout-webengine=ON', '-Dmodern-layout-automation=ON', '-Dmodern-layout-mockups=OFF'
+            )
+            EnablePackaging = $true
+            UseBundledCli11 = $true
+            AllowPendingReboot = $true
+          }
+          if ('${{ steps.restore-pr-shared-build-env-cache.outputs.cache-hit }}' -ne 'true') {
+            $arguments.InstallDependencies = $true
+          }
+          .\scripts\windows\build-local-windows-client.ps1 @arguments
+          cmake --build .\build-shared-webengine --config Release --target `
+            speech_cleanup_benchmark deepfilternet_runtime mumble-updater mumble-updater-test `
+            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementCalibration `
+            TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
+            TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
+            TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
+            TestModernDialogControllers TestUpdateHealth TestSpeechCleanup --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build PR input-enhancement correctness targets.' }
+          .\scripts\windows\new-input-enhancement-package-manifests.ps1 `
+            -StageRoot .\build-shared-webengine\shared-webengine-stage `
+            -ModelDescriptorPath .\src\mumble\input-enhancement\input-models.descriptor.json `
+            -RecipeDescriptorPath .\src\mumble\input-enhancement\input-recipes.descriptor.json `
+            -ModelManifestPath .\build-shared-webengine\unsigned-input-models.json `
+            -RecipeManifestPath .\build-shared-webengine\unsigned-input-recipes.json
+
+      - name: Run mandatory input-enhancement correctness gates
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $qtPluginPath = Join-Path $env:MUMBLE_ENVIRONMENT_DIR 'installed\x64-windows\Qt6\plugins'
+          if (Test-Path -LiteralPath $qtPluginPath -PathType Container) {
+            $env:QT_PLUGIN_PATH = $qtPluginPath
+            $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $qtPluginPath 'platforms'
+          }
+          .\scripts\windows\invoke-input-enhancement-release-tests.ps1 `
+            -BuildRoot .\build-shared-webengine `
+            -OutputPath .\build-shared-webengine\pr-correctness\qualification.json
+
+      - name: Run 24-case generated-fixture product smoke
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .\scripts\audio-quality\run-pr-smoke.py `
+            --benchmark .\build-shared-webengine\speech_cleanup_benchmark.exe `
+            --stage-root .\build-shared-webengine\shared-webengine-stage `
+            --model-manifest .\build-shared-webengine\unsigned-input-models.json `
+            --recipe-manifest .\build-shared-webengine\unsigned-input-recipes.json `
+            --source-sha $env:PR_SOURCE_SHA `
+            --output-root .\build-shared-webengine\pr-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'The 24-case PR product-pipeline smoke failed.' }
+
+      - name: Upload only audio-free PR smoke evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: input-enhancement-pr-smoke-${{ github.event.pull_request.head.sha }}
+          path: |
+            build-shared-webengine/pr-smoke/upload
+            build-shared-webengine/pr-correctness/qualification.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  trusted-infrastructure-status:
+    name: trusted-quality-infrastructure-status
+    if: always() && needs.classify.result == 'success' && github.event_name != 'pull_request'
+    needs:
+      - classify
+      - policy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report whether a measured qualification will run
+        shell: bash
+        env:
+          CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED }}
+          HARNESS_CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' }}
+          HARNESS_HASH_CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != '' }}
+          POLICY_RESULT: ${{ needs.policy.result }}
+          REPOSITORY_NAME: ${{ github.repository }}
+          REQUESTED_SUITE: ${{ needs.classify.outputs.requested_suite }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          trusted=false
+          if [[ "$REPOSITORY_NAME" == "dankmaster/mumble-forked" && "$SOURCE_REF" == "refs/heads/master" ]]; then
+            trusted=true
+          fi
+
+          {
+            echo "## Protected audio-quality infrastructure"
+            echo
+            echo "Requested suite: \`$REQUESTED_SUITE\`"
+            echo "Policy job: \`$POLICY_RESULT\`"
+            echo "Trusted repository/ref: \`$trusted\`"
+            echo "Protected runner flag: \`${CONFIGURED:-false}\`"
+            echo "Harness path configured: \`${HARNESS_CONFIGURED:-false}\`"
+            echo "Harness SHA-256 configured: \`${HARNESS_HASH_CONFIGURED:-false}\`"
+            echo
+            if [[ "$REQUESTED_SUITE" == "none" || "$REQUESTED_SUITE" == "policy_only" ]]; then
+              echo "**NOT REQUESTED** — no measured corpus qualification was selected."
+            elif [[ "$trusted" != "true" ]]; then
+              echo "**NOT RUN** — self-hosted execution is forbidden outside the canonical repository's master ref."
+              exit 1
+            elif [[ "$CONFIGURED" != "true" || "$HARNESS_CONFIGURED" != "true" || "$HARNESS_HASH_CONFIGURED" != "true" ]]; then
+              echo "**NOT RUN** — protected runners/corpus harness are not configured. No quality pass is claimed."
+              exit 1
+            elif [[ "$POLICY_RESULT" != "success" ]]; then
+              echo "**BLOCKED** — policy or Original source-contract checks failed."
+              exit 1
+            else
+              echo "**QUEUED ON PROTECTED RUNNERS** — evidence must validate before this workflow can pass."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  trusted-build:
+    name: trusted-build-once
+    if: >-
+      needs.policy.result == 'success' &&
+      (needs.classify.outputs.requested_suite == 'master_quality' || needs.classify.outputs.requested_suite == 'nightly') &&
+      (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.repository == 'dankmaster/mumble-forked' &&
+      github.ref == 'refs/heads/master' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED == 'true' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != ''
+    needs:
+      - classify
+      - policy
+    runs-on: windows-2022
+    timeout-minutes: 180
+    env:
+      INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX }}
+      QUALITY_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Confirm trusted source and release key
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -cne 'refs/heads/master' -or
+              (git rev-parse HEAD).Trim().ToLowerInvariant() -cne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw 'Measured build must use the exact protected master commit.'
+          }
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          Assert-Ed25519PublicKeyHex -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX | Out-Null
+          .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
+
+      - name: Initialize submodules with retry
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
+
+      - name: Pin shared codec environment
+        shell: bash
+        run: |
+          echo "MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE=https://github.com/${{ github.repository }}/releases/download/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_DIR_OVERRIDE=$GITHUB_WORKSPACE/build_env/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE}-${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}-shared" >> "$GITHUB_ENV"
+          echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=OFF" >> "$GITHUB_ENV"
+
+      - name: Set environment variables
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "windows-2022" "shared" "x86_64" "${{ github.workspace }}"
+
+      - id: restore-shared-build-env-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.MUMBLE_ENVIRONMENT_DIR }}
+          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
+
+      - name: Verify shared build environment archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          archive_url="${MUMBLE_ENVIRONMENT_SOURCE}/${MUMBLE_ENVIRONMENT_VERSION}.7z"
+          if ! curl -I -f -L "$archive_url" >/dev/null && ! curl -I -f -L "${archive_url}.001" >/dev/null; then
+            echo "::error title=Missing shared build environment::Publish ${MUMBLE_ENVIRONMENT_VERSION}.7z before running quality."
+            exit 1
+          fi
+
+      - id: setup-windows-optional-runtimes
+        uses: ./.github/actions/setup-windows-optional-runtimes
+        with:
+          onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
+          gstreamer-version: ${{ env.GSTREAMER_VERSION }}
+          rnnoise-model-release-tag: ${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG }}
+          install-rust: 'true'
+          install-ffmpeg: 'true'
+          install-gstreamer: 'true'
+
+      - name: Install Windows installer tooling
+        uses: ./.github/actions/setup-windows-installer-tooling
+        with:
+          wixsharp-version: '1.19.0.0'
+
+      - name: Build the sole unsigned qualification payload
+        shell: powershell
+        run: |
+          $arguments = @{
+            BuildNumber = $env:QUALITY_BUILD_NUMBER
+            EnvironmentRelease = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}'
+            EnvironmentCommit = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}'
+            SharedWebEngine = $true
+            AdditionalCMakeOptions = @(
+              '-Dserver=OFF', '-Dtests=ON', '-Dbenchmarks=ON', '-Drnnoise=ON', '-Ddtln=ON',
+              '-Ddeepfilternet=ON', '-Dinput-enhancement-signed-policy-required=ON',
+              "-DMUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX=$env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX",
+              '-Dmodern-layout-webengine=ON', '-Dmodern-layout-automation=ON', '-Dmodern-layout-mockups=OFF'
+            )
+            EnablePackaging = $true
+            UseBundledCli11 = $true
+            AllowPendingReboot = $true
+          }
+          if ('${{ steps.restore-shared-build-env-cache.outputs.cache-hit }}' -ne 'true') {
+            $arguments.InstallDependencies = $true
+          }
+          .\scripts\windows\build-local-windows-client.ps1 @arguments
+          cmake --build .\build-shared-webengine --config Release --target `
+            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementCalibration `
+            TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
+            TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
+            TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
+            TestModernDialogControllers TestUpdateHealth TestSpeechCleanup mumble-updater mumble-updater-test `
+            speech_cleanup_benchmark --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build mandatory qualification targets.' }
+
+      - name: Run correctness and validate the staged payload
+        shell: powershell
+        run: |
+          .\scripts\windows\invoke-input-enhancement-release-tests.ps1 `
+            -BuildRoot .\build-shared-webengine -BuildType Release `
+            -OutputPath .\build-shared-webengine\input-enhancement-test-gates.json
+          .\scripts\windows\assert-windows-build-artifacts.ps1 `
+            -BuildRoot .\build-shared-webengine `
+            -StageRoot .\build-shared-webengine\shared-webengine-stage `
+            -RequireStage -RequireClient -RequireScreenHelper -RequireSpeechCleanup `
+            -RequireUpdaterRuntime -RequireGStreamerRuntime -RequireClientInstaller -RequireEnglishOnlyInstallers
+          .\scripts\windows\new-input-enhancement-package-manifests.ps1 `
+            -StageRoot .\build-shared-webengine\shared-webengine-stage `
+            -ModelDescriptorPath .\src\mumble\input-enhancement\input-models.descriptor.json `
+            -RecipeDescriptorPath .\src\mumble\input-enhancement\input-recipes.descriptor.json `
+            -ModelManifestPath .\build-shared-webengine\unsigned-input-models.json `
+            -RecipeManifestPath .\build-shared-webengine\unsigned-input-recipes.json
+          $binary = Get-Item .\build-shared-webengine\shared-webengine-stage\mumble.exe
+          $metadata = [ordered]@{
+            schemaVersion = 1
+            sourceSha = $env:GITHUB_SHA.ToLowerInvariant()
+            buildNumber = [int]$env:QUALITY_BUILD_NUMBER
+            testedBinaryFileName = $binary.Name
+            testedBinarySha256 = (Get-FileHash $binary.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            createdAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'build-shared-webengine\unsigned-build-metadata.json'),
+            ($metadata | ConvertTo-Json -Depth 5),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Upload the exact unsigned build once
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: input-enhancement-unsigned-${{ github.sha }}-${{ github.run_id }}
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build-shared-webengine/shared-webengine-stage/**
+            build-shared-webengine/CMakeCache.txt
+            build-shared-webengine/installer/**
+            build-shared-webengine/input-enhancement-test-gates.json
+            build-shared-webengine/speech_cleanup_benchmark.exe
+            build-shared-webengine/unsigned-build-metadata.json
+            build-shared-webengine/unsigned-input-models.json
+            build-shared-webengine/unsigned-input-recipes.json
+
+  trusted-quality:
+    name: trusted-${{ needs.classify.outputs.requested_suite }}-${{ matrix.runner_class }}
+    if: >-
+      needs.policy.result == 'success' &&
+      (needs.classify.outputs.requested_suite == 'master_quality' || needs.classify.outputs.requested_suite == 'nightly') &&
+      (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.repository == 'dankmaster/mumble-forked' &&
+      github.ref == 'refs/heads/master' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED == 'true' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != ''
+    needs:
+      - classify
+      - policy
+      - trusted-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner_class: low-performance
+            runner_label: input-enhancement-low
+          - runner_class: mainstream
+            runner_label: input-enhancement-mainstream
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - ${{ matrix.runner_label }}
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Confirm trusted checkout identity
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actualSha -cne $env:EXPECTED_SHA.ToLowerInvariant()) {
+            throw "Checked out '$actualSha', expected '$env:EXPECTED_SHA'."
+          }
+          python --version
+
+      - name: Download the single unsigned payload tested by both runners
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: input-enhancement-unsigned-${{ github.sha }}-${{ github.run_id }}
+          path: build-shared-webengine
+
+      - name: Run and validate measured quality evidence
+        id: quality-gate
+        continue-on-error: true
+        shell: pwsh
+        env:
+          HARNESS_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS }}
+          HARNESS_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 }}
+          LEGACY_BINARY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY }}
+          REQUESTED_SUITE: ${{ needs.classify.outputs.requested_suite }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:HARNESS_EXPECTED_SHA256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 must be the lowercase SHA-256 of the protected harness.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:HARNESS_PATH) -or
+              -not [System.IO.Path]::IsPathFullyQualified($env:HARNESS_PATH)) {
+            throw 'INPUT_ENHANCEMENT_QUALITY_HARNESS must be a protected absolute runner-local path.'
+          }
+          $harness = Get-Item -LiteralPath $env:HARNESS_PATH -ErrorAction Stop
+          if ($harness.PSIsContainer -or ($harness.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw 'INPUT_ENHANCEMENT_QUALITY_HARNESS must identify a regular, non-reparse protected harness file.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:LEGACY_BINARY_PATH) -or
+              -not [System.IO.Path]::IsPathFullyQualified($env:LEGACY_BINARY_PATH)) {
+            throw 'INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY must be a protected absolute runner-local path.'
+          }
+          $legacyBinary = Get-Item -LiteralPath $env:LEGACY_BINARY_PATH -ErrorAction Stop
+          if ($legacyBinary.PSIsContainer) {
+            throw 'INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY must identify the trusted legacy executable.'
+          }
+          $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+          if ([System.IO.Path]::GetFullPath($harness.FullName).StartsWith($workspace, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The trusted quality harness must live outside the checked-out repository.'
+          }
+          if ([System.IO.Path]::GetFullPath($legacyBinary.FullName).StartsWith($workspace, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The trusted legacy executable must live outside the checked-out repository.'
+          }
+          $harnessSha256 = (Get-FileHash -LiteralPath $harness.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($harnessSha256 -cne $env:HARNESS_EXPECTED_SHA256) {
+            throw "Protected quality harness hash '$harnessSha256' does not match configured '$env:HARNESS_EXPECTED_SHA256'."
+          }
+          $outputRoot = Join-Path $env:RUNNER_TEMP "mumble-audio-quality-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-${{ matrix.runner_class }}"
+          python scripts/audio-quality/run-ci-quality-gate.py `
+            --suite $env:REQUESTED_SUITE `
+            --harness $harness.FullName `
+            --source-root $env:GITHUB_WORKSPACE `
+            --output-root $outputRoot `
+            --tested-binary "$env:GITHUB_WORKSPACE\build-shared-webengine\shared-webengine-stage\mumble.exe" `
+            --legacy-binary $legacyBinary.FullName `
+            --staged-client-root "$env:GITHUB_WORKSPACE\build-shared-webengine\shared-webengine-stage" `
+            --model-manifest "$env:GITHUB_WORKSPACE\build-shared-webengine\unsigned-input-models.json" `
+            --recipe-manifest "$env:GITHUB_WORKSPACE\build-shared-webengine\unsigned-input-recipes.json" `
+            --github-output $env:GITHUB_OUTPUT
+          if ($LASTEXITCODE -ne 0) {
+            throw "Measured audio-quality gate failed with exit code $LASTEXITCODE."
+          }
+          $harnessSha256After = (Get-FileHash -LiteralPath $harness.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($harnessSha256After -cne $harnessSha256) {
+            throw 'The protected quality harness changed while measured qualification was running.'
+          }
+          $provenance = [ordered]@{
+            schemaVersion = 1
+            kind = 'input-enhancement-quality-harness-provenance'
+            sourceSha = $env:GITHUB_SHA.ToLowerInvariant()
+            qualityWorkflowRunId = [string]$env:GITHUB_RUN_ID
+            runnerClass = '${{ matrix.runner_class }}'
+            harnessFileName = $harness.Name
+            harnessSha256 = $harnessSha256
+          }
+          $provenancePath = Join-Path $outputRoot 'upload\quality-harness-provenance.json'
+          if (-not (Test-Path -LiteralPath (Split-Path -Parent $provenancePath) -PathType Container)) {
+            throw 'Validated upload root is missing; refusing to publish harness provenance.'
+          }
+          [System.IO.File]::WriteAllText(
+            $provenancePath,
+            ($provenance | ConvertTo-Json -Depth 4),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Upload only validated audio-free evidence
+        if: always() && steps.quality-gate.outputs.safe_upload == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: input-enhancement-${{ needs.classify.outputs.requested_suite }}-${{ matrix.runner_class }}-${{ github.sha }}
+          path: ${{ runner.temp }}/mumble-audio-quality-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner_class }}/upload
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report measured gate result
+        if: always()
+        shell: pwsh
+        env:
+          GATE_OUTCOME: ${{ steps.quality-gate.outcome }}
+          SAFE_UPLOAD: ${{ steps.quality-gate.outputs.safe_upload }}
+          SUITE: ${{ needs.classify.outputs.requested_suite }}
+        run: |
+          @"
+          ## Measured audio-quality gate: ${{ matrix.runner_class }}
+
+          - Suite: ``$env:SUITE``
+          - Gate outcome: ``$env:GATE_OUTCOME``
+          - Validated audio-free evidence available: ``$env:SAFE_UPLOAD``
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Fail closed after preserving safe failure evidence
+        if: always() && steps.quality-gate.outcome != 'success'
+        shell: pwsh
+        run: throw 'Measured qualification did not pass; no quality approval is claimed.'

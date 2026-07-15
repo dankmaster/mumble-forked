@@ -18,7 +18,7 @@ Param(
 
 	[string] $Format = "mumble-update-v1",
 
-	[int] $MinUpdaterVersion = 2,
+	[int] $MinUpdaterVersion = 3,
 
 	[string] $ApplyMode = "replace-staged-payload",
 
@@ -268,6 +268,11 @@ function Test-PackageArchive {
 		if ($manifest.format -ne $Format) {
 			throw "Unexpected package format '$($manifest.format)'"
 		}
+		if ($null -eq $manifest.healthCheck -or $manifest.healthCheck.required -ne $true -or
+			[int64] $manifest.healthCheck.minimumStableRuntimeMilliseconds -ne 10000 -or
+			[int64] $manifest.healthCheck.timeoutMilliseconds -ne 45000) {
+			throw "Package archive does not require the production health-marker contract"
+		}
 
 		Assert-QtQuickPayload -Root $payloadRoot
 
@@ -442,6 +447,11 @@ try {
 		minUpdaterVersion = $MinUpdaterVersion
 		applyMode = $ApplyMode
 		createdAt = (Get-Date).ToUniversalTime().ToString("o")
+		healthCheck = [ordered] @{
+			required = $true
+			minimumStableRuntimeMilliseconds = 10000
+			timeoutMilliseconds = 45000
+		}
 		files = @($files)
 	}
 
