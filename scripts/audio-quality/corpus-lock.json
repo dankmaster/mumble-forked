@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "verified_at": "2026-07-14",
+  "verified_at": "2026-07-15",
   "description": "Pinned seed corpus metadata for input-enhancement evaluation. Audio remains outside Git and is never packaged with Mumble.",
   "policy": {
     "allowed_roles": [
@@ -17,6 +17,38 @@
     "unknown_or_ambiguous_license": "blocked"
   },
   "sources": [
+    {
+      "id": "common-voice-swedish-26-0",
+      "kind": "clean_speech",
+      "version": "26.0 (cv-corpus-26.0-2026-06-12; sv-SE)",
+      "source_url": "https://raw.githubusercontent.com/common-voice/cv-dataset/f99d8239d2796131b73ac99f92ee7cb4443bf3ba/datasets/scripted-speech/cv-corpus-26.0-2026-06-12.json",
+      "landing_page": "https://mozilladatacollective.com/datasets/cmqintw0q00xwnr07mjjzpe61",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "fc6e3a1c28e05f361badf51b0b8e1770db0d3012b02087b382b22ccd92bb0051",
+        "size_bytes": 1281634603
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "status": "verified",
+        "evidence_url": "https://mozilladatacollective.com/datasets/cmqintw0q00xwnr07mjjzpe61",
+        "notes": "MDC permits training and evaluation but forbids attempting to identify speakers and forbids re-hosting or re-sharing the dataset."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 50259,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "multilingual_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The pinned Common Voice release metadata records this SHA-256 and byte size for sv-SE. No artifact_path is present: MDC access requires its own terms/API flow, so the repository fetcher must fail closed and must never mirror the archive."
+    },
     {
       "id": "demand-ooffice-48k",
       "kind": "environmental_noise",
@@ -106,6 +138,43 @@
       "redistribution_status": "source_license_review_required"
     },
     {
+      "id": "openslr28-rirs-noises",
+      "kind": "environmental_noise_and_rir",
+      "version": "SLR28 (archive published 2017-10-03)",
+      "source_url": "https://www.openslr.org/resources/28/rirs_noises.zip",
+      "landing_page": "https://www.openslr.org/28/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr28/rirs_noises.zip",
+        "digest": "3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7",
+        "size_bytes": 1311166223
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/resources/28/info.txt",
+        "notes": "OpenSLR's primary SLR28 metadata explicitly assigns Apache-2.0 to the downloadable database. The official archive MD5 is e6f48e257286e05de56413b4779d8ffb; this lock additionally pins a locally verified SHA-256 and byte size."
+      },
+      "audio": {
+        "channel_counts": [
+          1,
+          2,
+          8,
+          16,
+          30
+        ],
+        "file_count": 61260,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The archive includes 843 point-source noise WAVs, 92 real isotropic-noise WAVs and real/simulated RIRs. This project approves it for private local evaluation only; extracted files and derived mixtures remain outside Git and release artifacts."
+    },
+    {
       "id": "openslr31-mini-librispeech-dev-clean-2",
       "kind": "clean_speech",
       "version": "SLR31",
@@ -133,6 +202,36 @@
       ],
       "training_status": "blocked_evaluation_only",
       "redistribution_status": "blocked_evaluation_only"
+    },
+    {
+      "id": "vctk-0-92-48k",
+      "kind": "clean_speech",
+      "version": "0.92 (DataShare DOI 10.7488/ds/2645)",
+      "source_url": "https://datashare.ed.ac.uk/server/api/core/bitstreams/535f4286-e54c-4038-838c-a02285e32cb2",
+      "landing_page": "https://datashare.ed.ac.uk/items/30e7453c-9ea8-48b4-8e18-f96d0dc62928",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "468ed794251d6662cb1b4666c6163516b6bdf8bb14eb09daf3e82aeba2014174",
+        "size_bytes": 1829
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://datashare.ed.ac.uk/server/api/core/bitstreams/956a1688-0b59-428c-8a2f-10837433dde3/content",
+        "notes": "The current University of Edinburgh DataShare record includes the full Creative Commons Attribution 4.0 license text."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Integrity pins the 1,829-byte official bitstream metadata response, not the 11,747,302,977-byte ZIP. DataShare publishes only MD5 8a6ba2946b36fcbef0212cad601f4bfa for the archive; without an independently verified SHA-256 and artifact_path, automated fetching remains fail closed."
     }
   ],
   "excluded_sources": [
@@ -156,6 +255,28 @@
       "training_status": "blocked_noncommercial",
       "redistribution_status": "blocked_noncommercial",
       "reason": "Non-commercial material is excluded from product training and redistributable fixtures."
+    },
+    {
+      "id": "dns-challenge-5-composite",
+      "kind": "composite_clean_noise_rir_corpus",
+      "source_url": "https://github.com/microsoft/DNS-Challenge/tree/591184a9fcb2cbdec02520fed81a32bbbf9d73ff",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "591184a9fcb2cbdec02520fed81a32bbbf9d73ff"
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "ambiguous",
+        "evidence_url": "https://github.com/microsoft/DNS-Challenge/blob/591184a9fcb2cbdec02520fed81a32bbbf9d73ff/README.md#dataset-licenses",
+        "notes": "CC-BY-4.0 covers repository documentation, not the aggregate audio bundle. DNS5 retains the original, heterogeneous terms of every clean-speech, noise, and RIR source."
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_ambiguous_license",
+      "redistribution_status": "blocked_ambiguous_license",
+      "reason": "The repository revision is pinned, but the roughly 550 GB archived DNS5 bundle has composite per-source licenses and no reviewed SHA-256 lock for every selected archive. Split and approve components individually before any product training or evaluation use."
     }
   ]
 }

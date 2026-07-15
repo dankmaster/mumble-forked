@@ -161,8 +161,27 @@ def _validate_license(value: Any, path: str) -> Mapping[str, Any]:
 
 def _validate_audio(value: Any, path: str) -> None:
 	audio = _expect_mapping(value, path)
-	_expect_exact_keys(audio, { "channels", "sample_rate_hz" }, { "file_count", "pair_count" }, path)
-	for key in audio:
+	_expect_exact_keys(
+		audio,
+		{ "sample_rate_hz" },
+		{ "channel_counts", "channels", "file_count", "pair_count" },
+		path,
+	)
+	_expect(
+		("channels" in audio) != ("channel_counts" in audio),
+		path,
+		"must specify exactly one of channels or channel_counts",
+	)
+	if "channel_counts" in audio:
+		counts = audio["channel_counts"]
+		_expect(isinstance(counts, list) and bool(counts), f"{path}.channel_counts", "expected a non-empty array")
+		_expect(
+			all(isinstance(count, int) and not isinstance(count, bool) and count > 0 for count in counts),
+			f"{path}.channel_counts",
+			"all entries must be positive integers",
+		)
+		_expect(counts == sorted(set(counts)), f"{path}.channel_counts", "entries must be unique and sorted")
+	for key in set(audio) - { "channel_counts" }:
 		_expect(
 			isinstance(audio[key], int) and not isinstance(audio[key], bool) and audio[key] > 0,
 			f"{path}.{key}",
@@ -299,6 +318,11 @@ def _load_json(path: Path) -> Any:
 		raise ValidationError(f"{path}: unable to load JSON: {error}") from error
 
 
+def load_validated_manifest(path: Path) -> Mapping[str, Any]:
+	"""Load and validate a corpus lock for the other tracked quality tools."""
+	return validate_manifest(_load_json(path))
+
+
 def _sha256_file(path: Path) -> str:
 	digest = hashlib.sha256()
 	with path.open("rb") as stream:
@@ -360,6 +384,21 @@ def run_self_test() -> None:
 		"excluded_sources": [],
 	}
 	validate_manifest(fixture)
+	multi_channel = copy.deepcopy(fixture)
+	multi_channel["sources"][0]["audio"] = {
+		"channel_counts": [ 1, 2, 8 ],
+		"file_count": 3,
+		"sample_rate_hz": 16000,
+	}
+	validate_manifest(multi_channel)
+	bad_channel_counts = copy.deepcopy(multi_channel)
+	bad_channel_counts["sources"][0]["audio"]["channel_counts"] = [ 2, 1, 2 ]
+	try:
+		validate_manifest(bad_channel_counts)
+	except ValidationError:
+		pass
+	else:
+		raise AssertionError("self-test accepted duplicate or unsorted channel counts")
 
 	unsafe = copy.deepcopy(fixture)
 	unsafe["sources"][0]["license"] = {
@@ -396,7 +435,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 		if args.self_test:
 			run_self_test()
 			print("corpus-lock validator self-test: ok")
-		manifest = validate_manifest(_load_json(args.manifest))
+		manifest = load_validated_manifest(args.manifest)
 		verified = verify_artifacts(manifest, args.artifact_root) if args.artifact_root else 0
 		print(
 			f"corpus lock: ok; sources={len(manifest['sources'])}; excluded={len(manifest['excluded_sources'])}; "
