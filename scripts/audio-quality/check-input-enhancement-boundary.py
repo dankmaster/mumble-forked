@@ -60,7 +60,7 @@ def classify_changes(paths: Iterable[str]) -> Tuple[List[str], List[str]]:
 
 
 def changed_files(base: str, head: str) -> List[str]:
-	command = [ "git", "diff", "--name-only", "--diff-filter=ACMRT", f"{base}...{head}", "--" ]
+	command = [ "git", "diff", "--name-only", "--diff-filter=ACDMRT", f"{base}...{head}", "--" ]
 	try:
 		completed = subprocess.run(command, check=True, capture_output=True, text=True, encoding="utf-8")
 	except (OSError, subprocess.CalledProcessError) as error:
