@@ -1,9 +1,0 @@
-# CMake generation dependency list for this directory.
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPostgreSQL.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/SelectLibraryConfigurations.cmake
-D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/postgresql/vcpkg-cmake-wrapper.cmake
-D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_define_backend_target.cmake
-D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_utils.cmake
-D:/Coding/Mumble-input-enhancement/3rdparty/soci/src/backends/postgresql/CMakeLists.txt

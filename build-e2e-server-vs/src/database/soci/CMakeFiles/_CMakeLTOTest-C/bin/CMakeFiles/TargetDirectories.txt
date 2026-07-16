@@ -1,4 +1,0 @@
-D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/foo.dir
-D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/boo.dir
-D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/ALL_BUILD.dir
-D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/ZERO_CHECK.dir

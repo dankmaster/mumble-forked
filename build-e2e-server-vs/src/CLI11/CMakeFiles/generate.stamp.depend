@@ -1,7 +1,0 @@
-# CMake generation dependency list for this directory.
-C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDependentOption.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/ExternalProject/shared_internal_commands.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/GNUInstallDirs.cmake
-D:/Coding/Mumble-input-enhancement/3rdparty/CLI11/CMakeLists.txt
-D:/Coding/Mumble-input-enhancement/3rdparty/CLI11/cmake/CLI11Warnings.cmake

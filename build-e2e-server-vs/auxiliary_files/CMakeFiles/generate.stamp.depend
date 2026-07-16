@@ -1,7 +1,0 @@
-# CMake generation dependency list for this directory.
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
-C:/Program Files/CMake/share/cmake-4.3/Modules/FindPkgConfig.cmake
-D:/Coding/Mumble-input-enhancement/auxiliary_files/CMakeLists.txt
-D:/Coding/Mumble-input-enhancement/cmake/delayed_configure_files.cmake
-D:/Coding/Mumble-input-enhancement/cmake/pkg-utils.cmake
