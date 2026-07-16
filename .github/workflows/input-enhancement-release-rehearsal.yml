@@ -1,0 +1,269 @@
+name: Input Enhancement Pre-Azure Release Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected master commit to rehearse
+        required: true
+        type: string
+      build_number:
+        description: Positive immutable build number
+        required: true
+        type: number
+      community_size:
+        description: Listening community size (0 means require at least three listeners)
+        required: false
+        default: 0
+        type: number
+
+# Deliberately no id-token permission, release environment, deployment
+# environment, production secret, or contents write. The only remote store is
+# a short-lived Actions artifact used to prove byte-exact download semantics.
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: input-enhancement-pre-azure-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  local-draft:
+    name: ephemeral-sign-and-stage-local-draft
+    if: github.ref == 'refs/heads/master'
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - input-enhancement-mainstream
+    timeout-minutes: 360
+    outputs:
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+      build_id: ${{ steps.identity.outputs.build_id }}
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
+      REQUESTED_COMMUNITY_SIZE: ${{ inputs.community_size }}
+      REHEARSAL_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_EXECUTOR }}
+      REHEARSAL_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_EXECUTOR_SHA256 }}
+      UNSIGNED_HANDOFF_ARCHIVE: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE }}
+      UNSIGNED_HANDOFF_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256 }}
+      MEASURED_EVIDENCE_ARCHIVE: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE }}
+      MEASURED_EVIDENCE_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256 }}
+      LISTENING_QUALIFICATION: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION }}
+      LISTENING_QUALIFICATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256 }}
+      RELEASE_SMOKE_HARNESS: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS }}
+      RELEASE_SMOKE_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256 }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 }}
+      RELEASE_SMOKE_CASE_SET: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET }}
+      RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
+      RELEASE_SMOKE_SERVER_BINARY: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY }}
+      RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
+      KILL_SWITCH_OBSERVER: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER }}
+      KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_RECEIPT: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT }}
+      KILL_SWITCH_OBSERVER_RECEIPT_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256 }}
+      UPDATER_VM_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR }}
+      UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_RECEIPT: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT }}
+      UPDATER_VM_RECEIPT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256 }}
+      UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
+      UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
+      UPDATER_VM_HARDWARE_FINGERPRINT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Establish immutable rehearsal identity
+        id: identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'source_sha must be a full lowercase Git SHA.'
+          }
+          $buildNumber = 0
+          if (-not [int]::TryParse($env:REQUESTED_BUILD_NUMBER, [ref]$buildNumber) -or $buildNumber -le 0) {
+            throw 'build_number must be a positive integer.'
+          }
+          if ((git rev-parse HEAD).Trim() -cne $env:REQUESTED_SOURCE_SHA) {
+            throw 'Checked-out commit differs from requested source_sha.'
+          }
+          git merge-base --is-ancestor $env:REQUESTED_SOURCE_SHA origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'Rehearsal commit is not on protected master.' }
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          $buildId = Get-InputEnhancementBuildId -BuildNumber $buildNumber -SourceSha $env:REQUESTED_SOURCE_SHA
+          $artifactName = "input-enhancement-rehearsal-draft-$buildId-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "REHEARSAL_ARTIFACT_NAME=$artifactName" >> $env:GITHUB_ENV
+
+      - name: Run isolated ephemeral rehearsal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            'REHEARSAL_EXECUTOR', 'REHEARSAL_EXECUTOR_SHA256',
+            'UNSIGNED_HANDOFF_ARCHIVE', 'UNSIGNED_HANDOFF_ARCHIVE_SHA256',
+            'MEASURED_EVIDENCE_ARCHIVE', 'MEASURED_EVIDENCE_ARCHIVE_SHA256',
+            'LISTENING_QUALIFICATION', 'LISTENING_QUALIFICATION_SHA256',
+            'RELEASE_SMOKE_HARNESS', 'RELEASE_SMOKE_HARNESS_SHA256',
+            'RELEASE_SMOKE_FIXTURE_MANIFEST', 'RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256',
+            'RELEASE_SMOKE_CASE_SET', 'RELEASE_SMOKE_CASE_SET_SHA256',
+            'RELEASE_SMOKE_SERVER_BINARY', 'RELEASE_SMOKE_SERVER_BINARY_SHA256',
+            'KILL_SWITCH_OBSERVER', 'KILL_SWITCH_OBSERVER_SHA256',
+            'KILL_SWITCH_OBSERVER_RECEIPT', 'KILL_SWITCH_OBSERVER_RECEIPT_SHA256',
+            'UPDATER_VM_EXECUTOR', 'UPDATER_VM_EXECUTOR_SHA256',
+            'UPDATER_VM_RECEIPT', 'UPDATER_VM_RECEIPT_SHA256',
+            'UPDATER_VM_IMAGE_SHA256', 'UPDATER_VM_SNAPSHOT_SHA256',
+            'UPDATER_VM_HARDWARE_FINGERPRINT_SHA256'
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing protected rehearsal input '$name'."
+            }
+          }
+          $outputRoot = Join-Path $env:RUNNER_TEMP "mumble-pre-azure-rehearsal-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          .\scripts\windows\invoke-input-enhancement-release-rehearsal.ps1 `
+            -SourceRoot $env:GITHUB_WORKSPACE `
+            -SourceSha $env:REQUESTED_SOURCE_SHA `
+            -BuildNumber ([int]$env:REQUESTED_BUILD_NUMBER) `
+            -ExecutorPath $env:REHEARSAL_EXECUTOR `
+            -ExecutorSha256 $env:REHEARSAL_EXECUTOR_SHA256 `
+            -UnsignedHandoffArchivePath $env:UNSIGNED_HANDOFF_ARCHIVE `
+            -UnsignedHandoffArchiveSha256 $env:UNSIGNED_HANDOFF_ARCHIVE_SHA256 `
+            -MeasuredEvidenceArchivePath $env:MEASURED_EVIDENCE_ARCHIVE `
+            -MeasuredEvidenceArchiveSha256 $env:MEASURED_EVIDENCE_ARCHIVE_SHA256 `
+            -ListeningQualificationPath $env:LISTENING_QUALIFICATION `
+            -ListeningQualificationSha256 $env:LISTENING_QUALIFICATION_SHA256 `
+            -ReleaseSmokeHarnessPath $env:RELEASE_SMOKE_HARNESS `
+            -ReleaseSmokeHarnessSha256 $env:RELEASE_SMOKE_HARNESS_SHA256 `
+            -FixtureManifestPath $env:RELEASE_SMOKE_FIXTURE_MANIFEST `
+            -FixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 `
+            -CaseSetPath $env:RELEASE_SMOKE_CASE_SET `
+            -CaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 `
+            -ServerExecutablePath $env:RELEASE_SMOKE_SERVER_BINARY `
+            -ServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
+            -KillSwitchObserverPath $env:KILL_SWITCH_OBSERVER `
+            -KillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
+            -KillSwitchObserverReceiptPath $env:KILL_SWITCH_OBSERVER_RECEIPT `
+            -KillSwitchObserverReceiptSha256 $env:KILL_SWITCH_OBSERVER_RECEIPT_SHA256 `
+            -UpdaterVmExecutorPath $env:UPDATER_VM_EXECUTOR `
+            -UpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 `
+            -UpdaterVmReceiptPath $env:UPDATER_VM_RECEIPT `
+            -UpdaterVmReceiptSha256 $env:UPDATER_VM_RECEIPT_SHA256 `
+            -UpdaterVmImageSha256 $env:UPDATER_VM_IMAGE_SHA256 `
+            -UpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
+            -UpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `
+            -DraftArtifactName $env:REHEARSAL_ARTIFACT_NAME `
+            -OutputRoot $outputRoot `
+            -CommunitySize ([int]$env:REQUESTED_COMMUNITY_SIZE)
+          "REHEARSAL_OUTPUT_ROOT=$outputRoot" >> $env:GITHUB_ENV
+
+      - name: Reject private material before remote staging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\windows\assert-input-enhancement-rehearsal-draft-manifest.ps1 `
+            -Root $env:REHEARSAL_OUTPUT_ROOT `
+            -ExpectedArtifactName $env:REHEARSAL_ARTIFACT_NAME
+
+      - name: Stage local draft in remote Actions artifact store
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.identity.outputs.artifact_name }}
+          path: ${{ env.REHEARSAL_OUTPUT_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  remote-reverify:
+    name: independent-remote-byte-reverification
+    needs: local-draft
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_COMMUNITY_SIZE: ${{ inputs.community_size }}
+      REHEARSAL_ARTIFACT_NAME: ${{ needs.local-draft.outputs.artifact_name }}
+      EXPECTED_BUILD_ID: ${{ needs.local-draft.outputs.build_id }}
+      REHEARSAL_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_EXECUTOR_SHA256 }}
+      UNSIGNED_HANDOFF_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256 }}
+      MEASURED_EVIDENCE_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256 }}
+      LISTENING_QUALIFICATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256 }}
+      RELEASE_SMOKE_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256 }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 }}
+      RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
+      RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
+      KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_RECEIPT_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256 }}
+      UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_RECEIPT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256 }}
+      UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
+      UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
+      UPDATER_VM_HARDWARE_FINGERPRINT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.local-draft.outputs.artifact_name }}
+          path: rehearsal-remote
+
+      - name: Reverify downloaded draft and every product gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\windows\assert-input-enhancement-rehearsal-draft-manifest.ps1 `
+            -Root .\rehearsal-remote -ExpectedArtifactName $env:REHEARSAL_ARTIFACT_NAME
+          .\scripts\windows\assert-input-enhancement-release-rehearsal.ps1 `
+            -Root .\rehearsal-remote `
+            -ExpectedSourceSha $env:REQUESTED_SOURCE_SHA `
+            -ExpectedBuildId $env:EXPECTED_BUILD_ID `
+            -ExpectedDraftArtifactName $env:REHEARSAL_ARTIFACT_NAME `
+            -ExpectedExecutorSha256 $env:REHEARSAL_EXECUTOR_SHA256 `
+            -ExpectedUnsignedHandoffSha256 $env:UNSIGNED_HANDOFF_ARCHIVE_SHA256 `
+            -ExpectedMeasuredEvidenceArchiveSha256 $env:MEASURED_EVIDENCE_ARCHIVE_SHA256 `
+            -ExpectedListeningQualificationSha256 $env:LISTENING_QUALIFICATION_SHA256 `
+            -ExpectedReleaseSmokeHarnessSha256 $env:RELEASE_SMOKE_HARNESS_SHA256 `
+            -ExpectedFixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 `
+            -ExpectedCaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 `
+            -ExpectedServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
+            -ExpectedKillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
+            -ExpectedKillSwitchObserverReceiptSha256 $env:KILL_SWITCH_OBSERVER_RECEIPT_SHA256 `
+            -ExpectedUpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 `
+            -ExpectedUpdaterVmReceiptSha256 $env:UPDATER_VM_RECEIPT_SHA256 `
+            -ExpectedUpdaterVmImageSha256 $env:UPDATER_VM_IMAGE_SHA256 `
+            -ExpectedUpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
+            -ExpectedUpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `
+            -ExpectedCommunitySize ([int]$env:REQUESTED_COMMUNITY_SIZE)
+          New-Item -ItemType Directory -Force -Path .\remote-reverification | Out-Null
+          .\scripts\windows\new-input-enhancement-rehearsal-remote-attestation.ps1 `
+            -DraftRoot .\rehearsal-remote `
+            -ArtifactName $env:REHEARSAL_ARTIFACT_NAME `
+            -SourceSha $env:REQUESTED_SOURCE_SHA `
+            -BuildId $env:EXPECTED_BUILD_ID `
+            -WorkflowRunId $env:GITHUB_RUN_ID `
+            -OutputPath .\remote-reverification\remote-reverification.json
+
+      - name: Store audio-free remote reverification receipt
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: input-enhancement-rehearsal-reverification-${{ needs.local-draft.outputs.build_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: remote-reverification/remote-reverification.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

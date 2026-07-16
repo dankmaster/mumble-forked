@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 using namespace Mumble::InputEnhancement;
 
@@ -56,6 +57,7 @@ struct FakeState {
 	unsigned int latency             = 960;
 	unsigned int latencyAfterPrepare = 0;
 	float lastMix                    = -1.0f;
+	std::vector< float > observedMixes;
 	QString activeModelId;
 	QString activeModelPath;
 };
@@ -102,6 +104,7 @@ public:
 			m_state.coldProcessPending = false;
 		}
 		m_state.lastMix = mixFactor;
+		m_state.observedMixes.push_back(mixFactor);
 		for (unsigned int i = 0; i < sampleCount; ++i) {
 			m_state.inputWasFiniteAndClamped = m_state.inputWasFiniteAndClamped && std::isfinite(samples[i])
 											   && samples[i] >= -1.0f && samples[i] <= 1.0f;
@@ -198,6 +201,7 @@ class TestInputEnhancement : public QObject {
 private slots:
 	void catalogDefinesStableProductRecipes();
 	void catalogClampsControlsAndInterpolatesMix();
+	void profileValuesAndReadinessAreStable();
 	void autoPolicyUsesCpuAndBackendAvailability();
 	void explicitProfilesFallBackDeterministically();
 	void defaultPipelineStartsAsZeroLatencyOriginal();
@@ -211,6 +215,7 @@ private slots:
 	void realtimePreparationFailureFailsClosed();
 	void neuralRecipeWarmupFailureFailsClosed();
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
+	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
 	void runtimeUnhealthyProcessorFailsClosed();
 	void neuralInputIsSanitizedAndOutputIsClamped();
@@ -235,13 +240,15 @@ void TestInputEnhancement::catalogDefinesStableProductRecipes() {
 		const char *modelId;
 		unsigned int latencyBudget;
 	};
-	const std::array< Expected, 4 > expected = { {
+	const std::array< Expected, 5 > expected = { {
 		{ Profile::Original, Engine::None, "input.original", "", originalLatencyBudgetSamples },
 		{ Profile::Light, Engine::Speex, "input.light.speex", "", lightLatencyBudgetSamples },
 		{ Profile::Balanced, Engine::RNNoise, "input.balanced.rnnoise-embedded", "rnnoise:embedded",
 		  balancedLatencyBudgetSamples },
-		{ Profile::Crisp, Engine::DeepFilterNet, "input.crisp.deepfilternet-balanced", "deepfilternet:balanced",
-		  crispLatencyBudgetSamples },
+		{ Profile::Quality, Engine::DeepFilterNet, "input.quality.deepfilternet-balanced", "deepfilternet:balanced",
+		  qualityLatencyBudgetSamples },
+		{ Profile::VoiceFocus, Engine::DeepFilterNet, "input.voice-focus.deepfilternet-balanced",
+		  "deepfilternet:balanced", voiceFocusLatencyBudgetSamples },
 	} };
 
 	for (const Expected &item : expected) {
@@ -278,13 +285,86 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 	QCOMPARE(natural.naturalCrisp(), 10);
 	QVERIFY(std::abs(natural.mixFactor() - 0.42625f) < 0.00001f);
 
-	const ValidatedControls crispMinimum = validatedControlsForProfile(Profile::Crisp, 0, 0);
-	QCOMPARE(crispMinimum.noiseReduction, 25);
-	QCOMPARE(crispMinimum.naturalCrisp, 25);
-	const ValidatedControls crispMaximum = validatedControlsForProfile(Profile::Crisp, 100, 100);
-	QCOMPARE(crispMaximum.noiseReduction, 90);
-	QCOMPARE(crispMaximum.naturalCrisp, 100);
+	const ValidatedControls qualityMinimum = validatedControlsForProfile(Profile::Quality, 0, 0);
+	QCOMPARE(qualityMinimum.noiseReduction, 25);
+	QCOMPARE(qualityMinimum.naturalCrisp, 25);
+	const ValidatedControls qualityMaximum = validatedControlsForProfile(Profile::Quality, 100, 100);
+	QCOMPARE(qualityMaximum.noiseReduction, 90);
+	QCOMPARE(qualityMaximum.naturalCrisp, 100);
+	const ValidatedControls focusMinimum = validatedControlsForProfile(Profile::VoiceFocus, 0, 0);
+	QCOMPARE(focusMinimum.noiseReduction, 70);
+	QCOMPARE(focusMinimum.naturalCrisp, 40);
+	const ValidatedControls focusMaximum = validatedControlsForProfile(Profile::VoiceFocus, 100, 100);
+	QCOMPARE(focusMaximum.noiseReduction, 100);
+	QCOMPARE(focusMaximum.naturalCrisp, 100);
+	QVERIFY(mixFactorForControls(Profile::VoiceFocus, 0, 0) > mixFactorForControls(Profile::Quality, 0, 0));
+	QCOMPARE(mixFactorForControls(Profile::VoiceFocus, 100, 100), 0.99f);
+	QVERIFY(mixFactorForControls(Profile::Quality, 100, 100)
+			< mixFactorForControls(Profile::VoiceFocus, 100, 100));
 	QCOMPARE(mixFactorForControls(Profile::Original, 100, 100), 0.0f);
+}
+
+void TestInputEnhancement::profileValuesAndReadinessAreStable() {
+	QCOMPARE(enumValue(Profile::Original), 0);
+	QCOMPARE(enumValue(Profile::Light), 1);
+	QCOMPARE(enumValue(Profile::Balanced), 2);
+	QCOMPARE(enumValue(Profile::Quality), 3);
+	QCOMPARE(enumValue(Profile::Crisp), enumValue(Profile::Quality));
+	QCOMPARE(enumValue(Profile::Auto), 4);
+	QCOMPARE(enumValue(Profile::VoiceFocus), 5);
+
+	ManualProfileCapabilityMetrics manualMetrics;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::Low);
+	manualMetrics.rnnoiseAvailable = true;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::Standard);
+	manualMetrics.deepFilterNetAvailable      = true;
+	manualMetrics.qualityPipelineReady        = true;
+	manualMetrics.callbackP99Nanoseconds      = 7'000'000;
+	manualMetrics.callbackMaximumNanoseconds  = 9'000'000;
+	manualMetrics.workerFrames                = 32;
+	manualMetrics.workerP99Nanoseconds        = 7'500'000;
+	manualMetrics.workerMaximumNanoseconds    = 9'500'000;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::High);
+	manualMetrics.workerP99Nanoseconds = 8'000'001;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::Standard);
+
+	QCOMPARE(cpuClassWithAuthenticatedE2EOverride(CpuClass::Standard, false, true, QStringLiteral("High")),
+			 CpuClass::Standard);
+	QCOMPARE(cpuClassWithAuthenticatedE2EOverride(CpuClass::Standard, true, false, QStringLiteral("High")),
+			 CpuClass::Standard);
+	QCOMPARE(cpuClassWithAuthenticatedE2EOverride(CpuClass::Standard, true, true, QStringLiteral("High")),
+			 CpuClass::High);
+	QCOMPARE(cpuClassWithAuthenticatedE2EOverride(CpuClass::Standard, true, true, QStringLiteral("invalid")),
+			 CpuClass::Standard);
+
+	ResolveRequest request     = requestFor(Profile::VoiceFocus);
+	request.cpuClass           = CpuClass::Standard;
+	ProfileReadiness readiness = profileReadiness(request);
+	QVERIFY(!readiness.selectable);
+	QCOMPARE(readiness.reason, ProfileReadinessReason::InsufficientCpu);
+	request.cpuClass = CpuClass::High;
+	readiness        = profileReadiness(request);
+	QVERIFY(readiness.selectable);
+	// An offline/test request stays runnable but is never release evidence.
+	QVERIFY(!readiness.productionQualified);
+	request.captureDevice = CaptureDeviceContext::liveDevice(QStringLiteral("WASAPI"), true);
+	readiness             = profileReadiness(request);
+#ifdef Q_OS_WIN
+	QVERIFY(readiness.productionQualified);
+#else
+	QVERIFY(!readiness.productionQualified);
+#endif
+	request.captureDevice = CaptureDeviceContext::liveDevice(QStringLiteral("WASAPI"), false);
+	QVERIFY(!profileReadiness(request).productionQualified);
+	request.captureDevice = CaptureDeviceContext::liveDevice(QStringLiteral("PortAudio"), true);
+	readiness             = profileReadiness(request);
+	QVERIFY(readiness.selectable);
+	QVERIFY(!readiness.productionQualified);
+	request.profile = Profile::Auto;
+	readiness       = profileReadiness(request);
+	QVERIFY(!readiness.productionQualified);
+	QVERIFY(!readiness.selectable);
+	QCOMPARE(readiness.reason, ProfileReadinessReason::AutoRuntimeUnavailable);
 }
 
 void TestInputEnhancement::autoPolicyUsesCpuAndBackendAvailability() {
@@ -296,7 +376,7 @@ void TestInputEnhancement::autoPolicyUsesCpuAndBackendAvailability() {
 	QCOMPARE(enumValue(RecipeCatalog::resolve(request).effectiveProfile()), enumValue(Profile::Balanced));
 
 	request.cpuClass = CpuClass::High;
-	QCOMPARE(enumValue(RecipeCatalog::resolve(request).effectiveProfile()), enumValue(Profile::Crisp));
+	QCOMPARE(enumValue(RecipeCatalog::resolve(request).effectiveProfile()), enumValue(Profile::Quality));
 
 	request.backendAvailability.deepFilterNet = false;
 	QCOMPARE(enumValue(RecipeCatalog::resolve(request).effectiveProfile()), enumValue(Profile::Balanced));
@@ -312,14 +392,19 @@ void TestInputEnhancement::explicitProfilesFallBackDeterministically() {
 	QCOMPARE(enumValue(lightFallback.effectiveProfile()), enumValue(Profile::Light));
 	QCOMPARE(lightFallback.id(), QStringLiteral("input.balanced.fallback-light.speex"));
 
-	ResolveRequest crisp                    = requestFor(Profile::Crisp);
-	crisp.backendAvailability.deepFilterNet = false;
-	const Recipe balancedFallback           = RecipeCatalog::resolve(crisp);
+	ResolveRequest quality                    = requestFor(Profile::Quality);
+	quality.backendAvailability.deepFilterNet = false;
+	const Recipe balancedFallback             = RecipeCatalog::resolve(quality);
 	QCOMPARE(enumValue(balancedFallback.effectiveProfile()), enumValue(Profile::Balanced));
-	QCOMPARE(balancedFallback.id(), QStringLiteral("input.crisp.fallback-balanced.rnnoise-embedded"));
+	QCOMPARE(balancedFallback.id(), QStringLiteral("input.quality.fallback-balanced.rnnoise-embedded"));
 
-	crisp.backendAvailability.rnnoise = false;
-	QCOMPARE(enumValue(RecipeCatalog::resolve(crisp).effectiveProfile()), enumValue(Profile::Light));
+	quality.backendAvailability.rnnoise = false;
+	QCOMPARE(enumValue(RecipeCatalog::resolve(quality).effectiveProfile()), enumValue(Profile::Light));
+
+	ResolveRequest focus                    = requestFor(Profile::VoiceFocus);
+	focus.backendAvailability.deepFilterNet = false;
+	QCOMPARE(RecipeCatalog::resolve(focus).id(),
+			 QStringLiteral("input.voice-focus.fallback-balanced.rnnoise-embedded"));
 }
 
 void TestInputEnhancement::defaultPipelineStartsAsZeroLatencyOriginal() {
@@ -462,6 +547,8 @@ void TestInputEnhancement::neuralRecipeBindsAuthorizationToLoadedAsset() {
 	QVERIFY(!incompleteAuthorization.configure(recipe, signedHash));
 	QCOMPARE(enumValue(incompleteAuthorization.diagnostics().fallbackReason()),
 			 enumValue(FallbackReason::UnexpectedModel));
+	QCOMPARE(missingPath.factoryCalls, 0);
+	QCOMPARE(missingPath.processCalls, 0);
 
 	QFile tampered(loadedPath);
 	QVERIFY(tampered.open(QIODevice::WriteOnly | QIODevice::Truncate));
@@ -472,6 +559,8 @@ void TestInputEnhancement::neuralRecipeBindsAuthorizationToLoadedAsset() {
 	Pipeline wrongHash(factoryFor(hashMismatch));
 	QVERIFY(!wrongHash.configure(recipe, signedHash, loadedPath));
 	QCOMPARE(enumValue(wrongHash.diagnostics().fallbackReason()), enumValue(FallbackReason::UnexpectedModel));
+	QCOMPARE(hashMismatch.factoryCalls, 0);
+	QCOMPARE(hashMismatch.processCalls, 0);
 }
 
 void TestInputEnhancement::offlinePreparationDelegatesAndFailsClosed() {
@@ -586,6 +675,51 @@ void TestInputEnhancement::liveMixOverrideUsesConfiguredProcessorWithoutReconfig
 	QCOMPARE(state.processCalls
 				 - static_cast< int >(Pipeline::processorWarmupFrames + Pipeline::processorPostResetProbeFrames),
 			 1);
+}
+
+void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {
+	constexpr unsigned int protectedFrames = 8;
+	for (const Profile profile : { Profile::Quality, Profile::VoiceFocus }) {
+		FakeState state;
+		state.latency = qualityLatencyBudgetSamples;
+		Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+		const Recipe recipe = RecipeCatalog::resolve(requestFor(profile));
+		QVERIFY(pipeline.configure(recipe));
+		state.observedMixes.clear();
+
+		std::array< float, frameSamples > frame = {};
+		for (unsigned int index = 0; index < 6; ++index) {
+			frame.fill(0.0f);
+			QVERIFY(pipeline.processFrame(frame));
+		}
+		for (unsigned int index = 0; index < 15; ++index) {
+			frame.fill(0.25f);
+			QVERIFY(pipeline.processFrame(frame));
+		}
+
+		const auto protectedBegin = std::find_if(state.observedMixes.cbegin(), state.observedMixes.cend(),
+			[&recipe](float mix) { return mix < recipe.mixFactor() - 0.00001f; });
+		QVERIFY(protectedBegin != state.observedMixes.cend());
+		QVERIFY(std::distance(protectedBegin, state.observedMixes.cend())
+				>= static_cast< std::ptrdiff_t >(protectedFrames + 1));
+		QCOMPARE(protectedBegin[0], 0.0f);
+		QCOMPARE(protectedBegin[1], 0.0f);
+		QCOMPARE(protectedBegin[2], 0.0f);
+		QCOMPARE(protectedBegin[3], 0.0f);
+		for (unsigned int index = 1; index < protectedFrames; ++index) {
+			QVERIFY(protectedBegin[index] >= protectedBegin[index - 1]);
+			QVERIFY(protectedBegin[index] <= recipe.mixFactor());
+		}
+		QVERIFY(std::abs(protectedBegin[protectedFrames] - recipe.mixFactor()) < 0.00001f);
+
+		const std::size_t releaseStart = state.observedMixes.size();
+		for (unsigned int index = 0; index < 7; ++index) {
+			frame.fill(0.0f);
+			QVERIFY(pipeline.processFrame(frame));
+		}
+		QVERIFY(state.observedMixes.size() >= releaseStart + 7);
+		QCOMPARE(state.observedMixes[releaseStart + 5], 0.0f);
+	}
 }
 
 void TestInputEnhancement::preparationFailuresFailClosed() {

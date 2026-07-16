@@ -256,13 +256,18 @@ CalibrationCandidateEvaluator::Output::~Output() {
 
 CalibrationPackageAuthorization
 	CalibrationPackageAuthorization::signedPackage(std::vector< AuthorizedRecipe > recipes) {
-	return signedPackage(QStringLiteral("input-recipes-v1"), std::move(recipes));
+	return signedPackage(QStringLiteral("input-recipes-v2"), std::move(recipes));
 }
 
 CalibrationPackageAuthorization
 	CalibrationPackageAuthorization::signedPackage(QString catalogRevision, std::vector< AuthorizedRecipe > recipes) {
+	return catalogBoundPackage(std::move(catalogRevision), std::move(recipes));
+}
+
+CalibrationPackageAuthorization CalibrationPackageAuthorization::catalogBoundPackage(
+	QString catalogRevision, std::vector< AuthorizedRecipe > recipes) {
 	CalibrationPackageAuthorization authorization;
-	authorization.mode            = Mode::SignedPackage;
+	authorization.mode            = Mode::CatalogBound;
 	authorization.catalogRevision = std::move(catalogRevision);
 	authorization.recipes         = std::move(recipes);
 	return authorization;
@@ -305,12 +310,16 @@ bool CalibrationPackageAuthorization::recipeAuthorized(const Recipe &recipe, QSt
 		authorizedRelativeModelPath->clear();
 	}
 	if (mode == Mode::ExplicitUnmanagedBuildZero) {
-		return true;
+		// A manifest-free developer client may calibrate Original and Light, but
+		// it must not invent a neural model identity. Build-0 packages with parsed
+		// manifests use an exact catalog-bound authorization assembled by
+		// AudioInput instead of this fallback mode.
+		return !recipe.usesNeuralProcessor();
 	}
 	if (mode == Mode::DenyNeural) {
 		return !recipe.usesNeuralProcessor();
 	}
-	if (mode != Mode::SignedPackage) {
+	if (mode != Mode::CatalogBound) {
 		return false;
 	}
 	for (const AuthorizedRecipe &authorized : recipes) {
@@ -820,7 +829,10 @@ DefaultPreference
 std::array< CalibrationSession::Selection, 4 >
 	CalibrationRuntimeBridge::standardCandidateSet(const DefaultPreference &controls) noexcept {
 	std::array< CalibrationSession::Selection, 4 > candidates;
-	const std::array profiles = { Profile::Original, Profile::Light, Profile::Balanced, Profile::Crisp };
+	// Voice Focus is explicit-only. It replaces Quality in the blind set only
+	// after the user selected Voice Focus before starting calibration.
+	const std::array profiles = { Profile::Original, Profile::Light, Profile::Balanced,
+								  controls.profile == Profile::VoiceFocus ? Profile::VoiceFocus : Profile::Quality };
 	for (std::size_t index = 0; index < profiles.size(); ++index) {
 		DefaultPreference exact = controls;
 		exact.profile           = profiles[index];
@@ -872,26 +884,48 @@ bool InputEnhancementProbationController::start(const DeviceIdentity &identity, 
 												const DefaultPreference &lastKnownWorking,
 												const RecipeBinding &candidateRecipeBinding,
 												std::optional< RecipeBinding > lastKnownWorkingRecipeBinding) {
+	return startWithExecutionBinding(identity, candidate, lastKnownWorking, candidateRecipeBinding, std::nullopt,
+									 std::move(lastKnownWorkingRecipeBinding), std::nullopt);
+}
+
+bool InputEnhancementProbationController::startAuto(const DeviceIdentity &identity, const DefaultPreference &candidate,
+													const DefaultPreference &lastKnownWorking,
+													const QString &candidateAutoRecipeSetFingerprint,
+													std::optional< RecipeBinding > lastKnownWorkingRecipeBinding,
+													std::optional< QString > lastKnownWorkingAutoRecipeSetFingerprint) {
+	return startWithExecutionBinding(identity, candidate, lastKnownWorking, std::nullopt,
+									 candidateAutoRecipeSetFingerprint, std::move(lastKnownWorkingRecipeBinding),
+									 std::move(lastKnownWorkingAutoRecipeSetFingerprint));
+}
+
+bool InputEnhancementProbationController::startWithExecutionBinding(
+	const DeviceIdentity &identity, const DefaultPreference &candidate, const DefaultPreference &lastKnownWorking,
+	std::optional< RecipeBinding > candidateRecipeBinding, std::optional< QString > candidateAutoRecipeSetFingerprint,
+	std::optional< RecipeBinding > lastKnownWorkingRecipeBinding,
+	std::optional< QString > lastKnownWorkingAutoRecipeSetFingerprint) {
 	if (identity.backendId.isEmpty() || identity.physicalId.isEmpty()
-		|| !recipeBindingMatchesPreference(candidateRecipeBinding, candidate)
-		|| (lastKnownWorking.profile != Profile::Original
-			&& (!lastKnownWorkingRecipeBinding
-				|| !recipeBindingMatchesPreference(*lastKnownWorkingRecipeBinding, lastKnownWorking)))
+		|| !executionBindingMatchesPreference(candidate, candidateRecipeBinding, candidateAutoRecipeSetFingerprint)
+		|| !executionBindingMatchesPreference(lastKnownWorking, lastKnownWorkingRecipeBinding,
+											  lastKnownWorkingAutoRecipeSetFingerprint)
 		|| m_running.load(std::memory_order_acquire)) {
 		return false;
 	}
-	m_identity                      = identity;
-	m_candidate                     = candidate;
-	m_lastKnownWorking              = lastKnownWorking;
-	m_undoPreference                = candidate;
-	m_candidateRecipeBinding        = candidateRecipeBinding;
-	m_lastKnownWorkingRecipeBinding = std::move(lastKnownWorkingRecipeBinding);
-	m_undoRecipeBinding             = candidateRecipeBinding;
+	m_identity                                 = identity;
+	m_candidate                                = candidate;
+	m_lastKnownWorking                         = lastKnownWorking;
+	m_undoPreference                           = candidate;
+	m_candidateRecipeBinding                   = std::move(candidateRecipeBinding);
+	m_lastKnownWorkingRecipeBinding            = std::move(lastKnownWorkingRecipeBinding);
+	m_undoRecipeBinding                        = m_candidateRecipeBinding;
+	m_candidateAutoRecipeSetFingerprint        = std::move(candidateAutoRecipeSetFingerprint);
+	m_lastKnownWorkingAutoRecipeSetFingerprint = std::move(lastKnownWorkingAutoRecipeSetFingerprint);
+	m_undoAutoRecipeSetFingerprint             = m_candidateAutoRecipeSetFingerprint;
 	m_pendingAction.store(AutoV1::ProbationAction::None, std::memory_order_relaxed);
 	m_failure.store(AutoV1::ProbationFailure::None, std::memory_order_relaxed);
 	m_undoAvailable.store(false, std::memory_order_relaxed);
-	m_probation.start(bindingToken(candidate, m_candidateRecipeBinding),
-					  bindingToken(lastKnownWorking, m_lastKnownWorkingRecipeBinding));
+	m_probation.start(
+		bindingToken(candidate, m_candidateRecipeBinding, m_candidateAutoRecipeSetFingerprint),
+		bindingToken(lastKnownWorking, m_lastKnownWorkingRecipeBinding, m_lastKnownWorkingAutoRecipeSetFingerprint));
 	m_running.store(true, std::memory_order_release);
 	return true;
 }
@@ -899,21 +933,24 @@ bool InputEnhancementProbationController::start(const DeviceIdentity &identity, 
 bool InputEnhancementProbationController::restoreUndo(const DeviceProfileState &state) {
 	if (m_running.load(std::memory_order_acquire) || state.identity.backendId.isEmpty()
 		|| state.identity.physicalId.isEmpty() || state.pendingValidation || !state.lastKnownGood
-		|| !state.rollbackUndoPreference || !state.rollbackUndoRecipeBinding || state.preference != *state.lastKnownGood
-		|| !recipeBindingMatchesPreference(*state.rollbackUndoRecipeBinding, *state.rollbackUndoPreference)
-		|| (state.lastKnownGood->profile != Profile::Original
-			&& (!state.lastKnownGoodRecipeBinding
-				|| !recipeBindingMatchesPreference(*state.lastKnownGoodRecipeBinding, *state.lastKnownGood)))) {
+		|| !state.rollbackUndoPreference || state.preference != *state.lastKnownGood
+		|| !executionBindingMatchesPreference(*state.rollbackUndoPreference, state.rollbackUndoRecipeBinding,
+											  state.rollbackUndoAutoRecipeSetFingerprint)
+		|| !executionBindingMatchesPreference(*state.lastKnownGood, state.lastKnownGoodRecipeBinding,
+											  state.lastKnownGoodAutoRecipeSetFingerprint)) {
 		return false;
 	}
 
-	m_identity                      = state.identity;
-	m_candidate                     = *state.rollbackUndoPreference;
-	m_lastKnownWorking              = *state.lastKnownGood;
-	m_undoPreference                = *state.rollbackUndoPreference;
-	m_candidateRecipeBinding        = state.rollbackUndoRecipeBinding;
-	m_lastKnownWorkingRecipeBinding = state.lastKnownGoodRecipeBinding;
-	m_undoRecipeBinding             = state.rollbackUndoRecipeBinding;
+	m_identity                                 = state.identity;
+	m_candidate                                = *state.rollbackUndoPreference;
+	m_lastKnownWorking                         = *state.lastKnownGood;
+	m_undoPreference                           = *state.rollbackUndoPreference;
+	m_candidateRecipeBinding                   = state.rollbackUndoRecipeBinding;
+	m_lastKnownWorkingRecipeBinding            = state.lastKnownGoodRecipeBinding;
+	m_undoRecipeBinding                        = state.rollbackUndoRecipeBinding;
+	m_candidateAutoRecipeSetFingerprint        = state.rollbackUndoAutoRecipeSetFingerprint;
+	m_lastKnownWorkingAutoRecipeSetFingerprint = state.lastKnownGoodAutoRecipeSetFingerprint;
+	m_undoAutoRecipeSetFingerprint             = state.rollbackUndoAutoRecipeSetFingerprint;
 	m_pendingAction.store(AutoV1::ProbationAction::None, std::memory_order_relaxed);
 	m_failure.store(AutoV1::ProbationFailure::None, std::memory_order_relaxed);
 	m_undoAvailable.store(true, std::memory_order_release);
@@ -959,26 +996,29 @@ bool InputEnhancementProbationController::undoRollback(Settings &settings) {
 	if (!m_undoAvailable.load(std::memory_order_acquire)) {
 		return false;
 	}
-	Settings updated                 = settings;
-	DeviceProfileState state         = deviceStateFor(updated, m_identity);
-	state.identity                   = m_identity;
-	state.lastKnownGood              = m_lastKnownWorking;
-	state.lastKnownGoodRecipeBinding = m_lastKnownWorkingRecipeBinding;
-	state.preference                 = m_undoPreference;
-	state.pendingRecipeBinding       = m_undoRecipeBinding;
-	state.pendingValidation          = true;
+	Settings updated                            = settings;
+	DeviceProfileState state                    = deviceStateFor(updated, m_identity);
+	state.identity                              = m_identity;
+	state.lastKnownGood                         = m_lastKnownWorking;
+	state.lastKnownGoodRecipeBinding            = m_lastKnownWorkingRecipeBinding;
+	state.lastKnownGoodAutoRecipeSetFingerprint = m_lastKnownWorkingAutoRecipeSetFingerprint;
+	state.preference                            = m_undoPreference;
+	state.pendingRecipeBinding                  = m_undoRecipeBinding;
+	state.pendingAutoRecipeSetFingerprint       = m_undoAutoRecipeSetFingerprint;
+	state.pendingValidation                     = true;
 	state.lastRollbackReason.clear();
 	state.legacyOverride.reset();
 	state.rollbackUndoPreference.reset();
 	state.rollbackUndoRecipeBinding.reset();
+	state.rollbackUndoAutoRecipeSetFingerprint.reset();
 	if (!upsertDeviceProfile(updated, std::move(state))) {
 		return false;
 	}
 	settings = std::move(updated);
 	m_undoAvailable.store(false, std::memory_order_release);
-	return m_undoRecipeBinding
-		   && start(m_identity, m_undoPreference, m_lastKnownWorking, *m_undoRecipeBinding,
-					m_lastKnownWorkingRecipeBinding);
+	return startWithExecutionBinding(m_identity, m_undoPreference, m_lastKnownWorking, m_undoRecipeBinding,
+									 m_undoAutoRecipeSetFingerprint, m_lastKnownWorkingRecipeBinding,
+									 m_lastKnownWorkingAutoRecipeSetFingerprint);
 }
 
 bool InputEnhancementProbationController::running() const noexcept {
@@ -993,9 +1033,9 @@ AutoV1::ProbationFailure InputEnhancementProbationController::failure() const no
 	return m_failure.load(std::memory_order_acquire);
 }
 
-std::uint64_t
-	InputEnhancementProbationController::bindingToken(const DefaultPreference &preference,
-													  const std::optional< RecipeBinding > &binding) noexcept {
+std::uint64_t InputEnhancementProbationController::bindingToken(
+	const DefaultPreference &preference, const std::optional< RecipeBinding > &binding,
+	const std::optional< QString > &autoRecipeSetFingerprint) noexcept {
 	const CalibrationSession::Selection selection = CalibrationRuntimeBridge::selectionForPreference(preference);
 	std::uint64_t token                           = (static_cast< std::uint64_t >(selection.recipeToken) << 32U)
 						  | static_cast< std::uint32_t >(selection.recipeToken ^ 0x9e3779b9U);
@@ -1004,6 +1044,17 @@ std::uint64_t
 		token ^= static_cast< std::uint64_t >(qHash(binding->recipeId)) << 17U;
 		token ^= static_cast< std::uint64_t >(qHash(binding->modelSha256)) << 33U;
 		token ^= binding->recipeRevision;
+	}
+	if (autoRecipeSetFingerprint) {
+		// The callback's scalar token is only a probation-session discriminator.
+		// The complete 256-bit value remains in the controller and persisted
+		// DeviceProfileState; it is never reconstructed from this token.
+		std::uint64_t fingerprintToken = 1469598103934665603ULL;
+		for (const QChar character : *autoRecipeSetFingerprint) {
+			fingerprintToken ^= character.unicode();
+			fingerprintToken *= 1099511628211ULL;
+		}
+		token ^= fingerprintToken;
 	}
 	return token;
 }
@@ -1047,21 +1098,27 @@ bool InputEnhancementProbationController::updateDeviceSettings(Settings &setting
 	state.calibrated         = true;
 	state.legacyOverride.reset();
 	if (rollback) {
-		state.preference                 = m_lastKnownWorking;
-		state.lastKnownGood              = m_lastKnownWorking;
-		state.lastKnownGoodRecipeBinding = m_lastKnownWorkingRecipeBinding;
+		state.preference                            = m_lastKnownWorking;
+		state.lastKnownGood                         = m_lastKnownWorking;
+		state.lastKnownGoodRecipeBinding            = m_lastKnownWorkingRecipeBinding;
+		state.lastKnownGoodAutoRecipeSetFingerprint = m_lastKnownWorkingAutoRecipeSetFingerprint;
 		state.pendingRecipeBinding.reset();
-		state.rollbackUndoPreference    = m_candidate;
-		state.rollbackUndoRecipeBinding = m_candidateRecipeBinding;
-		state.pendingValidation         = false;
-		state.lastRollbackReason        = failureText(m_failure.load(std::memory_order_acquire));
+		state.pendingAutoRecipeSetFingerprint.reset();
+		state.rollbackUndoPreference               = m_candidate;
+		state.rollbackUndoRecipeBinding            = m_candidateRecipeBinding;
+		state.rollbackUndoAutoRecipeSetFingerprint = m_candidateAutoRecipeSetFingerprint;
+		state.pendingValidation                    = false;
+		state.lastRollbackReason                   = failureText(m_failure.load(std::memory_order_acquire));
 	} else {
-		state.preference                 = m_candidate;
-		state.lastKnownGood              = m_candidate;
-		state.lastKnownGoodRecipeBinding = m_candidateRecipeBinding;
+		state.preference                            = m_candidate;
+		state.lastKnownGood                         = m_candidate;
+		state.lastKnownGoodRecipeBinding            = m_candidateRecipeBinding;
+		state.lastKnownGoodAutoRecipeSetFingerprint = m_candidateAutoRecipeSetFingerprint;
 		state.pendingRecipeBinding.reset();
+		state.pendingAutoRecipeSetFingerprint.reset();
 		state.rollbackUndoPreference.reset();
 		state.rollbackUndoRecipeBinding.reset();
+		state.rollbackUndoAutoRecipeSetFingerprint.reset();
 		state.pendingValidation = false;
 		state.lastRollbackReason.clear();
 	}

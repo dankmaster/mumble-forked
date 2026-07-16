@@ -35,6 +35,7 @@ $requiredTests = @(
 	"DeepFilterNetCapiTests",
 	"TestInputEnhancement",
 	"TestInputEnhancementAuto",
+	"TestInputEnhancementAutoV2",
 	"TestInputEnhancementCalibration",
 	"TestInputEnhancementCalibrationRuntime",
 	"TestInputEnhancementPolicy",

@@ -262,23 +262,12 @@ function Assert-UpdaterRuntimePayload {
 		[string]$Root
 	)
 
-	$requiredRelativePaths = @(
-		"zlib1.dll"
-	)
-
-	$missing = New-Object System.Collections.Generic.List[string]
-	foreach ($relativePath in $requiredRelativePaths) {
-		$fullPath = Join-Path $Root $relativePath
-		if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-			$missing.Add($relativePath)
-		}
+	$updater = Find-Binary -Root $Root -BinaryName 'mumble-updater.exe'
+	if (-not $updater) {
+		throw "$Label is missing mumble-updater.exe."
 	}
-
-	if ($missing.Count -gt 0) {
-		throw "$Label is missing required updater runtime files: $($missing -join ', ')."
-	}
-
-	Write-Host "$Label updater runtime payload verified."
+	& (Join-Path $PSScriptRoot 'assert-mumble-updater-static-runtime.ps1') -UpdaterPath $updater.FullName
+	Write-Host "$Label self-contained updater runtime verified."
 }
 
 function Assert-GStreamerPayload {

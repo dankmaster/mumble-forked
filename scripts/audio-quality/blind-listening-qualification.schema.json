@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-blind-listening-qualification-v3.json",
+  "title": "Mumble input-enhancement blind-listening qualification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer_key_sha256",
+    "listener_count",
+    "minimum_clean_pairs_per_session",
+    "minimum_pairs_per_session",
+    "minimum_quality_noisy_decisive_votes_per_session",
+    "minimum_quality_noisy_pairs_per_session",
+    "minimum_voice_focus_severe_decisive_votes_per_session",
+    "minimum_voice_focus_severe_pairs_per_session",
+    "pack_id",
+    "quality_intelligibility_median",
+    "quality_noisy_preference",
+    "quality_noisy_vote_evidence",
+    "qualification_binding",
+    "recurring_clean_artifacts",
+    "schema_version",
+    "session_manifest",
+    "session_count",
+    "source_manifest_sha256",
+    "status",
+    "voice_focus_intelligibility_median",
+    "voice_focus_severe_preference",
+    "voice_focus_severe_vote_evidence"
+  ],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "status": { "const": "passed" },
+    "answer_key_sha256": { "$ref": "#/$defs/sha256" },
+    "source_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "pack_id": { "$ref": "#/$defs/sha256" },
+    "listener_count": { "type": "integer", "minimum": 1 },
+    "session_count": { "type": "integer", "minimum": 1 },
+    "minimum_pairs_per_session": { "type": "integer", "minimum": 26 },
+    "minimum_clean_pairs_per_session": { "type": "integer", "minimum": 2 },
+    "minimum_quality_noisy_pairs_per_session": { "type": "integer", "minimum": 12 },
+    "minimum_quality_noisy_decisive_votes_per_session": { "type": "integer", "minimum": 8 },
+    "minimum_voice_focus_severe_pairs_per_session": { "type": "integer", "minimum": 12 },
+    "minimum_voice_focus_severe_decisive_votes_per_session": { "type": "integer", "minimum": 8 },
+    "quality_noisy_preference": { "type": "number", "minimum": 0.6, "maximum": 1.0 },
+    "voice_focus_severe_preference": { "type": "number", "minimum": 0.6, "maximum": 1.0 },
+    "quality_intelligibility_median": { "type": "number", "minimum": 1, "maximum": 5 },
+    "voice_focus_intelligibility_median": { "type": "number", "minimum": 1, "maximum": 5 },
+    "quality_noisy_vote_evidence": { "$ref": "#/$defs/votes" },
+    "voice_focus_severe_vote_evidence": { "$ref": "#/$defs/votes" },
+    "qualification_binding": { "$ref": "#/$defs/qualification_binding" },
+    "session_manifest": { "$ref": "#/$defs/session_manifest" },
+    "recurring_clean_artifacts": {
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "sha256"],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+\\.json$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "session_source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "answer_key_sha256", "pack_id", "qualification_binding_sha256", "source_manifest_sha256"
+      ],
+      "properties": {
+        "answer_key_sha256": { "$ref": "#/$defs/sha256" },
+        "pack_id": { "$ref": "#/$defs/sha256" },
+        "qualification_binding_sha256": { "$ref": "#/$defs/sha256" },
+        "source_manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "session_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listener_pseudonym", "relative_path", "session_id", "session_instance_id", "sha256", "source_binding"
+      ],
+      "properties": {
+        "listener_pseudonym": { "$ref": "#/$defs/id" },
+        "relative_path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._-]+\\.evidence/sessions/[0-9]{6}-[0-9a-f]{64}\\.json$"
+        },
+        "session_id": { "$ref": "#/$defs/id" },
+        "session_instance_id": { "$ref": "#/$defs/id" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "source_binding": { "$ref": "#/$defs/session_source_binding" }
+      }
+    },
+    "session_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "answer_key", "canonicalization", "evidence_root", "schema_version", "session_root", "sessions",
+        "source_manifest"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "canonicalization": { "const": "mumble-json-sorted-keys-indent2-utf8-lf-v1" },
+        "evidence_root": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.evidence$"
+        },
+        "source_manifest": { "$ref": "#/$defs/file_ref" },
+        "answer_key": { "$ref": "#/$defs/file_ref" },
+        "session_root": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.evidence/sessions$"
+        },
+        "sessions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/session_file" }
+        }
+      }
+    },
+    "qualification_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_set_sha256",
+        "corpus_inventory_sha256",
+        "corpus_lock_sha256",
+        "git_sha",
+        "hardware_fingerprint_sha256",
+        "harness_sha256",
+        "metrics_runtime_sha256",
+        "mixture_plan_sha256",
+        "model_manifest_sha256",
+        "protected_quality_qualification_sha256",
+        "qualification_suite",
+        "recipe_manifest_sha256",
+        "recipe_set_version",
+        "release_fixtures_sha256",
+        "runner_class",
+        "server_binary_sha256",
+        "staged_payload_sha256",
+        "tested_binary_sha256"
+      ],
+      "properties": {
+        "case_set_sha256": { "$ref": "#/$defs/sha256" },
+        "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+        "corpus_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "hardware_fingerprint_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_sha256": { "$ref": "#/$defs/sha256" },
+        "metrics_runtime_sha256": { "$ref": "#/$defs/sha256" },
+        "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "protected_quality_qualification_sha256": { "$ref": "#/$defs/sha256" },
+        "qualification_suite": { "enum": ["master_quality", "nightly"] },
+        "recipe_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "recipe_set_version": { "$ref": "#/$defs/id" },
+        "release_fixtures_sha256": { "$ref": "#/$defs/sha256" },
+        "runner_class": { "enum": ["low-performance", "mainstream"] },
+        "server_binary_sha256": { "$ref": "#/$defs/sha256" },
+        "staged_payload_sha256": { "$ref": "#/$defs/sha256" },
+        "tested_binary_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "votes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparator", "decisive", "preferred", "presented", "ties"],
+      "properties": {
+        "presented": { "type": "integer", "minimum": 1 },
+        "decisive": { "type": "integer", "minimum": 1 },
+        "ties": { "type": "integer", "minimum": 0 },
+        "preferred": { "type": "integer", "minimum": 1 },
+        "comparator": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "description": "Schema v3 binds a canonical source/answer-key/session evidence tree. The semantic verifier securely reads every listed file, rejects missing, extra, non-canonical or tampered evidence, validates source/key/session joins, recomputes every aggregate field and then checks exact candidate/protected-runner hashes."
+}

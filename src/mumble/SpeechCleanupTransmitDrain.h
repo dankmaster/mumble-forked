@@ -20,11 +20,19 @@ public:
 		bool terminator               = false;
 	};
 
-	void begin(unsigned int latencySamples) noexcept { m_remainingSamples = latencySamples; }
-	void cancel() noexcept { m_remainingSamples = 0; }
+	void begin(unsigned int latencySamples) noexcept {
+		m_requestedSamples = latencySamples;
+		m_remainingSamples = latencySamples;
+	}
+	void cancel() noexcept {
+		m_requestedSamples = 0;
+		m_remainingSamples = 0;
+	}
 
 	bool active() const noexcept { return m_remainingSamples > 0; }
+	unsigned int requestedSamples() const noexcept { return m_requestedSamples; }
 	unsigned int remainingSamples() const noexcept { return m_remainingSamples; }
+	unsigned int drainedSamples() const noexcept { return m_requestedSamples - m_remainingSamples; }
 
 	Frame takeFrame(unsigned int frameSize) noexcept {
 		if (!active() || frameSize == 0) {
@@ -40,6 +48,7 @@ public:
 	}
 
 private:
+	unsigned int m_requestedSamples = 0;
 	unsigned int m_remainingSamples = 0;
 };
 

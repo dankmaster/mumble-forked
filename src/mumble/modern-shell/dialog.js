@@ -2282,7 +2282,7 @@
 				? "Mumble is running the product pipeline and the current Opus encode/decode locally."
 				: (element.dataset.inputEnhancementCalibrationErrorText
 					? String(element.dataset.inputEnhancementCalibrationErrorText)
-					: "Ready to compare the approved Original, Light, Balanced and Crisp recipes.");
+					: "Ready to compare the approved Original, Light, Balanced, Quality and Voice Focus recipes.");
 			timeText = workerState === "cancelling" ? "Cancelling and securely clearing audio…"
 				: (workerState === "running" ? "Analyzing… " + workerProgress + "%" : "Ready to analyze");
 			progress = workerState === "running" || workerState === "cancelling" ? workerProgress : 0;

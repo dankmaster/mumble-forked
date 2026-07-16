@@ -28,8 +28,8 @@ $recipeDescriptor = Read-ReleaseJson -Path $RecipeDescriptorPath
 if ([int](Assert-ObjectProperty -Object $modelDescriptor -Name "schemaVersion" -Context "Model descriptor") -ne 1) {
 	throw "Model descriptor schemaVersion must be 1."
 }
-if ([int](Assert-ObjectProperty -Object $recipeDescriptor -Name "schemaVersion" -Context "Recipe descriptor") -ne 1) {
-	throw "Recipe descriptor schemaVersion must be 1."
+if ([int](Assert-ObjectProperty -Object $recipeDescriptor -Name "schemaVersion" -Context "Recipe descriptor") -ne 2) {
+	throw "Recipe descriptor schemaVersion must be 2."
 }
 
 $catalogRevision = [string](Assert-ObjectProperty -Object $modelDescriptor -Name "catalogRevision" -Context "Model descriptor")
@@ -91,7 +91,7 @@ $resolvedModelManifestPath = if ([string]::IsNullOrWhiteSpace($ModelManifestPath
 Write-ReleaseJson -Value $modelManifest -Path $resolvedModelManifestPath
 $modelManifestHash = Get-ReleaseFileSha256 -Path $resolvedModelManifestPath
 
-$allowedProfiles = @("Original", "Light", "Balanced", "Crisp", "Auto")
+$allowedProfiles = @("Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto")
 $seenProfiles = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
 $recipeIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
 $packagedRecipes = New-Object System.Collections.Generic.List[object]
@@ -123,7 +123,7 @@ foreach ($profile in $allowedProfiles) {
 }
 
 $recipeManifest = [ordered]@{
-	schemaVersion       = 1
+	schemaVersion       = 2
 	catalogRevision     = $catalogRevision
 	modelManifestSha256 = $modelManifestHash
 	recipes             = $packagedRecipes.ToArray()

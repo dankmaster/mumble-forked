@@ -25,9 +25,9 @@ class PlanError(ValueError):
 	"""Raised when an inventory or generated plan is unsafe or invalid."""
 
 
-SUITE_CASES = { "pr_smoke": 24, "master_quality": 500, "nightly": 5000, "release": 12 }
+SUITE_CASES = { "pr_smoke": 30, "master_quality": 500, "nightly": 5000, "release": 30 }
 SPLITS = ("tuning", "validation", "holdout")
-PROFILES = ("Original", "Light", "Balanced", "Crisp", "Auto")
+PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
 GAIN_DB = (-6, -3, 0, 3, 6)
@@ -64,6 +64,19 @@ def _load_lock_module() -> Any:
 
 
 LOCK = _load_lock_module()
+
+
+def _load_inventory_module() -> Any:
+	path = Path(__file__).with_name("corpus-inventory-v3.py")
+	spec = importlib.util.spec_from_file_location("mumble_audio_corpus_inventory_v3_for_plan", path)
+	if spec is None or spec.loader is None:
+		raise PlanError(f"unable to load corpus inventory validator: {path}")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)
+	return module
+
+
+INVENTORY = _load_inventory_module()
 
 
 def _expect(condition: bool, path: str, message: str) -> None:
@@ -114,70 +127,11 @@ def assigned_split(seed: str, kind: str, group_id: str) -> str:
 def validate_inventory(
 	value: Any, manifest: Mapping[str, Any], expected_lock_sha256: str
 ) -> list[Mapping[str, Any]]:
-	_expect(isinstance(value, dict), "inventory", "expected an object")
-	_exact_keys(value, { "corpus_lock_sha256", "items", "schema_version" }, set(), "inventory")
-	_expect(value["schema_version"] == 2, "inventory.schema_version", "unsupported version")
-	_expect(value["corpus_lock_sha256"] == expected_lock_sha256, "inventory.corpus_lock_sha256", "lock mismatch")
-	_expect(isinstance(value["items"], list) and value["items"], "inventory.items", "expected a non-empty array")
-	allowed_sources = {
-		source["id"]: source
-		for source in manifest["sources"]
-		if source["license"]["status"] == "verified"
-		and "local_eval" in source["roles"]
-		and source["integrity"]["algorithm"] == "sha256"
-		and "artifact_path" in source["integrity"]
-	}
-	excluded_ids = { source["id"] for source in manifest["excluded_sources"] }
-	items = []
-	ids = []
-	for index, item in enumerate(value["items"]):
-		path = f"inventory.items[{index}]"
-		_expect(isinstance(item, dict), path, "expected an object")
-		_exact_keys(
-			item,
-			{
-				"channels", "duration_samples", "group_id", "id", "kind", "relative_path",
-				"sample_rate_hz", "sha256", "size_bytes", "source_artifact_sha256", "source_id",
-			},
-			{ "language", "noise_class" },
-			path,
-		)
-		for key in ("id", "group_id"):
-			_expect(
-				isinstance(item[key], str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", item[key])),
-				f"{path}.{key}",
-				"must be a stable identifier",
-			)
-		_expect(item["kind"] in ("speech", "noise"), f"{path}.kind", "must be speech or noise")
-		_safe_path(item["relative_path"], f"{path}.relative_path")
-		_expect(item["source_id"] not in excluded_ids, f"{path}.source_id", "excluded source")
-		_expect(item["source_id"] in allowed_sources, f"{path}.source_id", "source is not approved for local evaluation")
-		_expect(
-			isinstance(item["sha256"], str) and bool(re.fullmatch(r"[0-9a-f]{64}", item["sha256"])),
-			f"{path}.sha256",
-			"must pin the extracted file by lowercase SHA-256",
-		)
-		_expect(
-			item["source_artifact_sha256"] == allowed_sources[item["source_id"]]["integrity"]["digest"],
-			f"{path}.source_artifact_sha256",
-			"does not match the locked source artifact",
-		)
-		for key in ("channels", "duration_samples", "sample_rate_hz", "size_bytes"):
-			_expect(
-				isinstance(item[key], int) and not isinstance(item[key], bool) and item[key] > 0,
-				f"{path}.{key}",
-				"must be a positive integer",
-			)
-		if item["kind"] == "speech":
-			_expect(isinstance(item.get("language"), str) and bool(item["language"]), f"{path}.language", "required")
-			_expect("noise_class" not in item, f"{path}.noise_class", "not valid for speech")
-		else:
-			_expect(item.get("noise_class") in NOISE_BEHAVIOR, f"{path}.noise_class", "unknown noise class")
-			_expect("language" not in item, f"{path}.language", "not valid for noise")
-		items.append(item)
-		ids.append(item["id"])
-	_expect(ids == sorted(set(ids)), "inventory.items", "ids must be unique and sorted")
-	return items
+	_expect(value.get("corpus_lock_sha256") == expected_lock_sha256, "inventory.corpus_lock_sha256", "lock mismatch")
+	try:
+		return INVENTORY.validate_inventory(value, manifest, require_release=True)
+	except INVENTORY.InventoryError as error:
+		raise PlanError(str(error)) from error
 
 
 def _choice(values: Sequence[Any], seed: str, case_index: int, label: str) -> Any:
@@ -205,14 +159,30 @@ def generate_plan(
 		(item for item in items if item["kind"] == "noise" and assigned_split(seed, "noise", item["group_id"]) == split),
 		key=lambda item: item["id"],
 	)
+	rirs = sorted(
+		(item for item in items if item["kind"] == "rir" and assigned_split(seed, "rir", item["group_id"]) == split),
+		key=lambda item: item["id"],
+	)
+	microphone_responses = sorted(
+		(
+			item for item in items
+			if item["kind"] == "microphone_response"
+			and assigned_split(seed, "microphone_response", item["group_id"]) == split
+		),
+		key=lambda item: item["id"],
+	)
 	_expect(speech, "inventory", f"no speech groups assigned to {split}")
 	_expect(noise, "inventory", f"no noise groups assigned to {split}")
+	_expect(rirs, "inventory", f"no RIR groups assigned to {split}")
+	_expect(microphone_responses, "inventory", f"no microphone-response groups assigned to {split}")
 	_expect(case_count > 0, "case_count", "must be positive")
 	_expect(duration_ms >= 1000 and duration_ms % 10 == 0, "duration_ms", "must be >=1000 and align to 10 ms")
 
 	cases = []
 	for index in range(case_count):
 		clean = _choice(speech, seed, index, "speech")
+		rir = _choice(rirs, seed, index, "rir")
+		microphone_response = _choice(microphone_responses, seed, index, "microphone-response")
 		snr = SNR_DB[index % len(SNR_DB)]
 		selected_noise = None if snr is None else _choice(noise, seed, index, "noise")
 		case = {
@@ -220,13 +190,15 @@ def generate_plan(
 			"profile": PROFILES[index % len(PROFILES)],
 			"controls": {
 				"noise_reduction": _choice((20, 40, 60, 80), seed, index, "reduction"),
-				"natural_crisp": _choice((20, 40, 60, 80), seed, index, "character"),
+				"natural_clear": _choice((20, 40, 60, 80), seed, index, "character"),
 			},
 			"speech": {
 				"item_id": clean["id"],
 				"source_id": clean["source_id"],
 				"relative_path": clean["relative_path"],
 				"language": clean["language"],
+				"speaker_id": clean["speaker_id"],
+				"transcript_sha256": clean["transcript"]["sha256"],
 				"group_id": clean["group_id"],
 				"input_sample_rate_hz": clean["sample_rate_hz"],
 				"input_channels": clean["channels"],
@@ -242,12 +214,22 @@ def generate_plan(
 				"mild_clipping": (_stable_int(seed, "clip-v1", index) % 10) == 0,
 				"distance_cm": _choice(DISTANCE_CM, seed, index, "distance"),
 				"rir": {
-					"id": f"{split}-{_choice(('anechoic', 'small-room', 'office', 'living-room'), seed, index, 'rir')}-v1",
-					"rt60_ms": _choice(RT60_MS, seed, index, "rt60"),
+					"item_id": rir["id"], "group_id": rir["group_id"], "relative_path": rir["relative_path"],
+					"input_sample_rate_hz": rir["sample_rate_hz"], "input_channels": rir["channels"],
+					"duration_samples": rir["duration_samples"], "sha256": rir["sha256"],
+					"size_bytes": rir["size_bytes"], "source_id": rir["source_id"],
+					"source_artifact_sha256": rir["source_artifact_sha256"], **rir["rir"],
 				},
 				"microphone_response": {
-					"family": _choice(MICROPHONES, seed, index, "microphone"),
-					"id": f"{split}-{_choice(MICROPHONES, seed, index, 'microphone')}-response-v1",
+					"item_id": microphone_response["id"], "group_id": microphone_response["group_id"],
+					"relative_path": microphone_response["relative_path"],
+					"input_sample_rate_hz": microphone_response["sample_rate_hz"],
+					"input_channels": microphone_response["channels"],
+					"duration_samples": microphone_response["duration_samples"],
+					"sha256": microphone_response["sha256"], "size_bytes": microphone_response["size_bytes"],
+					"source_id": microphone_response["source_id"],
+					"source_artifact_sha256": microphone_response["source_artifact_sha256"],
+					**microphone_response["microphone_response"],
 				},
 			},
 			"transport": {
@@ -277,12 +259,13 @@ def generate_plan(
 		cases.append(case)
 
 	plan = {
-		"schema_version": 2,
-		"generator": "mumble-audio-mixture-plan-v2",
+		"schema_version": 3,
+		"generator": "mumble-audio-mixture-plan-v3",
 		"corpus_lock_sha256": lock_sha,
+		"corpus_inventory_sha256": INVENTORY.canonical_sha256(inventory),
 		"seed": seed,
 		"split": split,
-		"split_algorithm": "sha256-v1: tuning=0..59, validation=60..79, holdout=80..99",
+		"split_algorithm": "sha256-v1 by kind/group: tuning=0..59, validation=60..79, holdout=80..99",
 		"suite": suite,
 		"format": { "sample_rate_hz": 48000, "channels": 1, "frame_samples": 480, "duration_ms": duration_ms },
 		"timeline_alignment": "fixed",
@@ -297,18 +280,19 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	_exact_keys(
 		value,
 		{
-			"cases", "corpus_lock_sha256", "format", "generator", "schema_version", "seed", "split",
+			"cases", "corpus_inventory_sha256", "corpus_lock_sha256", "format", "generator", "schema_version", "seed", "split",
 			"split_algorithm", "suite", "timeline_alignment",
 		},
 		set(),
 		"plan",
 	)
-	_expect(value["schema_version"] == 2, "plan.schema_version", "unsupported version")
-	_expect(value["generator"] == "mumble-audio-mixture-plan-v2", "plan.generator", "unknown generator")
+	_expect(value["schema_version"] == 3, "plan.schema_version", "unsupported version")
+	_expect(value["generator"] == "mumble-audio-mixture-plan-v3", "plan.generator", "unknown generator")
 	_expect(value["split"] in SPLITS, "plan.split", "unknown split")
 	_expect(value["suite"] in SUITE_CASES, "plan.suite", "unknown suite")
 	_expect(value["timeline_alignment"] == "fixed", "plan.timeline_alignment", "release plans require fixed alignment")
 	_expect(bool(re.fullmatch(r"[0-9a-f]{64}", value["corpus_lock_sha256"])), "plan.corpus_lock_sha256", "invalid hash")
+	_expect(bool(re.fullmatch(r"[0-9a-f]{64}", value["corpus_inventory_sha256"])), "plan.corpus_inventory_sha256", "invalid hash")
 	_expect(value["format"]["sample_rate_hz"] == 48000, "plan.format.sample_rate_hz", "must be 48000")
 	_expect(value["format"]["channels"] == 1, "plan.format.channels", "must be mono")
 	_expect(value["format"]["frame_samples"] == 480, "plan.format.frame_samples", "must be 10 ms")
@@ -317,8 +301,12 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	startup_modes = set()
 	for index, case in enumerate(value["cases"]):
 		path = f"plan.cases[{index}]"
-		for label in ("speech", "noise"):
-			source = case[label]
+		for label, source in (
+			("speech", case["speech"]),
+			("noise", case["noise"]),
+			("rir", case["mix"]["rir"]),
+			("microphone_response", case["mix"]["microphone_response"]),
+		):
 			if source is None:
 				continue
 			_expect(
@@ -340,6 +328,7 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 				"must be a positive integer",
 			)
 		_expect(case["profile"] in PROFILES, f"{path}.profile", "unknown profile")
+		_expect("natural_clear" in case["controls"] and "natural_crisp" not in case["controls"], f"{path}.controls", "must use natural_clear")
 		_expect(case["transport"]["receiver_cleanup"] is False, f"{path}.transport.receiver_cleanup", "must be false")
 		_expect(case["transport"]["opus_bitrate_bps"] in BITRATES, f"{path}.transport.opus_bitrate_bps", "unsupported")
 		_expect(case["transport"]["frames_per_packet"] in PACKET_FRAMES, f"{path}.transport.frames_per_packet", "unsupported")
@@ -370,33 +359,62 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
 
 def _self_test_inventory(manifest: Mapping[str, Any], seed: str) -> Mapping[str, Any]:
 	lock_sha = LOCK.canonical_manifest_sha256(manifest)
-	artifact_sha256 = next(
-		source["integrity"]["digest"]
-		for source in manifest["sources"]
-		if source["id"] == "mcgill-tsp-speech-v2-48k"
-	)
+	sources = {source["id"]: source for source in manifest["sources"]}
 	items = []
-	for kind in ("speech", "noise"):
+	for kind in INVENTORY.KINDS:
 		for index in range(80):
+			source_id = "openslr28-rirs-noises" if kind in ("noise", "rir") else "mcgill-tsp-speech-v2-48k"
+			artifact_sha256 = sources[source_id]["integrity"]["digest"]
+			file_sha256 = hashlib.sha256(f"{kind}-{index:03d}".encode("utf-8")).hexdigest()
 			item = {
 				"id": f"{kind}-{index:03d}",
 				"kind": kind,
-				"source_id": "mcgill-tsp-speech-v2-48k",
+				"source_id": source_id,
 				"relative_path": f"extracted/{kind}-{index:03d}.wav",
 				"group_id": f"{kind}-group-{index:03d}",
 				"sample_rate_hz": 16000,
 				"channels": 1,
 				"duration_samples": 16000 * 12,
-				"sha256": hashlib.sha256(f"{kind}-{index:03d}".encode("utf-8")).hexdigest(),
+				"sha256": file_sha256,
 				"size_bytes": 16000 * 12 * 2 + 44,
 				"source_artifact_sha256": artifact_sha256,
+				"provenance": {
+					"derivation": "synthesized" if kind == "microphone_response" else "extracted", "parent_sha256": artifact_sha256,
+					"parameters_sha256": hashlib.sha256(b"self-test-parameters-v3").hexdigest(),
+					"source_path": f"archive/{kind}-{index:03d}.wav", "tool": "self-test", "tool_version": "3",
+				},
 			}
 			if kind == "speech":
 				item["language"] = "sv-SE" if index % 2 else "en-US"
-			else:
+				item["speaker_id"] = f"speaker-{index:03d}"
+				item["transcript"] = {
+					"status": "verified", "relative_path": f"transcripts/{index:03d}.txt",
+					"sha256": hashlib.sha256(f"transcript-{index:03d}".encode("utf-8")).hexdigest(),
+					"size_bytes": 20, "normalization": "exact-utf8",
+				}
+			elif kind == "noise":
 				item["noise_class"] = tuple(NOISE_BEHAVIOR)[index % len(NOISE_BEHAVIOR)]
+			elif kind == "rir":
+				item["rir"] = {
+					"rir_kind": "measured", "room_id": f"room-{index:03d}", "rt60_ms": RT60_MS[index % len(RT60_MS)],
+					"source_position_id": f"source-{index:03d}", "receiver_position_id": f"receiver-{index:03d}",
+				}
+			else:
+				item["microphone_response"] = {
+					"response_kind": "modeled", "device_family": MICROPHONES[index % len(MICROPHONES)],
+					"device_id": f"device-{index:03d}", "calibration_id": f"calibration-{index:03d}",
+				}
 			items.append(item)
-	return { "schema_version": 2, "corpus_lock_sha256": lock_sha, "items": sorted(items, key=lambda item: item["id"]) }
+	return {
+		"schema_version": 3, "inventory_id": "mixture-plan-self-test", "eligibility": "release",
+		"corpus_lock_sha256": lock_sha,
+		"provenance": {
+			"generator": "self-test", "generator_version": "3",
+			"generated_from_state_sha256": hashlib.sha256(b"state").hexdigest(),
+			"transformation_manifest_sha256": hashlib.sha256(b"transforms").hexdigest(),
+		},
+		"items": sorted(items, key=lambda item: item["id"]),
+	}
 
 
 def run_self_test() -> None:
@@ -419,22 +437,22 @@ def run_self_test() -> None:
 		pass
 	else:
 		raise AssertionError("inventory accepted a file bound to the wrong source artifact")
-	first = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 24, 6000)
-	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 24, 6000)
+	first = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
+	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	if canonical_sha256(first) != canonical_sha256(second):
 		raise AssertionError("identical inputs did not produce an identical plan")
 	if { case["startup"]["preroll_ms"] for case in first["cases"] } != { 0, 300 }:
 		raise AssertionError("cold/warm coverage is missing")
 	plans = {
-		split: generate_plan(manifest, inventory, "release", split, seed, 12, 6000)
+		split: generate_plan(manifest, inventory, "release", split, seed, 30, 6000)
 		for split in SPLITS
 	}
 	room_ids = {
-		split: { case["mix"]["rir"]["id"] for case in plan["cases"] }
+		split: { case["mix"]["rir"]["item_id"] for case in plan["cases"] }
 		for split, plan in plans.items()
 	}
 	microphone_ids = {
-		split: { case["mix"]["microphone_response"]["id"] for case in plan["cases"] }
+		split: { case["mix"]["microphone_response"]["item_id"] for case in plan["cases"] }
 		for split, plan in plans.items()
 	}
 	for left_index, left in enumerate(SPLITS):

@@ -142,6 +142,15 @@ def _read_window(path: Path, window: Mapping[str, int], expected_rate: int, expe
 	return [sum(samples[offset : offset + channels]) / channels for offset in range(0, len(samples), channels)]
 
 
+def _read_entire(path: Path, expected_rate: int, expected_channels: int, expected_frames: int) -> list[float]:
+	return _read_window(
+		path,
+		{"start_sample": 0, "length_samples": expected_frames},
+		expected_rate,
+		expected_channels,
+	)
+
+
 def _resample(samples: Sequence[float], source_rate: int, target_rate: int = TARGET_RATE) -> list[float]:
 	if source_rate == target_rate:
 		return list(samples)
@@ -215,6 +224,31 @@ def _synthetic_room(samples: Sequence[float], rt60_ms: int, room_id: str) -> lis
 	return output
 
 
+def _sparse_impulse_response(
+	samples: Sequence[float], impulse: Sequence[float], *, max_span_samples: int = 4096, max_taps: int = 48
+) -> list[float]:
+	"""Apply a bounded deterministic approximation of a locked response WAV.
+
+	The largest-energy taps from the first 85 ms are retained.  This keeps the
+	dependency-free renderer tractable while ensuring the real, hash-attested
+	response bytes materially determine every output sample.
+	"""
+	window = list(impulse[:max_span_samples])
+	if not window or max(abs(value) for value in window) <= 1e-12:
+		raise RenderError("impulse response has no usable energy")
+	indices = sorted(range(len(window)), key=lambda index: (-abs(window[index]), index))[:max_taps]
+	indices.sort()
+	normalizer = sum(abs(window[index]) for index in indices)
+	if normalizer <= 1e-12:
+		raise RenderError("impulse response selected no usable taps")
+	taps = [(index, window[index] / normalizer) for index in indices]
+	output = [0.0] * len(samples)
+	for delay, gain in taps:
+		for index in range(delay, len(samples)):
+			output[index] += samples[index - delay] * gain
+	return output
+
+
 def _fit_length(samples: Sequence[float], length: int) -> list[float]:
 	if len(samples) >= length:
 		return list(samples[:length])
@@ -249,7 +283,17 @@ def _render_case(case: Mapping[str, Any], corpus_root: Path, output_root: Path, 
 	)
 	speech = _fit_length(_resample(speech, int(speech_info["input_sample_rate_hz"])), target_samples)
 	mix = case["mix"]
-	speech = _synthetic_room(speech, int(mix["rir"]["rt60_ms"]), str(mix["rir"]["id"]))
+	rir_info = mix["rir"]
+	rir_path = _safe_source(corpus_root, rir_info["relative_path"])
+	_verify_locked_source(rir_path, rir_info)
+	rir_samples = _read_entire(
+		rir_path,
+		int(rir_info["input_sample_rate_hz"]),
+		int(rir_info["input_channels"]),
+		int(rir_info["duration_samples"]),
+	)
+	rir_samples = _resample(rir_samples, int(rir_info["input_sample_rate_hz"]))
+	speech = _sparse_impulse_response(speech, rir_samples)
 	distance_scale = min(2.0, max(0.2, 30.0 / float(mix["distance_cm"])))
 	speech = [value * distance_scale for value in speech]
 
@@ -273,9 +317,18 @@ def _render_case(case: Mapping[str, Any], corpus_root: Path, output_root: Path, 
 		noise_scale = target_noise_rms / noise_rms
 		noise = [value * noise_scale for value in noise]
 
-	family = str(mix["microphone_response"]["family"])
-	clean = _microphone_response(speech, family)
-	noisy = _microphone_response([left + right for left, right in zip(speech, noise)], family)
+	microphone_info = mix["microphone_response"]
+	microphone_path = _safe_source(corpus_root, microphone_info["relative_path"])
+	_verify_locked_source(microphone_path, microphone_info)
+	microphone_samples = _read_entire(
+		microphone_path,
+		int(microphone_info["input_sample_rate_hz"]),
+		int(microphone_info["input_channels"]),
+		int(microphone_info["duration_samples"]),
+	)
+	microphone_samples = _resample(microphone_samples, int(microphone_info["input_sample_rate_hz"]))
+	clean = _sparse_impulse_response(speech, microphone_samples)
+	noisy = _sparse_impulse_response([left + right for left, right in zip(speech, noise)], microphone_samples)
 	gain = 10.0 ** (float(mix["speech_gain_db"]) / 20.0)
 	clean = [value * gain for value in clean]
 	noisy = [value * gain for value in noisy]
@@ -299,6 +352,8 @@ def _render_case(case: Mapping[str, Any], corpus_root: Path, output_root: Path, 
 		},
 		"speech_source_sha256": _sha256(speech_path),
 		"noise_source_sha256": _sha256(noise_path) if noise_info is not None else None,
+		"rir_source_sha256": _sha256(rir_path),
+		"microphone_response_source_sha256": _sha256(microphone_path),
 		"rendered_samples": target_samples,
 	}
 
@@ -311,10 +366,11 @@ def render(plan: Mapping[str, Any], corpus_root: Path, output_root: Path) -> Map
 	target_samples = round(int(plan["format"]["duration_ms"]) * TARGET_RATE / 1000)
 	entries = [_render_case(case, corpus_root, output_root, target_samples) for case in plan["cases"]]
 	manifest = {
-		"schema_version": 1,
-		"renderer": "mumble-audio-mixture-renderer-v1",
+		"schema_version": 2,
+		"renderer": "mumble-audio-mixture-renderer-v2",
 		"plan_sha256": PLAN.canonical_sha256(plan),
 		"corpus_lock_sha256": plan["corpus_lock_sha256"],
+		"corpus_inventory_sha256": plan["corpus_inventory_sha256"],
 		"sample_rate_hz": TARGET_RATE,
 		"channels": TARGET_CHANNELS,
 		"private_audio_do_not_upload": True,
@@ -332,6 +388,13 @@ def _write_fixture(path: Path, rate: int, frequency: float, seconds: int) -> Non
 	_write_pcm16(path, samples if rate == TARGET_RATE else _resample(samples, rate, rate))
 
 
+def _write_impulse_fixture(path: Path, rate: int, reflections: Sequence[tuple[int, float]]) -> None:
+	samples = [0.0] * (rate // 10)
+	for delay, gain in reflections:
+		samples[delay] = gain
+	_write_pcm16(path, samples)
+
+
 def self_test() -> None:
 	# Exercise the byte-stable DSP using a minimal hand-authored valid plan.  The
 	# plan validator owns broader schema/split coverage in its own self-test.
@@ -341,8 +404,12 @@ def self_test() -> None:
 		corpus.mkdir()
 		_write_fixture(corpus / "speech.wav", TARGET_RATE, 220.0, 1)
 		_write_fixture(corpus / "noise.wav", TARGET_RATE, 997.0, 1)
+		_write_impulse_fixture(corpus / "rir.wav", TARGET_RATE, ((0, 1.0), (337, 0.2), (911, -0.1)))
+		_write_impulse_fixture(corpus / "microphone.wav", TARGET_RATE, ((0, 1.0), (2, -0.15), (7, 0.05)))
 		speech_path = corpus / "speech.wav"
 		noise_path = corpus / "noise.wav"
+		rir_path = corpus / "rir.wav"
+		microphone_path = corpus / "microphone.wav"
 		artifact_sha256 = "a" * 64
 		case = {
 			"case_id": "self-test-validation-00001",
@@ -362,8 +429,20 @@ def self_test() -> None:
 			},
 			"mix": {
 				"snr_db": 0, "speech_gain_db": 0, "mild_clipping": False, "distance_cm": 30,
-				"rir": { "id": "validation-office-v1", "rt60_ms": 150 },
-				"microphone_response": { "family": "usb", "id": "validation-usb-v1" },
+				"rir": {
+					"item_id": "validation-office-v1", "relative_path": "rir.wav",
+					"input_sample_rate_hz": TARGET_RATE, "input_channels": 1,
+					"duration_samples": TARGET_RATE // 10, "sha256": _sha256(rir_path),
+					"size_bytes": rir_path.stat().st_size, "source_artifact_sha256": artifact_sha256,
+					"rt60_ms": 150,
+				},
+				"microphone_response": {
+					"item_id": "validation-usb-v1", "relative_path": "microphone.wav",
+					"input_sample_rate_hz": TARGET_RATE, "input_channels": 1,
+					"duration_samples": TARGET_RATE // 10, "sha256": _sha256(microphone_path),
+					"size_bytes": microphone_path.stat().st_size, "source_artifact_sha256": artifact_sha256,
+					"device_family": "usb",
+				},
 			},
 		}
 		output_a = root / "a"

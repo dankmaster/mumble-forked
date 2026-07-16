@@ -153,6 +153,7 @@ private slots:
 	void standardCandidatesAlwaysStartWithOriginalAndExcludeAuto();
 	void calibrationRejectsAutoAsRollbackBaseline();
 	void probationMarksHealthyOnlyAfterBothThresholds();
+	void autoProbationPreservesFullSetFingerprintAcrossRollbackUndoAndHealthy();
 	void probationFailureRollsBackAndUndoRestoresCandidate();
 	void probationPersistsEveryFailureReason_data();
 	void probationPersistsEveryFailureReason();
@@ -243,16 +244,17 @@ void TestInputEnhancementCalibrationRuntime::cancelErrorAndDestructionWipeAllAud
 void TestInputEnhancementCalibrationRuntime::invalidOrExceptionalEvaluationWipesAndUnblocks() {
 	for (const bool throwFromEvaluator : { false, true }) {
 		std::vector< float > storage(CalibrationSession::requiredStorageSamples);
-		std::unique_ptr< CalibrationCandidateEvaluator > evaluator = throwFromEvaluator
-			? std::unique_ptr< CalibrationCandidateEvaluator >(std::make_unique< ThrowingEvaluator >())
-			: std::unique_ptr< CalibrationCandidateEvaluator >(std::make_unique< FakeEvaluator >());
+		std::unique_ptr< CalibrationCandidateEvaluator > evaluator =
+			throwFromEvaluator
+				? std::unique_ptr< CalibrationCandidateEvaluator >(std::make_unique< ThrowingEvaluator >())
+				: std::unique_ptr< CalibrationCandidateEvaluator >(std::make_unique< FakeEvaluator >());
 		CalibrationRuntimeBridge bridge(storage, std::move(evaluator));
 		QVERIFY(bridge.start(identity(), preference(Profile::Original, 50, 50), false,
-						 throwFromEvaluator ? 0x1002 : 0x1001));
+							 throwFromEvaluator ? 0x1002 : 0x1001));
 		QVERIFY(reachEvaluation(bridge));
 		if (throwFromEvaluator) {
 			const std::array candidates = { selection(Profile::Original, 0, 50, 1),
-										 selection(Profile::Balanced, 50, 50, 2) };
+											selection(Profile::Balanced, 50, 50, 2) };
 			QVERIFY(!bridge.evaluateCandidates(candidates));
 		} else {
 			QVERIFY(!bridge.evaluateCandidates({}));
@@ -269,8 +271,7 @@ void TestInputEnhancementCalibrationRuntime::fullCalibratedProfileStoreMakesAppl
 	CalibrationRuntimeBridge bridge(storage, std::make_unique< FakeEvaluator >());
 	QVERIFY(bridge.start(identity(), preference(Profile::Original, 50, 50), false, 0x2001));
 	QVERIFY(reachEvaluation(bridge));
-	const std::array candidates = { selection(Profile::Original, 0, 50, 1),
-								  selection(Profile::Balanced, 50, 50, 2) };
+	const std::array candidates = { selection(Profile::Original, 0, 50, 1), selection(Profile::Balanced, 50, 50, 2) };
 	QVERIFY(bridge.evaluateCandidates(candidates));
 	const auto pair = bridge.blindPair();
 	QVERIFY(bridge.selectBlindWinner(pair.leftPlaybackToken));
@@ -278,10 +279,10 @@ void TestInputEnhancementCalibrationRuntime::fullCalibratedProfileStoreMakesAppl
 	Settings settings;
 	for (int index = 0; index < MAX_DEVICE_PROFILES; ++index) {
 		DeviceProfileState occupied;
-		occupied.identity             = identity();
+		occupied.identity = identity();
 		occupied.identity.physicalId += QStringLiteral("-occupied-%1").arg(index);
-		occupied.calibrated           = true;
-		occupied.lastUsedEpochMs      = index + 1;
+		occupied.calibrated      = true;
+		occupied.lastUsedEpochMs = index + 1;
 		QVERIFY(upsertDeviceProfile(settings, std::move(occupied)));
 	}
 	QCOMPARE(settings.deviceProfiles.size(), MAX_DEVICE_PROFILES);
@@ -344,12 +345,16 @@ void TestInputEnhancementCalibrationRuntime::localEvaluatorIncludesOptionalLocal
 void TestInputEnhancementCalibrationRuntime::standardCandidatesAlwaysStartWithOriginalAndExcludeAuto() {
 	const auto candidates = CalibrationRuntimeBridge::standardCandidateSet(preference(Profile::Auto, 63, 71, true));
 	QCOMPARE(enumValue(candidates.front().profile), enumValue(Profile::Original));
+	QCOMPARE(enumValue(candidates.back().profile), enumValue(Profile::Quality));
 	for (const CalibrationSession::Selection &candidate : candidates) {
 		QVERIFY(candidate.profile != Profile::Auto);
 		QVERIFY(candidate.recipeToken != 0);
 		QCOMPARE(candidate.noiseReduction, 63);
 		QCOMPARE(candidate.naturalCrisp, 71);
 	}
+	const auto voiceFocusCandidates =
+		CalibrationRuntimeBridge::standardCandidateSet(preference(Profile::VoiceFocus, 80, 70));
+	QCOMPARE(enumValue(voiceFocusCandidates.back().profile), enumValue(Profile::VoiceFocus));
 }
 
 void TestInputEnhancementCalibrationRuntime::calibrationRejectsAutoAsRollbackBaseline() {
@@ -411,10 +416,28 @@ void TestInputEnhancementCalibrationRuntime::immutablePackageAuthorizationFailsC
 		QVERIFY(relativeModelPath.isEmpty());
 	}
 	const CalibrationPackageAuthorization unmanaged = CalibrationPackageAuthorization::explicitUnmanagedBuildZero();
-	QVERIFY(unmanaged.recipeAuthorized(balanced, sha, modelPath, &relativeModelPath));
+	QVERIFY(!unmanaged.recipeAuthorized(balanced, sha, modelPath, &relativeModelPath));
 	QVERIFY(sha.isEmpty());
 	QVERIFY(modelPath.isEmpty());
 	QVERIFY(relativeModelPath.isEmpty());
+
+	ResolveRequest lightRequest = request;
+	lightRequest.profile        = Profile::Light;
+	const Recipe light          = RecipeCatalog::resolve(lightRequest);
+	QVERIFY(unmanaged.recipeAuthorized(light, sha, modelPath, &relativeModelPath));
+	QVERIFY(sha.isEmpty());
+	QVERIFY(modelPath.isEmpty());
+	QVERIFY(relativeModelPath.isEmpty());
+
+	const CalibrationPackageAuthorization attestedBuildZero =
+		CalibrationPackageAuthorization::catalogBoundPackage(
+			QStringLiteral("unmanaged-build-zero"),
+			{ CalibrationPackageAuthorization::authorizeRecipe(balanced, signedSha, signedModelPath,
+														 signedRelativeModelPath) });
+	QVERIFY(attestedBuildZero.recipeAuthorized(balanced, sha, modelPath, &relativeModelPath));
+	QCOMPARE(sha, signedSha);
+	QCOMPARE(modelPath, signedModelPath);
+	QCOMPARE(relativeModelPath, signedRelativeModelPath);
 }
 
 void TestInputEnhancementCalibrationRuntime::evaluationObserverCancelsBetweenCandidatesAndWipes() {
@@ -518,6 +541,59 @@ void TestInputEnhancementCalibrationRuntime::probationMarksHealthyOnlyAfterBothT
 	QVERIFY(!saved->pendingRecipeBinding.has_value());
 	QVERIFY(!saved->rollbackUndoPreference.has_value());
 	QVERIFY(!saved->rollbackUndoRecipeBinding.has_value());
+}
+
+void TestInputEnhancementCalibrationRuntime::autoProbationPreservesFullSetFingerprintAcrossRollbackUndoAndHealthy() {
+	const QString setFingerprint(64, QLatin1Char('e'));
+	const DefaultPreference candidate = preference(Profile::Auto, 68, 72, true);
+	const DefaultPreference previous  = preference(Profile::Balanced, 50, 50);
+	Settings settings;
+	DeviceProfileState state;
+	state.identity                        = identity();
+	state.preference                      = candidate;
+	state.lastKnownGood                   = previous;
+	state.pendingAutoRecipeSetFingerprint = setFingerprint;
+	state.lastKnownGoodRecipeBinding      = bindingFor(Profile::Balanced, 50, 50);
+	state.pendingValidation               = true;
+	QVERIFY(upsertDeviceProfile(settings, state));
+
+	InputEnhancementProbationController probation;
+	QVERIFY(probation.startAuto(state.identity, candidate, previous, setFingerprint, state.lastKnownGoodRecipeBinding));
+	QCOMPARE(enumValue(probation.observeFrame(10, true, ProbationHealthSignal::DeadlineMiss)),
+			 enumValue(AutoV1::ProbationAction::Rollback));
+	QCOMPARE(enumValue(probation.serviceSettings(settings)), enumValue(ProbationSettingsResult::RolledBack));
+	const DeviceProfileState *rolledBack = findDeviceProfile(settings, identity());
+	QVERIFY(rolledBack);
+	QVERIFY(rolledBack->preference == previous);
+	QVERIFY(rolledBack->rollbackUndoAutoRecipeSetFingerprint.has_value());
+	QCOMPARE(*rolledBack->rollbackUndoAutoRecipeSetFingerprint, setFingerprint);
+	QVERIFY(!rolledBack->rollbackUndoRecipeBinding.has_value());
+
+	InputEnhancementProbationController afterRestart;
+	QVERIFY(afterRestart.restoreUndo(*rolledBack));
+	QVERIFY(afterRestart.undoRollback(settings));
+	const DeviceProfileState *pending = findDeviceProfile(settings, identity());
+	QVERIFY(pending);
+	QVERIFY(pending->pendingValidation);
+	QVERIFY(pending->pendingAutoRecipeSetFingerprint.has_value());
+	QCOMPARE(*pending->pendingAutoRecipeSetFingerprint, setFingerprint);
+	QVERIFY(!pending->pendingRecipeBinding.has_value());
+
+	for (int frame = 0; frame < 5'999; ++frame) {
+		const bool speech = frame < 1'000;
+		QCOMPARE(enumValue(afterRestart.observeFrame(10, speech)), enumValue(AutoV1::ProbationAction::None));
+	}
+	QCOMPARE(enumValue(afterRestart.observeFrame(10, false)), enumValue(AutoV1::ProbationAction::MarkHealthy));
+	QCOMPARE(enumValue(afterRestart.serviceSettings(settings)), enumValue(ProbationSettingsResult::MarkedHealthy));
+	const DeviceProfileState *healthy = findDeviceProfile(settings, identity());
+	QVERIFY(healthy);
+	QVERIFY(healthy->lastKnownGood.has_value());
+	QCOMPARE(healthy->lastKnownGood->profile, Profile::Auto);
+	QVERIFY(healthy->lastKnownGoodAutoRecipeSetFingerprint.has_value());
+	QCOMPARE(*healthy->lastKnownGoodAutoRecipeSetFingerprint, setFingerprint);
+	QVERIFY(!healthy->lastKnownGoodRecipeBinding.has_value());
+	QVERIFY(!healthy->pendingAutoRecipeSetFingerprint.has_value());
+	QVERIFY(!healthy->rollbackUndoAutoRecipeSetFingerprint.has_value());
 }
 
 void TestInputEnhancementCalibrationRuntime::probationFailureRollsBackAndUndoRestoresCandidate() {

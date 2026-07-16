@@ -1,0 +1,1304 @@
+#!/usr/bin/env python3
+"""Orchestrate a hash-bound client-1/server/client-2 quality case.
+
+The tracked core owns the portable contract, provenance, Original pairing, and
+fixed-timeline scoring.  A runner-local adapter owns only machine-specific
+process launch, client automation, and capture.  The adapter is invoked as:
+
+    adapter --contract <adapter-contract.json> --result <adapter-result.json>
+
+No corpus or captured audio is copied into the evidence manifest.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+import hashlib
+import importlib.util
+import json
+import math
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import wave
+from pathlib import Path, PurePosixPath
+from typing import Any, Mapping, MutableMapping, Sequence
+
+
+class E2EError(RuntimeError):
+	"""Raised when a run cannot produce trustworthy two-client evidence."""
+
+
+HEX64 = re.compile(r"[0-9a-f]{64}")
+FRAME_SAMPLES = 480
+# The unchanged local Mumble route has a bounded startup buffer that is not
+# profile latency: four fixed 10 ms route frames plus the selected Opus packet
+# duration. Original parity is qualified separately against the frozen legacy
+# client. Receiver captures may consume this route budget; the hard one-frame
+# input edge/tail gate is enforced independently on sender pre-Opus PCM.
+ORIGINAL_ROUTE_FIXED_STARTUP_FRAMES = 4
+
+PERFORMANCE_BUDGETS = {
+	"Original": {"callback_p99_ms": 5.0, "worker_p99_ms": 5.0, "mean_rtf": 0.15},
+	"Light": {"callback_p99_ms": 5.0, "worker_p99_ms": 5.0, "mean_rtf": 0.15},
+	"Balanced": {"callback_p99_ms": 5.0, "worker_p99_ms": 5.0, "mean_rtf": 0.15},
+	"Quality": {"callback_p99_ms": 8.0, "worker_p99_ms": 8.0, "mean_rtf": 0.35},
+	"VoiceFocus": {"callback_p99_ms": 8.0, "worker_p99_ms": 8.0, "mean_rtf": 0.35},
+	"Auto": {"callback_p99_ms": 8.0, "worker_p99_ms": 8.0, "mean_rtf": 0.35},
+}
+CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
+PRODUCT_PROFILES = (*CORE_PROFILES, "Auto")
+FIXED_PROFILE_MODEL_INITIALIZATION_ATTEMPTS = {
+	"Original": 0,
+	"Light": 0,
+	"Balanced": 1,
+	"Quality": 1,
+	"VoiceFocus": 1,
+}
+MODEL_FIELDS = {
+	"id", "version", "backend", "path", "sha256", "size", "licenseSpdx",
+	"sampleRateHz", "algorithmicLatencyMs", "recipeCompatibility",
+}
+RECIPE_FIELDS = {
+	"id", "revision", "profile", "engine", "modelIds", "noiseReductionRange",
+	"naturalCrispRange", "latencyBudgetMs", "minimumCpuClass", "executionSemanticsVersion",
+	"mixCurveVersion", "adaptationPolicyVersion",
+}
+EXECUTION_IDENTITY_FIELDS = {
+	"run_provenance_sha256", "runtime_payload_sha256", "client_binary_sha256",
+	"server_binary_sha256", "model_manifest_sha256", "recipe_manifest_sha256",
+}
+
+
+def _load_script(name: str, module_name: str) -> Any:
+	path = Path(__file__).with_name(name)
+	spec = importlib.util.spec_from_file_location(module_name, path)
+	if spec is None or spec.loader is None:
+		raise E2EError(f"unable to load {path}")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)
+	return module
+
+
+PLAN = _load_script("generate-mixture-plan.py", "mumble_two_client_plan")
+INVENTORY = _load_script("corpus-inventory-v3.py", "mumble_two_client_inventory")
+LOCK = _load_script("validate-corpus-lock.py", "mumble_two_client_lock")
+
+
+def _load_json(path: Path) -> Any:
+	def reject_duplicates(pairs: Sequence[tuple[str, Any]]) -> MutableMapping[str, Any]:
+		result: MutableMapping[str, Any] = {}
+		for key, value in pairs:
+			if key in result:
+				raise E2EError(f"duplicate JSON key in {path}: {key}")
+			result[key] = value
+		return result
+	try:
+		return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+	except (OSError, json.JSONDecodeError) as error:
+		raise E2EError(f"unable to read {path}: {error}") from error
+
+
+def _file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open("rb") as stream:
+		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+			digest.update(chunk)
+	return digest.hexdigest()
+
+
+def _canonical_sha256(value: Any) -> str:
+	return hashlib.sha256(
+		json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+	).hexdigest()
+
+
+def _safe_relative(value: Any, path: str) -> PurePosixPath:
+	if not isinstance(value, str) or not value:
+		raise E2EError(f"{path}: expected a non-empty relative path")
+	parsed = PurePosixPath(value)
+	if parsed.is_absolute() or parsed.as_posix() != value or "." in parsed.parts or ".." in parsed.parts:
+		raise E2EError(f"{path}: unsafe path")
+	return parsed
+
+
+def _below(root: Path, relative: Any, label: str) -> Path:
+	root = root.resolve()
+	path = root.joinpath(*_safe_relative(relative, label).parts).resolve()
+	try:
+		path.relative_to(root)
+	except ValueError as error:
+		raise E2EError(f"{label}: path escapes root") from error
+	return path
+
+
+def _verified_file(path: Path, expected_hash: str | None = None, expected_size: int | None = None) -> Mapping[str, Any]:
+	resolved = path.resolve()
+	if not resolved.is_file() or resolved.is_symlink():
+		raise E2EError(f"required regular file is missing: {resolved}")
+	size = resolved.stat().st_size
+	actual = _file_sha256(resolved)
+	if expected_hash is not None and (not HEX64.fullmatch(expected_hash) or actual != expected_hash):
+		raise E2EError(f"SHA-256 mismatch for {resolved}")
+	if expected_size is not None and size != expected_size:
+		raise E2EError(f"size mismatch for {resolved}: expected {expected_size}, got {size}")
+	return {"path": str(resolved), "sha256": actual, "size_bytes": size}
+
+
+def _tree_attestation(root: Path) -> Mapping[str, Any]:
+	root = root.resolve()
+	if not root.is_dir():
+		raise E2EError(f"runtime root does not exist: {root}")
+	entries = []
+	for path in sorted(root.rglob("*"), key=lambda candidate: candidate.relative_to(root).as_posix().lower()):
+		if path.is_symlink():
+			raise E2EError(f"runtime payload contains a symbolic link: {path}")
+		if path.is_file():
+			info = _verified_file(path)
+			entries.append({
+				"relative_path": path.relative_to(root).as_posix(),
+				"sha256": info["sha256"],
+				"size_bytes": info["size_bytes"],
+			})
+	if not entries:
+		raise E2EError("runtime payload is empty")
+	return {"root": str(root), "file_count": len(entries), "sha256": _canonical_sha256(entries)}
+
+
+def _verify_metric_models(manifest_path: Path) -> Mapping[str, Any]:
+	manifest = _load_json(manifest_path)
+	if not isinstance(manifest, dict) or set(manifest) != {"models", "runtime", "schema_version"}:
+		raise E2EError("metrics manifest must contain only schema_version, runtime, and models")
+	if manifest["schema_version"] != 1 or not isinstance(manifest["models"], list) or not manifest["models"]:
+		raise E2EError("metrics manifest schema/models are invalid")
+	runtime = manifest["runtime"]
+	if not isinstance(runtime, dict) or set(runtime) != {"id", "relative_path", "sha256", "size_bytes", "version"}:
+		raise E2EError("metrics runtime must pin id, version, path, size, and SHA-256")
+	runtime_path = _below(manifest_path.parent, runtime["relative_path"], "metrics.runtime.relative_path")
+	runtime_file = _verified_file(runtime_path, runtime["sha256"], runtime["size_bytes"])
+	if not isinstance(runtime["id"], str) or not runtime["id"] or not isinstance(runtime["version"], str) or not runtime["version"]:
+		raise E2EError("metrics runtime id/version must be non-empty")
+	verified = []
+	ids = []
+	for index, model in enumerate(manifest["models"]):
+		if not isinstance(model, dict) or set(model) != {"id", "relative_path", "sha256", "size_bytes"}:
+			raise E2EError(f"metrics manifest models[{index}] has invalid keys")
+		path = _below(manifest_path.parent, model["relative_path"], f"metrics.models[{index}].relative_path")
+		info = _verified_file(path, model["sha256"], model["size_bytes"])
+		verified.append({"id": model["id"], "sha256": info["sha256"], "size_bytes": info["size_bytes"]})
+		ids.append(model["id"])
+	if ids != sorted(set(ids)):
+		raise E2EError("metrics model ids must be unique and sorted")
+	required_ids = {"dnsmos", "estoi", "wer-en", "wer-sv"}
+	if set(ids) != required_ids:
+		raise E2EError(f"metrics manifest must pin exactly: {', '.join(sorted(required_ids))}")
+	return {
+		"manifest": _verified_file(manifest_path),
+		"runtime": {"id": runtime["id"], "version": runtime["version"], **runtime_file},
+		"models_sha256": _canonical_sha256(verified),
+		"models": verified,
+	}
+
+
+def _exact_integer(value: Any, minimum: int, maximum: int, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
+		raise E2EError(f"{label}: expected an integer in [{minimum}, {maximum}]")
+	return value
+
+
+def _finite_number(value: Any, minimum: float, maximum: float, label: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, (int, float)):
+		raise E2EError(f"{label}: expected a finite number")
+	number = float(value)
+	if not math.isfinite(number) or not minimum <= number <= maximum:
+		raise E2EError(f"{label}: expected a finite number in [{minimum}, {maximum}]")
+	return number
+
+
+def _non_empty_text(value: Any, label: str) -> str:
+	if not isinstance(value, str) or not value:
+		raise E2EError(f"{label}: expected non-empty text")
+	return value
+
+
+def _sha256_text(value: Any, label: str) -> str:
+	if not isinstance(value, str) or not HEX64.fullmatch(value):
+		raise E2EError(f"{label}: expected lowercase SHA-256")
+	return value
+
+
+def _control_range(value: Any, label: str) -> None:
+	if not isinstance(value, list) or len(value) != 2:
+		raise E2EError(f"{label}: expected a two-element range")
+	minimum = _exact_integer(value[0], 0, 100, f"{label}[0]")
+	maximum = _exact_integer(value[1], 0, 100, f"{label}[1]")
+	if minimum > maximum:
+		raise E2EError(f"{label}: minimum exceeds maximum")
+
+
+def _verify_product_catalog(
+	model_manifest_path: Path, recipe_manifest_path: Path, runtime_root: Path
+) -> Mapping[str, Any]:
+	model_manifest = _load_json(model_manifest_path)
+	recipe_manifest = _load_json(recipe_manifest_path)
+	model_root_fields = {"schemaVersion", "catalogRevision", "generatedFromAssets", "models"}
+	recipe_root_fields = {"schemaVersion", "catalogRevision", "modelManifestSha256", "recipes"}
+	if not isinstance(model_manifest, dict) or set(model_manifest) != model_root_fields:
+		raise E2EError("model manifest root schema is invalid")
+	if not isinstance(recipe_manifest, dict) or set(recipe_manifest) != recipe_root_fields:
+		raise E2EError("recipe manifest root schema is invalid")
+	if model_manifest["schemaVersion"] != 1 or model_manifest["generatedFromAssets"] is not True:
+		raise E2EError("model manifest must be generated schema v1")
+	if recipe_manifest["schemaVersion"] != 2:
+		raise E2EError("recipe manifest must be schema v2")
+	catalog_revision = _non_empty_text(model_manifest["catalogRevision"], "model catalog revision")
+	if recipe_manifest["catalogRevision"] != catalog_revision:
+		raise E2EError("model and recipe catalog revisions differ")
+	model_manifest_info = _verified_file(model_manifest_path)
+	recipe_manifest_info = _verified_file(recipe_manifest_path)
+	if _sha256_text(recipe_manifest["modelManifestSha256"], "recipe model-manifest SHA-256") != model_manifest_info["sha256"]:
+		raise E2EError("recipe manifest is not bound to the exact model manifest bytes")
+	if not isinstance(model_manifest["models"], list) or not model_manifest["models"]:
+		raise E2EError("model manifest models must be a non-empty array")
+
+	models: dict[str, Mapping[str, Any]] = {}
+	model_compatibility: dict[str, set[str]] = {}
+	asset_paths: set[str] = set()
+	for index, model in enumerate(model_manifest["models"]):
+		label = f"model manifest models[{index}]"
+		if not isinstance(model, dict) or set(model) != MODEL_FIELDS:
+			raise E2EError(f"{label}: invalid keys")
+		model_id = _non_empty_text(model["id"], f"{label}.id")
+		if model_id in models:
+			raise E2EError(f"{label}.id: duplicate model {model_id}")
+		version = _non_empty_text(model["version"], f"{label}.version")
+		backend = _non_empty_text(model["backend"], f"{label}.backend")
+		_non_empty_text(model["licenseSpdx"], f"{label}.licenseSpdx")
+		relative_path = _safe_relative(model["path"], f"{label}.path")
+		path_key = relative_path.as_posix().casefold()
+		if path_key in asset_paths:
+			raise E2EError(f"{label}.path: duplicate model asset path")
+		asset_paths.add(path_key)
+		size = _exact_integer(model["size"], 1, 4 * 1024 * 1024 * 1024, f"{label}.size")
+		_exact_integer(model["sampleRateHz"], 1, 384000, f"{label}.sampleRateHz")
+		_finite_number(model["algorithmicLatencyMs"], 0.0, 1000.0, f"{label}.algorithmicLatencyMs")
+		asset = _below(runtime_root, relative_path.as_posix(), f"{label}.path")
+		verified_asset = _verified_file(asset, _sha256_text(model["sha256"], f"{label}.sha256"), size)
+		compatibility = model["recipeCompatibility"]
+		if (
+			not isinstance(compatibility, list)
+			or any(not isinstance(item, str) or not item for item in compatibility)
+			or len(compatibility) != len(set(compatibility))
+		):
+			raise E2EError(f"{label}.recipeCompatibility: invalid recipe ID list")
+		models[model_id] = {
+			"id": model_id,
+			"version": version,
+			"backend": backend,
+			"sha256": verified_asset["sha256"],
+		}
+		model_compatibility[model_id] = set(compatibility)
+
+	if not isinstance(recipe_manifest["recipes"], list) or not recipe_manifest["recipes"]:
+		raise E2EError("recipe manifest recipes must be a non-empty array")
+	recipe_models: dict[str, set[str]] = {}
+	bindings: list[Mapping[str, Any]] = []
+	seen_recipe_ids: set[str] = set()
+	seen_profiles: set[str] = set()
+	for index, recipe in enumerate(recipe_manifest["recipes"]):
+		label = f"recipe manifest recipes[{index}]"
+		if not isinstance(recipe, dict) or set(recipe) not in (RECIPE_FIELDS, RECIPE_FIELDS | {"advancedOnly"}):
+			raise E2EError(f"{label}: invalid keys")
+		recipe_id = _non_empty_text(recipe["id"], f"{label}.id")
+		if recipe_id in seen_recipe_ids:
+			raise E2EError(f"{label}.id: duplicate recipe {recipe_id}")
+		seen_recipe_ids.add(recipe_id)
+		profile = recipe["profile"]
+		if profile not in PRODUCT_PROFILES:
+			raise E2EError(f"{label}.profile: unsupported product profile")
+		seen_profiles.add(profile)
+		engine = recipe["engine"]
+		if engine not in {"None", "Speex", "RNNoise", "DeepFilterNet", "DTLN"}:
+			raise E2EError(f"{label}.engine: unsupported engine")
+		revision = _exact_integer(recipe["revision"], 1, 2**31 - 1, f"{label}.revision")
+		model_ids = recipe["modelIds"]
+		if (
+			not isinstance(model_ids, list)
+			or len(model_ids) > 8
+			or any(not isinstance(item, str) or not item for item in model_ids)
+			or len(model_ids) != len(set(model_ids))
+		):
+			raise E2EError(f"{label}.modelIds: invalid model ID list")
+		neural = engine in {"RNNoise", "DeepFilterNet", "DTLN"}
+		if neural != bool(model_ids):
+			raise E2EError(f"{label}: engine/model relationship is invalid")
+		for model_id in model_ids:
+			model = models.get(model_id)
+			if model is None or model["backend"] != engine:
+				raise E2EError(f"{label}: unknown or incompatible model {model_id}")
+			if recipe_id not in model_compatibility[model_id]:
+				raise E2EError(f"{label}: model {model_id} does not declare recipe compatibility")
+		_control_range(recipe["noiseReductionRange"], f"{label}.noiseReductionRange")
+		_control_range(recipe["naturalCrispRange"], f"{label}.naturalCrispRange")
+		latency_ms = _finite_number(recipe["latencyBudgetMs"], 0.0, 1000.0, f"{label}.latencyBudgetMs")
+		if not float(latency_ms * 48.0).is_integer():
+			raise E2EError(f"{label}.latencyBudgetMs: must map to whole 48 kHz samples")
+		if recipe["minimumCpuClass"] not in {"Low", "Standard", "High"}:
+			raise E2EError(f"{label}.minimumCpuClass: unsupported CPU class")
+		for field in ("executionSemanticsVersion", "mixCurveVersion", "adaptationPolicyVersion"):
+			_exact_integer(recipe[field], 1, 2**31 - 1, f"{label}.{field}")
+		advanced_only = recipe.get("advancedOnly", False)
+		if not isinstance(advanced_only, bool):
+			raise E2EError(f"{label}.advancedOnly: expected boolean")
+		recipe_models[recipe_id] = set(model_ids)
+		if not advanced_only:
+			bindings.append({
+				"profile": profile,
+				"engine": engine,
+				"recipe": {
+					"catalog_revision": catalog_revision,
+					"id": recipe_id,
+					"manifest_sha256": recipe_manifest_info["sha256"],
+					"revision": revision,
+				},
+				"models": sorted([
+					{"id": model_id, "sha256": models[model_id]["sha256"], "version": models[model_id]["version"]}
+					for model_id in model_ids
+				], key=lambda model: model["id"]),
+			})
+
+	if seen_profiles != set(PRODUCT_PROFILES):
+		raise E2EError("recipe manifest does not cover every product profile")
+	for model_id, compatible_recipes in model_compatibility.items():
+		for recipe_id in compatible_recipes:
+			if recipe_id not in recipe_models or model_id not in recipe_models[recipe_id]:
+				raise E2EError(f"model {model_id} declares invalid compatibility with {recipe_id}")
+	for profile in CORE_PROFILES:
+		if sum(binding["profile"] == profile for binding in bindings) != 1:
+			raise E2EError(f"product profile {profile} must have exactly one non-advanced recipe")
+	if not any(binding["profile"] == "Auto" for binding in bindings):
+		raise E2EError("product profile Auto must have at least one non-advanced recipe")
+	bindings.sort(key=lambda binding: (binding["profile"], binding["recipe"]["id"]))
+	return {
+		"catalog_revision": catalog_revision,
+		"model_manifest": model_manifest_info,
+		"recipe_manifest": recipe_manifest_info,
+		"bindings": bindings,
+	}
+
+
+def _execution_identity_from_paths(paths: Mapping[str, Any]) -> Mapping[str, str]:
+	required_paths = {
+		"run_provenance", "runtime_root", "client_binary", "server_binary", "model_manifest", "recipe_manifest",
+	}
+	if not isinstance(paths, dict) or set(paths) != required_paths:
+		raise E2EError("adapter contract paths are incomplete")
+	resolved: dict[str, Path] = {}
+	for key, value in paths.items():
+		if not isinstance(value, str) or not value or not Path(value).is_absolute():
+			raise E2EError(f"adapter contract path {key} must be absolute")
+		resolved[key] = Path(value).resolve()
+	provenance = _load_json(resolved["run_provenance"])
+	if not isinstance(provenance, dict):
+		raise E2EError("run provenance must be a JSON object")
+	return {
+		"run_provenance_sha256": _canonical_sha256(provenance),
+		"runtime_payload_sha256": str(_tree_attestation(resolved["runtime_root"])["sha256"]),
+		"client_binary_sha256": str(_verified_file(resolved["client_binary"])["sha256"]),
+		"server_binary_sha256": str(_verified_file(resolved["server_binary"])["sha256"]),
+		"model_manifest_sha256": str(_verified_file(resolved["model_manifest"])["sha256"]),
+		"recipe_manifest_sha256": str(_verified_file(resolved["recipe_manifest"])["sha256"]),
+	}
+
+
+def _rendered_case(plan: Mapping[str, Any], case: Mapping[str, Any], render_manifest_path: Path, render_root: Path) -> Mapping[str, Any]:
+	manifest = _load_json(render_manifest_path)
+	if manifest.get("schema_version") != 2 or manifest.get("renderer") != "mumble-audio-mixture-renderer-v2":
+		raise E2EError("render manifest is not schema v2")
+	if manifest.get("plan_sha256") != PLAN.canonical_sha256(plan):
+		raise E2EError("render manifest does not bind the selected plan")
+	if manifest.get("corpus_inventory_sha256") != plan["corpus_inventory_sha256"]:
+		raise E2EError("render manifest inventory hash mismatch")
+	matches = [item for item in manifest.get("cases", []) if item.get("case_id") == case["case_id"]]
+	if len(matches) != 1:
+		raise E2EError(f"render manifest must contain exactly one {case['case_id']} entry")
+	entry = matches[0]
+	input_path = _below(render_root, entry["input"]["path"], "render.input.path")
+	reference_path = _below(render_root, entry["clean_reference"]["path"], "render.clean_reference.path")
+	return {
+		"manifest": _verified_file(render_manifest_path),
+		"input": _verified_file(input_path, entry["input"]["sha256"]),
+		"clean_reference": _verified_file(reference_path, entry["clean_reference"]["sha256"]),
+	}
+
+
+def _adapter_command(adapter: Path, contract: Path, result: Path, extra: Sequence[str]) -> list[str]:
+	if adapter.suffix.lower() == ".py":
+		return [sys.executable, str(adapter), "--contract", str(contract), "--result", str(result), *extra]
+	return [str(adapter), "--contract", str(contract), "--result", str(result), *extra]
+
+
+def _write_json(path: Path, value: Mapping[str, Any]) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+	temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+	os.replace(temporary, path)
+
+
+def _build_contract(
+	role: str,
+	profile: str,
+	case: Mapping[str, Any],
+	rendered: Mapping[str, Any],
+	paths: Mapping[str, str],
+	provenance_sha256: str,
+	expected_execution_identity: Mapping[str, str],
+	authorized_product_bindings: Sequence[Mapping[str, Any]],
+	output_root: Path,
+) -> Mapping[str, Any]:
+	# Edge/tail qualification needs clean inputs for both the unchanged route
+	# control and the enhanced pre-Opus probe. Noisy quality roles must never
+	# qualify an edge merely because room noise crosses the activity threshold
+	# before the utterance begins.
+	contract_input = rendered["clean_reference"] if role in {"control", "candidate_edge"} else rendered["input"]
+	profile_bindings = [binding for binding in authorized_product_bindings if binding["profile"] == profile]
+	if profile != "Auto" and len(profile_bindings) != 1:
+		raise E2EError(f"profile {profile} does not resolve to exactly one product recipe")
+	if not profile_bindings:
+		raise E2EError(f"profile {profile} has no authorized product recipe")
+	return {
+		"schema_version": 3,
+		"contract": "mumble-two-client-adapter-v3",
+		"role": role,
+		"run_provenance_sha256": provenance_sha256,
+		"profile": profile,
+		"expected_execution_identity": dict(expected_execution_identity),
+		"authorized_product_bindings": profile_bindings,
+		"performance_budgets": dict(PERFORMANCE_BUDGETS[profile]),
+		# The client accepts this only in an E2E-enabled build with the adapter's
+		# non-empty per-run token. It makes the qualified tier explicit instead of
+		# relying on thread count or an unrelated Auto-policy microbenchmark.
+		"cpu_class": "High",
+		"controls": case["controls"],
+		"transport": {
+			**case["transport"],
+			"server_host": "127.0.0.1",
+		},
+		"startup": case["startup"],
+		"input": contract_input,
+		"clean_reference": rendered["clean_reference"],
+		"paths": paths,
+		"output_root": str(output_root.resolve()),
+		"requirements": {
+			"receiver_cleanup": False,
+			"callback_frame_samples": 480,
+			"sample_rate_hz": 48000,
+			"causal_drain_required": True,
+			"runtime_diagnostics_required": True,
+			"callback_and_worker_metrics_required": True,
+			"sender_pre_opus": {
+				"required": True,
+				"channels": 1,
+				"sample_rate_hz": 48000,
+				"timeline_origin": "source-after-transmitted-preroll",
+				"include_causal_tail": True,
+			},
+		},
+	}
+
+
+def _validate_adapter_result(
+	result_path: Path,
+	contract: Mapping[str, Any],
+	contract_path: Path,
+	expected_contract_sha256: str,
+	role_root: Path,
+) -> tuple[Mapping[str, Any], Path, Path]:
+	if _file_sha256(contract_path) != expected_contract_sha256:
+		raise E2EError("adapter contract changed while the machine adapter was running")
+	result = _load_json(result_path)
+	required = {
+		"capture", "diagnostics", "execution_identity", "input_sha256", "profile", "receiver_cleanup",
+		"sender_pre_opus",
+		"role", "schema_version", "status", "transport",
+	}
+	if not isinstance(result, dict) or set(result) != required:
+		raise E2EError(f"adapter result has invalid keys: {result_path}")
+	if result["schema_version"] != 3 or result["status"] != "passed":
+		raise E2EError(f"adapter did not pass {contract['role']}: {result.get('status')}")
+	if result["role"] != contract["role"] or result["profile"] != contract["profile"]:
+		raise E2EError("adapter role/profile mismatch")
+	if result["receiver_cleanup"] is not False or result["input_sha256"] != contract["input"]["sha256"]:
+		raise E2EError("adapter did not attest the requested input/receiver-cleanup state")
+	expected_identity = contract["expected_execution_identity"]
+	if not isinstance(expected_identity, dict) or set(expected_identity) != EXECUTION_IDENTITY_FIELDS:
+		raise E2EError("adapter contract has an invalid expected execution identity")
+	for key, value in expected_identity.items():
+		_sha256_text(value, f"adapter contract expected_execution_identity.{key}")
+	if expected_identity["run_provenance_sha256"] != contract["run_provenance_sha256"]:
+		raise E2EError("adapter contract provenance identity is internally inconsistent")
+	execution_identity = result["execution_identity"]
+	identity_fields = EXECUTION_IDENTITY_FIELDS | {"contract_file_sha256"}
+	if not isinstance(execution_identity, dict) or set(execution_identity) != identity_fields:
+		raise E2EError("adapter execution identity is incomplete")
+	for key, value in execution_identity.items():
+		_sha256_text(value, f"adapter execution_identity.{key}")
+	if execution_identity["contract_file_sha256"] != expected_contract_sha256:
+		raise E2EError("adapter did not attest the exact contract bytes")
+	for key in EXECUTION_IDENTITY_FIELDS:
+		if execution_identity[key] != expected_identity[key]:
+			raise E2EError(f"adapter execution identity mismatch: {key}")
+	observed_identity = _execution_identity_from_paths(contract["paths"])
+	if observed_identity != expected_identity:
+		raise E2EError("runtime or provenance changed after the contract was emitted")
+	for key in ("opus_bitrate_bps", "frames_per_packet", "transmit_mode"):
+		if not isinstance(result["transport"], dict) or set(result["transport"]) != {
+			"opus_bitrate_bps", "frames_per_packet", "transmit_mode",
+		} or result["transport"][key] != contract["transport"][key]:
+			raise E2EError(f"adapter transport mismatch: {key}")
+	diagnostics = result["diagnostics"]
+	required_diagnostics = {
+		"active_engine", "active_models", "active_profile", "active_recipe", "callback_frame_count",
+		"callback_p99_ms", "deadline_miss_count", "declared_latency_samples", "fallback_count",
+		"invalid_output_count", "mean_rtf", "model_initialization_attempts", "tail_drained",
+		"worker_frame_count", "worker_p99_ms",
+	}
+	if not isinstance(diagnostics, dict) or set(diagnostics) != required_diagnostics:
+		raise E2EError("adapter diagnostics are incomplete")
+	if diagnostics["active_profile"] != contract["profile"]:
+		raise E2EError("adapter active profile mismatch")
+	model_initialization_attempts = _exact_integer(
+		diagnostics["model_initialization_attempts"], 0, 2**31 - 1,
+		"adapter diagnostics.model_initialization_attempts",
+	)
+	expected_model_initialization_attempts = FIXED_PROFILE_MODEL_INITIALIZATION_ATTEMPTS.get(
+		contract["profile"],
+		1 if diagnostics["active_engine"] in {"RNNoise", "DeepFilterNet"} else 0,
+	)
+	if model_initialization_attempts != expected_model_initialization_attempts:
+		raise E2EError(
+			"adapter model-initialization attestation mismatch: "
+			f"profile={contract['profile']} expected={expected_model_initialization_attempts} "
+			f"observed={model_initialization_attempts}"
+		)
+	for key in ("deadline_miss_count", "fallback_count", "invalid_output_count"):
+		if _exact_integer(diagnostics[key], 0, 2**63 - 1, f"adapter diagnostics.{key}") != 0:
+			raise E2EError(f"adapter reported {key}={diagnostics[key]}")
+	if diagnostics["tail_drained"] is not True:
+		raise E2EError("adapter did not drain the causal tail")
+	_exact_integer(diagnostics["declared_latency_samples"], 0, 2**31 - 1, "adapter diagnostics.declared_latency_samples")
+	active_recipe = diagnostics["active_recipe"]
+	if not isinstance(active_recipe, dict) or set(active_recipe) != {
+		"catalog_revision", "id", "manifest_sha256", "revision",
+	}:
+		raise E2EError("adapter active recipe attestation is invalid")
+	_non_empty_text(active_recipe["catalog_revision"], "adapter active recipe catalog_revision")
+	_non_empty_text(active_recipe["id"], "adapter active recipe id")
+	_sha256_text(active_recipe["manifest_sha256"], "adapter active recipe manifest_sha256")
+	_exact_integer(active_recipe["revision"], 1, 2**31 - 1, "adapter active recipe revision")
+	active_models = diagnostics["active_models"]
+	if not isinstance(active_models, list):
+		raise E2EError("adapter active models must be an array")
+	validated_models = []
+	for index, model in enumerate(active_models):
+		if not isinstance(model, dict) or set(model) != {"id", "sha256", "version"}:
+			raise E2EError(f"adapter active_models[{index}] is invalid")
+		validated_models.append({
+			"id": _non_empty_text(model["id"], f"adapter active_models[{index}].id"),
+			"sha256": _sha256_text(model["sha256"], f"adapter active_models[{index}].sha256"),
+			"version": _non_empty_text(model["version"], f"adapter active_models[{index}].version"),
+		})
+	if validated_models != sorted(validated_models, key=lambda model: model["id"]):
+		raise E2EError("adapter active models must be sorted by model ID")
+	if len({model["id"] for model in validated_models}) != len(validated_models):
+		raise E2EError("adapter active model IDs must be unique")
+	observed_binding = {
+		"profile": diagnostics["active_profile"],
+		"engine": diagnostics["active_engine"],
+		"recipe": dict(active_recipe),
+		"models": validated_models,
+	}
+	if observed_binding not in contract["authorized_product_bindings"]:
+		raise E2EError("adapter active recipe/model binding is not authorized by the product manifests")
+	callback_frames = _exact_integer(
+		diagnostics["callback_frame_count"], 1, 2**63 - 1, "adapter diagnostics.callback_frame_count"
+	)
+	worker_frames = _exact_integer(
+		diagnostics["worker_frame_count"], 0, 2**63 - 1, "adapter diagnostics.worker_frame_count"
+	)
+	callback_p99 = _finite_number(
+		diagnostics["callback_p99_ms"], 0.0, 60_000.0, "adapter diagnostics.callback_p99_ms"
+	)
+	worker_p99 = _finite_number(
+		diagnostics["worker_p99_ms"], 0.0, 60_000.0, "adapter diagnostics.worker_p99_ms"
+	)
+	mean_rtf = _finite_number(diagnostics["mean_rtf"], 0.0, 1000.0, "adapter diagnostics.mean_rtf")
+	if callback_frames <= 0:
+		raise E2EError("adapter did not observe callback processing")
+	if diagnostics["active_engine"] == "DeepFilterNet" and worker_frames == 0:
+		raise E2EError("DeepFilterNet adapter result has no worker observations")
+	if worker_frames == 0 and worker_p99 != 0.0:
+		raise E2EError("adapter reported worker latency without worker frames")
+	budgets = contract["performance_budgets"]
+	if not isinstance(budgets, dict) or set(budgets) != {"callback_p99_ms", "worker_p99_ms", "mean_rtf"}:
+		raise E2EError("adapter contract performance budgets are invalid")
+	if callback_p99 > budgets["callback_p99_ms"]:
+		raise E2EError("adapter callback p99 exceeds the contract budget")
+	if worker_p99 > budgets["worker_p99_ms"]:
+		raise E2EError("adapter worker p99 exceeds the contract budget")
+	if mean_rtf > budgets["mean_rtf"]:
+		raise E2EError("adapter mean RTF exceeds the contract budget")
+	capture = result["capture"]
+	if not isinstance(capture, dict) or set(capture) != {"relative_path", "sha256", "size_bytes"}:
+		raise E2EError("adapter capture attestation is invalid")
+	capture_path = _below(role_root, capture["relative_path"], "adapter.capture.relative_path")
+	capture_size = _exact_integer(capture["size_bytes"], 1, 2**63 - 1, "adapter capture size_bytes")
+	_verified_file(capture_path, _sha256_text(capture["sha256"], "adapter capture sha256"), capture_size)
+	sender_pre_opus = result["sender_pre_opus"]
+	if not isinstance(sender_pre_opus, dict) or set(sender_pre_opus) != {
+		"relative_path", "sha256", "size_bytes",
+	}:
+		raise E2EError("adapter sender_pre_opus attestation is invalid")
+	sender_pre_opus_path = _below(
+		role_root, sender_pre_opus["relative_path"], "adapter.sender_pre_opus.relative_path"
+	)
+	sender_pre_opus_size = _exact_integer(
+		sender_pre_opus["size_bytes"], 1, 2**63 - 1, "adapter sender_pre_opus size_bytes"
+	)
+	_verified_file(
+		sender_pre_opus_path,
+		_sha256_text(sender_pre_opus["sha256"], "adapter sender_pre_opus sha256"),
+		sender_pre_opus_size,
+	)
+	return result, capture_path, sender_pre_opus_path
+
+
+def _score(
+	reference: Path,
+	received: Path,
+	latency: int,
+	output: Path,
+	baseline: Path | None = None,
+	require_complete_tail: bool = True,
+	max_onset_loss_samples: int = FRAME_SAMPLES,
+	max_end_loss_samples: int = FRAME_SAMPLES,
+) -> Mapping[str, Any]:
+	command = [
+		sys.executable, str(Path(__file__).with_name("score-fixed-timeline.py")),
+		"--reference", str(reference), "--received", str(received),
+		"--latency-samples", str(latency),
+		"--max-onset-loss-samples", str(max_onset_loss_samples),
+		"--max-end-loss-samples", str(max_end_loss_samples),
+		"--fail-on-new-clipping", "--output", str(output),
+	]
+	if require_complete_tail:
+		command.append("--require-complete-tail")
+	if baseline is not None:
+		command.extend([
+			"--transport-baseline", str(baseline), "--transport-baseline-latency-samples", "0",
+			"--qualified-transport-baseline",
+		])
+	completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	if completed.returncode != 0:
+		raise E2EError(f"fixed-timeline scoring failed ({completed.returncode}): {completed.stdout.strip()}")
+	return _load_json(output)
+
+
+def run(args: argparse.Namespace) -> Mapping[str, Any]:
+	plan = PLAN.validate_plan(_load_json(args.plan))
+	cases = [case for case in plan["cases"] if case["case_id"] == args.case_id]
+	if len(cases) != 1:
+		raise E2EError(f"plan must contain exactly one case named {args.case_id}")
+	case = cases[0]
+	if case["transport"]["receiver_cleanup"] is not False:
+		raise E2EError("receiver cleanup must remain disabled")
+	manifest = LOCK.load_validated_manifest(args.corpus_lock)
+	inventory = _load_json(args.inventory)
+	INVENTORY.validate_inventory(inventory, manifest, require_release=True)
+	if INVENTORY.canonical_sha256(inventory) != plan["corpus_inventory_sha256"]:
+		raise E2EError("plan does not bind the supplied inventory")
+	if LOCK.canonical_manifest_sha256(manifest) != plan["corpus_lock_sha256"]:
+		raise E2EError("plan does not bind the supplied corpus lock")
+	if args.output_root.exists() and any(args.output_root.iterdir()):
+		raise E2EError(f"output root must be empty: {args.output_root}")
+	args.output_root.mkdir(parents=True, exist_ok=True)
+
+	runtime = _tree_attestation(args.runtime_root)
+	client = _verified_file(args.client_binary)
+	server = _verified_file(args.server_binary)
+	try:
+		args.client_binary.resolve().relative_to(args.runtime_root.resolve())
+	except ValueError as error:
+		raise E2EError("client binary must be inside the attested runtime root") from error
+	for label, manifest_path in (("model", args.model_manifest), ("recipe", args.recipe_manifest)):
+		try:
+			manifest_path.resolve().relative_to(args.runtime_root.resolve())
+		except ValueError as error:
+			raise E2EError(f"{label} manifest must be inside the attested runtime root") from error
+	adapter = _verified_file(args.adapter)
+	rendered = _rendered_case(plan, case, args.render_manifest, args.render_root)
+	metrics = _verify_metric_models(args.metrics_manifest)
+	product_catalog = _verify_product_catalog(args.model_manifest, args.recipe_manifest, args.runtime_root)
+	provenance = {
+		"schema_version": 1,
+		"case_id": case["case_id"],
+		"plan": _verified_file(args.plan),
+		"corpus_lock": _verified_file(args.corpus_lock),
+		"corpus_inventory": _verified_file(args.inventory),
+		"render_manifest": rendered["manifest"],
+		"runtime_payload": runtime,
+		"client_binary": client,
+		"server_binary": server,
+		"model_manifest": product_catalog["model_manifest"],
+		"recipe_manifest": product_catalog["recipe_manifest"],
+		"product_catalog": {
+			"catalog_revision": product_catalog["catalog_revision"],
+			"bindings_sha256": _canonical_sha256(product_catalog["bindings"]),
+		},
+		"metrics": metrics,
+		"orchestrator": _verified_file(Path(__file__)),
+		"fixed_timeline_scorer": _verified_file(Path(__file__).with_name("score-fixed-timeline.py")),
+		"machine_adapter": adapter,
+	}
+	_write_json(args.output_root / "run-provenance.json", provenance)
+	provenance_sha256 = _canonical_sha256(provenance)
+	paths = {
+		"run_provenance": str((args.output_root / "run-provenance.json").resolve()),
+		"runtime_root": str(args.runtime_root.resolve()),
+		"client_binary": str(args.client_binary.resolve()),
+		"server_binary": str(args.server_binary.resolve()),
+		"model_manifest": str(args.model_manifest.resolve()),
+		"recipe_manifest": str(args.recipe_manifest.resolve()),
+	}
+	expected_execution_identity = _execution_identity_from_paths(paths)
+	provenance_identity = {
+		"run_provenance_sha256": provenance_sha256,
+		"runtime_payload_sha256": runtime["sha256"],
+		"client_binary_sha256": client["sha256"],
+		"server_binary_sha256": server["sha256"],
+		"model_manifest_sha256": product_catalog["model_manifest"]["sha256"],
+		"recipe_manifest_sha256": product_catalog["recipe_manifest"]["sha256"],
+	}
+	if expected_execution_identity != provenance_identity:
+		raise E2EError("runtime identity changed while the run provenance was being sealed")
+	# The clean control anchors fixed speech edges through the unchanged route.
+	# The noisy Original comparison remains available for OVRL/BAK/SIG/eSTOI/WER
+	# comparisons and is deliberately not treated as an edge-control.
+	roles = [("control", "Original"), ("original_comparison", "Original")]
+	if case["profile"] != "Original":
+		roles.append(("candidate", case["profile"]))
+		roles.append(("candidate_edge", case["profile"]))
+	contracts: list[tuple[str, Mapping[str, Any], Path, str, Path]] = []
+	for role, profile in roles:
+		role_root = args.output_root / role
+		contract_path = role_root / "adapter-contract.json"
+		result_path = role_root / "adapter-result.json"
+		contract = _build_contract(
+			role, profile, case, rendered, paths, provenance_sha256, expected_execution_identity,
+			product_catalog["bindings"], role_root,
+		)
+		_write_json(contract_path, contract)
+		contracts.append((role, contract, contract_path, _file_sha256(contract_path), result_path))
+	if args.emit_contracts_only:
+		manifest_result = {
+			"schema_version": 3, "status": "contracts_emitted", "case_id": case["case_id"],
+			"profile": case["profile"], "run_provenance_sha256": provenance_sha256,
+			"contracts": [
+				{
+					"role": role,
+					"relative_path": str(contract_path.relative_to(args.output_root).as_posix()),
+					"sha256": contract_sha256,
+				}
+				for role, _, contract_path, contract_sha256, _ in contracts
+			],
+			"private_audio_do_not_upload": True,
+		}
+		_write_json(args.output_root / "e2e-manifest.json", manifest_result)
+		return manifest_result
+
+	results: dict[str, Any] = {}
+	captures: dict[str, Path] = {}
+	sender_pre_opus_artifacts: dict[str, Path] = {}
+	for role, contract, contract_path, contract_sha256, result_path in contracts:
+		command = _adapter_command(args.adapter.resolve(), contract_path.resolve(), result_path.resolve(), args.adapter_arg)
+		completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		if completed.returncode != 0:
+			raise E2EError(f"machine adapter failed for {role} ({completed.returncode}): {completed.stdout.strip()}")
+		result, capture, sender_pre_opus = _validate_adapter_result(
+			result_path, contract, contract_path, contract_sha256, result_path.parent
+		)
+		results[role] = result
+		captures[role] = capture
+		sender_pre_opus_artifacts[role] = sender_pre_opus
+	pre_opus_scores: dict[str, Any] = {}
+	for role in ("control", "candidate_edge"):
+		if role not in results:
+			continue
+		result = results[role]
+		pre_opus_score_path = args.output_root / role / "pre-opus-fixed-timeline-score.json"
+		pre_opus_scores[role] = _score(
+			Path(rendered["clean_reference"]["path"]), sender_pre_opus_artifacts[role],
+			int(result["diagnostics"]["declared_latency_samples"]), pre_opus_score_path,
+			require_complete_tail=True,
+			max_onset_loss_samples=FRAME_SAMPLES,
+			max_end_loss_samples=FRAME_SAMPLES,
+		)
+	control_score_path = args.output_root / "control" / "fixed-timeline-score.json"
+	# VAD intentionally stops transmitting trailing room silence after the
+	# utterance. The hard one-frame input edge/tail gate is already enforced on
+	# sender pre-Opus PCM above. Continuous and PTT must additionally retain the
+	# complete receiver capture timeline through the real route.
+	require_complete_capture_tail = case["transport"]["transmit_mode"] != "VAD"
+	control_onset_budget_samples = (
+		ORIGINAL_ROUTE_FIXED_STARTUP_FRAMES + int(case["transport"]["frames_per_packet"])
+	) * FRAME_SAMPLES
+	# The receiver WAV starts at the first decoded OG packet rather than at the
+	# sender's source-timeline zero. That bounded route-origin offset moves both
+	# observed speech edges earlier; treating the earlier end as truncation makes
+	# a clean Original control fail even when its whole waveform is present. The
+	# separately attested complete-tail rule remains strict for Continuous/PTT.
+	# Both control and candidate receiver edges use this route bound; it must not
+	# be interpreted as, or substituted for, the hard sender input-latency gate.
+	control_end_budget_samples = control_onset_budget_samples
+	control_score = _score(
+		# Both the control input and edge reference are clean. A noisy Original
+		# comparison cannot be a trustworthy onset anchor because leading room
+		# noise may cross the activity threshold before speech starts.
+		Path(rendered["clean_reference"]["path"]), captures["control"],
+		int(results["control"]["diagnostics"]["declared_latency_samples"]), control_score_path,
+		require_complete_tail=require_complete_capture_tail,
+		max_onset_loss_samples=control_onset_budget_samples,
+		max_end_loss_samples=control_end_budget_samples,
+	)
+	scores: dict[str, Any] = {"control": control_score}
+	if "candidate" in results:
+		candidate_score_path = args.output_root / "candidate" / "fixed-timeline-score.json"
+		scores["candidate"] = _score(
+			Path(rendered["clean_reference"]["path"]), captures["candidate"],
+			int(results["candidate"]["diagnostics"]["declared_latency_samples"]), candidate_score_path,
+			captures["control"],
+			require_complete_tail=require_complete_capture_tail,
+			max_onset_loss_samples=control_onset_budget_samples,
+			max_end_loss_samples=control_end_budget_samples,
+		)
+	manifest_result = {
+		"schema_version": 3,
+		"status": "passed",
+		"case_id": case["case_id"],
+		"profile": case["profile"],
+		"run_provenance_sha256": provenance_sha256,
+		"receiver_cleanup": False,
+		"input_timeline_gate": {
+			"artifact": "sender_pre_opus",
+			"alignment": "fixed-declared-latency",
+			"roles": [role for role in ("control", "candidate_edge") if role in results],
+			"max_onset_loss_samples": FRAME_SAMPLES,
+			"max_end_loss_samples": FRAME_SAMPLES,
+			"complete_tail_required": True,
+		},
+		"route_control": {
+			"onset_budget_samples": control_onset_budget_samples,
+			"end_loss_budget_samples": control_end_budget_samples,
+			"receiver_edge_gate": "route-bounded-not-input-latency",
+			"capture_tail_rule": "complete" if require_complete_capture_tail else "vad-speech-edge",
+			"causal_tail_drain_required": True,
+			"legacy_original_parity_required": True,
+		},
+		"results": {
+			role: {
+				"adapter_contract_sha256": result["execution_identity"]["contract_file_sha256"],
+				"adapter_result_sha256": _file_sha256(args.output_root / role / "adapter-result.json"),
+				"capture_sha256": result["capture"]["sha256"],
+				"sender_pre_opus_sha256": result["sender_pre_opus"]["sha256"],
+				"execution_identity": result["execution_identity"],
+				"active_recipe": result["diagnostics"]["active_recipe"],
+				"active_models": result["diagnostics"]["active_models"],
+				"performance": {
+					"callback_frame_count": result["diagnostics"]["callback_frame_count"],
+					"callback_p99_ms": result["diagnostics"]["callback_p99_ms"],
+					"model_initialization_attempts": result["diagnostics"]["model_initialization_attempts"],
+					"worker_frame_count": result["diagnostics"]["worker_frame_count"],
+					"worker_p99_ms": result["diagnostics"]["worker_p99_ms"],
+					"mean_rtf": result["diagnostics"]["mean_rtf"],
+				},
+				"fixed_timeline_score_sha256": (
+					_file_sha256(args.output_root / role / "fixed-timeline-score.json") if role in scores else None
+				),
+				"pre_opus_fixed_timeline_score_sha256": (
+					_file_sha256(args.output_root / role / "pre-opus-fixed-timeline-score.json")
+					if role in pre_opus_scores else None
+				),
+				"qualification_purpose": (
+					"clean-original-route-control" if role == "control"
+					else "noisy-original-quality-comparison" if role == "original_comparison"
+					else "clean-enhanced-input-edge-probe" if role == "candidate_edge"
+					else "noisy-enhanced-candidate"
+				),
+			}
+			for role, result in results.items()
+		},
+		"private_audio_do_not_upload": True,
+	}
+	_write_json(args.output_root / "e2e-manifest.json", manifest_result)
+	return manifest_result
+
+
+def _write_sine(path: Path, samples: int = 48000, frequency_hz: int = 220) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	pcm = b"".join(struct.pack("<h", round(6000 * __import__("math").sin(2 * __import__("math").pi * frequency_hz * index / 48000))) for index in range(samples))
+	with wave.open(str(path), "wb") as stream:
+		stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(48000); stream.writeframes(pcm)
+
+
+def run_self_test() -> None:
+	with tempfile.TemporaryDirectory(prefix="mumble-two-client-e2e-") as directory:
+		root = Path(directory)
+		runtime = root / "runtime"; runtime.mkdir()
+		client = runtime / "mumble.exe"; client.write_bytes(b"client")
+		server = root / "mumble-server.exe"; server.write_bytes(b"server")
+		rnnoise_asset = runtime / "rnnoise.dll"; rnnoise_asset.write_bytes(b"rnnoise-self-test")
+		deepfilter_asset = runtime / "deepfilternet" / "model.tar.gz"
+		deepfilter_asset.parent.mkdir(); deepfilter_asset.write_bytes(b"deepfilter-self-test")
+		model_manifest = runtime / "input-models.json"
+		_write_json(model_manifest, {
+			"schemaVersion": 1,
+			"catalogRevision": "self-test-catalog-v2",
+			"generatedFromAssets": True,
+			"models": [
+				{
+					"id": "rnnoise:embedded", "version": "self-test-rnnoise", "backend": "RNNoise",
+					"path": "rnnoise.dll", "sha256": _file_sha256(rnnoise_asset),
+					"size": rnnoise_asset.stat().st_size, "licenseSpdx": "BSD-3-Clause",
+					"sampleRateHz": 48000, "algorithmicLatencyMs": 30,
+					"recipeCompatibility": [
+						"input.balanced.rnnoise-embedded", "input.auto.balanced.rnnoise-embedded",
+					],
+				},
+				{
+					"id": "deepfilternet:balanced", "version": "self-test-deepfilter", "backend": "DeepFilterNet",
+					"path": "deepfilternet/model.tar.gz", "sha256": _file_sha256(deepfilter_asset),
+					"size": deepfilter_asset.stat().st_size, "licenseSpdx": "MIT OR Apache-2.0",
+					"sampleRateHz": 48000, "algorithmicLatencyMs": 40,
+					"recipeCompatibility": [
+						"input.quality.deepfilternet-balanced", "input.auto.quality.deepfilternet-balanced",
+						"input.voice-focus.deepfilternet-balanced",
+					],
+				},
+			],
+		})
+
+		def recipe(
+			recipe_id: str, profile: str, engine: str, model_ids: list[str], latency_ms: int,
+			minimum_cpu: str, noise_range: list[int], character_range: list[int],
+		) -> Mapping[str, Any]:
+			return {
+				"id": recipe_id, "revision": 1, "profile": profile, "engine": engine,
+				"modelIds": model_ids, "noiseReductionRange": noise_range,
+				"naturalCrispRange": character_range, "latencyBudgetMs": latency_ms,
+				"minimumCpuClass": minimum_cpu, "executionSemanticsVersion": 2,
+				"mixCurveVersion": 2, "adaptationPolicyVersion": 1,
+			}
+
+		recipe_manifest = runtime / "input-recipes.json"
+		_write_json(recipe_manifest, {
+			"schemaVersion": 2,
+			"catalogRevision": "self-test-catalog-v2",
+			"modelManifestSha256": _file_sha256(model_manifest),
+			"recipes": [
+				recipe("input.original", "Original", "None", [], 0, "Low", [0, 0], [0, 0]),
+				recipe("input.light.speex", "Light", "Speex", [], 10, "Low", [0, 100], [0, 100]),
+				recipe(
+					"input.balanced.rnnoise-embedded", "Balanced", "RNNoise", ["rnnoise:embedded"],
+					30, "Standard", [20, 90], [10, 90],
+				),
+				recipe(
+					"input.quality.deepfilternet-balanced", "Quality", "DeepFilterNet",
+					["deepfilternet:balanced"], 50, "High", [25, 90], [25, 100],
+				),
+				recipe("input.auto.light.speex", "Auto", "Speex", [], 10, "Low", [0, 100], [0, 100]),
+				recipe(
+					"input.auto.balanced.rnnoise-embedded", "Auto", "RNNoise", ["rnnoise:embedded"],
+					30, "Standard", [20, 90], [10, 90],
+				),
+				recipe(
+					"input.auto.quality.deepfilternet-balanced", "Auto", "DeepFilterNet",
+					["deepfilternet:balanced"], 50, "High", [25, 90], [25, 100],
+				),
+				recipe(
+					"input.voice-focus.deepfilternet-balanced", "VoiceFocus", "DeepFilterNet",
+					["deepfilternet:balanced"], 50, "High", [70, 100], [40, 100],
+				),
+			],
+		})
+		metrics_runtime = root / "metrics-runtime.lock"; metrics_runtime.write_bytes(b"python-lock")
+		metric_models = []
+		for metric_id in ("dnsmos", "estoi", "wer-en", "wer-sv"):
+			metric_path = root / f"{metric_id}.bin"; metric_path.write_bytes(metric_id.encode("ascii"))
+			metric_models.append({
+				"id": metric_id, "relative_path": metric_path.name, "sha256": _file_sha256(metric_path),
+				"size_bytes": metric_path.stat().st_size,
+			})
+		metrics_manifest = root / "metrics.json"
+		metrics_manifest.write_text(json.dumps({
+			"schema_version": 1,
+			"runtime": {
+				"id": "self-test", "version": "1", "relative_path": metrics_runtime.name,
+				"sha256": _file_sha256(metrics_runtime), "size_bytes": metrics_runtime.stat().st_size,
+			},
+			"models": metric_models,
+		}), encoding="utf-8")
+		# The self-test adapter emulates the protected machine adapter while still
+		# independently hashing every path named by the contract.
+		manifest_path = Path(__file__).with_name("corpus-lock.json")
+		manifest = LOCK.load_validated_manifest(manifest_path)
+		inventory = PLAN._self_test_inventory(manifest, "mumble-plan-self-test")
+		inventory_path = root / "inventory.json"; _write_json(inventory_path, inventory)
+		plan = PLAN.generate_plan(manifest, inventory, "pr_smoke", "validation", "mumble-plan-self-test", 4, 1000)
+		plan_path = root / "plan.json"; _write_json(plan_path, plan)
+		selected_case = plan["cases"][3]
+		if selected_case["profile"] != "Quality":
+			raise AssertionError("self-test must exercise the DeepFilterNet Quality worker contract")
+		audio = root / "audio"; case_root = audio / selected_case["case_id"]; case_root.mkdir(parents=True)
+		_write_sine(case_root / "client1-input.wav", frequency_hz=220)
+		_write_sine(case_root / "clean-reference.wav", frequency_hz=330)
+		render_manifest = {
+			"schema_version": 2, "renderer": "mumble-audio-mixture-renderer-v2",
+			"plan_sha256": PLAN.canonical_sha256(plan), "corpus_lock_sha256": plan["corpus_lock_sha256"],
+			"corpus_inventory_sha256": plan["corpus_inventory_sha256"], "private_audio_do_not_upload": True,
+			"cases": [{
+				"case_id": selected_case["case_id"],
+				"input": {"path": f"{selected_case['case_id']}/client1-input.wav", "sha256": _file_sha256(case_root / "client1-input.wav")},
+				"clean_reference": {"path": f"{selected_case['case_id']}/clean-reference.wav", "sha256": _file_sha256(case_root / "clean-reference.wav")},
+			}],
+		}
+		render_manifest_path = root / "render.json"; _write_json(render_manifest_path, render_manifest)
+		adapter = root / "adapter.py"
+		adapter.write_text(
+			"import argparse,hashlib,json,shutil\n"
+			"from pathlib import Path\n"
+			"def fh(path):\n"
+			" d=hashlib.sha256()\n"
+			" with open(path,'rb') as s:\n"
+			"  for chunk in iter(lambda:s.read(1024*1024),b''): d.update(chunk)\n"
+			" return d.hexdigest()\n"
+			"def canonical(value): return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf8')).hexdigest()\n"
+			"def tree(root):\n"
+			" root=Path(root).resolve(); entries=[]\n"
+			" for path in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix().lower()):\n"
+			"  if path.is_file(): entries.append({'relative_path':path.relative_to(root).as_posix(),'sha256':fh(path),'size_bytes':path.stat().st_size})\n"
+			" return canonical(entries)\n"
+			"p=argparse.ArgumentParser();p.add_argument('--contract');p.add_argument('--result');a=p.parse_args()\n"
+			"c=json.load(open(a.contract,encoding='utf8')); out=c['output_root']+'/capture.wav'; pre=c['output_root']+'/sender-pre-opus.wav'\n"
+			"shutil.copy2(c['clean_reference']['path'],out); shutil.copy2(c['clean_reference']['path'],pre); data=open(out,'rb').read(); pre_data=open(pre,'rb').read()\n"
+			"paths=c['paths']; binding=c['authorized_product_bindings'][0]; engine=binding['engine']\n"
+			"identity={'contract_file_sha256':fh(a.contract),'run_provenance_sha256':canonical(json.load(open(paths['run_provenance'],encoding='utf8'))),'runtime_payload_sha256':tree(paths['runtime_root']),'client_binary_sha256':fh(paths['client_binary']),'server_binary_sha256':fh(paths['server_binary']),'model_manifest_sha256':fh(paths['model_manifest']),'recipe_manifest_sha256':fh(paths['recipe_manifest'])}\n"
+			"worker_frames=100 if engine=='DeepFilterNet' else 0\n"
+			"r={'schema_version':3,'status':'passed','role':c['role'],'profile':c['profile'],"
+			"'receiver_cleanup':False,'input_sha256':c['input']['sha256'],"
+			"'execution_identity':identity,"
+			"'transport':{k:c['transport'][k] for k in ('opus_bitrate_bps','frames_per_packet','transmit_mode')},"
+			"'capture':{'relative_path':'capture.wav','sha256':hashlib.sha256(data).hexdigest(),'size_bytes':len(data)},"
+			"'sender_pre_opus':{'relative_path':'sender-pre-opus.wav','sha256':hashlib.sha256(pre_data).hexdigest(),'size_bytes':len(pre_data)},"
+			"'diagnostics':{'active_profile':c['profile'],'active_engine':engine,'active_recipe':binding['recipe'],'active_models':binding['models'],'callback_frame_count':100,'callback_p99_ms':1.0,'model_initialization_attempts':1 if engine in ('RNNoise','DeepFilterNet') else 0,'worker_frame_count':worker_frames,'worker_p99_ms':2.0 if worker_frames else 0.0,'mean_rtf':0.1,'deadline_miss_count':0,'declared_latency_samples':0,'fallback_count':0,'invalid_output_count':0,'tail_drained':True}}\n"
+			"json.dump(r,open(a.result,'w',encoding='utf8'),sort_keys=True)\n",
+			encoding="utf-8",
+		)
+		args = argparse.Namespace(
+			plan=plan_path, case_id=selected_case["case_id"], render_manifest=render_manifest_path,
+			render_root=audio, runtime_root=runtime, client_binary=client, server_binary=server,
+			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
+			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
+			adapter_arg=[], output_root=root / "output", emit_contracts_only=False,
+		)
+		result = run(args)
+		if result["status"] != "passed" or set(result["results"]) != {
+			"control", "original_comparison", "candidate", "candidate_edge"
+		}:
+			raise AssertionError(
+				"orchestration did not produce route, Original-comparison, noisy candidate, and clean edge evidence"
+			)
+		control_contract = _load_json(root / "output" / "control" / "adapter-contract.json")
+		original_contract = _load_json(root / "output" / "original_comparison" / "adapter-contract.json")
+		candidate_edge_contract = _load_json(root / "output" / "candidate_edge" / "adapter-contract.json")
+		if control_contract["input"]["sha256"] != render_manifest["cases"][0]["clean_reference"]["sha256"]:
+			raise AssertionError("clean Original route control did not use the clean reference")
+		if result["route_control"]["end_loss_budget_samples"] != result["route_control"]["onset_budget_samples"]:
+			raise AssertionError("Original route-origin budget was not applied symmetrically to both speech edges")
+		if result["route_control"]["receiver_edge_gate"] != "route-bounded-not-input-latency":
+			raise AssertionError("receiver capture was not explicitly separated from the hard input timeline gate")
+		if result["input_timeline_gate"] != {
+			"artifact": "sender_pre_opus",
+			"alignment": "fixed-declared-latency",
+			"roles": ["control", "candidate_edge"],
+			"max_onset_loss_samples": FRAME_SAMPLES,
+			"max_end_loss_samples": FRAME_SAMPLES,
+			"complete_tail_required": True,
+		}:
+			raise AssertionError("hard input timeline gate has unexpected semantics")
+		if original_contract["input"]["sha256"] != render_manifest["cases"][0]["input"]["sha256"]:
+			raise AssertionError("noisy Original comparison did not use the rendered mixture")
+		if (
+			candidate_edge_contract["input"]["sha256"]
+			!= render_manifest["cases"][0]["clean_reference"]["sha256"]
+			or candidate_edge_contract["profile"] != selected_case["profile"]
+		):
+			raise AssertionError("candidate_edge did not use clean input with the enhanced candidate profile")
+		for role in ("control", "candidate_edge"):
+			evidence = result["results"][role]
+			pre_opus_score_path = root / "output" / role / "pre-opus-fixed-timeline-score.json"
+			pre_opus_score = _load_json(pre_opus_score_path)
+			if (
+				pre_opus_score.get("passed") is not True
+				or evidence["pre_opus_fixed_timeline_score_sha256"] != _file_sha256(pre_opus_score_path)
+				or evidence["sender_pre_opus_sha256"]
+				!= _load_json(root / "output" / role / "adapter-result.json")["sender_pre_opus"]["sha256"]
+			):
+				raise AssertionError(f"{role} did not bind a passing sender pre-Opus timeline artifact")
+		for role in ("original_comparison", "candidate"):
+			if result["results"][role]["pre_opus_fixed_timeline_score_sha256"] is not None:
+				raise AssertionError(f"noisy {role} was incorrectly used as a hard speech-edge anchor")
+		candidate_evidence = result["results"]["candidate"]
+		candidate_edge_evidence = result["results"]["candidate_edge"]
+		if (
+			candidate_evidence["active_recipe"]["id"] != "input.quality.deepfilternet-balanced"
+			or candidate_evidence["active_models"][0]["id"] != "deepfilternet:balanced"
+			or candidate_evidence["performance"]["model_initialization_attempts"] != 1
+			or candidate_evidence["performance"]["worker_frame_count"] <= 0
+			or candidate_evidence["execution_identity"]["run_provenance_sha256"] != result["run_provenance_sha256"]
+		):
+			raise AssertionError("final evidence did not preserve the active binding, worker metrics, and provenance")
+		if candidate_edge_evidence["qualification_purpose"] != "clean-enhanced-input-edge-probe":
+			raise AssertionError("candidate_edge evidence was not labelled as the clean enhanced input-edge probe")
+
+		candidate_root = root / "output" / "candidate"
+		candidate_contract_path = candidate_root / "adapter-contract.json"
+		candidate_contract = _load_json(candidate_contract_path)
+		candidate_contract_sha256 = _file_sha256(candidate_contract_path)
+		valid_adapter_result = _load_json(candidate_root / "adapter-result.json")
+		negative_result_path = candidate_root / "negative-adapter-result.json"
+
+		def expect_result_failure(label: str, mutate: Any) -> None:
+			invalid_result = json.loads(json.dumps(valid_adapter_result))
+			mutate(invalid_result)
+			_write_json(negative_result_path, invalid_result)
+			try:
+				_validate_adapter_result(
+					negative_result_path, candidate_contract, candidate_contract_path,
+					candidate_contract_sha256, candidate_root,
+				)
+			except E2EError:
+				return
+			raise AssertionError(f"adapter validation accepted corrupted {label} evidence")
+
+		for identity_field in sorted(EXECUTION_IDENTITY_FIELDS | {"contract_file_sha256"}):
+			expect_result_failure(
+				identity_field,
+				lambda value, field=identity_field: value["execution_identity"].__setitem__(field, "0" * 64),
+			)
+		expect_result_failure(
+			"active recipe",
+			lambda value: value["diagnostics"]["active_recipe"].__setitem__("id", "input.quality.changed"),
+		)
+		expect_result_failure(
+			"active model",
+			lambda value: value["diagnostics"]["active_models"][0].__setitem__("sha256", "0" * 64),
+		)
+		expect_result_failure(
+			"sender pre-Opus artifact",
+			lambda value: value["sender_pre_opus"].__setitem__("sha256", "0" * 64),
+		)
+		expect_result_failure(
+			"model initialization attempts",
+			lambda value: value["diagnostics"].__setitem__("model_initialization_attempts", 0),
+		)
+		expect_result_failure(
+			"callback budget",
+			lambda value: value["diagnostics"].__setitem__(
+				"callback_p99_ms", candidate_contract["performance_budgets"]["callback_p99_ms"] + 0.01
+			),
+		)
+		expect_result_failure(
+			"worker budget",
+			lambda value: value["diagnostics"].__setitem__(
+				"worker_p99_ms", candidate_contract["performance_budgets"]["worker_p99_ms"] + 0.01
+			),
+		)
+		expect_result_failure(
+			"mean RTF budget",
+			lambda value: value["diagnostics"].__setitem__(
+				"mean_rtf", candidate_contract["performance_budgets"]["mean_rtf"] + 0.01
+			),
+		)
+
+		candidate_edge_root = root / "output" / "candidate_edge"
+		late_pre_opus = candidate_edge_root / "late-pre-opus.wav"
+		with wave.open(str(case_root / "clean-reference.wav"), "rb") as source:
+			parameters = source.getparams()
+			frames = source.readframes(source.getnframes())
+		with wave.open(str(late_pre_opus), "wb") as target:
+			target.setparams(parameters)
+			target.writeframes(b"\x00\x00" * (FRAME_SAMPLES * 2) + frames)
+		late_score_path = candidate_edge_root / "late-pre-opus-fixed-timeline-score.json"
+		try:
+			_score(
+				case_root / "clean-reference.wav", late_pre_opus, 0, late_score_path,
+				require_complete_tail=True,
+				max_onset_loss_samples=FRAME_SAMPLES,
+				max_end_loss_samples=FRAME_SAMPLES,
+			)
+		except E2EError:
+			late_score = _load_json(late_score_path)
+			if late_score.get("passed") is not False or late_score.get("onset_loss_samples") != FRAME_SAMPLES * 2:
+				raise AssertionError("negative pre-Opus timeline case failed for an unexpected reason")
+		else:
+			raise AssertionError("hard pre-Opus timeline gate accepted a two-frame onset regression")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+	parser = argparse.ArgumentParser(description=__doc__)
+	parser.add_argument("--plan", type=Path)
+	parser.add_argument("--case-id")
+	parser.add_argument("--render-manifest", type=Path)
+	parser.add_argument("--render-root", type=Path)
+	parser.add_argument("--runtime-root", type=Path)
+	parser.add_argument("--client-binary", type=Path)
+	parser.add_argument("--server-binary", type=Path)
+	parser.add_argument("--model-manifest", type=Path)
+	parser.add_argument("--recipe-manifest", type=Path)
+	parser.add_argument("--inventory", type=Path)
+	parser.add_argument("--corpus-lock", type=Path, default=Path(__file__).with_name("corpus-lock.json"))
+	parser.add_argument("--metrics-manifest", type=Path)
+	parser.add_argument("--adapter", type=Path)
+	parser.add_argument("--adapter-arg", action="append", default=[])
+	parser.add_argument("--output-root", type=Path)
+	parser.add_argument("--emit-contracts-only", action="store_true")
+	parser.add_argument("--self-test", action="store_true")
+	args = parser.parse_args(argv)
+	try:
+		if args.self_test:
+			run_self_test()
+			print("two-client E2E core self-test: ok")
+			if args.plan is None:
+				return 0
+		required = (
+			"plan", "case_id", "render_manifest", "render_root", "runtime_root", "client_binary", "server_binary",
+			"model_manifest", "recipe_manifest", "inventory", "metrics_manifest", "adapter", "output_root",
+		)
+		missing = [name for name in required if getattr(args, name) is None]
+		if missing:
+			raise E2EError(f"missing required arguments: {', '.join('--' + name.replace('_', '-') for name in missing)}")
+		result = run(args)
+		print(f"two-client E2E: {result['status']}; case={result['case_id']}; output={args.output_root}")
+		return 0
+	except (E2EError, INVENTORY.InventoryError, LOCK.ValidationError, PLAN.PlanError, AssertionError) as error:
+		print(f"two-client E2E: error: {error}", file=sys.stderr)
+		return 1
+
+
+if __name__ == "__main__":
+	sys.exit(main())

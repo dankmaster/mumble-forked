@@ -185,7 +185,7 @@ jobs:
               echo "Requested suite: \`$REQUESTED_SUITE\`."
               if [[ "$REQUESTED_SUITE" == "pr_smoke" ]]; then
                 echo
-                echo "A separate ephemeral GitHub-hosted Windows job builds the candidate and runs 24 generated-fixture product-pipeline cases."
+                echo "A separate ephemeral GitHub-hosted Windows job builds the candidate and runs 30 generated-fixture core-profile cases."
                 echo "That PR smoke is a catastrophe/correctness gate; licensed human-speech quality evidence remains restricted to the trusted harness."
               fi
             else
@@ -194,7 +194,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   pr-smoke:
-    name: pr-audio-smoke-24-cases
+    name: pr-audio-smoke-30-cases
     if: >-
       github.event_name == 'pull_request' &&
       needs.classify.outputs.applicable == 'true' &&
@@ -323,7 +323,7 @@ jobs:
             -BuildRoot .\build-shared-webengine `
             -OutputPath .\build-shared-webengine\pr-correctness\qualification.json
 
-      - name: Run 24-case generated-fixture product smoke
+      - name: Run 30-case generated-fixture product smoke
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -334,7 +334,7 @@ jobs:
             --recipe-manifest .\build-shared-webengine\unsigned-input-recipes.json `
             --source-sha $env:PR_SOURCE_SHA `
             --output-root .\build-shared-webengine\pr-smoke
-          if ($LASTEXITCODE -ne 0) { throw 'The 24-case PR product-pipeline smoke failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'The 30-case PR product-pipeline smoke failed.' }
 
       - name: Upload only audio-free PR smoke evidence
         if: always()
@@ -361,6 +361,7 @@ jobs:
           CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED }}
           HARNESS_CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' }}
           HARNESS_HASH_CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != '' }}
+          PROVENANCE_CONFIGURED: ${{ vars.INPUT_ENHANCEMENT_QUALITY_PROVENANCE_CONFIGURED }}
           POLICY_RESULT: ${{ needs.policy.result }}
           REPOSITORY_NAME: ${{ github.repository }}
           REQUESTED_SUITE: ${{ needs.classify.outputs.requested_suite }}
@@ -382,13 +383,14 @@ jobs:
             echo "Protected runner flag: \`${CONFIGURED:-false}\`"
             echo "Harness path configured: \`${HARNESS_CONFIGURED:-false}\`"
             echo "Harness SHA-256 configured: \`${HARNESS_HASH_CONFIGURED:-false}\`"
+            echo "Protected provenance bundle configured: \`${PROVENANCE_CONFIGURED:-false}\`"
             echo
             if [[ "$REQUESTED_SUITE" == "none" || "$REQUESTED_SUITE" == "policy_only" ]]; then
               echo "**NOT REQUESTED** — no measured corpus qualification was selected."
             elif [[ "$trusted" != "true" ]]; then
               echo "**NOT RUN** — self-hosted execution is forbidden outside the canonical repository's master ref."
               exit 1
-            elif [[ "$CONFIGURED" != "true" || "$HARNESS_CONFIGURED" != "true" || "$HARNESS_HASH_CONFIGURED" != "true" ]]; then
+            elif [[ "$CONFIGURED" != "true" || "$HARNESS_CONFIGURED" != "true" || "$HARNESS_HASH_CONFIGURED" != "true" || "$PROVENANCE_CONFIGURED" != "true" ]]; then
               echo "**NOT RUN** — protected runners/corpus harness are not configured. No quality pass is claimed."
               exit 1
             elif [[ "$POLICY_RESULT" != "success" ]]; then
@@ -408,6 +410,7 @@ jobs:
       github.repository == 'dankmaster/mumble-forked' &&
       github.ref == 'refs/heads/master' &&
       vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED == 'true' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_PROVENANCE_CONFIGURED == 'true' &&
       vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' &&
       vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != ''
     needs:
@@ -575,6 +578,7 @@ jobs:
       github.repository == 'dankmaster/mumble-forked' &&
       github.ref == 'refs/heads/master' &&
       vars.INPUT_ENHANCEMENT_QUALITY_RUNNERS_CONFIGURED == 'true' &&
+      vars.INPUT_ENHANCEMENT_QUALITY_PROVENANCE_CONFIGURED == 'true' &&
       vars.INPUT_ENHANCEMENT_QUALITY_HARNESS != '' &&
       vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 != ''
     needs:
@@ -629,6 +633,17 @@ jobs:
           HARNESS_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS }}
           HARNESS_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 }}
           LEGACY_BINARY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY }}
+          LEGACY_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY_SHA256 }}
+          SERVER_BINARY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY }}
+          SERVER_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY_SHA256 }}
+          CORPUS_INVENTORY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY }}
+          CORPUS_INVENTORY_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY_SHA256 }}
+          CASE_SET_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET }}
+          CASE_SET_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET_SHA256 }}
+          RELEASE_FIXTURES_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES }}
+          RELEASE_FIXTURES_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES_SHA256 }}
+          METRICS_RUNTIME_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_METRICS_RUNTIME }}
+          METRICS_RUNTIME_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_METRICS_RUNTIME_SHA256 }}
           REQUESTED_SUITE: ${{ needs.classify.outputs.requested_suite }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -662,6 +677,42 @@ jobs:
           if ($harnessSha256 -cne $env:HARNESS_EXPECTED_SHA256) {
             throw "Protected quality harness hash '$harnessSha256' does not match configured '$env:HARNESS_EXPECTED_SHA256'."
           }
+          $protectedInputs = @(
+            @{ Name = 'legacy client'; Path = $env:LEGACY_BINARY_PATH; Hash = $env:LEGACY_EXPECTED_SHA256 },
+            @{ Name = 'OG server'; Path = $env:SERVER_BINARY_PATH; Hash = $env:SERVER_EXPECTED_SHA256 },
+            @{ Name = 'corpus inventory'; Path = $env:CORPUS_INVENTORY_PATH; Hash = $env:CORPUS_INVENTORY_EXPECTED_SHA256 },
+            @{ Name = 'qualification case set'; Path = $env:CASE_SET_PATH; Hash = $env:CASE_SET_EXPECTED_SHA256 },
+            @{ Name = 'release fixtures'; Path = $env:RELEASE_FIXTURES_PATH; Hash = $env:RELEASE_FIXTURES_EXPECTED_SHA256 },
+            @{ Name = 'metrics runtime'; Path = $env:METRICS_RUNTIME_PATH; Hash = $env:METRICS_RUNTIME_EXPECTED_SHA256 }
+          )
+          foreach ($input in $protectedInputs) {
+            if ([string]::IsNullOrWhiteSpace($input.Path) -or
+                -not [System.IO.Path]::IsPathFullyQualified($input.Path) -or
+                $input.Hash -cnotmatch '^[0-9a-f]{64}$') {
+              throw "Protected $($input.Name) path and lowercase SHA-256 must both be configured."
+            }
+          }
+          $cpu = Get-CimInstance Win32_Processor | Sort-Object DeviceID | Select-Object `
+            Manufacturer, Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed
+          $computer = Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory
+          $operatingSystem = Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber
+          $hardware = [ordered]@{
+            schemaVersion = 1
+            runnerClass = '${{ matrix.runner_class }}'
+            cpu = @($cpu)
+            computer = $computer
+            operatingSystem = $operatingSystem
+            activePowerScheme = ((powercfg.exe /getactivescheme) -join ' ').Trim()
+          }
+          $hardwareJson = $hardware | ConvertTo-Json -Depth 8 -Compress
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          try {
+            $hardwareFingerprintSha256 = [Convert]::ToHexString(
+              $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hardwareJson))
+            ).ToLowerInvariant()
+          } finally {
+            $sha.Dispose()
+          }
           $outputRoot = Join-Path $env:RUNNER_TEMP "mumble-audio-quality-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-${{ matrix.runner_class }}"
           python scripts/audio-quality/run-ci-quality-gate.py `
             --suite $env:REQUESTED_SUITE `
@@ -670,9 +721,23 @@ jobs:
             --output-root $outputRoot `
             --tested-binary "$env:GITHUB_WORKSPACE\build-shared-webengine\shared-webengine-stage\mumble.exe" `
             --legacy-binary $legacyBinary.FullName `
+            --expected-legacy-binary-sha256 $env:LEGACY_EXPECTED_SHA256 `
             --staged-client-root "$env:GITHUB_WORKSPACE\build-shared-webengine\shared-webengine-stage" `
             --model-manifest "$env:GITHUB_WORKSPACE\build-shared-webengine\unsigned-input-models.json" `
             --recipe-manifest "$env:GITHUB_WORKSPACE\build-shared-webengine\unsigned-input-recipes.json" `
+            --server-binary $env:SERVER_BINARY_PATH `
+            --expected-server-binary-sha256 $env:SERVER_EXPECTED_SHA256 `
+            --corpus-inventory $env:CORPUS_INVENTORY_PATH `
+            --expected-corpus-inventory-sha256 $env:CORPUS_INVENTORY_EXPECTED_SHA256 `
+            --case-set $env:CASE_SET_PATH `
+            --expected-case-set-sha256 $env:CASE_SET_EXPECTED_SHA256 `
+            --release-fixtures $env:RELEASE_FIXTURES_PATH `
+            --expected-release-fixtures-sha256 $env:RELEASE_FIXTURES_EXPECTED_SHA256 `
+            --metrics-runtime $env:METRICS_RUNTIME_PATH `
+            --expected-metrics-runtime-sha256 $env:METRICS_RUNTIME_EXPECTED_SHA256 `
+            --runner-class '${{ matrix.runner_class }}' `
+            --hardware-fingerprint-sha256 $hardwareFingerprintSha256 `
+            --expected-harness-sha256 $env:HARNESS_EXPECTED_SHA256 `
             --github-output $env:GITHUB_OUTPUT
           if ($LASTEXITCODE -ne 0) {
             throw "Measured audio-quality gate failed with exit code $LASTEXITCODE."
@@ -687,6 +752,7 @@ jobs:
             sourceSha = $env:GITHUB_SHA.ToLowerInvariant()
             qualityWorkflowRunId = [string]$env:GITHUB_RUN_ID
             runnerClass = '${{ matrix.runner_class }}'
+            hardwareFingerprintSha256 = $hardwareFingerprintSha256
             harnessFileName = $harness.Name
             harnessSha256 = $harnessSha256
           }

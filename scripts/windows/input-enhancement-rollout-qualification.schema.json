@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-rollout-qualification-v2.json",
+  "title": "Mumble input-enhancement rollout qualification",
+  "description": "A signed reference envelope. All rollout population, reliability, preference, privacy, build, recipe and window values are read from the separately signed sourceAggregate; the envelope contains no operator-supplied copies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domainRnnoiseTrack", "generatedAtUtc", "kind", "schemaVersion", "sourceAggregate"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "kind": { "const": "input-enhancement-rollout-qualification" },
+    "generatedAtUtc": { "$ref": "#/$defs/utc" },
+    "sourceAggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fileName",
+        "querySha256",
+        "sha256",
+        "signatureFileName",
+        "signatureSha256",
+        "windowSha256"
+      ],
+      "properties": {
+        "fileName": { "const": "input-enhancement-aggregate-export.json" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "signatureFileName": { "const": "input-enhancement-aggregate-export.json.sig" },
+        "signatureSha256": { "$ref": "#/$defs/sha256" },
+        "querySha256": { "$ref": "#/$defs/sha256" },
+        "windowSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "domainRnnoiseTrack": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "const": "pending" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["decision", "outcome", "status"],
+          "properties": {
+            "status": { "const": "completed" },
+            "outcome": { "enum": ["embedded-retained", "custom-promoted"] },
+            "decision": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["fileName", "sha256", "signatureFileName", "signatureSha256"],
+              "properties": {
+                "fileName": { "const": "rnnoise-selection-decision.json" },
+                "sha256": { "$ref": "#/$defs/sha256" },
+                "signatureFileName": { "const": "rnnoise-selection-decision.json.sig" },
+                "signatureSha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }
+  }
+}

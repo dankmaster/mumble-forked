@@ -1,0 +1,20 @@
+# Input-enhancement audio ownership
+/src/mumble/AudioInput.cpp @dankmaster
+/src/mumble/InputEnhancement* @dankmaster
+/src/mumble/input-enhancement/ @dankmaster
+/src/benchmarks/SpeechCleanup/ @dankmaster
+/src/tests/TestInputEnhancement*/ @dankmaster
+/scripts/audio-quality/ @dankmaster
+
+# Input-enhancement update and release ownership
+/src/UpdateHealth* @dankmaster
+/src/updater/ @dankmaster
+/scripts/windows/*input-enhancement* @dankmaster
+/scripts/windows/InputEnhancementReleaseTools.psm1 @dankmaster
+/.github/workflows/input-enhancement-*.yml @dankmaster
+/.github/workflows/mumble-forked.yml @dankmaster
+/.github/workflows/release.yml @dankmaster
+/.github/actions/sign-binaries/ @dankmaster
+
+# Changes to the ownership policy itself require the same owner.
+/.github/CODEOWNERS @dankmaster

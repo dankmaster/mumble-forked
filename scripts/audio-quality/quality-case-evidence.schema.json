@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-quality-case-evidence-v1.json",
+  "title": "One canonical JSONL record from input-enhancement quality case evidence",
+  "description": "The file is LF-delimited canonical JSON: one header, then profile/case sorted case records, then optional Auto transition records.",
+  "oneOf": [
+    { "$ref": "#/$defs/header" },
+    { "$ref": "#/$defs/case" },
+    { "$ref": "#/$defs/autoTransition" }
+  ],
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "counter": { "type": "integer", "minimum": 0 },
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "qualification_binding_sha256",
+        "record_type",
+        "schema_version",
+        "transition_case_count"
+      ],
+      "properties": {
+        "record_type": { "const": "header" },
+        "schema_version": { "const": 1 },
+        "qualification_binding_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "case_count": { "type": "integer", "minimum": 1 },
+        "transition_case_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deadline_misses",
+        "latency_attestation_failures",
+        "model_hash_errors",
+        "nan_or_inf_count",
+        "new_clipping_cases",
+        "tail_drain_failures",
+        "unexplained_fallbacks"
+      ],
+      "properties": {
+        "deadline_misses": { "$ref": "#/$defs/counter" },
+        "latency_attestation_failures": { "$ref": "#/$defs/counter" },
+        "model_hash_errors": { "$ref": "#/$defs/counter" },
+        "nan_or_inf_count": { "$ref": "#/$defs/counter" },
+        "new_clipping_cases": { "$ref": "#/$defs/counter" },
+        "tail_drain_failures": { "$ref": "#/$defs/counter" },
+        "unexplained_fallbacks": { "$ref": "#/$defs/counter" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "cohort_id",
+        "condition",
+        "counters",
+        "failed",
+        "fixed_timeline",
+        "language",
+        "metrics",
+        "performance",
+        "profile",
+        "receiver_cleanup_enabled",
+        "record_type",
+        "startup_preroll_ms"
+      ],
+      "properties": {
+        "record_type": { "const": "case" },
+        "case_id": { "$ref": "#/$defs/identifier" },
+        "profile": { "enum": ["Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto"] },
+        "condition": { "enum": ["clean", "noisy", "severe"] },
+        "cohort_id": { "$ref": "#/$defs/identifier" },
+        "language": { "type": "string", "minLength": 1 },
+        "startup_preroll_ms": { "enum": [0, 300] },
+        "fixed_timeline": { "type": "boolean" },
+        "receiver_cleanup_enabled": { "type": "boolean" },
+        "failed": { "type": "boolean" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithmic_latency_ms",
+            "dnsmos_bak_improvement",
+            "dnsmos_ovrl_improvement",
+            "dnsmos_sig_loss",
+            "estoi_loss",
+            "severe_noise_bak_improvement_over_quality",
+            "speech_edge_loss_ms",
+            "wer_loss_percentage_points"
+          ],
+          "properties": {
+            "algorithmic_latency_ms": { "type": "number", "minimum": 0 },
+            "dnsmos_bak_improvement": { "type": "number" },
+            "dnsmos_ovrl_improvement": { "type": "number" },
+            "dnsmos_sig_loss": { "type": "number" },
+            "estoi_loss": { "type": "number" },
+            "severe_noise_bak_improvement_over_quality": { "type": "number" },
+            "speech_edge_loss_ms": { "type": "number", "minimum": 0 },
+            "wer_loss_percentage_points": { "type": "number" }
+          }
+        },
+        "counters": { "$ref": "#/$defs/counters" },
+        "performance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "audio_duration_seconds",
+            "callback_durations_ms",
+            "max_internal_processing_ms",
+            "memory_growth_bytes",
+            "processing_duration_seconds",
+            "soak_duration_seconds"
+          ],
+          "properties": {
+            "audio_duration_seconds": { "type": "number", "exclusiveMinimum": 0 },
+            "processing_duration_seconds": { "type": "number", "minimum": 0 },
+            "callback_durations_ms": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "number", "minimum": 0 }
+            },
+            "max_internal_processing_ms": { "type": "number", "minimum": 0 },
+            "memory_growth_bytes": { "type": "integer" },
+            "soak_duration_seconds": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "transitionCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deadline_misses", "nan_or_inf_count", "new_clipping_cases", "unexplained_fallbacks"],
+      "properties": {
+        "deadline_misses": { "$ref": "#/$defs/counter" },
+        "nan_or_inf_count": { "$ref": "#/$defs/counter" },
+        "new_clipping_cases": { "$ref": "#/$defs/counter" },
+        "unexplained_fallbacks": { "$ref": "#/$defs/counter" }
+      }
+    },
+    "autoTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "counters",
+        "directed_pair",
+        "failed",
+        "fixed_timeline",
+        "metrics",
+        "performance",
+        "receiver_cleanup_enabled",
+        "record_type",
+        "startup_preroll_ms"
+      ],
+      "properties": {
+        "record_type": { "const": "auto_transition" },
+        "case_id": { "$ref": "#/$defs/identifier" },
+        "directed_pair": {
+          "enum": [
+            "Light->Balanced",
+            "Balanced->Light",
+            "Light->Quality",
+            "Quality->Light",
+            "Balanced->Quality",
+            "Quality->Balanced"
+          ]
+        },
+        "startup_preroll_ms": { "enum": [0, 300] },
+        "fixed_timeline": { "type": "boolean" },
+        "receiver_cleanup_enabled": { "type": "boolean" },
+        "failed": { "type": "boolean" },
+        "counters": { "$ref": "#/$defs/transitionCounters" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["speech_edge_loss_ms", "transition_processing_ms"],
+          "properties": {
+            "speech_edge_loss_ms": { "type": "number", "minimum": 0 },
+            "transition_processing_ms": { "type": "number", "minimum": 0 }
+          }
+        },
+        "performance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["memory_growth_bytes", "soak_duration_seconds"],
+          "properties": {
+            "memory_growth_bytes": { "type": "integer" },
+            "soak_duration_seconds": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

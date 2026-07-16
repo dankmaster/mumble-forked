@@ -36,6 +36,10 @@ private:
 	void writeDone(bool ok, const QString &errorMessage, std::uint64_t sourceFrames,
 				   std::uint64_t submittedFrames);
 	void observeInputPcm(const float *samples, unsigned int sampleCount);
+	void submitInputFrame(float *samples, unsigned int sampleCount);
+	void observePreOpusPcm(short *samples, unsigned int sampleCount, unsigned int channelCount,
+						 unsigned int sampleRate, bool isSpeech);
+	bool writePreOpusCapture(QString *errorMessage) const;
 	void beginVoiceContractObservation();
 	void finishVoiceContractObservation();
 	bool m_voiceContractEnabled = false;
@@ -46,6 +50,13 @@ private:
 	Mumble::SpeechCleanupE2E::OpusObservation m_opusObservation;
 	bool m_terminatorSubmitted = false;
 	unsigned int m_drainedCleanupSamples = 0;
+	std::vector< short > m_preOpusPcm;
+	std::uint64_t m_nextInputFrameIndex = 0;
+	std::uint64_t m_currentInputFrameIndex = 0;
+	std::uint64_t m_preOpusCallbacks = 0;
+	bool m_inputFrameArmed = false;
+	bool m_preOpusCaptureValid = true;
+	QString m_preOpusCaptureError;
 };
 
 class SpeechCleanupTestAudioOutput final : public AudioOutput {

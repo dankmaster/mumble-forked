@@ -165,7 +165,7 @@ private:
 /// the old and new product pipelines to contain no speech tail.
 class AcousticSilenceSwitchBoundary final {
 public:
-	/// 300 ms is longer than the sum of two maximum qualified Crisp latencies
+	/// 300 ms is longer than the sum of two maximum qualified Quality latencies
 	/// (2 * 50 ms) and provides margin for VAD/room-noise jitter.
 	static constexpr std::uint16_t minimumSilentFrames = 30;
 

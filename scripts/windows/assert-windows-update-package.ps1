@@ -79,7 +79,7 @@ try {
 		'minUpdaterVersion', 'applyMode', 'createdAt', 'healthCheck', 'files'
 	) 'Update manifest'
 	if ([int]$manifest.manifestVersion -ne 1 -or [string]$manifest.format -cne 'mumble-update-v1' -or
-		[string]$manifest.packageId -cne 'mumble-forked' -or [int]$manifest.minUpdaterVersion -ne 3 -or
+		[string]$manifest.packageId -cne 'mumble-forked' -or [int]$manifest.minUpdaterVersion -ne 4 -or
 		[string]$manifest.applyMode -cne 'replace-staged-payload') {
 		throw "Update manifest identity or updater contract is invalid."
 	}
@@ -127,9 +127,6 @@ try {
 	}
 	foreach ($required in @('mumble.exe', 'mumble-updater.exe')) {
 		if (-not $manifestPaths.Contains($required)) { throw "Update payload is missing '$required'." }
-	}
-	if ($RequireUpdaterRuntime -and -not $manifestPaths.Contains('zlib1.dll')) {
-		throw "Update payload is missing zlib1.dll."
 	}
 	if ($RequireGStreamerRuntime -and @($actualPaths | Where-Object { $_ -like 'gstreamer/lib/gstreamer-1.0/*.dll' }).Count -eq 0) {
 		throw "Update payload is missing the packaged GStreamer plugins."

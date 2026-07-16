@@ -22,6 +22,13 @@
 
 namespace {
 	struct DFState;
+	// DeepFilterNet is materially less speech-preserving when a quiet microphone
+	// reaches the model at roughly -50 dBFS or below (the downstream Mumble AGC
+	// intentionally runs after input enhancement). Normalize only the model
+	// domain, then undo the exact gain on the causally corresponding output. The
+	// user's PCM level and the delayed dry path therefore remain unchanged.
+	constexpr float modelDomainNominalGain = 8.0f; // +18.06 dB
+	constexpr float modelDomainPeakLimit   = 0.95f;
 
 	using DfCreateFn            = DFState *(*)(const char *path, float attenLim, const char *logLevel);
 	using DfGetFrameLengthFn    = std::size_t (*)(DFState *state);
@@ -102,7 +109,7 @@ namespace {
 class DeepFilterNetSpeechCleanup::Implementation {
 public:
 	explicit Implementation(const Mumble::SpeechCleanup::Selection &selection)
-		: m_profile(profileForSelection(selection)) {
+		: m_profile(profileForSelection(selection)), m_modelDomainNormalization(selection.modelDomainNormalization) {
 #ifdef USE_DEEPFILTERNET
 		m_modelPath = resolveModelPath(m_profile, m_activeModelId, m_usedFallback);
 		if (m_modelPath.isEmpty()) {
@@ -246,7 +253,7 @@ public:
 			m_inputFrame[m_inputFrameSize++] = inputSample;
 			if (m_inputFrameSize == m_frameLength) {
 				float localSnr   = std::numeric_limits< float >::quiet_NaN();
-				const int status = m_processFrameV2(m_state, m_inputFrame.data(), m_outputFrame.data(), &localSnr);
+				const int status = processModelFrame(m_inputFrame.data(), m_outputFrame.data(), &localSnr);
 				m_inputFrameSize = 0;
 				m_outputFramePosition = 0;
 				if (status != DeepFilterNetRealtimeWorker::statusOk) {
@@ -320,7 +327,49 @@ private:
 			return 1;
 		}
 		float localSnr = std::numeric_limits< float >::quiet_NaN();
-		return self->m_processFrameV2(self->m_state, input, output, &localSnr);
+		return self->processModelFrame(input, output, &localSnr);
+	}
+
+	int processModelFrame(const float *input, float *output, float *localSnr) noexcept {
+		if (!input || !output || !m_state || !m_processFrameV2) {
+			return DeepFilterNetRealtimeWorker::statusInvalidFrame;
+		}
+		if (!m_modelDomainNormalization) {
+			return m_processFrameV2(m_state, input, output, localSnr);
+		}
+		if (m_modelInputFrame.size() != m_frameLength || m_modelOutputInverseGain.size() != m_frameLength) {
+			return DeepFilterNetRealtimeWorker::statusInvalidFrame;
+		}
+
+		float peak = 0.0f;
+		for (std::size_t index = 0; index < m_frameLength; ++index) {
+			const float sample = std::isfinite(input[index]) ? std::clamp(input[index], -1.0f, 1.0f) : 0.0f;
+			peak               = std::max(peak, std::abs(sample));
+		}
+		const float headroomGain = peak > 0.0f ? modelDomainPeakLimit / peak : modelDomainNominalGain;
+		const float inputGain    = std::clamp(headroomGain, 1.0f, modelDomainNominalGain);
+
+		for (std::size_t index = 0; index < m_frameLength; ++index) {
+			const float sample = std::isfinite(input[index]) ? std::clamp(input[index], -1.0f, 1.0f) : 0.0f;
+			m_modelInputFrame[index] = std::clamp(sample * inputGain, -modelDomainPeakLimit, modelDomainPeakLimit);
+
+			float correspondingGain = inputGain;
+			if (!m_modelGainDelay.empty()) {
+				correspondingGain = m_modelGainDelay[m_modelGainDelayPosition];
+				m_modelGainDelay[m_modelGainDelayPosition] = inputGain;
+				m_modelGainDelayPosition = (m_modelGainDelayPosition + 1) % m_modelGainDelay.size();
+			}
+			m_modelOutputInverseGain[index] = 1.0f / std::max(correspondingGain, 1.0f);
+		}
+
+		const int status = m_processFrameV2(m_state, m_modelInputFrame.data(), output, localSnr);
+		if (status != DeepFilterNetRealtimeWorker::statusOk) {
+			return status;
+		}
+		for (std::size_t index = 0; index < m_frameLength; ++index) {
+			output[index] *= m_modelOutputInverseGain[index];
+		}
+		return DeepFilterNetRealtimeWorker::statusOk;
 	}
 
 	void processRealtimeInPlace(float *samples, unsigned int sampleCount, float mixFactor) noexcept {
@@ -380,6 +429,10 @@ private:
 		m_setPostFilterBeta(m_state, m_profile.postFilterBeta);
 		m_inputFrame.assign(m_frameLength, 0.0f);
 		m_outputFrame.assign(m_frameLength, 0.0f);
+		m_modelInputFrame.assign(m_modelDomainNormalization ? m_frameLength : 0, 0.0f);
+		m_modelOutputInverseGain.assign(m_modelDomainNormalization ? m_frameLength : 0, 1.0f);
+		m_modelGainDelay.assign(m_modelDomainNormalization ? algorithmicLatency : 0, 1.0f);
+		m_modelGainDelayPosition = 0;
 		m_inputFrameSize = 0;
 		m_outputFramePosition = m_frameLength;
 		m_dryDelay.assign(m_latencySamples, 0.0f);
@@ -397,10 +450,15 @@ private:
 		m_synchronousLatencySamples = 0;
 		m_realtimeLatencySamples = 0;
 		m_latencySamples = 0;
+		m_modelInputFrame.clear();
+		m_modelOutputInverseGain.clear();
+		m_modelGainDelay.clear();
+		m_modelGainDelayPosition = 0;
 	}
 
 	QLibrary m_library;
 	DeepFilterNetProfile m_profile;
+	const bool m_modelDomainNormalization = false;
 	QString m_modelPath;
 	QString m_activeModelId;
 	DFState *m_state = nullptr;
@@ -414,6 +472,10 @@ private:
 	std::size_t m_frameLength = 0;
 	std::vector< float > m_inputFrame;
 	std::vector< float > m_outputFrame;
+	std::vector< float > m_modelInputFrame;
+	std::vector< float > m_modelOutputInverseGain;
+	std::vector< float > m_modelGainDelay;
+	std::size_t m_modelGainDelayPosition = 0;
 	std::size_t m_inputFrameSize = 0;
 	std::size_t m_outputFramePosition = 0;
 	std::vector< float > m_dryDelay;

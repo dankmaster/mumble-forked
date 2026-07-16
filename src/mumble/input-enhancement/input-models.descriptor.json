@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogRevision": "input-recipes-v1",
+  "catalogRevision": "input-recipes-v2",
   "models": [
     {
       "id": "rnnoise:embedded",
@@ -94,8 +94,9 @@
       "sampleRateHz": 48000,
       "algorithmicLatencyMs": 40,
       "recipeCompatibility": [
-        "input.crisp.deepfilternet-balanced",
-        "input.auto.crisp.deepfilternet-balanced"
+        "input.quality.deepfilternet-balanced",
+        "input.auto.quality.deepfilternet-balanced",
+        "input.voice-focus.deepfilternet-balanced"
       ]
     },
     {

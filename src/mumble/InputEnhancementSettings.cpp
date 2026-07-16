@@ -33,21 +33,23 @@ namespace {
 	}
 
 	bool failSafePendingWithoutLastKnownGood(DeviceProfileState &state) {
-		const bool lastKnownGoodNeedsBinding = state.lastKnownGood && state.lastKnownGood->profile != Profile::Original;
 		if (!state.pendingValidation
-			|| (state.lastKnownGood && state.pendingRecipeBinding
-				&& recipeBindingMatchesPreference(*state.pendingRecipeBinding, state.preference)
-				&& (!lastKnownGoodNeedsBinding
-					|| (state.lastKnownGoodRecipeBinding
-						&& recipeBindingMatchesPreference(*state.lastKnownGoodRecipeBinding, *state.lastKnownGood))))) {
+			|| (state.lastKnownGood
+				&& executionBindingMatchesPreference(state.preference, state.pendingRecipeBinding,
+													 state.pendingAutoRecipeSetFingerprint)
+				&& executionBindingMatchesPreference(*state.lastKnownGood, state.lastKnownGoodRecipeBinding,
+													 state.lastKnownGoodAutoRecipeSetFingerprint))) {
 			return false;
 		}
 		state.preference    = safeOriginalPreference();
 		state.lastKnownGood = state.preference;
 		state.lastKnownGoodRecipeBinding.reset();
+		state.lastKnownGoodAutoRecipeSetFingerprint.reset();
 		state.pendingRecipeBinding.reset();
+		state.pendingAutoRecipeSetFingerprint.reset();
 		state.rollbackUndoPreference.reset();
 		state.rollbackUndoRecipeBinding.reset();
+		state.rollbackUndoAutoRecipeSetFingerprint.reset();
 		state.pendingValidation  = false;
 		state.lastRollbackReason = QStringLiteral("missing_exact_recipe_binding");
 		state.legacyOverride.reset();
@@ -55,20 +57,21 @@ namespace {
 	}
 
 	bool hasExactRollbackUndo(const DeviceProfileState &state) {
-		if (state.pendingValidation || !state.rollbackUndoPreference || !state.rollbackUndoRecipeBinding
-			|| !state.lastKnownGood || state.preference != *state.lastKnownGood
-			|| !recipeBindingMatchesPreference(*state.rollbackUndoRecipeBinding, *state.rollbackUndoPreference)) {
+		if (state.pendingValidation || !state.rollbackUndoPreference || !state.lastKnownGood
+			|| state.preference != *state.lastKnownGood
+			|| !executionBindingMatchesPreference(*state.rollbackUndoPreference, state.rollbackUndoRecipeBinding,
+												  state.rollbackUndoAutoRecipeSetFingerprint)) {
 			return false;
 		}
-		return state.lastKnownGood->profile == Profile::Original
-			   || (state.lastKnownGoodRecipeBinding
-				   && recipeBindingMatchesPreference(*state.lastKnownGoodRecipeBinding, *state.lastKnownGood));
+		return executionBindingMatchesPreference(*state.lastKnownGood, state.lastKnownGoodRecipeBinding,
+												 state.lastKnownGoodAutoRecipeSetFingerprint);
 	}
 
 	void sanitizeRollbackUndo(DeviceProfileState &state) {
 		if (!hasExactRollbackUndo(state)) {
 			state.rollbackUndoPreference.reset();
 			state.rollbackUndoRecipeBinding.reset();
+			state.rollbackUndoAutoRecipeSetFingerprint.reset();
 		}
 	}
 
@@ -207,6 +210,14 @@ namespace {
 		});
 	}
 
+	QString deserializeAutoRecipeSetFingerprint(const nlohmann::json &json) {
+		const QString fingerprint = QString::fromStdString(json.get< std::string >());
+		if (!isValidAutoRecipeSetFingerprint(fingerprint)) {
+			throw std::out_of_range("Input enhancement Auto recipe-set fingerprint is invalid");
+		}
+		return fingerprint;
+	}
+
 	nlohmann::json serializeRecipeBinding(const RecipeBinding &binding) {
 		if (!isValidRecipeBinding(binding)) {
 			throw std::out_of_range("Input enhancement recipe binding is invalid");
@@ -270,12 +281,34 @@ namespace {
 		if (safeState.lastKnownGoodRecipeBinding) {
 			json["last_known_good_recipe"] = serializeRecipeBinding(*safeState.lastKnownGoodRecipeBinding);
 		}
+		if (safeState.lastKnownGoodAutoRecipeSetFingerprint) {
+			if (!isValidAutoRecipeSetFingerprint(*safeState.lastKnownGoodAutoRecipeSetFingerprint)) {
+				throw std::out_of_range("Input enhancement last-known-good Auto fingerprint is invalid");
+			}
+			json["last_known_good_auto_recipe_set_fingerprint"] =
+				safeState.lastKnownGoodAutoRecipeSetFingerprint->toStdString();
+		}
 		if (safeState.pendingRecipeBinding) {
 			json["pending_recipe"] = serializeRecipeBinding(*safeState.pendingRecipeBinding);
 		}
-		if (safeState.rollbackUndoPreference && safeState.rollbackUndoRecipeBinding) {
+		if (safeState.pendingAutoRecipeSetFingerprint) {
+			if (!isValidAutoRecipeSetFingerprint(*safeState.pendingAutoRecipeSetFingerprint)) {
+				throw std::out_of_range("Input enhancement pending Auto fingerprint is invalid");
+			}
+			json["pending_auto_recipe_set_fingerprint"] = safeState.pendingAutoRecipeSetFingerprint->toStdString();
+		}
+		if (safeState.rollbackUndoPreference) {
 			json["rollback_undo_preference"] = serializePreference(*safeState.rollbackUndoPreference);
-			json["rollback_undo_recipe"]     = serializeRecipeBinding(*safeState.rollbackUndoRecipeBinding);
+			if (safeState.rollbackUndoRecipeBinding) {
+				json["rollback_undo_recipe"] = serializeRecipeBinding(*safeState.rollbackUndoRecipeBinding);
+			}
+			if (safeState.rollbackUndoAutoRecipeSetFingerprint) {
+				if (!isValidAutoRecipeSetFingerprint(*safeState.rollbackUndoAutoRecipeSetFingerprint)) {
+					throw std::out_of_range("Input enhancement rollback-undo Auto fingerprint is invalid");
+				}
+				json["rollback_undo_auto_recipe_set_fingerprint"] =
+					safeState.rollbackUndoAutoRecipeSetFingerprint->toStdString();
+			}
 		}
 		if (safeState.legacyOverride) {
 			json["legacy_override"] = serializeLegacyOverride(*safeState.legacyOverride);
@@ -300,14 +333,26 @@ namespace {
 		if (json.contains("last_known_good_recipe")) {
 			state.lastKnownGoodRecipeBinding = deserializeRecipeBinding(json.at("last_known_good_recipe"));
 		}
+		if (json.contains("last_known_good_auto_recipe_set_fingerprint")) {
+			state.lastKnownGoodAutoRecipeSetFingerprint =
+				deserializeAutoRecipeSetFingerprint(json.at("last_known_good_auto_recipe_set_fingerprint"));
+		}
 		if (json.contains("pending_recipe")) {
 			state.pendingRecipeBinding = deserializeRecipeBinding(json.at("pending_recipe"));
+		}
+		if (json.contains("pending_auto_recipe_set_fingerprint")) {
+			state.pendingAutoRecipeSetFingerprint =
+				deserializeAutoRecipeSetFingerprint(json.at("pending_auto_recipe_set_fingerprint"));
 		}
 		if (json.contains("rollback_undo_preference")) {
 			state.rollbackUndoPreference = deserializePreference(json.at("rollback_undo_preference"));
 		}
 		if (json.contains("rollback_undo_recipe")) {
 			state.rollbackUndoRecipeBinding = deserializeRecipeBinding(json.at("rollback_undo_recipe"));
+		}
+		if (json.contains("rollback_undo_auto_recipe_set_fingerprint")) {
+			state.rollbackUndoAutoRecipeSetFingerprint =
+				deserializeAutoRecipeSetFingerprint(json.at("rollback_undo_auto_recipe_set_fingerprint"));
 		}
 		if (json.contains("legacy_override")) {
 			state.legacyOverride = deserializeLegacyOverride(json.at("legacy_override"));
@@ -355,9 +400,12 @@ bool DeviceProfileState::operator==(const DeviceProfileState &other) const {
 	return identity == other.identity && preference == other.preference && calibrated == other.calibrated
 		   && lastUsedEpochMs == other.lastUsedEpochMs && lastKnownGood == other.lastKnownGood
 		   && lastKnownGoodRecipeBinding == other.lastKnownGoodRecipeBinding
+		   && lastKnownGoodAutoRecipeSetFingerprint == other.lastKnownGoodAutoRecipeSetFingerprint
 		   && pendingRecipeBinding == other.pendingRecipeBinding
+		   && pendingAutoRecipeSetFingerprint == other.pendingAutoRecipeSetFingerprint
 		   && rollbackUndoPreference == other.rollbackUndoPreference
 		   && rollbackUndoRecipeBinding == other.rollbackUndoRecipeBinding
+		   && rollbackUndoAutoRecipeSetFingerprint == other.rollbackUndoAutoRecipeSetFingerprint
 		   && pendingValidation == other.pendingValidation && lastRollbackReason == other.lastRollbackReason
 		   && legacyOverride == other.legacyOverride;
 }
@@ -400,12 +448,11 @@ const DeviceProfileState *findDeviceProfile(const Settings &settings, const Devi
 const DefaultPreference &preferenceForDevice(const Settings &settings, const DeviceIdentity &identity) noexcept {
 	if (const DeviceProfileState *profile = findDeviceProfile(settings, identity)) {
 		if (profile->pendingValidation
-			&& (!profile->lastKnownGood || !profile->pendingRecipeBinding
-				|| !recipeBindingMatchesPreference(*profile->pendingRecipeBinding, profile->preference)
-				|| (profile->lastKnownGood->profile != Profile::Original
-					&& (!profile->lastKnownGoodRecipeBinding
-						|| !recipeBindingMatchesPreference(*profile->lastKnownGoodRecipeBinding,
-														   *profile->lastKnownGood))))) {
+			&& (!profile->lastKnownGood
+				|| !executionBindingMatchesPreference(profile->preference, profile->pendingRecipeBinding,
+													  profile->pendingAutoRecipeSetFingerprint)
+				|| !executionBindingMatchesPreference(*profile->lastKnownGood, profile->lastKnownGoodRecipeBinding,
+													  profile->lastKnownGoodAutoRecipeSetFingerprint))) {
 			return safeOriginalPreferenceReference();
 		}
 		return profile->preference;
@@ -471,29 +518,33 @@ bool isValidRecipeBinding(const RecipeBinding &binding) {
 				return false;
 			}
 			break;
-		case Profile::Crisp:
+		case Profile::Quality:
 			if ((binding.engine != Engine::DeepFilterNet && binding.engine != Engine::DTLN)
-				|| binding.latencyBudgetSamples != crispLatencyBudgetSamples
+				|| binding.latencyBudgetSamples != qualityLatencyBudgetSamples
 				|| binding.minimumCpuClass != CpuClass::High) {
 				return false;
 			}
 			break;
 		case Profile::Auto:
 			return false;
+		case Profile::VoiceFocus:
+			if (binding.engine != Engine::DeepFilterNet
+				|| binding.latencyBudgetSamples != voiceFocusLatencyBudgetSamples
+				|| binding.minimumCpuClass != CpuClass::High) {
+				return false;
+			}
+			break;
 	}
 	const bool neural =
 		binding.engine == Engine::RNNoise || binding.engine == Engine::DeepFilterNet || binding.engine == Engine::DTLN;
 	if (!neural) {
 		return binding.modelId.isEmpty() && binding.modelSha256.isEmpty() && binding.modelRelativePath.isEmpty();
 	}
-	// Local build-number-zero clients deliberately run without a release key or
-	// signed manifests. Keep their bindings unmistakably development-only: a
-	// signed production catalog can never match this revision, so carrying the
-	// settings into a release falls safely back to Original.
-	if (binding.catalogRevision == QLatin1String("unmanaged-build-zero")) {
-		return safeBindingIdentifier(binding.modelId, 128) && binding.modelSha256.isEmpty()
-			   && binding.modelRelativePath.isEmpty();
-	}
+	// Build-number-zero packages use the reserved catalog revision below, so a
+	// development binding can never match a signed production catalog. Neural
+	// development recipes are still bound to the exact manifest-attested model
+	// hash and relative path; being unsigned must not make the local contract
+	// weaker than the release contract.
 	if (!safeBindingIdentifier(binding.modelId, 128) || binding.modelSha256.size() != 64
 		|| binding.modelSha256 != binding.modelSha256.toLower() || binding.modelRelativePath.isEmpty()
 		|| binding.modelRelativePath.size() > 240 || binding.modelRelativePath.startsWith(QLatin1Char('/'))
@@ -517,6 +568,16 @@ bool isValidRecipeBinding(const RecipeBinding &binding) {
 	});
 }
 
+bool isValidAutoRecipeSetFingerprint(const QString &fingerprint) noexcept {
+	if (fingerprint.size() != 64 || fingerprint != fingerprint.toLower()) {
+		return false;
+	}
+	return std::all_of(fingerprint.cbegin(), fingerprint.cend(), [](const QChar character) {
+		return (character >= QLatin1Char('0') && character <= QLatin1Char('9'))
+			   || (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
+	});
+}
+
 bool recipeBindingMatches(const RecipeBinding &binding, const Recipe &recipe, const QString &catalogRevision,
 						  const QString &modelSha256, const QString &modelRelativePath) {
 	return isValidRecipeBinding(binding)
@@ -533,33 +594,52 @@ bool recipeBindingMatchesPreference(const RecipeBinding &binding, const DefaultP
 	return binding.noiseReduction == controls.noiseReduction && binding.naturalCrisp == controls.naturalCrisp;
 }
 
+bool executionBindingMatchesPreference(const DefaultPreference &preference,
+									   const std::optional< RecipeBinding > &recipeBinding,
+									   const std::optional< QString > &autoRecipeSetFingerprint) noexcept {
+	if (preference.profile == Profile::Auto) {
+		return !recipeBinding && autoRecipeSetFingerprint && isValidAutoRecipeSetFingerprint(*autoRecipeSetFingerprint);
+	}
+	if (autoRecipeSetFingerprint) {
+		return false;
+	}
+	if (preference.profile == Profile::Original && !recipeBinding) {
+		return true;
+	}
+	return recipeBinding && recipeBindingMatchesPreference(*recipeBinding, preference);
+}
+
 bool rollbackPendingValidationAfterAbnormalExit(Settings &settings) {
 	bool changed = false;
 	for (DeviceProfileState &state : settings.deviceProfiles) {
 		if (!state.pendingValidation) {
 			continue;
 		}
-		const DefaultPreference candidatePreference           = state.preference;
-		const std::optional< RecipeBinding > candidateBinding = state.pendingRecipeBinding;
+		const DefaultPreference candidatePreference             = state.preference;
+		const std::optional< RecipeBinding > candidateBinding   = state.pendingRecipeBinding;
+		const std::optional< QString > candidateAutoFingerprint = state.pendingAutoRecipeSetFingerprint;
 		const bool exactCandidate =
-			candidateBinding && recipeBindingMatchesPreference(*candidateBinding, candidatePreference);
+			executionBindingMatchesPreference(candidatePreference, candidateBinding, candidateAutoFingerprint);
 		const bool exactLastKnownGood =
 			state.lastKnownGood
-			&& (state.lastKnownGood->profile == Profile::Original
-				|| (state.lastKnownGoodRecipeBinding
-					&& recipeBindingMatchesPreference(*state.lastKnownGoodRecipeBinding, *state.lastKnownGood)));
+			&& executionBindingMatchesPreference(*state.lastKnownGood, state.lastKnownGoodRecipeBinding,
+												 state.lastKnownGoodAutoRecipeSetFingerprint);
 		state.preference    = exactLastKnownGood ? *state.lastKnownGood : safeOriginalPreference();
 		state.lastKnownGood = state.preference;
 		if (!exactLastKnownGood || state.preference.profile == Profile::Original) {
 			state.lastKnownGoodRecipeBinding.reset();
+			state.lastKnownGoodAutoRecipeSetFingerprint.reset();
 		}
 		state.pendingRecipeBinding.reset();
+		state.pendingAutoRecipeSetFingerprint.reset();
 		if (exactCandidate) {
-			state.rollbackUndoPreference    = candidatePreference;
-			state.rollbackUndoRecipeBinding = candidateBinding;
+			state.rollbackUndoPreference               = candidatePreference;
+			state.rollbackUndoRecipeBinding            = candidateBinding;
+			state.rollbackUndoAutoRecipeSetFingerprint = candidateAutoFingerprint;
 		} else {
 			state.rollbackUndoPreference.reset();
 			state.rollbackUndoRecipeBinding.reset();
+			state.rollbackUndoAutoRecipeSetFingerprint.reset();
 		}
 		state.pendingValidation  = false;
 		state.lastRollbackReason = QStringLiteral("crash_detected");
@@ -653,9 +733,9 @@ Profile profileForLegacy(const int noiseCancelMode, const int backend) {
 		case ::Settings::NoiseCancelSpeex:
 			return Profile::Light;
 		case ::Settings::NoiseCancelRNN:
-			return backend == static_cast< int >(::Settings::RNNoiseBackend) ? Profile::Balanced : Profile::Crisp;
+			return backend == static_cast< int >(::Settings::RNNoiseBackend) ? Profile::Balanced : Profile::Quality;
 		case ::Settings::NoiseCancelBoth:
-			return Profile::Crisp;
+			return Profile::Quality;
 	}
 	return Profile::Original;
 }
@@ -693,7 +773,12 @@ nlohmann::json serializeSettings(const Settings &settings) {
 
 bool deserializeSettings(const nlohmann::json &json, Settings &settings) {
 	try {
-		if (!json.is_object() || json.at("schema_version").get< int >() != SETTINGS_SCHEMA_VERSION) {
+		if (!json.is_object()) {
+			settings = safeOriginalSettings();
+			return false;
+		}
+		const int sourceSchemaVersion = json.at("schema_version").get< int >();
+		if (sourceSchemaVersion != 2 && sourceSchemaVersion != SETTINGS_SCHEMA_VERSION) {
 			settings = safeOriginalSettings();
 			return false;
 		}
@@ -718,7 +803,29 @@ bool deserializeSettings(const nlohmann::json &json, Settings &settings) {
 		if (json.contains("legacy_override")) {
 			parsed.legacyOverride = deserializeLegacyOverride(json.at("legacy_override"));
 		}
-		settings = std::move(parsed);
+		if (sourceSchemaVersion == 2) {
+			// v2 exact bindings name the old Crisp/v1 recipe catalog. Preserve
+			// the audible preference (Crisp parses as the numeric Quality value),
+			// but discard stale attestations so the v2 catalog is preflighted and
+			// rebound instead of failing silently at audio startup.
+			for (DeviceProfileState &device : parsed.deviceProfiles) {
+				if (device.pendingValidation) {
+					device.preference         = device.lastKnownGood.value_or(safeOriginalPreference());
+					device.lastRollbackReason = QStringLiteral("settings_v3_recipe_rebind");
+				}
+				device.lastKnownGood.reset();
+				device.lastKnownGoodRecipeBinding.reset();
+				device.lastKnownGoodAutoRecipeSetFingerprint.reset();
+				device.pendingRecipeBinding.reset();
+				device.pendingAutoRecipeSetFingerprint.reset();
+				device.rollbackUndoPreference.reset();
+				device.rollbackUndoRecipeBinding.reset();
+				device.rollbackUndoAutoRecipeSetFingerprint.reset();
+				device.pendingValidation = false;
+			}
+		}
+		parsed.schemaVersion = SETTINGS_SCHEMA_VERSION;
+		settings             = std::move(parsed);
 		return true;
 	} catch (const std::exception &) {
 		settings = safeOriginalSettings();

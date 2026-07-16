@@ -27,7 +27,7 @@ const QByteArray PrivateSeed     = QByteArray::fromHex("9d61b19deffd5a60ba844af4
 														   "4449c5697b326919703bac031cae7f60");
 const QByteArray PublicKey       = QByteArray::fromHex("d75a980182b10ab7d54bfed3c964073a"
 															 "0ee172f3daa62325af021a68f707511a");
-const QString CatalogRevision    = QStringLiteral("input-recipes-v1");
+const QString CatalogRevision    = QStringLiteral("input-recipes-v2");
 const QByteArray RnnoiseAsset    = QByteArrayLiteral("signed-rnnoise-runtime");
 const QByteArray DeepFilterAsset = QByteArrayLiteral("signed-deepfilter-model");
 
@@ -76,8 +76,7 @@ QJsonObject recipe(const QString &id, const QString &profile, const QString &eng
 		{ QStringLiteral("naturalCrispRange"), QJsonArray{ 0, 100 } },
 		{ QStringLiteral("latencyBudgetMs"), latency },
 		{ QStringLiteral("minimumCpuClass"), cpuClass },
-		{ QStringLiteral("executionSemanticsVersion"),
-		  static_cast< qint64 >(recipeExecutionSemanticsVersion) },
+		{ QStringLiteral("executionSemanticsVersion"), static_cast< qint64 >(recipeExecutionSemanticsVersion) },
 		{ QStringLiteral("mixCurveVersion"), static_cast< qint64 >(qualifiedMixCurveVersion) },
 		{ QStringLiteral("adaptationPolicyVersion"), static_cast< qint64 >(adaptationPolicyVersion) },
 	};
@@ -120,7 +119,9 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 		{ QStringLiteral("licenseSpdx"), QStringLiteral("MIT OR Apache-2.0") },
 		{ QStringLiteral("sampleRateHz"), 48000 },
 		{ QStringLiteral("algorithmicLatencyMs"), 40 },
-		{ QStringLiteral("recipeCompatibility"), QJsonArray{ QStringLiteral("input.crisp.deepfilternet-balanced") } },
+		{ QStringLiteral("recipeCompatibility"),
+		  QJsonArray{ QStringLiteral("input.quality.deepfilternet-balanced"),
+					  QStringLiteral("input.voice-focus.deepfilternet-balanced") } },
 	};
 	QJsonObject modelRoot{
 		{ QStringLiteral("schemaVersion"), 1 },
@@ -130,7 +131,7 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 	};
 
 	QJsonObject recipeRoot{
-		{ QStringLiteral("schemaVersion"), 1 },
+		{ QStringLiteral("schemaVersion"), 2 },
 		{ QStringLiteral("catalogRevision"), CatalogRevision },
 		{ QStringLiteral("modelManifestSha256"), QString(64, QLatin1Char('0')) },
 		{ QStringLiteral("recipes"),
@@ -142,7 +143,10 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 			  recipe(QStringLiteral("input.balanced.rnnoise-embedded"), QStringLiteral("Balanced"),
 					 QStringLiteral("RNNoise"), QJsonArray{ QStringLiteral("rnnoise:embedded") },
 					 QStringLiteral("Standard"), 30),
-			  recipe(QStringLiteral("input.crisp.deepfilternet-balanced"), QStringLiteral("Crisp"),
+			  recipe(QStringLiteral("input.quality.deepfilternet-balanced"), QStringLiteral("Quality"),
+					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:balanced") },
+					 QStringLiteral("High"), 50),
+			  recipe(QStringLiteral("input.voice-focus.deepfilternet-balanced"), QStringLiteral("VoiceFocus"),
 					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:balanced") },
 					 QStringLiteral("High"), 50),
 			  recipe(QStringLiteral("input.auto.balanced.rnnoise-embedded"), QStringLiteral("Auto"),
@@ -179,6 +183,7 @@ class TestInputEnhancementPackageVerifier : public QObject {
 private slots:
 	void acceptsExactSignedCatalogAndPublishesModelHashes();
 	void bindsRuntimeRecipesToSignedCatalog();
+	void preflightExplainsUnavailableProfiles();
 	void rejectsChangedManifestSignatureAndAssetBytes();
 	void rejectsUnsafePathsUnknownReferencesAndWrongCatalog_data();
 	void rejectsUnsafePathsUnknownReferencesAndWrongCatalog();
@@ -204,6 +209,7 @@ void TestInputEnhancementPackageVerifier::acceptsExactSignedCatalogAndPublishesM
 	QCOMPARE(verifier.catalogRevision(), CatalogRevision);
 	QCOMPARE(verifier.modelSha256Hex(QStringLiteral("rnnoise:embedded")),
 			 QString::fromLatin1(QCryptographicHash::hash(RnnoiseAsset, QCryptographicHash::Sha256).toHex()));
+	QCOMPARE(verifier.runtimePayloadFingerprint().size(), 64);
 	QCOMPARE(verifier.modelRelativePath(QStringLiteral("rnnoise:embedded")), QStringLiteral("rnnoise.dll"));
 	QVERIFY(verifier.modelRelativePath(QStringLiteral("missing:model")).isEmpty());
 	QVERIFY(verifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
@@ -223,8 +229,8 @@ void TestInputEnhancementPackageVerifier::bindsRuntimeRecipesToSignedCatalog() {
 	QVERIFY(verifier.verify().verified);
 
 	BackendAvailability availability{ true, true, true };
-	for (const Profile profile :
-		 { Profile::Original, Profile::Light, Profile::Balanced, Profile::Crisp, Profile::Auto }) {
+	for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Quality,
+								   Profile::VoiceFocus, Profile::Auto }) {
 		ResolveRequest request;
 		request.profile             = profile;
 		request.noiseReduction      = 50;
@@ -252,6 +258,39 @@ void TestInputEnhancementPackageVerifier::bindsRuntimeRecipesToSignedCatalog() {
 	balancedRequest.cpuClass            = CpuClass::Standard;
 	balancedRequest.backendAvailability = availability;
 	QVERIFY(!narrowedVerifier.recipeAuthorized(RecipeCatalog::resolve(balancedRequest)));
+}
+
+void TestInputEnhancementPackageVerifier::preflightExplainsUnavailableProfiles() {
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	writeValidPackage(root);
+	InputEnhancementPackageVerifier verifier(configuration(root));
+	QVERIFY(verifier.verify().verified);
+
+	ResolveRequest request;
+	request.profile             = Profile::VoiceFocus;
+	request.cpuClass            = CpuClass::Standard;
+	request.backendAvailability = { true, true, true };
+	ProfileReadiness readiness  = verifier.readinessForProfile(request);
+	QVERIFY(!readiness.selectable);
+	QCOMPARE(readiness.reason, ProfileReadinessReason::InsufficientCpu);
+
+	request.cpuClass = CpuClass::High;
+	readiness        = verifier.readinessForProfile(request);
+	QVERIFY(readiness.selectable);
+	QVERIFY(!readiness.productionQualified);
+	request.captureDevice = CaptureDeviceContext::liveDevice(QStringLiteral("WASAPI"), true);
+	readiness             = verifier.readinessForProfile(request);
+#ifdef Q_OS_WIN
+	QVERIFY(readiness.productionQualified);
+#else
+	QVERIFY(!readiness.productionQualified);
+#endif
+
+	request.backendAvailability.deepFilterNet = false;
+	readiness                                 = verifier.readinessForProfile(request);
+	QVERIFY(!readiness.selectable);
+	QCOMPARE(readiness.reason, ProfileReadinessReason::BackendUnavailable);
 }
 
 void TestInputEnhancementPackageVerifier::rejectsChangedManifestSignatureAndAssetBytes() {
@@ -314,8 +353,8 @@ void TestInputEnhancementPackageVerifier::rejectsUnsafePathsUnknownReferencesAnd
 			entries.replace(2, balanced);
 			recipes.insert(QStringLiteral("recipes"), entries);
 		} else {
-			models.insert(QStringLiteral("catalogRevision"), QStringLiteral("input-recipes-v2"));
-			recipes.insert(QStringLiteral("catalogRevision"), QStringLiteral("input-recipes-v2"));
+			models.insert(QStringLiteral("catalogRevision"), QStringLiteral("input-recipes-v9"));
+			recipes.insert(QStringLiteral("catalogRevision"), QStringLiteral("input-recipes-v9"));
 		}
 	});
 	InputEnhancementPackageVerifier verifier(configuration(root));
@@ -381,7 +420,77 @@ void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() 
 	QVERIFY(!report.verified);
 	QVERIFY(!verifier.managedBySignedPackage());
 	QVERIFY(verifier.verificationHealthy());
-	QVERIFY(verifier.modelAuthorized(QStringLiteral("local:e2e-model"), QStringLiteral("missing.bin")));
+	QVERIFY(verifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Light })));
+	QVERIFY(!verifier.modelAuthorized(QStringLiteral("local:e2e-model"), QStringLiteral("missing.bin")));
+
+	// An unsigned build-0 package is not production-authenticated, but the same
+	// strict parser must bind its product recipes to exact, re-hashed assets.
+	// This is what makes localhost E2E diagnostics useful without allowing an
+	// empty or invented active-model SHA-256.
+	QTemporaryDir attestedRoot;
+	QVERIFY(attestedRoot.isValid());
+	writeValidPackage(attestedRoot);
+	auto attestedConfiguration = configuration(attestedRoot);
+	attestedConfiguration.rawPublicKey.clear();
+	attestedConfiguration.currentBuild = 0;
+	InputEnhancementPackageVerifier attestedVerifier(std::move(attestedConfiguration));
+	const PackageVerificationReport attestedReport = attestedVerifier.verify();
+	QVERIFY(attestedReport.ready);
+	QVERIFY(attestedReport.unmanaged);
+	QVERIFY(!attestedReport.verified);
+	QVERIFY(attestedVerifier.verificationHealthy());
+	QCOMPARE(attestedVerifier.catalogRevision(), CatalogRevision);
+	QCOMPARE(attestedVerifier.modelSha256Hex(QStringLiteral("rnnoise:embedded")),
+			 QString::fromLatin1(QCryptographicHash::hash(RnnoiseAsset, QCryptographicHash::Sha256).toHex()));
+	QCOMPARE(attestedVerifier.modelSha256Hex(QStringLiteral("deepfilternet:balanced")),
+			 QString::fromLatin1(QCryptographicHash::hash(DeepFilterAsset, QCryptographicHash::Sha256).toHex()));
+	QVERIFY(attestedVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
+	QVERIFY(attestedVerifier.modelAuthorized(QStringLiteral("deepfilternet:balanced")));
+	QVERIFY(attestedVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Balanced, 50, 50, CpuClass::High,
+															 BackendAvailability{ true, true, true } })));
+	QVERIFY(attestedVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Quality, 50, 50, CpuClass::High,
+															 BackendAvailability{ true, true, true } })));
+
+	QVERIFY(writeFile(QDir(attestedRoot.path()).filePath(QStringLiteral("rnnoise.dll")),
+				  QByteArray(RnnoiseAsset.size(), 'X')));
+	QVERIFY(!attestedVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
+
+	// Re-verification without either manifest must discard the previously
+	// published unsigned snapshot. Otherwise a manifest-free build-0 process
+	// could retain neural authorization from an earlier package state.
+	QTemporaryDir removedCatalogRoot;
+	QVERIFY(removedCatalogRoot.isValid());
+	writeValidPackage(removedCatalogRoot);
+	auto removedCatalogConfiguration = configuration(removedCatalogRoot);
+	removedCatalogConfiguration.rawPublicKey.clear();
+	removedCatalogConfiguration.currentBuild = 0;
+	InputEnhancementPackageVerifier removedCatalogVerifier(std::move(removedCatalogConfiguration));
+	QVERIFY(removedCatalogVerifier.verify().unmanaged);
+	QVERIFY(removedCatalogVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
+	QVERIFY(QFile::remove(QDir(removedCatalogRoot.path()).filePath(QStringLiteral("input-models.json"))));
+	QVERIFY(QFile::remove(QDir(removedCatalogRoot.path()).filePath(QStringLiteral("input-recipes.json"))));
+	const PackageVerificationReport removedCatalogReport = removedCatalogVerifier.verify();
+	QVERIFY(removedCatalogReport.ready);
+	QVERIFY(removedCatalogReport.unmanaged);
+	QVERIFY(removedCatalogVerifier.verificationHealthy());
+	QVERIFY(removedCatalogVerifier.catalogRevision().isEmpty());
+	QVERIFY(!removedCatalogVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
+	QVERIFY(!removedCatalogVerifier.recipeAuthorized(RecipeCatalog::resolve(
+		{ Profile::Balanced, 50, 50, CpuClass::High, BackendAvailability{ true, true, true } })));
+	QVERIFY(removedCatalogVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Light })));
+
+	QTemporaryDir invalidRoot;
+	QVERIFY(invalidRoot.isValid());
+	writeValidPackage(invalidRoot);
+	QVERIFY(writeFile(QDir(invalidRoot.path()).filePath(QStringLiteral("deepfilternet/model.tar.gz")),
+				  QByteArray(DeepFilterAsset.size(), 'X')));
+	auto invalidConfiguration = configuration(invalidRoot);
+	invalidConfiguration.rawPublicKey.clear();
+	invalidConfiguration.currentBuild = 0;
+	InputEnhancementPackageVerifier invalidVerifier(std::move(invalidConfiguration));
+	QCOMPARE(errorValue(invalidVerifier.verify().error), errorValue(PackageVerificationError::AssetHashMismatch));
+	QVERIFY(!invalidVerifier.verificationHealthy());
+	QVERIFY(!invalidVerifier.modelAuthorized(QStringLiteral("deepfilternet:balanced")));
 }
 
 QTEST_GUILESS_MAIN(TestInputEnhancementPackageVerifier)

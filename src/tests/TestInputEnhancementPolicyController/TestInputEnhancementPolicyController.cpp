@@ -20,7 +20,7 @@ using namespace Mumble::InputEnhancement;
 
 namespace {
 constexpr std::uint64_t CurrentBuild = 100;
-const QString RecipeSetVersion       = QStringLiteral("input-recipes-v1");
+const QString RecipeSetVersion       = QStringLiteral("input-recipes-v2");
 const QDateTime Now          = QDateTime::fromString(QStringLiteral("2026-07-15T12:00:00Z"), Qt::ISODate).toUTC();
 const QByteArray PrivateSeed = QByteArray::fromHex("9d61b19deffd5a60ba844af492ec2cc4"
 												   "4449c5697b326919703bac031cae7f60");
@@ -105,6 +105,7 @@ private slots:
 	void cacheRestoreFallsBackToThePreviousAtomicSlot();
 	void publishesDynamicForceChangesAsOneAtomicState();
 	void validatesHttpsUrlsAndBuildsBoundedRequests();
+	void policyRefreshCadenceIsBoundedBelowKillSwitchDeadline();
 	void startupReadinessRequiresAnExplicitOfflineDecision();
 };
 
@@ -119,6 +120,8 @@ void TestInputEnhancementPolicyController::buildZeroWithoutKeyIsTheOnlyUnmanaged
 	QVERIFY(!controller.managedBySignedPolicy());
 	QVERIFY(controller.available());
 	QVERIFY(!controller.forceOriginal());
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(false));
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(true));
 	QVERIFY(!controller.readyForHealthMarker());
 	controller.start();
 	QVERIFY(controller.readyForHealthMarker());
@@ -136,6 +139,8 @@ void TestInputEnhancementPolicyController::releaseLikeKeylessBuildFailsClosed() 
 	QVERIFY(controller.managedBySignedPolicy());
 	QVERIFY(!controller.available());
 	QVERIFY(controller.forceOriginal());
+	QVERIFY(controller.policyForcedOriginalCanQualifyAudioHealth(false));
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(true));
 	controller.start();
 	QVERIFY(controller.readyForHealthMarker());
 	QVERIFY(controller.policyDecisionHealthy());
@@ -208,6 +213,8 @@ void TestInputEnhancementPolicyController::unavailablePolicyForcesOriginalWithou
 	QVERIFY(controller.effectiveState().hasVerifiedPolicy);
 	QVERIFY(!controller.available());
 	QVERIFY(controller.forceOriginal());
+	QVERIFY(controller.policyForcedOriginalCanQualifyAudioHealth(false));
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(true));
 	QCOMPARE(controller.recommendedProfile(), Profile::Auto);
 }
 
@@ -247,6 +254,7 @@ void TestInputEnhancementPolicyController::publishesDynamicForceChangesAsOneAtom
 
 	const QByteArray balanced = canonicalPolicyBytes(policy(Profile::Balanced));
 	QVERIFY(controller.acceptDownloadedCandidate(balanced, sign(balanced), Now).candidateAccepted);
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(false));
 	QCOMPARE(forceSpy.count(), 1);
 	QCOMPARE(forceSpy.takeFirst().at(0).toBool(), false);
 
@@ -259,6 +267,8 @@ void TestInputEnhancementPolicyController::publishesDynamicForceChangesAsOneAtom
 	QVERIFY(snapshot.hasVerifiedPolicy);
 	QVERIFY(snapshot.available);
 	QVERIFY(snapshot.forceOriginal);
+	QVERIFY(controller.policyForcedOriginalCanQualifyAudioHealth(false));
+	QVERIFY(!controller.policyForcedOriginalCanQualifyAudioHealth(true));
 	QCOMPARE(snapshot.recommendedProfile, Profile::Crisp);
 	QCOMPARE(forceSpy.count(), 1);
 	QCOMPARE(forceSpy.takeFirst().at(0).toBool(), true);
@@ -325,6 +335,17 @@ void TestInputEnhancementPolicyController::validatesHttpsUrlsAndBuildsBoundedReq
 	} else {
 		qunsetenv("MUMBLE_FORK_UPDATE_CHANNEL");
 	}
+}
+
+void TestInputEnhancementPolicyController::policyRefreshCadenceIsBoundedBelowKillSwitchDeadline() {
+	using Controller = InputEnhancementPolicyController;
+	QCOMPARE(Controller::refreshIntervalMilliseconds(0), Controller::refreshBaseIntervalMilliseconds);
+	QCOMPARE(Controller::refreshIntervalMilliseconds(Controller::refreshMaximumJitterMilliseconds),
+			 Controller::refreshMaximumIntervalMilliseconds);
+	QCOMPARE(Controller::refreshIntervalMilliseconds(Controller::refreshMaximumJitterMilliseconds + 1),
+			 Controller::refreshBaseIntervalMilliseconds);
+	QVERIFY(Controller::refreshBaseIntervalMilliseconds >= 15 * 60 * 1000);
+	QVERIFY(Controller::refreshMaximumIntervalMilliseconds < 20 * 60 * 1000);
 }
 
 void TestInputEnhancementPolicyController::startupReadinessRequiresAnExplicitOfflineDecision() {

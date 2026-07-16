@@ -211,10 +211,12 @@ namespace {
 				return QStringLiteral("Light");
 			case Profile::Balanced:
 				return QStringLiteral("Balanced");
-			case Profile::Crisp:
-				return QStringLiteral("Crisp");
+			case Profile::Quality:
+				return QStringLiteral("Quality");
 			case Profile::Auto:
 				return QStringLiteral("Auto");
+			case Profile::VoiceFocus:
+				return QStringLiteral("VoiceFocus");
 		}
 		return {};
 	}
@@ -265,7 +267,7 @@ namespace {
 		qint64 recipeSchema                    = 0;
 		if (!hasExactFields(modelRoot, modelRootFields) || !hasExactFields(recipeRoot, recipeRootFields)
 			|| !exactInteger(modelRoot.value(QStringLiteral("schemaVersion")), 1, 1, modelSchema)
-			|| !exactInteger(recipeRoot.value(QStringLiteral("schemaVersion")), 1, 1, recipeSchema)
+			|| !exactInteger(recipeRoot.value(QStringLiteral("schemaVersion")), 2, 2, recipeSchema)
 			|| !modelRoot.value(QStringLiteral("generatedFromAssets")).isBool()
 			|| !modelRoot.value(QStringLiteral("generatedFromAssets")).toBool()
 			|| !modelRoot.value(QStringLiteral("catalogRevision")).isString()
@@ -387,8 +389,8 @@ namespace {
 													   QStringLiteral("adaptationPolicyVersion") };
 		const QSet< QString > optionalRecipeFields = { QStringLiteral("advancedOnly") };
 		const QSet< QString > profiles             = { QStringLiteral("Original"), QStringLiteral("Light"),
-													   QStringLiteral("Balanced"), QStringLiteral("Crisp"),
-													   QStringLiteral("Auto") };
+													   QStringLiteral("Balanced"), QStringLiteral("Quality"),
+													   QStringLiteral("Auto"),     QStringLiteral("VoiceFocus") };
 		const QSet< QString > engines    = { QStringLiteral("None"), QStringLiteral("Speex"), QStringLiteral("RNNoise"),
 											 QStringLiteral("DeepFilterNet"), QStringLiteral("DTLN") };
 		const QSet< QString > cpuClasses = { QStringLiteral("Low"), QStringLiteral("Standard"),
@@ -407,9 +409,9 @@ namespace {
 			const QString engine     = recipe.value(QStringLiteral("engine")).toString();
 			const QString cpuClass   = recipe.value(QStringLiteral("minimumCpuClass")).toString();
 			qint64 revision          = 0;
-			qint64 executionVersion   = 0;
-			qint64 mixVersion         = 0;
-			qint64 adaptationVersion  = 0;
+			qint64 executionVersion  = 0;
+			qint64 mixVersion        = 0;
+			qint64 adaptationVersion = 0;
 			QStringList modelIds;
 			int minimumNoiseReduction = 0;
 			int maximumNoiseReduction = 0;
@@ -421,8 +423,7 @@ namespace {
 				|| !cpuClasses.contains(cpuClass)
 				|| !exactInteger(recipe.value(QStringLiteral("revision")), 1, 1, revision)
 				|| !exactInteger(recipe.value(QStringLiteral("executionSemanticsVersion")),
-								 recipeExecutionSemanticsVersion, recipeExecutionSemanticsVersion,
-								 executionVersion)
+								 recipeExecutionSemanticsVersion, recipeExecutionSemanticsVersion, executionVersion)
 				|| !exactInteger(recipe.value(QStringLiteral("mixCurveVersion")), qualifiedMixCurveVersion,
 								 qualifiedMixCurveVersion, mixVersion)
 				|| !exactInteger(recipe.value(QStringLiteral("adaptationPolicyVersion")), adaptationPolicyVersion,
@@ -466,13 +467,12 @@ namespace {
 				return PackageVerificationError::InvalidSchema;
 			}
 			parsedSnapshot->recipes.insert(
-				id,
-				VerifiedRecipeEntry{ id, static_cast< std::uint32_t >(revision), profile, engine, modelIds,
-								 minimumNoiseReduction, maximumNoiseReduction, minimumNaturalCrisp,
-								 maximumNaturalCrisp, static_cast< unsigned int >(latencySamplesValue), cpuClass,
-								 static_cast< std::uint32_t >(executionVersion),
-								 static_cast< std::uint32_t >(mixVersion),
-								 static_cast< std::uint32_t >(adaptationVersion) });
+				id, VerifiedRecipeEntry{ id, static_cast< std::uint32_t >(revision), profile, engine, modelIds,
+										 minimumNoiseReduction, maximumNoiseReduction, minimumNaturalCrisp,
+										 maximumNaturalCrisp, static_cast< unsigned int >(latencySamplesValue),
+										 cpuClass, static_cast< std::uint32_t >(executionVersion),
+										 static_cast< std::uint32_t >(mixVersion),
+										 static_cast< std::uint32_t >(adaptationVersion) });
 		}
 		if (seenProfiles != profiles) {
 			detail = QStringLiteral("Package recipes do not cover all five product profiles");
@@ -494,12 +494,49 @@ namespace {
 
 InputEnhancementPackageVerifier::InputEnhancementPackageVerifier(Configuration configuration)
 	: m_configuration(std::move(configuration)),
-	  m_developmentBypass(m_configuration.currentBuild == 0 && m_configuration.rawPublicKey.isEmpty()) {
+	  m_developmentBypass(m_configuration.currentBuild == 0 && m_configuration.rawPublicKey.isEmpty()),
+	  m_manualProfileCpuClass(CpuClass::Low) {
 	m_report.store(std::make_shared< const PackageVerificationReport >(), std::memory_order_release);
 }
 
 PackageVerificationReport InputEnhancementPackageVerifier::verify() {
 	if (m_developmentBypass) {
+		// Verification may be repeated by tests or a future package refresh. Drop
+		// the previously published unsigned catalog before inspecting the current
+		// package so a manifest-free build-0 run can never inherit stale neural
+		// authorization from an earlier successful verification.
+		m_snapshot.store({}, std::memory_order_release);
+		const QString modelManifestPath =
+			m_configuration.packageRoot.filePath(QStringLiteral("input-models.json"));
+		const QString recipeManifestPath =
+			m_configuration.packageRoot.filePath(QStringLiteral("input-recipes.json"));
+		const bool modelManifestExists  = QFileInfo::exists(modelManifestPath);
+		const bool recipeManifestExists = QFileInfo::exists(recipeManifestPath);
+
+		// Build-0 clients do not authenticate manifests with the production key,
+		// but packaged product profiles must still be bound to the exact catalog
+		// and model bytes that will be initialized. Preserve the manifest-free
+		// unmanaged mode for Original/Light development, while refusing to invent
+		// a neural model identity when no catalog is present.
+		if (modelManifestExists || recipeManifestExists) {
+			const auto modelBytes = readBounded(modelManifestPath, maximumModelManifestBytes);
+			const auto recipeBytes = readBounded(recipeManifestPath, maximumRecipeManifestBytes);
+			if (!modelBytes || !recipeBytes) {
+				return fail(PackageVerificationError::MissingManifest,
+							QStringLiteral("Unmanaged input model or recipe manifest is missing or oversized"));
+			}
+
+			std::shared_ptr< Snapshot > parsedSnapshot;
+			QString detail;
+			const PackageVerificationError parseError =
+				parseAndVerifyPackage(m_configuration.packageRoot, m_configuration.supportedCatalogRevision,
+								  *modelBytes, *recipeBytes, parsedSnapshot, detail);
+			if (parseError != PackageVerificationError::None) {
+				return fail(parseError, std::move(detail));
+			}
+			m_snapshot.store(std::shared_ptr< const Snapshot >(std::move(parsedSnapshot)), std::memory_order_release);
+		}
+
 		PackageVerificationReport unmanaged;
 		unmanaged.ready     = true;
 		unmanaged.unmanaged = true;
@@ -564,7 +601,14 @@ bool InputEnhancementPackageVerifier::readyForHealthMarker() const noexcept {
 }
 
 bool InputEnhancementPackageVerifier::verificationHealthy() const noexcept {
-	return readyForHealthMarker() && (m_developmentBypass || m_verified.load(std::memory_order_acquire));
+	if (!readyForHealthMarker()) {
+		return false;
+	}
+	if (!m_developmentBypass) {
+		return m_verified.load(std::memory_order_acquire);
+	}
+	const auto current = m_report.load(std::memory_order_acquire);
+	return current && current->unmanaged && current->error == PackageVerificationError::None;
 }
 
 bool InputEnhancementPackageVerifier::managedBySignedPackage() const noexcept {
@@ -576,11 +620,12 @@ bool InputEnhancementPackageVerifier::hasVerifiedPackage() const noexcept {
 }
 
 bool InputEnhancementPackageVerifier::modelAuthorized(const QString &modelId, const QString &expectedPath) const {
-	if (m_developmentBypass) {
-		return true;
-	}
 	const auto current = snapshot();
-	if (!current || !m_verified.load(std::memory_order_acquire)) {
+	// A neural product profile always needs a concrete catalog entry, including
+	// in an unmanaged build-0 client. This prevents a development run from
+	// reporting an empty active-model hash as if it were qualified evidence.
+	if (!current || (!m_developmentBypass && !m_verified.load(std::memory_order_acquire))
+		|| !verificationHealthy()) {
 		return false;
 	}
 	const auto iterator = current->models.constFind(modelId);
@@ -606,9 +651,6 @@ bool InputEnhancementPackageVerifier::modelAuthorized(const QString &modelId, co
 }
 
 bool InputEnhancementPackageVerifier::modelsAuthorized(const QStringList &modelIds) const {
-	if (m_developmentBypass) {
-		return true;
-	}
 	if (modelIds.isEmpty()) {
 		return false;
 	}
@@ -616,11 +658,15 @@ bool InputEnhancementPackageVerifier::modelsAuthorized(const QStringList &modelI
 }
 
 bool InputEnhancementPackageVerifier::recipeAuthorized(const Recipe &recipe) const {
-	if (m_developmentBypass) {
-		return true;
-	}
 	const auto current = snapshot();
-	if (!current || !m_verified.load(std::memory_order_acquire)) {
+	if (!current) {
+		// Keep manifest-free build-0 development usable for the non-neural
+		// Original/Light path. Neural recipes are rejected separately by
+		// modelAuthorized(), so they can never initialize without an attested
+		// model asset and SHA-256.
+		return m_developmentBypass && verificationHealthy() && !recipe.usesNeuralProcessor();
+	}
+	if ((!m_developmentBypass && !m_verified.load(std::memory_order_acquire)) || !verificationHealthy()) {
 		return false;
 	}
 	const auto iterator = current->recipes.constFind(recipe.id());
@@ -642,6 +688,96 @@ bool InputEnhancementPackageVerifier::recipeAuthorized(const Recipe &recipe) con
 		   && iterator->executionSemanticsVersion == recipeExecutionSemanticsVersion
 		   && iterator->mixCurveVersion == qualifiedMixCurveVersion
 		   && iterator->adaptationPolicyVersion == adaptationPolicyVersion;
+}
+
+ProfileReadiness InputEnhancementPackageVerifier::readinessForProfile(const ResolveRequest &request) const {
+	ProfileReadiness readiness = profileReadiness(request);
+	if (!readiness.selectable || request.profile == Profile::Original) {
+		return readiness;
+	}
+	if (!verificationHealthy()) {
+		return { false, false, ProfileReadinessReason::PackageUnavailable };
+	}
+
+	const Recipe recipe = RecipeCatalog::resolve(request);
+	if ((request.profile != Profile::Auto && recipe.effectiveProfile() != request.profile)
+		|| !recipeAuthorized(recipe)) {
+		return { false, false, ProfileReadinessReason::RecipeUnauthorized };
+	}
+	if (recipe.usesNeuralProcessor() && !modelAuthorized(recipe.modelId())) {
+		return { false, false, ProfileReadinessReason::ModelUnavailable };
+	}
+	return readiness;
+}
+
+CpuClass InputEnhancementPackageVerifier::manualProfileCpuClass() const {
+	if (!verificationHealthy()) {
+		return CpuClass::Low;
+	}
+
+	std::call_once(m_manualProfileProbeOnce, [this]() {
+		const BackendAvailability availability = BackendAvailability::compiled();
+		ManualProfileCapabilityMetrics metrics;
+		metrics.rnnoiseAvailable       = availability.rnnoise;
+		metrics.deepFilterNetAvailable = availability.deepFilterNet;
+		m_manualProfileCpuClass        = manualProfileCpuClassForMetrics(metrics);
+		if (!availability.deepFilterNet) {
+			return;
+		}
+
+		try {
+			ResolveRequest request;
+			request.profile             = Profile::Quality;
+			request.cpuClass            = CpuClass::High;
+			request.backendAvailability = availability;
+			const Recipe recipe         = RecipeCatalog::resolve(request);
+			if (recipe.effectiveProfile() != Profile::Quality || !recipeAuthorized(recipe)
+				|| !modelAuthorized(recipe.modelId())) {
+				return;
+			}
+
+			const QString authorizedSha256 = modelSha256Hex(recipe.modelId());
+			const QString authorizedPath   = modelPath(recipe.modelId());
+			// Use a relaxed probe deadline to collect the actual distributions, then
+			// classify against the stricter 8 ms p99 / 10 ms catastrophe contract.
+			Pipeline pipeline(Pipeline::ProcessorFactory{}, Pipeline::NanosecondClock{}, 20'000'000);
+			if (!pipeline.configure(recipe, authorizedSha256, authorizedPath)) {
+				return;
+			}
+
+			bool healthy = true;
+			std::array< float, frameSamples > frame = {};
+			for (unsigned int frameIndex = 0; frameIndex < 32; ++frameIndex) {
+				if (!pipeline.prepareOfflineFrame()) {
+					healthy = false;
+					break;
+				}
+				for (unsigned int sample = 0; sample < frameSamples; ++sample) {
+					const int phase = static_cast< int >((sample + frameIndex * 37U) % 97U) - 48;
+					frame[sample]   = static_cast< float >(phase) / 192.0f;
+				}
+				if (!pipeline.processFrame(frame)) {
+					healthy = false;
+					break;
+				}
+			}
+			healthy = pipeline.finishOfflineProcessing() && healthy;
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			metrics.qualityPipelineReady =
+				healthy && !diagnostics.fallbackActive() && diagnostics.deadlineMisses() == 0;
+			metrics.callbackP99Nanoseconds     = diagnostics.processingP99Nanoseconds();
+			metrics.callbackMaximumNanoseconds = diagnostics.maximumProcessingNanoseconds();
+			metrics.workerFrames               = diagnostics.workerProcessingFrames();
+			metrics.workerP99Nanoseconds       = diagnostics.workerProcessingP99Nanoseconds();
+			metrics.workerMaximumNanoseconds   = diagnostics.workerMaximumProcessingNanoseconds();
+			m_manualProfileCpuClass            = manualProfileCpuClassForMetrics(metrics);
+		} catch (...) {
+			// The capability probe is advisory and runs before a manual profile is
+			// selected. Any allocation/runtime exception keeps the conservative
+			// Standard classification established above.
+		}
+	});
+	return m_manualProfileCpuClass;
 }
 
 QByteArray InputEnhancementPackageVerifier::modelSha256(const QString &modelId) const {
@@ -666,6 +802,21 @@ QString InputEnhancementPackageVerifier::modelRelativePath(const QString &modelI
 QString InputEnhancementPackageVerifier::catalogRevision() const {
 	const auto current = snapshot();
 	return current ? current->catalogRevision : QString{};
+}
+
+QString InputEnhancementPackageVerifier::runtimePayloadFingerprint() const {
+	const auto current = snapshot();
+	if (!current || current->modelManifestSha256.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)
+		|| current->recipeManifestSha256.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)) {
+		return {};
+	}
+	QByteArray canonical("mumble-input-enhancement-runtime-payload-v1", 43);
+	canonical.append('\0');
+	canonical.append(current->catalogRevision.toUtf8());
+	canonical.append('\0');
+	canonical.append(current->modelManifestSha256);
+	canonical.append(current->recipeManifestSha256);
+	return QString::fromLatin1(QCryptographicHash::hash(canonical, QCryptographicHash::Sha256).toHex());
 }
 
 PackageVerificationReport InputEnhancementPackageVerifier::fail(PackageVerificationError error, QString detail) {

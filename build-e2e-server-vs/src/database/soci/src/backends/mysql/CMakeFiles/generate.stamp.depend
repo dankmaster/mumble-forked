@@ -1,0 +1,22 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindDependencyMacro.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindOpenSSL.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindZLIB.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/SelectLibraryConfigurations.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/openssl/vcpkg-cmake-wrapper.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/unofficial-libmysql/unofficial-libmysql-config.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/unofficial-libmysql/unofficial-libmysql-targets-debug.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/unofficial-libmysql/unofficial-libmysql-targets-release.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/unofficial-libmysql/unofficial-libmysql-targets.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zlib/vcpkg-cmake-wrapper.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zstd/zstdConfig.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zstd/zstdConfigVersion.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zstd/zstdTargets-debug.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zstd/zstdTargets-release.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/zstd/zstdTargets.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/find_modules/FindMySQL.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_define_backend_target.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_utils.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/src/backends/mysql/CMakeLists.txt

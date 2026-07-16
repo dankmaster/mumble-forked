@@ -22,7 +22,7 @@ enum class CpuClass : std::uint8_t;
 enum class Engine : std::uint8_t;
 class Recipe;
 
-constexpr int SETTINGS_SCHEMA_VERSION = 2;
+constexpr int SETTINGS_SCHEMA_VERSION = 3;
 constexpr int MAX_DEVICE_PROFILES     = 32;
 
 struct DefaultPreference {
@@ -89,11 +89,17 @@ struct DeviceProfileState {
 	qint64 lastUsedEpochMs = 0;
 	std::optional< DefaultPreference > lastKnownGood;
 	std::optional< RecipeBinding > lastKnownGoodRecipeBinding;
+	/// Full AutoRecipeSetBinding fingerprint for an Auto last-known-good
+	/// preference. Auto has three executable recipes, so reducing its identity
+	/// to one RecipeBinding (or to a callback-sized token) is not sufficient.
+	std::optional< QString > lastKnownGoodAutoRecipeSetFingerprint;
 	std::optional< RecipeBinding > pendingRecipeBinding;
+	std::optional< QString > pendingAutoRecipeSetFingerprint;
 	/// One-shot candidate retained after a probation rollback so AudioInput can
 	/// be recreated without losing the user's Undo affordance.
 	std::optional< DefaultPreference > rollbackUndoPreference;
 	std::optional< RecipeBinding > rollbackUndoRecipeBinding;
+	std::optional< QString > rollbackUndoAutoRecipeSetFingerprint;
 	bool pendingValidation = false;
 	QString lastRollbackReason;
 	std::optional< LegacyOverride > legacyOverride;
@@ -140,6 +146,15 @@ bool recipeBindingMatches(const RecipeBinding &binding, const Recipe &recipe, co
 						  const QString &modelSha256 = {}, const QString &modelRelativePath = {});
 bool recipeBindingMatchesPreference(const RecipeBinding &binding, const DefaultPreference &preference);
 bool isValidRecipeBinding(const RecipeBinding &binding);
+/// Auto persists the complete canonical recipe-set SHA-256. This helper is
+/// intentionally independent of AutoV2.h so settings remain a lower-level
+/// serialization contract without a circular include.
+bool isValidAutoRecipeSetFingerprint(const QString &fingerprint) noexcept;
+/// Verifies the exact persisted execution identity for any preference. Fixed
+/// profiles use one RecipeBinding; Auto uses only the complete set fingerprint.
+bool executionBindingMatchesPreference(const DefaultPreference &preference,
+									   const std::optional< RecipeBinding > &recipeBinding,
+									   const std::optional< QString > &autoRecipeSetFingerprint) noexcept;
 
 /// Ensures that an editable entry exists for the physical/session device. A
 /// new entry inherits the global default. Unstable identities are retained in

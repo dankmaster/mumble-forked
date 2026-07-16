@@ -108,11 +108,11 @@ Assert-TestGateResults -GateResults $testGates
 $signingResults = Read-ReleaseJson -Path $SigningResultsPath
 Assert-SigningResults -SigningResults $signingResults
 $measuredEvidence = Read-ReleaseJson -Path $MeasuredEvidencePath
-if ([int](Assert-ObjectProperty -Object $measuredEvidence -Name "schemaVersion" -Context "Measured evidence") -ne 1 -or
+if ([int](Assert-ObjectProperty -Object $measuredEvidence -Name "schemaVersion" -Context "Measured evidence") -ne 2 -or
 	(Assert-ObjectProperty -Object $measuredEvidence -Name "passed" -Context "Measured evidence") -ne $true -or
-	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "suite" -Context "Measured evidence") -cne "master_quality" -or
+	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "suite" -Context "Measured evidence") -cne "core_release" -or
 	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "sourceSha" -Context "Measured evidence") -cne $expectedSha) {
-	throw "Qualification requires passing master_quality evidence for the exact source SHA."
+	throw "Qualification requires passing master_quality and nightly core evidence for the exact source SHA."
 }
 $legacyBinarySha256 = [string](Assert-ObjectProperty -Object $measuredEvidence -Name "legacyBinarySha256" -Context "Measured evidence")
 if ($legacyBinarySha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -123,8 +123,17 @@ if ($qualityHarnessSha256 -cnotmatch '^[0-9a-f]{64}$') {
 	throw "Measured evidence must identify the exact lowercase protected quality-harness SHA256."
 }
 $measuredEvidenceItem = Get-Item -LiteralPath $MeasuredEvidencePath -ErrorAction Stop
-foreach ($runner in @(Assert-ObjectProperty -Object $measuredEvidence -Name "runners" -Context "Measured evidence")) {
+$masterRunners = @(Assert-ObjectProperty -Object $measuredEvidence -Name "runners" -Context "Measured evidence")
+$nightlyRunners = @(Assert-ObjectProperty -Object $measuredEvidence -Name "nightlyRunners" -Context "Measured evidence")
+if ($masterRunners.Count -ne 2 -or $nightlyRunners.Count -ne 2) {
+	throw "Measured evidence must contain both protected runner classes for master_quality and nightly."
+}
+foreach ($runner in @($masterRunners + $nightlyRunners)) {
 	$runnerClass = [string](Assert-ObjectProperty -Object $runner -Name "runnerClass" -Context "Measured runner evidence")
+	$suite = [string](Assert-ObjectProperty -Object $runner -Name "suite" -Context "Measured runner evidence '$runnerClass'")
+	if ($suite -cnotin @("master_quality", "nightly")) {
+		throw "Measured runner evidence '$runnerClass' has an unsupported suite '$suite'."
+	}
 	$harnessProvenanceSha256 = [string](Assert-ObjectProperty -Object $runner `
 		-Name "harnessProvenanceSha256" -Context "Measured runner evidence '$runnerClass'")
 	if ($harnessProvenanceSha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -248,6 +257,12 @@ if ($updatePackageItem.PSIsContainer -or $updatePackageItem.Extension -cne ".mum
 	-MsiPath $installerItem.FullName `
 	-UpdatePackagePath $updatePackageItem.FullName
 $msiPayloadVerification = Read-ReleaseJson -Path $MsiPayloadVerificationPath
+$candidateExecutableRecords = @($msiPayloadVerification.files | Where-Object { [string]$_.path -ceq 'mumble.exe' })
+if ($candidateExecutableRecords.Count -ne 1 -or
+	[string]$candidateExecutableRecords[0].sha256 -cnotmatch '^[0-9a-f]{64}$') {
+	throw 'MSI payload verification must identify exactly one hash-attested mumble.exe.'
+}
+$candidateExecutableSha256 = [string]$candidateExecutableRecords[0].sha256
 $buildId = Get-InputEnhancementBuildId -BuildNumber $BuildNumber -SourceSha $expectedSha
 $qualification = [ordered]@{
 	schemaVersion = 1
@@ -269,6 +284,7 @@ $qualification = [ordered]@{
 		sha256   = Get-ReleaseFileSha256 -Path $installerItem.FullName
 		size     = [int64]$installerItem.Length
 		signed   = $true
+		executableSha256 = $candidateExecutableSha256
 		payloadVerification = [ordered]@{
 			fileName = (Get-Item -LiteralPath $MsiPayloadVerificationPath).Name
 			sha256 = Get-ReleaseFileSha256 -Path $MsiPayloadVerificationPath
@@ -326,13 +342,17 @@ $qualification = [ordered]@{
 		fileName            = $measuredEvidenceItem.Name
 		sha256              = Get-ReleaseFileSha256 -Path $measuredEvidenceItem.FullName
 		passed              = $true
-		suite               = "master_quality"
+		suite               = "core_release"
 		sourceSha           = $expectedSha
 		testedBinarySha256  = [string]$measuredEvidence.testedBinarySha256
 		legacyBinarySha256  = $legacyBinarySha256
 		corpusLockSha256    = [string]$measuredEvidence.corpusLockSha256
 		harnessSha256       = $qualityHarnessSha256
-		runners             = @($measuredEvidence.runners)
+		protectedBuildIdentity = $measuredEvidence.protectedBuildIdentity
+		masterInputIdentity = $measuredEvidence.masterInputIdentity
+		nightlyInputIdentity = $measuredEvidence.nightlyInputIdentity
+		runners             = $masterRunners
+		nightlyRunners      = $nightlyRunners
 	}
 	signing        = [ordered]@{
 		required              = $true

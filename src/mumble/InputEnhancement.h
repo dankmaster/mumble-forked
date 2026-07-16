@@ -18,23 +18,58 @@ class SpeechCleanupProcessor;
 
 namespace Mumble::InputEnhancement {
 
-inline constexpr unsigned int frameSamples                 = 480;
-inline constexpr unsigned int originalLatencyBudgetSamples = 0;
-inline constexpr unsigned int lightLatencyBudgetSamples    = 480;
-inline constexpr unsigned int balancedLatencyBudgetSamples = 1440;
-inline constexpr unsigned int crispLatencyBudgetSamples    = 2400;
+inline constexpr unsigned int frameSamples                   = 480;
+inline constexpr unsigned int originalLatencyBudgetSamples   = 0;
+inline constexpr unsigned int lightLatencyBudgetSamples      = 480;
+inline constexpr unsigned int balancedLatencyBudgetSamples   = 1440;
+inline constexpr unsigned int qualityLatencyBudgetSamples    = 2400;
+inline constexpr unsigned int voiceFocusLatencyBudgetSamples = 2400;
+// Source-compatibility alias for locally developed v2 integrations. New code
+// and every persisted/public representation use Quality.
+inline constexpr unsigned int crispLatencyBudgetSamples = qualityLatencyBudgetSamples;
 
 // These revisions are part of the signed recipe contract and of the
 // persisted execution fingerprint. Any change to recipe execution, the
 // qualified mix curve, or callback-safe adaptation policy must increment the
 // corresponding value.
-inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 1;
-inline constexpr std::uint32_t qualifiedMixCurveVersion        = 1;
+inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 2;
+inline constexpr std::uint32_t qualifiedMixCurveVersion        = 2;
 inline constexpr std::uint32_t adaptationPolicyVersion         = 1;
 
-enum class Profile : std::uint8_t { Original, Light, Balanced, Crisp, Auto };
+enum class Profile : std::uint8_t {
+	Original = 0,
+	Light    = 1,
+	Balanced = 2,
+	Quality  = 3,
+	// Read-only/source compatibility alias. Serializers never emit "Crisp".
+	Crisp      = Quality,
+	Auto       = 4,
+	VoiceFocus = 5
+};
 enum class CpuClass : std::uint8_t { Low, Standard, High };
 enum class Engine : std::uint8_t { None, Speex, RNNoise, DeepFilterNet, DTLN };
+
+/// Result of the real, off-audio-thread manual-profile pipeline probe. Auto's
+/// policy probe is intentionally not part of this contract: a synthetic Auto
+/// workload must never make an explicitly selected Quality profile disappear.
+struct ManualProfileCapabilityMetrics final {
+	bool rnnoiseAvailable       = false;
+	bool deepFilterNetAvailable = false;
+	bool qualityPipelineReady   = false;
+	std::uint64_t callbackP99Nanoseconds = 0;
+	std::uint64_t callbackMaximumNanoseconds = 0;
+	std::uint64_t workerFrames = 0;
+	std::uint64_t workerP99Nanoseconds = 0;
+	std::uint64_t workerMaximumNanoseconds = 0;
+};
+
+CpuClass manualProfileCpuClassForMetrics(const ManualProfileCapabilityMetrics &metrics) noexcept;
+
+/// The deterministic two-client harness may request a tier only when both of
+/// its existing authentication gates are active. Production callers pass false
+/// for these flags, so an ambient environment variable cannot raise a tier.
+CpuClass cpuClassWithAuthenticatedE2EOverride(CpuClass measured, bool harnessEnabled, bool tokenPresent,
+											  const QString &requestedTier) noexcept;
 
 struct ValidatedControls final {
 	int noiseReduction = 0;
@@ -71,20 +106,61 @@ struct BackendAvailability final {
 	static BackendAvailability compiled();
 };
 
+/// Identifies where a recipe will run without coupling the product recipe to a
+/// concrete AudioInput backend. Offline benchmarks and test harnesses retain
+/// their default context: they may execute every recipe, but can never be
+/// mistaken for production-qualified live capture evidence.
+struct CaptureDeviceContext final {
+	enum class Kind : std::uint8_t { OfflineHarness, LiveDevice };
+
+	Kind kind = Kind::OfflineHarness;
+	QString backendId;
+	bool stablePhysicalIdentity = false;
+
+	static CaptureDeviceContext liveDevice(QString backendId, bool stablePhysicalIdentity);
+	bool productionQualified() const noexcept;
+};
+
 struct ResolveRequest final {
 	Profile profile                         = Profile::Original;
 	int noiseReduction                      = 50;
 	int naturalCrisp                        = 50;
 	CpuClass cpuClass                       = CpuClass::Standard;
 	BackendAvailability backendAvailability = {};
+	CaptureDeviceContext captureDevice      = {};
 };
+
+enum class ProfileReadinessReason : std::uint8_t {
+	Ready,
+	ExperimentalAuto,
+	AutoRuntimeUnavailable,
+	InsufficientCpu,
+	BackendUnavailable,
+	PackageUnavailable,
+	RecipeUnauthorized,
+	ModelUnavailable
+};
+
+/// Shared preflight result used before settings are offered or an input
+/// processor is prepared. A selectable experimental profile carries a reason
+/// so the UI can label it without treating it as unavailable.
+struct ProfileReadiness final {
+	bool selectable               = false;
+	bool productionQualified      = false;
+	ProfileReadinessReason reason = ProfileReadinessReason::BackendUnavailable;
+};
+
+/// Capability-only readiness. Signed package/model readiness is layered on by
+/// InputEnhancementPackageVerifier. Voice Focus is explicit-only; Auto never
+/// resolves to it.
+ProfileReadiness profileReadiness(const ResolveRequest &request) noexcept;
 
 /// A catalog-produced, immutable description of one validated input recipe.
 /// The recipe identifies both the user request and the concrete profile that
 /// will run after deterministic capability fallback.
 class Recipe final {
 public:
-	static constexpr std::uint32_t schemaVersion = 1;
+	static constexpr std::uint32_t schemaVersion = 2;
 
 	Recipe(const Recipe &)            = default;
 	Recipe(Recipe &&)                 = default;
@@ -295,8 +371,11 @@ private:
 	void recordProcessingDuration(std::uint64_t durationNanoseconds) noexcept;
 	std::uint64_t processingPercentileNanoseconds(unsigned int percentile) const noexcept;
 	void resetCounters() noexcept;
+	void resetDeepFilterEdgeProtection() noexcept;
+	float deepFilterEdgeProtectedMixFactor(float requestedMixFactor) noexcept;
 	static constexpr std::uint64_t processingHistogramBucketNanoseconds = 10'000;
 	static constexpr std::size_t processingHistogramBucketCount         = 2'001;
+	static constexpr unsigned int deepFilterOnsetProtectionFrames       = 8;
 
 	ProcessorFactory m_processorFactory;
 	NanosecondClock m_clock;
@@ -321,6 +400,12 @@ private:
 	std::uint64_t m_maximumProcessingNanoseconds                                      = 0;
 	std::uint64_t m_lastProcessingNanoseconds                                         = 0;
 	std::array< std::uint64_t, processingHistogramBucketCount > m_processingHistogram = {};
+	float m_deepFilterNoiseFloorRms                                                  = 0.0f;
+	float m_deepFilterSpeechPeakRms                                                  = 0.0f;
+	unsigned int m_deepFilterBaselineFrames                                          = 0;
+	unsigned int m_deepFilterBelowReleaseFrames                                      = 0;
+	unsigned int m_deepFilterOnsetProtectionFrame                                    = deepFilterOnsetProtectionFrames;
+	bool m_deepFilterSpeechActive                                                    = false;
 	bool m_fallbackActive                                                             = false;
 };
 

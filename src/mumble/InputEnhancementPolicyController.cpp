@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QRandomGenerator>
 #include <QSaveFile>
 
 #include <algorithm>
@@ -65,8 +66,11 @@ InputEnhancementPolicyController::InputEnhancementPolicyController(Configuration
 	m_expiryTimer.setInterval(60'000);
 	m_expiryTimer.setSingleShot(false);
 	connect(&m_expiryTimer, &QTimer::timeout, this, [this]() { reevaluate(); });
-	m_refreshTimer.setInterval(6 * 60 * 60 * 1000);
-	m_refreshTimer.setSingleShot(false);
+	// Fetch immediately at startup, then use bounded single-shot scheduling so
+	// clients do not synchronize on one fixed channel-policy polling instant.
+	// The 17-minute maximum leaves margin for the bounded HTTPS request and an
+	// input restart while retaining the 20-minute force-Original contract.
+	m_refreshTimer.setSingleShot(true);
 	connect(&m_refreshTimer, &QTimer::timeout, this, &InputEnhancementPolicyController::refresh);
 }
 
@@ -91,7 +95,6 @@ void InputEnhancementPolicyController::start() {
 	const bool remoteUrlUsable = isAllowedHttpsUrl(m_configuration.manifestUrl)
 								 && isAllowedHttpsUrl(signatureUrlForManifest(m_configuration.manifestUrl));
 	if (m_configuration.remoteFetchEnabled && m_networkManager && remoteUrlUsable) {
-		m_refreshTimer.start();
 		m_initialDecisionPending = !restoredVerifiedCache;
 		if (restoredVerifiedCache) {
 			markInitialDecisionReady();
@@ -213,6 +216,12 @@ bool InputEnhancementPolicyController::managedBySignedPolicy() const noexcept {
 	return effectiveState().managedBySignedPolicy;
 }
 
+bool InputEnhancementPolicyController::policyForcedOriginalCanQualifyAudioHealth(
+	const bool recoveryDisabled) const noexcept {
+	const EffectivePolicyState state = effectiveState();
+	return !recoveryDisabled && state.managedBySignedPolicy && state.forceOriginal;
+}
+
 bool InputEnhancementPolicyController::readyForHealthMarker() const noexcept {
 	return m_readyForHealthMarker.load(std::memory_order_acquire);
 }
@@ -280,6 +289,11 @@ QNetworkRequest InputEnhancementPolicyController::networkRequest(const QUrl &url
 	request.setAttribute(QNetworkRequest::MaximumDownloadBufferSizeAttribute, maximumBytes);
 	request.setRawHeader("Accept", "application/json, application/octet-stream;q=0.9");
 	return request;
+}
+
+int InputEnhancementPolicyController::refreshIntervalMilliseconds(const std::uint32_t jitterSample) noexcept {
+	return refreshBaseIntervalMilliseconds
+		   + static_cast< int >(jitterSample % static_cast< std::uint32_t >(refreshMaximumJitterMilliseconds + 1));
 }
 
 std::uint32_t InputEnhancementPolicyController::pack(const EffectivePolicyState &state) noexcept {
@@ -438,7 +452,18 @@ void InputEnhancementPolicyController::finishRefresh(bool accepted) {
 		m_initialDecisionPending = false;
 		markInitialDecisionReady();
 	}
+	scheduleNextRefresh();
 	emit refreshFinished(accepted);
+}
+
+void InputEnhancementPolicyController::scheduleNextRefresh() {
+	if (!m_started || m_developmentBypass || !m_configuration.remoteFetchEnabled || !m_networkManager
+		|| !isAllowedHttpsUrl(m_configuration.manifestUrl)
+		|| !isAllowedHttpsUrl(signatureUrlForManifest(m_configuration.manifestUrl))) {
+		m_refreshTimer.stop();
+		return;
+	}
+	m_refreshTimer.start(refreshIntervalMilliseconds(QRandomGenerator::global()->generate()));
 }
 
 void InputEnhancementPolicyController::markInitialDecisionReady() {

@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <string>
 
 class QTimer;
 
@@ -43,12 +44,14 @@ public:
 
 private:
 	UpdateHealthMonitor(QObject *parent, std::filesystem::path updateRoot, std::filesystem::path appPath,
-						HealthPredicate audioHealthy, std::uint64_t requiredStableMilliseconds);
+						HealthPredicate audioHealthy, std::uint64_t requiredStableMilliseconds,
+						std::string executableSha256);
 
 	void poll();
 
 	std::filesystem::path m_updateRoot;
 	std::filesystem::path m_appPath;
+	std::string m_executableSha256;
 	HealthPredicate m_audioHealthy;
 	QTimer *m_timer = nullptr;
 	QElapsedTimer m_monotonicClock;

@@ -13,7 +13,9 @@
 #include "Database.h"
 #include "Global.h"
 #include "InputEnhancement.h"
+#include "InputEnhancementAutoV2.h"
 #include "InputEnhancementCalibrationWorker.h"
+#include "InputEnhancementPackageVerifier.h"
 #include "ModernShellMenuSerializer.h"
 #include "ModernTheme.h"
 #include "PersistentChatMediaCache.h"
@@ -39,6 +41,72 @@
 namespace {
 	constexpr int kMaxAmplificationSliderValue = 19500;
 	constexpr int kAmplificationSliderBase     = 20000;
+
+	Mumble::InputEnhancement::CpuClass
+		inputEnhancementCpuClass(const Mumble::InputEnhancement::InputEnhancementPackageVerifier *verifier,
+								  const Mumble::InputEnhancement::Profile profile) {
+		using namespace Mumble::InputEnhancement;
+		if (!verifier) {
+			return CpuClass::Low;
+		}
+		if (profile == Profile::Original || profile == Profile::Light) {
+			return CpuClass::Low;
+		}
+		if (profile == Profile::Balanced) {
+			return BackendAvailability::compiled().rnnoise ? CpuClass::Standard : CpuClass::Low;
+		}
+		if (profile != Profile::Auto) {
+			return verifier->manualProfileCpuClass();
+		}
+		const AutoV2::CapabilityProbeKey key = AutoV2::currentCapabilityProbeKey(verifier->runtimePayloadFingerprint());
+		const AutoV2::CapabilityProbeResult result = AutoV2::cachedCapabilityProbe(key);
+		return result.valid ? result.cpuTier : CpuClass::Low;
+	}
+
+	Mumble::InputEnhancement::DeviceIdentity draftInputEnhancementDeviceIdentity(const Settings &settings);
+
+	QString inputEnhancementReadinessReasonText(Mumble::InputEnhancement::ProfileReadinessReason reason) {
+		using Reason = Mumble::InputEnhancement::ProfileReadinessReason;
+		switch (reason) {
+			case Reason::Ready:
+				return QString();
+			case Reason::ExperimentalAuto:
+				return QObject::tr(
+					"Experimental: profile switching is not part of the core release qualification.");
+			case Reason::AutoRuntimeUnavailable:
+				return QObject::tr("Safe dual-pipeline transitions are not enabled in this build.");
+			case Reason::InsufficientCpu:
+				return QObject::tr("This profile requires a higher qualified CPU class.");
+			case Reason::BackendUnavailable:
+				return QObject::tr("The required audio engine is not included in this build.");
+			case Reason::PackageUnavailable:
+				return QObject::tr("The input-enhancement package is unavailable or has not passed verification.");
+			case Reason::RecipeUnauthorized:
+				return QObject::tr("The exact recipe is not authorized by the current package.");
+			case Reason::ModelUnavailable:
+				return QObject::tr("The required model is missing or failed verification.");
+		}
+		return QObject::tr("The selected input-enhancement profile is unavailable.");
+	}
+
+	Mumble::InputEnhancement::ProfileReadiness inputEnhancementReadinessForSettings(
+		const Settings &settings, Mumble::InputEnhancement::Profile profile, int noiseReduction, int naturalCrisp) {
+		using namespace Mumble::InputEnhancement;
+		const InputEnhancementPackageVerifier *verifier =
+			Global::g_global_struct ? Global::get().inputEnhancementPackageVerifier : nullptr;
+		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(settings);
+		ResolveRequest request;
+		request.profile             = profile;
+		request.noiseReduction      = noiseReduction;
+		request.naturalCrisp        = naturalCrisp;
+		request.cpuClass            = inputEnhancementCpuClass(verifier, profile);
+		request.backendAvailability = BackendAvailability::compiled();
+		request.captureDevice = CaptureDeviceContext::liveDevice(identity.backendId, identity.stable);
+		if (!verifier && profile != Profile::Original) {
+			return { false, false, ProfileReadinessReason::PackageUnavailable };
+		}
+		return verifier ? verifier->readinessForProfile(request) : profileReadiness(request);
+	}
 
 	QVariantMap optionItem(const QVariant &value, const QString &label, const bool enabled = true,
 						   const QString &hint = QString()) {
@@ -281,13 +349,17 @@ namespace {
 			{ QStringLiteral("audio.echoMode"),
 			  QObject::tr("Reduce echo from speakers or shared output paths when supported by the audio backend.") },
 			{ QStringLiteral("audio.inputEnhancementProfile"),
-			  QObject::tr("Choose Original, Light, Balanced, Crisp, or the capability-aware Auto input recipe.") },
+			  QObject::tr("Choose Original, Light, Balanced, Quality, or Voice Focus input enhancement.") },
 			{ QStringLiteral("audio.inputEnhancementReduction"),
 			  QObject::tr("Adjust noise reduction only within the selected recipe's qualified range.") },
 			{ QStringLiteral("audio.inputEnhancementCharacter"),
-			  QObject::tr("Balance natural voice character against a crisper, more processed result.") },
+			  QObject::tr("Balance natural voice character against a clearer, more processed result.") },
 			{ QStringLiteral("audio.inputEnhancementAutoAdapt"),
-			  QObject::tr("Let Auto make bounded adjustments from local noise, voice activity, and CPU headroom.") },
+			  QObject::tr(
+				  "Let the current profile make bounded adjustments from local noise, voice activity, and CPU headroom.") },
+			{ QStringLiteral("audio.inputEnhancementExperimentalAuto"),
+			  QObject::tr(
+				  "Advanced experimental profile switching among Light, Balanced, and Quality; Voice Focus is excluded.") },
 			{ QStringLiteral("audio.noiseCancelMode"),
 			  QObject::tr("Choose whether local microphone noise suppression is disabled, classic, neural, or combined.") },
 			{ QStringLiteral("audio.noiseCancelBackend"),
@@ -543,20 +615,43 @@ namespace {
 		};
 	}
 
-	QVariantList inputEnhancementProfileOptions() {
-		using Profile = Mumble::InputEnhancement::Profile;
-		return QVariantList {
-			optionItem(static_cast< int >(Profile::Original), QObject::tr("Original"), true,
-					   QObject::tr("Keep the established Mumble input path without added enhancement latency.")),
-			optionItem(static_cast< int >(Profile::Light), QObject::tr("Light"), true,
-					   QObject::tr("Low-cost classic suppression for steady hiss, hum, and fan noise.")),
-			optionItem(static_cast< int >(Profile::Balanced), QObject::tr("Balanced"), true,
-					   QObject::tr("RNNoise-based cleanup for everyday voice chat.")),
-			optionItem(static_cast< int >(Profile::Crisp), QObject::tr("Crisp"), true,
-					   QObject::tr("Full-band neural enhancement for the strongest speech clarity.")),
-			optionItem(static_cast< int >(Profile::Auto), QObject::tr("Auto"), true,
-					   QObject::tr("Choose among qualified recipes for the current noise and CPU budget.")),
+	QVariantList inputEnhancementProfileOptions(
+		const Settings &settings, Mumble::InputEnhancement::Profile selectedProfile) {
+		using namespace Mumble::InputEnhancement;
+		auto profileOption = [&](Profile profile, const QString &label, const QString &description) {
+			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(settings, profile, 50, 50);
+			QString reason = inputEnhancementReadinessReasonText(readiness.reason);
+			if (readiness.selectable && !readiness.productionQualified) {
+				reason = QObject::tr("Preview/session-only on this input backend or device identity.");
+			}
+			if (!reason.isEmpty() && !readiness.selectable) {
+				reason.prepend(QObject::tr("Unavailable: "));
+			}
+			return optionItem(static_cast< int >(profile), label, readiness.selectable,
+							  reason.isEmpty() ? description : description + QLatin1Char(' ') + reason);
 		};
+
+		QVariantList options {
+			profileOption(Profile::Original, QObject::tr("Original"),
+						  QObject::tr("Keep the established Mumble input path without added enhancement latency.")),
+			profileOption(Profile::Light, QObject::tr("Light"),
+						  QObject::tr("Low-cost classic suppression for steady hiss, hum, and fan noise.")),
+			profileOption(Profile::Balanced, QObject::tr("Balanced"),
+						  QObject::tr("RNNoise-based cleanup for everyday voice chat.")),
+			profileOption(Profile::Quality, QObject::tr("Quality"),
+						  QObject::tr("Full-band neural enhancement tuned for natural clarity.")),
+			profileOption(Profile::VoiceFocus, QObject::tr("Voice Focus"),
+						  QObject::tr("Aggressive full-band cleanup that prioritizes speech over background sound.")),
+		};
+		// Auto is deliberately absent from the normal profile picker. Preserve a
+		// readable disabled value when opening settings that already contain an
+		// experimental Auto selection; it can be disabled or replaced from the
+		// Advanced controls below.
+		if (selectedProfile == Profile::Auto) {
+			options.append(optionItem(static_cast< int >(Profile::Auto), QObject::tr("Auto (Advanced)"), false,
+									  QObject::tr("Experimental Auto is managed in Advanced settings.")));
+		}
+		return options;
 	}
 
 	Mumble::InputEnhancement::LegacyOverride legacyInputOverride(const Settings &settings) {
@@ -630,10 +725,11 @@ namespace {
 				settings.noiseCancelModelId         = QStringLiteral("rnnoise:embedded");
 				settings.noiseCancelCustomModelPath.clear();
 				break;
-			case Profile::Crisp:
+			case Profile::Quality:
+			case Profile::VoiceFocus:
 				settings.noiseCancelMode            = Settings::NoiseCancelRNN;
 				settings.noiseCancelBackend         = Settings::DeepFilterNetBackend;
-				settings.noiseCancelModelId         = QStringLiteral("deepfilternet:default");
+				settings.noiseCancelModelId = QStringLiteral("deepfilternet:balanced");
 				settings.noiseCancelCustomModelPath.clear();
 				break;
 			case Profile::Auto:
@@ -933,8 +1029,8 @@ namespace {
 	}
 
 	QString autoCalibrationUnavailableText() {
-		return QObject::tr(
-			"Calibration is unavailable while Auto or automatic adaptation is enabled. Apply Original, Light, Balanced, or Crisp with automatic adaptation off first.");
+		return QObject::tr("Calibration is unavailable while Auto or automatic adaptation is enabled. Apply Original, "
+						   "Light, Balanced, Quality, or Voice Focus with automatic adaptation off first.");
 	}
 
 	QVariantMap voiceMeterField(
@@ -1752,6 +1848,8 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	cancelInputEnhancementCalibration();
 	m_inputEnhancementCalibrationWorker->reset();
 	m_inputEnhancementCalibrationControls.reset();
+	m_inputEnhancementPreAutoPreference.reset();
+	m_inputEnhancementReadinessUiError.clear();
 	m_original = settings;
 	m_draft    = settings;
 	m_shortcutCaptureIndex = -1;
@@ -1783,6 +1881,7 @@ QVariantMap ModernSettingsController::state() const {
 
 void ModernSettingsController::updateField(const QString &fieldID, const QVariant &value) {
 	const QString id = fieldID.trimmed();
+	m_inputEnhancementReadinessUiError.clear();
 	if (id == QLatin1String("look.quitBehavior")) {
 		m_draft.quitBehavior = static_cast< QuitBehavior >(value.toInt());
 	} else if (id == QLatin1String("look.alwaysOnTop")) {
@@ -1930,18 +2029,59 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 	} else if (id == QLatin1String("audio.echoMode")) {
 		m_draft.echoOption = static_cast< EchoCancelOptionID >(value.toInt());
 	} else if (id == QLatin1String("audio.inputEnhancementProfile")) {
-		const int profileValue = value.toInt();
-		if (profileValue >= static_cast< int >(Mumble::InputEnhancement::Profile::Original)
-			&& profileValue <= static_cast< int >(Mumble::InputEnhancement::Profile::Auto)) {
+		const int profileValue  = value.toInt();
+		const bool knownProfile = (profileValue >= static_cast< int >(Mumble::InputEnhancement::Profile::Original)
+								   && profileValue <= static_cast< int >(Mumble::InputEnhancement::Profile::Quality))
+								  || profileValue == static_cast< int >(Mumble::InputEnhancement::Profile::VoiceFocus);
+		if (knownProfile) {
+			using namespace Mumble::InputEnhancement;
+			const Profile selectedProfile = static_cast< Profile >(profileValue);
+			const DefaultPreference &currentPreference = currentInputEnhancementPreference(m_draft);
+			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+				m_draft, selectedProfile, currentPreference.reduction, currentPreference.character);
+			if (!readiness.selectable) {
+				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement was not changed: %1")
+													 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+				return;
+			}
 			if (Mumble::InputEnhancement::DefaultPreference *preference =
 					editableCurrentInputEnhancementPreference(m_draft)) {
-				preference->profile = static_cast< Mumble::InputEnhancement::Profile >(profileValue);
-				if (preference->profile == Mumble::InputEnhancement::Profile::Auto) {
-					preference->autoAdapt = true;
-				}
+				preference->profile = selectedProfile;
+				m_inputEnhancementPreAutoPreference.reset();
 				projectInputEnhancementPreference(m_draft);
 			}
 		}
+	} else if (id == QLatin1String("audio.inputEnhancementExperimentalAuto")) {
+		using namespace Mumble::InputEnhancement;
+		DefaultPreference *preference = editableCurrentInputEnhancementPreference(m_draft);
+		if (!preference) {
+			return;
+		}
+		if (value.toBool()) {
+			if (preference->profile == Profile::Auto) {
+				return;
+			}
+			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+				m_draft, Profile::Auto, preference->reduction, preference->character);
+			if (!readiness.selectable) {
+				m_inputEnhancementReadinessUiError = QObject::tr("Experimental Auto was not enabled: %1")
+												 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+				return;
+			}
+			m_inputEnhancementPreAutoPreference = *preference;
+			preference->profile                  = Profile::Auto;
+			preference->autoAdapt                = true;
+		} else if (preference->profile == Profile::Auto) {
+			DefaultPreference restored;
+			if (m_inputEnhancementPreAutoPreference
+				&& m_inputEnhancementPreAutoPreference->profile != Profile::Auto) {
+				restored = *m_inputEnhancementPreAutoPreference;
+			}
+			restored.autoAdapt = false;
+			*preference        = restored;
+			m_inputEnhancementPreAutoPreference.reset();
+		}
+		projectInputEnhancementPreference(m_draft);
 	} else if (id == QLatin1String("audio.inputEnhancementReduction")) {
 		if (Mumble::InputEnhancement::DefaultPreference *preference =
 				editableCurrentInputEnhancementPreference(m_draft)) {
@@ -2110,6 +2250,7 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 
 	if (action == QLatin1String("reset")) {
 		m_draft = m_original;
+		m_inputEnhancementReadinessUiError.clear();
 		m_shortcutCaptureIndex = -1;
 		forceModernLayout();
 		return result;
@@ -2493,6 +2634,18 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("apply") || action == QLatin1String("ok")) {
+		const Mumble::InputEnhancement::DefaultPreference &preference =
+			currentInputEnhancementPreference(m_draft);
+		const Mumble::InputEnhancement::ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+			m_draft, preference.profile, preference.reduction, preference.character);
+		if (!readiness.selectable) {
+			m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement settings were not saved: %1")
+												 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+			result.accepted    = false;
+			result.closeDialog = false;
+			return result;
+		}
+		m_inputEnhancementReadinessUiError.clear();
 		m_shortcutCaptureIndex = -1;
 		cancelInputEnhancementCalibration();
 		refreshShortcutRestartFlag();
@@ -2766,6 +2919,20 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const bool pushToTalkTransmit    = m_draft.atTransmit == Settings::PushToTalk;
 		const Mumble::InputEnhancement::DefaultPreference &inputEnhancementPreference =
 			currentInputEnhancementPreference(m_draft);
+		const Mumble::InputEnhancement::ProfileReadiness inputEnhancementAutoReadiness =
+			inputEnhancementReadinessForSettings(
+				m_draft, Mumble::InputEnhancement::Profile::Auto,
+				inputEnhancementPreference.reduction, inputEnhancementPreference.character);
+		const bool inputEnhancementAutoSelected =
+			inputEnhancementPreference.profile == Mumble::InputEnhancement::Profile::Auto;
+		QString inputEnhancementAutoHint = QObject::tr(
+			"Experimental: dynamically chooses among Light, Balanced, and Quality. Voice Focus is never selected.");
+		const QString inputEnhancementAutoReadinessReason =
+			inputEnhancementReadinessReasonText(inputEnhancementAutoReadiness.reason);
+		if (!inputEnhancementAutoReadinessReason.isEmpty()) {
+			inputEnhancementAutoHint += QLatin1Char(' ');
+			inputEnhancementAutoHint += QObject::tr("Unavailable: %1").arg(inputEnhancementAutoReadinessReason);
+		}
 		const QString inputEnhancementCalibrationUiError =
 			(inputEnhancementPreference.profile == Mumble::InputEnhancement::Profile::Auto
 			 || inputEnhancementPreference.autoAdapt)
@@ -2867,25 +3034,35 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															   QObject::tr("Echo cancellation"),
 															   static_cast< int >(m_draft.echoOption),
 															   echoOptionsFor(m_draft)),
-												   selectField(QStringLiteral("audio.inputEnhancementProfile"),
-															   QObject::tr("Input enhancement"),
-													   static_cast< int >(
-														   inputEnhancementPreference.profile),
-															   inputEnhancementProfileOptions()),
+										   hintedField(
+											   selectField(QStringLiteral("audio.inputEnhancementProfile"),
+													   QObject::tr("Input enhancement"),
+													   static_cast< int >(inputEnhancementPreference.profile),
+													   inputEnhancementProfileOptions(
+														   m_draft, inputEnhancementPreference.profile)),
+											   m_inputEnhancementReadinessUiError),
 												   rangeField(QStringLiteral("audio.inputEnhancementReduction"),
 															  QObject::tr("Noise reduction"),
 													  inputEnhancementPreference.reduction,
 															  0, 100, 1, QStringLiteral("%")),
 												   rangeField(QStringLiteral("audio.inputEnhancementCharacter"),
-															  QObject::tr("Natural ↔ Crisp"),
+														  QObject::tr("Natural ↔ Clear"),
 													  inputEnhancementPreference.character,
 															  0, 100, 1, QStringLiteral("%")),
+										   advancedField(enabledField(
+											   boolField(QStringLiteral("audio.inputEnhancementAutoAdapt"),
+													 QObject::tr("Adapt automatically"),
+													 inputEnhancementPreference.autoAdapt),
+											   inputEnhancementPreference.profile
+												   != Mumble::InputEnhancement::Profile::Auto)),
+										   advancedField(hintedField(
 											   enabledField(
-												   boolField(QStringLiteral("audio.inputEnhancementAutoAdapt"),
-															 QObject::tr("Adapt automatically"),
-															 inputEnhancementPreference.autoAdapt),
-												   inputEnhancementPreference.profile
-													   != Mumble::InputEnhancement::Profile::Auto),
+												   boolField(QStringLiteral("audio.inputEnhancementExperimentalAuto"),
+														 QObject::tr("Experimental Auto profile"),
+														 inputEnhancementAutoSelected),
+												   inputEnhancementAutoSelected
+													   || inputEnhancementAutoReadiness.selectable),
+											   inputEnhancementAutoHint)),
 												   advancedField(selectField(QStringLiteral("audio.noiseCancelMode"),
 																	 QObject::tr("Legacy suppression mode"),
 																	 static_cast< int >(m_draft.noiseCancelMode),

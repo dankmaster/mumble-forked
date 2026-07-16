@@ -11,6 +11,7 @@
 #include <QJsonParseError>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStringList>
 #include <QUrl>
 
 #include <cmath>
@@ -127,8 +128,13 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 		if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
 			return reject(ChannelPointerRejection::InvalidJson, QStringLiteral("Channel pointer is not a JSON object"));
 		}
-		const QJsonObject root           = document.object();
-		const QSet< QString > rootFields = { QStringLiteral("schemaVersion"),
+		const QJsonObject root = document.object();
+		qint64 schemaVersion   = 0;
+		if (!exactInteger(root.value(QStringLiteral("schemaVersion")), 1, 2, schemaVersion)) {
+			return reject(ChannelPointerRejection::InvalidSchema,
+						  QStringLiteral("Channel pointer schema version is invalid"));
+		}
+		QSet< QString > rootFields = { QStringLiteral("schemaVersion"),
 											 QStringLiteral("channel"),
 											 QStringLiteral("channelTag"),
 											 QStringLiteral("immutableTag"),
@@ -145,10 +151,12 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 											 QStringLiteral("knownGoodTags"),
 											 QStringLiteral("announcement"),
 											 QStringLiteral("promotedAtUtc") };
-		qint64 schemaVersion             = 0;
+		if (schemaVersion == 2) {
+			rootFields.insert(QStringLiteral("installer"));
+			rootFields.insert(QStringLiteral("recoveryInstallers"));
+		}
 		qint64 buildNumber               = 0;
 		if (!exactFields(root, rootFields)
-			|| !exactInteger(root.value(QStringLiteral("schemaVersion")), 1, 1, schemaVersion)
 			|| !exactInteger(root.value(QStringLiteral("buildNumber")), 1, std::numeric_limits< int >::max(),
 							 buildNumber)) {
 			return reject(ChannelPointerRejection::InvalidSchema,
@@ -189,6 +197,63 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 			|| artifactUrl.fileName != artifactName || artifactUrl.tag != immutableTag) {
 			return reject(ChannelPointerRejection::UnsafeArtifact,
 						  QStringLiteral("Channel pointer artifact is invalid"));
+		}
+
+		QJsonObject normalizedInstaller;
+		QJsonArray normalizedRecoveryInstallers;
+		QStringList recoveryTags;
+		if (schemaVersion == 2) {
+			const QJsonObject installer = root.value(QStringLiteral("installer")).toObject();
+			const QSet< QString > installerFields = { QStringLiteral("fileName"), QStringLiteral("sha256"),
+												QStringLiteral("size"), QStringLiteral("url"),
+												QStringLiteral("executableSha256") };
+			qint64 installerSize = 0;
+			GitHubReleaseAssetUrl installerUrl;
+			const QString installerName = installer.value(QStringLiteral("fileName")).toString();
+			if (!exactFields(installer, installerFields) || !sha256(installer.value(QStringLiteral("sha256")))
+				|| !sha256(installer.value(QStringLiteral("executableSha256")))
+				|| !exactInteger(installer.value(QStringLiteral("size")), 1,
+								 4LL * 1024LL * 1024LL * 1024LL, installerSize)
+				|| !parseGitHubReleaseAssetUrl(installer.value(QStringLiteral("url")), installerUrl)
+				|| !matches(installerName, QStringLiteral("^mumble-forked-[A-Za-z0-9._-]+\\.msi$"))
+				|| installerUrl.repository != artifactUrl.repository || installerUrl.tag != immutableTag
+				|| installerUrl.fileName != installerName) {
+				return reject(ChannelPointerRejection::UnsafeArtifact,
+							  QStringLiteral("Channel pointer candidate installer is invalid"));
+			}
+			normalizedInstaller = installer;
+
+			const QJsonArray recovery = root.value(QStringLiteral("recoveryInstallers")).toArray();
+			if (recovery.size() != 2) {
+				return reject(ChannelPointerRejection::InvalidSchema,
+							  QStringLiteral("Channel pointer must contain two recovery installers"));
+			}
+			QSet< QString > uniqueRecoveryTags;
+			for (const QJsonValue &value : recovery) {
+				const QJsonObject entry = value.toObject();
+				const QSet< QString > fields = { QStringLiteral("immutableTag"), QStringLiteral("fileName"),
+												QStringLiteral("sha256"), QStringLiteral("size"),
+												QStringLiteral("url") };
+				qint64 size = 0;
+				GitHubReleaseAssetUrl url;
+				const QString tag      = entry.value(QStringLiteral("immutableTag")).toString();
+				const QString fileName = entry.value(QStringLiteral("fileName")).toString();
+				if (!exactFields(entry, fields)
+					|| !matches(tag, QStringLiteral("^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$"))
+					|| tag == immutableTag || uniqueRecoveryTags.contains(tag)
+					|| !matches(fileName, QStringLiteral("^mumble-forked-[A-Za-z0-9._-]+\\.msi$"))
+					|| !sha256(entry.value(QStringLiteral("sha256")))
+					|| !exactInteger(entry.value(QStringLiteral("size")), 1,
+									 4LL * 1024LL * 1024LL * 1024LL, size)
+					|| !parseGitHubReleaseAssetUrl(entry.value(QStringLiteral("url")), url)
+					|| url.repository != artifactUrl.repository || url.tag != tag || url.fileName != fileName) {
+					return reject(ChannelPointerRejection::UnsafeArtifact,
+								  QStringLiteral("Channel pointer recovery installer is invalid"));
+				}
+				uniqueRecoveryTags.insert(tag);
+				recoveryTags.push_back(tag);
+				normalizedRecoveryInstallers.push_back(entry);
+			}
 		}
 
 		const QJsonObject qualification           = root.value(QStringLiteral("qualification")).toObject();
@@ -244,7 +309,9 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 		}
 
 		const QJsonArray knownGood = root.value(QStringLiteral("knownGoodTags")).toArray();
-		if (knownGood.isEmpty() || knownGood.size() > 2 || knownGood.first().toString() != immutableTag) {
+		const bool validKnownGoodCount = schemaVersion == 2 ? knownGood.size() == 3
+														 : (!knownGood.isEmpty() && knownGood.size() <= 2);
+		if (!validKnownGoodCount || knownGood.first().toString() != immutableTag) {
 			return reject(ChannelPointerRejection::InvalidSchema,
 						  QStringLiteral("Channel pointer recovery set is invalid"));
 		}
@@ -257,6 +324,12 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 							  QStringLiteral("Channel pointer recovery tag is invalid"));
 			}
 			uniqueTags.insert(tag.toString());
+		}
+		if (schemaVersion == 2
+			&& (knownGood.at(1).toString() != recoveryTags.at(0)
+				|| knownGood.at(2).toString() != recoveryTags.at(1))) {
+			return reject(ChannelPointerRejection::InvalidSchema,
+						  QStringLiteral("Channel pointer recovery order is inconsistent"));
 		}
 
 		const QString rawAnnouncement = root.value(QStringLiteral("announcement")).toString();
@@ -273,7 +346,7 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 
 		QJsonObject package{ { QStringLiteral("format"), QStringLiteral("mumble-update-v1") },
 							 { QStringLiteral("applyMode"), QStringLiteral("replace-staged-payload") },
-							 { QStringLiteral("minUpdaterVersion"), 3 },
+							 { QStringLiteral("minUpdaterVersion"), schemaVersion == 2 ? 4 : 3 },
 							 { QStringLiteral("fileName"), artifactName },
 							 { QStringLiteral("url"), artifactUrl.url.toString() },
 							 { QStringLiteral("sha256"), artifact.value(QStringLiteral("sha256")) },
@@ -291,6 +364,14 @@ ChannelPointerDecision verifyAndNormalizeChannelPointer(const QByteArray &exactP
 			{ QStringLiteral("knownGoodTags"), knownGood },
 			{ QStringLiteral("package"), package }
 		};
+		if (schemaVersion == 2) {
+			info.insert(QStringLiteral("installer"), normalizedInstaller);
+			info.insert(QStringLiteral("installerUrl"),
+						normalizedInstaller.value(QStringLiteral("url")));
+			info.insert(QStringLiteral("sha256"),
+						normalizedInstaller.value(QStringLiteral("sha256")));
+			info.insert(QStringLiteral("recoveryInstallers"), normalizedRecoveryInstallers);
+		}
 		return { info, ChannelPointerRejection::None, {}, true };
 	} catch (...) {
 		return reject(ChannelPointerRejection::InvalidSchema, QStringLiteral("Channel pointer verification failed"));

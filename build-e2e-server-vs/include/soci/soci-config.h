@@ -1,0 +1,20 @@
+#ifndef SOCI_SOCICONFIG_H_INCLUDED
+#define SOCI_SOCICONFIG_H_INCLUDED
+
+/* #define SOCI_HAVE_EMPTY */
+
+/* #define SOCI_HAVE_DB2 */
+
+/* #define SOCI_HAVE_FIREBIRD */
+
+#define SOCI_HAVE_MYSQL 1
+
+/* #define SOCI_HAVE_ODBC */
+
+/* #define SOCI_HAVE_ORACLE */
+
+#define SOCI_HAVE_POSTGRESQL 1
+
+#define SOCI_HAVE_SQLITE3 1
+
+#endif

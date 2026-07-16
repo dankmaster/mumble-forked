@@ -30,6 +30,31 @@ function Read-ReleaseJson {
 	}
 }
 
+function Assert-StrictInputEnhancementRolloutJson {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Path,
+
+		[Parameter(Mandatory = $true)]
+		[ValidateSet("aggregate", "rollout", "rnnoise-decision")]
+		[string]$Kind,
+
+		[string]$PythonPath = "python"
+	)
+
+	$file = Get-Item -LiteralPath $Path -ErrorAction Stop
+	$validator = Join-Path $PSScriptRoot "validate-input-enhancement-rollout-json.py"
+	if (-not (Test-Path -LiteralPath $validator -PathType Leaf)) {
+		throw "Strict rollout JSON validator is missing: '$validator'."
+	}
+	$validatorOutput = @(& $PythonPath $validator --kind $Kind --path $file.FullName 2>&1)
+	$validatorExitCode = $LASTEXITCODE
+	foreach ($line in $validatorOutput) { Write-Host ([string]$line) }
+	if ($validatorExitCode -ne 0) {
+		throw "Strict raw-JSON validation failed for '$($file.FullName)' as '$Kind'."
+	}
+}
+
 function Write-ReleaseJson {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -118,6 +143,7 @@ function Assert-TestGateResults {
 			"DeepFilterNetCapiTests",
 			"TestInputEnhancement",
 			"TestInputEnhancementAuto",
+			"TestInputEnhancementAutoV2",
 			"TestInputEnhancementCalibration",
 			"TestInputEnhancementCalibrationRuntime",
 			"TestInputEnhancementPolicy",
@@ -293,7 +319,9 @@ function Assert-CanonicalInputEnhancementPolicy {
 		throw "Signed policy available and forceOriginal fields must be booleans."
 	}
 	$profile = [string]$policy.recommendedProfile
-	if ($profile -cnotin @('Original', 'Light', 'Balanced', 'Crisp', 'Auto')) {
+	# Voice Focus is deliberately manual-only and must never arrive as a
+	# remotely recommended profile.
+	if ($profile -cnotin @('Original', 'Light', 'Balanced', 'Quality', 'Auto')) {
 		throw "Signed policy has an unsupported recommendedProfile."
 	}
 	$recipe = [string]$policy.recipeSetVersion
@@ -362,8 +390,12 @@ function Assert-InputEnhancementPromotionPolicy {
 		[bool]$ForceOriginal,
 
 		[Parameter(Mandatory = $true)]
-		[ValidateSet("Original", "Light", "Balanced", "Crisp", "Auto")]
+		[ValidateSet("Original", "Light", "Balanced", "Quality", "Auto")]
 		[string]$RecommendedProfile,
+
+		[Parameter(Mandatory = $true)]
+		[ValidateSet("private-community", "public")]
+		[string]$RolloutAudience,
 
 		[Parameter(Mandatory = $true)]
 		[bool]$RolloutEvidenceAvailable
@@ -373,6 +405,10 @@ function Assert-InputEnhancementPromotionPolicy {
 	if (-not $emergencyPolicy -and $Channel -ceq "preview" -and $RecommendedProfile -ceq "Auto") {
 		throw "A non-emergency preview promotion cannot recommend Auto. Auto requires stable rollout evidence."
 	}
+	if (-not $emergencyPolicy -and $Channel -ceq "stable" -and
+		$RolloutAudience -ceq "private-community" -and $RecommendedProfile -ceq "Auto") {
+		throw "The private community stage cannot recommend Auto. Auto requires the later public rollout stages."
+	}
 
 	$rolloutRequired = $Channel -ceq "stable" -and -not $emergencyPolicy
 	if ($rolloutRequired -and -not $RolloutEvidenceAvailable) {
@@ -381,12 +417,19 @@ function Assert-InputEnhancementPromotionPolicy {
 
 	$targetStage = "none"
 	if ($rolloutRequired) {
-		$targetStage = if ($RecommendedProfile -ceq "Auto") { "auto-recommended" } else { "stable-opt-in" }
+		$targetStage = if ($RolloutAudience -ceq "private-community") {
+			"community-stable"
+		} elseif ($RecommendedProfile -ceq "Auto") {
+			"auto-recommended"
+		} else {
+			"stable-opt-in"
+		}
 	}
 
 	return [pscustomobject][ordered]@{
 		emergencyPolicy = $emergencyPolicy
 		rolloutRequired = $rolloutRequired
+		rolloutAudience = $RolloutAudience
 		targetStage = $targetStage
 	}
 }
@@ -639,6 +682,7 @@ function Protect-FileWithEd25519 {
 Export-ModuleMember -Function @(
 	"Get-ReleaseFileSha256",
 	"Read-ReleaseJson",
+	"Assert-StrictInputEnhancementRolloutJson",
 	"Write-ReleaseJson",
 	"Assert-ObjectProperty",
 	"Assert-FullGitSha",

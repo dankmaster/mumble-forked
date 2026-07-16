@@ -42,7 +42,7 @@ if (-not (Test-Ed25519DetachedSignature -InputPath $PointerPath -SignaturePath $
 }
 
 $pointer = Read-ReleaseJson -Path $PointerPath
-if ([int](Assert-ObjectProperty $pointer 'schemaVersion' 'Previous channel pointer') -ne 1 -or
+if ([int](Assert-ObjectProperty $pointer 'schemaVersion' 'Previous channel pointer') -ne 2 -or
 	[string](Assert-ObjectProperty $pointer 'channel' 'Previous channel pointer') -cne $Channel) {
 	throw "Previous channel pointer schema or channel is invalid."
 }
@@ -55,13 +55,15 @@ if ($immutableTag -cne (Get-InputEnhancementBuildId -BuildNumber $buildNumber -S
 	throw "Previous channel pointer immutable identity is inconsistent."
 }
 $knownGoodTags = @(Assert-ObjectProperty $pointer 'knownGoodTags' 'Previous channel pointer')
-if ($knownGoodTags.Count -lt 1 -or $knownGoodTags.Count -gt 2 -or
+if ($knownGoodTags.Count -ne 3 -or
 	[string]$knownGoodTags[0] -cne $immutableTag -or
 	@($knownGoodTags | Select-Object -Unique).Count -ne $knownGoodTags.Count) {
 	throw "Previous channel pointer does not lead with its current immutable build."
 }
 
 $artifact = Assert-ObjectProperty $pointer 'artifact' 'Previous channel pointer'
+$candidateInstaller = Assert-ObjectProperty $pointer 'installer' 'Previous channel pointer'
+$recoveryInstallers = @(Assert-ObjectProperty $pointer 'recoveryInstallers' 'Previous channel pointer')
 $qualification = Assert-ObjectProperty $pointer 'qualification' 'Previous channel pointer'
 $releaseSmoke = Assert-ObjectProperty $pointer 'releaseSmoke' 'Previous channel pointer'
 $artifactName = [string](Assert-ObjectProperty $artifact 'fileName' 'Previous recovery artifact')
@@ -75,6 +77,33 @@ if ($artifactName -notmatch '^[A-Za-z0-9._-]+[.]mumble-update$' -or $artifactHas
 	[string](Assert-ObjectProperty $releaseSmoke 'sha256' 'Previous release smoke') -notmatch '^[0-9a-f]{64}$' -or
 	[string](Assert-ObjectProperty $releaseSmoke 'url' 'Previous release smoke') -cne "$baseUrl/release-smoke.json") {
 	throw "Previous channel pointer recovery references are invalid."
+}
+$candidateInstallerName = [string](Assert-ObjectProperty $candidateInstaller 'fileName' 'Previous candidate MSI')
+$candidateInstallerHash = [string](Assert-ObjectProperty $candidateInstaller 'sha256' 'Previous candidate MSI')
+$candidateInstallerSize = [int64](Assert-ObjectProperty $candidateInstaller 'size' 'Previous candidate MSI')
+$candidateExecutableHash = [string](Assert-ObjectProperty $candidateInstaller 'executableSha256' 'Previous candidate MSI')
+if ($candidateInstallerName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+	$candidateInstallerHash -notmatch '^[0-9a-f]{64}$' -or
+	$candidateExecutableHash -notmatch '^[0-9a-f]{64}$' -or $candidateInstallerSize -le 0 -or
+	[string](Assert-ObjectProperty $candidateInstaller 'url' 'Previous candidate MSI') -cne
+	"$baseUrl/$candidateInstallerName" -or $recoveryInstallers.Count -ne 2) {
+	throw "Previous channel pointer candidate/recovery MSI set is invalid."
+}
+$seenRecoveryTags = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+for ($index = 0; $index -lt $recoveryInstallers.Count; $index++) {
+	$recovery = $recoveryInstallers[$index]
+	$tag = [string](Assert-ObjectProperty $recovery 'immutableTag' 'Previous recovery MSI')
+	$name = [string](Assert-ObjectProperty $recovery 'fileName' 'Previous recovery MSI')
+	$hash = [string](Assert-ObjectProperty $recovery 'sha256' 'Previous recovery MSI')
+	$size = [int64](Assert-ObjectProperty $recovery 'size' 'Previous recovery MSI')
+	$url = [string](Assert-ObjectProperty $recovery 'url' 'Previous recovery MSI')
+	if ($tag -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' -or
+		-not $seenRecoveryTags.Add($tag) -or [string]$knownGoodTags[$index + 1] -cne $tag -or
+		$name -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+		$hash -notmatch '^[0-9a-f]{64}$' -or $size -le 0 -or
+		$url -cne "https://github.com/$Repository/releases/download/$tag/$name") {
+		throw "Previous channel pointer recovery MSI entry $index is invalid."
+	}
 }
 
 $remoteTag = @(git ls-remote origin "refs/tags/$immutableTag")
@@ -123,8 +152,10 @@ $qualifiedInstaller = Assert-ObjectProperty $qualified 'installer' 'Recovery qua
 $installerName = [string](Assert-ObjectProperty $qualifiedInstaller 'fileName' 'Recovery installer')
 $installerHash = [string](Assert-ObjectProperty $qualifiedInstaller 'sha256' 'Recovery installer')
 $installerSize = [int64](Assert-ObjectProperty $qualifiedInstaller 'size' 'Recovery installer')
+$qualifiedExecutableHash = [string](Assert-ObjectProperty $qualifiedInstaller 'executableSha256' 'Recovery installer')
 if ($installerName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
-	$installerHash -notmatch '^[0-9a-f]{64}$' -or $installerSize -le 0 -or
+	$installerHash -notmatch '^[0-9a-f]{64}$' -or $qualifiedExecutableHash -notmatch '^[0-9a-f]{64}$' -or
+	$installerSize -le 0 -or
 	(Assert-ObjectProperty $qualifiedInstaller 'signed' 'Recovery installer') -ne $true) {
 	throw "Recovery qualification contains invalid signed-installer metadata."
 }
@@ -134,6 +165,21 @@ $installerPath = Join-Path $OutputRoot $installerName
 if ((Get-Item -LiteralPath $installerPath).Length -ne $installerSize -or
 	(Get-ReleaseFileSha256 -Path $installerPath) -cne $installerHash) {
 	throw "Downloaded recovery installer does not match the signed qualification."
+}
+if ($installerName -cne $candidateInstallerName -or $installerHash -cne $candidateInstallerHash -or
+	$installerSize -ne $candidateInstallerSize -or $qualifiedExecutableHash -cne $candidateExecutableHash) {
+	throw "Previous qualification and channel pointer disagree about the candidate MSI."
+}
+foreach ($recovery in $recoveryInstallers) {
+	$tag = [string]$recovery.immutableTag
+	$name = [string]$recovery.fileName
+	gh release download $tag --repo $Repository --pattern $name --dir $OutputRoot
+	if ($LASTEXITCODE -ne 0) { throw "Recovery installer '$name' is missing from '$tag'." }
+	$path = Join-Path $OutputRoot $name
+	if ((Get-Item -LiteralPath $path).Length -ne [int64]$recovery.size -or
+		(Get-ReleaseFileSha256 -Path $path) -cne [string]$recovery.sha256) {
+		throw "Downloaded recovery installer '$name' does not match the signed channel pointer."
+	}
 }
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-signatures.ps1') `
 	-Root $OutputRoot -ExpectedSignerSubject $ExpectedSignerSubject `

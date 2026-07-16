@@ -23,6 +23,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -120,10 +121,12 @@ namespace {
 				return QStringLiteral("Light");
 			case Profile::Balanced:
 				return QStringLiteral("Balanced");
-			case Profile::Crisp:
-				return QStringLiteral("Crisp");
+			case Profile::Quality:
+				return QStringLiteral("Quality");
 			case Profile::Auto:
 				return QStringLiteral("Auto");
+			case Profile::VoiceFocus:
+				return QStringLiteral("VoiceFocus");
 		}
 		return QStringLiteral("Original");
 	}
@@ -131,8 +134,11 @@ namespace {
 	Mumble::InputEnhancement::Profile parseProfile(const QString &value) {
 		using Profile = Mumble::InputEnhancement::Profile;
 		const QString normalized = value.trimmed();
-		for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Crisp,
-									   Profile::Auto }) {
+		if (normalized.compare(QLatin1String("Crisp"), Qt::CaseInsensitive) == 0) {
+			return Profile::Quality;
+		}
+		for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Quality,
+									   Profile::Auto, Profile::VoiceFocus }) {
 			if (profileName(profile).compare(normalized, Qt::CaseInsensitive) == 0) {
 				return profile;
 			}
@@ -741,7 +747,7 @@ namespace {
 		requireFiniteSignal(samples, QStringLiteral("Input audio"));
 
 		const Recipe recipe = RecipeCatalog::resolve(request);
-		// Product fallback uses the 10 ms catastrophe limit. Balanced/Crisp
+		// Product fallback uses the 10 ms catastrophe limit. Balanced/Quality
 		// p99 targets (5/8 ms) are evaluated from benchmark diagnostics instead
 		// of turning one scheduling outlier into an audible profile rollback.
 		constexpr std::uint64_t deadline = 10'000'000;
@@ -1014,15 +1020,15 @@ int main(int argc, char **argv) {
 											 QStringLiteral("factor"), QStringLiteral("1.0"));
 	const QCommandLineOption profileOption(
 		QStringList() << QStringLiteral("profile"),
-		QStringLiteral("Run the production input-enhancement recipe: Original, Light, Balanced, Crisp, or Auto"),
+		QStringLiteral("Run an input-enhancement recipe: Original, Light, Balanced, Quality, VoiceFocus, or Auto"),
 		QStringLiteral("profile"));
 	const QCommandLineOption noiseReductionOption(
 		QStringList() << QStringLiteral("noise-reduction"),
 		QStringLiteral("Product noise-reduction control from 0 to 100"), QStringLiteral("value"),
 		QStringLiteral("50"));
 	const QCommandLineOption naturalCrispOption(
-		QStringList() << QStringLiteral("natural-crisp"),
-		QStringLiteral("Product Natural-to-Crisp control from 0 to 100"), QStringLiteral("value"),
+		QStringList() << QStringLiteral("natural-clear") << QStringLiteral("natural-crisp"),
+		QStringLiteral("Product Natural-to-Clear control from 0 to 100"), QStringLiteral("value"),
 		QStringLiteral("50"));
 	const QCommandLineOption cpuClassOption(
 		QStringList() << QStringLiteral("cpu-class"),
@@ -1163,7 +1169,7 @@ int main(int argc, char **argv) {
 				throw std::runtime_error("--noise-reduction must be an integer from 0 to 100");
 			}
 			if (!naturalCrispValid || naturalCrisp < 0 || naturalCrisp > 100) {
-				throw std::runtime_error("--natural-crisp must be an integer from 0 to 100");
+				throw std::runtime_error("--natural-clear must be an integer from 0 to 100");
 			}
 			productRequest.profile             = parseProfile(parser.value(profileOption));
 			productRequest.noiseReduction      = noiseReduction;
@@ -1330,7 +1336,11 @@ int main(int argc, char **argv) {
 		reportStream.close();
 		return 0;
 	} catch (const std::exception &e) {
-		qCritical("speech_cleanup_benchmark: %s", e.what());
+		// Qt logging can be compiled out or redirected by the client object
+		// library. This executable is a CI tool, so failures must always reach the
+		// invoking harness through stderr.
+		std::fprintf(stderr, "speech_cleanup_benchmark: %s\n", e.what());
+		std::fflush(stderr);
 		return 1;
 	}
 }

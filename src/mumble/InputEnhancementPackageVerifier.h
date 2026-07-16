@@ -15,10 +15,14 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 
 namespace Mumble::InputEnhancement {
 
 class Recipe;
+enum class CpuClass : std::uint8_t;
+struct ResolveRequest;
+struct ProfileReadiness;
 
 enum class PackageVerificationError : std::uint8_t {
 	None,
@@ -60,8 +64,8 @@ struct VerifiedRecipeEntry final {
 	unsigned int latencyBudgetSamples = 0;
 	QString minimumCpuClass;
 	std::uint32_t executionSemanticsVersion = 0;
-	std::uint32_t mixCurveVersion            = 0;
-	std::uint32_t adaptationPolicyVersion    = 0;
+	std::uint32_t mixCurveVersion           = 0;
+	std::uint32_t adaptationPolicyVersion   = 0;
 };
 
 struct PackageVerificationReport final {
@@ -101,19 +105,34 @@ public:
 	bool hasVerifiedPackage() const noexcept;
 
 	/// Re-hashes the asset immediately before model initialization. Passing an
-	/// expected path additionally binds the caller's resolved file to the signed
-	/// relative path. Unmanaged build-0 developer clients return true.
+	/// expected path additionally binds the caller's resolved file to the
+	/// manifest-relative path. Build-0 clients may use an unsigned catalog, but
+	/// neural models are never authorized without a parsed catalog and exact
+	/// asset SHA-256.
 	bool modelAuthorized(const QString &modelId, const QString &expectedPath = {}) const;
 	bool modelsAuthorized(const QStringList &modelIds) const;
 	/// Binds the compiled product recipe to the exact signed recipe catalog,
 	/// including revision, profile/engine, model, safe control intervals,
 	/// latency budget and CPU class. Unmanaged build-0 clients return true.
 	bool recipeAuthorized(const Recipe &recipe) const;
+	/// Combines shared CPU/backend readiness with the exact verified recipe and
+	/// model catalog. Manual profiles are selectable only when the requested
+	/// profile itself can run; deterministic runtime fallback is never presented
+	/// as a successful preflight.
+	ProfileReadiness readinessForProfile(const ResolveRequest &request) const;
+	/// Runs and caches a real Quality pipeline/worker probe off the audio
+	/// callback. Manual profile readiness is deliberately independent from
+	/// AutoV2's synthetic policy-capability probe.
+	CpuClass manualProfileCpuClass() const;
 	QByteArray modelSha256(const QString &modelId) const;
 	QString modelSha256Hex(const QString &modelId) const;
 	QString modelPath(const QString &modelId) const;
 	QString modelRelativePath(const QString &modelId) const;
 	QString catalogRevision() const;
+	/// SHA-256 binding the verified model and recipe manifests plus their
+	/// catalog revision. Capability-probe cache entries use this instead of a
+	/// model name so any packaged model/recipe byte drift invalidates the tier.
+	QString runtimePayloadFingerprint() const;
 
 	// Immutable after publication; exposed as a type only so the strict parser
 	// can construct it before one atomic publication.
@@ -136,6 +155,8 @@ private:
 	std::atomic_bool m_ready{ false };
 	std::atomic_bool m_verified{ false };
 	const bool m_developmentBypass;
+	mutable std::once_flag m_manualProfileProbeOnce;
+	mutable CpuClass m_manualProfileCpuClass;
 };
 
 } // namespace Mumble::InputEnhancement

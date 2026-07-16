@@ -363,6 +363,8 @@ protected:
 	int m_inputGateReleaseFrames;
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
 	bool m_forceSpeechCleanupE2ERelease = false;
+	unsigned int m_speechCleanupE2ECurrentDrainSamples = 0;
+	unsigned int m_speechCleanupE2ELastCompletedDrainSamples = 0;
 	std::atomic< std::uint64_t > m_speechCleanupE2EModelInitializationAttempts { 0 };
 #endif
 	int iBufferedFrames;

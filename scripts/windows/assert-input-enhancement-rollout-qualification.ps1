@@ -10,7 +10,20 @@ param(
 	[string]$PublicKeyHex,
 
 	[Parameter(Mandatory = $true)]
-	[ValidateSet("stable-opt-in", "auto-recommended", "auto-default")]
+	[string]$AggregateExportPath,
+
+	[Parameter(Mandatory = $true)]
+	[string]$AggregateExportSignaturePath,
+
+	[Parameter(Mandatory = $true)]
+	[string]$AggregatePublicKeyHex,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedQuerySha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidateSet("community-stable", "stable-opt-in", "auto-recommended", "auto-default")]
 	[string]$TargetStage,
 
 	[Parameter(Mandatory = $true)]
@@ -20,6 +33,12 @@ param(
 	[string]$ExpectedRecipeSetVersion,
 
 	[int]$MaximumEvidenceAgeDays = 7,
+
+	[string]$RnnoiseDecisionPath = "",
+
+	[string]$RnnoiseDecisionSignaturePath = "",
+
+	[string]$PythonPath = "python",
 
 	[string]$OpenSslPath = ""
 )
@@ -97,9 +116,13 @@ if ($ExpectedRecipeSetVersion -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
 	throw "ExpectedRecipeSetVersion is invalid."
 }
 
-$null = Assert-Ed25519PublicKeyHex -PublicKeyHex $PublicKeyHex
+$rolloutKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $PublicKeyHex
+$aggregateKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $AggregatePublicKeyHex
+if ($rolloutKey -ceq $aggregateKey) {
+	throw "Telemetry aggregate exports and rollout envelopes must use separate Ed25519 signer identities."
+}
 if (-not (Test-Ed25519DetachedSignature -InputPath $EvidencePath -SignaturePath $SignaturePath `
-	-PublicKeyHex $PublicKeyHex -OpenSslPath $OpenSslPath)) {
+	-PublicKeyHex $rolloutKey -OpenSslPath $OpenSslPath)) {
 	throw "Rollout qualification has no valid detached Ed25519 signature."
 }
 $evidenceFile = Get-Item -LiteralPath $EvidencePath -ErrorAction Stop
@@ -112,110 +135,178 @@ if ($evidenceFile.Length -le 0 -or $evidenceFile.Length -gt 32768 -or $signature
 	throw "Rollout qualification or signature has an unsafe size."
 }
 
+Assert-StrictInputEnhancementRolloutJson -Path $evidenceFile.FullName -Kind rollout -PythonPath $PythonPath
+
 $evidence = Read-ReleaseJson -Path $evidenceFile.FullName
 Assert-ExactProperties $evidence @(
-	'domainRnnoiseTrack', 'generatedAtUtc', 'kind', 'population', 'preference', 'privacy',
-	'recipeSetVersion', 'reliability', 'schemaVersion', 'sourceChannel', 'testedBuildIds', 'window'
+	'domainRnnoiseTrack', 'generatedAtUtc', 'kind', 'schemaVersion', 'sourceAggregate'
 ) 'Rollout qualification'
-if ([int](Assert-ObjectProperty $evidence 'schemaVersion' 'Rollout qualification') -ne 1 -or
-	[string](Assert-ObjectProperty $evidence 'kind' 'Rollout qualification') -cne 'input-enhancement-rollout-qualification') {
+if ([int](Assert-ObjectProperty $evidence 'schemaVersion' 'Rollout qualification') -ne 2 -or
+	[string](Assert-ObjectProperty $evidence 'kind' 'Rollout qualification') -cne
+		'input-enhancement-rollout-qualification') {
 	throw "Unsupported rollout qualification schema."
 }
 
-$generatedAt = Get-UtcTimestamp (Assert-ObjectProperty $evidence 'generatedAtUtc' 'Rollout qualification') 'generatedAtUtc'
+$generatedAt = Get-UtcTimestamp (Assert-ObjectProperty $evidence 'generatedAtUtc' 'Rollout qualification') `
+	'rollout.generatedAtUtc'
 $now = [DateTimeOffset]::UtcNow
 if ($generatedAt -gt $now.AddMinutes(5) -or $generatedAt -lt $now.AddDays(-$MaximumEvidenceAgeDays)) {
 	throw "Rollout qualification is future-dated or older than the allowed evidence age."
 }
 
-$window = Assert-ObjectProperty $evidence 'window' 'Rollout qualification'
-Assert-ExactProperties $window @('endUtc', 'observationDays', 'startUtc') 'Rollout window'
-$windowStart = Get-UtcTimestamp (Assert-ObjectProperty $window 'startUtc' 'Rollout window') 'window.startUtc'
-$windowEnd = Get-UtcTimestamp (Assert-ObjectProperty $window 'endUtc' 'Rollout window') 'window.endUtc'
-$observationDays = Get-WholeNumber (Assert-ObjectProperty $window 'observationDays' 'Rollout window') `
-	'window.observationDays' 1
-if ($windowStart -ge $windowEnd -or $windowEnd -gt $generatedAt -or
-	($windowEnd - $windowStart).TotalDays -lt $observationDays) {
-	throw "Rollout window is inconsistent with its attested observation days."
+& (Join-Path $PSScriptRoot 'assert-input-enhancement-aggregate-export.ps1') `
+	-AggregateExportPath $AggregateExportPath `
+	-AggregateExportSignaturePath $AggregateExportSignaturePath `
+	-AggregatePublicKeyHex $aggregateKey `
+	-ExpectedQuerySha256 $ExpectedQuerySha256 `
+	-MaximumEvidenceAgeDays $MaximumEvidenceAgeDays `
+	-PythonPath $PythonPath `
+	-OpenSslPath $OpenSslPath
+
+$aggregateFile = Get-Item -LiteralPath $AggregateExportPath -ErrorAction Stop
+$aggregateSignatureFile = Get-Item -LiteralPath $AggregateExportSignaturePath -ErrorAction Stop
+$aggregate = Read-ReleaseJson -Path $aggregateFile.FullName
+$aggregateQuery = Assert-ObjectProperty $aggregate 'query' 'Telemetry aggregate export'
+$sourceAggregate = Assert-ObjectProperty $evidence 'sourceAggregate' 'Rollout qualification'
+Assert-ExactProperties $sourceAggregate @(
+	'fileName', 'querySha256', 'sha256', 'signatureFileName', 'signatureSha256', 'windowSha256'
+) 'Rollout source aggregate'
+if ([string]$sourceAggregate.fileName -cne $aggregateFile.Name -or
+	[string]$sourceAggregate.signatureFileName -cne $aggregateSignatureFile.Name -or
+	[string]$sourceAggregate.sha256 -cne (Get-ReleaseFileSha256 -Path $aggregateFile.FullName) -or
+	[string]$sourceAggregate.signatureSha256 -cne (Get-ReleaseFileSha256 -Path $aggregateSignatureFile.FullName) -or
+	[string]$sourceAggregate.querySha256 -cne [string]$aggregateQuery.sha256 -or
+	[string]$sourceAggregate.windowSha256 -cne [string]$aggregateQuery.windowSha256) {
+	throw "Rollout qualification does not reference the exact verified aggregate export bytes and query/window binding."
+}
+$aggregateGeneratedAt = Get-UtcTimestamp (Assert-ObjectProperty $aggregate 'generatedAtUtc' 'Telemetry aggregate export') `
+	'aggregate.generatedAtUtc'
+if ($generatedAt -lt $aggregateGeneratedAt) {
+	throw "Rollout qualification predates its telemetry aggregate export."
 }
 
-$sourceChannel = [string](Assert-ObjectProperty $evidence 'sourceChannel' 'Rollout qualification')
-$requiredSourceChannel = if ($TargetStage -eq 'stable-opt-in') { 'preview' } else { 'stable' }
+$window = Assert-ObjectProperty $aggregate 'window' 'Telemetry aggregate export'
+$windowStart = Get-UtcTimestamp (Assert-ObjectProperty $window 'startUtc' 'Aggregate window') 'aggregate.window.startUtc'
+$windowEnd = Get-UtcTimestamp (Assert-ObjectProperty $window 'endUtc' 'Aggregate window') 'aggregate.window.endUtc'
+$observationDays = Get-WholeNumber (Assert-ObjectProperty $window 'observationDays' 'Aggregate window') `
+	'aggregate.window.observationDays' 1
+if ($windowStart -ge $windowEnd -or $windowEnd -gt $aggregateGeneratedAt -or
+	($windowEnd - $windowStart).TotalDays -lt $observationDays) {
+	throw "Rollout aggregate window is inconsistent with its attested observation days."
+}
+
+$sourceChannel = [string](Assert-ObjectProperty $aggregate 'sourceChannel' 'Telemetry aggregate export')
+$rolloutAudience = [string](Assert-ObjectProperty $aggregate 'rolloutAudience' 'Telemetry aggregate export')
+$requiredSourceChannel = if ($TargetStage -cin @('community-stable', 'stable-opt-in')) { 'preview' } else { 'stable' }
+$requiredAudience = if ($TargetStage -ceq 'community-stable') { 'private-community' } else { 'public' }
 if ($sourceChannel -cne $requiredSourceChannel) {
 	throw "$TargetStage requires evidence collected on the '$requiredSourceChannel' channel."
 }
-$testedBuildIds = @(Assert-ObjectProperty $evidence 'testedBuildIds' 'Rollout qualification')
-if ($testedBuildIds.Count -lt 1 -or $testedBuildIds.Count -gt 16 -or
-	@($testedBuildIds | Where-Object { [string]$_ -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' }).Count -gt 0 -or
-	@($testedBuildIds | Select-Object -Unique).Count -ne $testedBuildIds.Count -or
-	$ExpectedBuildId -cnotin @($testedBuildIds | ForEach-Object { [string]$_ })) {
-	throw "Rollout qualification must uniquely include the exact immutable build being promoted."
+if ($rolloutAudience -cne $requiredAudience) {
+	throw "$TargetStage requires rollout audience '$requiredAudience'."
+}
+$testedBuildIds = @((Assert-ObjectProperty $aggregate 'testedBuildIds' 'Telemetry aggregate export') |
+	ForEach-Object { [string]$_ })
+if ($testedBuildIds.Count -ne 1 -or
+	@($testedBuildIds | Where-Object { $_ -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' }).Count -gt 0 -or
+	[string]$testedBuildIds[0] -cne $ExpectedBuildId) {
+	throw "Rollout aggregate must contain only the exact immutable build being promoted."
 }
 
-$population = Assert-ObjectProperty $evidence 'population' 'Rollout qualification'
-Assert-ExactProperties $population @('distinctDevices', 'distinctUsers', 'talkHours') 'Rollout population'
-$users = Get-WholeNumber (Assert-ObjectProperty $population 'distinctUsers' 'Rollout population') 'population.distinctUsers'
-$devices = Get-WholeNumber (Assert-ObjectProperty $population 'distinctDevices' 'Rollout population') 'population.distinctDevices'
-$talkHours = Get-FiniteNumber (Assert-ObjectProperty $population 'talkHours' 'Rollout population') 'population.talkHours'
+$population = Assert-ObjectProperty $aggregate 'population' 'Telemetry aggregate export'
+$users = Get-WholeNumber (Assert-ObjectProperty $population 'distinctUsers' 'Aggregate population') `
+	'aggregate.population.distinctUsers'
+$devices = Get-WholeNumber (Assert-ObjectProperty $population 'distinctDevices' 'Aggregate population') `
+	'aggregate.population.distinctDevices'
+$intendedCommunityDevices = Get-WholeNumber `
+	(Assert-ObjectProperty $population 'intendedCommunityDevices' 'Aggregate population') `
+	'aggregate.population.intendedCommunityDevices' 1
+$talkHours = Get-FiniteNumber (Assert-ObjectProperty $population 'talkHours' 'Aggregate population') `
+	'aggregate.population.talkHours'
 
-$reliability = Assert-ObjectProperty $evidence 'reliability' 'Rollout qualification'
-Assert-ExactProperties $reliability @(
-	'callbackOverrunFrameRate', 'crashFreeSessionRate', 'fallbackSessionRate', 'manualRollbackOrOptOutRate',
-	'modelHashMismatchCount', 'p0Count', 'p1Count', 'recurrentCallbackRegressionCount'
-) 'Rollout reliability'
-$p0 = Get-WholeNumber (Assert-ObjectProperty $reliability 'p0Count' 'Rollout reliability') 'reliability.p0Count'
-$p1 = Get-WholeNumber (Assert-ObjectProperty $reliability 'p1Count' 'Rollout reliability') 'reliability.p1Count'
-$hashFailures = Get-WholeNumber (Assert-ObjectProperty $reliability 'modelHashMismatchCount' 'Rollout reliability') `
-	'reliability.modelHashMismatchCount'
+$reliability = Assert-ObjectProperty $aggregate 'reliability' 'Telemetry aggregate export'
+$p0 = Get-WholeNumber (Assert-ObjectProperty $reliability 'p0Count' 'Aggregate reliability') `
+	'aggregate.reliability.p0Count'
+$p1 = Get-WholeNumber (Assert-ObjectProperty $reliability 'p1Count' 'Aggregate reliability') `
+	'aggregate.reliability.p1Count'
+$hashFailures = Get-WholeNumber (Assert-ObjectProperty $reliability 'modelHashMismatchCount' 'Aggregate reliability') `
+	'aggregate.reliability.modelHashMismatchCount'
 $callbackRegressions = Get-WholeNumber `
-	(Assert-ObjectProperty $reliability 'recurrentCallbackRegressionCount' 'Rollout reliability') `
-	'reliability.recurrentCallbackRegressionCount'
-$crashFree = Get-FiniteNumber (Assert-ObjectProperty $reliability 'crashFreeSessionRate' 'Rollout reliability') `
-	'reliability.crashFreeSessionRate' 0 1
-$fallbackRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'fallbackSessionRate' 'Rollout reliability') `
-	'reliability.fallbackSessionRate' 0 1
-$overrunRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'callbackOverrunFrameRate' 'Rollout reliability') `
-	'reliability.callbackOverrunFrameRate' 0 1
-$optOutRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'manualRollbackOrOptOutRate' 'Rollout reliability') `
-	'reliability.manualRollbackOrOptOutRate' 0 1
+	(Assert-ObjectProperty $reliability 'recurrentCallbackRegressionCount' 'Aggregate reliability') `
+	'aggregate.reliability.recurrentCallbackRegressionCount'
+$crashFree = Get-FiniteNumber (Assert-ObjectProperty $reliability 'crashFreeSessionRate' 'Aggregate reliability') `
+	'aggregate.reliability.crashFreeSessionRate' 0 1
+$fallbackRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'fallbackSessionRate' 'Aggregate reliability') `
+	'aggregate.reliability.fallbackSessionRate' 0 1
+$overrunRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'callbackOverrunFrameRate' 'Aggregate reliability') `
+	'aggregate.reliability.callbackOverrunFrameRate' 0 1
+$optOutRate = Get-FiniteNumber (Assert-ObjectProperty $reliability 'manualRollbackOrOptOutRate' 'Aggregate reliability') `
+	'aggregate.reliability.manualRollbackOrOptOutRate' 0 1
 if ($p0 -ne 0 -or $p1 -ne 0 -or $hashFailures -ne 0 -or $callbackRegressions -ne 0) {
-	throw "Rollout qualification contains a P0/P1, model-hash failure, or recurrent callback regression."
+	throw "Rollout aggregate contains a P0/P1, model-hash failure, or recurrent callback regression."
 }
 
-$preference = Assert-ObjectProperty $evidence 'preference' 'Rollout qualification'
-Assert-ExactProperties $preference @('blindAbResponses', 'selectedOverOriginalRate') 'Rollout preference'
-$blindResponses = Get-WholeNumber (Assert-ObjectProperty $preference 'blindAbResponses' 'Rollout preference') `
-	'preference.blindAbResponses'
-$preferenceRate = Get-FiniteNumber (Assert-ObjectProperty $preference 'selectedOverOriginalRate' 'Rollout preference') `
-	'preference.selectedOverOriginalRate' 0 1
+$preference = Assert-ObjectProperty $aggregate 'preference' 'Telemetry aggregate export'
+$blindResponses = Get-WholeNumber (Assert-ObjectProperty $preference 'blindAbResponses' 'Aggregate preference') `
+	'aggregate.preference.blindAbResponses'
+$preferenceRate = Get-FiniteNumber (Assert-ObjectProperty $preference 'selectedOverOriginalRate' 'Aggregate preference') `
+	'aggregate.preference.selectedOverOriginalRate' 0 1
 
 $domainTrack = Assert-ObjectProperty $evidence 'domainRnnoiseTrack' 'Rollout qualification'
-Assert-ExactProperties $domainTrack @('outcome', 'status') 'Domain RNNoise track'
 $domainStatus = [string](Assert-ObjectProperty $domainTrack 'status' 'Domain RNNoise track')
-$domainOutcome = [string](Assert-ObjectProperty $domainTrack 'outcome' 'Domain RNNoise track')
-if ($domainStatus -cnotin @('pending', 'completed') -or
-	$domainOutcome -cnotin @('pending', 'embedded-retained', 'custom-promoted')) {
-	throw "Domain RNNoise track has an unsupported status or outcome."
+$hasDecision = -not [string]::IsNullOrWhiteSpace($RnnoiseDecisionPath)
+$hasDecisionSignature = -not [string]::IsNullOrWhiteSpace($RnnoiseDecisionSignaturePath)
+if ($hasDecision -xor $hasDecisionSignature) {
+	throw "RNNoise decision evidence is incomplete."
 }
-if (($domainStatus -eq 'completed' -and $domainOutcome -eq 'pending') -or
-	($domainStatus -eq 'pending' -and $domainOutcome -ne 'pending')) {
-	throw "Domain RNNoise track status and outcome are inconsistent."
+if ($domainStatus -ceq 'pending') {
+	Assert-ExactProperties $domainTrack @('status') 'Pending domain RNNoise track'
+	if ($hasDecision) {
+		throw "A pending RNNoise track must not receive unattested decision files."
+	}
+} elseif ($domainStatus -ceq 'completed') {
+	Assert-ExactProperties $domainTrack @('decision', 'outcome', 'status') 'Completed domain RNNoise track'
+	if (-not $hasDecision) {
+		throw "A completed RNNoise track requires its exact signed selection decision."
+	}
+	$decisionEvidence = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rnnoise-selection-decision.ps1') `
+		-DecisionPath $RnnoiseDecisionPath `
+		-DecisionSignaturePath $RnnoiseDecisionSignaturePath `
+		-PublicKeyHex $rolloutKey `
+		-PythonPath $PythonPath `
+		-OpenSslPath $OpenSslPath
+	$decisionReference = Assert-ObjectProperty $domainTrack 'decision' 'Completed domain RNNoise track'
+	Assert-ExactProperties $decisionReference @('fileName', 'sha256', 'signatureFileName', 'signatureSha256') `
+		'RNNoise decision reference'
+	$domainOutcome = [string](Assert-ObjectProperty $domainTrack 'outcome' 'Completed domain RNNoise track')
+	if ($domainOutcome -cne [string]$decisionEvidence.rolloutOutcome -or
+		[string]$decisionReference.fileName -cne [string]$decisionEvidence.fileName -or
+		[string]$decisionReference.sha256 -cne [string]$decisionEvidence.sha256 -or
+		[string]$decisionReference.signatureFileName -cne [string]$decisionEvidence.signatureFileName -or
+		[string]$decisionReference.signatureSha256 -cne [string]$decisionEvidence.signatureSha256) {
+		throw "Completed RNNoise track does not bind the exact verified campaign selection decision."
+	}
+} else {
+	throw "Domain RNNoise track has an unsupported status."
 }
 
-$privacy = Assert-ObjectProperty $evidence 'privacy' 'Rollout qualification'
-Assert-ExactProperties $privacy @(
-	'optInOnly', 'rawAudioIncluded', 'rawDeviceIdsIncluded', 'retentionDays', 'transcriptsIncluded', 'voiceprintsIncluded'
-) 'Rollout privacy'
-if ((Assert-ObjectProperty $privacy 'optInOnly' 'Rollout privacy') -ne $true -or
-	(Assert-ObjectProperty $privacy 'rawAudioIncluded' 'Rollout privacy') -ne $false -or
-	(Assert-ObjectProperty $privacy 'rawDeviceIdsIncluded' 'Rollout privacy') -ne $false -or
-	(Assert-ObjectProperty $privacy 'transcriptsIncluded' 'Rollout privacy') -ne $false -or
-	(Assert-ObjectProperty $privacy 'voiceprintsIncluded' 'Rollout privacy') -ne $false -or
-	(Get-WholeNumber (Assert-ObjectProperty $privacy 'retentionDays' 'Rollout privacy') 'privacy.retentionDays' 1) -gt 30) {
-	throw "Rollout qualification violates the input-enhancement telemetry privacy contract."
+$privacy = Assert-ObjectProperty $aggregate 'privacy' 'Telemetry aggregate export'
+if ((Assert-ObjectProperty $privacy 'optInOnly' 'Aggregate privacy') -ne $true -or
+	(Assert-ObjectProperty $privacy 'rawAudioIncluded' 'Aggregate privacy') -ne $false -or
+	(Assert-ObjectProperty $privacy 'rawDeviceIdsIncluded' 'Aggregate privacy') -ne $false -or
+	(Assert-ObjectProperty $privacy 'transcriptsIncluded' 'Aggregate privacy') -ne $false -or
+	(Assert-ObjectProperty $privacy 'voiceprintsIncluded' 'Aggregate privacy') -ne $false -or
+	(Get-WholeNumber (Assert-ObjectProperty $privacy 'retentionDays' 'Aggregate privacy') `
+		'aggregate.privacy.retentionDays' 1) -gt 30) {
+	throw "Rollout aggregate violates the input-enhancement telemetry privacy contract."
 }
 
 switch ($TargetStage) {
+	'community-stable' {
+		if ($devices -lt $intendedCommunityDevices -or $talkHours -lt 20 -or $observationDays -lt 7) {
+			throw "Private community stable requires all intended devices, 20 talk hours, and 7 observation days."
+		}
+	}
 	'stable-opt-in' {
 		if ($users -lt 10 -or $devices -lt 10 -or $talkHours -lt 50 -or $observationDays -lt 7) {
 			throw "Stable opt-in requires 10 users/devices, 50 talk hours, and 7 observation days."
@@ -236,9 +327,9 @@ switch ($TargetStage) {
 	}
 }
 
-$recipeSet = [string](Assert-ObjectProperty $evidence 'recipeSetVersion' 'Rollout qualification')
+$recipeSet = [string](Assert-ObjectProperty $aggregate 'recipeSetVersion' 'Telemetry aggregate export')
 if ($recipeSet -cne $ExpectedRecipeSetVersion) {
-	throw "Rollout qualification recipe set does not match the promoted build."
+	throw "Rollout aggregate recipe set does not match the promoted build."
 }
 
-Write-Host "Verified signed rollout qualification '$TargetStage' for '$ExpectedBuildId'."
+Write-Host "Verified signed rollout qualification '$TargetStage' for '$ExpectedBuildId' from the exact signed aggregate export."

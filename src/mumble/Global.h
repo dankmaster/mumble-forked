@@ -128,6 +128,7 @@ public:
 	bool bDebugDumpInput;
 	bool bDebugPrintQueue;
 	bool bDisableInputEnhancement;
+	bool bInputEnhancementRecoveryDisabled;
 	std::unique_ptr< ChannelListenerManager > channelListenerManager;
 
 	bool bHappyEaster;

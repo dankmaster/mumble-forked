@@ -34,6 +34,7 @@ class TestSpeechCleanup : public QObject {
 	Q_OBJECT
 
 private slots:
+	void modelDomainNormalizationIsExplicitAndPartOfSelectionIdentity();
 	void transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame();
 	void transmitDrainCanBeCancelledForFreshSpeech();
 #ifdef TEST_EXPECT_RNNOISE
@@ -60,6 +61,7 @@ private slots:
 	void dtlnSanitizesNonFiniteInputWithoutPoisoningItsState();
 #endif
 	void deepFilterNetOutputIsIndependentOfInputChunking();
+	void deepFilterNetRealtimeTimelineMatchesReportedLatency();
 	void deepFilterNetDryWetMixUsesTheProcessedTimeline();
 	void deepFilterNetResetRestoresTheStreamingTimeline();
 	void deepFilterNetSanitizesNonFiniteInputWithoutPoisoningItsState();
@@ -80,6 +82,19 @@ private:
 	static void verifyNonFiniteInputSanitized(const Mumble::SpeechCleanup::Selection &selection);
 };
 
+void TestSpeechCleanup::modelDomainNormalizationIsExplicitAndPartOfSelectionIdentity() {
+	Mumble::SpeechCleanup::Selection legacy;
+	legacy.backend = Settings::DeepFilterNetBackend;
+	legacy.modelId = QStringLiteral("deepfilternet:balanced");
+	QVERIFY(!legacy.modelDomainNormalization);
+	QVERIFY(!Mumble::SpeechCleanup::normalizeSelection(legacy).modelDomainNormalization);
+
+	Mumble::SpeechCleanup::Selection product = legacy;
+	product.modelDomainNormalization         = true;
+	QVERIFY(product != legacy);
+	QVERIFY(Mumble::SpeechCleanup::normalizeSelection(product).modelDomainNormalization);
+}
+
 void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame() {
 	Mumble::SpeechCleanup::TransmitDrain drain;
 	drain.begin(1776);
@@ -94,7 +109,9 @@ void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFra
 
 	QCOMPARE(drainedSamples, (std::vector< unsigned int >{ 480, 480, 480, 336 }));
 	QCOMPARE(std::accumulate(drainedSamples.cbegin(), drainedSamples.cend(), 0u), 1776u);
+	QCOMPARE(drain.requestedSamples(), 1776u);
 	QCOMPARE(drain.remainingSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 1776u);
 
 	const auto exhaustedFrame = drain.takeFrame(480);
 	QVERIFY(!exhaustedFrame.draining);
@@ -103,6 +120,8 @@ void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFra
 
 	drain.begin(0);
 	QVERIFY(!drain.active());
+	QCOMPARE(drain.requestedSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
 }
 
 void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
@@ -113,13 +132,16 @@ void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
 	QVERIFY(firstFrame.draining);
 	QVERIFY(!firstFrame.terminator);
 	QCOMPARE(drain.remainingSamples(), 960u);
+	QCOMPARE(drain.drainedSamples(), 480u);
 
 	// AudioInput invokes this on either a fresh VAD activation or PTT press. No
 	// cleanup reset is coupled to cancellation, so the live processor timeline
 	// can continue immediately with the new microphone frame.
 	drain.cancel();
 	QVERIFY(!drain.active());
+	QCOMPARE(drain.requestedSamples(), 0u);
 	QCOMPARE(drain.remainingSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
 	QVERIFY(!drain.takeFrame(480).draining);
 }
 
@@ -491,6 +513,67 @@ void TestSpeechCleanup::deepFilterNetOutputIsIndependentOfInputChunking() {
 	}
 #endif
 	verifyChunkInvariant(embeddedSelection(Settings::DeepFilterNetBackend));
+}
+
+void TestSpeechCleanup::deepFilterNetRealtimeTimelineMatchesReportedLatency() {
+	auto processor = createSpeechCleanupProcessor(embeddedSelection(Settings::DeepFilterNetBackend));
+#ifdef TEST_EXPECT_DEEPFILTERNET
+	QVERIFY2(processor && processor->isReady(),
+			 "DeepFilterNet was enabled but its runtime/model test payload is unavailable");
+#else
+	if (!processor || !processor->isReady()) {
+		QSKIP("DeepFilterNet runtime/model is not available in this build");
+	}
+#endif
+	QVERIFY(processor->prepareRealtime());
+	QVERIFY(processor->isReady());
+	QCOMPARE(processor->workerSchedulingDelayFrames(), 2u);
+
+	constexpr unsigned int FRAME_SAMPLES = 480;
+	constexpr std::size_t IMPULSE_INDEX  = FRAME_SAMPLES * 4;
+	const unsigned int reportedLatency   = processor->latencySamples();
+	QVERIFY2(reportedLatency > 0, "The real-time DeepFilterNet adapter must report its causal latency");
+
+	std::vector< float > signal(IMPULSE_INDEX + reportedLatency + FRAME_SAMPLES * 4, 0.0f);
+	signal[IMPULSE_INDEX] = 0.5f;
+	for (std::size_t offset = 0; offset < signal.size(); offset += FRAME_SAMPLES) {
+		QVERIFY2(processor->prepareOfflineFrame(), "The real-time worker did not complete before its deadline");
+		processor->processInPlace(signal.data() + offset, FRAME_SAMPLES, 0.0f);
+		QVERIFY(processor->isReady());
+	}
+	QVERIFY(processor->finishOfflineProcessing());
+
+	for (std::size_t index = 0; index < signal.size(); ++index) {
+		const float expected = index == IMPULSE_INDEX + reportedLatency ? 0.5f : 0.0f;
+		QVERIFY2(std::fabs(signal[index] - expected) <= 1.0e-8f,
+				 qPrintable(QStringLiteral("DeepFilterNet real-time dry latency mismatch at sample %1; reported=%2")
+							.arg(index)
+							.arg(reportedLatency)));
+	}
+
+	auto wetProcessor = createSpeechCleanupProcessor(embeddedSelection(Settings::DeepFilterNetBackend));
+	QVERIFY(wetProcessor && wetProcessor->isReady());
+	QVERIFY(wetProcessor->prepareRealtime());
+	QCOMPARE(wetProcessor->latencySamples(), reportedLatency);
+	std::vector< float > wetSignal(signal.size(), 0.0f);
+	wetSignal[IMPULSE_INDEX] = 0.5f;
+	for (std::size_t offset = 0; offset < wetSignal.size(); offset += FRAME_SAMPLES) {
+		QVERIFY(wetProcessor->prepareOfflineFrame());
+		wetProcessor->processInPlace(wetSignal.data() + offset, FRAME_SAMPLES, 1.0f);
+		QVERIFY(wetProcessor->isReady());
+	}
+	QVERIFY(wetProcessor->finishOfflineProcessing());
+	const auto wetPeak = std::max_element(wetSignal.cbegin(), wetSignal.cend(), [](float left, float right) {
+		return std::fabs(left) < std::fabs(right);
+	});
+	QVERIFY(wetPeak != wetSignal.cend());
+	QVERIFY2(std::fabs(*wetPeak) > 1.0e-4f, "The real-time DeepFilterNet impulse probe was unexpectedly silent");
+	const std::size_t wetPeakIndex = static_cast< std::size_t >(std::distance(wetSignal.cbegin(), wetPeak));
+	const std::size_t expectedWetPeak = IMPULSE_INDEX + reportedLatency;
+	QVERIFY2(wetPeakIndex >= expectedWetPeak - 1 && wetPeakIndex <= expectedWetPeak + 1,
+			 qPrintable(QStringLiteral("DeepFilterNet real-time wet peak mismatch: actual=%1 expected=%2")
+						.arg(wetPeakIndex)
+						.arg(expectedWetPeak)));
 }
 
 void TestSpeechCleanup::deepFilterNetDryWetMixUsesTheProcessedTimeline() {

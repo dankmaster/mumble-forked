@@ -19,10 +19,15 @@ struct Selection {
 	Settings::SpeechCleanupBackend backend = Settings::RNNoiseBackend;
 	QString modelId                       = QStringLiteral("rnnoise:embedded");
 	QString customModelPath               = {};
+	// Product input recipes may opt in to a level-normalized model domain.
+	// Legacy/expert input and receiver cleanup deliberately retain the exact
+	// historical processor path by leaving this false.
+	bool modelDomainNormalization = false;
 };
 
 inline bool operator==(const Selection &lhs, const Selection &rhs) {
-	return lhs.backend == rhs.backend && lhs.modelId == rhs.modelId && lhs.customModelPath == rhs.customModelPath;
+	return lhs.backend == rhs.backend && lhs.modelId == rhs.modelId && lhs.customModelPath == rhs.customModelPath
+		   && lhs.modelDomainNormalization == rhs.modelDomainNormalization;
 }
 
 inline bool operator!=(const Selection &lhs, const Selection &rhs) {

@@ -49,10 +49,16 @@ namespace {
 				return QStringLiteral("Light");
 			case Profile::Balanced:
 				return QStringLiteral("Balanced");
-			case Profile::Crisp:
-				return QStringLiteral("Crisp");
+			case Profile::Quality:
+				return QStringLiteral("Quality");
 			case Profile::Auto:
 				return QStringLiteral("Auto");
+			case Profile::VoiceFocus:
+				// Voice Focus deliberately remains an explicit user choice. A
+				// signed channel policy may disable enhancement or recommend one
+				// of the adaptive/core profiles, but must not opt a user into the
+				// aggressive manual-only profile.
+				return {};
 		}
 		return {};
 	}
@@ -64,8 +70,8 @@ namespace {
 			profile = Profile::Light;
 		} else if (name == QLatin1String("Balanced")) {
 			profile = Profile::Balanced;
-		} else if (name == QLatin1String("Crisp")) {
-			profile = Profile::Crisp;
+		} else if (name == QLatin1String("Quality") || name == QLatin1String("Crisp")) {
+			profile = Profile::Quality;
 		} else if (name == QLatin1String("Auto")) {
 			profile = Profile::Auto;
 		} else {

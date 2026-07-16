@@ -27494,7 +27494,10 @@ bool MainWindow::restartForPreparedForkUpdate() {
 	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode, true, true,
 											m_modernPreparedFallbackInstallerPath,
 											VersionCheck::expectedUpdateSha256ForInfo(m_modernVersionCheckInfo),
-											VersionCheck::expectedInstallerSha256ForInfo(m_modernVersionCheckInfo))) {
+											VersionCheck::expectedInstallerSha256ForInfo(m_modernVersionCheckInfo),
+											VersionCheck::preparedRecoveryInstallerPathForInfo(m_modernVersionCheckInfo),
+											VersionCheck::expectedRecoveryInstallerSha256ForInfo(m_modernVersionCheckInfo),
+											VersionCheck::expectedCandidateExecutableSha256ForInfo(m_modernVersionCheckInfo))) {
 		clearPendingUpdateResumeState();
 		QVariantMap failureBanner;
 		failureBanner.insert(QStringLiteral("visible"), true);
