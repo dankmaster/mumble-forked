@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run 24 deterministic product-pipeline smoke cases on an ephemeral CI build.
+"""Run 30 deterministic core-profile smoke cases on an ephemeral CI build.
 
 This is deliberately a correctness/catastrophe smoke, not a replacement for the
 licensed human-speech corpus qualification on protected runners. Generated WAV
@@ -19,22 +19,27 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import wave
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 from xml.etree import ElementTree
 
 
 SAMPLE_RATE = 48_000
-PROFILES = ("Original", "Light", "Balanced", "Crisp")
+PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 SCENES = ("clean", "stationary-hvac", "transient-keyboard")
 STARTUPS = (("cold", 0), ("warm", 14_400))
 EXPECTED = {
 	"Original": ("None", "input.original", 0, ""),
 	"Light": ("Speex", "input.light.speex", 0, ""),
 	"Balanced": ("RNNoise", "input.balanced.rnnoise-embedded", 1_440, "rnnoise:embedded"),
-	"Crisp": ("DeepFilterNet", "input.crisp.deepfilternet-balanced", 2_400, "deepfilternet:balanced"),
+	"Quality": ("DeepFilterNet", "input.quality.deepfilternet-balanced", 2_400, "deepfilternet:balanced"),
+	"VoiceFocus": (
+		"DeepFilterNet", "input.voice-focus.deepfilternet-balanced", 2_400, "deepfilternet:balanced"
+	),
 }
 
 
@@ -58,6 +63,31 @@ def file_sha256(path: Path) -> str:
 		for block in iter(lambda: stream.read(1024 * 1024), b""):
 			digest.update(block)
 	return digest.hexdigest()
+
+
+@contextmanager
+def benchmark_in_stage(benchmark: Path, stage_root: Path) -> Iterator[Path]:
+	"""Run the benchmark with the staged runtime as its application directory.
+
+	Windows resolves DLLs beside the executable before PATH, and the product
+	pipeline deliberately binds embedded-model identity to the loader-resolved
+	module path. Executing the build-tree benchmark in place would therefore load
+	a build-tree RNNoise DLL while authorizing the staged DLL, even when the bytes
+	are identical. A verified temporary copy makes both identities refer to the
+	exact staged runtime without relaxing path or hash authentication.
+	"""
+	file_descriptor, temporary_name = tempfile.mkstemp(
+		prefix=".speech_cleanup_benchmark-pr-smoke-", suffix=benchmark.suffix, dir=stage_root
+	)
+	os.close(file_descriptor)
+	staged_benchmark = Path(temporary_name)
+	try:
+		shutil.copy2(benchmark, staged_benchmark)
+		if file_sha256(staged_benchmark) != file_sha256(benchmark):
+			raise SmokeError("staged benchmark copy does not match the requested benchmark")
+		yield staged_benchmark
+	finally:
+		staged_benchmark.unlink(missing_ok=True)
 
 
 def write_wav(path: Path, samples: Sequence[float]) -> None:
@@ -179,7 +209,7 @@ def run_case(
 	noise_reduction = {"clean": 35, "stationary-hvac": 60, "transient-keyboard": 75}[scene]
 	command = [
 		str(benchmark), "--profile", profile,
-		"--noise-reduction", str(noise_reduction), "--natural-crisp", "55",
+		"--noise-reduction", str(noise_reduction), "--natural-clear", "55",
 		"--cpu-class", "High", "--input", str(input_path), "--clean-reference", str(clean_path),
 		"--output", str(output_path), "--report", str(report_path),
 	]
@@ -197,8 +227,16 @@ def run_case(
 	)
 	duration = time.monotonic() - started
 	if completed.returncode != 0:
+		details = "\n".join(
+			f"{name}: {value.strip()}"
+			for name, value in (("stdout", completed.stdout), ("stderr", completed.stderr))
+			if value.strip()
+		)
+		if not details:
+			details = "benchmark produced no stdout/stderr; inspect the command and case artifacts below"
 		raise SmokeError(
-			f"{case_id}: benchmark exited {completed.returncode}: {(completed.stderr or completed.stdout).strip()}"
+			f"{case_id}: benchmark exited {completed.returncode}: {details}; "
+			f"command={subprocess.list2cmdline(command)}; case_root={case_root}"
 		)
 	report = load_json(report_path)
 	checks = {
@@ -286,14 +324,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 		environment = os.environ.copy()
 		environment["PATH"] = str(stage_root) + os.pathsep + environment.get("PATH", "")
 		started = time.monotonic()
-		cases = [
-			run_case(benchmark, stage_root, work_root, profile, scene, startup, preroll, models, environment)
-			for scene in SCENES
-			for startup, preroll in STARTUPS
-			for profile in PROFILES
-		]
-		if len(cases) != 24:
-			raise SmokeError(f"internal suite error: expected 24 cases, got {len(cases)}")
+		with benchmark_in_stage(benchmark, stage_root) as staged_benchmark:
+			cases = [
+				run_case(staged_benchmark, stage_root, work_root, profile, scene, startup, preroll, models, environment)
+				for scene in SCENES
+				for startup, preroll in STARTUPS
+				for profile in PROFILES
+			]
+		if len(cases) != 30:
+			raise SmokeError(f"internal suite error: expected 30 cases, got {len(cases)}")
 		elapsed = time.monotonic() - started
 		summary = {
 			"schemaVersion": 1,
@@ -314,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 			json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
 		)
 		write_junit(upload_root / "pr-smoke.junit.xml", cases, elapsed)
-		print(f"input-enhancement PR smoke: passed {len(cases)}/24 cases in {elapsed:.1f}s")
+		print(f"input-enhancement PR smoke: passed {len(cases)}/30 cases in {elapsed:.1f}s")
 		return 0
 	except (OSError, SmokeError, subprocess.SubprocessError, KeyError, ValueError) as error:
 		print(f"input-enhancement PR smoke: failed: {error}", file=sys.stderr)

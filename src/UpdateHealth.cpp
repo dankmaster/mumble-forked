@@ -60,6 +60,13 @@ namespace {
 				  });
 	}
 
+	bool validBootSessionIdentity(const std::string &identity) {
+		return identity.size() == 32
+			   && std::all_of(identity.begin(), identity.end(), [](const unsigned char ch) {
+					  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+				  });
+	}
+
 	bool validSha256(const std::string &value) {
 		return value.size() == 64 && std::all_of(value.begin(), value.end(), [](const unsigned char ch) {
 				   return std::isxdigit(ch) != 0;
@@ -98,6 +105,20 @@ namespace {
 		}
 		if (value == "rolled-back") {
 			return TransactionState::RolledBack;
+		}
+		return std::nullopt;
+	}
+
+	const char *modeName(const TransactionMode mode) {
+		return mode == TransactionMode::WindowsInstaller ? "windows-installer" : "native-package";
+	}
+
+	std::optional< TransactionMode > parseMode(const std::string &value) {
+		if (value == "native-package") {
+			return TransactionMode::NativePackage;
+		}
+		if (value == "windows-installer") {
+			return TransactionMode::WindowsInstaller;
 		}
 		return std::nullopt;
 	}
@@ -209,18 +230,28 @@ namespace {
 	}
 
 	std::optional< PendingUpdate > parsePending(const json &document, std::string *error) {
-		if (document.value("schema", 0) != 2) {
+		if (document.value("schema", 0u) != SchemaVersion
+			|| document.value("updaterProtocolVersion", 0u) != UpdaterProtocolVersion) {
 			setError(error, "Unsupported update-health pending state.");
 			return std::nullopt;
 		}
 
 		PendingUpdate pending;
+		pending.updaterProtocolVersion          = document.value("updaterProtocolVersion", 0u);
+		const auto parsedMode                   = parseMode(document.value("mode", ""));
 		pending.transactionId                  = document.value("transactionId", "");
 		const auto parsedState                 = parseState(document.value("state", ""));
 		pending.packageIdentity                  = document.value("packageIdentity", "");
 		pending.previousPackageIdentity          = document.value("previousPackageIdentity", "");
+		pending.expectedExecutableSha256         = document.value("expectedExecutableSha256", "");
 		pending.appPath                          = pathFromUtf8(document.value("appPath", ""));
 		pending.backupRoot                       = pathFromUtf8(document.value("backupRoot", ""));
+		const json recoveryInstaller             = document.value("recoveryInstaller", json::object());
+		pending.recoveryInstallerPath            = pathFromUtf8(recoveryInstaller.value("path", ""));
+		pending.recoveryInstallerSize = recoveryInstaller.value("size", static_cast< std::uint64_t >(0));
+		pending.recoveryInstallerSha256          = recoveryInstaller.value("sha256", "");
+		pending.bootSessionIdentity              = document.value("bootSessionIdentity", "");
+		pending.restartRequired                  = document.value("restartRequired", false);
 		pending.minimumStableRuntimeMilliseconds = std::max< std::uint64_t >(
 			MinimumStableRuntimeMilliseconds,
 			document.value("minimumStableRuntimeMilliseconds", MinimumStableRuntimeMilliseconds));
@@ -233,12 +264,22 @@ namespace {
 		pending.previousInstalledManifestSize    = previousManifest.value("size", static_cast< std::uint64_t >(0));
 		pending.previousInstalledManifestSha256  = previousManifest.value("sha256", "");
 
-		if (!validTransactionId(pending.transactionId) || !parsedState || !safeIdentity(pending.packageIdentity)
+		if (!validTransactionId(pending.transactionId) || !parsedState || !parsedMode
+			|| !safeIdentity(pending.packageIdentity) || !validSha256(pending.expectedExecutableSha256)
 			|| pending.appPath.empty() || pending.backupRoot.empty()) {
 			setError(error, "Invalid update-health pending identity or path.");
 			return std::nullopt;
 		}
 		pending.state = *parsedState;
+		pending.mode  = *parsedMode;
+		if (pending.mode == TransactionMode::WindowsInstaller
+			&& (pending.recoveryInstallerPath.empty() || pending.recoveryInstallerSize == 0
+				|| !validSha256(pending.recoveryInstallerSha256)
+				|| !validBootSessionIdentity(pending.bootSessionIdentity)
+				|| !samePath(pending.recoveryInstallerPath.parent_path(), pending.backupRoot))) {
+			setError(error, "Invalid Windows Installer recovery artifact.");
+			return std::nullopt;
+		}
 		if (pending.previousInstalledManifestExisted && !validSha256(pending.previousInstalledManifestSha256)) {
 			setError(error, "Invalid previous installed-manifest checksum.");
 			return std::nullopt;
@@ -284,9 +325,19 @@ std::filesystem::path healthMarkerPath(const std::filesystem::path &updateRoot, 
 }
 
 bool writePendingState(const std::filesystem::path &updateRoot, const PendingUpdate &pending, std::string *error) {
-	if (!validTransactionId(pending.transactionId) || !safeIdentity(pending.packageIdentity) || pending.appPath.empty()
+	if (pending.updaterProtocolVersion != UpdaterProtocolVersion || !validTransactionId(pending.transactionId)
+		|| !safeIdentity(pending.packageIdentity) || !validSha256(pending.expectedExecutableSha256)
+		|| pending.appPath.empty()
 		|| pending.backupRoot.empty()) {
 		setError(error, "Refusing to write invalid update-health pending state.");
+		return false;
+	}
+	if (pending.mode == TransactionMode::WindowsInstaller
+		&& (pending.recoveryInstallerPath.empty() || pending.recoveryInstallerSize == 0
+			|| !validSha256(pending.recoveryInstallerSha256)
+			|| !validBootSessionIdentity(pending.bootSessionIdentity)
+			|| !samePath(pending.recoveryInstallerPath.parent_path(), pending.backupRoot))) {
+		setError(error, "Refusing invalid Windows Installer recovery state.");
 		return false;
 	}
 
@@ -305,13 +356,21 @@ bool writePendingState(const std::filesystem::path &updateRoot, const PendingUpd
 	}
 
 	const json document{
-		{ "schema", 2 },
+		{ "schema", SchemaVersion },
+		{ "updaterProtocolVersion", pending.updaterProtocolVersion },
 		{ "state", stateName(pending.state) },
+		{ "mode", modeName(pending.mode) },
 		{ "transactionId", pending.transactionId },
 		{ "packageIdentity", pending.packageIdentity },
 		{ "previousPackageIdentity", pending.previousPackageIdentity },
+		{ "expectedExecutableSha256", pending.expectedExecutableSha256 },
 		{ "appPath", utf8Path(pending.appPath) },
 		{ "backupRoot", utf8Path(pending.backupRoot) },
+		{ "recoveryInstaller", json{ { "path", utf8Path(pending.recoveryInstallerPath) },
+										{ "size", pending.recoveryInstallerSize },
+										{ "sha256", pending.recoveryInstallerSha256 } } },
+		{ "bootSessionIdentity", pending.bootSessionIdentity },
+		{ "restartRequired", pending.restartRequired },
 		{ "createdAtUnixMilliseconds", unixMillisecondsNow() },
 		{ "minimumStableRuntimeMilliseconds",
 		  std::max(MinimumStableRuntimeMilliseconds, pending.minimumStableRuntimeMilliseconds) },
@@ -353,7 +412,8 @@ std::optional< PendingUpdate > readPendingState(const std::filesystem::path &upd
 
 bool writeHealthMarker(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
 					   const std::uint64_t stableRuntimeMilliseconds, const bool settingsLoaded,
-					   const bool audioInitialized, std::string *error) {
+					   const bool audioInitialized, const std::string &runningExecutableSha256,
+					   std::string *error) {
 	auto pending = readPendingState(updateRoot, appPath, error);
 	if (!pending) {
 		setError(error, "No valid pending update-health state exists.");
@@ -361,6 +421,15 @@ bool writeHealthMarker(const std::filesystem::path &updateRoot, const std::files
 	}
 	if (pending->state != TransactionState::AwaitingHealth) {
 		setError(error, "Pending update is not awaiting a health marker.");
+		return false;
+	}
+	if (pending->restartRequired) {
+		setError(error, "A reboot-required update cannot publish a health marker before recovery completes.");
+		return false;
+	}
+	if (!validSha256(runningExecutableSha256)
+		|| runningExecutableSha256 != pending->expectedExecutableSha256) {
+		setError(error, "The running executable does not match the candidate executable SHA256.");
 		return false;
 	}
 	if (!settingsLoaded || !audioInitialized
@@ -371,10 +440,12 @@ bool writeHealthMarker(const std::filesystem::path &updateRoot, const std::files
 	}
 
 	const json marker{
-		{ "schema", 2 },
+		{ "schema", SchemaVersion },
+		{ "updaterProtocolVersion", UpdaterProtocolVersion },
 		{ "state", "healthy" },
 		{ "transactionId", pending->transactionId },
 		{ "packageIdentity", pending->packageIdentity },
+		{ "executableSha256", runningExecutableSha256 },
 		{ "appPath", utf8Path(pending->appPath) },
 		{ "settingsLoaded", true },
 		{ "audioInitialized", true },
@@ -385,7 +456,8 @@ bool writeHealthMarker(const std::filesystem::path &updateRoot, const std::files
 }
 
 bool markerConfirmsHealthy(const std::filesystem::path &updateRoot, const PendingUpdate &pending, std::string *error) {
-	if (pending.state != TransactionState::AwaitingHealth) {
+	if (pending.state != TransactionState::AwaitingHealth || pending.restartRequired
+		|| !validSha256(pending.expectedExecutableSha256)) {
 		return false;
 	}
 	std::ifstream stream(healthMarkerPath(updateRoot, pending), std::ios::binary);
@@ -396,9 +468,12 @@ bool markerConfirmsHealthy(const std::filesystem::path &updateRoot, const Pendin
 		const json marker                         = json::parse(stream);
 		const std::filesystem::path markerAppPath = pathFromUtf8(marker.value("appPath", ""));
 		const std::uint64_t stableRuntime = marker.value("stableRuntimeMilliseconds", static_cast< std::uint64_t >(0));
-		return marker.value("schema", 0) == 2 && marker.value("state", "") == "healthy"
+		return marker.value("schema", 0u) == SchemaVersion
+			   && marker.value("updaterProtocolVersion", 0u) == UpdaterProtocolVersion
+			   && marker.value("state", "") == "healthy"
 			   && marker.value("transactionId", "") == pending.transactionId
 			   && marker.value("packageIdentity", "") == pending.packageIdentity
+			   && marker.value("executableSha256", "") == pending.expectedExecutableSha256
 			   && samePath(markerAppPath, pending.appPath) && marker.value("settingsLoaded", false)
 			   && marker.value("audioInitialized", false)
 			   && stableRuntime >= std::max(MinimumStableRuntimeMilliseconds, pending.minimumStableRuntimeMilliseconds);

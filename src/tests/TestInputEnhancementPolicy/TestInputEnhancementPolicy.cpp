@@ -50,7 +50,7 @@ PolicyManifest validPolicy(Profile profile = Profile::Balanced, int expiresInSec
 	policy.available          = true;
 	policy.forceOriginal      = false;
 	policy.recommendedProfile = profile;
-	policy.recipeSetVersion   = QStringLiteral("input-recipes-v1");
+	policy.recipeSetVersion   = QStringLiteral("input-recipes-v2");
 	policy.minBuild           = 90;
 	policy.expiresAt          = Now.addSecs(expiresInSeconds);
 	return policy;
@@ -67,14 +67,14 @@ std::shared_ptr< FakeVerifier > verifierFor(const QByteArray &manifest) {
 std::unique_ptr< SignedPolicyStore > storeFor(const std::shared_ptr< FakeVerifier > &verifier,
 											  QByteArray publicKey = PublicKey) {
 	return std::make_unique< SignedPolicyStore >(std::move(publicKey), verifier, CurrentBuild,
-												 QStringLiteral("input-recipes-v1"), MaximumFutureSeconds);
+												 QStringLiteral("input-recipes-v2"), MaximumFutureSeconds);
 }
 
 QJsonObject validChannelPointer(const QString &channel = QStringLiteral("stable")) {
 	const QString tag       = QStringLiteral("mumble-forked-build-101-abcdef123456");
 	const QString sourceSha = QStringLiteral("abcdef123456") + QString(28, QLatin1Char('a'));
 	return QJsonObject{
-		{ QStringLiteral("schemaVersion"), 1 },
+		{ QStringLiteral("schemaVersion"), 2 },
 		{ QStringLiteral("channel"), channel },
 		{ QStringLiteral("channelTag"), QStringLiteral("mumble-forked-%1").arg(channel) },
 		{ QStringLiteral("immutableTag"), tag },
@@ -89,6 +89,33 @@ QJsonObject validChannelPointer(const QString &channel = QStringLiteral("stable"
 						 QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/download/%1/"
 										"mumble-forked-1.7.101.mumble-update")
 							 .arg(tag) } } },
+		{ QStringLiteral("installer"),
+		  QJsonObject{ { QStringLiteral("fileName"), QStringLiteral("mumble-forked-1.7.101.msi") },
+					   { QStringLiteral("sha256"), QString(64, QLatin1Char('2')) },
+					   { QStringLiteral("size"), 234567 },
+					   { QStringLiteral("executableSha256"), QString(64, QLatin1Char('9')) },
+					   { QStringLiteral("url"),
+						 QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/download/%1/"
+									"mumble-forked-1.7.101.msi")
+							 .arg(tag) } } },
+		{ QStringLiteral("recoveryInstallers"),
+		  QJsonArray{
+			  QJsonObject{ { QStringLiteral("immutableTag"),
+							QStringLiteral("mumble-forked-build-100-111111111111") },
+						 { QStringLiteral("fileName"), QStringLiteral("mumble-forked-1.7.100.msi") },
+						 { QStringLiteral("sha256"), QString(64, QLatin1Char('3')) },
+						 { QStringLiteral("size"), 220000 },
+						 { QStringLiteral("url"),
+						   QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/download/"
+									  "mumble-forked-build-100-111111111111/mumble-forked-1.7.100.msi") } },
+			  QJsonObject{ { QStringLiteral("immutableTag"),
+							QStringLiteral("mumble-forked-build-99-222222222222") },
+						 { QStringLiteral("fileName"), QStringLiteral("mumble-forked-1.7.99.msi") },
+						 { QStringLiteral("sha256"), QString(64, QLatin1Char('4')) },
+						 { QStringLiteral("size"), 210000 },
+						 { QStringLiteral("url"),
+						   QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/download/"
+									  "mumble-forked-build-99-222222222222/mumble-forked-1.7.99.msi") } } } },
 		{ QStringLiteral("qualification"),
 		  QJsonObject{ { QStringLiteral("sha256"), QString(64, QLatin1Char('c')) },
 					   { QStringLiteral("url"),
@@ -117,7 +144,9 @@ QJsonObject validChannelPointer(const QString &channel = QStringLiteral("stable"
 					   { QStringLiteral("encoding"), QStringLiteral("raw") },
 					   { QStringLiteral("fileName"), QStringLiteral("channel-pointer.json.sig") },
 					   { QStringLiteral("publicKeyHex"), QString::fromLatin1(PublicKey.toHex()) } } },
-		{ QStringLiteral("knownGoodTags"), QJsonArray{ tag } },
+		{ QStringLiteral("knownGoodTags"),
+		  QJsonArray{ tag, QStringLiteral("mumble-forked-build-100-111111111111"),
+					  QStringLiteral("mumble-forked-build-99-222222222222") } },
 		{ QStringLiteral("announcement"), QStringLiteral("Qualified input enhancement preview") },
 		// PowerShell DateTime.ToString("o") emits seven fractional digits.
 		{ QStringLiteral("promotedAtUtc"), QStringLiteral("2026-07-14T12:00:00.1234567Z") }
@@ -184,13 +213,17 @@ void TestInputEnhancementPolicy::acceptsSignedChannelPointerAsInstallablePackage
 	QCOMPARE(decision.updateInfo.value(QStringLiteral("channel")).toString(), QStringLiteral("stable"));
 	const QJsonObject package = decision.updateInfo.value(QStringLiteral("package")).toObject();
 	QCOMPARE(package.value(QStringLiteral("format")).toString(), QStringLiteral("mumble-update-v1"));
-	QCOMPARE(package.value(QStringLiteral("minUpdaterVersion")).toInt(), 3);
+	QCOMPARE(package.value(QStringLiteral("minUpdaterVersion")).toInt(), 4);
 	QCOMPARE(package.value(QStringLiteral("sha256")).toString(), QString(64, QLatin1Char('b')));
 	QCOMPARE(package.value(QStringLiteral("size")).toInt(), 123456);
 	QCOMPARE(package.value(QStringLiteral("url")).toString(),
 			 QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/download/"
 							"mumble-forked-build-101-abcdef123456/"
 							"mumble-forked-1.7.101.mumble-update"));
+	const QJsonObject installer = decision.updateInfo.value(QStringLiteral("installer")).toObject();
+	QCOMPARE(installer.value(QStringLiteral("sha256")).toString(), QString(64, QLatin1Char('2')));
+	QCOMPARE(installer.value(QStringLiteral("executableSha256")).toString(), QString(64, QLatin1Char('9')));
+	QCOMPARE(decision.updateInfo.value(QStringLiteral("recoveryInstallers")).toArray().size(), 2);
 	QCOMPARE(decision.updateInfo.value(QStringLiteral("releaseUrl")).toString(),
 			 QStringLiteral("https://github.com/dankmaster/mumble-forked/releases/tag/"
 							"mumble-forked-build-101-abcdef123456"));
@@ -365,7 +398,7 @@ void TestInputEnhancementPolicy::emitsAndRequiresCanonicalManifestBytes() {
 	const PolicyManifest policy = validPolicy();
 	const QByteArray canonical  = canonicalPolicyBytes(policy);
 	QCOMPARE(canonical, QByteArray("{\"available\":true,\"expiresAt\":\"2026-07-14T13:00:00Z\",\"forceOriginal\":false,"
-								   "\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v1\","
+								   "\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
 								   "\"recommendedProfile\":\"Balanced\"}"));
 
 	auto verifier                 = verifierFor(canonical);
@@ -388,7 +421,7 @@ void TestInputEnhancementPolicy::acceptsVerifiedPolicyAndExposesRestorableCache(
 	QVERIFY(accepted.hasVerifiedPolicy);
 	QVERIFY(!accepted.usingCachedPolicy);
 	QCOMPARE(accepted.effectivePolicy.recommendedProfile, Profile::Crisp);
-	QCOMPARE(accepted.effectivePolicy.recipeSetVersion, QStringLiteral("input-recipes-v1"));
+	QCOMPARE(accepted.effectivePolicy.recipeSetVersion, QStringLiteral("input-recipes-v2"));
 	QVERIFY(store->hasCachedPolicy());
 	QCOMPARE(store->cachedManifestBytes(), canonical);
 	QCOMPARE(store->cachedSignature(), Signature);
@@ -447,29 +480,34 @@ void TestInputEnhancementPolicy::rejectsInvalidSchema_data() {
 	QTest::newRow("array-root") << QByteArray("[]") << rejectionValue(PolicyRejection::InvalidRoot);
 	QTest::newRow("unknown-field") << QByteArray(
 		"{\"available\":true,\"expiresAt\":\"2026-07-14T13:00:00Z\",\"forceOriginal\":false,"
-		"\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v1\","
+		"\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
 		"\"recommendedProfile\":\"Balanced\",\"serverFeature\":true}")
 								   << rejectionValue(PolicyRejection::UnknownField);
 	QTest::newRow("missing-field") << QByteArray("{\"available\":true}")
 								   << rejectionValue(PolicyRejection::MissingField);
 	QTest::newRow("wrong-type") << QByteArray(
 		"{\"available\":\"yes\",\"expiresAt\":\"2026-07-14T13:00:00Z\","
-		"\"forceOriginal\":false,\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v1\","
+		"\"forceOriginal\":false,\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
 		"\"recommendedProfile\":\"Balanced\"}")
 								<< rejectionValue(PolicyRejection::InvalidFieldType);
 	QTest::newRow("unknown-profile") << QByteArray(
 		"{\"available\":true,\"expiresAt\":\"2026-07-14T13:00:00Z\",\"forceOriginal\":false,"
-		"\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v1\","
+		"\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
 		"\"recommendedProfile\":\"Ultra\"}")
 									 << rejectionValue(PolicyRejection::InvalidFieldValue);
+	QTest::newRow("manual-only-voice-focus") << QByteArray(
+		"{\"available\":true,\"expiresAt\":\"2026-07-14T13:00:00Z\",\"forceOriginal\":false,"
+		"\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
+		"\"recommendedProfile\":\"VoiceFocus\"}")
+										 << rejectionValue(PolicyRejection::InvalidFieldValue);
 	QTest::newRow("fractional-build") << QByteArray(
 		"{\"available\":true,\"expiresAt\":\"2026-07-14T13:00:00Z\",\"forceOriginal\":false,"
-		"\"minBuild\":90.5,\"recipeSetVersion\":\"input-recipes-v1\","
+		"\"minBuild\":90.5,\"recipeSetVersion\":\"input-recipes-v2\","
 		"\"recommendedProfile\":\"Balanced\"}")
 									  << rejectionValue(PolicyRejection::InvalidFieldValue);
 	QTest::newRow("offset-timestamp") << QByteArray(
 		"{\"available\":true,\"expiresAt\":\"2026-07-14T15:00:00+02:00\","
-		"\"forceOriginal\":false,\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v1\","
+		"\"forceOriginal\":false,\"minBuild\":90,\"recipeSetVersion\":\"input-recipes-v2\","
 		"\"recommendedProfile\":\"Balanced\"}")
 									  << rejectionValue(PolicyRejection::InvalidFieldValue);
 }
@@ -491,14 +529,14 @@ void TestInputEnhancementPolicy::rejectsExpiredFutureMinBuildAndRecipeMismatch_d
 	QTest::addColumn< QString >("recipeSetVersion");
 	QTest::addColumn< int >("expectedRejection");
 
-	QTest::newRow("expired") << -1 << qulonglong(90) << QStringLiteral("input-recipes-v1")
+	QTest::newRow("expired") << -1 << qulonglong(90) << QStringLiteral("input-recipes-v2")
 							 << rejectionValue(PolicyRejection::Expired);
 	QTest::newRow("too-far-future") << int(MaximumFutureSeconds + 1) << qulonglong(90)
-									<< QStringLiteral("input-recipes-v1")
+									<< QStringLiteral("input-recipes-v2")
 									<< rejectionValue(PolicyRejection::ExpirationTooFarInFuture);
-	QTest::newRow("minimum-build") << 3600 << qulonglong(CurrentBuild + 1) << QStringLiteral("input-recipes-v1")
+	QTest::newRow("minimum-build") << 3600 << qulonglong(CurrentBuild + 1) << QStringLiteral("input-recipes-v2")
 								   << rejectionValue(PolicyRejection::MinimumBuildNotMet);
-	QTest::newRow("recipe-set") << 3600 << qulonglong(90) << QStringLiteral("input-recipes-v2")
+	QTest::newRow("recipe-set") << 3600 << qulonglong(90) << QStringLiteral("input-recipes-v3")
 								<< rejectionValue(PolicyRejection::RecipeSetMismatch);
 }
 

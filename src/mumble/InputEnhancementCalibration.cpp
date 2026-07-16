@@ -426,7 +426,8 @@ bool CalibrationSession::selectionValid(const Selection &selection) const noexce
 		case Profile::Original:
 		case Profile::Light:
 		case Profile::Balanced:
-		case Profile::Crisp:
+		case Profile::Quality:
+		case Profile::VoiceFocus:
 		case Profile::Auto:
 			return true;
 	}

@@ -53,7 +53,9 @@ param(
 
 	[string]$ExpectedSignerSubject = "",
 
-	[string]$OpenSslPath = ""
+	[string]$OpenSslPath = "",
+
+	[string]$PythonPath = "python"
 )
 
 $ErrorActionPreference = "Stop"
@@ -162,6 +164,12 @@ if ($updatePackageFile.Extension -cne ".mumble-update" -or
 	-MsiPath $installerFile.FullName `
 	-UpdatePackagePath $updatePackageFile.FullName
 $msiPayloadVerification = Read-ReleaseJson -Path $MsiPayloadVerificationPath
+$candidateExecutableRecords = @($msiPayloadVerification.files | Where-Object { [string]$_.path -ceq 'mumble.exe' })
+if ($candidateExecutableRecords.Count -ne 1 -or
+	[string](Assert-ObjectProperty -Object $installerRecord -Name 'executableSha256' -Context 'Qualified installer') -cne
+	[string]$candidateExecutableRecords[0].sha256) {
+	throw 'Qualification candidate executable identity does not match the exact MSI payload mumble.exe.'
+}
 $msiPayloadVerificationRecord = Assert-ObjectProperty -Object $installerRecord `
 	-Name 'payloadVerification' -Context 'Qualified installer'
 $null = Assert-QualifiedFile -Record $msiPayloadVerificationRecord `
@@ -256,16 +264,25 @@ if ((Assert-ObjectProperty -Object $testRecord -Name "passed" -Context "Qualifie
 $measuredRecord = Assert-ObjectProperty -Object $qualification -Name "measuredQuality" -Context "Qualification"
 $null = Assert-QualifiedFile -Record $measuredRecord -Path $MeasuredEvidencePath -Label "Measured quality evidence"
 $measuredEvidence = Read-ReleaseJson -Path $MeasuredEvidencePath
-if ([int](Assert-ObjectProperty -Object $measuredEvidence -Name "schemaVersion" -Context "Measured evidence") -ne 1 -or
+if ([int](Assert-ObjectProperty -Object $measuredEvidence -Name "schemaVersion" -Context "Measured evidence") -ne 2 -or
 	(Assert-ObjectProperty -Object $measuredEvidence -Name "passed" -Context "Measured evidence") -ne $true -or
-	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "suite" -Context "Measured evidence") -cne "master_quality" -or
+	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "suite" -Context "Measured evidence") -cne "core_release" -or
 	[string](Assert-ObjectProperty -Object $measuredEvidence -Name "sourceSha" -Context "Measured evidence") -cne $sourceSha -or
+	[string](Assert-ObjectProperty -Object $measuredRecord -Name "suite" -Context "Qualified measured evidence") -cne "core_release" -or
 	[string](Assert-ObjectProperty -Object $measuredRecord -Name "testedBinarySha256" -Context "Qualified measured evidence") -cne [string]$measuredEvidence.testedBinarySha256 -or
 	[string](Assert-ObjectProperty -Object $measuredRecord -Name "legacyBinarySha256" -Context "Qualified measured evidence") -cne [string](Assert-ObjectProperty -Object $measuredEvidence -Name "legacyBinarySha256" -Context "Measured evidence") -or
 	[string](Assert-ObjectProperty -Object $measuredRecord -Name "corpusLockSha256" -Context "Qualified measured evidence") -cne [string]$measuredEvidence.corpusLockSha256 -or
 	[string](Assert-ObjectProperty -Object $measuredRecord -Name "harnessSha256" -Context "Qualified measured evidence") -cne [string](Assert-ObjectProperty -Object $measuredEvidence -Name "harnessSha256" -Context "Measured evidence") -or
 	[string]$measuredEvidence.harnessSha256 -cnotmatch '^[0-9a-f]{64}$') {
 	throw "Qualification measured-quality evidence is invalid or belongs to another source/binary/corpus."
+}
+foreach ($identityName in @("protectedBuildIdentity", "masterInputIdentity", "nightlyInputIdentity")) {
+	$qualifiedIdentity = Assert-ObjectProperty -Object $measuredRecord -Name $identityName -Context "Qualified measured evidence"
+	$attestedIdentity = Assert-ObjectProperty -Object $measuredEvidence -Name $identityName -Context "Measured evidence"
+	if (($qualifiedIdentity | ConvertTo-Json -Depth 20 -Compress) -cne
+		($attestedIdentity | ConvertTo-Json -Depth 20 -Compress)) {
+		throw "Qualification changed measured '$identityName'."
+	}
 }
 $attestedUnsignedModel = Assert-ObjectProperty -Object $measuredEvidence -Name "unsignedModelManifest" -Context "Measured evidence"
 $attestedUnsignedRecipe = Assert-ObjectProperty -Object $measuredEvidence -Name "unsignedRecipeManifest" -Context "Measured evidence"
@@ -275,10 +292,19 @@ if ([string]$attestedUnsignedModel.sha256 -cne (Get-ReleaseFileSha256 -Path $Uns
 	throw "Measured quality is not bound to the unsigned package manifests."
 }
 $measuredEvidenceItem = Get-Item -LiteralPath $MeasuredEvidencePath -ErrorAction Stop
-$runnerClasses = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
-foreach ($runner in @(Assert-ObjectProperty -Object $measuredEvidence -Name "runners" -Context "Measured evidence")) {
+$masterRunners = @(Assert-ObjectProperty -Object $measuredEvidence -Name "runners" -Context "Measured evidence")
+$nightlyRunners = @(Assert-ObjectProperty -Object $measuredEvidence -Name "nightlyRunners" -Context "Measured evidence")
+if (($measuredRecord.runners | ConvertTo-Json -Depth 20 -Compress) -cne ($masterRunners | ConvertTo-Json -Depth 20 -Compress) -or
+	($measuredRecord.nightlyRunners | ConvertTo-Json -Depth 20 -Compress) -cne ($nightlyRunners | ConvertTo-Json -Depth 20 -Compress)) {
+	throw "Qualification changed the measured master/nightly runner records."
+}
+$runnerKeys = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+foreach ($runner in @($masterRunners + $nightlyRunners)) {
 	$runnerClass = [string](Assert-ObjectProperty -Object $runner -Name "runnerClass" -Context "Measured runner evidence")
-	$null = $runnerClasses.Add($runnerClass)
+	$suite = [string](Assert-ObjectProperty -Object $runner -Name "suite" -Context "Measured runner evidence '$runnerClass'")
+	if (-not $runnerKeys.Add("$suite/$runnerClass")) {
+		throw "Measured evidence contains duplicate '$suite/$runnerClass' runner evidence."
+	}
 	$harnessProvenanceSha256 = [string](Assert-ObjectProperty -Object $runner `
 		-Name "harnessProvenanceSha256" -Context "Measured runner evidence '$runnerClass'")
 	if ($harnessProvenanceSha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -298,15 +324,22 @@ foreach ($runner in @(Assert-ObjectProperty -Object $measuredEvidence -Name "run
 		}
 		$evidence = Read-ReleaseJson -Path $filePath
 		if ($recordName -ceq "qualityQualification") {
+			& $PythonPath (Join-Path (Split-Path -Parent $PSScriptRoot) "audio-quality/validate-quality-qualification.py") $filePath
+			if ($LASTEXITCODE -ne 0) {
+				throw "Measured quality evidence for '$suite/$runnerClass' failed the semantic qualification validator."
+			}
 			$build = Assert-ObjectProperty -Object $evidence -Name "build" -Context "Measured quality '$runnerClass'"
 			$coverage = Assert-ObjectProperty -Object $evidence -Name "coverage" -Context "Measured quality '$runnerClass'"
 			$reportedModels = @((Assert-ObjectProperty -Object $build -Name "model_hashes" -Context "Measured quality '$runnerClass'") | ForEach-Object { [string]$_ } | Sort-Object)
 			$attestedModels = @($measuredEvidence.modelHashes | ForEach-Object { [string]$_ } | Sort-Object)
-			if ([string]$evidence.suite -cne "master_quality" -or [string]$evidence.status -cne "passed" -or
+			$minimumCases = if ($suite -ceq "nightly") { 5000 } else { 500 }
+			if ($suite -cnotin @("master_quality", "nightly") -or
+				[string]$evidence.suite -cne $suite -or [string]$evidence.qualification_scope -cne "core" -or
+				[string]$evidence.status -cne "passed" -or
 				[string]$build.git_sha -cne $sourceSha -or [string]$build.tested_binary_sha256 -cne [string]$measuredEvidence.testedBinarySha256 -or
 				[string]$build.corpus_lock_sha256 -cne [string]$measuredEvidence.corpusLockSha256 -or
 				[string]$build.recipe_set_version -cne $catalogRevision -or
-				[int]$coverage.case_count -lt 500 -or [int]$coverage.failed_case_count -ne 0 -or
+				[int]$coverage.case_count -lt $minimumCases -or [int]$coverage.failed_case_count -ne 0 -or
 				@(Compare-Object -ReferenceObject $attestedModels -DifferenceObject $reportedModels).Count -ne 0 -or
 				[int]$record.caseCount -ne [int]$coverage.case_count) {
 				throw "Measured quality evidence for '$runnerClass' failed semantic identity/coverage checks."
@@ -336,8 +369,11 @@ foreach ($runner in @(Assert-ObjectProperty -Object $measuredEvidence -Name "run
 		}
 	}
 }
-if (-not $runnerClasses.SetEquals([string[]]@("low-performance", "mainstream"))) {
-	throw "Measured quality must contain exactly the protected low-performance and mainstream runner classes."
+if (-not $runnerKeys.SetEquals([string[]]@(
+		"master_quality/low-performance", "master_quality/mainstream",
+		"nightly/low-performance", "nightly/mainstream"
+	))) {
+	throw "Measured quality must contain master_quality and nightly evidence from exactly both protected runner classes."
 }
 
 $signingRecord = Assert-ObjectProperty -Object $qualification -Name "signing" -Context "Qualification"

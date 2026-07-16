@@ -7,9 +7,29 @@
 
 #include "UpdateHealth.h"
 
+#include <QCryptographicHash>
+#include <QFile>
 #include <QTimer>
 
 #include <algorithm>
+
+namespace {
+	std::string executableSha256(const std::filesystem::path &path) {
+		QFile executable(QString::fromStdWString(path.wstring()));
+		if (!executable.open(QIODevice::ReadOnly)) {
+			return {};
+		}
+		QCryptographicHash hash(QCryptographicHash::Sha256);
+		while (!executable.atEnd()) {
+			const QByteArray bytes = executable.read(1024 * 1024);
+			if (bytes.isEmpty() && executable.error() != QFile::NoError) {
+				return {};
+			}
+			hash.addData(bytes);
+		}
+		return hash.result().toHex().toStdString();
+	}
+}
 
 UpdateHealthStableWindow::UpdateHealthStableWindow(const std::uint64_t requiredStableMilliseconds) noexcept
 	: m_requiredStableMilliseconds(requiredStableMilliseconds) {
@@ -37,20 +57,29 @@ UpdateHealthMonitor *UpdateHealthMonitor::startIfPending(QObject *parent, const 
 														 HealthPredicate audioHealthy) {
 	std::string error;
 	const auto pending = Mumble::UpdateHealth::readPendingState(updateRoot, appPath, &error);
-	if (!pending || pending->state != Mumble::UpdateHealth::TransactionState::AwaitingHealth) {
+	if (!pending || pending->state != Mumble::UpdateHealth::TransactionState::AwaitingHealth
+		|| pending->restartRequired) {
+		return nullptr;
+	}
+	const std::string runningExecutableSha256 = executableSha256(appPath);
+	if (runningExecutableSha256.empty()
+		|| runningExecutableSha256 != pending->expectedExecutableSha256) {
 		return nullptr;
 	}
 
 	return new UpdateHealthMonitor(
 		parent, updateRoot, appPath, std::move(audioHealthy),
-		std::max(Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds, pending->minimumStableRuntimeMilliseconds));
+		std::max(Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds, pending->minimumStableRuntimeMilliseconds),
+		std::move(runningExecutableSha256));
 }
 
 UpdateHealthMonitor::UpdateHealthMonitor(QObject *parent, std::filesystem::path updateRoot,
 										 std::filesystem::path appPath, HealthPredicate audioHealthy,
-										 const std::uint64_t requiredStableMilliseconds)
+										 const std::uint64_t requiredStableMilliseconds,
+										 std::string executableSha256)
 	: QObject(parent), m_updateRoot(std::move(updateRoot)), m_appPath(std::move(appPath)),
-	  m_audioHealthy(std::move(audioHealthy)), m_stableWindow(requiredStableMilliseconds) {
+	  m_executableSha256(std::move(executableSha256)), m_audioHealthy(std::move(audioHealthy)),
+	  m_stableWindow(requiredStableMilliseconds) {
 	m_monotonicClock.start();
 	m_timer = new QTimer(this);
 	m_timer->setInterval(250);
@@ -68,7 +97,8 @@ void UpdateHealthMonitor::poll() {
 	}
 
 	std::string error;
-	if (Mumble::UpdateHealth::writeHealthMarker(m_updateRoot, m_appPath, *stableMilliseconds, true, true, &error)) {
+	if (Mumble::UpdateHealth::writeHealthMarker(m_updateRoot, m_appPath, *stableMilliseconds, true, true,
+											  m_executableSha256, &error)) {
 		m_timer->stop();
 		deleteLater();
 	}

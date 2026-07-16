@@ -174,6 +174,7 @@ Global::Global(const QString &qsConfigPath) {
 	bDebugDumpInput  = false;
 	bDebugPrintQueue = false;
 	bDisableInputEnhancement = false;
+	bInputEnhancementRecoveryDisabled = false;
 
 	channelListenerManager = std::make_unique< ChannelListenerManager >();
 

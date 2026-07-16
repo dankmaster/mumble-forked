@@ -7,7 +7,7 @@ param(
 	[bool]$ForceOriginal,
 
 	[Parameter(Mandatory = $true)]
-	[ValidateSet('Original', 'Light', 'Balanced', 'Crisp', 'Auto')]
+	[ValidateSet('Original', 'Light', 'Balanced', 'Quality', 'Auto')]
 	[string]$RecommendedProfile,
 
 	[Parameter(Mandatory = $true)]

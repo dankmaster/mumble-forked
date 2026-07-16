@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement/corpus-inventory-v3.schema.json",
+  "title": "Mumble input-enhancement corpus inventory v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "inventory_id",
+    "eligibility",
+    "corpus_lock_sha256",
+    "provenance",
+    "items"
+  ],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "inventory_id": { "$ref": "#/$defs/id" },
+    "eligibility": { "enum": ["draft", "release"] },
+    "corpus_lock_sha256": { "$ref": "#/$defs/sha256" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator", "generator_version", "generated_from_state_sha256", "transformation_manifest_sha256"],
+      "properties": {
+        "generator": { "type": "string", "minLength": 1 },
+        "generator_version": { "type": "string", "minLength": 1 },
+        "generated_from_state_sha256": { "$ref": "#/$defs/sha256" },
+        "transformation_manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\).+$" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["derivation", "parent_sha256", "parameters_sha256", "source_path", "tool", "tool_version"],
+      "properties": {
+        "derivation": { "enum": ["extracted", "decoded", "resampled", "recorded", "synthesized", "legacy-v2-import"] },
+        "parent_sha256": { "$ref": "#/$defs/sha256" },
+        "parameters_sha256": { "$ref": "#/$defs/sha256" },
+        "source_path": { "$ref": "#/$defs/path" },
+        "tool": { "type": "string", "minLength": 1 },
+        "tool_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["id", "kind", "source_id", "source_artifact_sha256", "relative_path", "group_id", "sample_rate_hz", "channels", "duration_samples", "size_bytes", "sha256", "provenance"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["speech", "noise", "rir", "microphone_response"] },
+        "source_id": { "$ref": "#/$defs/id" },
+        "source_artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "relative_path": { "$ref": "#/$defs/path" },
+        "group_id": { "$ref": "#/$defs/id" },
+        "sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "duration_samples": { "type": "integer", "minimum": 1 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "item": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": { "const": "speech" },
+                "language": { "type": "string", "minLength": 1 },
+                "speaker_id": { "$ref": "#/$defs/id" },
+                "transcript": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["status", "relative_path", "sha256", "size_bytes", "normalization"],
+                      "properties": {
+                        "status": { "const": "verified" },
+                        "relative_path": { "$ref": "#/$defs/path" },
+                        "sha256": { "$ref": "#/$defs/sha256" },
+                        "size_bytes": { "type": "integer", "minimum": 0 },
+                        "normalization": { "enum": ["exact-utf8", "nfc-utf8"] }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["status", "reason"],
+                      "properties": {
+                        "status": { "const": "unavailable" },
+                        "reason": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": ["language", "speaker_id", "transcript"]
+            },
+            {
+              "properties": {
+                "kind": { "const": "noise" },
+                "noise_class": { "enum": ["fan", "hvac", "hum", "keyboard", "mouse", "traffic", "rain", "wind", "handling", "babble", "music-tv", "competing-speech", "paired-noisy-speech"] }
+              },
+              "required": ["noise_class"]
+            },
+            {
+              "properties": {
+                "kind": { "const": "rir" },
+                "rir": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["rir_kind", "room_id", "source_position_id", "receiver_position_id", "rt60_ms"],
+                  "properties": {
+                    "rir_kind": { "enum": ["measured", "simulated"] },
+                    "room_id": { "$ref": "#/$defs/id" },
+                    "source_position_id": { "$ref": "#/$defs/id" },
+                    "receiver_position_id": { "$ref": "#/$defs/id" },
+                    "rt60_ms": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              },
+              "required": ["rir"]
+            },
+            {
+              "properties": {
+                "kind": { "const": "microphone_response" },
+                "microphone_response": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["response_kind", "device_family", "device_id", "calibration_id"],
+                  "properties": {
+                    "response_kind": { "enum": ["measured", "modeled"] },
+                    "device_family": { "enum": ["headset", "laptop", "usb", "phone"] },
+                    "device_id": { "$ref": "#/$defs/id" },
+                    "calibration_id": { "$ref": "#/$defs/id" }
+                  }
+                }
+              },
+              "required": ["microphone_response"]
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

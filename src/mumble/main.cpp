@@ -668,6 +668,7 @@ int main(int argc, char **argv) {
 	}
 	const bool inputEnhancementRecoveryDisabled =
 		options.disableInputEnhancement || inputEnhancementDisabledByEnvironment();
+	Global::get().bInputEnhancementRecoveryDisabled = inputEnhancementRecoveryDisabled;
 	Global::get().bDisableInputEnhancement = inputEnhancementRecoveryDisabled;
 	if (Global::get().bDisableInputEnhancement) {
 		qWarning("Input enhancement is disabled for this session; using Original");
@@ -763,7 +764,7 @@ int main(int argc, char **argv) {
 	packageConfiguration.packageRoot        = QDir(QCoreApplication::applicationDirPath());
 	packageConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
 	packageConfiguration.currentBuild       = Version::getPatch(Version::get());
-	packageConfiguration.supportedCatalogRevision = QStringLiteral("input-recipes-v1");
+	packageConfiguration.supportedCatalogRevision = QStringLiteral("input-recipes-v2");
 	Global::get().inputEnhancementPackageVerifier =
 		new Mumble::InputEnhancement::InputEnhancementPackageVerifier(std::move(packageConfiguration));
 	const Mumble::InputEnhancement::PackageVerificationReport packageReport =
@@ -784,7 +785,7 @@ int main(int argc, char **argv) {
 		QDir(Global::get().qdBasePath.filePath(QStringLiteral("input-enhancement-policy")));
 	policyConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
 	policyConfiguration.currentBuild       = Version::getPatch(Version::get());
-	policyConfiguration.recipeSetVersion   = QStringLiteral("input-recipes-v1");
+	policyConfiguration.recipeSetVersion   = QStringLiteral("input-recipes-v2");
 	policyConfiguration.manifestUrl =
 		Mumble::InputEnhancement::InputEnhancementPolicyController::manifestUrlFromEnvironment();
 	policyConfiguration.remoteFetchEnabled = true;

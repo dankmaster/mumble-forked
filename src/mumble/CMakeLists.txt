@@ -176,6 +176,8 @@ set(MUMBLE_SOURCES
 	"InputEnhancement.h"
 	"InputEnhancementAuto.cpp"
 	"InputEnhancementAuto.h"
+	"InputEnhancementAutoV2.cpp"
+	"InputEnhancementAutoV2.h"
 	"InputEnhancementChannelPointer.cpp"
 	"InputEnhancementChannelPointer.h"
 	"InputEnhancementCalibration.cpp"

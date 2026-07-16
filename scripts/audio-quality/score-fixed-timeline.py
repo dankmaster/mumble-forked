@@ -124,7 +124,12 @@ def _active_edges(samples: Sequence[float], frame_samples: int) -> tuple[int, in
 	levels = _frame_rms(samples, frame_samples)
 	if not levels:
 		raise ScoreError("audio is shorter than one 10 ms frame")
-	threshold = max(10.0 ** (-50.0 / 20.0), max(levels) * 0.05)
+	# Edge detection must remain gain-invariant. Corpus generation deliberately
+	# includes distant/quiet microphones, and a -50 dBFS absolute floor can mark
+	# an otherwise valid utterance as complete silence after an Opus round trip.
+	# Keep only a numerical-noise floor and derive the useful threshold from the
+	# clean reference's own peak frame level.
+	threshold = max(10.0 ** (-90.0 / 20.0), max(levels) * 0.05)
 	active = [index for index, value in enumerate(levels) if value >= threshold]
 	if not active:
 		raise ScoreError("reference contains no detectable speech/activity")
@@ -171,6 +176,7 @@ def score(
 	reference_onset, reference_end, threshold = _active_edges(reference, frame_samples)
 	baseline_record: Mapping[str, object] | None = None
 	onset_baseline_adjustment = 0
+	end_baseline_adjustment = 0
 	if transport_baseline_path is not None:
 		baseline_rate, baseline, baseline_clipped = _read_mono_wav(transport_baseline_path)
 		if baseline_rate != reference_rate:
@@ -182,6 +188,7 @@ def score(
 		baseline_onset = baseline_active[0] * frame_samples
 		baseline_end = min(len(baseline), (baseline_active[-1] + 1) * frame_samples)
 		raw_onset_offset = baseline_onset - (reference_onset + transport_baseline_latency_samples)
+		raw_end_offset = (reference_end + transport_baseline_latency_samples) - baseline_end
 		# A negative control offset cannot justify moving the target's expected
 		# onset earlier. Only the positive startup delay in the unchanged Original
 		# transport is removed from the enhancement edge-loss gate.
@@ -192,8 +199,10 @@ def score(
 		# latency/loss added by enhancement without allowing a broken control to
 		# bless itself.
 		onset_baseline_adjustment = max(0, raw_onset_offset)
+		end_baseline_adjustment = max(0, raw_end_offset)
 		if not qualified_transport_baseline:
 			onset_baseline_adjustment = min(frame_samples, onset_baseline_adjustment)
+			end_baseline_adjustment = min(frame_samples, end_baseline_adjustment)
 		baseline_record = {
 			"sha256": _sha256(transport_baseline_path),
 			"qualification": (
@@ -207,6 +216,8 @@ def score(
 			"received_end_samples": baseline_end,
 			"raw_onset_offset_samples": raw_onset_offset,
 			"applied_onset_adjustment_samples": onset_baseline_adjustment,
+			"raw_end_offset_samples": raw_end_offset,
+			"applied_end_adjustment_samples": end_baseline_adjustment,
 			"clipped_samples": baseline_clipped,
 		}
 	received_levels = _frame_rms(received, frame_samples)
@@ -215,19 +226,21 @@ def score(
 		received_onset = received_active[0] * frame_samples
 		received_end = min(len(received), (received_active[-1] + 1) * frame_samples)
 		expected_onset = reference_onset + latency_samples + onset_baseline_adjustment
+		expected_end = reference_end + latency_samples - end_baseline_adjustment
 		onset_loss = max(0, received_onset - expected_onset)
-		end_loss = max(0, (reference_end + latency_samples) - received_end)
+		end_loss = max(0, expected_end - received_end)
 	else:
 		received_onset = None
 		received_end = None
 		expected_onset = reference_onset + latency_samples + onset_baseline_adjustment
+		expected_end = reference_end + latency_samples - end_baseline_adjustment
 		onset_loss = reference_end - reference_onset
 		end_loss = reference_end - reference_onset
 
 	return {
-		"schema_version": 1,
-		"scorer": "mumble-fixed-timeline-v1",
-		"timeline_alignment": "fixed-paired-original-onset" if baseline_record else "fixed",
+		"schema_version": 3,
+		"scorer": "mumble-fixed-timeline-v3",
+		"timeline_alignment": "fixed-paired-original-route" if baseline_record else "fixed",
 		"sample_rate_hz": reference_rate,
 		"frame_samples": frame_samples,
 		"declared_latency_samples": latency_samples,
@@ -242,6 +255,7 @@ def score(
 		"reference_onset_samples": reference_onset,
 		"reference_end_samples": reference_end,
 		"expected_onset_samples": expected_onset,
+		"expected_end_samples": expected_end,
 		"received_onset_samples": received_onset,
 		"received_end_samples": received_end,
 		"onset_loss_samples": onset_loss,
@@ -274,6 +288,13 @@ def self_test() -> None:
 			raise AssertionError("exact delayed signal failed fixed-timeline edge checks")
 		if float(result["fixed_timeline_sdr_db"]) < 80.0:
 			raise AssertionError("exact delayed signal has unexpectedly low fixed-timeline SDR")
+		quiet_reference = [value * 0.01 for value in reference]
+		quiet_received = [0.0] * latency + quiet_reference
+		_write_wave(root / "quiet-reference.wav", quiet_reference)
+		_write_wave(root / "quiet-received.wav", quiet_received)
+		quiet_result = score(root / "quiet-reference.wav", root / "quiet-received.wav", latency)
+		if quiet_result["onset_loss_samples"] != 0 or quiet_result["end_loss_samples"] != 0:
+			raise AssertionError("quiet speech failed gain-invariant edge detection")
 		wrong = score(root / "reference.wav", root / "received.wav", 0)
 		if float(wrong["fixed_timeline_sdr_db"]) >= float(result["fixed_timeline_sdr_db"]):
 			raise AssertionError("undeclared delay was hidden by scorer")
@@ -291,7 +312,7 @@ def self_test() -> None:
 			root / "transport-baseline.wav",
 			0,
 		)
-		if paired["timeline_alignment"] != "fixed-paired-original-onset" or paired["onset_loss_samples"] != 0:
+		if paired["timeline_alignment"] != "fixed-paired-original-route" or paired["onset_loss_samples"] != 0:
 			raise AssertionError("paired Original startup baseline did not preserve the fixed onset timeline")
 		late = [0.0] * (transport_delay + target_latency + 960) + reference
 		_write_wave(root / "transport-target-late.wav", late)
@@ -343,6 +364,29 @@ def self_test() -> None:
 		if qualified_late_result["onset_loss_samples"] != 960:
 			raise AssertionError("qualified Original offset hid enhancement-only startup loss")
 
+		# A separately qualified VAD route may omit the same trailing low-level
+		# speech frames in both Original and candidate. Remove only that observed
+		# route loss; any additional candidate truncation must remain visible.
+		vad_route_loss = 1_920
+		vad_baseline = [0.0] * transport_delay + reference[:-vad_route_loss]
+		vad_target = [0.0] * (transport_delay + target_latency) + reference[:-vad_route_loss]
+		vad_target_lost = vad_target[:-480]
+		_write_wave(root / "vad-baseline.wav", vad_baseline)
+		_write_wave(root / "vad-target.wav", vad_target)
+		_write_wave(root / "vad-target-lost.wav", vad_target_lost)
+		vad_result = score(
+			root / "reference.wav", root / "vad-target.wav", target_latency,
+			root / "vad-baseline.wav", 0, True,
+		)
+		if vad_result["end_loss_samples"] != 0:
+			raise AssertionError("qualified Original VAD end offset was not applied to the paired timeline")
+		vad_lost_result = score(
+			root / "reference.wav", root / "vad-target-lost.wav", target_latency,
+			root / "vad-baseline.wav", 0, True,
+		)
+		if vad_lost_result["end_loss_samples"] != 480:
+			raise AssertionError("qualified Original VAD baseline hid candidate-only end loss")
+
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
@@ -365,6 +409,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 	)
 	parser.add_argument("--output", type=Path)
 	parser.add_argument("--max-edge-loss-samples", type=int, default=480)
+	parser.add_argument("--max-onset-loss-samples", type=int)
+	parser.add_argument("--max-end-loss-samples", type=int)
 	parser.add_argument("--require-complete-tail", action="store_true")
 	parser.add_argument("--fail-on-new-clipping", action="store_true")
 	parser.add_argument("--self-test", action="store_true")
@@ -377,6 +423,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 				return 0
 		if args.reference is None or args.received is None or args.latency_samples is None or args.output is None:
 			raise ScoreError("--reference, --received, --latency-samples, and --output are required")
+		max_onset_loss_samples = (
+			args.max_edge_loss_samples if args.max_onset_loss_samples is None else args.max_onset_loss_samples
+		)
+		max_end_loss_samples = (
+			args.max_edge_loss_samples if args.max_end_loss_samples is None else args.max_end_loss_samples
+		)
+		if max_onset_loss_samples < 0 or max_end_loss_samples < 0:
+			raise ScoreError("edge-loss limits must be non-negative")
 		result = score(
 			args.reference,
 			args.received,
@@ -386,15 +440,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 			args.qualified_transport_baseline,
 		)
 		passed = (
-			int(result["onset_loss_samples"]) <= args.max_edge_loss_samples
-			and int(result["end_loss_samples"]) <= args.max_edge_loss_samples
+			int(result["onset_loss_samples"]) <= max_onset_loss_samples
+			and int(result["end_loss_samples"]) <= max_end_loss_samples
 			and (not args.require_complete_tail or int(result["missing_tail_samples"]) == 0)
 			and (
 				not args.fail_on_new_clipping
 				or int(result["received_clipped_samples"]) <= int(result["reference_clipped_samples"])
 			)
 		)
-		result = { **result, "passed": passed }
+		result = {
+			**result,
+			"qualification_limits": {
+				"max_onset_loss_samples": max_onset_loss_samples,
+				"max_end_loss_samples": max_end_loss_samples,
+				"require_complete_tail": bool(args.require_complete_tail),
+				"fail_on_new_clipping": bool(args.fail_on_new_clipping),
+			},
+			"passed": passed,
+		}
 		_write_json(args.output, result)
 		print(f"Fixed-timeline score: {'passed' if passed else 'failed'}; {args.output}")
 		return 0 if passed else 1

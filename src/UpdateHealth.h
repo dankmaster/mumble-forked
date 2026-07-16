@@ -13,10 +13,13 @@
 
 namespace Mumble::UpdateHealth {
 
+constexpr std::uint32_t SchemaVersion          = 3;
+constexpr std::uint32_t UpdaterProtocolVersion = 4;
 constexpr std::uint64_t MinimumStableRuntimeMilliseconds = 10'000;
 constexpr std::uint64_t DefaultHealthTimeoutMilliseconds = 45'000;
 
 enum class TransactionState : std::uint8_t { RollbackArmed, AwaitingHealth, Committed, RolledBack };
+enum class TransactionMode : std::uint8_t { NativePackage, WindowsInstaller };
 
 struct RollbackFile {
 	std::string path;
@@ -26,12 +29,24 @@ struct RollbackFile {
 };
 
 struct PendingUpdate {
+	std::uint32_t updaterProtocolVersion = UpdaterProtocolVersion;
+	TransactionMode mode                 = TransactionMode::NativePackage;
 	std::string transactionId;
 	TransactionState state = TransactionState::RollbackArmed;
 	std::string packageIdentity;
 	std::string previousPackageIdentity;
+	/// SHA-256 of the exact mumble executable that is allowed to publish the
+	/// health marker. This is independent of the package/MSI identity.
+	std::string expectedExecutableSha256;
 	std::filesystem::path appPath;
 	std::filesystem::path backupRoot;
+	std::filesystem::path recoveryInstallerPath;
+	std::uint64_t recoveryInstallerSize = 0;
+	std::string recoveryInstallerSha256;
+	/// Windows boot-session identity in which a reboot-required MSI transaction
+	/// was armed. Recovery may only become terminal after this identity changes.
+	std::string bootSessionIdentity;
+	bool restartRequired = false;
 	bool previousInstalledManifestExisted       = false;
 	std::uint64_t previousInstalledManifestSize = 0;
 	std::string previousInstalledManifestSha256;
@@ -55,6 +70,7 @@ std::optional< PendingUpdate > readPendingState(const std::filesystem::path &upd
 /// startup gates have remained healthy for at least ten seconds.
 bool writeHealthMarker(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
 					   std::uint64_t stableRuntimeMilliseconds, bool settingsLoaded, bool audioInitialized,
+					   const std::string &runningExecutableSha256,
 					   std::string *error = nullptr);
 
 bool markerConfirmsHealthy(const std::filesystem::path &updateRoot, const PendingUpdate &pending,

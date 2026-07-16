@@ -8,7 +8,9 @@
 #include "API.h"
 #include "Audio.h"
 #include "AudioOutput.h"
+#include "InputEnhancementAutoV2.h"
 #include "InputEnhancementPackageVerifier.h"
+#include "InputEnhancementPolicyController.h"
 #include "MainWindow.h"
 #include "MumbleProtocol.h"
 #include "NetworkConfig.h"
@@ -46,15 +48,32 @@ static short clampFloatSample(float v) {
 										   static_cast< float >(std::numeric_limits< short >::max())));
 }
 
-static Mumble::InputEnhancement::CpuClass currentInputEnhancementCpuClass() noexcept {
-	const int idealThreads = QThread::idealThreadCount();
-	if (idealThreads >= 8) {
-		return Mumble::InputEnhancement::CpuClass::High;
+static Mumble::InputEnhancement::CpuClass currentInputEnhancementCpuClass(
+	const Mumble::InputEnhancement::Profile profile = Mumble::InputEnhancement::Profile::Original) {
+	using namespace Mumble::InputEnhancement;
+	const InputEnhancementPackageVerifier *verifier =
+		Global::g_global_struct ? Global::get().inputEnhancementPackageVerifier : nullptr;
+	if (!verifier) {
+		return CpuClass::Low;
 	}
-	if (idealThreads >= 4) {
-		return Mumble::InputEnhancement::CpuClass::Standard;
+	CpuClass measured = CpuClass::Low;
+	if (profile == Profile::Auto) {
+		const AutoV2::CapabilityProbeKey key =
+			AutoV2::currentCapabilityProbeKey(verifier->runtimePayloadFingerprint());
+		const AutoV2::CapabilityProbeResult result = AutoV2::cachedCapabilityProbe(key);
+		measured = result.valid ? result.cpuTier : CpuClass::Low;
+	} else if (profile == Profile::Quality || profile == Profile::VoiceFocus) {
+		measured = verifier->manualProfileCpuClass();
+	} else if (profile == Profile::Balanced && BackendAvailability::compiled().rnnoise) {
+		measured = CpuClass::Standard;
 	}
-	return Mumble::InputEnhancement::CpuClass::Low;
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	measured = cpuClassWithAuthenticatedE2EOverride(
+		measured, qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_ENABLE") == QLatin1String("1"),
+		!qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_TOKEN").trimmed().isEmpty(),
+		qEnvironmentVariable("MUMBLE_INPUT_ENHANCEMENT_E2E_CPU_CLASS"));
+#endif
+	return measured;
 }
 
 class CalibrationPacketPathLease final {
@@ -624,52 +643,51 @@ bool AudioInput::startInputEnhancementCalibration(const Mumble::InputEnhancement
 		opus.bitrate                                                 = iAudioQuality;
 		opus.framesPerPacket                                         = static_cast< unsigned int >(iAudioFrames);
 		opus.allowLowDelay                                           = bAllowLowDelay;
-		const Mumble::InputEnhancement::CpuClass calibrationCpuClass = currentInputEnhancementCpuClass();
+		const Mumble::InputEnhancement::CpuClass calibrationCpuClass =
+			currentInputEnhancementCpuClass(Mumble::InputEnhancement::Profile::Quality);
 
 		Mumble::InputEnhancement::CalibrationPackageAuthorization authorization;
 		const Mumble::InputEnhancement::InputEnhancementPackageVerifier *verifier =
 			Global::get().inputEnhancementPackageVerifier;
 		if (verifier && verifier->verificationHealthy()) {
-			if (!verifier->managedBySignedPackage()) {
-				authorization = Mumble::InputEnhancement::CalibrationPackageAuthorization::explicitUnmanagedBuildZero();
-			} else {
-				std::vector< Mumble::InputEnhancement::CalibrationPackageAuthorization::AuthorizedRecipe >
-					authorizedRecipes;
-				for (const Mumble::InputEnhancement::Profile profile :
-					 { Mumble::InputEnhancement::Profile::Original, Mumble::InputEnhancement::Profile::Light,
-					   Mumble::InputEnhancement::Profile::Balanced, Mumble::InputEnhancement::Profile::Crisp }) {
-					Mumble::InputEnhancement::ResolveRequest request;
-					request.profile             = profile;
-					request.noiseReduction      = candidateControls.reduction;
-					request.naturalCrisp        = candidateControls.character;
-					request.cpuClass            = calibrationCpuClass;
-					request.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
-					const Mumble::InputEnhancement::Recipe recipe =
-						Mumble::InputEnhancement::RecipeCatalog::resolve(request);
-					if (recipe.effectiveProfile() != profile || !verifier->recipeAuthorized(recipe)) {
-						continue;
-					}
-					QString sha256;
-					QString modelPath;
-					if (recipe.usesNeuralProcessor()) {
-						if (!verifier->modelAuthorized(recipe.modelId())) {
-							continue;
-						}
-						sha256                          = verifier->modelSha256Hex(recipe.modelId());
-						modelPath                       = verifier->modelPath(recipe.modelId());
-						const QString relativeModelPath = verifier->modelRelativePath(recipe.modelId());
-						authorizedRecipes.push_back(
-							Mumble::InputEnhancement::CalibrationPackageAuthorization::authorizeRecipe(
-								recipe, sha256, modelPath, relativeModelPath));
-						continue;
-					}
-					authorizedRecipes.push_back(
-						Mumble::InputEnhancement::CalibrationPackageAuthorization::authorizeRecipe(recipe, sha256,
-																								   modelPath));
+			std::vector< Mumble::InputEnhancement::CalibrationPackageAuthorization::AuthorizedRecipe >
+				authorizedRecipes;
+			for (const Mumble::InputEnhancement::Profile profile :
+				 { Mumble::InputEnhancement::Profile::Original, Mumble::InputEnhancement::Profile::Light,
+				   Mumble::InputEnhancement::Profile::Balanced, Mumble::InputEnhancement::Profile::Quality,
+				   Mumble::InputEnhancement::Profile::VoiceFocus }) {
+				Mumble::InputEnhancement::ResolveRequest request;
+				request.profile             = profile;
+				request.noiseReduction      = candidateControls.reduction;
+				request.naturalCrisp        = candidateControls.character;
+				request.cpuClass            = calibrationCpuClass;
+				request.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+				const Mumble::InputEnhancement::Recipe recipe =
+					Mumble::InputEnhancement::RecipeCatalog::resolve(request);
+				if (recipe.effectiveProfile() != profile || !verifier->recipeAuthorized(recipe)) {
+					continue;
 				}
-				authorization = Mumble::InputEnhancement::CalibrationPackageAuthorization::signedPackage(
-					verifier->catalogRevision(), std::move(authorizedRecipes));
+				QString sha256;
+				QString modelPath;
+				if (recipe.usesNeuralProcessor()) {
+					if (!verifier->modelAuthorized(recipe.modelId())) {
+						continue;
+					}
+					sha256                          = verifier->modelSha256Hex(recipe.modelId());
+					modelPath                       = verifier->modelPath(recipe.modelId());
+					const QString relativeModelPath = verifier->modelRelativePath(recipe.modelId());
+					authorizedRecipes.push_back(
+						Mumble::InputEnhancement::CalibrationPackageAuthorization::authorizeRecipe(
+							recipe, sha256, modelPath, relativeModelPath));
+					continue;
+				}
+				authorizedRecipes.push_back(
+					Mumble::InputEnhancement::CalibrationPackageAuthorization::authorizeRecipe(recipe, sha256, modelPath));
 			}
+			const QString catalogRevision =
+				verifier->managedBySignedPackage() ? verifier->catalogRevision() : QStringLiteral("unmanaged-build-zero");
+			authorization = Mumble::InputEnhancement::CalibrationPackageAuthorization::catalogBoundPackage(
+				catalogRevision, std::move(authorizedRecipes));
 		}
 		auto evaluator = std::make_unique< Mumble::InputEnhancement::LocalCalibrationCandidateEvaluator >(
 			opus, std::move(authorization), calibrationCpuClass);
@@ -1285,15 +1303,14 @@ void AudioInput::initializeInputEnhancement() {
 		Mumble::InputEnhancement::findDeviceProfile(settings, m_inputDeviceIdentity);
 	const Mumble::InputEnhancement::DefaultPreference &preference =
 		Mumble::InputEnhancement::preferenceForDevice(settings, m_inputDeviceIdentity);
-	const bool unsafePendingState =
-		deviceProfile && deviceProfile->pendingValidation
-		&& (!deviceProfile->lastKnownGood || !deviceProfile->pendingRecipeBinding
-			|| !Mumble::InputEnhancement::recipeBindingMatchesPreference(*deviceProfile->pendingRecipeBinding,
-																		 deviceProfile->preference)
-			|| (deviceProfile->lastKnownGood->profile != Mumble::InputEnhancement::Profile::Original
-				&& (!deviceProfile->lastKnownGoodRecipeBinding
-					|| !Mumble::InputEnhancement::recipeBindingMatchesPreference(
-						*deviceProfile->lastKnownGoodRecipeBinding, *deviceProfile->lastKnownGood))));
+	const bool unsafePendingState = deviceProfile && deviceProfile->pendingValidation
+									&& (!deviceProfile->lastKnownGood
+										|| !Mumble::InputEnhancement::executionBindingMatchesPreference(
+											deviceProfile->preference, deviceProfile->pendingRecipeBinding,
+											deviceProfile->pendingAutoRecipeSetFingerprint)
+										|| !Mumble::InputEnhancement::executionBindingMatchesPreference(
+											*deviceProfile->lastKnownGood, deviceProfile->lastKnownGoodRecipeBinding,
+											deviceProfile->lastKnownGoodAutoRecipeSetFingerprint));
 	const Mumble::InputEnhancement::RecipeBinding *expectedRecipeBinding = nullptr;
 	if (deviceProfile && !unsafePendingState) {
 		if (deviceProfile->pendingValidation && deviceProfile->pendingRecipeBinding) {
@@ -1303,7 +1320,6 @@ void AudioInput::initializeInputEnhancement() {
 			expectedRecipeBinding = &*deviceProfile->lastKnownGoodRecipeBinding;
 		}
 	}
-	initializeInputEnhancementProbation(deviceProfile);
 	if (Global::get().bDisableInputEnhancement) {
 		m_usesLegacyInputEnhancement = false;
 		m_inputEnhancementEngine     = Mumble::InputEnhancement::Engine::None;
@@ -1311,9 +1327,21 @@ void AudioInput::initializeInputEnhancement() {
 		m_inputEnhancementAutoPipelineBank.reset();
 		m_speechCleanupProcessor.reset();
 		m_configuredLegacyNoiseCancelMode = Settings::NoiseCancelOff;
-		failInputEnhancementProbation(Mumble::InputEnhancement::ProbationHealthSignal::InitializationFailure);
+		const Mumble::InputEnhancement::InputEnhancementPolicyController *policyController =
+			Global::get().inputEnhancementPolicyController;
+		const bool safePolicyOriginal =
+			policyController
+			&& policyController->policyForcedOriginalCanQualifyAudioHealth(
+				Global::get().bInputEnhancementRecoveryDisabled);
+		if (!safePolicyOriginal) {
+			m_inputEnhancementHealthyForUpdate.store(false, std::memory_order_relaxed);
+		}
 		return;
 	}
+	// A policy-forced Original session deliberately leaves pending profile
+	// probation untouched. If policy later re-enables enhancement, capture is
+	// restarted and the exact candidate begins probation on its real audio path.
+	initializeInputEnhancementProbation(deviceProfile);
 	m_inputEnhancementBaseReduction                                = std::clamp(preference.reduction, 0, 100);
 	m_inputEnhancementBaseCharacter                                = std::clamp(preference.character, 0, 100);
 	m_inputEnhancementActiveReduction                              = m_inputEnhancementBaseReduction;
@@ -1360,6 +1388,19 @@ void AudioInput::initializeInputEnhancement() {
 		m_inputEnhancementCalibrationBaselineAvailable  = true;
 		return;
 	}
+	if (preference.profile == Mumble::InputEnhancement::Profile::Auto) {
+		// AutoV2's transition coordinator is callback-safe, but the current
+		// PreparedPipelineBank API retires the source as soon as switchTo() is
+		// called and exposes only one active Pipeline*. Until the bank can lease
+		// stable source+candidate processors through commit/abort (including the
+		// non-neural Light path), a true aligned dual-pipeline crossfade cannot be
+		// wired without risking use-after-retire or an audible hard switch.
+		qWarning("AudioInput: Auto runtime unavailable: PreparedPipelineBank cannot lease source and candidate "
+				 "pipelines through an aligned transition; using Original");
+		m_inputEnhancementHealthyForUpdate.store(false, std::memory_order_relaxed);
+		failInputEnhancementProbation(Mumble::InputEnhancement::ProbationHealthSignal::InitializationFailure);
+		return;
+	}
 
 	// Signed package catalogs govern only the new product pipeline. Hidden
 	// legacy overrides (including an explicit custom model path) deliberately
@@ -1377,15 +1418,31 @@ void AudioInput::initializeInputEnhancement() {
 	request.profile             = preference.profile;
 	request.noiseReduction      = preference.reduction;
 	request.naturalCrisp        = preference.character;
-	request.cpuClass            = currentInputEnhancementCpuClass();
+	request.cpuClass            = currentInputEnhancementCpuClass(preference.profile);
 	request.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+	request.captureDevice       = Mumble::InputEnhancement::CaptureDeviceContext::liveDevice(
+		m_inputDeviceIdentity.backendId, m_inputDeviceIdentity.stable);
 	m_inputEnhancementCpuClass  = request.cpuClass;
 	m_inputEnhancementAutoAdapt =
 		(preference.autoAdapt || preference.profile == Mumble::InputEnhancement::Profile::Auto)
 		&& preference.profile != Mumble::InputEnhancement::Profile::Original;
 	m_inputEnhancementAutoProfileSwitching =
 		m_inputEnhancementAutoAdapt && preference.profile == Mumble::InputEnhancement::Profile::Auto;
-	m_inputEnhancementSpeexStrength               = -std::clamp(preference.reduction, 0, 100);
+	m_inputEnhancementSpeexStrength                            = -std::clamp(preference.reduction, 0, 100);
+	const Mumble::InputEnhancement::ProfileReadiness readiness = packageVerifier->readinessForProfile(request);
+	if (!readiness.selectable) {
+		qWarning("AudioInput: Requested input enhancement profile failed preflight (reason=%d); using Original",
+				 static_cast< int >(readiness.reason));
+		m_inputEnhancementAutoAdapt            = false;
+		m_inputEnhancementAutoProfileSwitching = false;
+		m_inputEnhancementHealthyForUpdate.store(false, std::memory_order_relaxed);
+		failInputEnhancementProbation(Mumble::InputEnhancement::ProbationHealthSignal::InitializationFailure);
+		return;
+	}
+	if (!readiness.productionQualified) {
+		qInfo("AudioInput: Input enhancement is running in preview/session-only mode for capture backend %s",
+			  qUtf8Printable(request.captureDevice.backendId));
+	}
 	const Mumble::InputEnhancement::Recipe recipe = Mumble::InputEnhancement::RecipeCatalog::resolve(request);
 	if (!packageVerifier->recipeAuthorized(recipe)) {
 		qWarning("AudioInput: Input enhancement recipe %s is not authorized by the signed package; using Original",
@@ -1477,12 +1534,13 @@ void AudioInput::initializeInputEnhancement() {
 				case Profile::Balanced:
 					candidateRequest.cpuClass = CpuClass::Standard;
 					break;
-				case Profile::Crisp:
+				case Profile::Quality:
 					candidateRequest.cpuClass = CpuClass::High;
 					break;
 				case Profile::Original:
 				case Profile::Light:
 				case Profile::Auto:
+				case Profile::VoiceFocus:
 					return {};
 			}
 
@@ -1514,7 +1572,7 @@ void AudioInput::initializeInputEnhancement() {
 			balancedFactory = factoryForAutoProfile(Profile::Balanced);
 		}
 		if (request.cpuClass == CpuClass::High && request.backendAvailability.deepFilterNet) {
-			crispFactory = factoryForAutoProfile(Profile::Crisp);
+			crispFactory = factoryForAutoProfile(Profile::Quality);
 		}
 
 		if (recipe.effectiveProfile() == Profile::Light && !balancedFactory && !crispFactory) {
@@ -1544,9 +1602,9 @@ void AudioInput::initializeInputEnhancement() {
 
 		m_inputEnhancementAutoPipelineBank = std::move(bank);
 		m_inputEnhancementConcreteProfile  = m_inputEnhancementAutoPipelineBank->activeProfile();
-		m_inputEnhancementEngine           = m_inputEnhancementConcreteProfile == Profile::Crisp ? Engine::DeepFilterNet
-											 : m_inputEnhancementConcreteProfile == Profile::Balanced ? Engine::RNNoise
-																									  : Engine::Speex;
+		m_inputEnhancementEngine = m_inputEnhancementConcreteProfile == Profile::Quality    ? Engine::DeepFilterNet
+								   : m_inputEnhancementConcreteProfile == Profile::Balanced ? Engine::RNNoise
+																							: Engine::Speex;
 		m_inputEnhancementAutoPolicy.reset(m_inputEnhancementConcreteProfile);
 		m_inputEnhancementAutoSwitchGate.reset(m_inputEnhancementConcreteProfile);
 		if (usedStartupFallback) {
@@ -1567,7 +1625,7 @@ void AudioInput::initializeInputEnhancement() {
 		return;
 	}
 
-	// The 5 ms Balanced and 8 ms Crisp values are p99 qualification goals,
+	// The 5 ms Balanced and 8 ms Quality/Voice Focus values are p99 qualification goals,
 	// not fail-closed thresholds. A single scheduler preemption must not drop an
 	// otherwise healthy utterance to Original; the product catastrophe/soak
 	// contract uses 10 ms as the hard per-frame deadline.
@@ -1604,17 +1662,25 @@ void AudioInput::initializeInputEnhancementProbation(
 		m_inputEnhancementProbation.restoreUndo(*deviceProfile);
 		return;
 	}
-	if (!deviceProfile->lastKnownGood || !deviceProfile->pendingRecipeBinding
-		|| !Mumble::InputEnhancement::recipeBindingMatchesPreference(*deviceProfile->pendingRecipeBinding,
-																	 deviceProfile->preference)
-		|| (deviceProfile->lastKnownGood->profile != Mumble::InputEnhancement::Profile::Original
-			&& (!deviceProfile->lastKnownGoodRecipeBinding
-				|| !Mumble::InputEnhancement::recipeBindingMatchesPreference(*deviceProfile->lastKnownGoodRecipeBinding,
-																			 *deviceProfile->lastKnownGood)))) {
+	if (!deviceProfile->lastKnownGood
+		|| !Mumble::InputEnhancement::executionBindingMatchesPreference(deviceProfile->preference,
+																		deviceProfile->pendingRecipeBinding,
+																		deviceProfile->pendingAutoRecipeSetFingerprint)
+		|| !Mumble::InputEnhancement::executionBindingMatchesPreference(
+			*deviceProfile->lastKnownGood, deviceProfile->lastKnownGoodRecipeBinding,
+			deviceProfile->lastKnownGoodAutoRecipeSetFingerprint)) {
 		return;
 	}
-	m_inputEnhancementProbation.start(deviceProfile->identity, deviceProfile->preference, *deviceProfile->lastKnownGood,
-									  *deviceProfile->pendingRecipeBinding, deviceProfile->lastKnownGoodRecipeBinding);
+	if (deviceProfile->preference.profile == Mumble::InputEnhancement::Profile::Auto) {
+		m_inputEnhancementProbation.startAuto(
+			deviceProfile->identity, deviceProfile->preference, *deviceProfile->lastKnownGood,
+			*deviceProfile->pendingAutoRecipeSetFingerprint, deviceProfile->lastKnownGoodRecipeBinding,
+			deviceProfile->lastKnownGoodAutoRecipeSetFingerprint);
+	} else {
+		m_inputEnhancementProbation.start(deviceProfile->identity, deviceProfile->preference,
+										  *deviceProfile->lastKnownGood, *deviceProfile->pendingRecipeBinding,
+										  deviceProfile->lastKnownGoodRecipeBinding);
+	}
 }
 
 void AudioInput::failInputEnhancementProbation(Mumble::InputEnhancement::ProbationHealthSignal signal) noexcept {
@@ -1664,7 +1730,7 @@ void AudioInput::markOpenedInputDeviceProfileUsed() noexcept {
 		this,
 		[openedIdentity]() {
 			if (Mumble::InputEnhancement::markDeviceProfileUsed(Global::get().s.inputEnhancement, openedIdentity,
-													QDateTime::currentMSecsSinceEpoch())) {
+																QDateTime::currentMSecsSinceEpoch())) {
 				Global::get().s.save();
 			}
 		},
@@ -1710,7 +1776,7 @@ void AudioInput::finishAlignedInputEnhancementFallback() noexcept {
 		&& recoveryProfile != Profile::Original
 		&& m_inputEnhancementAutoPipelineBank->candidatePrepared(recoveryProfile)
 		&& m_inputEnhancementAutoPipelineBank->switchTo(recoveryProfile)) {
-		m_inputEnhancementEngine          = recoveryProfile == Profile::Crisp      ? Engine::DeepFilterNet
+		m_inputEnhancementEngine          = recoveryProfile == Profile::Quality    ? Engine::DeepFilterNet
 											: recoveryProfile == Profile::Balanced ? Engine::RNNoise
 																				   : Engine::Speex;
 		m_inputEnhancementConcreteProfile = recoveryProfile;
@@ -1751,14 +1817,17 @@ bool AudioInput::processInputEnhancementFrame(std::array< float, Mumble::InputEn
 		m_speechCleanupProcessor->processInPlace(frame.data(), validSamples);
 		return true;
 	}
+	if (validSamples != Mumble::InputEnhancement::frameSamples) {
+		return false;
+	}
 	Mumble::InputEnhancement::Pipeline *pipeline = activeInputEnhancementPipeline();
 	if (!pipeline) {
 		return false;
 	}
 	if (m_inputEnhancementAutoAdapt) {
-		return pipeline->processFrame(frame, Mumble::InputEnhancement::mixFactorForControls(
-												 m_inputEnhancementConcreteProfile, m_inputEnhancementActiveReduction,
-												 m_inputEnhancementActiveCharacter));
+		return pipeline->processFrame(frame.data(), validSamples,
+			Mumble::InputEnhancement::mixFactorForControls(m_inputEnhancementConcreteProfile,
+				m_inputEnhancementActiveReduction, m_inputEnhancementActiveCharacter));
 	}
 	return pipeline->processFrame(frame);
 }
@@ -1816,7 +1885,7 @@ bool AudioInput::applyPreparedAutoInputEnhancementProfile(Mumble::InputEnhanceme
 	}
 
 	const Profile previousProfile     = m_inputEnhancementConcreteProfile;
-	const Engine nextEngine           = profile == Profile::Crisp      ? Engine::DeepFilterNet
+	const Engine nextEngine           = profile == Profile::Quality    ? Engine::DeepFilterNet
 										: profile == Profile::Balanced ? Engine::RNNoise
 																	   : Engine::Speex;
 	m_inputEnhancementEngine          = nextEngine;
@@ -1843,7 +1912,7 @@ void AudioInput::updateAutoInputEnhancement(float vadConfidence, bool acousticSp
 			vadConfidence, m_inputEnhancementCpuClass, inputEnhancementDeadlinePressure(),
 			m_inputEnhancementBaseReduction, m_inputEnhancementBaseCharacter, observation)) {
 		observation.balancedAvailable = autoInputEnhancementCandidatePrepared(Profile::Balanced);
-		observation.crispAvailable    = autoInputEnhancementCandidatePrepared(Profile::Crisp);
+		observation.crispAvailable    = autoInputEnhancementCandidatePrepared(Profile::Quality);
 		observation.allowProfileSwitch =
 			m_inputEnhancementAutoProfileSwitching && m_inputEnhancementAutoSwitchGate.switchingAllowed();
 		const Decision decision           = m_inputEnhancementAutoPolicy.evaluate(observation);
@@ -1991,33 +2060,44 @@ std::uint64_t AudioInput::inputEnhancementModelInitializationAttemptsForDiagnost
 }
 
 unsigned int AudioInput::finishSpeechCleanupE2ETransmission() {
-	if (!bPreviousVoice) {
-		return 0;
-	}
-
 	// This is an explicit release rather than a VAD decision, so begin the drain
 	// before submitting the first zero frame. That makes the deterministic path
 	// consume exactly latencySamples() zeros instead of one decision frame plus
-	// the reported latency.
+	// the reported latency. Run a fresh drain even when VAD already closed the
+	// utterance: noisy raw-VAD restarts may have cancelled every earlier drain,
+	// and release qualification needs one complete, unambiguous final proof.
 	unsigned int requestedDrainSamples = 0;
+	qInfo("AudioInput E2E drain: begin previousVoice=%s neuralReady=%s activeBefore=%s remainingBefore=%u",
+		  bPreviousVoice ? "true" : "false", neuralInputEnhancementReady() ? "true" : "false",
+		  m_speechCleanupTransmitDrain.active() ? "true" : "false",
+		  m_speechCleanupTransmitDrain.remainingSamples());
 	if (neuralInputEnhancementReady()) {
 		requestedDrainSamples = inputEnhancementLatencySamples();
+		m_speechCleanupE2ECurrentDrainSamples       = 0;
+		m_speechCleanupE2ELastCompletedDrainSamples = 0;
 		m_speechCleanupTransmitDrain.begin(requestedDrainSamples);
 	}
 	std::vector< short > silence(iFrameSize, 0);
 	m_forceSpeechCleanupE2ERelease = true;
 	auto nextDeadline              = std::chrono::steady_clock::now();
-	do {
+	const unsigned int maximumDrainCallbacks =
+		requestedDrainSamples == 0 ? 0 : ((requestedDrainSamples + iFrameSize - 1) / iFrameSize) + 1;
+	for (unsigned int callback = 0;
+		 callback < maximumDrainCallbacks && m_speechCleanupTransmitDrain.active(); ++callback) {
 		encodeAudioFrame(AudioChunk(silence.data()));
+		qInfo("AudioInput E2E drain: callback active=%s remaining=%u current=%u completed=%u",
+			  m_speechCleanupTransmitDrain.active() ? "true" : "false",
+			  m_speechCleanupTransmitDrain.remainingSamples(), m_speechCleanupE2ECurrentDrainSamples,
+			  m_speechCleanupE2ELastCompletedDrainSamples);
 		// This helper is compiled only into the deterministic E2E client. A real
 		// capture backend receives each drain frame from its next 10 ms callback;
 		// preserve that contract here so an asynchronous neural worker is tested
 		// against its actual deadline instead of an artificial zero-time burst.
 		nextDeadline += std::chrono::milliseconds(10);
 		std::this_thread::sleep_until(nextDeadline);
-	} while (bRunning && m_speechCleanupTransmitDrain.active());
+	}
 	m_forceSpeechCleanupE2ERelease = false;
-	return requestedDrainSamples - m_speechCleanupTransmitDrain.remainingSamples();
+	return m_speechCleanupE2ELastCompletedDrainSamples;
 }
 #endif
 
@@ -2118,7 +2198,8 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	bool speechCleanupDrainCancelledForActivation = false;
 	if (m_speechCleanupTransmitDrain.active() && !neuralCleanupReady) {
 		m_speechCleanupTransmitDrain.cancel();
-	} else if (m_speechCleanupTransmitDrain.active() && speechCleanupDrainActivation) {
+	} else if (m_speechCleanupTransmitDrain.active() && speechCleanupDrainActivation
+			   && !forceSpeechCleanupE2ERelease) {
 		m_speechCleanupTransmitDrain.cancel();
 		speechCleanupDrainCancelledForActivation = true;
 	}
@@ -2161,6 +2242,14 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		}
 
 		const bool processed = processInputEnhancementFrame(cleanupFrame, cleanupSampleCount);
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+		if (processed && speechCleanupDrainFrame.draining) {
+			m_speechCleanupE2ECurrentDrainSamples += speechCleanupDrainFrame.zeroInputSamples;
+			if (speechCleanupDrainFrame.terminator) {
+				m_speechCleanupE2ELastCompletedDrainSamples = m_speechCleanupE2ECurrentDrainSamples;
+			}
+		}
+#endif
 
 		for (unsigned int i = 0; i < cleanupSampleCount; ++i) {
 			psSource[i] = clampFloatSample(cleanupFrame[i] * 32768.0f);
@@ -2296,6 +2385,9 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		}
 	} else if (!bIsSpeech && bPreviousVoice && neuralCleanupReady
 			   && (!continuousTransmission || forceSpeechCleanupE2ERelease)) {
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+		m_speechCleanupE2ECurrentDrainSamples = 0;
+#endif
 		m_speechCleanupTransmitDrain.begin(inputEnhancementLatencySamples());
 		if (m_speechCleanupTransmitDrain.active()) {
 			speechCleanupDrainStarted = true;

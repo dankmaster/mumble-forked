@@ -1,0 +1,27 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/3rdparty/utfcpp/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/tracy/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/spdlog/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/CLI11/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/CLI11/fuzz/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/CLI11/src/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/CLI11/single-include/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/core/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/backends/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/backends/mysql/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/backends/postgresql/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/soci/src/backends/sqlite3/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/database/nlohmann_json/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/murmur/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/src/murmur/database/cmake_install.cmake",
+		"D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/auxiliary_files/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

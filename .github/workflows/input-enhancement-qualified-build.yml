@@ -12,7 +12,11 @@ on:
         required: true
         type: number
       quality_run_id:
-        description: Successful Input Enhancement Quality run for this exact SHA and staged binary
+        description: Successful 500+ case master_quality run for this exact SHA and staged binary
+        required: true
+        type: string
+      nightly_quality_run_id:
+        description: Successful 5000+ case nightly/60-minute-soak run for the same exact staged binary
         required: true
         type: string
       release_notes:
@@ -39,6 +43,10 @@ env:
 jobs:
   build-test-sign:
     name: build-test-sign
+    # Fail closed until a verifier binds this exact candidate to successful
+    # pre-Azure rehearsal, protected listening/VM receipts, and >=7d/20h
+    # dogfood evidence. Quality run IDs alone must never obtain OIDC or sign.
+    if: ${{ github.repository == '__disabled__/until-pre-azure-evidence-verifier-v1' }}
     runs-on: windows-2022
     environment: release-preview
     timeout-minutes: 180
@@ -59,6 +67,7 @@ jobs:
       REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
       REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
       QUALITY_RUN_ID: ${{ inputs.quality_run_id }}
+      NIGHTLY_QUALITY_RUN_ID: ${{ inputs.nightly_quality_run_id }}
     outputs:
       build_id: ${{ steps.metadata.outputs.build_id }}
 
@@ -168,17 +177,28 @@ jobs:
           if ($env:QUALITY_RUN_ID -notmatch '^[1-9][0-9]*$') {
             throw "quality_run_id must identify one completed Actions run."
           }
+          if ($env:NIGHTLY_QUALITY_RUN_ID -notmatch '^[1-9][0-9]*$') {
+            throw "nightly_quality_run_id must identify one completed Actions run."
+          }
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:QUALITY_RUN_ID" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or [string]$run.head_sha -cne $env:REQUESTED_SOURCE_SHA -or
               [string]$run.conclusion -cne 'success' -or
               -not ([string]$run.path).EndsWith('/input-enhancement-quality.yml', [System.StringComparison]::Ordinal)) {
             throw "Quality run must be a successful Input Enhancement Quality run for the exact requested SHA."
           }
+          $nightlyRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:NIGHTLY_QUALITY_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or [string]$nightlyRun.head_sha -cne $env:REQUESTED_SOURCE_SHA -or
+              [string]$nightlyRun.conclusion -cne 'success' -or
+              -not ([string]$nightlyRun.path).EndsWith('/input-enhancement-quality.yml', [System.StringComparison]::Ordinal)) {
+            throw "Nightly run must be a successful Input Enhancement Quality run for the exact requested SHA."
+          }
 
           $evidenceRoot = '.\build-shared-webengine\measured-evidence'
           $lowRoot = Join-Path $evidenceRoot 'download-low-performance'
           $mainstreamRoot = Join-Path $evidenceRoot 'download-mainstream'
-          New-Item -ItemType Directory -Force -Path $lowRoot, $mainstreamRoot | Out-Null
+          $lowNightlyRoot = Join-Path $evidenceRoot 'download-nightly-low-performance'
+          $mainstreamNightlyRoot = Join-Path $evidenceRoot 'download-nightly-mainstream'
+          New-Item -ItemType Directory -Force -Path $lowRoot, $mainstreamRoot, $lowNightlyRoot, $mainstreamNightlyRoot | Out-Null
           gh run download $env:QUALITY_RUN_ID --repo $env:GITHUB_REPOSITORY `
             --name "input-enhancement-master_quality-low-performance-$env:REQUESTED_SOURCE_SHA" `
             --dir $lowRoot
@@ -187,15 +207,49 @@ jobs:
             --name "input-enhancement-master_quality-mainstream-$env:REQUESTED_SOURCE_SHA" `
             --dir $mainstreamRoot
           if ($LASTEXITCODE -ne 0) { throw "Mainstream measured evidence is missing." }
+          gh run download $env:NIGHTLY_QUALITY_RUN_ID --repo $env:GITHUB_REPOSITORY `
+            --name "input-enhancement-nightly-low-performance-$env:REQUESTED_SOURCE_SHA" `
+            --dir $lowNightlyRoot
+          if ($LASTEXITCODE -ne 0) { throw "Low-performance nightly evidence is missing." }
+          gh run download $env:NIGHTLY_QUALITY_RUN_ID --repo $env:GITHUB_REPOSITORY `
+            --name "input-enhancement-nightly-mainstream-$env:REQUESTED_SOURCE_SHA" `
+            --dir $mainstreamNightlyRoot
+          if ($LASTEXITCODE -ne 0) { throw "Mainstream nightly evidence is missing." }
 
           Copy-Item (Join-Path $lowRoot 'qualification.json') `
-            (Join-Path $evidenceRoot 'quality-low-performance.json')
+            (Join-Path $evidenceRoot 'quality-master_quality-low-performance.json')
           Copy-Item (Join-Path $lowRoot 'original-voice-qualification.json') `
-            (Join-Path $evidenceRoot 'original-voice-low-performance.json')
+            (Join-Path $evidenceRoot 'original-voice-master_quality-low-performance.json')
           Copy-Item (Join-Path $mainstreamRoot 'qualification.json') `
-            (Join-Path $evidenceRoot 'quality-mainstream.json')
+            (Join-Path $evidenceRoot 'quality-master_quality-mainstream.json')
           Copy-Item (Join-Path $mainstreamRoot 'original-voice-qualification.json') `
-            (Join-Path $evidenceRoot 'original-voice-mainstream.json')
+            (Join-Path $evidenceRoot 'original-voice-master_quality-mainstream.json')
+          Copy-Item (Join-Path $lowNightlyRoot 'qualification.json') `
+            (Join-Path $evidenceRoot 'quality-nightly-low-performance.json')
+          Copy-Item (Join-Path $lowNightlyRoot 'original-voice-qualification.json') `
+            (Join-Path $evidenceRoot 'original-voice-nightly-low-performance.json')
+          Copy-Item (Join-Path $mainstreamNightlyRoot 'qualification.json') `
+            (Join-Path $evidenceRoot 'quality-nightly-mainstream.json')
+          Copy-Item (Join-Path $mainstreamNightlyRoot 'original-voice-qualification.json') `
+            (Join-Path $evidenceRoot 'original-voice-nightly-mainstream.json')
+
+          $mergedArtifacts = Join-Path $evidenceRoot 'artifacts'
+          New-Item -ItemType Directory -Force -Path $mergedArtifacts | Out-Null
+          $artifactNamespaces = @(
+            @{ Root = $lowRoot; Namespace = 'master_quality-low-performance' },
+            @{ Root = $mainstreamRoot; Namespace = 'master_quality-mainstream' },
+            @{ Root = $lowNightlyRoot; Namespace = 'nightly-low-performance' },
+            @{ Root = $mainstreamNightlyRoot; Namespace = 'nightly-mainstream' }
+          )
+          foreach ($item in $artifactNamespaces) {
+            $sourceArtifacts = Join-Path (Join-Path $item.Root 'artifacts') $item.Namespace
+            $destinationArtifacts = Join-Path $mergedArtifacts $item.Namespace
+            if (-not (Test-Path -LiteralPath $sourceArtifacts -PathType Container) -or
+                (Test-Path -LiteralPath $destinationArtifacts)) {
+              throw "Measured evidence artifact namespace '$($item.Namespace)' is missing or duplicated."
+            }
+            Copy-Item -LiteralPath $sourceArtifacts -Destination $destinationArtifacts -Recurse
+          }
 
           .\scripts\windows\new-input-enhancement-measured-attestation.ps1 `
             -SourceRoot . `
@@ -203,9 +257,12 @@ jobs:
             -TestedBinaryPath .\build-shared-webengine\shared-webengine-stage\mumble.exe `
             -LowPerformanceEvidenceRoot $lowRoot `
             -MainstreamEvidenceRoot $mainstreamRoot `
+            -LowPerformanceNightlyEvidenceRoot $lowNightlyRoot `
+            -MainstreamNightlyEvidenceRoot $mainstreamNightlyRoot `
             -UnsignedModelManifestPath .\build-shared-webengine\unsigned-input-models.json `
             -UnsignedRecipeManifestPath .\build-shared-webengine\unsigned-input-recipes.json `
             -QualityWorkflowRunId $env:QUALITY_RUN_ID `
+            -NightlyQualityWorkflowRunId $env:NIGHTLY_QUALITY_RUN_ID `
             -ExpectedHarnessSha256 $env:INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256 `
             -OutputPath (Join-Path $evidenceRoot 'measured-quality-attestation.json')
 
@@ -381,13 +438,19 @@ jobs:
           $measuredRoot = Join-Path $buildRoot 'measured-evidence'
           foreach ($name in @(
             'measured-quality-attestation.json',
-            'quality-low-performance.json',
-            'original-voice-low-performance.json',
-            'quality-mainstream.json',
-            'original-voice-mainstream.json'
+            'quality-master_quality-low-performance.json',
+            'original-voice-master_quality-low-performance.json',
+            'quality-master_quality-mainstream.json',
+            'original-voice-master_quality-mainstream.json',
+            'quality-nightly-low-performance.json',
+            'original-voice-nightly-low-performance.json',
+            'quality-nightly-mainstream.json',
+            'original-voice-nightly-mainstream.json'
           )) {
             Copy-Item -LiteralPath (Join-Path $measuredRoot $name) -Destination (Join-Path $handoffRoot $name)
           }
+          Copy-Item -LiteralPath (Join-Path $measuredRoot 'artifacts') `
+            -Destination (Join-Path $handoffRoot 'artifacts') -Recurse
 
           .\scripts\windows\new-input-enhancement-qualification.ps1 `
             -SourceRoot . `
@@ -460,7 +523,7 @@ jobs:
       # Protected repository variable. It must be an absolute path to a runner-local
       # PowerShell harness outside GITHUB_WORKSPACE. Harness contract:
       # - accept the named arguments used below;
-      # - run the fixed input-enhancement-release-smoke-v1 matrix (12 cases);
+      # - run the fixed input-enhancement-release-smoke-v1 matrix (6 Original controls + 24 enhanced cases);
       # - use only ExpandedArtifactRoot/mumble.exe from the verified update payload for both clients;
       # - route client 1 through an OG Mumble Opus server on 127.0.0.1 to client 2;
       # - keep receiver/post-decode cleanup disabled;
@@ -815,7 +878,7 @@ jobs:
           $notes = @(
             "# Qualified input-enhancement build",
             "",
-            "This immutable release contains the exact signed artifact that passed the mandatory input-enhancement runtime, Auto, calibration, settings, cleanup, benchmark, and packaged 12-case localhost release-smoke gates.",
+            "This immutable release contains the exact signed artifact that passed the mandatory input-enhancement runtime, Auto, calibration, settings, cleanup, benchmark, and packaged 30-case localhost release-smoke gates (6 Original controls + 24 enhanced cases).",
             "",
             "- Build ID: $tag",
             "- Source: $sourceSha",

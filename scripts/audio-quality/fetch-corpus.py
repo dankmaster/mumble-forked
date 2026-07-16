@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.error
@@ -183,14 +184,17 @@ def _write_state(
 	root: Path, manifest: Mapping[str, Any], purpose: str, results: Sequence[tuple[Mapping[str, Any], str, Path]]
 ) -> None:
 	state = {
-		"schema_version": 2,
+		"schema_version": 3,
+		"state_kind": "mumble-input-enhancement-corpus-state",
 		"corpus_lock_sha256": LOCK.canonical_manifest_sha256(manifest),
+		"fetcher_sha256": _sha256(Path(__file__).resolve()),
 		"purpose": purpose,
 		"archives": [
 			{
 				"source_id": source["id"],
 				"source_kind": source["kind"],
 				"relative_path": path.relative_to(root).as_posix(),
+				"source_url_sha256": hashlib.sha256(source["source_url"].encode("utf-8")).hexdigest(),
 				"source_artifact_sha256": source["integrity"]["digest"],
 				"size_bytes": source["integrity"]["size_bytes"],
 				"verified": True,
@@ -242,7 +246,12 @@ def run_self_test() -> None:
 		state_path.parent.mkdir(parents=True)
 		_write_state(state_root, manifest, "local-eval", [ (state_source, "verified-existing", state_path) ])
 		state = json.loads((state_root / "corpus-state.json").read_text(encoding="utf-8"))
-		if state["schema_version"] != 2 or state["archives"][0]["source_artifact_sha256"] != state_source["integrity"]["digest"]:
+		if (
+			state["schema_version"] != 3
+			or state["state_kind"] != "mumble-input-enhancement-corpus-state"
+			or state["archives"][0]["source_artifact_sha256"] != state_source["integrity"]["digest"]
+			or not re.fullmatch(r"[0-9a-f]{64}", state["fetcher_sha256"])
+		):
 			raise AssertionError("corpus state did not expose the locked source artifact hash")
 	try:
 		validate_artifact_root(_repo_root() / "scripts" / "audio-quality" / "downloads")

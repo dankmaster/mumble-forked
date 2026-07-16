@@ -19,6 +19,7 @@ QUALITY_QUALIFICATION = "qualification.json"
 ORIGINAL_QUALIFICATION = "original-voice-qualification.json"
 UPLOAD_DIRECTORY = "upload"
 ARTIFACT_SUFFIXES = {
+	"case_evidence_jsonl": ".jsonl",
 	"failure_spectrogram_index": ".json",
 	"junit": ".xml",
 	"per_case_csv": ".csv",
@@ -88,6 +89,44 @@ def canonical_json_sha256(value: Any) -> str:
 	return hashlib.sha256(payload).hexdigest()
 
 
+def file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open("rb") as stream:
+		for block in iter(lambda: stream.read(1024 * 1024), b""):
+			digest.update(block)
+	return digest.hexdigest()
+
+
+def payload_sha256(path: Path) -> str:
+	"""Hash a file directly or a directory as a canonical, path-sensitive file inventory."""
+	if path.is_file():
+		return file_sha256(path)
+	if not path.is_dir():
+		raise GateError(f"protected provenance path does not exist: {path}")
+	records: list[Mapping[str, Any]] = []
+	for candidate in sorted(path.rglob("*"), key=lambda value: value.relative_to(path).as_posix()):
+		if candidate.is_symlink():
+			raise GateError(f"protected provenance trees must not contain symlinks: {candidate}")
+		if not candidate.is_file():
+			continue
+		records.append(
+			{
+				"path": candidate.relative_to(path).as_posix(),
+				"sha256": file_sha256(candidate),
+				"size_bytes": candidate.stat().st_size,
+			}
+		)
+	if not records:
+		raise GateError(f"protected provenance directory contains no files: {path}")
+	return canonical_json_sha256(records)
+
+
+def lowercase_sha256(value: str, label: str) -> str:
+	if len(value) != 64 or value.lower() != value or any(character not in "0123456789abcdef" for character in value):
+		raise GateError(f"{label} must be a lowercase SHA-256")
+	return value
+
+
 def load_json(path: Path) -> Mapping[str, Any]:
 	try:
 		value = json.loads(path.read_text(encoding="utf-8"))
@@ -114,6 +153,23 @@ def git_head(source_root: Path) -> str:
 	return completed.stdout.strip().lower()
 
 
+def protected_path_identity(path: Path, source_root: Path, expected_sha256: str, label: str) -> tuple[Path, str]:
+	resolved = path.resolve()
+	if not resolved.exists():
+		raise GateError(f"{label} does not exist: {resolved}")
+	try:
+		resolved.relative_to(source_root)
+	except ValueError:
+		pass
+	else:
+		raise GateError(f"{label} must live outside the checked-out repository")
+	expected = lowercase_sha256(expected_sha256, f"expected {label} hash")
+	actual = payload_sha256(resolved)
+	if actual != expected:
+		raise GateError(f"{label} hash {actual!r} does not match configured {expected!r}")
+	return resolved, actual
+
+
 def harness_command(
 	harness: Path,
 	suite: str,
@@ -126,6 +182,14 @@ def harness_command(
 	staged_client_root: Path,
 	model_manifest: Path,
 	recipe_manifest: Path,
+	server_binary: Path,
+	corpus_inventory: Path,
+	case_set: Path,
+	release_fixtures: Path,
+	metrics_runtime: Path,
+	runner_class: str,
+	hardware_fingerprint_sha256: str,
+	harness_sha256: str,
 ) -> list[str]:
 	common_values = (suite, str(source_root), str(output_root), source_sha, str(corpus_lock))
 	if harness.suffix.lower() == ".ps1":
@@ -159,6 +223,22 @@ def harness_command(
 			str(model_manifest),
 			"-RecipeManifestPath",
 			str(recipe_manifest),
+			"-ServerBinaryPath",
+			str(server_binary),
+			"-CorpusInventoryPath",
+			str(corpus_inventory),
+			"-CaseSetPath",
+			str(case_set),
+			"-ReleaseFixturesPath",
+			str(release_fixtures),
+			"-MetricsRuntimePath",
+			str(metrics_runtime),
+			"-RunnerClass",
+			runner_class,
+			"-HardwareFingerprintSha256",
+			hardware_fingerprint_sha256,
+			"-HarnessSha256",
+			harness_sha256,
 		]
 	if harness.suffix.lower() == ".py":
 		command = [ sys.executable, str(harness) ]
@@ -187,6 +267,22 @@ def harness_command(
 		str(model_manifest),
 		"--recipe-manifest",
 		str(recipe_manifest),
+		"--server-binary",
+		str(server_binary),
+		"--corpus-inventory",
+		str(corpus_inventory),
+		"--case-set",
+		str(case_set),
+		"--release-fixtures",
+		str(release_fixtures),
+		"--metrics-runtime",
+		str(metrics_runtime),
+		"--runner-class",
+		runner_class,
+		"--hardware-fingerprint-sha256",
+		hardware_fingerprint_sha256,
+		"--harness-sha256",
+		harness_sha256,
 	]
 
 
@@ -202,20 +298,27 @@ def validate_identity(
 	expected_suite: str,
 	expected_sha: str,
 	expected_corpus_sha: str,
-	expected_binary_sha: str | None,
-	expected_legacy_binary_sha: str | None,
+	expected_build: Mapping[str, str] | None,
 ) -> None:
 	if quality.get("suite") != expected_suite:
 		raise GateError(f"qualification suite is {quality.get('suite')!r}, expected {expected_suite!r}")
+	if quality.get("qualification_scope") != "core":
+		raise GateError("protected master/nightly qualification must attest the core profile set")
+	if quality.get("schema_version") != 3 or quality.get("status") != "passed":
+		raise GateError("protected quality evidence must be a passing schema-v3 qualification")
 	build = quality.get("build")
 	if not isinstance(build, dict) or build.get("git_sha") != expected_sha:
 		raise GateError("quality evidence does not attest the checked-out Git SHA")
 	if build.get("corpus_lock_sha256") != expected_corpus_sha:
 		raise GateError("quality evidence does not attest the checked-in corpus lock")
-	if expected_binary_sha is not None and build.get("tested_binary_sha256") != expected_binary_sha:
-		raise GateError("quality evidence does not attest the exact supplied staged client binary")
+	if expected_build is not None:
+		for field, expected in expected_build.items():
+			if build.get(field) != expected:
+				raise GateError(f"quality evidence does not attest the exact {field}")
 	if original.get("candidate_build_sha") != expected_sha:
 		raise GateError("Original voice evidence does not attest the checked-out Git SHA")
+	expected_binary_sha = expected_build.get("tested_binary_sha256") if expected_build is not None else None
+	expected_legacy_binary_sha = expected_build.get("legacy_binary_sha256") if expected_build is not None else None
 	if expected_binary_sha is not None and original.get("candidate_executable_sha256") != expected_binary_sha:
 		raise GateError("Original voice evidence does not attest the exact supplied staged client binary")
 	if expected_legacy_binary_sha is not None and original.get("legacy_executable_sha256") != expected_legacy_binary_sha:
@@ -244,7 +347,7 @@ def validate_recipe_and_models(
 	for recipe in recipes:
 		if not isinstance(recipe, dict) or recipe.get("advancedOnly") is True:
 			continue
-		if recipe.get("profile") in ("Balanced", "Crisp", "Auto"):
+		if recipe.get("profile") in ("Balanced", "Quality", "VoiceFocus", "Auto"):
 			ids = recipe.get("modelIds")
 			if not isinstance(ids, list) or any(not isinstance(value, str) for value in ids):
 				raise GateError("product recipe has invalid model IDs")
@@ -321,20 +424,28 @@ def run_self_test() -> None:
 	command = harness_command(
 		Path("trusted-harness.py"), "master_quality", Path("source"), Path("output"), "a" * 40,
 		Path("corpus-lock.json"), Path("candidate.exe"), Path("legacy.exe"), Path("stage"),
-		Path("models.json"), Path("recipes.json"),
+		Path("models.json"), Path("recipes.json"), Path("server.exe"), Path("inventory.json"),
+		Path("cases.json"), Path("release-fixtures"), Path("metrics-runtime"), "low-performance",
+		"b" * 64, "c" * 64,
 	)
 	if command[command.index("--legacy-binary") + 1] != "legacy.exe":
 		raise AssertionError("trusted harness command is not bound to the supplied legacy executable")
+	if command[command.index("--runner-class") + 1] != "low-performance":
+		raise AssertionError("trusted harness command is not bound to the supplied runner class")
 	if safe_artifact_paths(
 		{
 			"artifacts": {
+				"case_evidence_jsonl": {
+					"contains_audio_samples": False,
+					"path": "artifacts/master_quality-low-performance/case-evidence.jsonl",
+				},
 				"junit": {
 					"contains_audio_samples": False,
 					"path": "reports/junit.xml",
 				}
 			}
 		}
-	) != [ "reports/junit.xml" ]:
+	) != [ "artifacts/master_quality-low-performance/case-evidence.jsonl", "reports/junit.xml" ]:
 		raise AssertionError("safe artifact path classification regression")
 	try:
 		safe_artifact_paths(
@@ -355,11 +466,15 @@ def run_self_test() -> None:
 	digest = "a" * 64
 	source_sha = "b" * 40
 	quality = {
+		"schema_version": 3,
+		"status": "passed",
 		"suite": "master_quality",
+		"qualification_scope": "core",
 		"build": {
 			"git_sha": source_sha,
 			"corpus_lock_sha256": digest,
 			"tested_binary_sha256": digest,
+			"legacy_binary_sha256": "d" * 64,
 		},
 	}
 	original = { key: None for key in ORIGINAL_ROOT_KEYS }
@@ -370,20 +485,32 @@ def run_self_test() -> None:
 			"cases": [ { key: None for key in ORIGINAL_CASE_KEYS } ],
 		}
 	)
-	validate_identity(quality, original, "master_quality", source_sha, digest, digest, None)
+	validate_identity(
+		quality, original, "master_quality", source_sha, digest,
+		{ "tested_binary_sha256": digest },
+	)
 	original["candidate_executable_sha256"] = "c" * 64
 	try:
-		validate_identity(quality, original, "master_quality", source_sha, digest, digest, None)
+		validate_identity(
+			quality, original, "master_quality", source_sha, digest,
+			{ "tested_binary_sha256": digest },
+		)
 	except GateError:
 		pass
 	else:
 		raise AssertionError("Original evidence candidate executable was not bound to the staged client")
 	original["candidate_executable_sha256"] = digest
 	original["legacy_executable_sha256"] = "d" * 64
-	validate_identity(quality, original, "master_quality", source_sha, digest, digest, "d" * 64)
+	validate_identity(
+		quality, original, "master_quality", source_sha, digest,
+		{ "tested_binary_sha256": digest, "legacy_binary_sha256": "d" * 64 },
+	)
 	original["legacy_executable_sha256"] = "e" * 64
 	try:
-		validate_identity(quality, original, "master_quality", source_sha, digest, digest, "d" * 64)
+		validate_identity(
+			quality, original, "master_quality", source_sha, digest,
+			{ "tested_binary_sha256": digest, "legacy_binary_sha256": "d" * 64 },
+		)
 	except GateError:
 		pass
 	else:
@@ -401,6 +528,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--staged-client-root", type=Path)
 	parser.add_argument("--model-manifest", type=Path)
 	parser.add_argument("--recipe-manifest", type=Path)
+	parser.add_argument("--server-binary", type=Path)
+	parser.add_argument("--corpus-inventory", type=Path)
+	parser.add_argument("--case-set", type=Path)
+	parser.add_argument("--release-fixtures", type=Path)
+	parser.add_argument("--metrics-runtime", type=Path)
+	parser.add_argument("--runner-class", choices=("low-performance", "mainstream", "local-development"))
+	parser.add_argument("--hardware-fingerprint-sha256")
+	parser.add_argument("--expected-harness-sha256")
+	parser.add_argument("--expected-legacy-binary-sha256")
+	parser.add_argument("--expected-server-binary-sha256")
+	parser.add_argument("--expected-corpus-inventory-sha256")
+	parser.add_argument("--expected-case-set-sha256")
+	parser.add_argument("--expected-release-fixtures-sha256")
+	parser.add_argument("--expected-metrics-runtime-sha256")
 	parser.add_argument("--github-output", type=Path)
 	parser.add_argument("--validate-only", action="store_true", help="validate pre-existing output without invoking a harness")
 	parser.add_argument("--self-test", action="store_true")
@@ -418,9 +559,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 		if not args.validate_only and args.harness is None:
 			raise GateError("--harness is required unless --validate-only is used")
 		if not args.validate_only and any(value is None for value in (
-			args.tested_binary, args.legacy_binary, args.staged_client_root, args.model_manifest, args.recipe_manifest
+			args.tested_binary, args.legacy_binary, args.staged_client_root, args.model_manifest, args.recipe_manifest,
+			args.server_binary, args.corpus_inventory, args.case_set, args.release_fixtures, args.metrics_runtime,
+			args.runner_class, args.hardware_fingerprint_sha256, args.expected_harness_sha256,
+			args.expected_legacy_binary_sha256, args.expected_server_binary_sha256,
+			args.expected_corpus_inventory_sha256, args.expected_case_set_sha256,
+			args.expected_release_fixtures_sha256, args.expected_metrics_runtime_sha256,
 		)):
-			raise GateError("the candidate/legacy binaries, staged root, and unsigned model/recipe manifests are required for measured harness runs")
+			raise GateError("measured runs require every protected binary, fixture, metric runtime, runner identity, and expected hash")
 
 		source_root = args.source_root.resolve()
 		output_root = args.output_root.resolve()
@@ -439,8 +585,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 		tested_binary_sha: str | None = None
 		legacy_binary: Path | None = None
 		legacy_binary_sha: str | None = None
+		server_binary: Path | None = None
+		corpus_inventory: Path | None = None
+		case_set: Path | None = None
+		release_fixtures: Path | None = None
+		metrics_runtime: Path | None = None
+		harness_sha: str | None = None
+		hardware_fingerprint_sha: str | None = None
 		model_manifest: Mapping[str, Any] | None = None
 		recipe_manifest: Mapping[str, Any] | None = None
+		model_manifest_sha: str | None = None
+		recipe_manifest_sha: str | None = None
+		staged_payload_sha: str | None = None
+		protected_hashes: dict[str, str] = {}
 		identity_inputs = (args.tested_binary, args.staged_client_root, args.model_manifest, args.recipe_manifest)
 		if any(value is not None for value in identity_inputs):
 			if any(value is None for value in identity_inputs):
@@ -457,20 +614,54 @@ def main(argv: Sequence[str] | None = None) -> int:
 				tested_binary.relative_to(staged_client_root)
 			except ValueError as error:
 				raise GateError("the tested binary must live below the supplied staged client root") from error
-			tested_binary_sha = hashlib.sha256(tested_binary.read_bytes()).hexdigest()
+			tested_binary_sha = file_sha256(tested_binary)
+			staged_payload_sha = payload_sha256(staged_client_root)
+			model_manifest_sha = file_sha256(model_manifest_path)
+			recipe_manifest_sha = file_sha256(recipe_manifest_path)
 			model_manifest = load_json(model_manifest_path)
 			recipe_manifest = load_json(recipe_manifest_path)
 		if args.legacy_binary is not None:
-			legacy_binary = args.legacy_binary.resolve()
-			if not legacy_binary.is_file():
-				raise GateError("the supplied legacy client binary is missing")
-			try:
-				legacy_binary.relative_to(source_root)
-			except ValueError:
-				pass
+			if args.expected_legacy_binary_sha256 is not None:
+				legacy_binary, legacy_binary_sha = protected_path_identity(
+					args.legacy_binary, source_root, args.expected_legacy_binary_sha256, "trusted legacy client"
+				)
 			else:
-				raise GateError("the trusted legacy binary must live outside the checked-out repository")
-			legacy_binary_sha = hashlib.sha256(legacy_binary.read_bytes()).hexdigest()
+				legacy_binary = args.legacy_binary.resolve()
+				if not legacy_binary.is_file():
+					raise GateError("the supplied legacy client binary is missing")
+				try:
+					legacy_binary.relative_to(source_root)
+				except ValueError:
+					pass
+				else:
+					raise GateError("the trusted legacy binary must live outside the checked-out repository")
+				legacy_binary_sha = file_sha256(legacy_binary)
+
+		protected_specs = (
+			("server_binary_sha256", args.server_binary, args.expected_server_binary_sha256, "trusted OG server"),
+			("corpus_inventory_sha256", args.corpus_inventory, args.expected_corpus_inventory_sha256, "frozen corpus inventory"),
+			("case_set_sha256", args.case_set, args.expected_case_set_sha256, "frozen qualification case set"),
+			("release_fixtures_sha256", args.release_fixtures, args.expected_release_fixtures_sha256, "release fixture set"),
+			("metrics_runtime_sha256", args.metrics_runtime, args.expected_metrics_runtime_sha256, "pinned metrics runtime"),
+		)
+		resolved_protected: dict[str, Path] = {}
+		for field, path, expected_hash, label in protected_specs:
+			if path is None and expected_hash is None:
+				continue
+			if path is None or expected_hash is None:
+				raise GateError(f"{label} path and expected hash must be supplied together")
+			resolved, digest = protected_path_identity(path, source_root, expected_hash, label)
+			resolved_protected[field] = resolved
+			protected_hashes[field] = digest
+		server_binary = resolved_protected.get("server_binary_sha256")
+		corpus_inventory = resolved_protected.get("corpus_inventory_sha256")
+		case_set = resolved_protected.get("case_set_sha256")
+		release_fixtures = resolved_protected.get("release_fixtures_sha256")
+		metrics_runtime = resolved_protected.get("metrics_runtime_sha256")
+		if args.hardware_fingerprint_sha256 is not None:
+			hardware_fingerprint_sha = lowercase_sha256(
+				args.hardware_fingerprint_sha256, "hardware fingerprint"
+			)
 		manifest = load_json(corpus_lock)
 		corpus_sha = canonical_json_sha256(manifest)
 		run_validator(
@@ -494,11 +685,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 				pass
 			else:
 				raise GateError("trusted quality harness must live outside the checked-out repository")
+			harness_sha = file_sha256(harness)
+			if harness_sha != lowercase_sha256(args.expected_harness_sha256, "expected harness hash"):
+				raise GateError("trusted quality harness does not match its configured SHA-256")
 			assert tested_binary is not None and legacy_binary is not None and staged_client_root is not None
 			assert args.model_manifest is not None and args.recipe_manifest is not None
+			assert server_binary is not None and corpus_inventory is not None and case_set is not None
+			assert release_fixtures is not None and metrics_runtime is not None
+			assert args.runner_class is not None and hardware_fingerprint_sha is not None
 			command = harness_command(
 				harness, args.suite, source_root, output_root, source_sha, corpus_lock,
 				tested_binary, legacy_binary, staged_client_root, args.model_manifest.resolve(), args.recipe_manifest.resolve(),
+				server_binary, corpus_inventory, case_set, release_fixtures, metrics_runtime, args.runner_class,
+				hardware_fingerprint_sha, harness_sha,
 			)
 			print("Running trusted quality harness: " + subprocess.list2cmdline(command))
 			harness_return_code = subprocess.run(command, check=False).returncode
@@ -530,7 +729,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 		)
 		quality = load_json(quality_path)
 		original = load_json(original_path)
-		validate_identity(quality, original, args.suite, source_sha, corpus_sha, tested_binary_sha, legacy_binary_sha)
+		expected_build: dict[str, str] | None = None
+		if tested_binary_sha is not None:
+			assert staged_payload_sha is not None and legacy_binary_sha is not None
+			assert model_manifest_sha is not None and recipe_manifest_sha is not None
+			expected_build = {
+				"tested_binary_sha256": tested_binary_sha,
+				"staged_payload_sha256": staged_payload_sha,
+				"legacy_binary_sha256": legacy_binary_sha,
+				"model_manifest_sha256": model_manifest_sha,
+				"recipe_manifest_sha256": recipe_manifest_sha,
+				**protected_hashes,
+			}
+			if harness_sha is not None:
+				expected_build["harness_sha256"] = harness_sha
+			if args.runner_class is not None:
+				expected_build["runner_class"] = args.runner_class
+			if hardware_fingerprint_sha is not None:
+				expected_build["hardware_fingerprint_sha256"] = hardware_fingerprint_sha
+		validate_identity(quality, original, args.suite, source_sha, corpus_sha, expected_build)
 		if model_manifest is not None and recipe_manifest is not None:
 			validate_recipe_and_models(quality, model_manifest, recipe_manifest)
 		prepare_safe_upload(output_root, quality)

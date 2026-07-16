@@ -123,10 +123,11 @@ Profile Policy::normalizeConcreteProfile(Profile profile) noexcept {
 	switch (profile) {
 		case Profile::Light:
 		case Profile::Balanced:
-		case Profile::Crisp:
+		case Profile::Quality:
 			return profile;
 		case Profile::Original:
 		case Profile::Auto:
+		case Profile::VoiceFocus:
 			return Profile::Balanced;
 	}
 	return Profile::Balanced;
@@ -151,7 +152,7 @@ Profile Policy::chooseProfile(const Observation &observation) noexcept {
 								|| observation.noiseFloor == NoiseFloorBucket::VeryHigh;
 	const bool dynamicNoise = observation.stationaryScore < 55;
 	if (difficultNoise && dynamicNoise) {
-		return Profile::Crisp;
+		return Profile::Quality;
 	}
 
 	const bool easyStationaryEnvironment =
@@ -162,10 +163,10 @@ Profile Policy::chooseProfile(const Observation &observation) noexcept {
 }
 
 Profile Policy::availableProfile(Profile desired, const Observation &observation) noexcept {
-	if (desired == Profile::Crisp && observation.crispAvailable) {
-		return Profile::Crisp;
+	if (desired == Profile::Quality && observation.crispAvailable) {
+		return Profile::Quality;
 	}
-	if ((desired == Profile::Crisp || desired == Profile::Balanced) && observation.balancedAvailable) {
+	if ((desired == Profile::Quality || desired == Profile::Balanced) && observation.balancedAvailable) {
 		return Profile::Balanced;
 	}
 	if (observation.lightAvailable) {
@@ -185,7 +186,8 @@ int Policy::profileCost(Profile profile) noexcept {
 			return 1;
 		case Profile::Balanced:
 			return 2;
-		case Profile::Crisp:
+		case Profile::Quality:
+		case Profile::VoiceFocus:
 			return 3;
 		case Profile::Auto:
 			return 2;
@@ -197,7 +199,8 @@ Engine Policy::engineForProfile(Profile profile) noexcept {
 	switch (profile) {
 		case Profile::Light:
 			return Engine::Speex;
-		case Profile::Crisp:
+		case Profile::Quality:
+		case Profile::VoiceFocus:
 			return Engine::DeepFilterNet;
 		case Profile::Balanced:
 		case Profile::Original:
@@ -393,11 +396,12 @@ void SafeProfileSwitchGate::reset(Profile activeProfile) noexcept {
 	switch (activeProfile) {
 		case Profile::Light:
 		case Profile::Balanced:
-		case Profile::Crisp:
+		case Profile::Quality:
 			m_activeProfile = activeProfile;
 			break;
 		case Profile::Original:
 		case Profile::Auto:
+		case Profile::VoiceFocus:
 			m_activeProfile = Profile::Balanced;
 			break;
 	}
@@ -474,7 +478,7 @@ bool PreparedPipelineBank::initialize(Profile initialProfile, PipelineFactory ba
 
 	m_nodes[0].profile = Profile::Balanced;
 	m_nodes[0].factory = std::move(balancedFactory);
-	m_nodes[1].profile = Profile::Crisp;
+	m_nodes[1].profile = Profile::Quality;
 	m_nodes[1].factory = std::move(crispFactory);
 
 	for (Node &node : m_nodes) {
@@ -536,7 +540,7 @@ bool PreparedPipelineBank::switchTo(Profile profile) noexcept {
 	if (profile == previousProfile) {
 		return true;
 	}
-	if (profile != Profile::Light && profile != Profile::Balanced && profile != Profile::Crisp) {
+	if (profile != Profile::Light && profile != Profile::Balanced && profile != Profile::Quality) {
 		return false;
 	}
 

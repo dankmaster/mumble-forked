@@ -1,51 +1,23 @@
 [CmdletBinding()]
 param(
 	[Parameter(Mandatory = $true)]
-	[ValidateSet("preview", "stable")]
-	[string]$SourceChannel,
+	[string]$AggregateExportPath,
 
 	[Parameter(Mandatory = $true)]
-	[string[]]$TestedBuildIds,
+	[string]$AggregateExportSignaturePath,
 
 	[Parameter(Mandatory = $true)]
-	[string]$RecipeSetVersion,
+	[string]$AggregatePublicKeyHex,
 
 	[Parameter(Mandatory = $true)]
-	[DateTimeOffset]$WindowStartUtc,
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedQuerySha256,
 
-	[Parameter(Mandatory = $true)]
-	[DateTimeOffset]$WindowEndUtc,
+	[int]$MaximumAggregateAgeDays = 7,
 
-	[Parameter(Mandatory = $true)]
-	[int]$ObservationDays,
+	[string]$RnnoiseDecisionPath = "",
 
-	[Parameter(Mandatory = $true)]
-	[int]$DistinctUsers,
-
-	[Parameter(Mandatory = $true)]
-	[int]$DistinctDevices,
-
-	[Parameter(Mandatory = $true)]
-	[double]$TalkHours,
-
-	[int]$P0Count = 0,
-	[int]$P1Count = 0,
-	[int]$ModelHashMismatchCount = 0,
-	[int]$RecurrentCallbackRegressionCount = 0,
-	[double]$CrashFreeSessionRate = 1.0,
-	[double]$FallbackSessionRate = 0.0,
-	[double]$CallbackOverrunFrameRate = 0.0,
-	[double]$ManualRollbackOrOptOutRate = 0.0,
-	[int]$BlindAbResponses = 0,
-	[double]$SelectedOverOriginalRate = 0.0,
-
-	[ValidateSet("pending", "completed")]
-	[string]$DomainRnnoiseStatus = "pending",
-
-	[ValidateSet("pending", "embedded-retained", "custom-promoted")]
-	[string]$DomainRnnoiseOutcome = "pending",
-
-	[int]$TelemetryRetentionDays = 30,
+	[string]$RnnoiseDecisionSignaturePath = "",
 
 	[Parameter(Mandatory = $true)]
 	[string]$PrivateKeyBase64,
@@ -57,6 +29,8 @@ param(
 
 	[string]$SignaturePath = "",
 
+	[string]$PythonPath = "python",
+
 	[string]$OpenSslPath = ""
 )
 
@@ -64,44 +38,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot "InputEnhancementReleaseTools.psm1") -Force
 
-if ($TestedBuildIds.Count -lt 1 -or $TestedBuildIds.Count -gt 16 -or
-	@($TestedBuildIds | Where-Object { $_ -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' }).Count -gt 0 -or
-	@($TestedBuildIds | Select-Object -Unique).Count -ne $TestedBuildIds.Count) {
-	throw "TestedBuildIds must contain 1 to 16 unique immutable input-enhancement build IDs."
-}
-if ($RecipeSetVersion -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
-	throw "RecipeSetVersion is invalid."
-}
-if ($WindowStartUtc -ge $WindowEndUtc -or $WindowEndUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5) -or
-	$ObservationDays -lt 1 -or ($WindowEndUtc - $WindowStartUtc).TotalDays -lt $ObservationDays) {
-	throw "The rollout observation window is invalid."
-}
-foreach ($entry in @{
-	DistinctUsers = $DistinctUsers; DistinctDevices = $DistinctDevices; P0Count = $P0Count; P1Count = $P1Count;
-	ModelHashMismatchCount = $ModelHashMismatchCount;
-	RecurrentCallbackRegressionCount = $RecurrentCallbackRegressionCount; BlindAbResponses = $BlindAbResponses
-}.GetEnumerator()) {
-	if ([int64]$entry.Value -lt 0) { throw "$($entry.Key) cannot be negative." }
-}
-foreach ($entry in @{
-	CrashFreeSessionRate = $CrashFreeSessionRate; FallbackSessionRate = $FallbackSessionRate;
-	CallbackOverrunFrameRate = $CallbackOverrunFrameRate;
-	ManualRollbackOrOptOutRate = $ManualRollbackOrOptOutRate; SelectedOverOriginalRate = $SelectedOverOriginalRate
-}.GetEnumerator()) {
-	if ([double]::IsNaN([double]$entry.Value) -or [double]::IsInfinity([double]$entry.Value) -or
-		[double]$entry.Value -lt 0 -or [double]$entry.Value -gt 1) {
-		throw "$($entry.Key) must be between 0 and 1."
-	}
-}
-if ([double]::IsNaN($TalkHours) -or [double]::IsInfinity($TalkHours) -or $TalkHours -lt 0) {
-	throw "TalkHours must be finite and non-negative."
-}
-if ($TelemetryRetentionDays -lt 1 -or $TelemetryRetentionDays -gt 30) {
-	throw "TelemetryRetentionDays must be between 1 and 30."
-}
-if (($DomainRnnoiseStatus -eq 'completed' -and $DomainRnnoiseOutcome -eq 'pending') -or
-	($DomainRnnoiseStatus -eq 'pending' -and $DomainRnnoiseOutcome -ne 'pending')) {
-	throw "Domain RNNoise status and outcome are inconsistent."
+$aggregateKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $AggregatePublicKeyHex
+$releaseKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $ExpectedPublicKeyHex
+if ($aggregateKey -ceq $releaseKey) {
+	throw "Telemetry aggregate exports and rollout envelopes must use separate Ed25519 signer identities."
 }
 if ((Split-Path -Leaf $OutputPath) -cne 'input-enhancement-rollout.json') {
 	throw "OutputPath must end in input-enhancement-rollout.json."
@@ -111,53 +51,65 @@ if ((Split-Path -Leaf $SignaturePath) -cne 'input-enhancement-rollout.json.sig')
 	throw "SignaturePath must end in input-enhancement-rollout.json.sig."
 }
 
-$generatedAt = [DateTimeOffset]::UtcNow
-$evidence = [ordered]@{
-	schemaVersion = 1
-	kind = 'input-enhancement-rollout-qualification'
-	generatedAtUtc = $generatedAt.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-	sourceChannel = $SourceChannel
-	testedBuildIds = @($TestedBuildIds)
-	recipeSetVersion = $RecipeSetVersion
-	window = [ordered]@{
-		startUtc = $WindowStartUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-		endUtc = $WindowEndUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-		observationDays = $ObservationDays
-	}
-	population = [ordered]@{
-		distinctUsers = $DistinctUsers
-		distinctDevices = $DistinctDevices
-		talkHours = $TalkHours
-	}
-	reliability = [ordered]@{
-		p0Count = $P0Count
-		p1Count = $P1Count
-		modelHashMismatchCount = $ModelHashMismatchCount
-		recurrentCallbackRegressionCount = $RecurrentCallbackRegressionCount
-		crashFreeSessionRate = $CrashFreeSessionRate
-		fallbackSessionRate = $FallbackSessionRate
-		callbackOverrunFrameRate = $CallbackOverrunFrameRate
-		manualRollbackOrOptOutRate = $ManualRollbackOrOptOutRate
-	}
-	preference = [ordered]@{
-		blindAbResponses = $BlindAbResponses
-		selectedOverOriginalRate = $SelectedOverOriginalRate
-	}
-	domainRnnoiseTrack = [ordered]@{
-		status = $DomainRnnoiseStatus
-		outcome = $DomainRnnoiseOutcome
-	}
-	privacy = [ordered]@{
-		optInOnly = $true
-		rawAudioIncluded = $false
-		transcriptsIncluded = $false
-		voiceprintsIncluded = $false
-		rawDeviceIdsIncluded = $false
-		retentionDays = $TelemetryRetentionDays
+# This verifier checks the exporter signature, the pinned query hash and the
+# canonical window/filter hash before any rollout fields are copied. There is
+# deliberately no CLI path for supplying population or reliability totals.
+& (Join-Path $PSScriptRoot 'assert-input-enhancement-aggregate-export.ps1') `
+	-AggregateExportPath $AggregateExportPath `
+	-AggregateExportSignaturePath $AggregateExportSignaturePath `
+	-AggregatePublicKeyHex $AggregatePublicKeyHex `
+	-ExpectedQuerySha256 $ExpectedQuerySha256 `
+	-MaximumEvidenceAgeDays $MaximumAggregateAgeDays `
+	-PythonPath $PythonPath `
+	-OpenSslPath $OpenSslPath
+
+$aggregate = Read-ReleaseJson -Path $AggregateExportPath
+$aggregateFile = Get-Item -LiteralPath $AggregateExportPath -ErrorAction Stop
+$aggregateSignatureFile = Get-Item -LiteralPath $AggregateExportSignaturePath -ErrorAction Stop
+$query = Assert-ObjectProperty $aggregate 'query' 'Telemetry aggregate export'
+
+$hasDecision = -not [string]::IsNullOrWhiteSpace($RnnoiseDecisionPath)
+$hasDecisionSignature = -not [string]::IsNullOrWhiteSpace($RnnoiseDecisionSignaturePath)
+if ($hasDecision -xor $hasDecisionSignature) {
+	throw "RNNoise completion requires both the signed selection decision and its detached signature."
+}
+$domainTrack = [ordered]@{ status = 'pending' }
+if ($hasDecision) {
+	$decisionEvidence = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rnnoise-selection-decision.ps1') `
+		-DecisionPath $RnnoiseDecisionPath `
+		-DecisionSignaturePath $RnnoiseDecisionSignaturePath `
+		-PublicKeyHex $releaseKey `
+		-PythonPath $PythonPath `
+		-OpenSslPath $OpenSslPath
+	$domainTrack = [ordered]@{
+		status = 'completed'
+		outcome = [string]$decisionEvidence.rolloutOutcome
+		decision = [ordered]@{
+			fileName = [string]$decisionEvidence.fileName
+			sha256 = [string]$decisionEvidence.sha256
+			signatureFileName = [string]$decisionEvidence.signatureFileName
+			signatureSha256 = [string]$decisionEvidence.signatureSha256
+		}
 	}
 }
 
+$evidence = [ordered]@{
+	schemaVersion = 2
+	kind = 'input-enhancement-rollout-qualification'
+	generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+	sourceAggregate = [ordered]@{
+		fileName = $aggregateFile.Name
+		sha256 = Get-ReleaseFileSha256 -Path $aggregateFile.FullName
+		signatureFileName = $aggregateSignatureFile.Name
+		signatureSha256 = Get-ReleaseFileSha256 -Path $aggregateSignatureFile.FullName
+		querySha256 = [string]$query.sha256
+		windowSha256 = [string]$query.windowSha256
+	}
+	domainRnnoiseTrack = $domainTrack
+}
+
 Write-ReleaseJson -Value $evidence -Path $OutputPath
+Assert-StrictInputEnhancementRolloutJson -Path $OutputPath -Kind rollout -PythonPath $PythonPath
 Protect-FileWithEd25519 -InputPath $OutputPath -SignaturePath $SignaturePath `
 	-PrivateKeyBase64 $PrivateKeyBase64 -ExpectedPublicKeyHex $ExpectedPublicKeyHex -OpenSslPath $OpenSslPath
-Write-Host "Created signed rollout qualification '$OutputPath' for $($TestedBuildIds.Count) immutable build(s)."
+Write-Host "Created signed rollout qualification '$OutputPath' from hash-bound aggregate export '$($aggregateFile.Name)'."

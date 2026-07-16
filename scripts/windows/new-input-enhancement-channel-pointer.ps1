@@ -20,6 +20,8 @@ param(
 
 	[string]$PreviousPointerSignaturePath = "",
 
+	[string]$BootstrapRecoverySetPath = "",
+
 	[Parameter(Mandatory = $true)]
 	[string]$PrivateKeyBase64,
 
@@ -73,6 +75,7 @@ if ((Assert-ObjectProperty -Object $artifact -Name "signed" -Context "Qualified 
 
 $knownGood = New-Object System.Collections.Generic.List[string]
 $knownGood.Add($immutableTag)
+$recoveryInstallers = New-Object System.Collections.Generic.List[object]
 $publicKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $ExpectedPublicKeyHex
 if (-not (Test-Ed25519DetachedSignature -InputPath $PolicyPath -SignaturePath $PolicySignaturePath `
 	-PublicKeyHex $publicKey -OpenSslPath $OpenSslPath)) {
@@ -88,7 +91,10 @@ $null = Assert-CanonicalInputEnhancementPolicy -Path $policyFile.FullName `
 	-ExpectedMinBuild ([uint64]$qualification.buildNumber) `
 	-ExpectedRecipeSetVersion ([string]$qualification.recipeManifest.catalogRevision) `
 	-RequireCurrentlyValid
-if (-not [string]::IsNullOrWhiteSpace($PreviousPointerPath) -and (Test-Path -LiteralPath $PreviousPointerPath -PathType Leaf)) {
+if (-not [string]::IsNullOrWhiteSpace($PreviousPointerPath)) {
+	if (-not (Test-Path -LiteralPath $PreviousPointerPath -PathType Leaf)) {
+		throw "Previous channel pointer path does not exist."
+	}
 	if ([string]::IsNullOrWhiteSpace($PreviousPointerSignaturePath) -or
 		-not (Test-Ed25519DetachedSignature -InputPath $PreviousPointerPath `
 			-SignaturePath $PreviousPointerSignaturePath -PublicKeyHex $publicKey -OpenSslPath $OpenSslPath)) {
@@ -98,22 +104,90 @@ if (-not [string]::IsNullOrWhiteSpace($PreviousPointerPath) -and (Test-Path -Lit
 	if ([string](Assert-ObjectProperty -Object $previous -Name "channel" -Context "Previous channel pointer") -cne $Channel) {
 		throw "Previous pointer belongs to a different channel."
 	}
-	$previousImmutableTag = [string](Assert-ObjectProperty -Object $previous -Name "immutableTag" -Context "Previous channel pointer")
-	$previousKnownGoodTags = @(Assert-ObjectProperty -Object $previous -Name "knownGoodTags" -Context "Previous channel pointer")
-	if ($previousKnownGoodTags.Count -lt 1 -or $previousKnownGoodTags.Count -gt 2 -or
-		[string]$previousKnownGoodTags[0] -cne $previousImmutableTag -or
-		@($previousKnownGoodTags | Select-Object -Unique).Count -ne $previousKnownGoodTags.Count) {
-		throw "Previous pointer must lead with its current immutable build and contain at most two unique recovery tags."
-	}
-	foreach ($tag in $previousKnownGoodTags) {
-		$tagString = [string]$tag
-		if ($tagString -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$') {
-			throw "Previous pointer contains invalid immutable tag '$tagString'."
+	$previousSchema = [int](Assert-ObjectProperty -Object $previous -Name "schemaVersion" -Context "Previous channel pointer")
+	if ($previousSchema -eq 2) {
+		$previousImmutableTag = [string](Assert-ObjectProperty -Object $previous -Name "immutableTag" -Context "Previous channel pointer")
+		$previousInstaller = Assert-ObjectProperty -Object $previous -Name "installer" -Context "Previous channel pointer"
+		$previousRecovery = @(Assert-ObjectProperty -Object $previous -Name "recoveryInstallers" -Context "Previous channel pointer")
+		$candidates = @(
+			[pscustomobject]@{
+				immutableTag = $previousImmutableTag
+				fileName = [string](Assert-ObjectProperty $previousInstaller 'fileName' 'Previous candidate MSI')
+				sha256 = [string](Assert-ObjectProperty $previousInstaller 'sha256' 'Previous candidate MSI')
+				size = [int64](Assert-ObjectProperty $previousInstaller 'size' 'Previous candidate MSI')
+				url = [string](Assert-ObjectProperty $previousInstaller 'url' 'Previous candidate MSI')
+			}
+		) + $previousRecovery
+		foreach ($candidate in $candidates) {
+			$tagString = [string](Assert-ObjectProperty $candidate 'immutableTag' 'Previous recovery MSI')
+			$fileName = [string](Assert-ObjectProperty $candidate 'fileName' 'Previous recovery MSI')
+			$hash = [string](Assert-ObjectProperty $candidate 'sha256' 'Previous recovery MSI')
+			$size = [int64](Assert-ObjectProperty $candidate 'size' 'Previous recovery MSI')
+			$url = [string](Assert-ObjectProperty $candidate 'url' 'Previous recovery MSI')
+			if ($tagString -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' -or
+				$fileName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+				$hash -notmatch '^[0-9a-f]{64}$' -or $size -le 0 -or
+				$url -cne "https://github.com/$Repository/releases/download/$tagString/$fileName") {
+				throw "Previous pointer contains invalid recovery MSI metadata."
+			}
+			if (-not $knownGood.Contains($tagString) -and $recoveryInstallers.Count -lt 2) {
+				$knownGood.Add($tagString)
+				$recoveryInstallers.Add([ordered]@{
+					immutableTag = $tagString
+					fileName = $fileName
+					sha256 = $hash
+					size = $size
+					url = $url
+				})
+			}
 		}
-		if (-not $knownGood.Contains($tagString) -and $knownGood.Count -lt 2) {
-			$knownGood.Add($tagString)
-		}
+	} elseif ($previousSchema -ne 1) {
+		throw "Previous channel pointer has an unsupported schema."
 	}
+}
+
+if (-not [string]::IsNullOrWhiteSpace($BootstrapRecoverySetPath)) {
+	if ($recoveryInstallers.Count -ne 0) {
+		throw "Bootstrap recovery metadata cannot be combined with a previous v2 recovery set."
+	}
+	$bootstrap = Read-ReleaseJson -Path $BootstrapRecoverySetPath
+	$bootstrapProperties = @($bootstrap.PSObject.Properties.Name | Sort-Object)
+	if (@(Compare-Object -ReferenceObject @('recoveryInstallers', 'schemaVersion') `
+		-DifferenceObject $bootstrapProperties).Count -ne 0 -or [int]$bootstrap.schemaVersion -ne 1) {
+		throw "Bootstrap recovery set has an invalid root schema."
+	}
+	$bootstrapEntries = @($bootstrap.recoveryInstallers)
+	if ($bootstrapEntries.Count -ne 2) {
+		throw "Bootstrap recovery set must contain exactly two MSI records."
+	}
+	foreach ($candidate in $bootstrapEntries) {
+		$properties = @($candidate.PSObject.Properties.Name | Sort-Object)
+		if (@(Compare-Object -ReferenceObject @('fileName', 'immutableTag', 'sha256', 'size') `
+			-DifferenceObject $properties).Count -ne 0) {
+			throw "Bootstrap recovery MSI has an invalid schema."
+		}
+		$tagString = [string]$candidate.immutableTag
+		$fileName = [string]$candidate.fileName
+		$hash = [string]$candidate.sha256
+		$size = [int64]$candidate.size
+		if ($tagString -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' -or
+			$fileName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+			$hash -notmatch '^[0-9a-f]{64}$' -or $size -le 0 -or $knownGood.Contains($tagString)) {
+			throw "Bootstrap recovery MSI metadata is invalid or duplicated."
+		}
+		$knownGood.Add($tagString)
+		$recoveryInstallers.Add([ordered]@{
+			immutableTag = $tagString
+			fileName = $fileName
+			sha256 = $hash
+			size = $size
+			url = "https://github.com/$Repository/releases/download/$tagString/$fileName"
+		})
+	}
+}
+
+if ($recoveryInstallers.Count -ne 2) {
+	throw "Channel pointer v2 requires exactly two distinct previous recovery MSI files."
 }
 
 $artifactName = [string](Assert-ObjectProperty -Object $updatePackage -Name "fileName" -Context "Qualified update package")
@@ -121,8 +195,19 @@ if ($artifactName -notmatch '^[A-Za-z0-9._-]+\.mumble-update$' -or
 	[string](Assert-ObjectProperty -Object $updatePackage -Name "format" -Context "Qualified update package") -cne "mumble-update-v1") {
 	throw "Channel pointer requires a qualified mumble-update-v1 package."
 }
+$qualifiedInstaller = Assert-ObjectProperty -Object $qualification -Name "installer" -Context "Qualification"
+$installerName = [string](Assert-ObjectProperty $qualifiedInstaller 'fileName' 'Qualified installer')
+$installerHash = [string](Assert-ObjectProperty $qualifiedInstaller 'sha256' 'Qualified installer')
+$installerSize = [int64](Assert-ObjectProperty $qualifiedInstaller 'size' 'Qualified installer')
+$candidateExecutableHash = [string](Assert-ObjectProperty $qualifiedInstaller 'executableSha256' 'Qualified installer')
+if ($installerName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+	$installerHash -notmatch '^[0-9a-f]{64}$' -or $candidateExecutableHash -notmatch '^[0-9a-f]{64}$' -or
+	$installerSize -le 0 -or
+	(Assert-ObjectProperty $qualifiedInstaller 'signed' 'Qualified installer') -ne $true) {
+	throw "Channel pointer requires an exact signed candidate MSI in qualification evidence."
+}
 $pointer = [ordered]@{
-	schemaVersion       = 1
+	schemaVersion       = 2
 	channel             = $Channel
 	channelTag          = "mumble-forked-$Channel"
 	immutableTag        = $immutableTag
@@ -135,6 +220,14 @@ $pointer = [ordered]@{
 		size     = [int64]$updatePackage.size
 		url      = "https://github.com/$Repository/releases/download/$immutableTag/$artifactName"
 	}
+	installer           = [ordered]@{
+		fileName = $installerName
+		sha256   = $installerHash
+		size     = $installerSize
+		executableSha256 = $candidateExecutableHash
+		url      = "https://github.com/$Repository/releases/download/$immutableTag/$installerName"
+	}
+	recoveryInstallers  = $recoveryInstallers.ToArray()
 	qualification       = [ordered]@{
 		sha256 = Get-ReleaseFileSha256 -Path $QualificationPath
 		url    = "https://github.com/$Repository/releases/download/$immutableTag/qualification.json"

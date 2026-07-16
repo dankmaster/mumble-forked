@@ -56,15 +56,19 @@ Import-Module (Join-Path $PSScriptRoot "InputEnhancementReleaseTools.psm1") -For
 
 $suiteId = "input-enhancement-release-smoke-v1"
 $requiredScenes = @("stationary-hvac", "transient-keyboard", "competing-speech")
-$requiredProfiles = @("Balanced", "Crisp")
+$requiredProfiles = @("Light", "Balanced", "Quality", "VoiceFocus")
 $requiredStartups = @("cold", "warm")
 $requiredModelIds = @{
+	Light = ""
 	Balanced = "rnnoise:embedded"
-	Crisp = "deepfilternet:balanced"
+	Quality = "deepfilternet:balanced"
+	VoiceFocus = "deepfilternet:balanced"
 }
 $requiredRecipeIds = @{
+	Light = "input.light.speex"
 	Balanced = "input.balanced.rnnoise-embedded"
-	Crisp = "input.crisp.deepfilternet-balanced"
+	Quality = "input.quality.deepfilternet-balanced"
+	VoiceFocus = "input.voice-focus.deepfilternet-balanced"
 }
 
 function Assert-ExactProperties {
@@ -293,7 +297,7 @@ foreach ($model in $manifestModels) {
 	}
 	$modelsById[$modelId] = $model
 }
-foreach ($requiredModelId in $requiredModelIds.Values) {
+foreach ($requiredModelId in @($requiredModelIds.Values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)) {
 	if (-not $modelsById.ContainsKey($requiredModelId)) {
 		throw "Qualified model manifest is missing release-smoke model '$requiredModelId'."
 	}
@@ -399,8 +403,8 @@ foreach ($entry in @($caseSet.cases)) {
 	if ($caseSetCasesById.ContainsKey($id)) { throw "Duplicate case-set enhanced ID '$id'." }
 	$caseSetCasesById[$id] = $entry
 }
-if ($caseSetControlsById.Count -ne 6 -or $caseSetCasesById.Count -ne 12) {
-	throw "Release-smoke case set must contain exactly six Original controls and twelve enhanced cases."
+if ($caseSetControlsById.Count -ne 6 -or $caseSetCasesById.Count -ne 24) {
+	throw "Release-smoke case set must contain exactly six Original controls and 24 enhanced cases."
 }
 $provenance = Assert-ObjectProperty -Object $smoke -Name "provenance" -Context "Release smoke"
 Assert-ExactProperties -Object $provenance -Context "Release-smoke provenance" -Names @(
@@ -518,8 +522,8 @@ if ($controlsById.Count -ne $expectedControlIds.Count) {
 }
 
 $cases = @(Assert-ObjectProperty -Object $smoke -Name "cases" -Context "Release smoke")
-if ($cases.Count -ne 12) {
-	throw "Release smoke must contain exactly 12 cases, got $($cases.Count)."
+if ($cases.Count -ne 24) {
+	throw "Release smoke must contain exactly 24 enhanced cases, got $($cases.Count)."
 }
 
 $expectedIds = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::Ordinal)
@@ -640,13 +644,13 @@ foreach ($case in $cases) {
 	if ($receivedClippedSamples -gt $referenceClippedSamples) {
 		throw "Release-smoke case '$id' introduced new clipped samples."
 	}
-	$callbackBudgetMs = if ($profile -ceq 'Balanced') { 5.0 } else { 8.0 }
+	$callbackBudgetMs = if ($profile -cin @('Light', 'Balanced')) { 5.0 } else { 8.0 }
 	$null = Assert-FiniteNumberAtMost -Value $case.callbackP99Ms -Maximum $callbackBudgetMs `
 		-Context "Release-smoke case '$id' callbackP99Ms"
 	$null = Assert-NonnegativeIntegerAtMost -Value $case.workerPendingFrames -Maximum 0 `
 		-Context "Release-smoke case '$id' workerPendingFrames"
-	$workerP99BudgetMs = if ($profile -ceq 'Crisp') { 8.0 } else { [double]::MaxValue }
-	$workerRtfBudget = if ($profile -ceq 'Crisp') { 0.35 } else { [double]::MaxValue }
+	$workerP99BudgetMs = if ($profile -cin @('Quality', 'VoiceFocus')) { 8.0 } else { [double]::MaxValue }
+	$workerRtfBudget = if ($profile -cin @('Quality', 'VoiceFocus')) { 0.35 } else { [double]::MaxValue }
 	$null = Assert-FiniteNumberAtMost -Value $case.workerP99Ms -Maximum $workerP99BudgetMs `
 		-Context "Release-smoke case '$id' workerP99Ms"
 	$null = Assert-FiniteNumberAtMost -Value $case.workerRtf -Maximum $workerRtfBudget `
@@ -663,7 +667,9 @@ foreach ($case in $cases) {
 	}
 	$expectedModelHash = Assert-Sha256Value -Value ([string]$case.expectedModelSha256) -Context "Case '$id' expected model hash"
 	$activeModelHash = Assert-Sha256Value -Value ([string]$case.activeModelSha256) -Context "Case '$id' active model hash"
-	$manifestModelHash = Assert-Sha256Value -Value ([string]$modelsById[$requiredModelId].sha256) -Context "Manifest model '$requiredModelId' hash"
+	$manifestModelHash = if ([string]::IsNullOrWhiteSpace($requiredModelId)) { '0' * 64 } else {
+		Assert-Sha256Value -Value ([string]$modelsById[$requiredModelId].sha256) -Context "Manifest model '$requiredModelId' hash"
+	}
 	if ($activeModelHash -cne $expectedModelHash -or $expectedModelHash -cne $manifestModelHash) {
 		throw "Release-smoke case '$id' activated an unexpected model hash."
 	}
@@ -677,23 +683,25 @@ foreach ($case in $cases) {
 	foreach ($counter in @("fallbackCount", "modelHashMismatchCount", "invalidOutputCount", "tailErrorCount", "latencyErrorCount")) {
 		Assert-ZeroCounter -Object $case -Name $counter -Context "Release-smoke case '$id'"
 	}
-	if ([int64]$case.tailDrainExpectedFrames -le 0 -or
+	$expectedTailMinimum = if ($profile -ceq 'Light') { 0 } else { 1 }
+	if ([int64]$case.tailDrainExpectedFrames -lt $expectedTailMinimum -or
 		[int64]$case.tailDrainActualFrames -ne [int64]$case.tailDrainExpectedFrames) {
 		throw "Release-smoke case '$id' did not drain the exact expected enhancement tail."
 	}
 	$latencyMs = [double]$case.enhancementLatencyMs
-	$latencyBudgetMs = if ($profile -ceq "Balanced") { 30.0 } else { 50.0 }
-	if ([double]::IsNaN($latencyMs) -or [double]::IsInfinity($latencyMs) -or $latencyMs -le 0.0 -or $latencyMs -gt $latencyBudgetMs) {
+	$latencyBudgetMs = if ($profile -ceq 'Light') { 10.0 } elseif ($profile -ceq "Balanced") { 30.0 } else { 50.0 }
+	$latencyMinimumMs = if ($profile -ceq 'Light') { 0.0 } else { [double]::Epsilon }
+	if ([double]::IsNaN($latencyMs) -or [double]::IsInfinity($latencyMs) -or $latencyMs -lt $latencyMinimumMs -or $latencyMs -gt $latencyBudgetMs) {
 		throw "Release-smoke case '$id' enhancement latency '$latencyMs' ms exceeds the $latencyBudgetMs ms profile budget."
 	}
 }
 
 if ($seenIds.Count -ne $expectedIds.Count) {
-	throw "Release smoke does not contain the complete fixed 12-case matrix."
+	throw "Release smoke does not contain the complete fixed 24-case matrix."
 }
 if ($startupBaselinePairs.Count -ne 6 -or
-	@($startupBaselinePairs.Values | Where-Object { [int]$_.caseCount -ne 2 }).Count -ne 0) {
-	throw "Release smoke must contain exactly one shared paired Original baseline for Balanced and Crisp in each scene/startup pair."
+	@($startupBaselinePairs.Values | Where-Object { [int]$_.caseCount -ne 4 }).Count -ne 0) {
+	throw "Release smoke must contain one shared paired Original baseline for all four core profiles in each scene/startup pair."
 }
 
-Write-Host "Release smoke verified: 12 fixed packaged localhost cases for '$ExpectedBuildId'."
+Write-Host "Release smoke verified: 6 Original controls plus 24 enhanced packaged localhost cases for '$ExpectedBuildId'."

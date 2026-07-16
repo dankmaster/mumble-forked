@@ -10,6 +10,8 @@
 #include <QtTest>
 
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace {
 
@@ -25,6 +27,7 @@ Mumble::UpdateHealth::PendingUpdate pendingFor(const std::filesystem::path &root
 	pending.state                  = Mumble::UpdateHealth::TransactionState::AwaitingHealth;
 	pending.packageIdentity         = "0123456789abcdef";
 	pending.previousPackageIdentity = "previous";
+	pending.expectedExecutableSha256 = std::string(64, 'c');
 	pending.appPath                 = root / "Application" / "mumble.exe";
 	pending.backupRoot              = root / "known-good" / "snapshot";
 	pending.rollbackFiles.push_back(Mumble::UpdateHealth::RollbackFile{ "mumble.exe", true, 42, std::string(64, 'a') });
@@ -38,6 +41,10 @@ class TestUpdateHealth : public QObject {
 
 private slots:
 	void pendingStateRoundTrips();
+	void legacySchemaIsRejected();
+	void windowsInstallerRecoveryRoundTrips();
+	void windowsInstallerRecoveryMustStayInsideSnapshot();
+	void unsupportedUpdaterProtocolIsRejected();
 	void markerRequiresEveryStartupGate();
 	void terminalJournalPrecedesMarkerCleanup();
 	void invalidRollbackPathIsRejected();
@@ -59,9 +66,108 @@ void TestUpdateHealth::pendingStateRoundTrips() {
 	QVERIFY2(restored.has_value(), error.c_str());
 	QCOMPARE(QString::fromStdString(restored->packageIdentity), QStringLiteral("0123456789abcdef"));
 	QCOMPARE(QString::fromStdString(restored->transactionId), QStringLiteral("00112233445566778899aabbccddeeff"));
+	QCOMPARE(QString::fromStdString(restored->expectedExecutableSha256), QString(64, QLatin1Char('c')));
 	QCOMPARE(restored->state, Mumble::UpdateHealth::TransactionState::AwaitingHealth);
+	QCOMPARE(restored->updaterProtocolVersion, Mumble::UpdateHealth::UpdaterProtocolVersion);
 	QCOMPARE(restored->rollbackFiles.size(), std::size_t(1));
 	QCOMPARE(restored->minimumStableRuntimeMilliseconds, Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds);
+}
+
+void TestUpdateHealth::legacySchemaIsRejected() {
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const auto root    = filesystemPath(temporary.path());
+	const auto pending = pendingFor(root);
+
+	std::string error;
+	QVERIFY2(Mumble::UpdateHealth::writePendingState(root, pending, &error), error.c_str());
+	const auto statePath = Mumble::UpdateHealth::pendingStatePath(root, pending.appPath);
+	std::ifstream input(statePath, std::ios::binary);
+	std::ostringstream buffer;
+	buffer << input.rdbuf();
+	std::string contents = buffer.str();
+	const std::string currentSchema = "\"schema\": 3";
+	const auto schemaPosition       = contents.find(currentSchema);
+	QVERIFY(schemaPosition != std::string::npos);
+	contents.replace(schemaPosition, currentSchema.size(), "\"schema\": 2");
+	std::ofstream output(statePath, std::ios::binary | std::ios::trunc);
+	output << contents;
+	output.close();
+
+	error.clear();
+	QVERIFY(!Mumble::UpdateHealth::readPendingState(root, pending.appPath, &error).has_value());
+	QVERIFY(QString::fromStdString(error).contains(QStringLiteral("Unsupported update-health")));
+}
+
+void TestUpdateHealth::windowsInstallerRecoveryRoundTrips() {
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const auto root = filesystemPath(temporary.path());
+	auto pending    = pendingFor(root);
+	pending.mode    = Mumble::UpdateHealth::TransactionMode::WindowsInstaller;
+	pending.recoveryInstallerPath   = pending.backupRoot / "known-good-recovery.msi";
+	pending.recoveryInstallerSize   = 1234;
+	pending.recoveryInstallerSha256 = std::string(64, 'b');
+	pending.bootSessionIdentity     = "00112233445566778899aabbccddeeff";
+	pending.restartRequired         = true;
+
+	std::string error;
+	QVERIFY2(Mumble::UpdateHealth::writePendingState(root, pending, &error), error.c_str());
+	const auto restored = Mumble::UpdateHealth::readPendingState(root, pending.appPath, &error);
+	QVERIFY2(restored.has_value(), error.c_str());
+	QCOMPARE(restored->mode, Mumble::UpdateHealth::TransactionMode::WindowsInstaller);
+	QVERIFY(restored->recoveryInstallerPath == pending.recoveryInstallerPath);
+	QCOMPARE(restored->recoveryInstallerSize, std::uint64_t{ 1234 });
+	QCOMPARE(QString::fromStdString(restored->recoveryInstallerSha256), QString(64, QLatin1Char('b')));
+	QCOMPARE(QString::fromStdString(restored->bootSessionIdentity),
+			 QStringLiteral("00112233445566778899aabbccddeeff"));
+	QVERIFY(restored->restartRequired);
+	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true,
+												   pending.expectedExecutableSha256, &error));
+	QVERIFY(!Mumble::UpdateHealth::markerConfirmsHealthy(root, *restored, &error));
+	pending.bootSessionIdentity.clear();
+	QVERIFY(!Mumble::UpdateHealth::writePendingState(root, pending, &error));
+}
+
+void TestUpdateHealth::windowsInstallerRecoveryMustStayInsideSnapshot() {
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const auto root = filesystemPath(temporary.path());
+	auto pending    = pendingFor(root);
+	pending.mode    = Mumble::UpdateHealth::TransactionMode::WindowsInstaller;
+	pending.recoveryInstallerPath   = root / "outside" / "known-good-recovery.msi";
+	pending.recoveryInstallerSize   = 1234;
+	pending.recoveryInstallerSha256 = std::string(64, 'b');
+
+	std::string error;
+	QVERIFY(!Mumble::UpdateHealth::writePendingState(root, pending, &error));
+	QVERIFY(QString::fromStdString(error).contains(QStringLiteral("Windows Installer recovery")));
+}
+
+void TestUpdateHealth::unsupportedUpdaterProtocolIsRejected() {
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const auto root    = filesystemPath(temporary.path());
+	const auto pending = pendingFor(root);
+
+	std::string error;
+	QVERIFY2(Mumble::UpdateHealth::writePendingState(root, pending, &error), error.c_str());
+	const auto statePath = Mumble::UpdateHealth::pendingStatePath(root, pending.appPath);
+	std::ifstream input(statePath, std::ios::binary);
+	std::ostringstream buffer;
+	buffer << input.rdbuf();
+	std::string contents = buffer.str();
+	const std::string currentProtocol = "\"updaterProtocolVersion\": 4";
+	const auto protocolPosition       = contents.find(currentProtocol);
+	QVERIFY(protocolPosition != std::string::npos);
+	contents.replace(protocolPosition, currentProtocol.size(), "\"updaterProtocolVersion\": 3");
+	std::ofstream output(statePath, std::ios::binary | std::ios::trunc);
+	output << contents;
+	output.close();
+
+	error.clear();
+	QVERIFY(!Mumble::UpdateHealth::readPendingState(root, pending.appPath, &error).has_value());
+	QVERIFY(QString::fromStdString(error).contains(QStringLiteral("Unsupported update-health")));
 }
 
 void TestUpdateHealth::markerRequiresEveryStartupGate() {
@@ -72,10 +178,17 @@ void TestUpdateHealth::markerRequiresEveryStartupGate() {
 
 	std::string error;
 	QVERIFY2(Mumble::UpdateHealth::writePendingState(root, pending, &error), error.c_str());
-	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 9'999, true, true, &error));
-	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, false, true, &error));
-	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, false, &error));
-	QVERIFY2(Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true, &error), error.c_str());
+	const std::string executableSha256 = pending.expectedExecutableSha256;
+	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 9'999, true, true,
+												   executableSha256, &error));
+	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, false, true,
+												   executableSha256, &error));
+	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, false,
+												   executableSha256, &error));
+	QVERIFY(!Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true,
+												   std::string(64, 'd'), &error));
+	QVERIFY2(Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true,
+													executableSha256, &error), error.c_str());
 	QVERIFY2(Mumble::UpdateHealth::markerConfirmsHealthy(root, pending, &error), error.c_str());
 	auto newAttempt          = pending;
 	newAttempt.transactionId = "ffeeddccbbaa99887766554433221100";
@@ -91,7 +204,8 @@ void TestUpdateHealth::terminalJournalPrecedesMarkerCleanup() {
 
 	std::string error;
 	QVERIFY2(Mumble::UpdateHealth::writePendingState(root, pending, &error), error.c_str());
-	QVERIFY2(Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true, &error),
+	QVERIFY2(Mumble::UpdateHealth::writeHealthMarker(root, pending.appPath, 10'000, true, true,
+													pending.expectedExecutableSha256, &error),
 			 error.c_str());
 	const auto marker = Mumble::UpdateHealth::healthMarkerPath(root, pending);
 	QVERIFY(std::filesystem::exists(marker));

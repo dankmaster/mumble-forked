@@ -74,8 +74,10 @@
 	PROCESS(Mumble::InputEnhancement::Profile, Original, "Original")           \
 	PROCESS(Mumble::InputEnhancement::Profile, Light, "Light")                 \
 	PROCESS(Mumble::InputEnhancement::Profile, Balanced, "Balanced")           \
-	PROCESS(Mumble::InputEnhancement::Profile, Crisp, "Crisp")                 \
-	PROCESS(Mumble::InputEnhancement::Profile, Auto, "Auto")
+	PROCESS(Mumble::InputEnhancement::Profile, Quality, "Quality")             \
+	PROCESS_ALIAS(Mumble::InputEnhancement::Profile, Quality, "Crisp")         \
+	PROCESS(Mumble::InputEnhancement::Profile, Auto, "Auto")                   \
+	PROCESS(Mumble::InputEnhancement::Profile, VoiceFocus, "VoiceFocus")
 
 #define ECHO_CANCEL_VALUES                                                \
 	PROCESS(EchoCancelOptionID, DISABLED, "Disabled")                     \
@@ -251,12 +253,14 @@
 #define PROCESS(enumType, enumValue, stringValue) \
 	case enumType::enumValue:                     \
 		return stringValue;
+#define PROCESS_ALIAS(enumType, enumValue, stringValue)
 
 PROCESS_ALL_ENUMS
 
 #undef BEFORE_CODE
 #undef AFTER_CODE
 #undef PROCESS
+#undef PROCESS_ALIAS
 
 #define BEFORE_CODE(enumType) void stringToEnum(const std::string &str, enumType &e) {
 #define AFTER_CODE                                           \
@@ -266,6 +270,7 @@ PROCESS_ALL_ENUMS
 	if (str == stringValue) {                     \
 		e = enumType::enumValue;                  \
 	} else
+#define PROCESS_ALIAS(enumType, enumValue, stringValue) PROCESS(enumType, enumValue, stringValue)
 
 namespace details {
 
@@ -274,6 +279,7 @@ PROCESS_ALL_ENUMS
 }
 
 #undef PROCESS
+#undef PROCESS_ALIAS
 #undef AFTER_CODE
 #undef BEFORE_CODE
 #undef PROCESS_ALL_ENUMS

@@ -60,6 +60,10 @@ public:
 	static constexpr qsizetype signatureBytes        = 64;
 	static constexpr int maximumRedirects            = 3;
 	static constexpr int transferTimeoutMilliseconds = 10'000;
+	static constexpr int refreshBaseIntervalMilliseconds    = 15 * 60 * 1000;
+	static constexpr int refreshMaximumJitterMilliseconds   = 2 * 60 * 1000;
+	static constexpr int refreshMaximumIntervalMilliseconds =
+		refreshBaseIntervalMilliseconds + refreshMaximumJitterMilliseconds;
 
 	explicit InputEnhancementPolicyController(Configuration configuration,
 											  QNetworkAccessManager *networkManager = nullptr,
@@ -83,6 +87,10 @@ public:
 	bool available() const noexcept;
 	Profile recommendedProfile() const noexcept;
 	bool managedBySignedPolicy() const noexcept;
+	/// True when the effective signed-policy state, rather than the explicit
+	/// recovery switch, owns a safe Original-only audio session. Policy startup
+	/// readiness remains a separate update-health gate.
+	bool policyForcedOriginalCanQualifyAudioHealth(bool recoveryDisabled) const noexcept;
 	/// True after startup has produced an explicit policy decision: verified
 	/// cache, completed initial download attempt, or fail-closed offline state.
 	bool readyForHealthMarker() const noexcept;
@@ -95,6 +103,9 @@ public:
 	static QUrl signatureUrlForManifest(const QUrl &manifestUrl);
 	static bool isAllowedHttpsUrl(const QUrl &url) noexcept;
 	static QNetworkRequest networkRequest(const QUrl &url, qsizetype maximumBytes);
+	/// Maps an entropy sample to the bounded 15-17 minute policy refresh
+	/// interval. The immediate startup fetch is separate from this cadence.
+	static int refreshIntervalMilliseconds(std::uint32_t jitterSample) noexcept;
 
 signals:
 	void effectivePolicyChanged();
@@ -122,6 +133,7 @@ private:
 	void requestAsset(const QUrl &url, qsizetype maximumBytes,
 					  const std::function< void(bool, QByteArray) > &completion);
 	void finishRefresh(bool accepted);
+	void scheduleNextRefresh();
 	void markInitialDecisionReady();
 
 	Configuration m_configuration;

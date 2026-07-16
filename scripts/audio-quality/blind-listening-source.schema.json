@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-blind-listening-source-v3.json",
+  "title": "Mumble input-enhancement blind-listening source manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pairs", "qualification_binding", "schema_version", "session_id"],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "session_id": { "$ref": "#/$defs/id" },
+    "qualification_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_set_sha256",
+        "corpus_inventory_sha256",
+        "corpus_lock_sha256",
+        "git_sha",
+        "hardware_fingerprint_sha256",
+        "harness_sha256",
+        "metrics_runtime_sha256",
+        "mixture_plan_sha256",
+        "model_manifest_sha256",
+        "protected_quality_qualification_sha256",
+        "qualification_suite",
+        "recipe_manifest_sha256",
+        "recipe_set_version",
+        "release_fixtures_sha256",
+        "runner_class",
+        "server_binary_sha256",
+        "staged_payload_sha256",
+        "tested_binary_sha256"
+      ],
+      "properties": {
+        "case_set_sha256": { "$ref": "#/$defs/sha256" },
+        "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+        "corpus_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "hardware_fingerprint_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_sha256": { "$ref": "#/$defs/sha256" },
+        "metrics_runtime_sha256": { "$ref": "#/$defs/sha256" },
+        "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "protected_quality_qualification_sha256": { "$ref": "#/$defs/sha256" },
+        "qualification_suite": { "enum": ["master_quality", "nightly"] },
+        "recipe_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "recipe_set_version": { "$ref": "#/$defs/id" },
+        "release_fixtures_sha256": { "$ref": "#/$defs/sha256" },
+        "runner_class": { "enum": ["low-performance", "mainstream"] },
+        "server_binary_sha256": { "$ref": "#/$defs/sha256" },
+        "staged_payload_sha256": { "$ref": "#/$defs/sha256" },
+        "tested_binary_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "pairs": {
+      "type": "array",
+      "minItems": 26,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cohort", "id", "left", "right"],
+        "properties": {
+          "cohort": { "enum": ["clean", "noisy", "severe"] },
+          "id": { "$ref": "#/$defs/id" },
+          "left": { "$ref": "#/$defs/source" },
+          "right": { "$ref": "#/$defs/source" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "relative_path", "sha256"],
+      "properties": {
+        "label": { "enum": ["Original", "Light", "Balanced", "Quality", "VoiceFocus"] },
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)[^\\\\]+\\.wav$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  },
+  "description": "The runtime validator additionally requires 12 noisy Quality/Original pairs, 12 severe VoiceFocus/Quality pairs, two clean pairs covering Quality and VoiceFocus, sorted unique IDs, different profiles, and balanced concealed A/B orientation. Qualification v3 stores and hashes a canonical copy of this manifest in its evidence tree."
+}

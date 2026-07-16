@@ -47,7 +47,7 @@ struct CalibrationOpusConfiguration final {
 /// calibration worker starts. The evaluator never retains the global verifier
 /// or consults mutable package state while processing captured audio.
 struct CalibrationPackageAuthorization final {
-	enum class Mode : std::uint8_t { DenyNeural, SignedPackage, ExplicitUnmanagedBuildZero };
+	enum class Mode : std::uint8_t { DenyNeural, CatalogBound, ExplicitUnmanagedBuildZero };
 
 	struct AuthorizedRecipe final {
 		QString recipeId;
@@ -72,7 +72,11 @@ struct CalibrationPackageAuthorization final {
 
 	static CalibrationPackageAuthorization signedPackage(std::vector< AuthorizedRecipe > recipes);
 	static CalibrationPackageAuthorization signedPackage(QString catalogRevision,
-														 std::vector< AuthorizedRecipe > recipes);
+												 std::vector< AuthorizedRecipe > recipes);
+	static CalibrationPackageAuthorization catalogBoundPackage(QString catalogRevision,
+													std::vector< AuthorizedRecipe > recipes);
+	/// Manifest-free build-0 fallback. Only Original/Light are authorized; a
+	/// parsed unsigned catalog must instead provide exact recipe/model bindings.
 	static CalibrationPackageAuthorization explicitUnmanagedBuildZero();
 	static AuthorizedRecipe authorizeRecipe(const Recipe &recipe, QString sha256Hex, QString canonicalModelPath = {},
 											QString relativeModelPath = {});
@@ -245,6 +249,13 @@ public:
 	bool start(const DeviceIdentity &identity, const DefaultPreference &candidate,
 			   const DefaultPreference &lastKnownWorking, const RecipeBinding &candidateRecipeBinding,
 			   std::optional< RecipeBinding > lastKnownWorkingRecipeBinding = std::nullopt);
+	/// Starts probation for Auto using the complete canonical recipe-set
+	/// fingerprint. The fingerprint remains intact through healthy, rollback,
+	/// restart, and Undo paths; it is never replaced by the callback token.
+	bool startAuto(const DeviceIdentity &identity, const DefaultPreference &candidate,
+				   const DefaultPreference &lastKnownWorking, const QString &candidateAutoRecipeSetFingerprint,
+				   std::optional< RecipeBinding > lastKnownWorkingRecipeBinding      = std::nullopt,
+				   std::optional< QString > lastKnownWorkingAutoRecipeSetFingerprint = std::nullopt);
 	/// Restores the one-shot Undo affordance from an exact, persisted rollback
 	/// state after Audio::restartInput() has recreated AudioInput.
 	bool restoreUndo(const DeviceProfileState &state);
@@ -258,8 +269,15 @@ public:
 	AutoV1::ProbationFailure failure() const noexcept;
 
 private:
+	bool startWithExecutionBinding(const DeviceIdentity &identity, const DefaultPreference &candidate,
+								   const DefaultPreference &lastKnownWorking,
+								   std::optional< RecipeBinding > candidateRecipeBinding,
+								   std::optional< QString > candidateAutoRecipeSetFingerprint,
+								   std::optional< RecipeBinding > lastKnownWorkingRecipeBinding,
+								   std::optional< QString > lastKnownWorkingAutoRecipeSetFingerprint);
 	static std::uint64_t bindingToken(const DefaultPreference &preference,
-									  const std::optional< RecipeBinding > &binding) noexcept;
+									  const std::optional< RecipeBinding > &binding,
+									  const std::optional< QString > &autoRecipeSetFingerprint) noexcept;
 	static AutoV1::ProbationFailure probationFailure(ProbationHealthSignal health) noexcept;
 	static QString failureText(AutoV1::ProbationFailure failure);
 	bool updateDeviceSettings(Settings &settings, bool rollback);
@@ -271,6 +289,9 @@ private:
 	std::optional< RecipeBinding > m_candidateRecipeBinding;
 	std::optional< RecipeBinding > m_lastKnownWorkingRecipeBinding;
 	std::optional< RecipeBinding > m_undoRecipeBinding;
+	std::optional< QString > m_candidateAutoRecipeSetFingerprint;
+	std::optional< QString > m_lastKnownWorkingAutoRecipeSetFingerprint;
+	std::optional< QString > m_undoAutoRecipeSetFingerprint;
 	AutoV1::Probation m_probation;
 	std::atomic_bool m_running{ false };
 	std::atomic_bool m_undoAvailable{ false };

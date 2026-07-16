@@ -30,8 +30,8 @@ $modelManifest = Read-ReleaseJson -Path $resolvedModelManifest
 $recipeManifest = Read-ReleaseJson -Path $resolvedRecipeManifest
 
 if ([int](Assert-ObjectProperty -Object $modelManifest -Name "schemaVersion" -Context "Model manifest") -ne 1 -or
-	[int](Assert-ObjectProperty -Object $recipeManifest -Name "schemaVersion" -Context "Recipe manifest") -ne 1) {
-	throw "Packaged input-enhancement manifests must use schemaVersion 1."
+	[int](Assert-ObjectProperty -Object $recipeManifest -Name "schemaVersion" -Context "Recipe manifest") -ne 2) {
+	throw "Packaged input-enhancement manifests must use model schemaVersion 1 and recipe schemaVersion 2."
 }
 $catalogRevision = [string](Assert-ObjectProperty -Object $modelManifest -Name "catalogRevision" -Context "Model manifest")
 if ([string]::IsNullOrWhiteSpace($catalogRevision) -or
@@ -109,7 +109,7 @@ if ($unmanifested.Count -gt 0) {
 	throw "Staged model assets are missing from input-models.json: $($unmanifested -join ', ')."
 }
 
-$allowedProfiles = @("Original", "Light", "Balanced", "Crisp", "Auto")
+$allowedProfiles = @("Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto")
 $seenProfiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
 $recipeIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
 $recipes = @(Assert-ObjectProperty -Object $recipeManifest -Name "recipes" -Context "Recipe manifest")

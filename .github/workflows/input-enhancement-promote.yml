@@ -37,7 +37,7 @@ on:
           - Original
           - Light
           - Balanced
-          - Crisp
+          - Quality
           - Auto
       policy_validity_days:
         description: Signed policy validity in days (1-30)
@@ -49,6 +49,14 @@ on:
         required: false
         default: ''
         type: string
+      rollout_audience:
+        description: Private community gate or later public rollout gates
+        required: true
+        default: private-community
+        type: choice
+        options:
+          - private-community
+          - public
 
 permissions:
   contents: read
@@ -69,6 +77,7 @@ jobs:
       EXPECTED_SIGNER_SUBJECT: ${{ vars.AZURE_ARTIFACT_SIGNING_EXPECTED_SUBJECT }}
       IMMUTABLE_TAG: ${{ inputs.immutable_tag }}
       PROMOTION_CHANNEL: ${{ inputs.channel }}
+      ROLLOUT_AUDIENCE: ${{ inputs.rollout_audience }}
       PROMOTION_ANNOUNCEMENT: ${{ inputs.announcement }}
       POLICY_AVAILABLE: ${{ inputs.policy_available }}
       POLICY_FORCE_ORIGINAL: ${{ inputs.force_original }}
@@ -76,6 +85,10 @@ jobs:
       POLICY_VALIDITY_DAYS: ${{ inputs.policy_validity_days }}
       ROLLOUT_EVIDENCE_TAG: ${{ inputs.rollout_evidence_tag }}
       INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX }}
+      INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX }}
+      INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256: ${{ vars.INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256 }}
+      BOOTSTRAP_RECOVERY_SET_URL: ${{ vars.INPUT_ENHANCEMENT_BOOTSTRAP_RECOVERY_SET_URL }}
+      BOOTSTRAP_RECOVERY_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_BOOTSTRAP_RECOVERY_SET_SHA256 }}
     outputs:
       source_sha: ${{ steps.verify.outputs.source_sha }}
 
@@ -119,6 +132,7 @@ jobs:
             -Available ([bool]::Parse($env:POLICY_AVAILABLE)) `
             -ForceOriginal ([bool]::Parse($env:POLICY_FORCE_ORIGINAL)) `
             -RecommendedProfile $env:POLICY_RECOMMENDED_PROFILE `
+            -RolloutAudience $env:ROLLOUT_AUDIENCE `
             -RolloutEvidenceAvailable $rolloutTagValid | Out-Null
 
       - name: Download immutable release assets
@@ -142,16 +156,31 @@ jobs:
             -Available ([bool]::Parse($env:POLICY_AVAILABLE)) `
             -ForceOriginal ([bool]::Parse($env:POLICY_FORCE_ORIGINAL)) `
             -RecommendedProfile $env:POLICY_RECOMMENDED_PROFILE `
+            -RolloutAudience $env:ROLLOUT_AUDIENCE `
             -RolloutEvidenceAvailable ($env:ROLLOUT_EVIDENCE_TAG -match '^mumble-forked-rollout-[A-Za-z0-9._-]{1,80}$')
           $required = [bool]$decision.rolloutRequired
           "ROLLOUT_EVIDENCE_REQUIRED=$($required.ToString().ToLowerInvariant())" >> $env:GITHUB_ENV
           if (-not $required) { return }
           New-Item -ItemType Directory -Force -Path .\rollout-evidence | Out-Null
-          foreach ($name in @('input-enhancement-rollout.json', 'input-enhancement-rollout.json.sig')) {
+          foreach ($name in @(
+            'input-enhancement-rollout.json',
+            'input-enhancement-rollout.json.sig',
+            'input-enhancement-aggregate-export.json',
+            'input-enhancement-aggregate-export.json.sig'
+          )) {
             gh release download $env:ROLLOUT_EVIDENCE_TAG --repo $env:GITHUB_REPOSITORY `
               --pattern $name --dir .\rollout-evidence
             if ($LASTEXITCODE -ne 0) {
               throw "Rollout evidence release '$env:ROLLOUT_EVIDENCE_TAG' is missing '$name'."
+            }
+          }
+          if ($env:POLICY_RECOMMENDED_PROFILE -ceq 'Auto') {
+            foreach ($name in @('rnnoise-selection-decision.json', 'rnnoise-selection-decision.json.sig')) {
+              gh release download $env:ROLLOUT_EVIDENCE_TAG --repo $env:GITHUB_REPOSITORY `
+                --pattern $name --dir .\rollout-evidence
+              if ($LASTEXITCODE -ne 0) {
+                throw "Auto rollout evidence release '$env:ROLLOUT_EVIDENCE_TAG' is missing '$name'."
+              }
             }
           }
 
@@ -160,6 +189,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
           $qualificationPath = '.\immutable-release\qualification.json'
           $qualificationSignaturePath = '.\immutable-release\qualification.json.sig'
           if (-not (Test-Path -LiteralPath $qualificationPath -PathType Leaf) -or
@@ -286,18 +316,30 @@ jobs:
             -ExpectedCaseSetSha256 ([string]$releaseSmoke.provenance.caseSetSha256) `
             -ExpectedServerExecutableSha256 ([string]$releaseSmoke.provenance.serverExecutableSha256)
           if ([bool]::Parse($env:ROLLOUT_EVIDENCE_REQUIRED)) {
-            $targetStage = if ($env:POLICY_RECOMMENDED_PROFILE -ceq 'Auto') {
-              'auto-recommended'
-            } else {
-              'stable-opt-in'
+            $promotionDecision = Assert-InputEnhancementPromotionPolicy `
+              -Channel $env:PROMOTION_CHANNEL `
+              -Available ([bool]::Parse($env:POLICY_AVAILABLE)) `
+              -ForceOriginal ([bool]::Parse($env:POLICY_FORCE_ORIGINAL)) `
+              -RecommendedProfile $env:POLICY_RECOMMENDED_PROFILE `
+              -RolloutAudience $env:ROLLOUT_AUDIENCE `
+              -RolloutEvidenceAvailable $true
+            $rolloutArguments = @{
+              EvidencePath = '.\rollout-evidence\input-enhancement-rollout.json'
+              SignaturePath = '.\rollout-evidence\input-enhancement-rollout.json.sig'
+              PublicKeyHex = $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
+              AggregateExportPath = '.\rollout-evidence\input-enhancement-aggregate-export.json'
+              AggregateExportSignaturePath = '.\rollout-evidence\input-enhancement-aggregate-export.json.sig'
+              AggregatePublicKeyHex = $env:INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX
+              ExpectedQuerySha256 = $env:INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256
+              TargetStage = [string]$promotionDecision.targetStage
+              ExpectedBuildId = $env:IMMUTABLE_TAG
+              ExpectedRecipeSetVersion = [string]$qualification.recipeManifest.catalogRevision
             }
-            .\scripts\windows\assert-input-enhancement-rollout-qualification.ps1 `
-              -EvidencePath .\rollout-evidence\input-enhancement-rollout.json `
-              -SignaturePath .\rollout-evidence\input-enhancement-rollout.json.sig `
-              -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
-              -TargetStage $targetStage `
-              -ExpectedBuildId $env:IMMUTABLE_TAG `
-              -ExpectedRecipeSetVersion ([string]$qualification.recipeManifest.catalogRevision)
+            if ($env:POLICY_RECOMMENDED_PROFILE -ceq 'Auto') {
+              $rolloutArguments.RnnoiseDecisionPath = '.\rollout-evidence\rnnoise-selection-decision.json'
+              $rolloutArguments.RnnoiseDecisionSignaturePath = '.\rollout-evidence\rnnoise-selection-decision.json.sig'
+            }
+            .\scripts\windows\assert-input-enhancement-rollout-qualification.ps1 @rolloutArguments
           }
 
           if ($env:PROMOTION_CHANNEL -ceq 'stable') {
@@ -310,13 +352,64 @@ jobs:
           }
           "source_sha=$tagSha" >> $env:GITHUB_OUTPUT
 
-      - name: Download and verify previous recovery target
+      - name: Download and verify previous recovery target or protected bootstrap
         shell: powershell
         run: |
           $channelTag = "mumble-forked-$env:PROMOTION_CHANNEL"
           "PREVIOUS_POINTER_AVAILABLE=false" >> $env:GITHUB_ENV
+          "BOOTSTRAP_RECOVERY_SET_AVAILABLE=false" >> $env:GITHUB_ENV
+
+          function Get-VerifiedBootstrapRecoverySet {
+            if ($env:BOOTSTRAP_RECOVERY_SET_URL -notmatch '^https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+[.]json$' -or
+                $env:BOOTSTRAP_RECOVERY_SET_SHA256 -notmatch '^[0-9a-f]{64}$') {
+              throw "The protected environment has no valid hash-pinned v1-to-v2 recovery bootstrap asset."
+            }
+            New-Item -ItemType Directory -Force -Path .\bootstrap-recovery | Out-Null
+            Invoke-WebRequest -Uri $env:BOOTSTRAP_RECOVERY_SET_URL `
+              -OutFile .\bootstrap-recovery\recovery-set.json
+            $actualHash = (Get-FileHash -LiteralPath .\bootstrap-recovery\recovery-set.json `
+              -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -cne $env:BOOTSTRAP_RECOVERY_SET_SHA256) {
+              throw "Protected bootstrap recovery metadata SHA256 mismatch."
+            }
+            $bootstrap = Get-Content .\bootstrap-recovery\recovery-set.json -Raw | ConvertFrom-Json
+            $rootFields = @($bootstrap.PSObject.Properties.Name | Sort-Object)
+            if (@(Compare-Object @('recoveryInstallers','schemaVersion') $rootFields).Count -ne 0 -or
+                [int]$bootstrap.schemaVersion -ne 1 -or @($bootstrap.recoveryInstallers).Count -ne 2) {
+              throw "Protected bootstrap recovery metadata has an invalid schema."
+            }
+            $seenTags = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            foreach ($entry in @($bootstrap.recoveryInstallers)) {
+              $entryFields = @($entry.PSObject.Properties.Name | Sort-Object)
+              if (@(Compare-Object @('fileName','immutableTag','sha256','size') $entryFields).Count -ne 0 -or
+                  [string]$entry.immutableTag -notmatch '^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$' -or
+                  -not $seenTags.Add([string]$entry.immutableTag) -or
+                  [string]$entry.fileName -notmatch '^mumble-forked-[A-Za-z0-9._-]+[.]msi$' -or
+                  [string]$entry.sha256 -notmatch '^[0-9a-f]{64}$' -or [int64]$entry.size -le 0) {
+                throw "Protected bootstrap recovery MSI metadata is invalid or duplicated."
+              }
+              $targetDirectory = Join-Path .\bootstrap-recovery ([string]$entry.immutableTag)
+              New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
+              gh release download ([string]$entry.immutableTag) --repo $env:GITHUB_REPOSITORY `
+                --pattern ([string]$entry.fileName) --dir $targetDirectory
+              if ($LASTEXITCODE -ne 0) {
+                throw "Bootstrap recovery MSI '$($entry.fileName)' is unavailable from '$($entry.immutableTag)'."
+              }
+              $msi = Get-Item -LiteralPath (Join-Path $targetDirectory ([string]$entry.fileName))
+              if ([int64]$msi.Length -ne [int64]$entry.size -or
+                  (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                    [string]$entry.sha256) {
+                throw "Bootstrap recovery MSI '$($entry.fileName)' failed exact size/SHA256 verification."
+              }
+            }
+            "BOOTSTRAP_RECOVERY_SET_AVAILABLE=true" >> $env:GITHUB_ENV
+          }
+
           gh release view $channelTag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -ne 0) { return }
+          if ($LASTEXITCODE -ne 0) {
+            Get-VerifiedBootstrapRecoverySet
+            return
+          }
           New-Item -ItemType Directory -Force -Path .\previous-channel | Out-Null
           gh release download $channelTag `
             --repo $env:GITHUB_REPOSITORY `
@@ -326,14 +419,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Existing channel release has no verifiable channel-pointer.json."
           }
-          .\scripts\windows\assert-input-enhancement-recovery-pointer.ps1 `
-            -Channel $env:PROMOTION_CHANNEL `
-            -Repository $env:GITHUB_REPOSITORY `
-            -PointerPath .\previous-channel\channel-pointer.json `
-            -PointerSignaturePath .\previous-channel\channel-pointer.json.sig `
-            -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
-            -ExpectedSignerSubject $env:EXPECTED_SIGNER_SUBJECT `
-            -OutputRoot .\previous-recovery-verify
+          $previousPointer = Get-Content .\previous-channel\channel-pointer.json -Raw | ConvertFrom-Json
+          if ([int]$previousPointer.schemaVersion -eq 2) {
+            .\scripts\windows\assert-input-enhancement-recovery-pointer.ps1 `
+              -Channel $env:PROMOTION_CHANNEL `
+              -Repository $env:GITHUB_REPOSITORY `
+              -PointerPath .\previous-channel\channel-pointer.json `
+              -PointerSignaturePath .\previous-channel\channel-pointer.json.sig `
+              -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
+              -ExpectedSignerSubject $env:EXPECTED_SIGNER_SUBJECT `
+              -OutputRoot .\previous-recovery-verify
+          } elseif ([int]$previousPointer.schemaVersion -eq 1) {
+            .\scripts\windows\assert-input-enhancement-detached-signature.ps1 `
+              -InputPath .\previous-channel\channel-pointer.json `
+              -SignaturePath .\previous-channel\channel-pointer.json.sig `
+              -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
+            Get-VerifiedBootstrapRecoverySet
+          } else {
+            throw "Existing channel pointer has an unsupported schema."
+          }
           "PREVIOUS_POINTER_AVAILABLE=true" >> $env:GITHUB_ENV
 
       - name: Create channel pointer and two-build recovery set
@@ -381,6 +485,9 @@ jobs:
             $arguments.PreviousPointerPath = $previousPointer
             $arguments.PreviousPointerSignaturePath = $previousPointerSignature
           }
+          if ([bool]::Parse($env:BOOTSTRAP_RECOVERY_SET_AVAILABLE)) {
+            $arguments.BootstrapRecoverySetPath = '.\bootstrap-recovery\recovery-set.json'
+          }
           .\scripts\windows\new-input-enhancement-channel-pointer.ps1 @arguments
 
           $pointer = Get-Content .\promotion-handoff\channel-pointer.json -Raw | ConvertFrom-Json
@@ -396,10 +503,19 @@ jobs:
               -Destination .\promotion-handoff\previous-channel-pointer.json.sig
           }
           if ([bool]::Parse($env:ROLLOUT_EVIDENCE_REQUIRED)) {
-            Copy-Item -LiteralPath .\rollout-evidence\input-enhancement-rollout.json `
-              -Destination .\promotion-handoff\input-enhancement-rollout.json
-            Copy-Item -LiteralPath .\rollout-evidence\input-enhancement-rollout.json.sig `
-              -Destination .\promotion-handoff\input-enhancement-rollout.json.sig
+            $rolloutNames = @(
+              'input-enhancement-rollout.json',
+              'input-enhancement-rollout.json.sig',
+              'input-enhancement-aggregate-export.json',
+              'input-enhancement-aggregate-export.json.sig'
+            )
+            if ($env:POLICY_RECOMMENDED_PROFILE -ceq 'Auto') {
+              $rolloutNames += @('rnnoise-selection-decision.json', 'rnnoise-selection-decision.json.sig')
+            }
+            foreach ($name in $rolloutNames) {
+              Copy-Item -LiteralPath (Join-Path .\rollout-evidence $name) `
+                -Destination (Join-Path .\promotion-handoff $name)
+            }
           }
 
       - name: Transfer verified signed channel artifacts
@@ -421,7 +537,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       IMMUTABLE_TAG: ${{ inputs.immutable_tag }}
       PROMOTION_CHANNEL: ${{ inputs.channel }}
+      ROLLOUT_AUDIENCE: ${{ inputs.rollout_audience }}
       INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX }}
+      INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX }}
+      INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256: ${{ vars.INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256 }}
       EXPECTED_SIGNER_SUBJECT: ${{ vars.AZURE_ARTIFACT_SIGNING_EXPECTED_SUBJECT }}
 
     steps:
@@ -452,7 +571,7 @@ jobs:
             -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
           $policy = Assert-CanonicalInputEnhancementPolicy -Path $policyPath -RequireCurrentlyValid
           $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
-          if ([int]$pointer.schemaVersion -ne 1 -or
+          if ([int]$pointer.schemaVersion -ne 2 -or
               [string]$pointer.channel -cne $env:PROMOTION_CHANNEL -or
               [string]$pointer.immutableTag -cne $env:IMMUTABLE_TAG -or
               [string]$pointer.sourceSha -cne '${{ needs.verify-candidate.outputs.source_sha }}' -or
@@ -468,25 +587,68 @@ jobs:
           }
           $rolloutPath = '.\promotion-handoff\input-enhancement-rollout.json'
           $rolloutSignaturePath = '.\promotion-handoff\input-enhancement-rollout.json.sig'
-          $hasRollout = Test-Path -LiteralPath $rolloutPath -PathType Leaf
-          $hasRolloutSignature = Test-Path -LiteralPath $rolloutSignaturePath -PathType Leaf
-          if ($hasRollout -xor $hasRolloutSignature) {
-            throw 'Promotion handoff contains an incomplete rollout evidence pair.'
+          $aggregatePath = '.\promotion-handoff\input-enhancement-aggregate-export.json'
+          $aggregateSignaturePath = '.\promotion-handoff\input-enhancement-aggregate-export.json.sig'
+          $rolloutEvidencePaths = @($rolloutPath, $rolloutSignaturePath, $aggregatePath, $aggregateSignaturePath)
+          $rolloutEvidencePresence = @($rolloutEvidencePaths | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+          }).Count
+          if ($rolloutEvidencePresence -notin @(0, $rolloutEvidencePaths.Count)) {
+            throw 'Promotion handoff contains an incomplete rollout/aggregate evidence quartet.'
+          }
+          $hasCompleteRolloutEvidence = $rolloutEvidencePresence -eq $rolloutEvidencePaths.Count
+          $rnnoiseDecisionPath = '.\promotion-handoff\rnnoise-selection-decision.json'
+          $rnnoiseDecisionSignaturePath = '.\promotion-handoff\rnnoise-selection-decision.json.sig'
+          $rnnoiseEvidencePaths = @($rnnoiseDecisionPath, $rnnoiseDecisionSignaturePath)
+          $rnnoiseEvidencePresence = @($rnnoiseEvidencePaths | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+          }).Count
+          if ($rnnoiseEvidencePresence -notin @(0, $rnnoiseEvidencePaths.Count)) {
+            throw 'Promotion handoff contains incomplete RNNoise selection-decision evidence.'
+          }
+          if ([string]$policy.recommendedProfile -ceq 'Auto' -and
+              $rnnoiseEvidencePresence -ne $rnnoiseEvidencePaths.Count) {
+            throw 'Auto promotion requires the complete signed RNNoise selection decision.'
           }
           $promotionDecision = Assert-InputEnhancementPromotionPolicy `
             -Channel $env:PROMOTION_CHANNEL `
             -Available ([bool]$policy.available) `
             -ForceOriginal ([bool]$policy.forceOriginal) `
             -RecommendedProfile ([string]$policy.recommendedProfile) `
-            -RolloutEvidenceAvailable ($hasRollout -and $hasRolloutSignature)
+            -RolloutAudience $env:ROLLOUT_AUDIENCE `
+            -RolloutEvidenceAvailable $hasCompleteRolloutEvidence
           $rolloutRequired = [bool]$promotionDecision.rolloutRequired
           if ($rolloutRequired) {
-            .\scripts\windows\assert-input-enhancement-rollout-qualification.ps1 `
-              -EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath `
-              -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
-              -TargetStage ([string]$promotionDecision.targetStage) -ExpectedBuildId ([string]$pointer.immutableTag) `
-              -ExpectedRecipeSetVersion ([string]$policy.recipeSetVersion)
+            $rolloutArguments = @{
+              EvidencePath = $rolloutPath
+              SignaturePath = $rolloutSignaturePath
+              PublicKeyHex = $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
+              AggregateExportPath = $aggregatePath
+              AggregateExportSignaturePath = $aggregateSignaturePath
+              AggregatePublicKeyHex = $env:INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX
+              ExpectedQuerySha256 = $env:INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256
+              TargetStage = [string]$promotionDecision.targetStage
+              ExpectedBuildId = [string]$pointer.immutableTag
+              ExpectedRecipeSetVersion = [string]$policy.recipeSetVersion
+            }
+            if ($rnnoiseEvidencePresence -eq $rnnoiseEvidencePaths.Count) {
+              $rolloutArguments.RnnoiseDecisionPath = $rnnoiseDecisionPath
+              $rolloutArguments.RnnoiseDecisionSignaturePath = $rnnoiseDecisionSignaturePath
+            }
+            .\scripts\windows\assert-input-enhancement-rollout-qualification.ps1 @rolloutArguments
           }
+
+          # Revalidate the complete schema-v2 candidate plus both recovery MSIs
+          # in the publishing job. This also covers the one-time v1 bootstrap,
+          # whose protected inputs have already been folded into the signed v2
+          # pointer by the verification job.
+          .\scripts\windows\assert-input-enhancement-recovery-pointer.ps1 `
+            -Channel $env:PROMOTION_CHANNEL -Repository $env:GITHUB_REPOSITORY `
+            -PointerPath $pointerPath -PointerSignaturePath $pointerSignaturePath `
+            -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
+            -ExpectedSignerSubject $env:EXPECTED_SIGNER_SUBJECT `
+            -OutputRoot .\publisher-current-recovery-verify
+
           $previousPointerPath = '.\promotion-handoff\previous-channel-pointer.json'
           $previousPointerSignaturePath = '.\promotion-handoff\previous-channel-pointer.json.sig'
           if ((Test-Path -LiteralPath $previousPointerPath) -xor
@@ -494,14 +656,26 @@ jobs:
             throw 'Promotion handoff contains an incomplete previous channel pointer pair.'
           }
           if (Test-Path -LiteralPath $previousPointerPath) {
-            .\scripts\windows\assert-input-enhancement-recovery-pointer.ps1 `
-              -Channel $env:PROMOTION_CHANNEL -Repository $env:GITHUB_REPOSITORY `
-              -PointerPath $previousPointerPath -PointerSignaturePath $previousPointerSignaturePath `
-              -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
-              -ExpectedSignerSubject $env:EXPECTED_SIGNER_SUBJECT `
-              -OutputRoot .\publisher-recovery-verify
-          } elseif (@($pointer.knownGoodTags).Count -ne 1) {
-            throw 'A two-build recovery pointer requires the previous signed pointer evidence.'
+            $previousPointerForPublication = Get-Content -LiteralPath $previousPointerPath -Raw | ConvertFrom-Json
+            if ([int]$previousPointerForPublication.schemaVersion -eq 2) {
+              .\scripts\windows\assert-input-enhancement-recovery-pointer.ps1 `
+                -Channel $env:PROMOTION_CHANNEL -Repository $env:GITHUB_REPOSITORY `
+                -PointerPath $previousPointerPath -PointerSignaturePath $previousPointerSignaturePath `
+                -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX `
+                -ExpectedSignerSubject $env:EXPECTED_SIGNER_SUBJECT `
+                -OutputRoot .\publisher-previous-recovery-verify
+            } elseif ([int]$previousPointerForPublication.schemaVersion -eq 1) {
+              .\scripts\windows\assert-input-enhancement-detached-signature.ps1 `
+                -InputPath $previousPointerPath -SignaturePath $previousPointerSignaturePath `
+                -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
+              if ([string]$previousPointerForPublication.channel -cne $env:PROMOTION_CHANNEL) {
+                throw 'Previous schema-v1 channel pointer belongs to another channel.'
+              }
+            } else {
+              throw 'Previous channel pointer has an unsupported schema.'
+            }
+          } elseif (@($pointer.knownGoodTags).Count -ne 3) {
+            throw 'A schema-v2 channel pointer requires the candidate plus two verified recovery builds.'
           }
 
           New-Item -ItemType Directory -Force -Path .\publish-reverify | Out-Null
@@ -559,13 +733,24 @@ jobs:
           $modernReleaseExisted = $LASTEXITCODE -eq 0
           $isPreview = $env:PROMOTION_CHANNEL -ceq 'preview'
           $channelPrerequisiteAssets = @($pointerSignaturePath, $policyPath, $policySignaturePath)
-          if ($rolloutRequired) { $channelPrerequisiteAssets += @($rolloutPath, $rolloutSignaturePath) }
+          if ($rolloutRequired) {
+            $channelPrerequisiteAssets += @(
+              $rolloutPath, $rolloutSignaturePath, $aggregatePath, $aggregateSignaturePath
+            )
+            if ($rnnoiseEvidencePresence -eq $rnnoiseEvidencePaths.Count) {
+              $channelPrerequisiteAssets += $rnnoiseEvidencePaths
+            }
+          }
           $managedChannelAssetNames = @(
             'channel-pointer.json.sig',
             'input-enhancement-policy.json',
             'input-enhancement-policy.json.sig',
             'input-enhancement-rollout.json',
             'input-enhancement-rollout.json.sig',
+            'input-enhancement-aggregate-export.json',
+            'input-enhancement-aggregate-export.json.sig',
+            'rnnoise-selection-decision.json',
+            'rnnoise-selection-decision.json.sig',
             'channel-pointer.json'
           )
           $previousChannelTag = @(git ls-remote origin "refs/tags/$channelTag")

@@ -42,7 +42,7 @@
 namespace {
 
 constexpr int MaxRedirects = 5;
-constexpr int SupportedPackageUpdaterVersion          = 3;
+constexpr int SupportedPackageUpdaterVersion          = 4;
 constexpr qint64 MaximumChannelPointerBytes           = 64 * 1024;
 constexpr qint64 ExpectedChannelPointerSignatureBytes = 64;
 constexpr qint64 MaximumSupportedUpdateAssetBytes     = 4LL * 1024LL * 1024LL * 1024LL;
@@ -230,6 +230,48 @@ qint64 packageExpectedSize(const QJsonObject &info) {
 	return expectedAssetSize(packageObject(info));
 }
 
+QString candidateExecutableExpectedSha256(const QJsonObject &info) {
+	return normalizedSha256String(
+		installerObject(info).value(QStringLiteral("executableSha256")).toString());
+}
+
+QJsonObject selectedRecoveryInstallerObject(const QJsonObject &info) {
+	const QJsonArray recovery = info.value(QStringLiteral("recoveryInstallers")).toArray();
+	if (recovery.isEmpty()) {
+		return {};
+	}
+	const int currentBuild = Version::getPatch(Version::get());
+	const QRegularExpression tagPattern(
+		QStringLiteral("^mumble-forked-build-([1-9][0-9]*)-[0-9a-f]{12}$"));
+	for (const QJsonValue &value : recovery) {
+		const QJsonObject entry = value.toObject();
+		const auto match = tagPattern.match(entry.value(QStringLiteral("immutableTag")).toString());
+		if (match.hasMatch() && match.captured(1).toInt() == currentBuild) {
+			return entry;
+		}
+	}
+	return recovery.first().toObject();
+}
+
+QUrl recoveryInstallerDownloadUrl(const QJsonObject &info) {
+	return jsonUrl(selectedRecoveryInstallerObject(info), QStringLiteral("url"));
+}
+
+QString recoveryInstallerExpectedSha256(const QJsonObject &info) {
+	return normalizedSha256(selectedRecoveryInstallerObject(info));
+}
+
+qint64 recoveryInstallerExpectedSize(const QJsonObject &info) {
+	return expectedAssetSize(selectedRecoveryInstallerObject(info));
+}
+
+bool canUseRecoveryInstaller(const QJsonObject &info) {
+	const QJsonObject recovery = selectedRecoveryInstallerObject(info);
+	return !recovery.isEmpty() && isTrustedUpdateAssetUrl(recoveryInstallerDownloadUrl(info))
+		   && !recoveryInstallerExpectedSha256(info).isEmpty() && recoveryInstallerExpectedSize(info) > 0
+		   && !candidateExecutableExpectedSha256(info).isEmpty();
+}
+
 QString preferredUpdateMode(const QJsonObject &info) {
 	const QString mode = info.value(QStringLiteral("preferredUpdate")).toString().trimmed().toLower();
 	return mode.isEmpty() ? QStringLiteral("package") : mode;
@@ -260,7 +302,8 @@ bool canUsePackageUpdate(const QJsonObject &info) {
 	}
 
 	return isTrustedUpdateAssetUrl(packageDownloadUrl(info)) && !packageExpectedSha256(info).isEmpty()
-		   && packageExpectedSize(info) > 0;
+		   && packageExpectedSize(info) > 0
+		   && (minUpdaterVersion < 4 || canUseRecoveryInstaller(info));
 #else
 	Q_UNUSED(info);
 	return false;
@@ -322,6 +365,15 @@ QString updateAssetFileName(const QJsonObject &info) {
 QString updateAssetPathForMode(const QJsonObject &info, const QString &updateMode) {
 	return QDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")))
 		.filePath(updateAssetFileNameForMode(info, updateMode));
+}
+
+QString recoveryInstallerPath(const QJsonObject &info) {
+	const QJsonObject recovery = selectedRecoveryInstallerObject(info);
+	QString fileName = recovery.value(QStringLiteral("immutableTag")).toString() + QLatin1Char('-')
+					 + QFileInfo(recoveryInstallerDownloadUrl(info).path()).fileName();
+	fileName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+	return QDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")))
+		.filePath(QStringLiteral("recovery-%1").arg(fileName));
 }
 
 QString updateModeFromPath(const QString &updatePath, const QString &requestedMode) {
@@ -618,7 +670,10 @@ QString updaterUiThemeArgument() {
 QStringList bundledUpdaterArguments(const QString &updatePath, const QString &updateDirPath, const bool passive,
 									const QString &updateMode, const QString &fallbackInstallerPath = QString(),
 									const QString &expectedUpdateSha256 = QString(),
-									const QString &expectedFallbackInstallerSha256 = QString()) {
+									const QString &expectedFallbackInstallerSha256 = QString(),
+									const QString &recoveryPath = QString(),
+									const QString &expectedRecoverySha256 = QString(),
+									const QString &expectedCandidateExecutableSha256 = QString()) {
 	const QString appPath = QCoreApplication::applicationFilePath();
 	const QString appDir  = QFileInfo(appPath).absolutePath();
 	const QDir updateDir(updateDirPath);
@@ -654,40 +709,20 @@ QStringList bundledUpdaterArguments(const QString &updatePath, const QString &up
 		&& !expectedInstallerSha256.trimmed().isEmpty()) {
 		arguments << QStringLiteral("--installer-sha256") << expectedInstallerSha256.trimmed().toLower();
 	}
+	if (canUsePreparedInstallerFallback(recoveryPath) && !expectedRecoverySha256.trimmed().isEmpty()) {
+		arguments << QStringLiteral("--recovery-installer") << QDir::toNativeSeparators(recoveryPath)
+				  << QStringLiteral("--recovery-installer-sha256")
+				  << expectedRecoverySha256.trimmed().toLower();
+	}
+	if (!expectedCandidateExecutableSha256.trimmed().isEmpty()) {
+		arguments << QStringLiteral("--candidate-executable-sha256")
+				  << expectedCandidateExecutableSha256.trimmed().toLower();
+	}
 	const QString uiTheme = updaterUiThemeArgument();
 	if (!uiTheme.isEmpty()) {
 		arguments << QStringLiteral("--ui-theme") << uiTheme;
 	}
 	return arguments;
-}
-
-bool copyReplacing(const QString &sourcePath, const QString &targetPath) {
-	if (!QFileInfo::exists(sourcePath)) {
-		return true;
-	}
-	if (QFile::exists(targetPath) && !QFile::remove(targetPath)) {
-		return false;
-	}
-	return QFile::copy(sourcePath, targetPath);
-}
-
-bool copyBundledUpdaterRuntime(const QString &appDirPath, const QString &updateDirPath) {
-	const QDir appDir(appDirPath);
-	const QDir updateDir(updateDirPath);
-	const QStringList dependencies {
-		QStringLiteral("zlib1.dll"),
-	};
-
-	for (const QString &dependency : dependencies) {
-		const QString sourcePath = appDir.filePath(dependency);
-		if (!QFileInfo::exists(sourcePath)) {
-			continue;
-		}
-		if (!copyReplacing(sourcePath, updateDir.filePath(dependency))) {
-			return false;
-		}
-	}
-	return true;
 }
 
 QStringList msiexecUpdateArguments(const QString &installerPath, const bool passive) {
@@ -728,10 +763,6 @@ QString prepareBundledUpdaterCopy(const QString &updateDirPath) {
 	if (!QFile::copy(updaterSourcePath, updaterTargetPath)) {
 		return {};
 	}
-	if (!copyBundledUpdaterRuntime(QCoreApplication::applicationDirPath(), updateDir.absolutePath())) {
-		QFile::remove(updaterTargetPath);
-		return {};
-	}
 	return updaterTargetPath;
 #else
 	Q_UNUSED(updateDirPath);
@@ -741,7 +772,9 @@ QString prepareBundledUpdaterCopy(const QString &updateDirPath) {
 
 bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode,
 						  const QString &fallbackInstallerPath, const QString &expectedUpdateSha256,
-						  const QString &expectedFallbackInstallerSha256) {
+						  const QString &expectedFallbackInstallerSha256, const QString &recoveryPath,
+						  const QString &expectedRecoverySha256,
+						  const QString &expectedCandidateExecutableSha256) {
 #ifdef Q_OS_WIN
 	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
 	const QString updaterTargetPath = prepareBundledUpdaterCopy(updateDir.absolutePath());
@@ -751,7 +784,8 @@ bool launchBundledUpdater(const QString &updatePath, const bool passive, const Q
 
 	const QStringList arguments =
 		bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode, fallbackInstallerPath,
-								expectedUpdateSha256, expectedFallbackInstallerSha256);
+								expectedUpdateSha256, expectedFallbackInstallerSha256, recoveryPath,
+								expectedRecoverySha256, expectedCandidateExecutableSha256);
 	return QProcess::startDetached(updaterTargetPath, arguments, updateDir.absolutePath());
 #else
 	Q_UNUSED(updatePath);
@@ -760,6 +794,9 @@ bool launchBundledUpdater(const QString &updatePath, const bool passive, const Q
 	Q_UNUSED(fallbackInstallerPath);
 	Q_UNUSED(expectedUpdateSha256);
 	Q_UNUSED(expectedFallbackInstallerSha256);
+	Q_UNUSED(recoveryPath);
+	Q_UNUSED(expectedRecoverySha256);
+	Q_UNUSED(expectedCandidateExecutableSha256);
 	return false;
 #endif
 }
@@ -818,6 +855,7 @@ private:
 	QString m_targetPath;
 	QString m_primaryUpdatePath;
 	QString m_fallbackInstallerPath;
+	QString m_recoveryInstallerPath;
 	std::unique_ptr< QSaveFile > m_file;
 	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
 	QNetworkReply *m_reply      = nullptr;
@@ -827,6 +865,7 @@ private:
 	qint64 m_receivedSize = 0;
 	bool m_cancelled    = false;
 	bool m_downloadingFallbackInstaller = false;
+	bool m_downloadingRecoveryInstaller = false;
 	int m_redirectCount = 0;
 	std::function< void(const QString &) > m_readyCallback;
 	std::function< void(const QString &) > m_failureCallback;
@@ -834,7 +873,8 @@ private:
 	std::function< void(qint64, qint64) > m_progressCallback;
 
 	void beginDownload(const QUrl &url, const QString &expectedSha256, const qint64 expectedSize,
-					   const QString &targetPath, const bool fallbackInstaller) {
+					   const QString &targetPath, const bool fallbackInstaller,
+					   const bool recoveryInstaller = false) {
 		m_downloadUrl = url;
 		m_expectedSha256 = expectedSha256;
 		m_expectedSize   = expectedSize;
@@ -843,6 +883,7 @@ private:
 		m_pendingFailure.clear();
 		m_redirectCount = 0;
 		m_downloadingFallbackInstaller = fallbackInstaller;
+		m_downloadingRecoveryInstaller = recoveryInstaller;
 		m_hash.reset();
 
 		m_file = std::make_unique< QSaveFile >(m_targetPath);
@@ -850,7 +891,6 @@ private:
 			showFailure(VersionCheck::tr("Mumble could not write the update package to %1.").arg(m_targetPath));
 			return;
 		}
-
 		request(m_downloadUrl);
 	}
 
@@ -988,9 +1028,14 @@ private:
 	}
 
 	void finishDownloadedAsset() {
+		if (m_downloadingRecoveryInstaller) {
+			m_recoveryInstallerPath = m_targetPath;
+			preparePackageOrFinish();
+			return;
+		}
 		if (m_downloadingFallbackInstaller) {
 			m_fallbackInstallerPath = m_targetPath;
-			preparePackageOrFinish();
+			prepareRecoveryOrFinish();
 			return;
 		}
 
@@ -1001,7 +1046,7 @@ private:
 			const qint64 fallbackSize    = installerExpectedSize(m_info);
 			if (fileMatchesSha256(fallbackPath, fallbackSha256, fallbackSize)) {
 				m_fallbackInstallerPath = fallbackPath;
-				finishReady();
+				prepareRecoveryOrFinish();
 				return;
 			}
 
@@ -1009,7 +1054,28 @@ private:
 			return;
 		}
 
-		preparePackageOrFinish();
+		prepareRecoveryOrFinish();
+	}
+
+	void prepareRecoveryOrFinish() {
+		if (m_updateMode != QLatin1String("package")
+			|| jsonInt(packageObject(m_info), QStringLiteral("minUpdaterVersion"), -1) < 4) {
+			preparePackageOrFinish();
+			return;
+		}
+		if (!canUseRecoveryInstaller(m_info)) {
+			showFailure(VersionCheck::tr("The signed update pointer has no usable known-good recovery MSI."));
+			return;
+		}
+		const QString path = recoveryInstallerPath(m_info);
+		const QString sha256 = recoveryInstallerExpectedSha256(m_info);
+		const qint64 size = recoveryInstallerExpectedSize(m_info);
+		if (fileMatchesSha256(path, sha256, size)) {
+			m_recoveryInstallerPath = path;
+			preparePackageOrFinish();
+			return;
+		}
+		beginDownload(recoveryInstallerDownloadUrl(m_info), sha256, size, path, false, true);
 	}
 
 	void preparePackageOrFinish() {
@@ -1028,7 +1094,9 @@ private:
 		const QString packagePath = m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath;
 		QStringList arguments = bundledUpdaterArguments(packagePath, updateDir.absolutePath(), true, m_updateMode,
 												m_fallbackInstallerPath, packageExpectedSha256(m_info),
-												installerExpectedSha256(m_info));
+												installerExpectedSha256(m_info), m_recoveryInstallerPath,
+												recoveryInstallerExpectedSha256(m_info),
+												candidateExecutableExpectedSha256(m_info));
 		arguments << QStringLiteral("--prepare") << QStringLiteral("--no-ui");
 
 		m_prepareProcess = new QProcess(this);
@@ -1109,6 +1177,14 @@ QString VersionCheck::expectedInstallerSha256ForInfo(const QJsonObject &info) {
 	return installerExpectedSha256(info);
 }
 
+QString VersionCheck::expectedRecoveryInstallerSha256ForInfo(const QJsonObject &info) {
+	return recoveryInstallerExpectedSha256(info);
+}
+
+QString VersionCheck::expectedCandidateExecutableSha256ForInfo(const QJsonObject &info) {
+	return candidateExecutableExpectedSha256(info);
+}
+
 bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
 	return canUsePackageUpdate(info) || canUseInstallerUpdate(info);
 }
@@ -1172,6 +1248,7 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	const bool packageUsesMsiFallback = selectedMode == QLatin1String("package") && canUseInstallerUpdate(info);
 	const QString fallbackInstallerPath =
 		packageUsesMsiFallback ? updateAssetPathForMode(info, QStringLiteral("installer")) : QString();
+	const QString recoveryPath = canUseRecoveryInstaller(info) ? recoveryInstallerPath(info) : QString();
 
 	const QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
 	const QString dryRunUpdatePath = preparedInstallerPath.trimmed().isEmpty()
@@ -1224,6 +1301,11 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("fallbackInstallerPath"), QDir::toNativeSeparators(fallbackInstallerPath));
 	result.insert(QStringLiteral("fallbackInstallerReady"),
 				  packageUsesMsiFallback && canUsePreparedInstallerFallback(fallbackInstallerPath));
+	result.insert(QStringLiteral("recoveryInstallerPath"), QDir::toNativeSeparators(recoveryPath));
+	result.insert(QStringLiteral("recoveryInstallerSha256"), recoveryInstallerExpectedSha256(info));
+	result.insert(QStringLiteral("candidateExecutableSha256"), candidateExecutableExpectedSha256(info));
+	result.insert(QStringLiteral("recoveryInstallerReady"),
+				  canUsePreparedInstallerFallback(recoveryPath));
 	result.insert(QStringLiteral("preparedInstallerPath"), QDir::toNativeSeparators(dryRunUpdatePath));
 	result.insert(QStringLiteral("preparedUpdatePath"), QDir::toNativeSeparators(dryRunUpdatePath));
 	result.insert(QStringLiteral("preparedInstallerAccepted"), canLaunchPreparedUpdate(dryRunUpdatePath, selectedMode));
@@ -1241,9 +1323,11 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("bundledUpdaterArguments"),
 				  stringListJsonArray(bundledUpdaterArguments(dryRunUpdatePath, updateDir.absolutePath(), true,
 															  selectedMode, fallbackInstallerPath,
-															  selectedMode == QLatin1String("package") ? packageSha256
+																		  selectedMode == QLatin1String("package") ? packageSha256
 																							: installerSha256,
-															  installerSha256)));
+																			  installerSha256, recoveryPath,
+																			  recoveryInstallerExpectedSha256(info),
+																			  candidateExecutableExpectedSha256(info))));
 	result.insert(QStringLiteral("directMsiexecProgram"), QStringLiteral("msiexec.exe"));
 	result.insert(QStringLiteral("directMsiexecArguments"),
 				  selectedMode == QLatin1String("installer")
@@ -1265,6 +1349,10 @@ QString VersionCheck::preparedFallbackInstallerPathForInfo(const QJsonObject &in
 		return {};
 	}
 	return updateAssetPathForMode(info, QStringLiteral("installer"));
+}
+
+QString VersionCheck::preparedRecoveryInstallerPathForInfo(const QJsonObject &info) {
+	return canUseRecoveryInstaller(info) ? recoveryInstallerPath(info) : QString();
 }
 
 bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode) {
@@ -1289,7 +1377,10 @@ bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QStr
 bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString &updateMode, const bool passive,
 										const bool restartAfterInstall, const QString &fallbackInstallerPath,
 										const QString &expectedUpdateSha256,
-										const QString &expectedFallbackInstallerSha256) {
+										const QString &expectedFallbackInstallerSha256,
+										const QString &recoveryPath,
+										const QString &expectedRecoverySha256,
+										const QString &expectedCandidateExecutableSha256) {
 #ifdef Q_OS_WIN
 	if (currentProcessIsElevated()) {
 		return false;
@@ -1298,10 +1389,20 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	if (!canLaunchPreparedUpdate(updatePath, mode)) {
 		return false;
 	}
+	if (recoveryPath.isEmpty() != expectedRecoverySha256.trimmed().isEmpty()
+		|| (!recoveryPath.isEmpty()
+			&& !fileMatchesSha256(recoveryPath, normalizedSha256String(expectedRecoverySha256)))) {
+		return false;
+	}
+	if (!recoveryPath.isEmpty()
+		&& normalizedSha256String(expectedCandidateExecutableSha256).isEmpty()) {
+		return false;
+	}
 
 	if (restartAfterInstall) {
 		return launchBundledUpdater(updatePath, passive, mode, fallbackInstallerPath, expectedUpdateSha256,
-								 expectedFallbackInstallerSha256);
+								 expectedFallbackInstallerSha256, recoveryPath, expectedRecoverySha256,
+								 expectedCandidateExecutableSha256);
 	}
 
 	if (mode == QLatin1String("package")) {
@@ -1318,6 +1419,9 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	Q_UNUSED(fallbackInstallerPath);
 	Q_UNUSED(expectedUpdateSha256);
 	Q_UNUSED(expectedFallbackInstallerSha256);
+	Q_UNUSED(recoveryPath);
+	Q_UNUSED(expectedRecoverySha256);
+	Q_UNUSED(expectedCandidateExecutableSha256);
 	return false;
 #endif
 }

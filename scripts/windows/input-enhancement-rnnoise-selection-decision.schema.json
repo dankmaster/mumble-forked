@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-rnnoise-selection-decision-v1.json",
+  "title": "Mumble RNNoise campaign selection decision",
+  "description": "The signed final one-shot holdout decision emitted by select-rnnoise-model.py. A completed rollout envelope references the exact decision and signature bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bootstrap",
+    "custom_model",
+    "embedded_reference",
+    "holdout_mixture_plan_sha256",
+    "holdout_results_sha256",
+    "one_shot_receipt_sha256",
+    "reason_codes",
+    "schema_version",
+    "status",
+    "training_plan_sha256",
+    "validation_selection_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "status": { "enum": ["embedded-retained", "custom-selected"] },
+    "training_plan_sha256": { "$ref": "#/$defs/sha256" },
+    "validation_selection_sha256": { "$ref": "#/$defs/sha256" },
+    "holdout_results_sha256": { "$ref": "#/$defs/sha256" },
+    "holdout_mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+    "one_shot_receipt_sha256": { "$ref": "#/$defs/sha256" },
+    "reason_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confidence",
+        "iterations",
+        "lower_bound",
+        "median_improvement",
+        "metric",
+        "sampler",
+        "seed_sha256"
+      ],
+      "properties": {
+        "confidence": { "const": 0.95 },
+        "iterations": { "const": 20000 },
+        "lower_bound": { "type": "number", "minimum": -10, "maximum": 10 },
+        "median_improvement": { "type": "number", "minimum": -10, "maximum": 10 },
+        "metric": { "const": "paired per-case OVRL improvement, median bootstrap" },
+        "sampler": { "const": "splitmix64-v1" },
+        "seed_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "embedded_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["license_spdx", "model_id", "sha256", "size_bytes"],
+      "properties": {
+        "license_spdx": { "type": "string", "minLength": 1 },
+        "model_id": { "const": "rnnoise:embedded" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "custom_model": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_id", "manifest_relative_path", "model_id", "sha256", "size_bytes"],
+          "properties": {
+            "candidate_id": { "$ref": "#/$defs/id" },
+            "manifest_relative_path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "model_id": { "type": "string", "pattern": "^rnnoise:custom:[A-Za-z0-9._:-]{1,175}$" },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "size_bytes": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "embedded-retained" } } },
+      "then": {
+        "properties": {
+          "custom_model": { "type": "null" },
+          "reason_codes": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "custom-selected" } } },
+      "then": {
+        "properties": {
+          "custom_model": { "type": "object" },
+          "reason_codes": { "maxItems": 0 },
+          "bootstrap": {
+            "properties": { "lower_bound": { "exclusiveMinimum": 0 } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }
+  }
+}

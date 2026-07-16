@@ -33,10 +33,11 @@ namespace {
 		return minimum + ((clamped * (maximum - minimum)) + 50) / 100;
 	}
 
-	float mixFactorForValidatedControls(const ValidatedControls &controls) noexcept {
+	float mixFactorForValidatedControls(Profile profile, const ValidatedControls &controls) noexcept {
 		const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
 		const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
-		return std::clamp(reduction * (0.75f + 0.25f * character), 0.0f, 1.0f);
+		const float mixFactor = std::clamp(reduction * (0.75f + 0.25f * character), 0.0f, 1.0f);
+		return profile == Profile::VoiceFocus ? std::min(mixFactor, 0.99f) : mixFactor;
 	}
 
 	void appendFingerprintU32(QByteArray &bytes, const std::uint32_t value) {
@@ -63,10 +64,12 @@ namespace {
 				return QStringLiteral("light");
 			case Profile::Balanced:
 				return QStringLiteral("balanced");
-			case Profile::Crisp:
-				return QStringLiteral("crisp");
+			case Profile::Quality:
+				return QStringLiteral("quality");
 			case Profile::Auto:
 				return QStringLiteral("auto");
+			case Profile::VoiceFocus:
+				return QStringLiteral("voice-focus");
 		}
 
 		return QStringLiteral("original");
@@ -81,19 +84,21 @@ ValidatedControls validatedControlsForProfile(Profile profile, int noiseReductio
 			return { clampControl(noiseReduction), clampControl(naturalCrisp) };
 		case Profile::Balanced:
 			return { mapControlToRange(noiseReduction, 20, 90), mapControlToRange(naturalCrisp, 10, 90) };
-		case Profile::Crisp:
+		case Profile::Quality:
 			return { mapControlToRange(noiseReduction, 25, 90), mapControlToRange(naturalCrisp, 25, 100) };
 		case Profile::Auto:
 			// Auto is a request, never a concrete processing profile. Callers that
 			// process audio must pass the policy-selected concrete profile.
 			return {};
+		case Profile::VoiceFocus:
+			return { mapControlToRange(noiseReduction, 70, 100), mapControlToRange(naturalCrisp, 40, 100) };
 	}
 
 	return {};
 }
 
 float mixFactorForControls(Profile profile, int noiseReduction, int naturalCrisp) noexcept {
-	return mixFactorForValidatedControls(validatedControlsForProfile(profile, noiseReduction, naturalCrisp));
+	return mixFactorForValidatedControls(profile, validatedControlsForProfile(profile, noiseReduction, naturalCrisp));
 }
 
 Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProfile, int noiseReduction,
@@ -124,7 +129,7 @@ Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProf
 		case Profile::Balanced:
 			engine          = Engine::RNNoise;
 			modelId         = QStringLiteral("rnnoise:embedded");
-			mixFactor       = mixFactorForValidatedControls(controls);
+			mixFactor       = mixFactorForValidatedControls(effectiveProfile, controls);
 			latencyBudget   = balancedLatencyBudgetSamples;
 			minimumCpuClass = CpuClass::Standard;
 			id              = requestedProfile == Profile::Balanced ? QStringLiteral("input.balanced.rnnoise-embedded")
@@ -132,17 +137,25 @@ Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProf
 								  ? QStringLiteral("input.auto.balanced.rnnoise-embedded")
 								  : QStringLiteral("input.%1.fallback-balanced.rnnoise-embedded").arg(profileSlug(requestedProfile));
 			break;
-		case Profile::Crisp:
+		case Profile::Quality:
 			engine          = Engine::DeepFilterNet;
 			modelId         = QStringLiteral("deepfilternet:balanced");
-			mixFactor       = mixFactorForValidatedControls(controls);
-			latencyBudget   = crispLatencyBudgetSamples;
+			mixFactor       = mixFactorForValidatedControls(effectiveProfile, controls);
+			latencyBudget   = qualityLatencyBudgetSamples;
 			minimumCpuClass = CpuClass::High;
-			id              = requestedProfile == Profile::Crisp ? QStringLiteral("input.crisp.deepfilternet-balanced")
-																 : QStringLiteral("input.auto.crisp.deepfilternet-balanced");
+			id = requestedProfile == Profile::Quality ? QStringLiteral("input.quality.deepfilternet-balanced")
+													  : QStringLiteral("input.auto.quality.deepfilternet-balanced");
 			break;
 		case Profile::Auto:
 			// Auto is a request, never an executable recipe.
+			break;
+		case Profile::VoiceFocus:
+			engine          = Engine::DeepFilterNet;
+			modelId         = QStringLiteral("deepfilternet:balanced");
+			mixFactor       = mixFactorForValidatedControls(effectiveProfile, controls);
+			latencyBudget   = voiceFocusLatencyBudgetSamples;
+			minimumCpuClass = CpuClass::High;
+			id              = QStringLiteral("input.voice-focus.deepfilternet-balanced");
 			break;
 	}
 
@@ -171,6 +184,7 @@ namespace {
 		}
 
 		selection.modelId = recipe.modelId();
+		selection.modelDomainNormalization = recipe.engine() == Engine::DeepFilterNet;
 		return createSpeechCleanupProcessor(selection);
 	}
 
@@ -217,12 +231,104 @@ namespace {
 	}
 } // namespace
 
+CpuClass manualProfileCpuClassForMetrics(const ManualProfileCapabilityMetrics &metrics) noexcept {
+	if (!metrics.rnnoiseAvailable) {
+		return CpuClass::Low;
+	}
+	if (!metrics.deepFilterNetAvailable || !metrics.qualityPipelineReady || metrics.workerFrames == 0) {
+		return CpuClass::Standard;
+	}
+	constexpr std::uint64_t qualifiedP99Nanoseconds = 8'000'000;
+	constexpr std::uint64_t catastropheNanoseconds  = 10'000'000;
+	return metrics.callbackP99Nanoseconds <= qualifiedP99Nanoseconds
+			   && metrics.workerP99Nanoseconds <= qualifiedP99Nanoseconds
+			   && metrics.callbackMaximumNanoseconds <= catastropheNanoseconds
+			   && metrics.workerMaximumNanoseconds <= catastropheNanoseconds
+		   ? CpuClass::High
+		   : CpuClass::Standard;
+}
+
+CpuClass cpuClassWithAuthenticatedE2EOverride(const CpuClass measured, const bool harnessEnabled,
+											  const bool tokenPresent, const QString &requestedTier) noexcept {
+	if (!harnessEnabled || !tokenPresent) {
+		return measured;
+	}
+	if (requestedTier == QLatin1String("Low")) {
+		return CpuClass::Low;
+	}
+	if (requestedTier == QLatin1String("Standard")) {
+		return CpuClass::Standard;
+	}
+	if (requestedTier == QLatin1String("High")) {
+		return CpuClass::High;
+	}
+	return measured;
+}
+
 BackendAvailability BackendAvailability::compiled() {
 	return {
 		Mumble::SpeechCleanup::isBackendAvailable(::Settings::RNNoiseBackend),
 		Mumble::SpeechCleanup::isBackendAvailable(::Settings::DeepFilterNetBackend),
 		Mumble::SpeechCleanup::isBackendAvailable(::Settings::DTLNBackend),
 	};
+}
+
+CaptureDeviceContext CaptureDeviceContext::liveDevice(QString backendId, const bool stablePhysicalIdentity) {
+	CaptureDeviceContext context;
+	context.kind                   = Kind::LiveDevice;
+	context.backendId              = std::move(backendId);
+	context.stablePhysicalIdentity = stablePhysicalIdentity;
+	return context;
+}
+
+bool CaptureDeviceContext::productionQualified() const noexcept {
+#ifdef Q_OS_WIN
+	return kind == Kind::LiveDevice && stablePhysicalIdentity
+		   && backendId.compare(QLatin1String("WASAPI"), Qt::CaseInsensitive) == 0;
+#else
+	return false;
+#endif
+}
+
+ProfileReadiness profileReadiness(const ResolveRequest &request) noexcept {
+	const auto cpuAtLeast = [actual = request.cpuClass](CpuClass required) {
+		return static_cast< std::uint8_t >(actual) >= static_cast< std::uint8_t >(required);
+	};
+	ProfileReadiness readiness;
+	readiness.selectable          = true;
+	readiness.productionQualified = request.captureDevice.productionQualified();
+	readiness.reason              = ProfileReadinessReason::Ready;
+
+	switch (request.profile) {
+		case Profile::Original:
+		case Profile::Light:
+			return readiness;
+		case Profile::Balanced:
+			if (!cpuAtLeast(CpuClass::Standard)) {
+				return { false, false, ProfileReadinessReason::InsufficientCpu };
+			}
+			if (!request.backendAvailability.rnnoise) {
+				return { false, false, ProfileReadinessReason::BackendUnavailable };
+			}
+			return readiness;
+		case Profile::Quality:
+		case Profile::VoiceFocus:
+			if (!cpuAtLeast(CpuClass::High)) {
+				return { false, false, ProfileReadinessReason::InsufficientCpu };
+			}
+			if (!request.backendAvailability.deepFilterNet) {
+				return { false, false, ProfileReadinessReason::BackendUnavailable };
+			}
+			return readiness;
+		case Profile::Auto:
+			// AutoV2's policy, binding, diagnostics and transition math are
+			// available, but PreparedPipelineBank cannot yet lease source and
+			// candidate processors across commit/abort. Keep the option visible but
+			// fail closed until the live dual-pipeline contract exists.
+			return { false, false, ProfileReadinessReason::AutoRuntimeUnavailable };
+	}
+
+	return { false, false, ProfileReadinessReason::BackendUnavailable };
 }
 
 Recipe::Recipe(QString id, std::uint32_t revision, Profile requestedProfile, Profile effectiveProfile, Engine engine,
@@ -310,11 +416,12 @@ Recipe RecipeCatalog::resolve(const ResolveRequest &request) {
 
 	if (request.profile == Profile::Balanced && !request.backendAvailability.rnnoise) {
 		effectiveProfile = Profile::Light;
-	} else if (request.profile == Profile::Crisp && !request.backendAvailability.deepFilterNet) {
+	} else if ((request.profile == Profile::Quality || request.profile == Profile::VoiceFocus)
+			   && !request.backendAvailability.deepFilterNet) {
 		effectiveProfile = request.backendAvailability.rnnoise ? Profile::Balanced : Profile::Light;
 	} else if (request.profile == Profile::Auto) {
 		if (request.cpuClass == CpuClass::High && request.backendAvailability.deepFilterNet) {
-			effectiveProfile = Profile::Crisp;
+			effectiveProfile = Profile::Quality;
 		} else if (request.cpuClass != CpuClass::Low && request.backendAvailability.rnnoise) {
 			effectiveProfile = Profile::Balanced;
 		} else {
@@ -458,9 +565,23 @@ bool Pipeline::configure(const Recipe &recipe, const QString &authorizedModelSha
 	m_fallbackActive       = false;
 	m_fallbackReason       = FallbackReason::None;
 	resetCounters();
+	resetDeepFilterEdgeProtection();
 
 	if (!recipe.usesNeuralProcessor()) {
 		return true;
+	}
+
+	const QString normalizedModelSha256 = authorizedModelSha256.trimmed().toLower();
+	const QString normalizedModelPath   = authorizedModelPath.trimmed();
+	const bool hasModelAuthorization    = !normalizedModelSha256.isEmpty() || !normalizedModelPath.isEmpty();
+	if (hasModelAuthorization
+		&& (!validSha256(normalizedModelSha256) || normalizedModelPath.isEmpty()
+			|| !fileHasSha256(normalizedModelPath, normalizedModelSha256))) {
+		// Re-hash the authorized asset immediately before the processor factory is
+		// allowed to parse or initialize it. The second check below binds the
+		// factory's actual loaded path and catches any change during initialization.
+		failClosed(FallbackReason::UnexpectedModel);
+		return false;
 	}
 
 	std::unique_ptr< SpeechCleanupProcessor > processor = m_processorFactory(recipe);
@@ -479,13 +600,6 @@ bool Pipeline::configure(const Recipe &recipe, const QString &authorizedModelSha
 
 	const QString activeModelId = processor->activeModelId();
 	if (!activeModelId.isEmpty() && activeModelId != recipe.modelId()) {
-		failClosed(FallbackReason::UnexpectedModel);
-		return false;
-	}
-	const QString normalizedModelSha256 = authorizedModelSha256.trimmed().toLower();
-	const QString normalizedModelPath   = authorizedModelPath.trimmed();
-	const bool hasModelAuthorization    = !normalizedModelSha256.isEmpty() || !normalizedModelPath.isEmpty();
-	if (hasModelAuthorization && (!validSha256(normalizedModelSha256) || normalizedModelPath.isEmpty())) {
 		failClosed(FallbackReason::UnexpectedModel);
 		return false;
 	}
@@ -677,8 +791,9 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 		++m_neuralFrames;
 		return elapsedNanoseconds;
 	};
+	const float protectedMixFactor = deepFilterEdgeProtectedMixFactor(mixFactor);
 	try {
-		m_processor->processInPlace(samples, frameSamples, std::clamp(mixFactor, 0.0f, 1.0f));
+		m_processor->processInPlace(samples, frameSamples, protectedMixFactor);
 	} catch (...) {
 		finishProcessingTiming();
 		std::copy(m_alignedDryFrame.cbegin(), m_alignedDryFrame.cend(), samples);
@@ -724,6 +839,103 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 	}
 
 	return true;
+}
+
+void Pipeline::resetDeepFilterEdgeProtection() noexcept {
+	m_deepFilterNoiseFloorRms           = 0.0f;
+	m_deepFilterSpeechPeakRms           = 0.0f;
+	m_deepFilterBaselineFrames          = 0;
+	m_deepFilterBelowReleaseFrames      = 0;
+	m_deepFilterOnsetProtectionFrame    = deepFilterOnsetProtectionFrames;
+	m_deepFilterSpeechActive            = false;
+}
+
+float Pipeline::deepFilterEdgeProtectedMixFactor(float requestedMixFactor) noexcept {
+	const float boundedMixFactor = std::clamp(requestedMixFactor, 0.0f, 1.0f);
+	if (!m_recipe || (m_recipe->effectiveProfile() != Profile::Quality
+					  && m_recipe->effectiveProfile() != Profile::VoiceFocus)) {
+		return boundedMixFactor;
+	}
+
+	// DeepFilterNet can suppress low-energy consonants while its speech estimate
+	// rises from a quiet background. Detect that edge on the already delayed dry
+	// frame, which is aligned to the output being mixed in this callback. This
+	// adds no look-ahead or latency and keeps the normal profile mix after the
+	// bounded attack window. A quiet-room release guard similarly preserves low-
+	// energy word endings that the model would otherwise erase.
+	double energy = 0.0;
+	for (const float sample : m_alignedDryFrame) {
+		energy += static_cast< double >(sample) * static_cast< double >(sample);
+	}
+	const float rms = static_cast< float >(std::sqrt(energy / static_cast< double >(frameSamples)));
+
+	constexpr float absoluteNoiseFloorRms = 0.0000316227766f; // -90 dBFS
+	constexpr float onsetToFloorRatio      = 2.0f;
+	constexpr float releaseToFloorRatio    = 1.5f;
+	constexpr unsigned int baselineFramesRequired = 3;
+	constexpr unsigned int releaseFramesRequired  = 5;
+	constexpr float releaseToSpeechPeakRatio = 0.25f;
+	constexpr float quietRoomToSpeechPeakRatio = 0.10f;
+	constexpr std::array< float, deepFilterOnsetProtectionFrames > onsetMixCaps = {
+		0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f
+	};
+
+	const float learnedFloor = m_deepFilterNoiseFloorRms > 0.0f ? m_deepFilterNoiseFloorRms
+														  : absoluteNoiseFloorRms;
+	const float onsetThreshold = std::max(absoluteNoiseFloorRms, learnedFloor * onsetToFloorRatio);
+	const float releaseThreshold = std::max(absoluteNoiseFloorRms, learnedFloor * releaseToFloorRatio);
+	bool protectRelease = false;
+
+	if (!m_deepFilterSpeechActive) {
+		if (m_deepFilterBaselineFrames >= baselineFramesRequired && rms > onsetThreshold) {
+			m_deepFilterSpeechActive         = true;
+			m_deepFilterSpeechPeakRms        = rms;
+			m_deepFilterBelowReleaseFrames   = 0;
+			m_deepFilterOnsetProtectionFrame = 0;
+		} else {
+			// Before the first edge, learn the current stable room floor quickly.
+			// Once armed, only follow values that still look like background so a
+			// rising phoneme cannot move the threshold out of its own way.
+			if (m_deepFilterBaselineFrames == 0) {
+				m_deepFilterNoiseFloorRms = rms;
+			} else if (rms <= onsetThreshold) {
+				m_deepFilterNoiseFloorRms = (m_deepFilterNoiseFloorRms * 0.9f) + (rms * 0.1f);
+			}
+			if (m_deepFilterBaselineFrames < baselineFramesRequired) {
+				++m_deepFilterBaselineFrames;
+			}
+		}
+	} else {
+		m_deepFilterSpeechPeakRms = std::max(m_deepFilterSpeechPeakRms, rms);
+		const float lowEnergyThreshold = std::max(releaseThreshold,
+			m_deepFilterSpeechPeakRms * releaseToSpeechPeakRatio);
+		const bool quietRoom = learnedFloor <= std::max(absoluteNoiseFloorRms,
+			m_deepFilterSpeechPeakRms * quietRoomToSpeechPeakRatio);
+		protectRelease = quietRoom && rms <= lowEnergyThreshold;
+		if (rms <= releaseThreshold) {
+			++m_deepFilterBelowReleaseFrames;
+			if (m_deepFilterBelowReleaseFrames >= releaseFramesRequired) {
+				m_deepFilterSpeechActive         = false;
+				m_deepFilterSpeechPeakRms        = 0.0f;
+				m_deepFilterBaselineFrames       = 0;
+				m_deepFilterBelowReleaseFrames   = 0;
+				m_deepFilterOnsetProtectionFrame = deepFilterOnsetProtectionFrames;
+				m_deepFilterNoiseFloorRms         = rms;
+			}
+		} else {
+			m_deepFilterBelowReleaseFrames = 0;
+		}
+	}
+
+	if (m_deepFilterOnsetProtectionFrame < deepFilterOnsetProtectionFrames) {
+		const float protectedMix = std::min(boundedMixFactor, onsetMixCaps[m_deepFilterOnsetProtectionFrame]);
+		++m_deepFilterOnsetProtectionFrame;
+		return protectedMix;
+	}
+	if (protectRelease) {
+		return 0.0f;
+	}
+	return boundedMixFactor;
 }
 
 bool Pipeline::processFrame(std::array< float, frameSamples > &samples) noexcept {

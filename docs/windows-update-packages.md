@@ -22,10 +22,14 @@ clients. Newer clients also understand `manifestVersion: 2`, structured
 `installer` and `package` entries, and `preferredUpdate`.
 
 Current releases use `preferredUpdate: "package"`. Package-capable clients
-download and verify the package first; when installer metadata is available,
-they also prepare the MSI as the fallback that `mumble-updater.exe` can run if
-the package updater reports failure. Older clients ignore the package fields and
-continue to use the MSI through the preserved top-level fields.
+download and verify the package first. Updater protocol v4 additionally
+requires a signed channel-pointer-v2 recovery set: the candidate MSI and two
+previous immutable MSI assets, each with an exact size and SHA-256. The
+candidate also carries the SHA-256 of the exact signed `mumble.exe` extracted
+from its MSI payload verification. The client
+selects the installed build when it is present in that set, otherwise the
+newest verified recovery MSI. Older clients ignore the additive package fields
+and continue to use the MSI through the preserved top-level fields.
 
 `mumble-updater.exe` supports both `--installer <msi>` and
 `--package <mumble-update>`. Package mode now has a native prepare/commit split.
@@ -39,7 +43,14 @@ and restarts `mumble.exe`. If the app directory is not writable, the copied
 updater relaunches itself with `runas`. When package mode was launched with a
 verified `--installer` fallback, package failure runs the MSI fallback; user
 cancellation is kept distinct from failure and does not trigger the MSI
-fallback.
+fallback. A protocol-v4 MSI handoff also supplies `--recovery-installer` and
+its mandatory digest plus `--candidate-executable-sha256`. The updater persists that MSI outside the installed
+payload before changing the machine and commits only after the restarted
+client publishes its ten-second health marker.
+
+The updater is self-contained. It links a private `/MT` zlib 1.3.1 target and
+the build runs `dumpbin /dependents`; importing `zlib1.dll` is a hard failure.
+The copied recovery updater therefore needs no sidecar zlib DLL.
 
 ## Goals
 
@@ -103,7 +114,7 @@ Example:
     "url": "https://github.com/dankmaster/mumble/releases/download/mumble-forked/mumble-forked-1.7.123.mumble-update",
     "sha256": "<package-sha256>",
     "size": 123456789,
-    "minUpdaterVersion": 2,
+    "minUpdaterVersion": 4,
     "applyMode": "replace-staged-payload",
     "requiresElevation": "auto"
   },
@@ -121,6 +132,24 @@ Compatibility rules:
   platform, trust, and package fields before choosing package mode.
 - A future signed manifest can wrap the same fields without changing the basic
   package decision logic.
+
+For input-enhancement community releases, the signed channel pointer is that
+wrapper. Schema v2 has a fail-closed recovery contract:
+
+- `installer` identifies the candidate MSI and exact signed `mumble.exe` hash
+  from the immutable candidate tag;
+- `recoveryInstallers` contains exactly two distinct earlier immutable MSIs;
+- `knownGoodTags` contains the candidate followed by those two recovery tags
+  in the same order;
+- every URL must be a GitHub release asset in the same repository and must
+  match its declared tag and file name;
+- package selection normalizes `minUpdaterVersion` to 4. A v4 package without
+  the complete recovery set is not installable and is not silently downgraded.
+
+The first schema-v2 publication can bootstrap from a signed schema-v1 pointer
+only by supplying an explicit schema-v1 bootstrap file with exactly two
+records (`immutableTag`, `fileName`, `size`, `sha256`). Missing, duplicate or
+extra metadata fails closed; an incomplete schema-v2 pointer is never emitted.
 
 ## Package Artifact
 
@@ -163,7 +192,7 @@ Internal `manifest.json` example:
   "version": "1.7.123",
   "build": 123,
   "commit": "0123456789abcdef0123456789abcdef01234567",
-  "minUpdaterVersion": 2,
+  "minUpdaterVersion": 4,
   "applyMode": "replace-staged-payload",
   "createdAt": "2026-05-31T00:00:00.0000000Z",
   "files": [
@@ -186,11 +215,12 @@ New client behavior:
 1. Fetch and normalize `mumble-forked-update.json`.
 2. If `package` is present, trusted, supported by this client, and has a valid
    SHA-256, choose package mode.
-3. If package mode is selected and the MSI metadata is valid, download and
-   verify the MSI as the package-failure fallback before handoff.
-4. Otherwise use the existing MSI mode if `installerUrl` and top-level `sha256`
-   are valid.
-5. Otherwise show the release URL as a manual fallback.
+3. For a v4 package, require channel-pointer schema v2 with the exact candidate
+   MSI and exactly two previous recovery MSIs.
+4. Download and verify the candidate MSI plus the selected known-good MSI
+   before handoff. Neither may be substituted after verification.
+5. Otherwise use the existing MSI mode only for a legacy manifest.
+6. Otherwise show the release URL as a manual fallback.
 
 The Modern shell banner should not need a second UX model. It can keep the same
 states and actions:
@@ -231,16 +261,28 @@ Current package-mode flow:
 8. Create backups only for files that will be replaced.
 9. Copy changed staged payload files into the app directory.
 10. Verify copied file sizes and record the installed manifest.
-11. Restart `mumble.exe`.
-12. Leave logs and rollback data in the update directory.
+11. Restart `mumble.exe` and wait for update-health schema v3. The marker binds
+    updater protocol v4, transaction ID, package identity, the actual running
+    executable SHA-256, app path, settings
+    load, manifest verification, audio initialization and at least ten seconds
+    of stable runtime.
+12. Commit only after a valid marker. Crash, process kill, failed audio init,
+    unreadable journal, timeout or reboot resumes the durable recovery path.
+13. Native packages restore their verified file snapshot. MSI transactions
+    reinstall the already-downloaded, verified known-good MSI and never accept
+    a mixed payload as success.
 
-For the first version, rollback can be conservative:
-
-- Before copying a changed file, move or copy the previous file into a timestamp
-  backup directory.
-- If the copy phase fails, restore files from that backup.
-- If restart fails, leave the backup and logs for diagnostics instead of trying
-  to infer app health.
+The pending journal records whether the transaction is `native-package` or
+`windows-installer`, the expected candidate executable SHA-256, the recovery
+MSI path/size/hash, the Windows kernel boot-session identity, and the 3010
+reboot flag. A candidate 3010 can never enter health probation; it fails closed
+into known-good recovery. A successful recovery in the same boot remains
+non-terminal because deferred candidate operations can still win at restart.
+If recovery itself returns 3010, the journal is rebound to that boot session;
+the journal and startup recovery stay armed until a later, different boot
+session verifies a terminal exact-known-good state.
+Its persistent per-user recovery trigger is removed only after a terminal
+committed or rolled-back state is durably written.
 
 ## Install Location Strategy
 
@@ -383,7 +425,7 @@ Acceptance checks:
 
 ### Phase 3: Updater Package Mode
 
-Status: implemented with MSI fallback.
+Status: implemented with protocol-v4 MSI health qualification and recovery.
 
 - Add `--package` mode to `mumble-updater.exe`.
 - Add archive extraction and internal manifest verification.
@@ -393,13 +435,16 @@ Status: implemented with MSI fallback.
 - If package apply fails and a verified MSI fallback was supplied, run the MSI.
 - Treat cancellation exit codes separately from failure and do not launch the
   fallback MSI after cancellation.
+- Persist and verify a known-good MSI before candidate installation, including
+  recovery across health timeout, process termination, reboot and exit 3010.
 
 Acceptance checks:
 
 - Package update works when the app directory is writable.
 - Package update prompts for elevation when required.
 - Failed extraction, failed hash validation, and failed copy leave clear logs.
-- Existing `--installer` MSI mode still works.
+- Legacy `--installer` mode still works; v4 `--installer` plus
+  `--recovery-installer` is health-qualified and rollback-capable.
 - Cancelled elevation or installer flows are reported as cancelled, not failed.
 
 ### Phase 4: Local And Automated Verification
@@ -415,14 +460,15 @@ Status: active hardening area.
 Acceptance checks:
 
 - CI fails if the package is missing `mumble.exe`, `mumble-updater.exe`,
-  `zlib1.dll` for the copied updater, Qt runtime files, or optional runtime
-  files expected by the staged payload.
+  Qt runtime files, or optional runtime files expected by the staged payload.
+- CI fails if `mumble-updater.exe` imports `zlib1.dll`.
 - Local dev update can apply a package to an isolated writable app directory.
 - Package and MSI paths both remain visible in automation diagnostics.
 
 ### Phase 5: Signing And Versioned Layout
 
-Status: future work.
+Status: Azure/Authenticode intentionally deferred until the same unsigned
+candidate passes protected quality, release rehearsal, recovery and dogfood.
 
 - Add code signing for MSI, updater, and package assets when certificates are
   available.

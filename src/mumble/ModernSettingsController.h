@@ -71,7 +71,10 @@ private:
 		m_inputEnhancementCalibrationWorker;
 	std::optional< Mumble::InputEnhancement::DefaultPreference >
 		m_inputEnhancementCalibrationControls;
+	std::optional< Mumble::InputEnhancement::DefaultPreference >
+		m_inputEnhancementPreAutoPreference;
 	QString m_inputEnhancementCalibrationUiError;
+	QString m_inputEnhancementReadinessUiError;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;

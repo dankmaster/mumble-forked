@@ -59,9 +59,47 @@ bool updateCancelled(const DWORD exitCode) {
 	return exitCode == ERROR_CANCELLED || exitCode == InstallerUserExit;
 }
 
+std::string currentBootSessionIdentity() {
+	// SystemBootEnvironmentInformation exposes the per-boot GUID used by the
+	// Windows kernel. Resolve NtQuerySystemInformation dynamically so the updater
+	// remains self-contained and can fail closed when the information is absent.
+	struct BootEnvironmentInformation {
+		GUID bootIdentifier;
+		ULONG firmwareType;
+		ULONGLONG bootFlags;
+	};
+	using QuerySystemInformation = LONG(WINAPI *)(ULONG, PVOID, ULONG, PULONG);
+	constexpr ULONG SystemBootEnvironmentInformation = 90;
+
+	const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+	const auto query = ntdll ? reinterpret_cast< QuerySystemInformation >(
+								 GetProcAddress(ntdll, "NtQuerySystemInformation"))
+						 : nullptr;
+	if (!query) {
+		return {};
+	}
+	BootEnvironmentInformation information{};
+	ULONG returnedLength = 0;
+	const LONG status = query(SystemBootEnvironmentInformation, &information,
+							  static_cast< ULONG >(sizeof(information)), &returnedLength);
+	if (status < 0 || returnedLength < sizeof(GUID)) {
+		return {};
+	}
+
+	const GUID &id = information.bootIdentifier;
+	std::ostringstream stream;
+	stream << std::hex << std::nouppercase << std::setfill('0')
+		   << std::setw(8) << id.Data1 << std::setw(4) << id.Data2 << std::setw(4) << id.Data3;
+	for (const unsigned char byte : id.Data4) {
+		stream << std::setw(2) << static_cast< unsigned int >(byte);
+	}
+	return stream.str();
+}
+
 struct Options {
 	DWORD parentPid = 0;
 	std::wstring installerPath;
+	std::wstring recoveryInstallerPath;
 	std::wstring packagePath;
 	std::wstring appPath;
 	std::wstring workingDirectory;
@@ -70,6 +108,8 @@ struct Options {
 	std::wstring uiTheme;
 	std::wstring packageSha256;
 	std::wstring installerSha256;
+	std::wstring recoveryInstallerSha256;
+	std::wstring candidateExecutableSha256;
 	bool passive       = true;
 	bool noRelaunch    = false;
 	bool noUi          = false;
@@ -83,6 +123,11 @@ struct Options {
 };
 
 std::wstring recoveryUpdaterArguments(const Options &options);
+
+bool rollbackPendingWindowsInstaller(const Options &options,
+									 Mumble::UpdateHealth::PendingUpdate pending);
+bool rollbackPendingUpdate(const Options &options);
+std::optional< Mumble::UpdateHealth::PendingUpdate > armWindowsInstallerHealth(const Options &options);
 
 void postUiStatus(const std::wstring &message);
 void postUiProgress(int percent, bool indeterminate);
@@ -219,6 +264,8 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.parentPid = static_cast< DWORD >(std::wcstoul(nextValue().c_str(), nullptr, 10));
 		} else if (arg == L"--installer") {
 			options.installerPath = nextValue();
+		} else if (arg == L"--recovery-installer") {
+			options.recoveryInstallerPath = nextValue();
 		} else if (arg == L"--package") {
 			options.packagePath = nextValue();
 		} else if (arg == L"--app") {
@@ -235,6 +282,10 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.packageSha256 = nextValue();
 		} else if (arg == L"--installer-sha256") {
 			options.installerSha256 = nextValue();
+		} else if (arg == L"--recovery-installer-sha256") {
+			options.recoveryInstallerSha256 = nextValue();
+		} else if (arg == L"--candidate-executable-sha256") {
+			options.candidateExecutableSha256 = nextValue();
 		} else if (arg == L"--passive") {
 			options.passive = true;
 		} else if (arg == L"--no-passive") {
@@ -260,16 +311,34 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 
 	const bool hasInstaller = fileExists(options.installerPath);
 	const bool hasPackage   = fileExists(options.packagePath);
+	const bool hasRecoveryInstaller = fileExists(options.recoveryInstallerPath);
 	if (!hasInstaller) {
 		options.installerPath.clear();
 	}
 	if (!hasPackage) {
 		options.packagePath.clear();
 	}
+	if (!hasRecoveryInstaller) {
+		options.recoveryInstallerPath.clear();
+	}
 	if (hasPackage && !normalizeSha256Argument(options.packageSha256)) {
 		return false;
 	}
 	if (hasInstaller && !normalizeSha256Argument(options.installerSha256)) {
+		return false;
+	}
+	if (hasRecoveryInstaller && !normalizeSha256Argument(options.recoveryInstallerSha256)) {
+		return false;
+	}
+	if (!options.candidateExecutableSha256.empty()
+		&& !normalizeSha256Argument(options.candidateExecutableSha256)) {
+		return false;
+	}
+	if (hasRecoveryInstaller != !options.recoveryInstallerSha256.empty()) {
+		return false;
+	}
+	if (!options.recoverOnly && hasInstaller && hasRecoveryInstaller
+		&& options.candidateExecutableSha256.empty()) {
 		return false;
 	}
 	return !options.appPath.empty()
@@ -535,7 +604,7 @@ try {
 		throw "Unsupported update package apply mode: $($manifest.applyMode)"
 	}
 	$minUpdaterVersion = [int] $manifest.minUpdaterVersion
-	if ($minUpdaterVersion -gt 3) {
+	if ($minUpdaterVersion -gt 4) {
 		throw "Update package requires updater version $minUpdaterVersion."
 	}
 
@@ -1172,11 +1241,6 @@ bool armRecoveryBootstrap(const Options &options) {
 	if (!ensureDurableRecoveryFile(source, target)) {
 		return false;
 	}
-	const std::filesystem::path zlibSource = source.parent_path() / L"zlib1.dll";
-	const std::filesystem::path zlibTarget = target.parent_path() / L"zlib1.dll";
-	if (!ensureDurableRecoveryFile(zlibSource, zlibTarget)) {
-		return false;
-	}
 	return setRecoveryRunOnce(options, target);
 }
 
@@ -1486,6 +1550,7 @@ struct PackagePlan {
 	std::vector< PackageFile > changedFiles;
 	std::vector< PackageFile > staleFiles;
 	std::string previousPackageIdentity;
+	std::string expectedExecutableSha256;
 	bool healthCheckRequired                       = false;
 	std::uint64_t minimumStableRuntimeMilliseconds = Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds;
 	std::uint64_t healthTimeoutMilliseconds        = Mumble::UpdateHealth::DefaultHealthTimeoutMilliseconds;
@@ -1560,18 +1625,39 @@ std::vector< PackageFile > parsePackageManifest(const std::string &manifestText,
 	if (manifest.value("applyMode", "") != "replace-staged-payload") {
 		throw std::runtime_error("Unsupported update package apply mode.");
 	}
-	const int minUpdaterVersion = manifest.value("minUpdaterVersion", -1);
-	if (minUpdaterVersion > 3) {
-		throw std::runtime_error("Update package requires a newer updater.");
+	const auto updaterVersionIt = manifest.find("minUpdaterVersion");
+	if (updaterVersionIt == manifest.end() || !updaterVersionIt->is_number_integer()
+		|| updaterVersionIt->get< std::int64_t >()
+			   != static_cast< std::int64_t >(Mumble::UpdateHealth::UpdaterProtocolVersion)) {
+		throw std::runtime_error("Update package does not require this exact updater protocol.");
 	}
-	const json healthCheck                = manifest.value("healthCheck", json::object());
-	plan.healthCheckRequired              = healthCheck.value("required", false);
-	plan.minimumStableRuntimeMilliseconds = std::max< std::uint64_t >(
-		Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds,
-		healthCheck.value("minimumStableRuntimeMilliseconds", Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds));
-	plan.healthTimeoutMilliseconds =
-		std::max(plan.minimumStableRuntimeMilliseconds,
-				 healthCheck.value("timeoutMilliseconds", Mumble::UpdateHealth::DefaultHealthTimeoutMilliseconds));
+
+	const auto healthCheckIt = manifest.find("healthCheck");
+	if (healthCheckIt == manifest.end() || !healthCheckIt->is_object()) {
+		throw std::runtime_error("Update package is missing the mandatory health-check contract.");
+	}
+	const json &healthCheck = *healthCheckIt;
+	if (healthCheck.size() != 3 || !healthCheck.contains("required")
+		|| !healthCheck.contains("minimumStableRuntimeMilliseconds")
+		|| !healthCheck.contains("timeoutMilliseconds") || !healthCheck.at("required").is_boolean()
+		|| !healthCheck.at("required").get< bool >()
+		|| !healthCheck.at("minimumStableRuntimeMilliseconds").is_number_integer()
+		|| !healthCheck.at("timeoutMilliseconds").is_number_integer()) {
+		throw std::runtime_error("Update package health-check contract is invalid.");
+	}
+	const std::int64_t minimumStableRuntimeMilliseconds =
+		healthCheck.at("minimumStableRuntimeMilliseconds").get< std::int64_t >();
+	const std::int64_t healthTimeoutMilliseconds =
+		healthCheck.at("timeoutMilliseconds").get< std::int64_t >();
+	if (minimumStableRuntimeMilliseconds
+			!= static_cast< std::int64_t >(Mumble::UpdateHealth::MinimumStableRuntimeMilliseconds)
+		|| healthTimeoutMilliseconds
+			   != static_cast< std::int64_t >(Mumble::UpdateHealth::DefaultHealthTimeoutMilliseconds)) {
+		throw std::runtime_error("Update package health-check timing does not match the protocol-v4 contract.");
+	}
+	plan.healthCheckRequired              = true;
+	plan.minimumStableRuntimeMilliseconds = static_cast< std::uint64_t >(minimumStableRuntimeMilliseconds);
+	plan.healthTimeoutMilliseconds        = static_cast< std::uint64_t >(healthTimeoutMilliseconds);
 
 	std::vector< PackageFile > files;
 	std::unordered_set< std::string > uniquePaths;
@@ -1590,7 +1676,10 @@ std::vector< PackageFile > parsePackageManifest(const std::string &manifestText,
 		if (!isSafePackageRelativePath(file.path) || !validHash || !uniquePaths.insert(file.path).second) {
 			throw std::runtime_error("Update package manifest contains an invalid file entry.");
 		}
-		hasMumble  = hasMumble || file.path == "mumble.exe";
+		if (file.path == "mumble.exe") {
+			hasMumble                    = true;
+			plan.expectedExecutableSha256 = file.sha256;
+		}
 		hasUpdater = hasUpdater || file.path == "mumble-updater.exe";
 		files.push_back(std::move(file));
 	}
@@ -2080,6 +2169,7 @@ DWORD commitNativePackageUpdate(const Options &options) {
 		pending.state                            = Mumble::UpdateHealth::TransactionState::RollbackArmed;
 		pending.packageIdentity                  = plan.packageIdentity;
 		pending.previousPackageIdentity          = plan.previousPackageIdentity;
+		pending.expectedExecutableSha256         = plan.expectedExecutableSha256;
 		pending.appPath                          = plan.appPath;
 		pending.backupRoot                       = backupRoot;
 		pending.previousInstalledManifestExisted = previousManifestExisted;
@@ -2389,8 +2479,8 @@ RelaunchResult relaunchMumble(const Options &options) {
 	return result;
 }
 
-bool waitForPackageHealth(const Options &options, HANDLE process, Mumble::UpdateHealth::PendingUpdate pending) {
-	const PackagePlan plan = makePackagePlan(options);
+bool waitForUpdateHealth(const Options &options, HANDLE process, Mumble::UpdateHealth::PendingUpdate pending) {
+	const std::filesystem::path updateRoot = packageWorkRoot(options);
 	std::string healthError;
 	if (!process) {
 		appendLog(options, L"Unable to monitor the restarted client; update health cannot be confirmed.");
@@ -2400,8 +2490,8 @@ bool waitForPackageHealth(const Options &options, HANDLE process, Mumble::Update
 	appendLog(options, L"Waiting for the restarted client to publish its stable audio health marker.");
 	const ULONGLONG deadline = GetTickCount64() + pending.healthTimeoutMilliseconds;
 	while (GetTickCount64() < deadline) {
-		if (Mumble::UpdateHealth::markerConfirmsHealthy(plan.updateRoot, pending, &healthError)) {
-			if (!persistTerminalTransaction(options, plan.updateRoot, pending,
+		if (Mumble::UpdateHealth::markerConfirmsHealthy(updateRoot, pending, &healthError)) {
+			if (!persistTerminalTransaction(options, updateRoot, pending,
 											Mumble::UpdateHealth::TransactionState::Committed, healthError)) {
 				appendLog(options, L"Unable to durably finalize the healthy transaction. " + wideFromUtf8(healthError));
 				return false;
@@ -2422,6 +2512,84 @@ bool waitForPackageHealth(const Options &options, HANDLE process, Mumble::Update
 
 	appendLog(options, L"Restarted client did not publish its health marker before the deadline.");
 	return false;
+}
+
+DWORD runHealthQualifiedInstaller(const Options &options) {
+	if (options.recoveryInstallerPath.empty()) {
+		// Legacy manifests did not carry a known-good MSI. Preserve that path for
+		// backward compatibility, but protocol-v4 channel pointers always supply
+		// and verify a recovery installer before reaching this function.
+		return runInstaller(options);
+	}
+	auto pending = armWindowsInstallerHealth(options);
+	if (!pending) {
+		return ERROR_RECOVERY_FAILURE;
+	}
+
+	const DWORD installerExitCode = runInstaller(options);
+	if (!updateSucceeded(installerExitCode)) {
+		appendLog(options, L"Candidate MSI failed; restoring the known-good MSI before returning.");
+		return rollbackPendingWindowsInstaller(options, *pending) ? installerExitCode : ERROR_RECOVERY_FAILURE;
+	}
+
+	if (installerExitCode == RestartRequired) {
+		// A 3010 result does not prove that the candidate executable is on disk;
+		// Windows may still be running the previous image until reboot. Never
+		// launch it into probation or allow it to publish the candidate marker.
+		pending->restartRequired = true;
+		std::string rebootStateError;
+		if (!Mumble::UpdateHealth::writePendingState(packageWorkRoot(options), *pending, &rebootStateError)) {
+			appendLog(options, L"Unable to persist reboot-required candidate state. "
+							   + wideFromUtf8(rebootStateError));
+		}
+		appendLog(options, L"Candidate MSI returned 3010; failing closed and restoring known-good MSI without probation.");
+		return rollbackPendingWindowsInstaller(options, *pending) ? RestartRequired : ERROR_RECOVERY_FAILURE;
+	}
+
+	pending->restartRequired = false;
+	pending->state           = Mumble::UpdateHealth::TransactionState::AwaitingHealth;
+	std::string healthError;
+	if (!Mumble::UpdateHealth::writePendingState(packageWorkRoot(options), *pending, &healthError)) {
+		appendLog(options, L"Unable to enter MSI health probation. " + wideFromUtf8(healthError));
+		return rollbackPendingWindowsInstaller(options, *pending) ? ERROR_RECOVERY_FAILURE : ERROR_INSTALL_FAILURE;
+	}
+	if (options.noRelaunch) {
+		appendLog(options, L"Protocol-v4 MSI health cannot succeed with --no-relaunch; restoring known-good MSI.");
+		return rollbackPendingWindowsInstaller(options, *pending) ? ERROR_PROCESS_ABORTED : ERROR_RECOVERY_FAILURE;
+	}
+
+	appendLog(options, L"Candidate MSI installed; starting the 10-second update-health probation.");
+	RelaunchResult restart = relaunchMumble(options);
+	if (!restart.launched) {
+		return rollbackPendingWindowsInstaller(options, *pending)
+				 ? (restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error)
+				 : ERROR_RECOVERY_FAILURE;
+	}
+	const bool healthy = waitForUpdateHealth(options, restart.process, *pending);
+	if (healthy) {
+		CloseHandle(restart.process);
+		return installerExitCode;
+	}
+
+	DWORD processExitCode = 0;
+	if (GetExitCodeProcess(restart.process, &processExitCode) && processExitCode == STILL_ACTIVE) {
+		appendLog(options, L"Stopping the unqualified MSI client before rollback.");
+		TerminateProcess(restart.process, ERROR_PROCESS_ABORTED);
+		WaitForSingleObject(restart.process, 5000);
+	}
+	CloseHandle(restart.process);
+	if (!rollbackPendingWindowsInstaller(options, *pending)) {
+		return ERROR_RECOVERY_FAILURE;
+	}
+	RelaunchResult restored = relaunchMumble(options);
+	if (restored.process) {
+		CloseHandle(restored.process);
+	}
+	if (!restored.launched) {
+		return restored.error == 0 ? ERROR_PROCESS_ABORTED : restored.error;
+	}
+	appendLog(options, L"Known-good MSI was restored and restarted after failed health qualification.");
+	return ERROR_PROCESS_ABORTED;
 }
 
 DWORD restartPackageAndQualify(const Options &options) {
@@ -2472,7 +2640,7 @@ DWORD restartPackageAndQualify(const Options &options) {
 		return 0;
 	}
 
-	const bool healthy = waitForPackageHealth(options, restart.process, *pending);
+	const bool healthy = waitForUpdateHealth(options, restart.process, *pending);
 	if (healthy) {
 		CloseHandle(restart.process);
 		return 0;
@@ -2597,13 +2765,14 @@ DWORD runPendingRecovery(const Options &options) {
 		}
 
 		const std::filesystem::path appDir = parentPath(options.appPath);
-		if (!directoryWritable(options, appDir)) {
+		if (pending->mode == Mumble::UpdateHealth::TransactionMode::NativePackage
+			&& !directoryWritable(options, appDir)) {
 			appendLog(options, L"Persistent native recovery cannot write this installation; use MSI repair.");
 			return ERROR_ACCESS_DENIED;
 		}
 
-		appendLog(options, L"The interrupted payload never qualified; rolling back from the durable journal.");
-		if (!rollbackPendingPackage(options)) {
+		appendLog(options, L"The interrupted update never qualified; rolling back from the durable journal.");
+		if (!rollbackPendingUpdate(options)) {
 			return ERROR_RECOVERY_FAILURE;
 		}
 		if (options.noRelaunch) {
@@ -3623,6 +3792,184 @@ void postUiProgress(const int percent, const bool indeterminate) {
 	}
 }
 
+bool rollbackPendingWindowsInstaller(const Options &options,
+									 Mumble::UpdateHealth::PendingUpdate pending) {
+	const std::filesystem::path updateRoot = packageWorkRoot(options);
+	std::string healthError;
+	const bool candidateRestartWasPending = pending.restartRequired;
+	const std::string activeBootSession    = currentBootSessionIdentity();
+	const bool crossedRebootBoundary = candidateRestartWasPending && !activeBootSession.empty()
+								   && activeBootSession != pending.bootSessionIdentity;
+	if (pending.mode != Mumble::UpdateHealth::TransactionMode::WindowsInstaller
+		|| !pendingOwnsExpectedBackupRoot(updateRoot, pending)) {
+		appendLog(options, L"Refusing Windows Installer rollback outside its transaction-owned snapshot.");
+		return false;
+	}
+	bool recoveryExists              = false;
+	const std::uint64_t recoverySize = fileSizeOrMissing(pending.recoveryInstallerPath, recoveryExists);
+	if (!recoveryExists || recoverySize != pending.recoveryInstallerSize
+		|| fileSha256(pending.recoveryInstallerPath) != pending.recoveryInstallerSha256) {
+		appendLog(options, L"Refusing Windows Installer rollback because the known-good MSI failed verification.");
+		return false;
+	}
+
+	Options recoveryOptions              = options;
+	recoveryOptions.installerPath        = pending.recoveryInstallerPath.wstring();
+	recoveryOptions.installerSha256      = wideFromUtf8(pending.recoveryInstallerSha256);
+	recoveryOptions.recoveryInstallerPath.clear();
+	recoveryOptions.recoveryInstallerSha256.clear();
+	recoveryOptions.candidateExecutableSha256.clear();
+	recoveryOptions.parentPid = 0;
+	recoveryOptions.passive   = true;
+	if (!recoveryOptions.msiLogPath.empty()) {
+		recoveryOptions.msiLogPath =
+			std::filesystem::path(recoveryOptions.msiLogPath).replace_filename(L"mumble-recovery-msi.log").wstring();
+	}
+	appendLog(options, L"Reinstalling the verified known-good MSI.");
+	const DWORD rollbackExitCode = runInstaller(recoveryOptions);
+	if (!updateSucceeded(rollbackExitCode)) {
+		appendLog(options, L"Known-good MSI reinstall failed with code " + std::to_wstring(rollbackExitCode) + L'.');
+		return false;
+	}
+	if (rollbackExitCode == RestartRequired
+		|| (candidateRestartWasPending && !crossedRebootBoundary)) {
+		// Never claim that recovery completed while Windows Installer still has
+		// deferred file operations. This also applies when the candidate returned
+		// 3010 but the recovery MSI returned 0 in the same boot: the candidate's
+		// deferred operations can still win at reboot. Only a persistent startup
+		// recovery invocation, after crossing that reboot boundary, may commit the
+		// successful rollback and clear the durable journal.
+		pending.state           = Mumble::UpdateHealth::TransactionState::RollbackArmed;
+		pending.restartRequired = true;
+		if (rollbackExitCode == RestartRequired && !activeBootSession.empty()) {
+			// Recovery itself scheduled deferred operations. Bind the journal to
+			// this boot so another genuine reboot is required before commit.
+			pending.bootSessionIdentity = activeBootSession;
+		}
+		if (!Mumble::UpdateHealth::writePendingState(updateRoot, pending, &healthError)) {
+			appendLog(options, L"Unable to persist reboot-required MSI recovery. " + wideFromUtf8(healthError));
+		}
+		appendLog(options, candidateRestartWasPending && rollbackExitCode != RestartRequired
+							   ? L"Known-good MSI was restored, but the candidate's reboot boundary is still pending; "
+								 L"recovery remains armed and uncommitted."
+							   : L"Known-good MSI recovery requires reboot; recovery remains armed and uncommitted.");
+		return false;
+	}
+	pending.restartRequired = false;
+	if (!persistTerminalTransaction(options, updateRoot, pending,
+									Mumble::UpdateHealth::TransactionState::RolledBack, healthError)) {
+		appendLog(options, L"Unable to finalize Windows Installer rollback. " + wideFromUtf8(healthError));
+		return false;
+	}
+	appendLog(options, L"Verified known-good MSI was restored.");
+	return true;
+}
+
+bool rollbackPendingUpdate(const Options &options) {
+	std::string healthError;
+	auto pending = Mumble::UpdateHealth::readPendingState(packageWorkRoot(options),
+															 std::filesystem::path(options.appPath), &healthError);
+	if (!pending) {
+		appendLog(options, L"No valid pending update rollback was available. " + wideFromUtf8(healthError));
+		return false;
+	}
+	if (pending->mode == Mumble::UpdateHealth::TransactionMode::WindowsInstaller) {
+		return rollbackPendingWindowsInstaller(options, *pending);
+	}
+	return rollbackPendingPackage(options);
+}
+
+std::optional< Mumble::UpdateHealth::PendingUpdate > armWindowsInstallerHealth(const Options &options) {
+	if (options.recoveryInstallerPath.empty() || options.recoveryInstallerSha256.empty()
+		|| options.candidateExecutableSha256.empty()) {
+		return std::nullopt;
+	}
+	const std::filesystem::path updateRoot = packageWorkRoot(options);
+	const std::filesystem::path appPath(options.appPath);
+	std::string healthError;
+	const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(updateRoot, appPath);
+	std::error_code stateError;
+	const bool stateExists = std::filesystem::exists(statePath, stateError);
+	auto previous = Mumble::UpdateHealth::readPendingState(updateRoot, appPath, &healthError);
+	if (!previous && (stateExists || stateError)) {
+		appendLog(options, L"Refusing MSI update because its existing recovery journal is unreadable. "
+						   + wideFromUtf8(healthError));
+		return std::nullopt;
+	}
+	if (previous) {
+		if (previous->state == Mumble::UpdateHealth::TransactionState::Committed
+			|| previous->state == Mumble::UpdateHealth::TransactionState::RolledBack) {
+			if (!persistTerminalTransaction(options, updateRoot, *previous, previous->state, healthError)) {
+				return std::nullopt;
+			}
+		} else if (Mumble::UpdateHealth::markerConfirmsHealthy(updateRoot, *previous, &healthError)) {
+			if (!persistTerminalTransaction(options, updateRoot, *previous,
+											Mumble::UpdateHealth::TransactionState::Committed, healthError)) {
+				return std::nullopt;
+			}
+		} else if (!rollbackPendingUpdate(options)) {
+			return std::nullopt;
+		}
+	}
+
+	Mumble::UpdateHealth::PendingUpdate pending;
+	pending.mode                    = Mumble::UpdateHealth::TransactionMode::WindowsInstaller;
+	pending.transactionId           = newTransactionId();
+	pending.state                   = Mumble::UpdateHealth::TransactionState::RollbackArmed;
+	pending.packageIdentity         = lowerSha256(options.installerSha256);
+	pending.previousPackageIdentity = lowerSha256(options.recoveryInstallerSha256);
+	pending.expectedExecutableSha256 = lowerSha256(options.candidateExecutableSha256);
+	pending.appPath                 = appPath;
+	pending.bootSessionIdentity     = currentBootSessionIdentity();
+	if (pending.bootSessionIdentity.empty()) {
+		appendLog(options, L"Unable to obtain the Windows boot-session identity; refusing MSI protocol-v4 admission.");
+		return std::nullopt;
+	}
+	try {
+		pending.backupRoot = resolvePackagePathUnderRoot(
+			updateRoot, "known-good/" + Mumble::UpdateHealth::installationKey(appPath.parent_path())
+						+ "/transaction-" + pending.transactionId);
+		pending.recoveryInstallerPath =
+			resolvePackagePathUnderRoot(pending.backupRoot, "known-good-recovery.msi");
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Unable to create MSI recovery snapshot path. " + wideFromUtf8(exception.what()));
+		return std::nullopt;
+	}
+
+	std::error_code filesystemError;
+	std::filesystem::create_directories(pending.backupRoot, filesystemError);
+	if (filesystemError || !pendingOwnsExpectedBackupRoot(updateRoot, pending)
+		|| !ensureDurableRecoveryFile(std::filesystem::path(options.recoveryInstallerPath),
+									 pending.recoveryInstallerPath)) {
+		appendLog(options, L"Unable to persist the known-good MSI before candidate installation.");
+		std::filesystem::remove_all(pending.backupRoot, filesystemError);
+		return std::nullopt;
+	}
+	bool recoveryExists              = false;
+	pending.recoveryInstallerSize    = fileSizeOrMissing(pending.recoveryInstallerPath, recoveryExists);
+	pending.recoveryInstallerSha256  = fileSha256(pending.recoveryInstallerPath);
+	if (!recoveryExists || pending.recoveryInstallerSize == 0
+		|| pending.recoveryInstallerSha256 != lowerSha256(options.recoveryInstallerSha256)) {
+		appendLog(options, L"Persisted known-good MSI failed its mandatory SHA256 check.");
+		std::filesystem::remove_all(pending.backupRoot, filesystemError);
+		return std::nullopt;
+	}
+	if (!Mumble::UpdateHealth::writePendingState(updateRoot, pending, &healthError)) {
+		appendLog(options, L"Unable to arm MSI update-health state. " + wideFromUtf8(healthError));
+		std::filesystem::remove_all(pending.backupRoot, filesystemError);
+		return std::nullopt;
+	}
+	if (!armRecoveryBootstrap(options) || !launchRecoveryWatchdog(options)) {
+		appendLog(options, L"Unable to start persistent MSI recovery before installation.");
+		Mumble::UpdateHealth::removePendingState(updateRoot, appPath, &healthError);
+		clearRecoveryRunOnce(options);
+		std::filesystem::remove_all(pending.backupRoot, filesystemError);
+		return std::nullopt;
+	}
+	appendLog(options, L"Verified the known-good MSI and durably armed updater protocol v4 recovery.");
+	return pending;
+}
+
 bool installerFallbackHasNoPendingNativeTransaction(const Options &options) {
 	const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(
 		packageWorkRoot(options), std::filesystem::path(options.appPath));
@@ -3639,6 +3986,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 	std::unique_ptr< InstallationMutex > installationMutex;
 	std::unique_ptr< VerifiedArtifactFile > verifiedPackage;
 	std::unique_ptr< VerifiedArtifactFile > verifiedInstaller;
+	std::unique_ptr< VerifiedArtifactFile > verifiedRecoveryInstaller;
 	if (options.recoverOnly || packageMode || !options.installerPath.empty()) {
 		try {
 			installationMutex = std::make_unique< InstallationMutex >(std::filesystem::path(options.appPath));
@@ -3668,6 +4016,12 @@ DWORD runUpdate(const Options &requestedOptions) {
 					std::filesystem::path(options.installerPath), lowerSha256(options.installerSha256), "MSI installer");
 				options.installerPath = verifiedInstaller->finalPath().wstring();
 			}
+			if (!options.recoveryInstallerPath.empty()) {
+				verifiedRecoveryInstaller = std::make_unique< VerifiedArtifactFile >(
+					std::filesystem::path(options.recoveryInstallerPath),
+					lowerSha256(options.recoveryInstallerSha256), "known-good MSI installer");
+				options.recoveryInstallerPath = verifiedRecoveryInstaller->finalPath().wstring();
+			}
 		} catch (const std::exception &exception) {
 			appendLog(options, L"Updater transaction admission failed. " + wideFromUtf8(exception.what()));
 			return ERROR_LOCK_FAILED;
@@ -3689,7 +4043,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 	waitForParent(options);
 
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
-	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runInstaller(options);
+	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runHealthQualifiedInstaller(options);
 	bool installerRan    = !packageMode;
 
 	if (packageMode && !updateSucceeded(updateExitCode) && !updateCancelled(updateExitCode)
@@ -3697,7 +4051,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 		appendLog(options, L"Package update failed with code " + std::to_wstring(updateExitCode)
 							   + L"; running verified MSI fallback.");
 		postUiProgress(-1, true);
-		updateExitCode = runInstaller(options);
+		updateExitCode = runHealthQualifiedInstaller(options);
 		installerRan   = true;
 	} else if (packageMode && updateCancelled(updateExitCode)) {
 		appendLog(options, L"Package update was cancelled; MSI fallback will not run.");
@@ -3723,7 +4077,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 		}
 	}
 
-	if (installerRan && !options.noRelaunch && updateSucceeded(updateExitCode)) {
+	if (installerRan && options.recoveryInstallerPath.empty() && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Windows Installer completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);

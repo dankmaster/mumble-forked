@@ -22,7 +22,7 @@
 namespace {
 using namespace Mumble::InputEnhancement;
 
-constexpr auto testCatalogRevision = "input-recipes-v1";
+constexpr auto testCatalogRevision = "input-recipes-v2";
 
 DefaultPreference preference(Profile profile, int reduction = 30, int character = 50) {
 	DefaultPreference result;
@@ -79,7 +79,9 @@ private slots:
 	void newInstallDefaultsToOriginal();
 	void migratesLegacyTuple_data();
 	void migratesLegacyTuple();
-	void roundTripsSchemaV2();
+	void roundTripsSchemaV3();
+	void autoRecipeSetFingerprintRoundTripsAndFailsClosed();
+	void migratesSchemaV2CrispAlias();
 	void corruptOrUnknownSchemaUsesSafeOriginal();
 	void rejectsCorruptLegacyOverridesAndSafelyBoundsMigration();
 	void deviceKeyExcludesDisplayName();
@@ -93,6 +95,7 @@ private slots:
 	void pendingWithoutLastKnownGoodFailsSafeOnParseAndSelection();
 	void rejectsMalformedRecipeBindings();
 	void exactRecipeBindingDetectsCatalogRecipeAndModelDrift();
+	void unmanagedBuildZeroNeuralBindingRemainsHashBound();
 	void abnormalExitRollsBackPendingValidation();
 	void abnormalExitWithoutExactLastKnownGoodUsesOriginal();
 	void abnormalExitRollbackIsDurablyPersisted();
@@ -121,11 +124,11 @@ void TestInputEnhancementSettings::migratesLegacyTuple_data() {
 	QTest::newRow("rnnoise") << QStringLiteral("RNN") << QStringLiteral("RNNoise")
 							 << static_cast< int >(Mumble::InputEnhancement::Profile::Balanced);
 	QTest::newRow("dtln") << QStringLiteral("RNN") << QStringLiteral("DTLN")
-						  << static_cast< int >(Mumble::InputEnhancement::Profile::Crisp);
+						  << static_cast< int >(Mumble::InputEnhancement::Profile::Quality);
 	QTest::newRow("deepfilter") << QStringLiteral("RNN") << QStringLiteral("DeepFilterNet")
-								<< static_cast< int >(Mumble::InputEnhancement::Profile::Crisp);
+								<< static_cast< int >(Mumble::InputEnhancement::Profile::Quality);
 	QTest::newRow("combined") << QStringLiteral("Speex&RNN") << QStringLiteral("RNNoise")
-							  << static_cast< int >(Mumble::InputEnhancement::Profile::Crisp);
+							  << static_cast< int >(Mumble::InputEnhancement::Profile::Quality);
 }
 
 void TestInputEnhancementSettings::migratesLegacyTuple() {
@@ -157,9 +160,9 @@ void TestInputEnhancementSettings::migratesLegacyTuple() {
 	QCOMPARE(captured.speexNoiseCancelStrength, -73);
 }
 
-void TestInputEnhancementSettings::roundTripsSchemaV2() {
+void TestInputEnhancementSettings::roundTripsSchemaV3() {
 	::Settings original;
-	original.inputEnhancement.defaultPreference.profile   = Mumble::InputEnhancement::Profile::Crisp;
+	original.inputEnhancement.defaultPreference.profile   = Mumble::InputEnhancement::Profile::Quality;
 	original.inputEnhancement.defaultPreference.reduction = 87;
 	original.inputEnhancement.defaultPreference.character = 21;
 	original.inputEnhancement.defaultPreference.autoAdapt = false;
@@ -187,7 +190,10 @@ void TestInputEnhancementSettings::roundTripsSchemaV2() {
 
 	nlohmann::json json = original;
 	QVERIFY(json.at("audio").contains("input_enhancement"));
-	QCOMPARE(json.at("audio").at("input_enhancement").at("schema_version").get< int >(), 2);
+	QCOMPARE(json.at("audio").at("input_enhancement").at("schema_version").get< int >(), 3);
+	QCOMPARE(QString::fromStdString(
+				 json.at("audio").at("input_enhancement").at("default").at("profile").get< std::string >()),
+			 QStringLiteral("Quality"));
 	const auto &persistedDevice = json.at("audio").at("input_enhancement").at("devices").at(0);
 	QVERIFY(persistedDevice.contains("last_known_good_recipe"));
 	QVERIFY(persistedDevice.contains("pending_recipe"));
@@ -196,6 +202,84 @@ void TestInputEnhancementSettings::roundTripsSchemaV2() {
 
 	const ::Settings restored = json.get< ::Settings >();
 	QVERIFY(restored.inputEnhancement == original.inputEnhancement);
+}
+
+void TestInputEnhancementSettings::autoRecipeSetFingerprintRoundTripsAndFailsClosed() {
+	using namespace Mumble::InputEnhancement;
+	const QString setFingerprint(64, QLatin1Char('d'));
+	QVERIFY(isValidAutoRecipeSetFingerprint(setFingerprint));
+	QVERIFY(!isValidAutoRecipeSetFingerprint(QString(64, QLatin1Char('D'))));
+
+	DeviceProfileState state;
+	state.identity.backendId              = QStringLiteral("WASAPI");
+	state.identity.physicalId             = QStringLiteral("auto-set-endpoint");
+	state.preference                      = preference(Profile::Auto, 65, 70);
+	state.lastKnownGood                   = preference(Profile::Balanced, 55, 60);
+	state.lastKnownGoodRecipeBinding      = exactBinding(Profile::Balanced, 55, 60);
+	state.pendingAutoRecipeSetFingerprint = setFingerprint;
+	state.pendingValidation               = true;
+	QVERIFY(executionBindingMatchesPreference(state.preference, state.pendingRecipeBinding,
+											  state.pendingAutoRecipeSetFingerprint));
+
+	Mumble::InputEnhancement::Settings settings;
+	QVERIFY(upsertDeviceProfile(settings, state));
+	const nlohmann::json persisted = serializeSettings(settings);
+	const auto &deviceJson         = persisted.at("devices").at(0);
+	QCOMPARE(QString::fromStdString(deviceJson.at("pending_auto_recipe_set_fingerprint").get< std::string >()),
+			 setFingerprint);
+	QVERIFY(!deviceJson.contains("pending_recipe"));
+
+	Mumble::InputEnhancement::Settings restored;
+	QVERIFY(deserializeSettings(persisted, restored));
+	const DeviceProfileState *pending = findDeviceProfile(restored, state.identity);
+	QVERIFY(pending);
+	QVERIFY(pending->pendingAutoRecipeSetFingerprint.has_value());
+	QCOMPARE(*pending->pendingAutoRecipeSetFingerprint, setFingerprint);
+	QCOMPARE(preferenceForDevice(restored, state.identity).profile, Profile::Auto);
+
+	nlohmann::json missing = persisted;
+	missing["devices"][0].erase("pending_auto_recipe_set_fingerprint");
+	QVERIFY(deserializeSettings(missing, restored));
+	const DeviceProfileState *safe = findDeviceProfile(restored, state.identity);
+	QVERIFY(safe);
+	QCOMPARE(safe->preference.profile, Profile::Original);
+	QVERIFY(!safe->pendingValidation);
+	QCOMPARE(safe->lastRollbackReason, QStringLiteral("missing_exact_recipe_binding"));
+
+	nlohmann::json malformed                                       = persisted;
+	malformed["devices"][0]["pending_auto_recipe_set_fingerprint"] = std::string(64, 'D');
+	QVERIFY(!deserializeSettings(malformed, restored));
+	QCOMPARE(restored.defaultPreference.profile, Profile::Original);
+
+	Mumble::InputEnhancement::Settings abnormal;
+	QVERIFY(upsertDeviceProfile(abnormal, state));
+	QVERIFY(rollbackPendingValidationAfterAbnormalExit(abnormal));
+	const DeviceProfileState *rolledBack = findDeviceProfile(abnormal, state.identity);
+	QVERIFY(rolledBack);
+	QCOMPARE(rolledBack->preference.profile, Profile::Balanced);
+	QVERIFY(!rolledBack->pendingAutoRecipeSetFingerprint.has_value());
+	QVERIFY(rolledBack->rollbackUndoAutoRecipeSetFingerprint.has_value());
+	QCOMPARE(*rolledBack->rollbackUndoAutoRecipeSetFingerprint, setFingerprint);
+	QVERIFY(!rolledBack->rollbackUndoRecipeBinding.has_value());
+}
+
+void TestInputEnhancementSettings::migratesSchemaV2CrispAlias() {
+	nlohmann::json input = {
+		{ "schema_version", 2 },
+		{ "default", { { "profile", "Crisp" }, { "reduction", 87 }, { "character", 21 }, { "auto_adapt", false } } },
+		{ "devices", nlohmann::json::array() },
+	};
+	Mumble::InputEnhancement::Settings restored;
+	QVERIFY(deserializeSettings(input, restored));
+	QCOMPARE(restored.schemaVersion, SETTINGS_SCHEMA_VERSION);
+	QCOMPARE(restored.defaultPreference.profile, Profile::Quality);
+	QCOMPARE(restored.defaultPreference.reduction, 87);
+	QCOMPARE(restored.defaultPreference.character, 21);
+
+	const nlohmann::json persisted = serializeSettings(restored);
+	QCOMPARE(persisted.at("schema_version").get< int >(), 3);
+	QCOMPARE(QString::fromStdString(persisted.at("default").at("profile").get< std::string >()),
+			 QStringLiteral("Quality"));
 }
 
 void TestInputEnhancementSettings::corruptOrUnknownSchemaUsesSafeOriginal() {
@@ -578,7 +662,7 @@ void TestInputEnhancementSettings::exactRecipeBindingDetectsCatalogRecipeAndMode
 
 	QVERIFY(isValidRecipeBinding(binding));
 	QVERIFY(recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision), hash, path));
-	QVERIFY(!recipeBindingMatches(binding, recipe, QStringLiteral("input-recipes-v2"), hash, path));
+	QVERIFY(!recipeBindingMatches(binding, recipe, QStringLiteral("input-recipes-v3"), hash, path));
 	QVERIFY(!recipeBindingMatches(binding, resolvedRecipe(Profile::Balanced, 63, 41),
 								  QString::fromLatin1(testCatalogRevision), hash, path));
 	QVERIFY(!recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision),
@@ -598,6 +682,27 @@ void TestInputEnhancementSettings::exactRecipeBindingDetectsCatalogRecipeAndMode
 	RecipeBinding recipeIdDrift = binding;
 	recipeIdDrift.recipeId.append(QStringLiteral(".changed"));
 	QVERIFY(!recipeBindingMatches(recipeIdDrift, recipe, QString::fromLatin1(testCatalogRevision), hash, path));
+}
+
+void TestInputEnhancementSettings::unmanagedBuildZeroNeuralBindingRemainsHashBound() {
+	using namespace Mumble::InputEnhancement;
+	const Recipe recipe = resolvedRecipe(Profile::Balanced, 60, 60);
+	const QString hash(64, QLatin1Char('a'));
+	const QString path = QStringLiteral("rnnoise/rnnoise_little.weights_blob.bin");
+	const RecipeBinding binding = recipeBindingForRecipe(
+		recipe, QStringLiteral("unmanaged-build-zero"), hash, path);
+
+	QVERIFY(isValidRecipeBinding(binding));
+	QVERIFY(recipeBindingMatches(binding, recipe, QStringLiteral("unmanaged-build-zero"), hash, path));
+	QVERIFY(!recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision), hash, path));
+
+	RecipeBinding missingHash = binding;
+	missingHash.modelSha256.clear();
+	QVERIFY(!isValidRecipeBinding(missingHash));
+
+	RecipeBinding missingPath = binding;
+	missingPath.modelRelativePath.clear();
+	QVERIFY(!isValidRecipeBinding(missingPath));
 }
 
 void TestInputEnhancementSettings::abnormalExitRollsBackPendingValidation() {

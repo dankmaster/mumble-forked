@@ -41,6 +41,195 @@ function Assert-Throws {
 	}
 }
 
+function Get-TestUtf8Sha256 {
+	param([Parameter(Mandatory = $true)][string]$Value)
+	$sha = [Security.Cryptography.SHA256]::Create()
+	try {
+		$bytes = [Text.UTF8Encoding]::new($false).GetBytes($Value)
+		return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+	} finally {
+		$sha.Dispose()
+	}
+}
+
+function Get-TestRolloutWindowSha256 {
+	param(
+		[string]$QuerySha256,
+		[string]$SourceSnapshotSha256,
+		[DateTimeOffset]$WindowStartUtc,
+		[DateTimeOffset]$WindowEndUtc,
+		[int]$ObservationDays,
+		[string]$SourceChannel,
+		[string]$RolloutAudience,
+		[string]$RecipeSetVersion,
+		[string[]]$TestedBuildIds
+	)
+	$buildIds = @($TestedBuildIds)
+	[Array]::Sort($buildIds, [StringComparer]::Ordinal)
+	$canonical = @(
+		'input-enhancement-rollout-window-v2',
+		"querySha256=$QuerySha256",
+		"sourceSnapshotSha256=$SourceSnapshotSha256",
+		"startUtc=$($WindowStartUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))",
+		"endUtc=$($WindowEndUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))",
+		"observationDays=$ObservationDays",
+		"sourceChannel=$SourceChannel",
+		"rolloutAudience=$RolloutAudience",
+		"recipeSetVersion=$RecipeSetVersion",
+		"testedBuildIds=$([string]::Join(',', $buildIds))"
+	) -join "`n"
+	return Get-TestUtf8Sha256 -Value "$canonical`n"
+}
+
+function Write-SignedRolloutAggregateFixture {
+	param(
+		[string]$Path,
+		[string]$SignaturePath,
+		[string]$PrivateKeyBase64,
+		[string]$PublicKeyHex,
+		[string]$OpenSslPath,
+		[string]$QuerySha256,
+		[string]$SourceSnapshotSha256,
+		[string]$SourceChannel,
+		[string]$RolloutAudience = 'private-community',
+		[string[]]$TestedBuildIds,
+		[string]$RecipeSetVersion,
+		[DateTimeOffset]$WindowStartUtc,
+		[DateTimeOffset]$WindowEndUtc,
+		[int]$ObservationDays,
+		[int]$DistinctUsers,
+		[int]$DistinctDevices,
+		[int]$IntendedCommunityDevices = 1,
+		[double]$TalkHours,
+		[DateTimeOffset]$GeneratedAtUtc = [DateTimeOffset]::UtcNow,
+		[int]$P0Count = 0,
+		[int]$P1Count = 0,
+		[int]$ModelHashMismatchCount = 0,
+		[int]$RecurrentCallbackRegressionCount = 0,
+		[double]$CrashFreeSessionRate = 1.0,
+		[double]$FallbackSessionRate = 0.0,
+		[double]$CallbackOverrunFrameRate = 0.0,
+		[double]$ManualRollbackOrOptOutRate = 0.0,
+		[int]$BlindAbResponses = 0,
+		[double]$SelectedOverOriginalRate = 0.0,
+		[string]$WindowSha256Override = ''
+	)
+	$sortedBuildIds = @($TestedBuildIds)
+	[Array]::Sort($sortedBuildIds, [StringComparer]::Ordinal)
+	$windowSha256 = Get-TestRolloutWindowSha256 `
+		-QuerySha256 $QuerySha256 -SourceSnapshotSha256 $SourceSnapshotSha256 `
+		-WindowStartUtc $WindowStartUtc -WindowEndUtc $WindowEndUtc -ObservationDays $ObservationDays `
+		-SourceChannel $SourceChannel -RolloutAudience $RolloutAudience `
+		-RecipeSetVersion $RecipeSetVersion -TestedBuildIds $sortedBuildIds
+	if (-not [string]::IsNullOrWhiteSpace($WindowSha256Override)) { $windowSha256 = $WindowSha256Override }
+	$aggregate = [ordered]@{
+		schemaVersion = 2
+		kind = 'input-enhancement-telemetry-aggregate-export'
+		generatedAtUtc = $GeneratedAtUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+		sourceChannel = $SourceChannel
+		rolloutAudience = $RolloutAudience
+		testedBuildIds = $sortedBuildIds
+		recipeSetVersion = $RecipeSetVersion
+		window = [ordered]@{
+			startUtc = $WindowStartUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+			endUtc = $WindowEndUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+			observationDays = $ObservationDays
+		}
+		query = [ordered]@{
+			id = 'input-enhancement-rollout-v2'
+			sha256 = $QuerySha256
+			sourceEventCount = 1000
+			sourceSnapshotSha256 = $SourceSnapshotSha256
+			windowSha256 = $windowSha256
+		}
+		population = [ordered]@{
+			distinctUsers = $DistinctUsers
+			distinctDevices = $DistinctDevices
+			intendedCommunityDevices = $IntendedCommunityDevices
+			talkHours = $TalkHours
+		}
+		reliability = [ordered]@{
+			p0Count = $P0Count
+			p1Count = $P1Count
+			modelHashMismatchCount = $ModelHashMismatchCount
+			recurrentCallbackRegressionCount = $RecurrentCallbackRegressionCount
+			crashFreeSessionRate = $CrashFreeSessionRate
+			fallbackSessionRate = $FallbackSessionRate
+			callbackOverrunFrameRate = $CallbackOverrunFrameRate
+			manualRollbackOrOptOutRate = $ManualRollbackOrOptOutRate
+		}
+		preference = [ordered]@{
+			blindAbResponses = $BlindAbResponses
+			selectedOverOriginalRate = $SelectedOverOriginalRate
+		}
+		privacy = [ordered]@{
+			optInOnly = $true
+			rawAudioIncluded = $false
+			transcriptsIncluded = $false
+			voiceprintsIncluded = $false
+			rawDeviceIdsIncluded = $false
+			retentionDays = 30
+		}
+	}
+	Write-ReleaseJson -Path $Path -Value $aggregate
+	Protect-FileWithEd25519 -InputPath $Path -SignaturePath $SignaturePath `
+		-PrivateKeyBase64 $PrivateKeyBase64 -ExpectedPublicKeyHex $PublicKeyHex -OpenSslPath $OpenSslPath
+}
+
+function Write-SignedRnnoiseDecisionFixture {
+	param(
+		[string]$Path,
+		[string]$SignaturePath,
+		[string]$PrivateKeyBase64,
+		[string]$PublicKeyHex,
+		[string]$OpenSslPath,
+		[ValidateSet('embedded-retained', 'custom-selected')]
+		[string]$Status = 'embedded-retained'
+	)
+	$customSelected = $Status -ceq 'custom-selected'
+	[object[]]$reasonCodes = @()
+	if (-not $customSelected) {
+		$reasonCodes = [object[]]@('bootstrap.ovrl_lower_bound_not_positive')
+	}
+	$decision = [ordered]@{
+		bootstrap = [ordered]@{
+			confidence = 0.95
+			iterations = 20000
+			lower_bound = if ($customSelected) { 0.01 } else { -0.01 }
+			median_improvement = if ($customSelected) { 0.02 } else { 0.0 }
+			metric = 'paired per-case OVRL improvement, median bootstrap'
+			sampler = 'splitmix64-v1'
+			seed_sha256 = ('1' * 64)
+		}
+		custom_model = if ($customSelected) {
+			[ordered]@{
+				candidate_id = 'seed-0001'
+				manifest_relative_path = 'rnnoise/custom/self-test/seed-0001.weights_blob.bin'
+				model_id = 'rnnoise:custom:self-test:seed-0001'
+				sha256 = ('2' * 64)
+				size_bytes = 1234
+			}
+		} else { $null }
+		embedded_reference = [ordered]@{
+			license_spdx = 'BSD-3-Clause'
+			model_id = 'rnnoise:embedded'
+			sha256 = ('3' * 64)
+			size_bytes = 4321
+		}
+		holdout_mixture_plan_sha256 = ('4' * 64)
+		holdout_results_sha256 = ('5' * 64)
+		one_shot_receipt_sha256 = ('6' * 64)
+		reason_codes = $reasonCodes
+		schema_version = 1
+		status = $Status
+		training_plan_sha256 = ('7' * 64)
+		validation_selection_sha256 = ('8' * 64)
+	}
+	Write-ReleaseJson -Path $Path -Value $decision
+	Protect-FileWithEd25519 -InputPath $Path -SignaturePath $SignaturePath `
+		-PrivateKeyBase64 $PrivateKeyBase64 -ExpectedPublicKeyHex $PublicKeyHex -OpenSslPath $OpenSslPath
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "mumble-input-enhancement-release-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 try {
@@ -50,6 +239,12 @@ try {
 	$privateKeyBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($privateKeyPath))
 	$publicKeyHex = Get-Ed25519PublicKeyHexFromPrivateKey `
 		-PrivateKeyBase64 $privateKeyBase64 -OpenSslPath $openSsl
+	$aggregatePrivateKeyPath = Join-Path $tempRoot 'aggregate-ed25519-private.pem'
+	Invoke-NativeChecked -Command $openSsl -Arguments @('genpkey', '-algorithm', 'Ed25519', '-out', $aggregatePrivateKeyPath)
+	$aggregatePrivateKeyBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($aggregatePrivateKeyPath))
+	$aggregatePublicKeyHex = Get-Ed25519PublicKeyHexFromPrivateKey `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -OpenSslPath $openSsl
+	if ($aggregatePublicKeyHex -ceq $publicKeyHex) { throw 'Aggregate and release fixture keys unexpectedly match.' }
 
 	$sourceRoot = Join-Path $tempRoot "source"
 	New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
@@ -61,10 +256,114 @@ try {
 	Invoke-NativeChecked -Command "git" -Arguments @("-C", $sourceRoot, "add", "source.txt")
 	Invoke-NativeChecked -Command "git" -Arguments @("-C", $sourceRoot, "commit", "-q", "-m", "fixture")
 	$sourceSha = (& git -C $sourceRoot rev-parse HEAD).Trim()
+	$protocolSimulationPath = Join-Path $tempRoot 'updater-protocol-v4-simulation.json'
+	& (Join-Path $scriptsRoot 'test-input-enhancement-update-protocol-v4.ps1') `
+		-OutputPath $protocolSimulationPath -SourceSha $sourceSha `
+		-BuildId "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-updater-protocol-evidence.ps1') `
+		-EvidencePath $protocolSimulationPath -ExpectedSourceSha $sourceSha `
+		-ExpectedBuildId "mumble-forked-build-1-$($sourceSha.Substring(0, 12))" `
+		-ExpectedCandidatePayloadSha256 ('a' * 64)
+	$vmCases = New-Object System.Collections.Generic.List[object]
+	foreach ($target in @(
+		[ordered]@{ version = 'N-2'; payload = ('b' * 64) },
+		[ordered]@{ version = 'N-1'; payload = ('c' * 64) }
+	)) {
+		foreach ($modeAndTriggers in @(
+			[ordered]@{ mode = 'native'; triggers = @('install-failure', 'crash-before-marker', 'audio-init-failure', 'process-kill', 'power-loss-after-journal', 'power-loss-after-mutation') },
+			[ordered]@{ mode = 'msi'; triggers = @('install-failure', 'crash-before-marker', 'audio-init-failure', 'process-kill', 'power-loss', 'candidate-3010', 'recovery-3010') }
+		)) {
+			foreach ($trigger in $modeAndTriggers.triggers) {
+				$vmCases.Add([ordered]@{
+					mode = $modeAndTriggers.mode; fromVersion = $target.version; trigger = $trigger
+					exitCode = 1; observedPayloadSha256 = $target.payload; journalFinal = 'cleared'
+					rebootCycles = if ($trigger -match '3010|power-loss') { 1 } else { 0 }
+					mixedPayloadObserved = $false; residualJournalCount = 0; residualManagedFileCount = 0; passed = $true
+				})
+			}
+		}
+	}
+	$vmEvidencePath = Join-Path $tempRoot 'updater-vm-evidence.json'
+	Write-ReleaseJson -Path $vmEvidencePath -Value ([ordered]@{
+		schemaVersion = 1; kind = 'updater-v4-vm-rollback-matrix'; passed = $true; audioFree = $true
+		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		createdAtUtc = '2026-07-15T12:00:00Z'
+		candidate = [ordered]@{ payloadSha256 = ('a' * 64); installerSha256 = ('e' * 64); executableSha256 = ('f' * 64) }
+		recoveryTargets = @(
+			[ordered]@{ fromVersion = 'N-2'; buildId = 'mumble-forked-build-8-111111111111'; installerSha256 = ('1' * 64); payloadSha256 = ('b' * 64) },
+			[ordered]@{ fromVersion = 'N-1'; buildId = 'mumble-forked-build-9-222222222222'; installerSha256 = ('2' * 64); payloadSha256 = ('c' * 64) }
+		)
+		runner = [ordered]@{ class = 'protected-windows-update-vm'; isolated = $true; imageSha256 = ('3' * 64); snapshotSha256 = ('4' * 64); hardwareFingerprintSha256 = ('5' * 64); harnessSha256 = ('d' * 64); vmExecutorSha256 = ('6' * 64) }
+		cases = $vmCases.ToArray()
+	})
+	$vmReceiptPath = Join-Path $tempRoot 'updater-vm-receipt.json'
+	Write-ReleaseJson -Path $vmReceiptPath -Value ([ordered]@{
+		schemaVersion = 1; kind = 'updater-v4-protected-vm-receipt'; passed = $true; audioFree = $true
+		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		createdAtUtc = '2026-07-15T12:01:00Z'; evidenceSha256 = Get-ReleaseFileSha256 -Path $vmEvidencePath
+		vmExecutorSha256 = ('6' * 64); imageSha256 = ('3' * 64); snapshotSha256 = ('4' * 64)
+		hardwareFingerprintSha256 = ('5' * 64)
+	})
+	$vmAssert = @{
+		EvidencePath = $vmEvidencePath; ExpectedSourceSha = $sourceSha
+		ExpectedBuildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		ExpectedCandidatePayloadSha256 = ('a' * 64); ExpectedCandidateInstallerSha256 = ('e' * 64)
+		ExpectedCandidateExecutableSha256 = ('f' * 64); ExpectedHarnessSha256 = ('d' * 64)
+		ReceiptPath = $vmReceiptPath; ExpectedReceiptSha256 = Get-ReleaseFileSha256 -Path $vmReceiptPath
+		ExpectedVmExecutorSha256 = ('6' * 64); ExpectedImageSha256 = ('3' * 64)
+		ExpectedSnapshotSha256 = ('4' * 64); ExpectedHardwareFingerprintSha256 = ('5' * 64)
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-updater-vm-evidence.ps1') @vmAssert
+	$tamperedVm = Read-ReleaseJson -Path $vmEvidencePath
+	$tamperedVm.cases[0].mixedPayloadObserved = $true
+	$tamperedVmPath = Join-Path $tempRoot 'updater-vm-evidence-tampered.json'
+	Write-ReleaseJson -Path $tamperedVmPath -Value $tamperedVm
+	Assert-Throws -Description 'mixed updater VM payload' -Script {
+		$badVmAssert = $vmAssert.Clone(); $badVmAssert.EvidencePath = $tamperedVmPath
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-updater-vm-evidence.ps1') @badVmAssert
+	}
+
+	$killTracePath = Join-Path $tempRoot 'kill-switch-runtime-trace.json'
+	$killClient = [ordered]@{
+		pid = 4242; executableSha256 = ('f' * 64)
+		startedAtUtc = '2026-07-15T12:00:00Z'; endedAtUtc = '2026-07-15T12:10:00Z'
+	}
+	Write-ReleaseJson -Path $killTracePath -Value ([ordered]@{
+		schemaVersion = 2; kind = 'input-enhancement-policy-runtime-trace'; passed = $true; audioFree = $true
+		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		startedAtUtc = '2026-07-15T12:00:00Z'; observationNonce = ('9' * 64)
+		testedBinarySha256 = ('f' * 64); stagedPayloadSha256 = ('a' * 64); policySha256 = ('7' * 64)
+		clientProcess = $killClient; events = @()
+	})
+	$killReceiptPath = Join-Path $tempRoot 'kill-switch-observer-receipt.json'
+	Write-ReleaseJson -Path $killReceiptPath -Value ([ordered]@{
+		schemaVersion = 1; kind = 'input-enhancement-policy-observer-receipt'; passed = $true; audioFree = $true
+		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		observationNonce = ('9' * 64); observerSha256 = ('8' * 64)
+		runtimeTraceSha256 = Get-ReleaseFileSha256 -Path $killTracePath
+		testedBinarySha256 = ('f' * 64); stagedPayloadSha256 = ('a' * 64); policySha256 = ('7' * 64)
+		clientProcess = $killClient
+	})
+	$killAssert = @{
+		RuntimeTracePath = $killTracePath; ReceiptPath = $killReceiptPath
+		ExpectedReceiptSha256 = Get-ReleaseFileSha256 -Path $killReceiptPath
+		ExpectedSourceSha = $sourceSha; ExpectedBuildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		ExpectedObserverSha256 = ('8' * 64); ExpectedTestedBinarySha256 = ('f' * 64)
+		ExpectedStagedPayloadSha256 = ('a' * 64); ExpectedPolicySha256 = ('7' * 64)
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-kill-switch-observation.ps1') @killAssert
+	$tamperedKillTrace = Read-ReleaseJson -Path $killTracePath
+	$tamperedKillTrace.clientProcess.pid = 4243
+	$tamperedKillTracePath = Join-Path $tempRoot 'kill-switch-runtime-trace-tampered.json'
+	Write-ReleaseJson -Path $tamperedKillTracePath -Value $tamperedKillTrace
+	Assert-Throws -Description 'kill-switch trace without independent observer receipt binding' -Script {
+		$badKillAssert = $killAssert.Clone(); $badKillAssert.RuntimeTracePath = $tamperedKillTracePath
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-kill-switch-observation.ps1') @badKillAssert
+	}
 
 	$previewPolicyGate = Assert-InputEnhancementPromotionPolicy `
 		-Channel preview -Available $true -ForceOriginal $false `
-		-RecommendedProfile Balanced -RolloutEvidenceAvailable $false
+		-RecommendedProfile Balanced -RolloutAudience private-community -RolloutEvidenceAvailable $false
 	if ([bool]$previewPolicyGate.emergencyPolicy -or [bool]$previewPolicyGate.rolloutRequired -or
 		[string]$previewPolicyGate.targetStage -cne 'none') {
 		throw 'Preview promotion policy gate returned an invalid decision.'
@@ -72,22 +371,40 @@ try {
 	Assert-Throws -Description 'preview Auto recommendation without stable evidence' -Script {
 		Assert-InputEnhancementPromotionPolicy `
 			-Channel preview -Available $true -ForceOriginal $false `
-			-RecommendedProfile Auto -RolloutEvidenceAvailable $false | Out-Null
+			-RecommendedProfile Auto -RolloutAudience public -RolloutEvidenceAvailable $false | Out-Null
 	}
 	$emergencyPreviewGate = Assert-InputEnhancementPromotionPolicy `
 		-Channel preview -Available $false -ForceOriginal $true `
-		-RecommendedProfile Auto -RolloutEvidenceAvailable $false
+		-RecommendedProfile Auto -RolloutAudience private-community -RolloutEvidenceAvailable $false
 	if (-not [bool]$emergencyPreviewGate.emergencyPolicy -or [bool]$emergencyPreviewGate.rolloutRequired) {
 		throw 'Emergency preview policy gate returned an invalid decision.'
 	}
 	Assert-Throws -Description 'stable promotion without signed rollout evidence' -Script {
 		Assert-InputEnhancementPromotionPolicy `
 			-Channel stable -Available $true -ForceOriginal $false `
-			-RecommendedProfile Balanced -RolloutEvidenceAvailable $false | Out-Null
+			-RecommendedProfile Balanced -RolloutAudience private-community -RolloutEvidenceAvailable $false | Out-Null
+	}
+	$communityStableGate = Assert-InputEnhancementPromotionPolicy `
+		-Channel stable -Available $true -ForceOriginal $false `
+		-RecommendedProfile Balanced -RolloutAudience private-community -RolloutEvidenceAvailable $true
+	if (-not [bool]$communityStableGate.rolloutRequired -or
+		[string]$communityStableGate.targetStage -cne 'community-stable') {
+		throw 'Private community promotion did not select the isolated community-stable gate.'
+	}
+	$publicStableGate = Assert-InputEnhancementPromotionPolicy `
+		-Channel stable -Available $true -ForceOriginal $false `
+		-RecommendedProfile Balanced -RolloutAudience public -RolloutEvidenceAvailable $true
+	if ([string]$publicStableGate.targetStage -cne 'stable-opt-in') {
+		throw 'Public stable promotion did not preserve the later stable-opt-in gate.'
+	}
+	Assert-Throws -Description 'private community Auto recommendation' -Script {
+		Assert-InputEnhancementPromotionPolicy `
+			-Channel stable -Available $true -ForceOriginal $false `
+			-RecommendedProfile Auto -RolloutAudience private-community -RolloutEvidenceAvailable $true | Out-Null
 	}
 	$stableAutoGate = Assert-InputEnhancementPromotionPolicy `
 		-Channel stable -Available $true -ForceOriginal $false `
-		-RecommendedProfile Auto -RolloutEvidenceAvailable $true
+		-RecommendedProfile Auto -RolloutAudience public -RolloutEvidenceAvailable $true
 	if (-not [bool]$stableAutoGate.rolloutRequired -or
 		[string]$stableAutoGate.targetStage -cne 'auto-recommended') {
 		throw 'Stable Auto promotion policy gate returned an invalid decision.'
@@ -96,6 +413,53 @@ try {
 	$promotionWorkflowSource = Get-Content -LiteralPath $promotionWorkflowPath -Raw
 	if ([regex]::Matches($promotionWorkflowSource, 'Assert-InputEnhancementPromotionPolicy').Count -lt 3) {
 		throw 'Promotion workflow must enforce the shared policy gate before download, evidence handling, and publication.'
+	}
+	foreach ($bootstrapMarker in @(
+		'INPUT_ENHANCEMENT_BOOTSTRAP_RECOVERY_SET_URL',
+		'INPUT_ENHANCEMENT_BOOTSTRAP_RECOVERY_SET_SHA256',
+		'Get-VerifiedBootstrapRecoverySet',
+		'$arguments.BootstrapRecoverySetPath',
+		'Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256'
+	)) {
+		if (-not $promotionWorkflowSource.Contains($bootstrapMarker)) {
+			throw "Promotion workflow is missing protected v1-to-v2 bootstrap marker '$bootstrapMarker'."
+		}
+	}
+	if ($promotionWorkflowSource.Contains('AllowIncompleteRecoverySet')) {
+		throw 'Promotion workflow must never emit an incomplete schema-v2 recovery set.'
+	}
+	foreach ($rolloutAggregateMarker in @(
+		'INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX',
+		'INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256',
+		'rollout_audience',
+		'-RolloutAudience',
+		'input-enhancement-aggregate-export.json',
+		'input-enhancement-aggregate-export.json.sig',
+		'rnnoise-selection-decision.json',
+		'rnnoise-selection-decision.json.sig',
+		'AggregateExportPath =',
+		'AggregateExportSignaturePath =',
+		'AggregatePublicKeyHex =',
+		'ExpectedQuerySha256 =',
+		'incomplete rollout/aggregate evidence quartet'
+	)) {
+		if (-not $promotionWorkflowSource.Contains($rolloutAggregateMarker)) {
+			throw "Promotion workflow is missing signed aggregate-export marker '$rolloutAggregateMarker'."
+		}
+	}
+	if ($promotionWorkflowSource -notmatch '\[int\]\$pointer[.]schemaVersion -ne 2' -or
+		$promotionWorkflowSource -match '\[int\]\$pointer[.]schemaVersion -ne 1' -or
+		$promotionWorkflowSource.Contains('elseif (@($pointer.knownGoodTags).Count -ne 1)') -or
+		-not $promotionWorkflowSource.Contains('-OutputRoot .\publisher-current-recovery-verify') -or
+		-not $promotionWorkflowSource.Contains('$previousPointerForPublication.schemaVersion -eq 1')) {
+		throw 'Promotion publisher must accept only the generated schema-v2 pointer, reverify its full recovery set, and support signed v1 bootstrap lineage.'
+	}
+	$qualifiedWorkflowPath = Join-Path $scriptsRoot '..\..\.github\workflows\input-enhancement-qualified-build.yml'
+	$qualifiedWorkflowSource = Get-Content -LiteralPath $qualifiedWorkflowPath -Raw
+	if (-not $qualifiedWorkflowSource.Contains("if: `${{ github.repository == '__disabled__/until-pre-azure-evidence-verifier-v1' }}") -or
+		-not $qualifiedWorkflowSource.Contains('pre-Azure rehearsal') -or
+		-not $qualifiedWorkflowSource.Contains('dogfood evidence')) {
+		throw 'Azure qualified-build workflow must remain fail-closed until rehearsal, protected receipt, and dogfood evidence are verified.'
 	}
 	$compatibilityMarker = '# Existing installed builds still request the legacy stable manifest.'
 	$compatibilityOffset = $promotionWorkflowSource.IndexOf($compatibilityMarker, [StringComparison]::Ordinal)
@@ -133,15 +497,61 @@ try {
 		'-ExpectedHarnessSha256 $env:INPUT_ENHANCEMENT_QUALITY_HARNESS_SHA256')) {
 		throw 'Qualified build does not enforce the configured protected quality-harness SHA256.'
 	}
+	foreach ($runnerEvidenceName in @(
+		'quality-master_quality-low-performance.json', 'original-voice-master_quality-low-performance.json',
+		'quality-master_quality-mainstream.json', 'original-voice-master_quality-mainstream.json',
+		'quality-nightly-low-performance.json', 'original-voice-nightly-low-performance.json',
+		'quality-nightly-mainstream.json', 'original-voice-nightly-mainstream.json'
+	)) {
+		if (-not $qualifiedWorkflowSource.Contains($runnerEvidenceName)) {
+			throw "Qualified build handoff is missing measured runner evidence '$runnerEvidenceName'."
+		}
+	}
+	$rehearsalWorkflowPath = Join-Path $scriptsRoot '..\..\.github\workflows\input-enhancement-release-rehearsal.yml'
+	$rehearsalWorkflowSource = Get-Content -LiteralPath $rehearsalWorkflowPath -Raw
+	foreach ($requiredMarker in @(
+		'actions: read', 'contents: read', 'invoke-input-enhancement-release-rehearsal.ps1',
+		'actions/upload-artifact@', 'actions/download-artifact@', 'remote-reverification.json',
+		'INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256',
+		'INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256',
+		'INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256',
+		'INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256'
+	)) {
+		if (-not $rehearsalWorkflowSource.Contains($requiredMarker)) {
+			throw "Pre-Azure rehearsal workflow is missing '$requiredMarker'."
+		}
+	}
+	foreach ($forbiddenPattern in @(
+		'(?im)^\s*contents:\s*write\s*$', '(?im)^\s*id-token:\s*write\s*$',
+		'(?im)^\s*environment\s*:', '(?i)\bgh\s+release\b', '(?i)api\.github\.com/.*/releases',
+		'(?i)azure/login', '(?i)artifact[- ]?signing', '(?i)trusted[- ]?signing', '\$\{\{\s*secrets\.'
+	)) {
+		if ($rehearsalWorkflowSource -match $forbiddenPattern) {
+			throw "Pre-Azure rehearsal workflow contains forbidden production capability '$forbiddenPattern'."
+		}
+	}
+	$draftManifestRoot = Join-Path $tempRoot 'rehearsal-draft-manifest-fixture'
+	New-Item -ItemType Directory -Force -Path $draftManifestRoot | Out-Null
+	[IO.File]::WriteAllText((Join-Path $draftManifestRoot 'rehearsal.json'), '{}', [Text.UTF8Encoding]::new($false))
+	[IO.File]::WriteAllBytes((Join-Path $draftManifestRoot 'candidate.msi'), [byte[]](1, 2, 3))
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $draftManifestRoot -ArtifactName 'self-test-draft'
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $draftManifestRoot -ExpectedArtifactName 'self-test-draft'
+	[IO.File]::AppendAllText((Join-Path $draftManifestRoot 'candidate.msi'), 'tamper')
+	Assert-Throws -Description 'remote rehearsal draft byte tampering' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $draftManifestRoot -ExpectedArtifactName 'self-test-draft'
+	}
 
 	$stageRoot = Join-Path $tempRoot "stage"
 	$modelDir = Join-Path $stageRoot "rnnoise"
-	$crispModelDir = Join-Path $stageRoot "deepfilternet"
-	New-Item -ItemType Directory -Force -Path $modelDir, $crispModelDir | Out-Null
+	$qualityModelDir = Join-Path $stageRoot "deepfilternet"
+	New-Item -ItemType Directory -Force -Path $modelDir, $qualityModelDir | Out-Null
 	$modelAsset = Join-Path $modelDir "test-model.bin"
-	$crispModelAsset = Join-Path $crispModelDir "test-model.bin"
+	$qualityModelAsset = Join-Path $qualityModelDir "test-model.bin"
 	[System.IO.File]::WriteAllBytes($modelAsset, [byte[]](1, 2, 3, 4, 5))
-	[System.IO.File]::WriteAllBytes($crispModelAsset, [byte[]](6, 7, 8, 9, 10))
+	[System.IO.File]::WriteAllBytes($qualityModelAsset, [byte[]](6, 7, 8, 9, 10))
 	$modelDescriptorPath = Join-Path $tempRoot "model-descriptor.json"
 	$recipeDescriptorPath = Join-Path $tempRoot "recipe-descriptor.json"
 	Write-ReleaseJson -Path $modelDescriptorPath -Value ([ordered]@{
@@ -166,7 +576,7 @@ try {
 				licenseSpdx = "MIT OR Apache-2.0"
 				sampleRateHz = 48000
 				algorithmicLatencyMs = 30
-				recipeCompatibility = @("input.crisp.deepfilternet-balanced")
+				recipeCompatibility = @("input.quality.deepfilternet-balanced", "input.voice-focus.deepfilternet-balanced")
 			}
 		)
 	})
@@ -174,11 +584,12 @@ try {
 		[ordered]@{ id = "input.original"; revision = 1; profile = "Original"; modelIds = @() },
 		[ordered]@{ id = "input.light.speex"; revision = 1; profile = "Light"; modelIds = @() },
 		[ordered]@{ id = "input.balanced.rnnoise-embedded"; revision = 1; profile = "Balanced"; modelIds = @("rnnoise:embedded") },
-		[ordered]@{ id = "input.crisp.deepfilternet-balanced"; revision = 1; profile = "Crisp"; modelIds = @("deepfilternet:balanced") },
+		[ordered]@{ id = "input.quality.deepfilternet-balanced"; revision = 1; profile = "Quality"; modelIds = @("deepfilternet:balanced") },
+		[ordered]@{ id = "input.voice-focus.deepfilternet-balanced"; revision = 1; profile = "VoiceFocus"; modelIds = @("deepfilternet:balanced") },
 		[ordered]@{ id = "input.auto.light.speex"; revision = 1; profile = "Auto"; modelIds = @() }
 	)
 	Write-ReleaseJson -Path $recipeDescriptorPath -Value ([ordered]@{
-		schemaVersion = 1
+		schemaVersion = 2
 		catalogRevision = "self-test-r1"
 		recipes = $recipes
 	})
@@ -236,54 +647,349 @@ try {
 	New-Item -ItemType Directory -Force -Path $rolloutRoot | Out-Null
 	$rolloutPath = Join-Path $rolloutRoot 'input-enhancement-rollout.json'
 	$rolloutSignaturePath = "$rolloutPath.sig"
+	$aggregatePath = Join-Path $rolloutRoot 'input-enhancement-aggregate-export.json'
+	$aggregateSignaturePath = "$aggregatePath.sig"
+	$aggregateSchema = Read-ReleaseJson -Path (Join-Path $scriptsRoot 'input-enhancement-aggregate-export.schema.json')
+	$rolloutSchema = Read-ReleaseJson -Path (Join-Path $scriptsRoot 'input-enhancement-rollout-qualification.schema.json')
+	$rnnoiseDecisionSchema = Read-ReleaseJson `
+		-Path (Join-Path $scriptsRoot 'input-enhancement-rnnoise-selection-decision.schema.json')
+	if ([string]$aggregateSchema.'$id' -cne
+		'https://mumble.info/schemas/input-enhancement-telemetry-aggregate-export-v2.json' -or
+		[int]$aggregateSchema.properties.schemaVersion.const -ne 2 -or
+		[string]$rolloutSchema.'$id' -cne
+		'https://mumble.info/schemas/input-enhancement-rollout-qualification-v2.json' -or
+		[int]$rolloutSchema.properties.schemaVersion.const -ne 2 -or
+		[string]$rnnoiseDecisionSchema.'$id' -cne
+		'https://mumble.info/schemas/input-enhancement-rnnoise-selection-decision-v1.json') {
+		throw 'Rollout/aggregate JSON schemas do not expose the expected fail-closed versions.'
+	}
 	$rolloutEnd = [DateTimeOffset]::UtcNow.AddMinutes(-1)
-	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
-		-SourceChannel preview -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
-		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
-		-DistinctUsers 10 -DistinctDevices 10 -TalkHours 50 `
-		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
-		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
-	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
-		-EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath -PublicKeyHex $publicKeyHex `
-		-TargetStage stable-opt-in -ExpectedBuildId $buildId -ExpectedRecipeSetVersion 'self-test-r1' `
-		-OpenSslPath $openSsl
-
-	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
-		-SourceChannel preview -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
-		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
-		-DistinctUsers 9 -DistinctDevices 10 -TalkHours 50 `
-		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
-		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
-	Assert-Throws -Description 'undersized signed stable rollout' -Script {
-		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
-			-EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath -PublicKeyHex $publicKeyHex `
-			-TargetStage stable-opt-in -ExpectedBuildId $buildId -ExpectedRecipeSetVersion 'self-test-r1' `
-			-OpenSslPath $openSsl
+	$rolloutQuerySha256 = 'a' * 64
+	$rolloutSnapshotSha256 = 'b' * 64
+	$aggregateVerification = @{
+		AggregateExportPath = $aggregatePath
+		AggregateExportSignaturePath = $aggregateSignaturePath
+		AggregatePublicKeyHex = $aggregatePublicKeyHex
+		ExpectedQuerySha256 = $rolloutQuerySha256
+		OpenSslPath = $openSsl
+	}
+	$rolloutVerification = @{
+		EvidencePath = $rolloutPath
+		SignaturePath = $rolloutSignaturePath
+		PublicKeyHex = $publicKeyHex
+		AggregateExportPath = $aggregatePath
+		AggregateExportSignaturePath = $aggregateSignaturePath
+		AggregatePublicKeyHex = $aggregatePublicKeyHex
+		ExpectedQuerySha256 = $rolloutQuerySha256
+		ExpectedBuildId = $buildId
+		ExpectedRecipeSetVersion = 'self-test-r1'
+		OpenSslPath = $openSsl
+	}
+	$removedManualParameters = @(
+		'SourceChannel', 'TestedBuildIds', 'RecipeSetVersion', 'WindowStartUtc', 'WindowEndUtc',
+		'ObservationDays', 'DistinctUsers', 'DistinctDevices', 'TalkHours', 'CrashFreeSessionRate',
+		'DomainRnnoiseStatus', 'DomainRnnoiseOutcome'
+	)
+	$rolloutGeneratorParameters = (Get-Command (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1')).Parameters
+	if (@($removedManualParameters | Where-Object { $rolloutGeneratorParameters.ContainsKey($_) }).Count -ne 0) {
+		throw 'Rollout generator still exposes manually supplied aggregate totals or filters.'
 	}
 
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -RolloutAudience private-community `
+		-TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 2 -DistinctDevices 10 -IntendedCommunityDevices 10 -TalkHours 20
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-aggregate-export.ps1') @aggregateVerification
 	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
-		-SourceChannel stable -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
-		-WindowStartUtc $rolloutEnd.AddDays(-31) -WindowEndUtc $rolloutEnd -ObservationDays 30 `
-		-DistinctUsers 50 -DistinctDevices 50 -TalkHours 500 -CrashFreeSessionRate 0.999 `
-		-FallbackSessionRate 0.0009 -CallbackOverrunFrameRate 0.00009 `
-		-ManualRollbackOrOptOutRate 0.099 -BlindAbResponses 25 -SelectedOverOriginalRate 0.60 `
-		-DomainRnnoiseStatus completed -DomainRnnoiseOutcome embedded-retained `
+		-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+		-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
 		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
 		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
 	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
-		-EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath -PublicKeyHex $publicKeyHex `
-		-TargetStage auto-recommended -ExpectedBuildId $buildId -ExpectedRecipeSetVersion 'self-test-r1' `
-		-OpenSslPath $openSsl
-	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
-		-EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath -PublicKeyHex $publicKeyHex `
-		-TargetStage auto-default -ExpectedBuildId $buildId -ExpectedRecipeSetVersion 'self-test-r1' `
-		-OpenSslPath $openSsl
-	Add-Content -LiteralPath $rolloutPath -Value ' ' -NoNewline
-	Assert-Throws -Description 'tampered rollout qualification' -Script {
+		@rolloutVerification -TargetStage community-stable
+
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -RolloutAudience private-community `
+		-TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 2 -DistinctDevices 9 -IntendedCommunityDevices 10 -TalkHours 20
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+		-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+		-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	Assert-Throws -Description 'private community rollout without every intended device' -Script {
 		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
-			-EvidencePath $rolloutPath -SignaturePath $rolloutSignaturePath -PublicKeyHex $publicKeyHex `
-			-TargetStage auto-default -ExpectedBuildId $buildId -ExpectedRecipeSetVersion 'self-test-r1' `
+			@rolloutVerification -TargetStage community-stable
+	}
+
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -RolloutAudience public `
+		-TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 10 -DistinctDevices 10 -IntendedCommunityDevices 10 -TalkHours 50
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+		-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+		-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+		@rolloutVerification -TargetStage stable-opt-in
+
+	$validPublicAggregateBytes = [IO.File]::ReadAllBytes($aggregatePath)
+	$validPublicAggregateSignatureBytes = [IO.File]::ReadAllBytes($aggregateSignaturePath)
+	$validPublicAggregateText = [Text.UTF8Encoding]::new($false, $true).GetString($validPublicAggregateBytes)
+	$rawSchemaMutations = @(
+		[pscustomobject]@{
+			description = 'boolean aggregate schemaVersion'
+			pattern = '"schemaVersion"\s*:\s*2'
+			replacement = '"schemaVersion": true'
+		},
+		[pscustomobject]@{
+			description = 'scalar testedBuildIds instead of an array'
+			pattern = '(?s)("testedBuildIds"\s*:\s*)\[\s*"[^"\r\n]+"\s*\]'
+			replacement = "`$1`"$buildId`""
+		},
+		[pscustomobject]@{
+			description = 'numeric string aggregate population'
+			pattern = '"distinctUsers"\s*:\s*10'
+			replacement = '"distinctUsers": "10"'
+		},
+		[pscustomobject]@{
+			description = 'string aggregate privacy boolean'
+			pattern = '"optInOnly"\s*:\s*true'
+			replacement = '"optInOnly": "true"'
+		},
+		[pscustomobject]@{
+			description = 'legacy aggregate schema v1'
+			pattern = '"schemaVersion"\s*:\s*2'
+			replacement = '"schemaVersion": 1'
+		},
+		[pscustomobject]@{
+			description = 'aggregate pooled across multiple builds'
+			pattern = "`"$buildId`""
+			replacement = "`"$buildId`",`n    `"mumble-forked-build-43-bbbbbbbbbbbb`""
+		}
+	)
+	foreach ($mutation in $rawSchemaMutations) {
+		$mutatedText = [regex]::Replace($validPublicAggregateText, [string]$mutation.pattern,
+			[string]$mutation.replacement, 1)
+		if ($mutatedText -ceq $validPublicAggregateText) {
+			throw "Self-test could not apply raw-schema mutation '$($mutation.description)'."
+		}
+		[IO.File]::WriteAllText($aggregatePath, $mutatedText, [Text.UTF8Encoding]::new($false))
+		Protect-FileWithEd25519 -InputPath $aggregatePath -SignaturePath $aggregateSignaturePath `
+			-PrivateKeyBase64 $aggregatePrivateKeyBase64 -ExpectedPublicKeyHex $aggregatePublicKeyHex `
 			-OpenSslPath $openSsl
+		Assert-Throws -Description ([string]$mutation.description) -Script {
+			& (Join-Path $scriptsRoot 'assert-input-enhancement-aggregate-export.ps1') @aggregateVerification
+		}
+	}
+	[IO.File]::WriteAllBytes($aggregatePath, $validPublicAggregateBytes)
+	[IO.File]::WriteAllBytes($aggregateSignaturePath, $validPublicAggregateSignatureBytes)
+
+	$staleWindowEnd = [DateTimeOffset]::UtcNow.AddDays(-30)
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -RolloutAudience public -TestedBuildIds @($buildId) `
+		-RecipeSetVersion 'self-test-r1' -WindowStartUtc $staleWindowEnd.AddDays(-8) `
+		-WindowEndUtc $staleWindowEnd -ObservationDays 7 -DistinctUsers 10 -DistinctDevices 10 `
+		-IntendedCommunityDevices 10 -TalkHours 50
+	Assert-Throws -Description 'freshly signed aggregate with a stale observation window' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-aggregate-export.ps1') @aggregateVerification
+	}
+	$lateIngestEnd = [DateTimeOffset]::UtcNow.AddHours(-25)
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -RolloutAudience public -TestedBuildIds @($buildId) `
+		-RecipeSetVersion 'self-test-r1' -WindowStartUtc $lateIngestEnd.AddDays(-8) `
+		-WindowEndUtc $lateIngestEnd -ObservationDays 7 -DistinctUsers 10 -DistinctDevices 10 `
+		-IntendedCommunityDevices 10 -TalkHours 50
+	Assert-Throws -Description 'aggregate whose exporter ingest gap exceeds 24 hours' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-aggregate-export.ps1') @aggregateVerification
+	}
+	[IO.File]::WriteAllBytes($aggregatePath, $validPublicAggregateBytes)
+	[IO.File]::WriteAllBytes($aggregateSignaturePath, $validPublicAggregateSignatureBytes)
+
+	Assert-Throws -Description 'aggregate signature verified with the rollout key' -Script {
+		$wrongAggregateKeyVerification = $rolloutVerification.Clone()
+		$wrongAggregateKeyVerification.AggregatePublicKeyHex = $publicKeyHex
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@wrongAggregateKeyVerification -TargetStage stable-opt-in
+	}
+	$originalAggregateBytes = [IO.File]::ReadAllBytes($aggregatePath)
+	Add-Content -LiteralPath $aggregatePath -Value ' ' -NoNewline
+	Assert-Throws -Description 'tampered telemetry aggregate bytes' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@rolloutVerification -TargetStage stable-opt-in
+	}
+	[IO.File]::WriteAllBytes($aggregatePath, $originalAggregateBytes)
+
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 10 -DistinctDevices 10 -TalkHours 51
+	Assert-Throws -Description 'stale rollout reference after a validly re-signed aggregate change' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@rolloutVerification -TargetStage stable-opt-in
+	}
+
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 10 -DistinctDevices 10 -TalkHours 50 -WindowSha256Override ('f' * 64)
+	Assert-Throws -Description 'validly signed aggregate with a fabricated window hash' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+			-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+			-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+			-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+			-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	}
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 ('c' * 64) -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel preview -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-8) -WindowEndUtc $rolloutEnd -ObservationDays 7 `
+		-DistinctUsers 10 -DistinctDevices 10 -TalkHours 50
+	Assert-Throws -Description 'validly signed aggregate from an unpinned query' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+			-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+			-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+			-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+			-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	}
+
+	Write-SignedRolloutAggregateFixture `
+		-Path $aggregatePath -SignaturePath $aggregateSignaturePath `
+		-PrivateKeyBase64 $aggregatePrivateKeyBase64 -PublicKeyHex $aggregatePublicKeyHex -OpenSslPath $openSsl `
+		-QuerySha256 $rolloutQuerySha256 -SourceSnapshotSha256 $rolloutSnapshotSha256 `
+		-SourceChannel stable -RolloutAudience public -TestedBuildIds @($buildId) -RecipeSetVersion 'self-test-r1' `
+		-WindowStartUtc $rolloutEnd.AddDays(-31) -WindowEndUtc $rolloutEnd -ObservationDays 30 `
+		-DistinctUsers 50 -DistinctDevices 50 -IntendedCommunityDevices 50 -TalkHours 500 -CrashFreeSessionRate 0.999 `
+		-FallbackSessionRate 0.0009 -CallbackOverrunFrameRate 0.00009 `
+		-ManualRollbackOrOptOutRate 0.099 -BlindAbResponses 25 -SelectedOverOriginalRate 0.60
+	$rnnoiseDecisionPath = Join-Path $rolloutRoot 'rnnoise-selection-decision.json'
+	$rnnoiseDecisionSignaturePath = "$rnnoiseDecisionPath.sig"
+	Write-SignedRnnoiseDecisionFixture `
+		-Path $rnnoiseDecisionPath -SignaturePath $rnnoiseDecisionSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -PublicKeyHex $publicKeyHex -OpenSslPath $openSsl `
+		-Status embedded-retained
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rnnoise-selection-decision.ps1') `
+		-DecisionPath $rnnoiseDecisionPath -DecisionSignaturePath $rnnoiseDecisionSignaturePath `
+		-PublicKeyHex $publicKeyHex -OpenSslPath $openSsl | Out-Null
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+		-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+		-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+		-RnnoiseDecisionPath $rnnoiseDecisionPath -RnnoiseDecisionSignaturePath $rnnoiseDecisionSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	$autoRolloutVerification = $rolloutVerification.Clone()
+	$autoRolloutVerification.RnnoiseDecisionPath = $rnnoiseDecisionPath
+	$autoRolloutVerification.RnnoiseDecisionSignaturePath = $rnnoiseDecisionSignaturePath
+	Assert-Throws -Description 'completed RNNoise rollout without its signed decision files' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@rolloutVerification -TargetStage auto-recommended
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+		@autoRolloutVerification -TargetStage auto-recommended
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+		@autoRolloutVerification -TargetStage auto-default
+	$embeddedRollout = Read-ReleaseJson -Path $rolloutPath
+	if ([string]$embeddedRollout.domainRnnoiseTrack.outcome -cne 'embedded-retained') {
+		throw 'Embedded RNNoise decision was not mapped to embedded-retained rollout outcome.'
+	}
+
+	Write-SignedRnnoiseDecisionFixture `
+		-Path $rnnoiseDecisionPath -SignaturePath $rnnoiseDecisionSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -PublicKeyHex $publicKeyHex -OpenSslPath $openSsl `
+		-Status custom-selected
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rollout-qualification.ps1') `
+		-AggregateExportPath $aggregatePath -AggregateExportSignaturePath $aggregateSignaturePath `
+		-AggregatePublicKeyHex $aggregatePublicKeyHex -ExpectedQuerySha256 $rolloutQuerySha256 `
+		-RnnoiseDecisionPath $rnnoiseDecisionPath -RnnoiseDecisionSignaturePath $rnnoiseDecisionSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+		-OutputPath $rolloutPath -SignaturePath $rolloutSignaturePath -OpenSslPath $openSsl
+	$customRollout = Read-ReleaseJson -Path $rolloutPath
+	if ([string]$customRollout.domainRnnoiseTrack.outcome -cne 'custom-promoted') {
+		throw 'Custom-selected RNNoise decision was not mapped to custom-promoted rollout outcome.'
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+		@autoRolloutVerification -TargetStage auto-default
+	$validDecisionBytes = [IO.File]::ReadAllBytes($rnnoiseDecisionPath)
+	$validDecisionSignatureBytes = [IO.File]::ReadAllBytes($rnnoiseDecisionSignaturePath)
+	$validDecisionText = [Text.UTF8Encoding]::new($false, $true).GetString($validDecisionBytes)
+	[IO.File]::WriteAllText($rnnoiseDecisionPath, "$validDecisionText ", [Text.UTF8Encoding]::new($false))
+	Assert-Throws -Description 'completed RNNoise rollout with tampered decision bytes' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@autoRolloutVerification -TargetStage auto-default
+	}
+	[IO.File]::WriteAllBytes($rnnoiseDecisionPath, $validDecisionBytes)
+	[IO.File]::WriteAllBytes($rnnoiseDecisionSignaturePath, $validDecisionSignatureBytes)
+
+	$replacedDecisionText = $validDecisionText.Replace(('5' * 64), ('9' * 64))
+	[IO.File]::WriteAllText($rnnoiseDecisionPath, $replacedDecisionText, [Text.UTF8Encoding]::new($false))
+	Protect-FileWithEd25519 -InputPath $rnnoiseDecisionPath -SignaturePath $rnnoiseDecisionSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex -OpenSslPath $openSsl
+	Assert-Throws -Description 'completed RNNoise rollout with re-signed but unbound decision' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@autoRolloutVerification -TargetStage auto-default
+	}
+	[IO.File]::WriteAllBytes($rnnoiseDecisionPath, $validDecisionBytes)
+	[IO.File]::WriteAllBytes($rnnoiseDecisionSignaturePath, $validDecisionSignatureBytes)
+
+	$validAutoRolloutBytes = [IO.File]::ReadAllBytes($rolloutPath)
+	$validAutoRolloutSignatureBytes = [IO.File]::ReadAllBytes($rolloutSignaturePath)
+	$validAutoRolloutText = [Text.UTF8Encoding]::new($false, $true).GetString($validAutoRolloutBytes)
+	$stringVersionRollout = [regex]::Replace($validAutoRolloutText, '"schemaVersion"\s*:\s*2',
+		'"schemaVersion": "2"', 1)
+	[IO.File]::WriteAllText($rolloutPath, $stringVersionRollout, [Text.UTF8Encoding]::new($false))
+	Protect-FileWithEd25519 -InputPath $rolloutPath -SignaturePath $rolloutSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex -OpenSslPath $openSsl
+	Assert-Throws -Description 'string rollout envelope schemaVersion' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@autoRolloutVerification -TargetStage auto-default
+	}
+	[IO.File]::WriteAllBytes($rolloutPath, $validAutoRolloutBytes)
+	[IO.File]::WriteAllBytes($rolloutSignaturePath, $validAutoRolloutSignatureBytes)
+
+	$tamperedRolloutText = $validAutoRolloutText.Replace($rolloutQuerySha256, ('e' * 64))
+	[IO.File]::WriteAllText($rolloutPath, $tamperedRolloutText, [Text.UTF8Encoding]::new($false))
+	Protect-FileWithEd25519 -InputPath $rolloutPath -SignaturePath $rolloutSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex -OpenSslPath $openSsl
+	Assert-Throws -Description 're-signed rollout reference that differs from aggregate provenance' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@autoRolloutVerification -TargetStage auto-default
+	}
+
+	$legacyRolloutText = [regex]::Replace($validAutoRolloutText, '"schemaVersion"\s*:\s*2',
+		'"schemaVersion": 1', 1)
+	[IO.File]::WriteAllText($rolloutPath, $legacyRolloutText, [Text.UTF8Encoding]::new($false))
+	Protect-FileWithEd25519 -InputPath $rolloutPath -SignaturePath $rolloutSignaturePath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex -OpenSslPath $openSsl
+	Assert-Throws -Description 'legacy manual rollout schema v1' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rollout-qualification.ps1') `
+			@autoRolloutVerification -TargetStage auto-default
 	}
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble.exe'), [byte[]](11, 12, 13, 14, 15))
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble-updater.exe'), [byte[]](21, 22, 23))
@@ -391,12 +1097,33 @@ try {
 	$testedBinarySha256 = Get-ReleaseFileSha256 -Path (Join-Path $stageRoot 'mumble.exe')
 	$corpusLockSha256 = ("cd" * 32)
 	$mixturePlanSha256 = ("ef" * 32)
+	$nightlyMixturePlanSha256 = ("f0" * 32)
+	$masterCaseSetSha256 = ("a1" * 32)
+	$nightlyCaseSetSha256 = ("a2" * 32)
+	$stagedPayloadSha256 = ("a3" * 32)
+	$serverExecutableSha256 = ("a4" * 32)
+	$corpusInventorySha256 = ("a5" * 32)
+	$releaseFixturesSha256 = ("a6" * 32)
+	$metricsRuntimeSha256 = ("a7" * 32)
 	$productModelHashes = @(
 		(Get-ReleaseFileSha256 -Path $modelAsset),
-		(Get-ReleaseFileSha256 -Path $crispModelAsset)
+		(Get-ReleaseFileSha256 -Path $qualityModelAsset)
 	) | Sort-Object
 	$legacyExecutableSha256 = ("12" * 32)
 	$qualityHarnessSha256 = ("34" * 32)
+	$hardwareFingerprints = @{
+		'low-performance' = ("35" * 32)
+		'mainstream' = ("36" * 32)
+	}
+	$qualityArtifactFileNames = [ordered]@{
+		case_evidence_jsonl       = 'case-evidence.jsonl'
+		failure_spectrogram_index = 'failure-spectrogram-index.json'
+		junit                     = 'junit.xml'
+		per_case_csv               = 'per-case.csv'
+		per_case_parquet           = 'per-case.parquet'
+		summary_html               = 'summary.html'
+		summary_json               = 'summary.json'
+	}
 	$originalCases = @(1..45 | ForEach-Object {
 		[ordered]@{
 			enhancement_profile = 'Original'
@@ -410,25 +1137,160 @@ try {
 		}
 	})
 	$qualityEvidence = {
-		param([string]$RunnerClass)
+		param([string]$Suite, [string]$RunnerClass)
+		$caseCount = if ($Suite -ceq 'nightly') { 5000 } else { 500 }
+		$perProfileCases = [int]($caseCount / 5)
+		$mixtureHash = if ($Suite -ceq 'nightly') { $nightlyMixturePlanSha256 } else { $mixturePlanSha256 }
+		$caseSetHash = if ($Suite -ceq 'nightly') { $nightlyCaseSetSha256 } else { $masterCaseSetSha256 }
+		$latencies = @{ Original = 0.0; Light = 10.0; Balanced = 30.0; Quality = 50.0; VoiceFocus = 50.0 }
+		$profiles = @('Original', 'Light', 'Balanced', 'Quality', 'VoiceFocus') | ForEach-Object {
+			$profile = $_
+			[ordered]@{
+				profile = $profile
+				case_count = $perProfileCases
+				passed = $true
+				metrics = [ordered]@{
+					algorithmic_latency_ms_max = [double]$latencies[$profile]
+					clean_estoi_loss_median = 0.005
+					clean_dnsmos_sig_loss_median = 0.02
+					worst_language_wer_loss_percentage_points = 0.5
+					noisy_dnsmos_ovrl_improvement_median = 0.25
+					noisy_dnsmos_bak_improvement_median = 0.55
+					severe_noise_bak_improvement_over_quality_median = if ($profile -ceq 'VoiceFocus') { 0.10 } else { 0.0 }
+					worst_cohort_ovrl_loss_median = 0.05
+					catastrophe_rate_percent = 0.0
+					max_speech_edge_loss_ms = 10.0
+					nan_or_inf_count = 0
+					new_clipping_cases = 0
+					unexplained_fallbacks = 0
+					model_hash_errors = 0
+					deadline_misses = 0
+					latency_attestation_failures = 0
+					tail_drain_failures = 0
+				}
+				performance = [ordered]@{
+					average_rtf = 0.10
+					p99_callback_ms = 4.0
+					max_internal_processing_ms = 9.0
+					memory_growth_bytes = 0
+					soak_duration_seconds = if ($Suite -ceq 'nightly' -and $profile -cin @('Balanced', 'Quality', 'VoiceFocus')) { 3600 } else { 0 }
+				}
+			}
+		}
+		$artifactRecords = [ordered]@{}
+		foreach ($artifactName in $qualityArtifactFileNames.Keys) {
+			$artifactRecords[$artifactName] = [ordered]@{
+				path = "artifacts/$Suite-$RunnerClass/$($qualityArtifactFileNames[$artifactName])"
+				sha256 = ("ab" * 32)
+				size_bytes = 0
+				contains_audio_samples = $false
+			}
+		}
 		return [ordered]@{
-			schema_version = 1
-			suite = 'master_quality'
+			schema_version = 3
+			qualification_scope = 'core'
+			suite = $Suite
 			status = 'passed'
-			runnerClass = $RunnerClass
+			generated_at_utc = '2026-07-14T12:00:00Z'
 			build = [ordered]@{
 				git_sha = $sourceSha
 				tested_binary_sha256 = $testedBinarySha256
+				staged_payload_sha256 = $stagedPayloadSha256
+				legacy_binary_sha256 = $legacyExecutableSha256
+				server_binary_sha256 = $serverExecutableSha256
+				harness_sha256 = $qualityHarnessSha256
+				hardware_fingerprint_sha256 = $hardwareFingerprints[$RunnerClass]
+				runner_class = $RunnerClass
 				corpus_lock_sha256 = $corpusLockSha256
-				mixture_plan_sha256 = $mixturePlanSha256
+				corpus_inventory_sha256 = $corpusInventorySha256
+				mixture_plan_sha256 = $mixtureHash
+				case_set_sha256 = $caseSetHash
+				release_fixtures_sha256 = $releaseFixturesSha256
+				metrics_runtime_sha256 = $metricsRuntimeSha256
+				model_manifest_sha256 = Get-ReleaseFileSha256 -Path $unsignedModelManifestPath
+				recipe_manifest_sha256 = Get-ReleaseFileSha256 -Path $unsignedRecipeManifestPath
 				recipe_set_version = 'self-test-r1'
 				model_hashes = $productModelHashes
 			}
-			coverage = [ordered]@{ case_count = 500; failed_case_count = 0 }
+			coverage = [ordered]@{
+				case_count = $caseCount
+				failed_case_count = 0
+				cold_start_cases = [int]($caseCount / 2)
+				warm_start_cases = [int]($caseCount / 2)
+				fixed_timeline_cases = $caseCount
+				receiver_cleanup_cases = 0
+				languages = @('en-US', 'sv-SE')
+			}
+			profiles = $profiles
+			auto_transitions = $null
+			artifacts = $artifactRecords
+			violations = @()
+		}
+	}
+	$qualityCaseRecords = {
+		param([string]$Suite)
+		$caseCount = if ($Suite -ceq 'nightly') { 5000 } else { 500 }
+		$perProfileCases = [int]($caseCount / 5)
+		$latencies = @{ Original = 0.0; Light = 10.0; Balanced = 30.0; Quality = 50.0; VoiceFocus = 50.0 }
+		foreach ($profile in @('Original', 'Light', 'Balanced', 'Quality', 'VoiceFocus')) {
+			for ($caseIndex = 0; $caseIndex -lt $perProfileCases; $caseIndex++) {
+				$condition = switch ($caseIndex % 6) {
+					0 { 'clean' }
+					1 { 'clean' }
+					2 { 'noisy' }
+					3 { 'noisy' }
+					4 { 'severe' }
+					default { 'severe' }
+				}
+				$cohortId = switch ($condition) {
+					'clean' { 'clean-room' }
+					'noisy' { 'noisy-hvac' }
+					default { 'severe-babble' }
+				}
+				[ordered]@{
+					record_type = 'case'
+					case_id = "case-$($caseIndex.ToString('D6'))"
+					profile = $profile
+					condition = $condition
+					cohort_id = $cohortId
+					language = if (($caseIndex % 2) -eq 0) { 'en-US' } else { 'sv-SE' }
+					startup_preroll_ms = if (($caseIndex % 2) -eq 0) { 0 } else { 300 }
+					fixed_timeline = $true
+					receiver_cleanup_enabled = $false
+					failed = $false
+					metrics = [ordered]@{
+						algorithmic_latency_ms = [double]$latencies[$profile]
+						dnsmos_bak_improvement = 0.55
+						dnsmos_ovrl_improvement = if ($condition -ceq 'clean') { -0.05 } else { 0.25 }
+						dnsmos_sig_loss = 0.02
+						estoi_loss = 0.005
+						severe_noise_bak_improvement_over_quality = if ($profile -ceq 'VoiceFocus' -and $condition -ceq 'severe') { 0.10 } else { 0.0 }
+						speech_edge_loss_ms = 10.0
+						wer_loss_percentage_points = 0.5
+					}
+					counters = [ordered]@{
+						deadline_misses = 0
+						latency_attestation_failures = 0
+						model_hash_errors = 0
+						nan_or_inf_count = 0
+						new_clipping_cases = 0
+						tail_drain_failures = 0
+						unexplained_fallbacks = 0
+					}
+					performance = [ordered]@{
+						audio_duration_seconds = 10.0
+						processing_duration_seconds = 1.0
+						callback_durations_ms = @(4.0)
+						max_internal_processing_ms = 9.0
+						memory_growth_bytes = 0
+						soak_duration_seconds = if ($Suite -ceq 'nightly' -and $caseIndex -eq 0 -and $profile -cin @('Balanced', 'Quality', 'VoiceFocus')) { 3600 } else { 0 }
+					}
+				}
+			}
 		}
 	}
 	$originalEvidence = {
-		param([string]$RunnerClass)
+		param([string]$Suite, [string]$RunnerClass)
 		return [ordered]@{
 			schema_version = 1
 			candidate_build_sha = $sourceSha
@@ -444,122 +1306,116 @@ try {
 			cases = $originalCases
 		}
 	}
-	$measuredEvidenceFiles = [ordered]@{
-		"quality-low-performance.json" = & $qualityEvidence 'low-performance'
-		"original-voice-low-performance.json" = & $originalEvidence 'low-performance'
-		"quality-mainstream.json" = & $qualityEvidence 'mainstream'
-		"original-voice-mainstream.json" = & $originalEvidence 'mainstream'
-	}
-	foreach ($measuredEvidenceFile in $measuredEvidenceFiles.GetEnumerator()) {
-		Write-ReleaseJson -Path (Join-Path $tempRoot $measuredEvidenceFile.Key) -Value $measuredEvidenceFile.Value
-	}
 	$fakePythonPath = Join-Path $tempRoot 'fake-python.cmd'
 	[System.IO.File]::WriteAllText($fakePythonPath, "@exit /b 0`r`n", [System.Text.Encoding]::ASCII)
-	$measuredRunnerRoots = @{
-		'low-performance' = Join-Path $tempRoot 'measured-low-performance'
-		'mainstream' = Join-Path $tempRoot 'measured-mainstream'
-	}
-	foreach ($runnerClass in @('low-performance', 'mainstream')) {
-		$runnerRoot = $measuredRunnerRoots[$runnerClass]
+	$measuredRunnerRoots = @{}
+	foreach ($suite in @('master_quality', 'nightly')) {
+		foreach ($runnerClass in @('low-performance', 'mainstream')) {
+		$runnerKey = "$suite|$runnerClass"
+		$runnerRoot = Join-Path $tempRoot "measured-$suite-$runnerClass"
+		$measuredRunnerRoots[$runnerKey] = $runnerRoot
 		New-Item -ItemType Directory -Force -Path $runnerRoot | Out-Null
-		Copy-Item -LiteralPath (Join-Path $tempRoot "quality-$runnerClass.json") `
-			-Destination (Join-Path $runnerRoot 'qualification.json')
-		Copy-Item -LiteralPath (Join-Path $tempRoot "original-voice-$runnerClass.json") `
-			-Destination (Join-Path $runnerRoot 'original-voice-qualification.json')
+		$qualityPath = Join-Path $runnerRoot 'qualification.json'
+		$quality = & $qualityEvidence $suite $runnerClass
+		Write-ReleaseJson -Path $qualityPath -Value $quality
+		$caseRecordsPath = Join-Path $runnerRoot 'case-records.json'
+		Write-ReleaseJson -Path $caseRecordsPath -Value ([ordered]@{
+			schema_version = 1
+			cases = @(& $qualityCaseRecords $suite)
+			auto_transitions = @()
+		})
+		$artifactNamespace = Join-Path (Join-Path $runnerRoot 'artifacts') "$suite-$runnerClass"
+		New-Item -ItemType Directory -Force -Path $artifactNamespace | Out-Null
+		foreach ($artifactName in $qualityArtifactFileNames.Keys) {
+			if ($artifactName -ceq 'case_evidence_jsonl') {
+				continue
+			}
+			$qualityEvidenceArtifactPath = Join-Path $artifactNamespace $qualityArtifactFileNames[$artifactName]
+			[System.IO.File]::WriteAllText(
+				$qualityEvidenceArtifactPath,
+				"audio-free self-test artifact: $artifactName`n",
+				[System.Text.UTF8Encoding]::new($false)
+			)
+		}
+		$caseEvidencePath = Join-Path $artifactNamespace $qualityArtifactFileNames['case_evidence_jsonl']
+		$caseEvidenceGenerator = Join-Path (Split-Path -Parent $scriptsRoot) `
+			'audio-quality\generate-quality-case-evidence.py'
+		$null = & python $caseEvidenceGenerator `
+			--qualification $qualityPath `
+			--records $caseRecordsPath `
+			--output $caseEvidencePath
+		if ($LASTEXITCODE -ne 0) {
+			throw "Unable to generate schema-v3 case evidence for '$suite/$runnerClass'."
+		}
+		Remove-Item -LiteralPath $caseRecordsPath -Force
+		foreach ($artifactName in $qualityArtifactFileNames.Keys) {
+			$qualityEvidenceArtifactPath = Join-Path $artifactNamespace $qualityArtifactFileNames[$artifactName]
+			$quality.artifacts[$artifactName].sha256 = Get-ReleaseFileSha256 -Path $qualityEvidenceArtifactPath
+			$quality.artifacts[$artifactName].size_bytes = [int64](Get-Item -LiteralPath $qualityEvidenceArtifactPath).Length
+		}
+		Write-ReleaseJson -Path $qualityPath -Value $quality
+		$qualityValidator = Join-Path (Split-Path -Parent $scriptsRoot) `
+			'audio-quality\validate-quality-qualification.py'
+		$null = & python $qualityValidator $qualityPath --artifact-root $runnerRoot
+		if ($LASTEXITCODE -ne 0) {
+			throw "Schema-v3 quality fixture failed semantic validation for '$suite/$runnerClass'."
+		}
+		Write-ReleaseJson -Path (Join-Path $runnerRoot 'original-voice-qualification.json') `
+			-Value (& $originalEvidence $suite $runnerClass)
 		Write-ReleaseJson -Path (Join-Path $runnerRoot 'quality-harness-provenance.json') -Value ([ordered]@{
 			schemaVersion = 1
 			kind = 'input-enhancement-quality-harness-provenance'
 			sourceSha = $sourceSha
-			qualityWorkflowRunId = '123456'
+			qualityWorkflowRunId = if ($suite -ceq 'nightly') { '123457' } else { '123456' }
 			runnerClass = $runnerClass
 			harnessFileName = 'protected-quality-harness.ps1'
 			harnessSha256 = $qualityHarnessSha256
+			hardwareFingerprintSha256 = $hardwareFingerprints[$runnerClass]
 		})
+		}
 	}
-	$measuredScriptAttestationPath = Join-Path $tempRoot 'measured-script-attestation.json'
+	$measuredEvidencePath = Join-Path $tempRoot 'measured-quality-attestation.json'
 	$measuredScriptArguments = @{
 		SourceRoot = $sourceRoot
 		SourceSha = $sourceSha
 		TestedBinaryPath = (Join-Path $stageRoot 'mumble.exe')
-		LowPerformanceEvidenceRoot = $measuredRunnerRoots['low-performance']
-		MainstreamEvidenceRoot = $measuredRunnerRoots['mainstream']
+		LowPerformanceEvidenceRoot = $measuredRunnerRoots['master_quality|low-performance']
+		MainstreamEvidenceRoot = $measuredRunnerRoots['master_quality|mainstream']
+		LowPerformanceNightlyEvidenceRoot = $measuredRunnerRoots['nightly|low-performance']
+		MainstreamNightlyEvidenceRoot = $measuredRunnerRoots['nightly|mainstream']
 		UnsignedModelManifestPath = $unsignedModelManifestPath
 		UnsignedRecipeManifestPath = $unsignedRecipeManifestPath
 		QualityWorkflowRunId = '123456'
+		NightlyQualityWorkflowRunId = '123457'
 		ExpectedHarnessSha256 = $qualityHarnessSha256
 		PythonPath = $fakePythonPath
-		OutputPath = $measuredScriptAttestationPath
+		OutputPath = $measuredEvidencePath
 	}
 	& (Join-Path $scriptsRoot 'new-input-enhancement-measured-attestation.ps1') @measuredScriptArguments
-	$measuredScriptAttestation = Read-ReleaseJson -Path $measuredScriptAttestationPath
+	$measuredScriptAttestation = Read-ReleaseJson -Path $measuredEvidencePath
 	if ([string]$measuredScriptAttestation.harnessSha256 -cne $qualityHarnessSha256 -or
-		@($measuredScriptAttestation.runners | Where-Object {
+		@($measuredScriptAttestation.runners + $measuredScriptAttestation.nightlyRunners | Where-Object {
 			[string]$_.harnessProvenanceSha256 -cnotmatch '^[0-9a-f]{64}$'
 		}).Count -ne 0) {
-		throw 'Measured-attestation tool did not bind both runners to the protected harness provenance.'
+		throw 'Measured-attestation tool did not bind all master/nightly runners to protected harness provenance.'
+	}
+	$mergedMeasuredArtifacts = Join-Path $tempRoot 'artifacts'
+	New-Item -ItemType Directory -Force -Path $mergedMeasuredArtifacts | Out-Null
+	foreach ($runner in @($measuredScriptAttestation.runners + $measuredScriptAttestation.nightlyRunners)) {
+		$runnerRoot = $measuredRunnerRoots["$($runner.suite)|$($runner.runnerClass)"]
+		Copy-Item -LiteralPath (Join-Path $runnerRoot 'qualification.json') `
+			-Destination (Join-Path $tempRoot ([string]$runner.qualityQualification.fileName)) -Force
+		Copy-Item -LiteralPath (Join-Path $runnerRoot 'original-voice-qualification.json') `
+			-Destination (Join-Path $tempRoot ([string]$runner.originalVoiceQualification.fileName)) -Force
+		$artifactNamespace = "$($runner.suite)-$($runner.runnerClass)"
+		Copy-Item -LiteralPath (Join-Path (Join-Path $runnerRoot 'artifacts') $artifactNamespace) `
+			-Destination (Join-Path $mergedMeasuredArtifacts $artifactNamespace) -Recurse
 	}
 	$wrongHarnessArguments = $measuredScriptArguments.Clone()
 	$wrongHarnessArguments.ExpectedHarnessSha256 = ('37' * 32)
 	Assert-Throws -Description 'measured attestation configured harness mismatch' -Script {
 		& (Join-Path $scriptsRoot 'new-input-enhancement-measured-attestation.ps1') @wrongHarnessArguments
 	}
-
-	$measuredEvidencePath = Join-Path $tempRoot "measured-quality-attestation.json"
-	$measuredRunners = @(
-		[ordered]@{
-			runnerClass = "low-performance"
-			harnessProvenanceSha256 = ("35" * 32)
-			qualityQualification = [ordered]@{
-				fileName = "quality-low-performance.json"
-				sha256 = Get-ReleaseFileSha256 -Path (Join-Path $tempRoot "quality-low-performance.json")
-				caseCount = 500
-			}
-			originalVoiceQualification = [ordered]@{
-				fileName = "original-voice-low-performance.json"
-				sha256 = Get-ReleaseFileSha256 -Path (Join-Path $tempRoot "original-voice-low-performance.json")
-				caseCount = 45
-			}
-		},
-		[ordered]@{
-			runnerClass = "mainstream"
-			harnessProvenanceSha256 = ("36" * 32)
-			qualityQualification = [ordered]@{
-				fileName = "quality-mainstream.json"
-				sha256 = Get-ReleaseFileSha256 -Path (Join-Path $tempRoot "quality-mainstream.json")
-				caseCount = 500
-			}
-			originalVoiceQualification = [ordered]@{
-				fileName = "original-voice-mainstream.json"
-				sha256 = Get-ReleaseFileSha256 -Path (Join-Path $tempRoot "original-voice-mainstream.json")
-				caseCount = 45
-			}
-		}
-	)
-	Write-ReleaseJson -Path $measuredEvidencePath -Value ([ordered]@{
-		schemaVersion = 1
-		passed = $true
-		suite = "master_quality"
-		sourceSha = $sourceSha
-		testedBinaryFileName = "mumble.exe"
-		testedBinarySha256 = $testedBinarySha256
-		legacyBinarySha256 = $legacyExecutableSha256
-		harnessSha256 = $qualityHarnessSha256
-		corpusLockSha256 = $corpusLockSha256
-		mixturePlanSha256 = $mixturePlanSha256
-		recipeSetVersion = "self-test-r1"
-		modelHashes = $productModelHashes
-		unsignedModelManifest = [ordered]@{
-			fileName = (Get-Item $unsignedModelManifestPath).Name
-			sha256 = Get-ReleaseFileSha256 -Path $unsignedModelManifestPath
-		}
-		unsignedRecipeManifest = [ordered]@{
-			fileName = (Get-Item $unsignedRecipeManifestPath).Name
-			sha256 = Get-ReleaseFileSha256 -Path $unsignedRecipeManifestPath
-		}
-		runners = $measuredRunners
-		qualityWorkflowRunId = "123456"
-		createdAtUtc = "2026-07-14T12:00:00.0000000+00:00"
-	})
 	$gatePath = Join-Path $tempRoot "test-gates.json"
 	Write-ReleaseJson -Path $gatePath -Value ([ordered]@{
 		schemaVersion = 1
@@ -568,6 +1424,7 @@ try {
 			[ordered]@{ name = "DeepFilterNetCapiTests"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancement"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementAuto"; passed = $true; exitCode = 0; durationMs = 1 },
+			[ordered]@{ name = "TestInputEnhancementAutoV2"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementCalibration"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementCalibrationRuntime"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementPolicy"; passed = $true; exitCode = 0; durationMs = 1 },
@@ -670,7 +1527,7 @@ try {
 	}
 	[System.IO.File]::WriteAllBytes($qualificationPath, $originalQualificationBytes)
 
-	$transportEvidencePath = Join-Path $tempRoot "original-voice-low-performance.json"
+	$transportEvidencePath = Join-Path $tempRoot "original-voice-master_quality-low-performance.json"
 	$transportEvidence = Read-ReleaseJson -Path $transportEvidencePath
 	$transportEvidence.transport_path = "mumble-opus"
 	Write-ReleaseJson -Path $transportEvidencePath -Value $transportEvidence
@@ -689,16 +1546,22 @@ try {
 	$packagedClientHash = Get-ReleaseFileSha256 -Path $packagedClientPath
 	$qualificationHash = Get-ReleaseFileSha256 -Path $qualificationPath
 	$fixedModelHashes = @{
+		Light = ('0' * 64)
 		Balanced = Get-ReleaseFileSha256 -Path $modelAsset
-		Crisp = Get-ReleaseFileSha256 -Path $crispModelAsset
+		Quality = Get-ReleaseFileSha256 -Path $qualityModelAsset
+		VoiceFocus = Get-ReleaseFileSha256 -Path $qualityModelAsset
 	}
 	$fixedModelIds = @{
+		Light = ""
 		Balanced = "rnnoise:embedded"
-		Crisp = "deepfilternet:balanced"
+		Quality = "deepfilternet:balanced"
+		VoiceFocus = "deepfilternet:balanced"
 	}
 	$fixedRecipeIds = @{
+		Light = "input.light.speex"
 		Balanced = "input.balanced.rnnoise-embedded"
-		Crisp = "input.crisp.deepfilternet-balanced"
+		Quality = "input.quality.deepfilternet-balanced"
+		VoiceFocus = "input.voice-focus.deepfilternet-balanced"
 	}
 	$releaseSmokeHarnessHash = ("13" * 32)
 	$releaseSmokeServerHash = ("16" * 32)
@@ -726,7 +1589,7 @@ try {
 				preRollMs = $preRollMs; fixtureId = "$scene-fixture"
 			})
 		}
-		foreach ($profile in @("Balanced", "Crisp")) {
+		foreach ($profile in @("Light", "Balanced", "Quality", "VoiceFocus")) {
 			foreach ($startup in @("cold", "warm")) {
 				$preRollMs = if ($startup -ceq "cold") { 0 } else { 300 }
 				$caseSetCases.Add([ordered]@{
@@ -781,7 +1644,7 @@ try {
 	}
 	$releaseSmokeCases = New-Object System.Collections.Generic.List[object]
 	foreach ($scene in @("stationary-hvac", "transient-keyboard", "competing-speech")) {
-		foreach ($profile in @("Balanced", "Crisp")) {
+		foreach ($profile in @("Light", "Balanced", "Quality", "VoiceFocus")) {
 			foreach ($startup in @("cold", "warm")) {
 				$releaseSmokeCases.Add([ordered]@{
 					id = "$scene-$($profile.ToLowerInvariant())-$startup"
@@ -817,9 +1680,9 @@ try {
 					invalidOutputCount = 0
 					tailErrorCount = 0
 					latencyErrorCount = 0
-					tailDrainExpectedFrames = 3
-					tailDrainActualFrames = 3
-					enhancementLatencyMs = if ($profile -ceq "Balanced") { 30.0 } else { 40.0 }
+					tailDrainExpectedFrames = if ($profile -ceq 'Light') { 0 } else { 3 }
+					tailDrainActualFrames = if ($profile -ceq 'Light') { 0 } else { 3 }
+					enhancementLatencyMs = if ($profile -ceq 'Light') { 0.0 } elseif ($profile -ceq "Balanced") { 30.0 } else { 40.0 }
 					fixedTimelinePassed = $true
 					onsetLossSamples = 0
 					endLossSamples = 0
@@ -829,9 +1692,9 @@ try {
 					missingTailSamples = 0
 					receivedClippedSamples = 0
 					referenceClippedSamples = 0
-					callbackP99Ms = if ($profile -ceq 'Balanced') { 4.0 } else { 7.0 }
-					workerP99Ms = if ($profile -ceq 'Crisp') { 7.0 } else { 0.0 }
-					workerRtf = if ($profile -ceq 'Crisp') { 0.30 } else { 0.0 }
+					callbackP99Ms = if ($profile -cin @('Light', 'Balanced')) { 4.0 } else { 7.0 }
+					workerP99Ms = if ($profile -cin @('Quality', 'VoiceFocus')) { 7.0 } else { 0.0 }
+					workerRtf = if ($profile -cin @('Quality', 'VoiceFocus')) { 0.30 } else { 0.0 }
 					workerPendingFrames = 0
 					deadlineMissCount = 0
 				})
@@ -1116,11 +1979,36 @@ try {
 
 	$previousPointerPath = Join-Path $tempRoot "previous-pointer.json"
 	$previousTag = "mumble-forked-build-41-000000000000"
+	$olderTag = "mumble-forked-build-40-111111111111"
+	$oldestTag = "mumble-forked-build-39-222222222222"
 	Write-ReleaseJson -Path $previousPointerPath -Value ([ordered]@{
-		schemaVersion = 1
+		schemaVersion = 2
 		channel = "preview"
 		immutableTag = $previousTag
-		knownGoodTags = @($previousTag)
+		installer = [ordered]@{
+			fileName = 'mumble-forked-1.7.41.msi'
+			sha256 = ('1' * 64)
+			size = 4100
+			executableSha256 = ('4' * 64)
+			url = "https://github.com/example/mumble/releases/download/$previousTag/mumble-forked-1.7.41.msi"
+		}
+		recoveryInstallers = @(
+			[ordered]@{
+				immutableTag = $olderTag
+				fileName = 'mumble-forked-1.7.40.msi'
+				sha256 = ('2' * 64)
+				size = 4000
+				url = "https://github.com/example/mumble/releases/download/$olderTag/mumble-forked-1.7.40.msi"
+			},
+			[ordered]@{
+				immutableTag = $oldestTag
+				fileName = 'mumble-forked-1.7.39.msi'
+				sha256 = ('3' * 64)
+				size = 3900
+				url = "https://github.com/example/mumble/releases/download/$oldestTag/mumble-forked-1.7.39.msi"
+			}
+		)
+		knownGoodTags = @($previousTag, $olderTag, $oldestTag)
 	})
 	$previousPointerSignaturePath = "$previousPointerPath.sig"
 	Protect-FileWithEd25519 -InputPath $previousPointerPath -SignaturePath $previousPointerSignaturePath `
@@ -1176,10 +2064,18 @@ try {
 	if ([string]$channelPointer.releaseSmoke.sha256 -cne (Get-ReleaseFileSha256 -Path $releaseSmokePath)) {
 		throw "Signed channel pointer did not attest the exact release-smoke evidence."
 	}
-	if (@($channelPointer.knownGoodTags).Count -ne 2 -or
+	if ([int]$channelPointer.schemaVersion -ne 2 -or
+		@($channelPointer.knownGoodTags).Count -ne 3 -or
 		[string]$channelPointer.knownGoodTags[0] -cne $buildId -or
-		[string]$channelPointer.knownGoodTags[1] -cne $previousTag) {
-		throw "Channel pointer did not retain the current and previous known-good immutable releases."
+		[string]$channelPointer.knownGoodTags[1] -cne $previousTag -or
+		[string]$channelPointer.knownGoodTags[2] -cne $olderTag -or
+		@($channelPointer.recoveryInstallers).Count -ne 2) {
+		throw "Channel pointer did not retain the candidate plus two previous recovery MSI releases."
+	}
+	if ([string]$channelPointer.installer.fileName -cne (Get-Item -LiteralPath $installerPath).Name -or
+		[string]$channelPointer.installer.sha256 -cne (Get-ReleaseFileSha256 -Path $installerPath) -or
+		[string]$channelPointer.installer.executableSha256 -cne $testedBinarySha256) {
+		throw "Channel pointer did not attest the exact candidate MSI."
 	}
 	if ([string]$channelPointer.inputEnhancementPolicy.sha256 -cne (Get-ReleaseFileSha256 -Path $policyPath) -or
 		[string]$channelPointer.inputEnhancementPolicy.signatureSha256 -cne (Get-ReleaseFileSha256 -Path "$policyPath.sig")) {
@@ -1187,6 +2083,41 @@ try {
 	}
 	if ($channelPointer.PSObject.Properties['signedVerified']) {
 		throw "Channel pointer still contains the obsolete non-cryptographic signedVerified claim."
+	}
+	$bootstrapRecoveryPath = Join-Path $tempRoot 'bootstrap-recovery-set.json'
+	Write-ReleaseJson -Path $bootstrapRecoveryPath -Value ([ordered]@{
+		schemaVersion = 1
+		recoveryInstallers = @(
+			[ordered]@{ immutableTag = $previousTag; fileName = 'mumble-forked-1.7.41.msi'; sha256 = ('1' * 64); size = 4100 },
+			[ordered]@{ immutableTag = $olderTag; fileName = 'mumble-forked-1.7.40.msi'; sha256 = ('2' * 64); size = 4000 }
+		)
+	})
+	$bootstrapPointerPath = Join-Path $tempRoot 'bootstrap-channel-pointer.json'
+	& (Join-Path $scriptsRoot 'new-input-enhancement-channel-pointer.ps1') `
+		-Channel stable -Repository 'example/mumble' `
+		-QualificationPath $qualificationPath -ReleaseSmokePath $releaseSmokePath `
+		-Announcement 'Schema v1 to v2 bootstrap' -BootstrapRecoverySetPath $bootstrapRecoveryPath `
+		-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+		-PolicyPath $policyPath -PolicySignaturePath "$policyPath.sig" `
+		-OpenSslPath $openSsl -OutputPath $bootstrapPointerPath
+	$bootstrapPointer = Read-ReleaseJson -Path $bootstrapPointerPath
+	if (@($bootstrapPointer.recoveryInstallers).Count -ne 2 -or
+		[string]$bootstrapPointer.recoveryInstallers[0].immutableTag -cne $previousTag -or
+		[string]$bootstrapPointer.recoveryInstallers[1].immutableTag -cne $olderTag) {
+		throw 'Explicit v1-to-v2 bootstrap did not preserve both hash-attested recovery MSI inputs.'
+	}
+	$incompleteBootstrap = Read-ReleaseJson -Path $bootstrapRecoveryPath
+	$incompleteBootstrap.recoveryInstallers = @($incompleteBootstrap.recoveryInstallers | Select-Object -First 1)
+	$incompleteBootstrapPath = Join-Path $tempRoot 'incomplete-bootstrap-recovery-set.json'
+	Write-ReleaseJson -Path $incompleteBootstrapPath -Value $incompleteBootstrap
+	Assert-Throws -Description 'incomplete v1-to-v2 recovery bootstrap' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-channel-pointer.ps1') `
+			-Channel stable -Repository 'example/mumble' `
+			-QualificationPath $qualificationPath -ReleaseSmokePath $releaseSmokePath `
+			-Announcement 'Must fail' -BootstrapRecoverySetPath $incompleteBootstrapPath `
+			-PrivateKeyBase64 $privateKeyBase64 -ExpectedPublicKeyHex $publicKeyHex `
+			-PolicyPath $policyPath -PolicySignaturePath "$policyPath.sig" `
+			-OpenSslPath $openSsl -OutputPath (Join-Path $tempRoot 'incomplete-bootstrap-pointer.json')
 	}
 	$expectedPolicyBytes = '{"available":true,"expiresAt":"' +
 		$policyExpiration.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture) +
@@ -1292,7 +2223,7 @@ try {
 				"@echo off",
 				"echo %* | findstr /C:`"--show-only=json-v1`" >nul",
 				"if %errorlevel%==0 (",
-				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
+				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
 				"  exit /b 0",
 				")",
 				"exit /b 0"

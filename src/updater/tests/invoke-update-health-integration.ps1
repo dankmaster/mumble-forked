@@ -28,7 +28,10 @@ function New-TestPackage {
 		[string] $PackageRoot,
 		[string] $PackagePath,
 		[System.Collections.IDictionary] $Files,
-		[bool] $RequireHealth
+		[bool] $RequireHealth,
+		[int] $MinUpdaterVersion = 4,
+		[switch] $OmitMinUpdaterVersion,
+		[switch] $OmitHealthCheck
 	)
 
 	if (Test-Path -LiteralPath $PackageRoot) {
@@ -57,14 +60,20 @@ function New-TestPackage {
 	)
 	$manifest = [ordered]@{
 		format = 'mumble-update-v1'
-		minUpdaterVersion = 3
+		minUpdaterVersion = $MinUpdaterVersion
 		applyMode = 'replace-staged-payload'
 		healthCheck = [ordered]@{
 			required = $RequireHealth
 			minimumStableRuntimeMilliseconds = 10000
-			timeoutMilliseconds = 12000
+			timeoutMilliseconds = 45000
 		}
 		files = $manifestFiles
+	}
+	if ($OmitMinUpdaterVersion) {
+		$manifest.Remove('minUpdaterVersion')
+	}
+	if ($OmitHealthCheck) {
+		$manifest.Remove('healthCheck')
 	}
 	Write-Utf8File -Path (Join-Path $PackageRoot 'manifest.json') -Content ($manifest | ConvertTo-Json -Depth 8)
 	if (Test-Path -LiteralPath $PackagePath) {
@@ -74,11 +83,75 @@ function New-TestPackage {
 		-DestinationPath $PackagePath -CompressionLevel Optimal
 }
 
+if (-not ('MumbleUpdateHealthTestKey' -as [type])) {
+	Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+
+public static class MumbleUpdateHealthTestKey {
+    public static string FromPath(string path) {
+        string value = Path.GetFullPath(path).Replace('/', '\\');
+        if (value.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase)) {
+            value = "\\\\" + value.Substring(8);
+        } else if (value.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase)) {
+            value = value.Substring(4);
+        }
+        value = value.ToLowerInvariant();
+        unchecked {
+            ulong hash = 14695981039346656037UL;
+            foreach (char character in value) {
+                hash ^= character;
+                hash *= 1099511628211UL;
+            }
+            return hash.ToString("x16");
+        }
+    }
+}
+'@
+}
+
+function Set-TestInstalledPackageState {
+	param(
+		[string] $PackagePath,
+		[string] $AppRoot,
+		[string] $AppPath,
+		[string] $UpdateRoot,
+		[System.Collections.IDictionary] $Files
+	)
+	$records = @()
+	foreach ($entry in $Files.GetEnumerator()) {
+		$target = Join-Path $AppRoot $entry.Key
+		[System.IO.Directory]::CreateDirectory((Split-Path -Parent $target)) | Out-Null
+		if ($entry.Value -is [System.IO.FileInfo]) {
+			[System.IO.File]::Copy($entry.Value.FullName, $target, $true)
+		} else {
+			Write-Utf8File -Path $target -Content ([string] $entry.Value)
+		}
+		$file = Get-Item -LiteralPath $target
+		$records += [ordered]@{
+			path = ([string]$entry.Key).Replace('\', '/')
+			size = [int64]$file.Length
+			sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+		}
+	}
+	$key = [MumbleUpdateHealthTestKey]::FromPath($AppRoot)
+	$manifestPath = Join-Path (Join-Path $UpdateRoot 'installed-manifests') "$key.json"
+	$manifest = [ordered]@{
+		schema = 1
+		appPath = [System.IO.Path]::GetFullPath($AppPath)
+		appDir = [System.IO.Path]::GetFullPath($AppRoot)
+		packageIdentity = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+		files = @($records)
+	}
+	Write-Utf8File -Path $manifestPath -Content ($manifest | ConvertTo-Json -Depth 8)
+}
+
 function Invoke-Updater {
 	param(
 		[string] $PackagePath,
 		[string] $AppPath,
 		[string] $UpdateRoot,
+		[string] $UpdaterExecutable = $UpdaterPath,
 		[switch] $NoRelaunch,
 		[string] $PackageSha256,
 		[string[]] $ExtraArguments = @()
@@ -99,7 +172,7 @@ function Invoke-Updater {
 	}
 	$arguments += $ExtraArguments
 	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-	$startInfo.FileName = $UpdaterPath
+	$startInfo.FileName = $UpdaterExecutable
 	$startInfo.UseShellExecute = $false
 	$startInfo.CreateNoWindow = $true
 	foreach ($argument in $arguments) {
@@ -136,6 +209,9 @@ function Invoke-InstallerAdmission {
 	param(
 		[string] $InstallerPath,
 		[string] $InstallerSha256,
+		[string] $RecoveryInstallerPath = '',
+		[string] $RecoveryInstallerSha256 = '',
+		[string] $CandidateExecutableSha256 = '',
 		[string] $AppPath,
 		[string] $UpdateRoot
 	)
@@ -149,6 +225,15 @@ function Invoke-InstallerAdmission {
 	)
 	if (-not [string]::IsNullOrWhiteSpace($InstallerSha256)) {
 		$arguments += @('--installer-sha256', $InstallerSha256)
+	}
+	if (-not [string]::IsNullOrWhiteSpace($RecoveryInstallerPath)) {
+		$arguments += @('--recovery-installer', $RecoveryInstallerPath)
+	}
+	if (-not [string]::IsNullOrWhiteSpace($RecoveryInstallerSha256)) {
+		$arguments += @('--recovery-installer-sha256', $RecoveryInstallerSha256)
+	}
+	if (-not [string]::IsNullOrWhiteSpace($CandidateExecutableSha256)) {
+		$arguments += @('--candidate-executable-sha256', $CandidateExecutableSha256)
 	}
 	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 	$startInfo.FileName = $UpdaterPath
@@ -230,6 +315,8 @@ try {
 	Write-Utf8File -Path $appPath -Content 'legacy-bootstrap'
 	$fakeInstaller = Join-Path $testRoot 'untrusted.msi'
 	Write-Utf8File -Path $fakeInstaller -Content 'not-an-msi'
+	$fakeRecoveryInstaller = Join-Path $testRoot 'untrusted-recovery.msi'
+	Write-Utf8File -Path $fakeRecoveryInstaller -Content 'not-a-recovery-msi'
 	$beforeInstallerAdmissionHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
 	foreach ($installerSha in @('', ('0' * 64))) {
 		$installerExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller -InstallerSha256 $installerSha `
@@ -238,19 +325,79 @@ try {
 			throw 'An MSI without its exact mandatory SHA256 unexpectedly passed updater admission.'
 		}
 	}
+	$fakeInstallerSha = (Get-FileHash -LiteralPath $fakeInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+	$candidateExecutableSha = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash.ToLowerInvariant()
+	$missingRecoveryDigestExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller `
+		-InstallerSha256 $fakeInstallerSha -RecoveryInstallerPath $fakeRecoveryInstaller `
+		-AppPath $appPath -UpdateRoot $updateRoot
+	if ($missingRecoveryDigestExit -eq 0) {
+		throw 'A recovery MSI without its paired digest unexpectedly passed updater admission.'
+	}
+	$badRecoveryDigestExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller `
+		-InstallerSha256 $fakeInstallerSha -RecoveryInstallerPath $fakeRecoveryInstaller `
+		-RecoveryInstallerSha256 ('0' * 64) -CandidateExecutableSha256 $candidateExecutableSha `
+		-AppPath $appPath -UpdateRoot $updateRoot
+	if ($badRecoveryDigestExit -eq 0) {
+		throw 'A recovery MSI with the wrong mandatory digest unexpectedly passed updater admission.'
+	}
+	$fakeRecoveryInstallerSha = (Get-FileHash -LiteralPath $fakeRecoveryInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+	$missingExecutableDigestExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller `
+		-InstallerSha256 $fakeInstallerSha -RecoveryInstallerPath $fakeRecoveryInstaller `
+		-RecoveryInstallerSha256 $fakeRecoveryInstallerSha -AppPath $appPath -UpdateRoot $updateRoot
+	if ($missingExecutableDigestExit -eq 0) {
+		throw 'An MSI probation request without its candidate executable digest unexpectedly passed admission.'
+	}
 	if ((Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash -ne $beforeInstallerAdmissionHash -or
 		(Get-TestRecoveryValues).Count -ne 0) {
 		throw 'Failed MSI digest admission mutated application or recovery state.'
 	}
 
+	# Protocol-v4 native packages must never bypass health probation through a
+	# missing/old version or an absent/false health contract. Exercise the real
+	# product updater, not the crash-injection test binary, and prove rejection
+	# happens before any application or recovery state changes.
+	$invalidFiles = [ordered]@{
+		'mumble.exe' = 'invalid-candidate'
+		'mumble-updater.exe' = 'invalid-updater'
+	}
+	$noHealthPackage = Join-Path $testRoot 'invalid-no-health.zip'
+	New-TestPackage -PackageRoot (Join-Path $testRoot 'invalid-no-health-package') `
+		-PackagePath $noHealthPackage -Files $invalidFiles -RequireHealth $false
+	$oldProtocolPackage = Join-Path $testRoot 'invalid-old-protocol.zip'
+	New-TestPackage -PackageRoot (Join-Path $testRoot 'invalid-old-protocol-package') `
+		-PackagePath $oldProtocolPackage -Files $invalidFiles -RequireHealth $true -MinUpdaterVersion 3
+	$missingHealthPackage = Join-Path $testRoot 'invalid-missing-health.zip'
+	New-TestPackage -PackageRoot (Join-Path $testRoot 'invalid-missing-health-package') `
+		-PackagePath $missingHealthPackage -Files $invalidFiles -RequireHealth $true -OmitHealthCheck
+	$missingProtocolPackage = Join-Path $testRoot 'invalid-missing-protocol.zip'
+	New-TestPackage -PackageRoot (Join-Path $testRoot 'invalid-missing-protocol-package') `
+		-PackagePath $missingProtocolPackage -Files $invalidFiles -RequireHealth $true -OmitMinUpdaterVersion
+	$beforeInvalidManifestHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
+	foreach ($invalidPackage in @(
+		$noHealthPackage, $oldProtocolPackage, $missingHealthPackage, $missingProtocolPackage
+	)) {
+		$invalidExit = Invoke-Updater -PackagePath $invalidPackage -AppPath $appPath -UpdateRoot $updateRoot `
+			-UpdaterExecutable $ProductUpdaterPath -NoRelaunch
+		if ($invalidExit -eq 0) {
+			throw "Invalid protocol-v4 package unexpectedly passed admission: $invalidPackage"
+		}
+		if ((Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash -ne $beforeInvalidManifestHash -or
+			(Get-TestRecoveryValues).Count -ne 0) {
+			throw "Invalid protocol-v4 package mutated application or recovery state: $invalidPackage"
+		}
+	}
+
 	$knownGoodClientSource = Get-Item -LiteralPath (Join-Path $env:WINDIR 'System32\where.exe')
 	$knownGoodPackage = Join-Path $testRoot 'known-good.zip'
+	$knownGoodFiles = [ordered]@{
+		'mumble.exe' = $knownGoodClientSource
+		'mumble-updater.exe' = 'known-good-updater'
+		'stale-managed.dll' = 'known-good-stale-file'
+	}
 	New-TestPackage -PackageRoot (Join-Path $testRoot 'known-good-package') -PackagePath $knownGoodPackage `
-		-Files ([ordered]@{
-			'mumble.exe' = $knownGoodClientSource
-			'mumble-updater.exe' = 'known-good-updater'
-			'stale-managed.dll' = 'known-good-stale-file'
-		}) -RequireHealth $false
+		-Files $knownGoodFiles -RequireHealth $true
+	Set-TestInstalledPackageState -PackagePath $knownGoodPackage -AppRoot $appRoot -AppPath $appPath `
+		-UpdateRoot $updateRoot -Files $knownGoodFiles
 
 	# The package digest is an admission credential, not descriptive metadata.
 	# A mismatch must fail before any application or recovery state is mutated.
@@ -265,11 +412,6 @@ try {
 	}
 	if ((Get-TestRecoveryValues).Count -ne 0) {
 		throw 'Package SHA256 admission failure armed persistent recovery state.'
-	}
-
-	$firstExit = Invoke-Updater -PackagePath $knownGoodPackage -AppPath $appPath -UpdateRoot $updateRoot -NoRelaunch
-	if ($firstExit -ne 0) {
-		throw "Known-good package apply failed with exit code $firstExit."
 	}
 
 	$brokenPackage = Join-Path $testRoot 'broken.zip'

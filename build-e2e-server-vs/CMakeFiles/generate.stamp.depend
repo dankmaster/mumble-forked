@@ -1,0 +1,64 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCommonLanguageInclude.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDependentOption.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeGenericSystem.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeInitializeConfigs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeLanguageInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeRCInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeSystemSpecificInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeSystemSpecificInitialize.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCXXCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCXXSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/CMakeLists-C.txt.in
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/CMakeLists-CXX.txt.in
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/foo.c
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/foo.cpp
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/main.c
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/main.cpp
+C:/Program Files/CMake/share/cmake-4.3/Modules/Compiler/CMakeCommonCompilerMacros.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Compiler/MSVC-C.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Compiler/MSVC-CXX.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Compiler/MSVC.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPkgConfig.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPython.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/FindPython/Support.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/GNUInstallDirs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeCLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeCXXLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeCommonLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CheckCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CheckFlagCommonConfig.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CheckSourceCompiles.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Linker/MSVC-C.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Linker/MSVC-CXX.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Linker/MSVC.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Linker/Windows-MSVC-C.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Linker/Windows-MSVC-CXX.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Linker/Windows-MSVC.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-Initialize.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC-C.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC-CXX.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/WindowsPaths.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/installed/x64-windows/share/python/vcpkg-cmake-wrapper.cmake
+D:/.mbe/2025-11-127cccc01d-shared-f1bb57b6/scripts/buildsystems/vcpkg.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/cmake-compiler-flags/CompilerFlags.cmake
+D:/Coding/Mumble-input-enhancement/CMakeLists.txt
+D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/CMakeFiles/4.3.1/CMakeCCompiler.cmake
+D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/CMakeFiles/4.3.1/CMakeCXXCompiler.cmake
+D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/CMakeFiles/4.3.1/CMakeRCCompiler.cmake
+D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/CMakeFiles/4.3.1/CMakeSystem.cmake
+D:/Coding/Mumble-input-enhancement/build-e2e-server-vs/arch.c
+D:/Coding/Mumble-input-enhancement/cmake/TargetArch.cmake
+D:/Coding/Mumble-input-enhancement/cmake/compiler.cmake
+D:/Coding/Mumble-input-enhancement/cmake/install-paths.cmake
+D:/Coding/Mumble-input-enhancement/cmake/os.cmake
+D:/Coding/Mumble-input-enhancement/cmake/pkg-utils.cmake
+D:/Coding/Mumble-input-enhancement/cmake/project-utils.cmake

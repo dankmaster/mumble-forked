@@ -17,11 +17,17 @@ def main() -> int:
 		"detect-audio-quality-applicability.py",
 		"validate-corpus-lock.py",
 		"fetch-corpus.py",
+		"corpus-inventory-v3.py",
 		"generate-mixture-plan.py",
 		"pad-fixed-timeline-wav.py",
 		"render-mixture-plan.py",
+		"freeze-rnnoise-training-plan.py",
+		"select-rnnoise-model.py",
 		"score-fixed-timeline.py",
+		"run-two-client-e2e.py",
+		"blind-listening.py",
 		"run-ci-quality-gate.py",
+		"generate-quality-case-evidence.py",
 		"validate-quality-qualification.py",
 	)
 	for script in scripts:
@@ -30,7 +36,15 @@ def main() -> int:
 			print(f"audio-quality self-tests: {script} failed with {result.returncode}", file=sys.stderr)
 			return result.returncode
 	try:
-		json.loads((root / "quality-qualification.schema.json").read_text(encoding="utf-8"))
+		for schema_name in (
+			"quality-qualification.schema.json",
+			"quality-case-evidence.schema.json",
+			"corpus-inventory-v3.schema.json",
+			"blind-listening-source.schema.json",
+			"blind-listening-session.schema.json",
+			"blind-listening-qualification.schema.json",
+		):
+			json.loads((root / schema_name).read_text(encoding="utf-8"))
 	except (OSError, json.JSONDecodeError) as error:
 		print(f"audio-quality self-tests: invalid qualification schema: {error}", file=sys.stderr)
 		return 1

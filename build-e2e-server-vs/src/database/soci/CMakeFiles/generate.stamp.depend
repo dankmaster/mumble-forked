@@ -1,0 +1,21 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-4.3/Modules/BasicConfigVersion-SameMajorVersion.cmake.in
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDependentOption.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CMakePackageConfigHelpers.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCXXCompilerFlag.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/CMakeLists-C.txt.in
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/CMakeLists-CXX.txt.in
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/foo.c
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/foo.cpp
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/main.c
+C:/Program Files/CMake/share/cmake-4.3/Modules/CheckIPOSupported/main.cpp
+C:/Program Files/CMake/share/cmake-4.3/Modules/GNUInstallDirs.cmake
+C:/Program Files/CMake/share/cmake-4.3/Modules/WriteBasicConfigVersionFile.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/CMakeLists.txt
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_compat.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_compiler_options.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_install_dirs.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_parse_version.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/cmake/soci_utils.cmake
+D:/Coding/Mumble-input-enhancement/3rdparty/soci/soci-config.cmake.in
