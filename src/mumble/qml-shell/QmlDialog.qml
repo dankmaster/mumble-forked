@@ -38,6 +38,8 @@ Dialog {
 	readonly property color dialogToneColor: toneColor(dialogTone)
 	property bool showAdvanced: !!dialogState.state.showAdvanced
 	property string focusedDialogId: ""
+	property int initialFocusGeneration: 0
+	property string initialFocusObjectName: ""
 	property bool nestedModalOpen: false
 	property var beforeOpen: null
 	// Controls inherit this palette when a specialized product component does
@@ -159,6 +161,7 @@ Dialog {
 	}
 	function applyInitialFocus() {
 		if (!visible || !contentItem) return
+		const generation = ++initialFocusGeneration
 		const requested = metadataFocusId()
 		let target = focusObjectInTree(contentItem, requested)
 		if (!target && requested.indexOf("dialogField_") !== 0)
@@ -168,16 +171,33 @@ Dialog {
 		if (!target)
 			target = focusObjectInTree(contentItem, "dialogCloseButton")
 		if (target && target.enabled !== false && target.visible !== false && target.forceActiveFocus) {
+			const objectName = String(target.objectName || "")
+			initialFocusObjectName = objectName
 			target.forceActiveFocus(Qt.TabFocusReason)
-			// Delegate geometry and ScrollView contentHeight can settle on
-			// consecutive event-loop turns (especially with offscreen/software
-			// rendering). Recheck after both layout passes so initial keyboard
-			// focus never remains hidden behind the sticky footer.
-			Qt.callLater(function() {
-				dialog.ensureContentVisible(target)
-				Qt.callLater(function() { dialog.ensureContentVisible(target) })
-			})
+			dialog.ensureContentVisible(target)
+			// Delegate geometry, the Popup enter transition and ScrollView's
+			// contentHeight can settle on different event-loop turns. Resolve the
+			// delegate afresh on every pass: a state change can destroy a Loader's
+			// previous item while these callbacks are still queued.
+			dialog.scheduleInitialFocusVisibility(objectName, generation, 4)
+		} else {
+			initialFocusObjectName = ""
 		}
+	}
+	function scheduleInitialFocusVisibility(objectName, generation, remainingPasses) {
+		if (objectName.length === 0 || remainingPasses <= 0) return
+		Qt.callLater(function() {
+			if (!dialog.visible || generation !== dialog.initialFocusGeneration) return
+			const target = dialog.focusObjectInTree(dialog.contentItem, objectName)
+			if (!target || !target.activeFocus) return
+			dialog.ensureContentVisible(target)
+			dialog.scheduleInitialFocusVisibility(objectName, generation, remainingPasses - 1)
+		})
+	}
+	function recheckInitialFocusVisibility() {
+		const objectName = initialFocusObjectName
+		if (objectName.length > 0)
+			scheduleInitialFocusVisibility(objectName, initialFocusGeneration, 1)
 	}
 	function ensureContentVisible(target) {
 		if (!target || !dialogContentScroll || !dialogContentScroll.contentItem) return
@@ -335,7 +355,14 @@ Dialog {
 		scheduleContentMeasurement()
 		Qt.callLater(applyInitialFocus)
 	}
-	onVisibleChanged: if (visible) Qt.callLater(applyInitialFocus)
+	onVisibleChanged: {
+		if (visible) {
+			Qt.callLater(applyInitialFocus)
+		} else {
+			++initialFocusGeneration
+			initialFocusObjectName = ""
+		}
+	}
 	Component.onCompleted: syncVisibility()
 	Connections {
 		target: dialogState
@@ -681,7 +708,10 @@ Dialog {
 						id: dialogContentColumn
 						width: parent.width
 						spacing: Theme.spacing + 4
-						onImplicitHeightChanged: dialog.scheduleContentMeasurement()
+						onImplicitHeightChanged: {
+							dialog.scheduleContentMeasurement()
+							dialog.recheckInitialFocusVisibility()
+						}
 					Rectangle {
 						id: loadingScaffold
 						objectName: "dialogLoadingScaffold"
