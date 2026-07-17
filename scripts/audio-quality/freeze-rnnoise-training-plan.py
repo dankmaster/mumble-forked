@@ -475,9 +475,12 @@ def run_self_test() -> None:
 			source["roles"] = sorted(set(source["roles"]) | {"training_candidate"})
 	LOCK.validate_manifest(manifest)
 	inventory = MIXTURE._self_test_inventory(manifest, "rnnoise-campaign-self-test")
-	tuning_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "tuning", "rnnoise-campaign-self-test", 2, 1000)
-	validation_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "validation", "rnnoise-campaign-self-test", 2, 1000)
-	holdout_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "holdout", "rnnoise-campaign-self-test", 2, 1000)
+	# Schema-v4 PR plans must cover both qualified control-grid endpoints for
+	# every profile.  Use the real 30-case smoke shape here instead of a legacy
+	# two-case shortcut so the frozen training-plan fixture is itself admissible.
+	tuning_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "tuning", "rnnoise-campaign-self-test", 30, 1000)
+	validation_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "validation", "rnnoise-campaign-self-test", 30, 1000)
+	holdout_mixture = MIXTURE.generate_plan(manifest, inventory, "pr_smoke", "holdout", "rnnoise-campaign-self-test", 30, 1000)
 	with tempfile.TemporaryDirectory() as temporary:
 		root = Path(temporary)
 		(root / "trainer.bin").write_bytes(b"pinned trainer")
