@@ -2576,6 +2576,8 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		bPreviousVoice = false;
 		previousPTT    = false;
 		iBitrate       = 0;
+		m_voiceActivityTransmitting.store(false, std::memory_order_relaxed);
+		m_voiceActivityBitrate.store(0, std::memory_order_relaxed);
 		if (p) {
 			p->setTalking(Settings::Passive);
 		}
@@ -2669,6 +2671,8 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		bPreviousVoice = false;
 		previousPTT    = false;
 		iBitrate       = 0;
+		m_voiceActivityTransmitting.store(false, std::memory_order_relaxed);
+		m_voiceActivityBitrate.store(0, std::memory_order_relaxed);
 		if (p) {
 			p->setTalking(Settings::Passive);
 		}
