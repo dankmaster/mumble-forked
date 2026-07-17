@@ -233,12 +233,18 @@ def validate_inventory(
 	_keys(
 		value,
 		{"corpus_lock_sha256", "eligibility", "inventory_id", "items", "provenance", "schema_version"},
-		set(),
+		{"sealed_splits", "selection_sha256"},
 		"inventory",
 	)
 	_expect(value["schema_version"] == 3, "inventory.schema_version", "unsupported version")
 	_identifier(value["inventory_id"], "inventory.inventory_id")
-	_expect(value["eligibility"] in ("draft", "release"), "inventory.eligibility", "must be draft or release")
+	_expect(value["eligibility"] in ("draft", "nightly-partial", "release"), "inventory.eligibility", "must be draft, nightly-partial or release")
+	if value["eligibility"] == "nightly-partial":
+		_expect(set(value) >= {"sealed_splits", "selection_sha256"}, "inventory", "nightly-partial requires sealed split and selection hash")
+		_expect(value["sealed_splits"] == ["holdout"], "inventory.sealed_splits", "nightly-partial must seal holdout")
+		_hash(value["selection_sha256"], "inventory.selection_sha256")
+	else:
+		_expect("sealed_splits" not in value and "selection_sha256" not in value, "inventory", "seal metadata is valid only for nightly-partial")
 	expected_lock = LOCK.canonical_manifest_sha256(manifest)
 	_expect(value["corpus_lock_sha256"] == expected_lock, "inventory.corpus_lock_sha256", "lock mismatch")
 	provenance = value["provenance"]
@@ -256,6 +262,7 @@ def validate_inventory(
 	_expect(isinstance(value["items"], list) and value["items"], "inventory.items", "must be a non-empty array")
 	if require_release:
 		_expect(value["eligibility"] == "release", "inventory.eligibility", "release qualification rejects draft inventory")
+	require_complete = require_release or value["eligibility"] == "nightly-partial"
 
 	allowed = _allowed_sources(manifest)
 	excluded = {source["id"] for source in manifest["excluded_sources"]}
@@ -305,7 +312,7 @@ def validate_inventory(
 			)
 			_expect(isinstance(item["language"], str) and bool(item["language"]), f"{path}.language", "required")
 			_identifier(item["speaker_id"], f"{path}.speaker_id")
-			_validate_transcript(item["transcript"], f"{path}.transcript", require_release)
+			_validate_transcript(item["transcript"], f"{path}.transcript", require_complete)
 		elif kind == "noise":
 			_expect(
 				allowed[item["source_id"]]["kind"] in ("environmental_noise", "environmental_noise_and_rir", "paired_clean_noisy_speech"),
@@ -339,7 +346,7 @@ def validate_inventory(
 		ids.append(item["id"])
 		kinds.add(kind)
 	_expect(ids == sorted(set(ids)), "inventory.items", "ids must be unique and sorted")
-	if require_release:
+	if require_complete:
 		missing_kinds = sorted(set(KINDS) - kinds)
 		_expect(not missing_kinds, "inventory.items", f"release inventory is missing kinds: {', '.join(missing_kinds)}")
 	return items

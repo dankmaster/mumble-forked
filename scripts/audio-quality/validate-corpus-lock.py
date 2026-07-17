@@ -66,6 +66,7 @@ SOURCE_REQUIRED_KEYS = {
 	"version",
 }
 SIDECAR_REQUIRED_KEYS = { "id", "integrity", "kind", "source_url" }
+SIDECAR_KINDS = { "archive_part", "label_metadata", "license_metadata", "transcript_metadata" }
 EXCLUDED_REQUIRED_KEYS = {
 	"id",
 	"integrity",
@@ -205,11 +206,7 @@ def _validate_sidecars(value: Any, path: str) -> None:
 			f"{sidecar_path}.id",
 			"must be a lowercase slug",
 		)
-		_expect(
-			sidecar["kind"] == "transcript_metadata",
-			f"{sidecar_path}.kind",
-			"only reviewed transcript_metadata sidecars are supported",
-		)
+		_expect(sidecar["kind"] in SIDECAR_KINDS, f"{sidecar_path}.kind", "unknown reviewed sidecar kind")
 		_expect_https_url(sidecar["source_url"], f"{sidecar_path}.source_url")
 		_validate_integrity(sidecar["integrity"], f"{sidecar_path}.integrity")
 		_expect(
@@ -515,6 +512,14 @@ def run_self_test() -> None:
 			},
 		}
 	]
+	bad_sidecar_kind = copy.deepcopy(policy_fixture)
+	bad_sidecar_kind["sources"][0]["sidecars"][0]["kind"] = "unreviewed_metadata"
+	try:
+		validate_manifest(bad_sidecar_kind)
+	except ValidationError:
+		pass
+	else:
+		raise AssertionError("self-test accepted an unknown sidecar kind")
 	blocked = copy.deepcopy(safe)
 	blocked.pop("sidecars")
 	blocked["id"] = "blocked-source"

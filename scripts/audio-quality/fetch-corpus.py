@@ -191,6 +191,18 @@ def _selected_sources(
 def _write_state(
 	root: Path, manifest: Mapping[str, Any], purpose: str, results: Sequence[tuple[Mapping[str, Any], str, Path]]
 ) -> None:
+	merged: dict[str, tuple[Mapping[str, Any], str, Path]] = {
+		source["id"]: (source, status, path) for source, status, path in results
+	}
+	for source in manifest["sources"]:
+		if source["id"] in merged or source_policy_error(source, purpose) is not None:
+			continue
+		path = _destination(root, source)
+		if not path.is_file():
+			continue
+		verify_archive(path, source["integrity"])
+		merged[source["id"]] = (source, "verified-existing", path)
+	state_results = [merged[source_id] for source_id in sorted(merged)]
 	state = {
 		"schema_version": 3,
 		"state_kind": "mumble-input-enhancement-corpus-state",
@@ -207,7 +219,7 @@ def _write_state(
 				"size_bytes": source["integrity"]["size_bytes"],
 				"verified": True,
 			}
-			for source, status, path in results
+			for source, status, path in state_results
 		],
 	}
 	temporary = root / ".corpus-state.json.tmp"
@@ -234,9 +246,26 @@ def run_self_test() -> None:
 		raise AssertionError("--all local-eval does not include a fetchable real noise/RIR source")
 	if source_policy_error(by_id["openslr31-mini-librispeech-dev-clean-2"], "training") is None:
 		raise AssertionError("evaluation-only source was accepted for training")
+	if source_policy_error(by_id["openslr12-librispeech-test-clean"], "local-eval") is not None:
+		raise AssertionError("reviewed LibriSpeech test-clean expansion was rejected")
+	if source_policy_error(by_id["openslr12-librispeech-test-clean"], "training") is None:
+		raise AssertionError("evaluation-only LibriSpeech test-clean was accepted for training")
 	fleurs = by_id["google-fleurs-sv-se-train-v2"]
 	if source_policy_error(fleurs, "local-eval") is not None or len(fleurs.get("sidecars", [])) != 1:
 		raise AssertionError("reviewed Swedish FLEURS archive and transcript sidecar were rejected")
+	for source_id in ("rixvox-v1-dev-0", "rixvox-v1-test-0"):
+		rixvox = by_id[source_id]
+		if source_policy_error(rixvox, "training") is not None:
+			raise AssertionError(f"reviewed RixVox source was rejected for training: {source_id}")
+		if [value["kind"] for value in rixvox.get("sidecars", [])] != ["transcript_metadata"]:
+			raise AssertionError(f"RixVox metadata sidecar changed: {source_id}")
+	fsd50k = by_id["fsd50k-eval-cc0-subset"]
+	if source_policy_error(fsd50k, "local-eval") is not None or source_policy_error(fsd50k, "training") is None:
+		raise AssertionError("FSD50K evaluation subset policy changed")
+	if [value["kind"] for value in fsd50k.get("sidecars", [])] != ["archive_part", "license_metadata", "label_metadata"]:
+		raise AssertionError("FSD50K split archive or metadata sidecars changed")
+	if "voxpopuli-swedish-speaker-expansion" not in {source["id"] for source in manifest["excluded_sources"]}:
+		raise AssertionError("VoxPopuli Swedish rejection audit is missing")
 	with tempfile.TemporaryDirectory() as directory:
 		external = validate_artifact_root(Path(directory))
 		if external != Path(directory).resolve():

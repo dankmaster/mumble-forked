@@ -215,12 +215,22 @@ def assigned_split(seed: str, kind: str, group_id: str) -> str:
 
 
 def validate_inventory(
-	value: Any, manifest: Mapping[str, Any], expected_lock_sha256: str, suite: str, seed: str
+	value: Any, manifest: Mapping[str, Any], expected_lock_sha256: str, suite: str, seed: str,
+	split: str | None = None,
 ) -> list[Mapping[str, Any]]:
 	_expect(value.get("corpus_lock_sha256") == expected_lock_sha256, "inventory.corpus_lock_sha256", "lock mismatch")
 	try:
-		items = INVENTORY.validate_inventory(value, manifest, require_release=True)
-		INVENTORY.validate_diversity(items, suite, seed)
+		if value.get("eligibility") == "nightly-partial":
+			_expect(suite == "nightly", "inventory.eligibility", "nightly-partial is forbidden outside nightly")
+			_expect(split in ("tuning", "validation"), "inventory.sealed_splits", "nightly-partial cannot generate holdout")
+			expected_selection_sha256 = INVENTORY.file_sha256(Path(__file__).with_name("nightly-corpus-selection-v1.json"))
+			_expect(value.get("selection_sha256") == expected_selection_sha256, "inventory.selection_sha256", "does not bind the frozen nightly selection")
+			_expect(value.get("sealed_splits") == ["holdout"], "inventory.sealed_splits", "must seal holdout")
+			items = INVENTORY.validate_inventory(value, manifest, require_release=False)
+			INVENTORY.validate_diversity(items, suite, seed, required_splits=(split,))
+		else:
+			items = INVENTORY.validate_inventory(value, manifest, require_release=True)
+			INVENTORY.validate_diversity(items, suite, seed)
 		return items
 	except INVENTORY.InventoryError as error:
 		raise PlanError(str(error)) from error
@@ -306,7 +316,7 @@ def generate_plan(
 	manifest: Mapping[str, Any], inventory: Any, suite: str, split: str, seed: str, case_count: int, duration_ms: int
 ) -> Mapping[str, Any]:
 	lock_sha = LOCK.canonical_manifest_sha256(manifest)
-	items = validate_inventory(inventory, manifest, lock_sha, suite, seed)
+	items = validate_inventory(inventory, manifest, lock_sha, suite, seed, split)
 	speech = sorted(
 		(item for item in items if item["kind"] == "speech" and assigned_split(seed, "speech", item["group_id"]) == split),
 		key=lambda item: item["id"],
@@ -639,7 +649,7 @@ def _self_test_inventory(manifest: Mapping[str, Any], seed: str) -> Mapping[str,
 	sources = {source["id"]: source for source in manifest["sources"]}
 	items = []
 	for kind in INVENTORY.KINDS:
-		for index in range(80):
+		for index in range(160):
 			if kind == "microphone_response":
 				source_id = INVENTORY.MODELED_RESPONSE_SOURCE_ID
 				artifact_sha256 = INVENTORY.file_sha256(INVENTORY.MODELED_RESPONSE_DEFINITION)
@@ -729,6 +739,27 @@ def run_self_test() -> None:
 			raise
 	else:
 		raise AssertionError("release inventory accepted a single noise class")
+	partial = copy.deepcopy(inventory)
+	partial["eligibility"] = "nightly-partial"
+	partial["selection_sha256"] = INVENTORY.file_sha256(Path(__file__).with_name("nightly-corpus-selection-v1.json"))
+	partial["sealed_splits"] = ["holdout"]
+	validate_inventory(
+		partial, manifest, LOCK.canonical_manifest_sha256(manifest), "nightly", seed, "validation",
+	)
+	try:
+		generate_plan(manifest, partial, "nightly", "holdout", seed, 5000, 6000)
+	except PlanError as error:
+		if "cannot generate holdout" not in str(error):
+			raise
+	else:
+		raise AssertionError("nightly-partial inventory generated a holdout plan")
+	try:
+		generate_plan(manifest, partial, "release", "validation", seed, 30, 6000)
+	except PlanError as error:
+		if "forbidden outside nightly" not in str(error):
+			raise
+	else:
+		raise AssertionError("nightly-partial inventory generated a release plan")
 	first = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	if canonical_sha256(first) != canonical_sha256(second):
