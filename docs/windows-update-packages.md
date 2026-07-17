@@ -52,6 +52,20 @@ The updater is self-contained. It links a private `/MT` zlib 1.3.1 target and
 the build runs `dumpbin /dependents`; importing `zlib1.dll` is a hard failure.
 The copied recovery updater therefore needs no sidecar zlib DLL.
 
+Input-enhancement package trust is separate from Authenticode. A release
+candidate must have a positive `BUILD_NUMBER` and the expected Ed25519 public
+key compiled into `mumble.exe`; signed model, recipe, policy and channel
+manifests are then verified with that exact key. The pre-Azure rehearsal uses
+a test key created before the candidate build and runs the candidate's
+`--write-input-enhancement-build-identity` diagnostic to attest the positive
+build number and raw public-key SHA-256 before packaging evidence is accepted.
+Build 0 is intentionally unmanaged and can be useful for local development,
+but it cannot satisfy release qualification. In an unmanaged build without
+local catalogs only Original/Light are available; strict unsigned local
+catalogs may enable neural profiles for development, but are never release
+evidence. Authenticode or future Azure signing does not make an unmanaged or
+wrong-key build eligible.
+
 ## Goals
 
 - Keep the MSI for fresh installs, repair, uninstall, Start Menu/registry

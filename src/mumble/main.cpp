@@ -58,6 +58,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QList>
 #include <QtCore/QProcess>
+#include <QtCore/QSaveFile>
 #include <QtGui/QDesktopServices>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
@@ -244,10 +245,11 @@ struct CLIOptions {
 	bool showLicense              = false;
 	bool showAuthors              = false;
 	bool showThirdPartyLicenses   = false;
-	bool dumpInputStreams         = false;
-	bool printEchoCancelQueue     = false;
-	bool disableInputEnhancement  = false;
-	bool skipSettingsBackupPrompt = false;
+	bool dumpInputStreams                    = false;
+	bool printEchoCancelQueue                = false;
+	bool disableInputEnhancement             = false;
+	bool writeInputEnhancementBuildIdentity = false;
+	bool skipSettingsBackupPrompt            = false;
 
 	std::optional< std::string > configFile;
 	std::optional< std::string > jackClientName;
@@ -319,9 +321,10 @@ CLIOptions parseCLI(int argc, char **argv) {
 	app.add_flag("--disable-input-enhancement", options.disableInputEnhancement,
 				 "Use the untouched Original microphone path for this session, regardless of saved input-enhancement settings.")
 		->group(CLIOptions::CLI_GENERAL_SECTION);
-
-
-
+	app.add_flag("--write-input-enhancement-build-identity", options.writeInputEnhancementBuildIdentity,
+				 "Write the compiled input-enhancement verifier identity to the path in "
+				 "MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT, then exit.")
+		->group(CLIOptions::CLI_DEBUG_SECTION);
 	app.add_flag("--hidden", options.startHiddenInTray, "Start Mumble hidden in the system tray.")
 		->group(CLIOptions::CLI_GENERAL_SECTION);
 
@@ -440,6 +443,23 @@ int main(int argc, char **argv) {
 
 	if (options.quit) {
 		return options.exitCode;
+	}
+	if (options.writeInputEnhancementBuildIdentity) {
+		const QString outputPath = qEnvironmentVariable("MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT");
+		if (outputPath.isEmpty()) {
+			qWarning("MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT is required for the build-identity diagnostic");
+			return 2;
+		}
+		QSaveFile output(outputPath);
+		const QByteArray identity = Mumble::InputEnhancement::configuredPolicyBuildIdentity(
+			static_cast< std::uint64_t >(Version::getPatch(Version::get())));
+		if (!output.open(QIODevice::WriteOnly) || output.write(identity) != identity.size()
+			|| !output.commit()) {
+			output.cancelWriting();
+			qWarning("Unable to write input-enhancement build identity");
+			return 3;
+		}
+		return 0;
 	}
 
 	// This argument has to be parsed first, since it's value is needed to create the global struct,

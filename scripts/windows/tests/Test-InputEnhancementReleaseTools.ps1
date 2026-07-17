@@ -52,6 +52,21 @@ function Get-TestUtf8Sha256 {
 	}
 }
 
+function Get-TestRawPublicKeySha256 {
+	param([Parameter(Mandatory = $true)][string]$PublicKeyHex)
+	$normalized = Assert-Ed25519PublicKeyHex -PublicKeyHex $PublicKeyHex
+	[byte[]]$bytes = [byte[]]::new(32)
+	for ($index = 0; $index -lt $bytes.Length; $index++) {
+		$bytes[$index] = [Convert]::ToByte($normalized.Substring($index * 2, 2), 16)
+	}
+	$sha = [Security.Cryptography.SHA256]::Create()
+	try {
+		return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+	} finally {
+		$sha.Dispose()
+	}
+}
+
 function Get-TestRolloutWindowSha256 {
 	param(
 		[string]$QuerySha256,
@@ -256,6 +271,77 @@ try {
 	Invoke-NativeChecked -Command "git" -Arguments @("-C", $sourceRoot, "add", "source.txt")
 	Invoke-NativeChecked -Command "git" -Arguments @("-C", $sourceRoot, "commit", "-q", "-m", "fixture")
 	$sourceSha = (& git -C $sourceRoot rev-parse HEAD).Trim()
+	$embeddedKeyDiagnostic = [ordered]@{
+		schemaVersion = 1
+		kind = 'mumble-input-enhancement-build-identity'
+		buildNumber = 1
+		packageVerificationMode = 'managed-signed'
+		configuredPublicKeySha256 = Get-TestRawPublicKeySha256 -PublicKeyHex $publicKeyHex
+	}
+	$embeddedKeyDiagnosticBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+		($embeddedKeyDiagnostic | ConvertTo-Json -Depth 5 -Compress))
+	$embeddedKeyDiagnosticSha = Get-TestUtf8Sha256 -Value (
+		[Text.UTF8Encoding]::new($false).GetString($embeddedKeyDiagnosticBytes))
+	$embeddedKeyAttestationPath = Join-Path $tempRoot 'embedded-key-attestation.json'
+	Write-ReleaseJson -Path $embeddedKeyAttestationPath -Value ([ordered]@{
+		schemaVersion = 1; kind = 'input-enhancement-embedded-key-attestation'; passed = $true; audioFree = $true
+		createdAtUtc = '2026-07-15T12:00:00Z'; candidateExecutableSha256 = ('f' * 64)
+		generatorSha256 = Get-ReleaseFileSha256 -Path (Join-Path $scriptsRoot 'new-input-enhancement-embedded-key-attestation.ps1')
+		runtimeDiagnosticSha256 = $embeddedKeyDiagnosticSha
+		runtimeDiagnosticBase64 = [Convert]::ToBase64String($embeddedKeyDiagnosticBytes)
+	})
+	$embeddedKeyAssert = @{
+		EvidencePath = $embeddedKeyAttestationPath; ExpectedCandidateExecutableSha256 = ('f' * 64)
+		ExpectedBuildNumber = 1; ExpectedPublicKeyHex = $publicKeyHex
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-embedded-key-attestation.ps1') @embeddedKeyAssert
+
+	$unmanagedDiagnostic = $embeddedKeyDiagnostic | ConvertTo-Json -Depth 5 -Compress | ConvertFrom-Json
+	$unmanagedDiagnostic.buildNumber = 0
+	$unmanagedDiagnostic.packageVerificationMode = 'unmanaged-build-zero'
+	$unmanagedDiagnostic.configuredPublicKeySha256 = ''
+	[byte[]]$unmanagedBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+		($unmanagedDiagnostic | ConvertTo-Json -Depth 5 -Compress))
+	$unmanagedAttestation = Read-ReleaseJson -Path $embeddedKeyAttestationPath
+	$unmanagedAttestation.runtimeDiagnosticBase64 = [Convert]::ToBase64String($unmanagedBytes)
+	$unmanagedAttestation.runtimeDiagnosticSha256 = Get-TestUtf8Sha256 -Value (
+		[Text.UTF8Encoding]::new($false).GetString($unmanagedBytes))
+	$unmanagedAttestationPath = Join-Path $tempRoot 'embedded-key-attestation-unmanaged.json'
+	Write-ReleaseJson -Path $unmanagedAttestationPath -Value $unmanagedAttestation
+	Assert-Throws -Description 'build-0 unmanaged rehearsal candidate' -Script {
+		$badEmbeddedKeyAssert = $embeddedKeyAssert.Clone(); $badEmbeddedKeyAssert.EvidencePath = $unmanagedAttestationPath
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-embedded-key-attestation.ps1') @badEmbeddedKeyAssert
+	}
+	$positiveUnmanagedDiagnostic = $embeddedKeyDiagnostic | ConvertTo-Json -Depth 5 -Compress | ConvertFrom-Json
+	$positiveUnmanagedDiagnostic.packageVerificationMode = 'unmanaged-build-zero'
+	[byte[]]$positiveUnmanagedBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+		($positiveUnmanagedDiagnostic | ConvertTo-Json -Depth 5 -Compress))
+	$positiveUnmanagedAttestation = Read-ReleaseJson -Path $embeddedKeyAttestationPath
+	$positiveUnmanagedAttestation.runtimeDiagnosticBase64 = [Convert]::ToBase64String($positiveUnmanagedBytes)
+	$positiveUnmanagedAttestation.runtimeDiagnosticSha256 = Get-TestUtf8Sha256 -Value (
+		[Text.UTF8Encoding]::new($false).GetString($positiveUnmanagedBytes))
+	$positiveUnmanagedAttestationPath = Join-Path $tempRoot 'embedded-key-attestation-positive-unmanaged.json'
+	Write-ReleaseJson -Path $positiveUnmanagedAttestationPath -Value $positiveUnmanagedAttestation
+	Assert-Throws -Description 'positive build reporting unmanaged rehearsal mode' -Script {
+		$badEmbeddedKeyAssert = $embeddedKeyAssert.Clone()
+		$badEmbeddedKeyAssert.EvidencePath = $positiveUnmanagedAttestationPath
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-embedded-key-attestation.ps1') @badEmbeddedKeyAssert
+	}
+
+	$mismatchedDiagnostic = $embeddedKeyDiagnostic | ConvertTo-Json -Depth 5 -Compress | ConvertFrom-Json
+	$mismatchedDiagnostic.configuredPublicKeySha256 = ('0' * 64)
+	[byte[]]$mismatchedBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+		($mismatchedDiagnostic | ConvertTo-Json -Depth 5 -Compress))
+	$mismatchedAttestation = Read-ReleaseJson -Path $embeddedKeyAttestationPath
+	$mismatchedAttestation.runtimeDiagnosticBase64 = [Convert]::ToBase64String($mismatchedBytes)
+	$mismatchedAttestation.runtimeDiagnosticSha256 = Get-TestUtf8Sha256 -Value (
+		[Text.UTF8Encoding]::new($false).GetString($mismatchedBytes))
+	$mismatchedAttestationPath = Join-Path $tempRoot 'embedded-key-attestation-mismatched.json'
+	Write-ReleaseJson -Path $mismatchedAttestationPath -Value $mismatchedAttestation
+	Assert-Throws -Description 'rehearsal candidate with mismatched embedded key' -Script {
+		$badEmbeddedKeyAssert = $embeddedKeyAssert.Clone(); $badEmbeddedKeyAssert.EvidencePath = $mismatchedAttestationPath
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-embedded-key-attestation.ps1') @badEmbeddedKeyAssert
+	}
 	$protocolSimulationPath = Join-Path $tempRoot 'updater-protocol-v4-simulation.json'
 	& (Join-Path $scriptsRoot 'test-input-enhancement-update-protocol-v4.ps1') `
 		-OutputPath $protocolSimulationPath -SourceSha $sourceSha `
@@ -512,6 +598,10 @@ try {
 	foreach ($requiredMarker in @(
 		'actions: read', 'contents: read', 'invoke-input-enhancement-release-rehearsal.ps1',
 		'actions/upload-artifact@', 'actions/download-artifact@', 'remote-reverification.json',
+		'INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PRIVATE_KEY_SHA256',
+		'INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PUBLIC_KEY_HEX',
+		'-TestEd25519PrivateKeyPath $env:REHEARSAL_TEST_ED25519_PRIVATE_KEY',
+		'-ExpectedEd25519PublicKeyHex $env:REHEARSAL_TEST_ED25519_PUBLIC_KEY_HEX',
 		'INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256',
@@ -521,6 +611,20 @@ try {
 		if (-not $rehearsalWorkflowSource.Contains($requiredMarker)) {
 			throw "Pre-Azure rehearsal workflow is missing '$requiredMarker'."
 		}
+	}
+	$rehearsalInvokeSource = Get-Content -LiteralPath (
+		Join-Path $scriptsRoot 'invoke-input-enhancement-release-rehearsal.ps1') -Raw
+	foreach ($requiredMarker in @(
+		'prebuilt test Ed25519 private key', 'PrebuiltTestEd25519PrivateKeyPath',
+		'PrebuiltTestEd25519PrivateKeySha256', 'PrebuiltTestEd25519PublicKeyHex',
+		'prebuilt-before-candidate-build'
+	)) {
+		if (-not $rehearsalInvokeSource.Contains($requiredMarker)) {
+			throw "Pre-Azure rehearsal orchestrator is missing pre-build key marker '$requiredMarker'."
+		}
+	}
+	if ($rehearsalInvokeSource.Contains('genpkey -algorithm Ed25519')) {
+		throw 'Pre-Azure rehearsal must not generate its manifest key after receiving the candidate handoff.'
 	}
 	foreach ($forbiddenPattern in @(
 		'(?im)^\s*contents:\s*write\s*$', '(?im)^\s*id-token:\s*write\s*$',
@@ -1997,19 +2101,23 @@ soak_reports = []
 if suite == 'nightly':
     for profile in ('Balanced', 'Quality', 'VoiceFocus'):
         report = {
-            'schema_version': 1,
+            'schema_version': 2,
             'kind': SOAK_KIND,
             'status': 'completed',
             'profile': profile,
             'active_bindings': [copy.deepcopy(binding_by_profile[profile])],
             'execution_identity': execution_identity(),
             'declared_latency_samples': latency_samples[profile],
-            'duration_seconds': 3600,
+            'audio_duration_seconds': 3600,
+            'wall_duration_seconds': 3600,
             'mean_rtf': 0.1,
             'callback_p99_ms': 4.0,
             'worker_p99_ms': 4.0,
             'maximum_internal_processing_ms': 9.0,
             'memory_growth_bytes_after_warmup': 0,
+            'rss_warmup_bytes': 100000,
+            'rss_end_bytes': 100000,
+            'rss_peak_bytes': 110000,
             'deadline_miss_count': 0,
             'fallback_count': 0,
             'invalid_output_count': 0,
