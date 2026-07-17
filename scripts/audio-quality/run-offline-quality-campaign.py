@@ -40,6 +40,7 @@ FRAME_SAMPLES = 480
 MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION = 3
 SELF_TEST_EXECUTION_SEMANTICS_VERSION = 5
 SELF_TEST_MIX_CURVE_VERSION = 5
+SUPPORTED_CORPUS_GENERATOR_VERSIONS = frozenset({"2", "3"})
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
@@ -414,7 +415,7 @@ def _validate_transformation_manifest(
 	)
 	_expect(
 		manifest["schema_version"] == 1 and manifest["generator"] == "mumble-corpus-builder"
-		and manifest["generator_version"] == "2",
+		and manifest["generator_version"] in SUPPORTED_CORPUS_GENERATOR_VERSIONS,
 		"corpus transformation manifest",
 		"unsupported generator schema",
 	)
@@ -2576,7 +2577,7 @@ def run_self_test() -> None:
 		transformation_manifest = {
 			"schema_version": 1,
 			"generator": "mumble-corpus-builder",
-			"generator_version": "2",
+			"generator_version": "3",
 			"corpus_lock_sha256": LOCK.canonical_manifest_sha256(lock),
 			"corpus_state_sha256": inventory["provenance"]["generated_from_state_sha256"],
 			"split_seed": seed,
@@ -2591,6 +2592,27 @@ def run_self_test() -> None:
 		}
 		_write_json_atomic(transformation_manifest_path, transformation_manifest)
 		inventory["provenance"]["transformation_manifest_sha256"] = _sha256(transformation_manifest_path)
+		# Generator v3 is the current hash-bound corpus builder. Unknown older or
+		# future versions remain rejected even if an attacker also rewrites the
+		# inventory's transformation-manifest hash.
+		_validate_transformation_manifest(transformation_manifest_path, inventory, lock)
+		for unsupported_version in ("1", "4"):
+			unsupported_path = root / f"unsupported-transformation-manifest-v{unsupported_version}.json"
+			unsupported = dict(transformation_manifest)
+			unsupported["generator_version"] = unsupported_version
+			_write_json_atomic(unsupported_path, unsupported)
+			unsupported_inventory = json.loads(json.dumps(inventory))
+			unsupported_inventory["provenance"]["transformation_manifest_sha256"] = _sha256(unsupported_path)
+			try:
+				_validate_transformation_manifest(unsupported_path, unsupported_inventory, lock)
+			except CampaignError as error:
+				_expect(
+					"unsupported generator schema" in str(error),
+					"self-test corpus generator version",
+					f"unexpected error: {error}",
+				)
+			else:
+				raise AssertionError(f"campaign accepted unsupported corpus generator v{unsupported_version}")
 		plan = PLAN.generate_plan(lock, inventory, "release", "validation", seed, 30, 1000)
 		_write_json_atomic(plan_path, plan)
 		_write_json_atomic(inventory_path, inventory)
