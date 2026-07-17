@@ -317,6 +317,7 @@ jobs:
           .\scripts\windows\assert-input-enhancement-package-signatures.ps1 `
             -StageRoot $stageRoot `
             -PublicKeyHex $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX
+          .\scripts\windows\new-windows-runtime-manifest.ps1 -StageRoot $stageRoot
 
       - name: Rebuild MSI from the signed staged payload
         shell: powershell

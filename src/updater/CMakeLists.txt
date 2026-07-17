@@ -13,15 +13,16 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/mumble-updater.rc.in" "${MUMBLE_UPDA
 # Windows dependency lane exposes ZLIB::ZLIB as an import library for
 # zlib1.dll, which is unsafe for that job. Build a private, hash-pinned copy.
 include(FetchContent)
-set(MUMBLE_UPDATER_ZLIB_URL
-	"https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz;https://zlib.net/fossils/zlib-1.3.1.tar.gz"
+set(MUMBLE_UPDATER_ZLIB_URLS
+	"https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
+	"https://zlib.net/fossils/zlib-1.3.1.tar.gz"
 	CACHE STRING "Ordered mirrors for the pinned source archive used only by mumble-updater")
 set(MUMBLE_UPDATER_ZLIB_SHA256
 	"9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
 	CACHE STRING "SHA256 of the private mumble-updater zlib source archive")
 
 FetchContent_Declare(mumble_updater_zlib
-	URL ${MUMBLE_UPDATER_ZLIB_URL}
+	URL ${MUMBLE_UPDATER_ZLIB_URLS}
 	URL_HASH "SHA256=${MUMBLE_UPDATER_ZLIB_SHA256}"
 	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )

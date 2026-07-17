@@ -295,11 +295,13 @@ jobs:
           .\scripts\windows\build-local-windows-client.ps1 @arguments
           cmake --build .\build-shared-webengine --config Release --target `
             speech_cleanup_benchmark deepfilternet_runtime mumble-updater mumble-updater-test `
-            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementCalibration `
+            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementAutoV2 `
+            TestInputEnhancementCalibration `
             TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
             TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
             TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
-            TestModernDialogControllers TestUpdateHealth TestSpeechCleanup --parallel 4
+            TestAudioOutputMemorySample TestModernDialogControllers TestQmlQuickComponents `
+            TestUpdateHealth TestSpeechCleanup --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build PR input-enhancement correctness targets.' }
           .\scripts\windows\new-input-enhancement-package-manifests.ps1 `
             -StageRoot .\build-shared-webengine\shared-webengine-stage `
@@ -307,6 +309,8 @@ jobs:
             -RecipeDescriptorPath .\src\mumble\input-enhancement\input-recipes.descriptor.json `
             -ModelManifestPath .\build-shared-webengine\unsigned-input-models.json `
             -RecipeManifestPath .\build-shared-webengine\unsigned-input-recipes.json
+          .\scripts\windows\new-windows-runtime-manifest.ps1 `
+            -StageRoot .\build-shared-webengine\shared-webengine-stage
 
       - name: Run mandatory input-enhancement correctness gates
         shell: powershell
@@ -510,11 +514,13 @@ jobs:
           }
           .\scripts\windows\build-local-windows-client.ps1 @arguments
           cmake --build .\build-shared-webengine --config Release --target `
-            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementCalibration `
+            TestInputEnhancement TestInputEnhancementAuto TestInputEnhancementAutoV2 `
+            TestInputEnhancementCalibration `
             TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
             TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
             TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
-            TestModernDialogControllers TestUpdateHealth TestSpeechCleanup mumble-updater mumble-updater-test `
+            TestAudioOutputMemorySample TestModernDialogControllers TestQmlQuickComponents `
+            TestUpdateHealth TestSpeechCleanup mumble-updater mumble-updater-test `
             speech_cleanup_benchmark --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build mandatory qualification targets.' }
 
@@ -535,6 +541,8 @@ jobs:
             -RecipeDescriptorPath .\src\mumble\input-enhancement\input-recipes.descriptor.json `
             -ModelManifestPath .\build-shared-webengine\unsigned-input-models.json `
             -RecipeManifestPath .\build-shared-webengine\unsigned-input-recipes.json
+          .\scripts\windows\new-windows-runtime-manifest.ps1 `
+            -StageRoot .\build-shared-webengine\shared-webengine-stage
           $binary = Get-Item .\build-shared-webengine\shared-webengine-stage\mumble.exe
           $metadata = [ordered]@{
             schemaVersion = 1
@@ -634,12 +642,12 @@ jobs:
           LEGACY_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY_SHA256 }}
           SERVER_BINARY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY }}
           SERVER_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY_SHA256 }}
-          CORPUS_INVENTORY_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY }}
-          CORPUS_INVENTORY_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY_SHA256 }}
-          CASE_SET_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET }}
-          CASE_SET_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET_SHA256 }}
-          MIXTURE_PLAN_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN }}
-          MIXTURE_PLAN_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN_SHA256 }}
+          CORPUS_INVENTORY_PATH: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CORPUS_INVENTORY || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_CORPUS_INVENTORY }}
+          CORPUS_INVENTORY_EXPECTED_SHA256: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CORPUS_INVENTORY_SHA256 || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_CORPUS_INVENTORY_SHA256 }}
+          CASE_SET_PATH: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CASE_SET || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_CASE_SET }}
+          CASE_SET_EXPECTED_SHA256: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CASE_SET_SHA256 || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_CASE_SET_SHA256 }}
+          MIXTURE_PLAN_PATH: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_MIXTURE_PLAN || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_MIXTURE_PLAN }}
+          MIXTURE_PLAN_EXPECTED_SHA256: ${{ needs.classify.outputs.requested_suite == 'nightly' && vars.INPUT_ENHANCEMENT_QUALITY_NIGHTLY_MIXTURE_PLAN_SHA256 || vars.INPUT_ENHANCEMENT_QUALITY_MASTER_MIXTURE_PLAN_SHA256 }}
           RELEASE_FIXTURES_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES }}
           RELEASE_FIXTURES_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES_SHA256 }}
           METRICS_RUNTIME_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_METRICS_RUNTIME }}

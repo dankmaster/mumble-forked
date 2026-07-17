@@ -77,10 +77,18 @@ INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY=<absolute path>
 INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY_SHA256=<sha256>
 INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY=<absolute path>
 INPUT_ENHANCEMENT_QUALITY_SERVER_BINARY_SHA256=<sha256>
-INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY=<absolute path>
-INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY_SHA256=<sha256>
-INPUT_ENHANCEMENT_QUALITY_CASE_SET=<absolute path>
-INPUT_ENHANCEMENT_QUALITY_CASE_SET_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_MASTER_CORPUS_INVENTORY=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_MASTER_CORPUS_INVENTORY_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_MASTER_CASE_SET=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_MASTER_CASE_SET_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_MASTER_MIXTURE_PLAN=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_MASTER_MIXTURE_PLAN_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CORPUS_INVENTORY=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CORPUS_INVENTORY_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CASE_SET=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_CASE_SET_SHA256=<sha256>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_MIXTURE_PLAN=<absolute path>
+INPUT_ENHANCEMENT_QUALITY_NIGHTLY_MIXTURE_PLAN_SHA256=<sha256>
 INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES=<absolute path>
 INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES_SHA256=<sha256>
 INPUT_ENHANCEMENT_QUALITY_METRICS_RUNTIME=<absolute path>
@@ -93,9 +101,12 @@ canonical tree hash implemented by `payload_sha256()` in
 relative paths, reject symbolic links, record each regular file's path, size
 and SHA-256, serialize the records as canonical JSON, then hash that JSON.
 
-Setting the two `*_CONFIGURED` flags is not sufficient to pass. The gate
-recomputes every hash, rejects checkout-local protected inputs, and compares
-the resulting identities with both the harness command and its output.
+The master and nightly inventory, case-set and mixture-plan pairs are separate
+because their suite names and minimum case counts are part of the signed
+provenance contract. Setting the two `*_CONFIGURED` flags is not sufficient to
+pass. The gate recomputes every hash, rejects checkout-local protected inputs,
+and compares the resulting identities with both the harness command and its
+output.
 
 ## Evidence contract
 

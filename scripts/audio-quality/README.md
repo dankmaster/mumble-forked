@@ -939,10 +939,11 @@ suites are eligible for self-hosted execution only when all of these are true:
 - repository variable `INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY` is an absolute
   path to the immutable runner-local legacy `mumble.exe` used for all 45
   Original comparisons;
-- protected path/hash pairs are configured for the OG server, corpus inventory,
-  case set, frozen mixture plan, release fixtures and metrics runtime. The
-  mixture pair is `INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN` plus
-  `INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN_SHA256`; a missing value or hash
+- protected path/hash pairs are configured for the OG server, release fixtures
+  and metrics runtime, plus suite-specific inventory, case-set and frozen
+  mixture-plan pairs. Master uses the
+  `INPUT_ENHANCEMENT_QUALITY_MASTER_*` variables and nightly uses the
+  `INPUT_ENHANCEMENT_QUALITY_NIGHTLY_*` variables; a missing value or hash
   mismatch fails before the trusted harness starts;
 - protected runners exist with labels `input-enhancement-low` and
   `input-enhancement-mainstream` in a runner group restricted to this workflow.

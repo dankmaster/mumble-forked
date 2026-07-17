@@ -67,6 +67,75 @@ function Get-TestRawPublicKeySha256 {
 	}
 }
 
+function Initialize-TestQtQuickPayload {
+	param([Parameter(Mandatory = $true)][string]$Root)
+
+	$requiredPaths = @(
+		'mumble.exe',
+		'mumble-updater.exe',
+		'Qt6Core.dll',
+		'Qt6Gui.dll',
+		'Qt6Qml.dll',
+		'Qt6Quick.dll',
+		'Qt6QuickControls2.dll',
+		'Qt6QuickControls2Basic.dll',
+		'Qt6QuickControls2BasicStyleImpl.dll',
+		'Qt6QuickControls2Impl.dll',
+		'Qt6QuickDialogs2.dll',
+		'Qt6QuickDialogs2QuickImpl.dll',
+		'Qt6QuickLayouts.dll',
+		'Qt6QuickShapes.dll',
+		'Qt6QuickTemplates2.dll',
+		'Qt6WebEngineCore.dll',
+		'Qt6WebEngineQuick.dll',
+		'QtWebEngineProcess.exe',
+		'platforms/qwindows.dll',
+		'tls/qopensslbackend.dll',
+		'qml/QtQuick/qmldir',
+		'qml/QtQuick/Controls/qmldir',
+		'qml/QtQuick/Controls/qtquickcontrols2plugin.dll',
+		'qml/QtQuick/Controls/Basic/qmldir',
+		'qml/QtQuick/Controls/Basic/qtquickcontrols2basicstyleplugin.dll',
+		'qml/QtQuick/Controls/Basic/impl/qmldir',
+		'qml/QtQuick/Controls/Basic/impl/qtquickcontrols2basicstyleimplplugin.dll',
+		'qml/QtQuick/Controls/impl/qmldir',
+		'qml/QtQuick/Controls/impl/qtquickcontrols2implplugin.dll',
+		'qml/QtQuick/Layouts/qmldir',
+		'qml/QtQuick/Layouts/qquicklayoutsplugin.dll',
+		'qml/QtQuick/Dialogs/qmldir',
+		'qml/QtQuick/Dialogs/qtquickdialogsplugin.dll',
+		'qml/QtQuick/Dialogs/quickimpl/qmldir',
+		'qml/QtQuick/Dialogs/quickimpl/qtquickdialogs2quickimplplugin.dll',
+		'qml/QtQuick/Shapes/qmldir',
+		'qml/QtQuick/Shapes/qmlshapesplugin.dll',
+		'qml/QtQuick/Templates/qmldir',
+		'qml/QtQuick/Templates/qtquicktemplates2plugin.dll',
+		'qml/QtWebEngine/qmldir',
+		'qml/QtWebEngine/qtwebenginequickplugin.dll',
+		'resources/icudtl.dat',
+		'resources/qtwebengine_resources.pak',
+		'translations/qtwebengine_locales/en-US.pak',
+		'qt.conf',
+		'direct-runtime-dependencies.txt'
+	)
+
+	foreach ($relativePath in $requiredPaths) {
+		$path = Join-Path $Root $relativePath
+		$parent = Split-Path -Parent $path
+		New-Item -ItemType Directory -Force -Path $parent | Out-Null
+		if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+			[IO.File]::WriteAllBytes($path, [byte[]](1))
+		}
+	}
+	[IO.File]::WriteAllLines(
+		(Join-Path $Root 'direct-runtime-dependencies.txt'),
+		@('Qt6Quick.dll', 'Qt6Qml.dll', 'Qt6WebEngineQuick.dll', 'Qt6WebEngineCore.dll'),
+		[Text.UTF8Encoding]::new($false)
+	)
+
+	& (Join-Path $scriptsRoot 'new-windows-runtime-manifest.ps1') -StageRoot $Root
+}
+
 function Get-TestRolloutWindowSha256 {
 	param(
 		[string]$QuerySha256,
@@ -1235,6 +1304,7 @@ try {
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble.exe'), [byte[]](11, 12, 13, 14, 15))
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble-updater.exe'), [byte[]](21, 22, 23))
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'zlib1.dll'), [byte[]](31, 32, 33))
+	Initialize-TestQtQuickPayload -Root $stageRoot
 	$updatePackagePath = Join-Path $tempRoot "mumble-forked-1.7.42.mumble-update"
 	& (Join-Path $scriptsRoot 'create-windows-update-package.ps1') `
 		-StageRoot $stageRoot -OutputPath $updatePackagePath -Version '1.7.42' `
@@ -2365,7 +2435,9 @@ raise SystemExit(1)
 			[ordered]@{ name = "TestInputEnhancementPolicyController"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementPackageVerifier"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementSettings"; passed = $true; exitCode = 0; durationMs = 1 },
+			[ordered]@{ name = "TestAudioOutputMemorySample"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestModernDialogControllers"; passed = $true; exitCode = 0; durationMs = 1 },
+			[ordered]@{ name = "TestQmlQuickComponents"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdateHealth"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdaterHealthIntegration"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdaterProtocolV4Simulation"; passed = $true; exitCode = 0; durationMs = 1 },
@@ -3164,7 +3236,7 @@ raise SystemExit(1)
 				"@echo off",
 				"echo %* | findstr /C:`"--show-only=json-v1`" >nul",
 				"if %errorlevel%==0 (",
-				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestUpdaterProtocolV4Simulation`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
+				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestAudioOutputMemorySample`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestQmlQuickComponents`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestUpdaterProtocolV4Simulation`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
 				"  exit /b 0",
 				")",
 				"exit /b 0"
