@@ -169,7 +169,14 @@ Dialog {
 			target = focusObjectInTree(contentItem, "dialogCloseButton")
 		if (target && target.enabled !== false && target.visible !== false && target.forceActiveFocus) {
 			target.forceActiveFocus(Qt.TabFocusReason)
-			Qt.callLater(function() { dialog.ensureContentVisible(target) })
+			// Delegate geometry and ScrollView contentHeight can settle on
+			// consecutive event-loop turns (especially with offscreen/software
+			// rendering). Recheck after both layout passes so initial keyboard
+			// focus never remains hidden behind the sticky footer.
+			Qt.callLater(function() {
+				dialog.ensureContentVisible(target)
+				Qt.callLater(function() { dialog.ensureContentVisible(target) })
+			})
 		}
 	}
 	function ensureContentVisible(target) {
