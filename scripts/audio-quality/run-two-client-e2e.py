@@ -438,7 +438,14 @@ def _verify_product_catalog(
 			raise E2EError(f"{label}.latencyBudgetMs: must map to whole 48 kHz samples")
 		if recipe["minimumCpuClass"] not in {"Low", "Standard", "High"}:
 			raise E2EError(f"{label}.minimumCpuClass: unsupported CPU class")
-		if profile in FIXED_RECIPE_CONTRACTS:
+		advanced_only = recipe.get("advancedOnly", False)
+		if not isinstance(advanced_only, bool):
+			raise E2EError(f"{label}.advancedOnly: expected boolean")
+		# The fixed contracts describe the five public product profiles. Expert
+		# recipes intentionally retain their own engine/latency contract and are
+		# never exposed as a product binding, even when their migration profile is
+		# Quality. A non-Advanced recipe can never use that escape hatch.
+		if not advanced_only and profile in FIXED_RECIPE_CONTRACTS:
 			allowed_engines, required_latency_ms, required_cpu = FIXED_RECIPE_CONTRACTS[profile]
 			if engine not in allowed_engines:
 				raise E2EError(f"{label}.engine: violates the fixed {profile} recipe contract")
@@ -451,9 +458,6 @@ def _verify_product_catalog(
 		)
 		for field in ("mixCurveVersion", "adaptationPolicyVersion"):
 			_exact_integer(recipe[field], 1, 2**31 - 1, f"{label}.{field}")
-		advanced_only = recipe.get("advancedOnly", False)
-		if not isinstance(advanced_only, bool):
-			raise E2EError(f"{label}.advancedOnly: expected boolean")
 		recipe_models[recipe_id] = set(model_ids)
 		if not advanced_only:
 			expected_latency_samples_by_recipe_id[recipe_id] = _expected_recipe_latency_samples(
@@ -1125,6 +1129,8 @@ def run_self_test() -> None:
 		rnnoise_asset = runtime / "rnnoise.dll"; rnnoise_asset.write_bytes(b"rnnoise-self-test")
 		deepfilter_asset = runtime / "deepfilternet" / "model.tar.gz"
 		deepfilter_asset.parent.mkdir(); deepfilter_asset.write_bytes(b"deepfilter-self-test")
+		dtln_asset = runtime / "dtln" / "expert.onnx"
+		dtln_asset.parent.mkdir(); dtln_asset.write_bytes(b"dtln-expert-self-test")
 		model_manifest = runtime / "input-models.json"
 		_write_json(model_manifest, {
 			"schemaVersion": 1,
@@ -1150,6 +1156,13 @@ def run_self_test() -> None:
 						"input.voice-focus.deepfilternet-low-latency",
 					],
 				},
+				{
+					"id": "dtln:expert", "version": "self-test-dtln", "backend": "DTLN",
+					"path": "dtln/expert.onnx", "sha256": _file_sha256(dtln_asset),
+					"size": dtln_asset.stat().st_size, "licenseSpdx": "MIT",
+					"sampleRateHz": 16000, "algorithmicLatencyMs": 32,
+					"recipeCompatibility": ["input.expert.dtln"],
+				},
 			],
 		})
 
@@ -1166,6 +1179,11 @@ def run_self_test() -> None:
 			}
 
 		recipe_manifest = runtime / "input-recipes.json"
+		advanced_dtln_recipe = dict(recipe(
+			"input.expert.dtln", "Quality", "DTLN", ["dtln:expert"],
+			50, "High", [0, 100], [0, 100],
+		))
+		advanced_dtln_recipe["advancedOnly"] = True
 		recipe_manifest_payload = {
 			"schemaVersion": 2,
 			"catalogRevision": "self-test-catalog-v2",
@@ -1194,9 +1212,13 @@ def run_self_test() -> None:
 					"input.voice-focus.deepfilternet-low-latency", "VoiceFocus", "DeepFilterNet",
 					["deepfilternet:low-latency"], 50, "High", [70, 100], [40, 100],
 				),
+				advanced_dtln_recipe,
 			],
 		}
 		_write_json(recipe_manifest, recipe_manifest_payload)
+		verified_catalog = _verify_product_catalog(model_manifest, recipe_manifest, runtime)
+		if any(binding["recipe"]["id"] == "input.expert.dtln" for binding in verified_catalog["bindings"]):
+			raise AssertionError("Advanced DTLN recipe leaked into public product bindings")
 		bad_fixed_contract = json.loads(json.dumps(recipe_manifest_payload))
 		bad_fixed_contract["recipes"][3]["minimumCpuClass"] = "Standard"
 		_write_json(recipe_manifest, bad_fixed_contract)
@@ -1206,6 +1228,16 @@ def run_self_test() -> None:
 			pass
 		else:
 			raise AssertionError("fixed Quality CPU contract drift was accepted")
+		bad_public_dtln = json.loads(json.dumps(recipe_manifest_payload))
+		bad_public_dtln["recipes"][-1]["advancedOnly"] = False
+		_write_json(recipe_manifest, bad_public_dtln)
+		try:
+			_verify_product_catalog(model_manifest, recipe_manifest, runtime)
+		except E2EError as error:
+			if "fixed Quality recipe contract" not in str(error):
+				raise AssertionError("public DTLN rejection returned the wrong contract error") from error
+		else:
+			raise AssertionError("non-Advanced DTLN Quality recipe was accepted")
 		_write_json(recipe_manifest, recipe_manifest_payload)
 		metrics_runtime = root / "metrics-runtime.lock"; metrics_runtime.write_bytes(b"python-lock")
 		metric_models = []
