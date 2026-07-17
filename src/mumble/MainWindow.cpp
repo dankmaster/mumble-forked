@@ -19737,16 +19737,25 @@ bool MainWindow::startInputEnhancementCalibrationPlayback(const std::span< const
 	stopInputEnhancementCalibrationPlayback();
 	if (!m_inputEnhancementCalibrationPlayback) {
 		m_inputEnhancementCalibrationPlayback = std::make_unique< Mumble::InputEnhancement::CalibrationPlayback >();
-		connect(
-			m_inputEnhancementCalibrationPlayback.get(),
-			&Mumble::InputEnhancement::CalibrationPlayback::playbackStarted, this, [](const bool usedDefaultFallback) {
-				if (usedDefaultFallback) {
-					qWarning("Input calibration playback: configured output disappeared; using the default endpoint");
-				}
-			});
+		connect(m_inputEnhancementCalibrationPlayback.get(),
+				&Mumble::InputEnhancement::CalibrationPlayback::playbackStarted, this,
+				[this](const quint64 generation, const bool usedDefaultFallback) {
+					if (!m_inputEnhancementCalibrationPlayback
+						|| m_inputEnhancementCalibrationPlayback->generation() != generation) {
+						return;
+					}
+					if (usedDefaultFallback) {
+						qWarning(
+							"Input calibration playback: configured output disappeared; using the default endpoint");
+					}
+				});
 		connect(
 			m_inputEnhancementCalibrationPlayback.get(), &Mumble::InputEnhancement::CalibrationPlayback::playbackFailed,
-			this, [this](const int errorValue, const bool afterStart) {
+			this, [this](const quint64 generation, const int errorValue, const bool afterStart) {
+				if (!m_inputEnhancementCalibrationPlayback
+					|| m_inputEnhancementCalibrationPlayback->generation() != generation) {
+					return;
+				}
 				using CalibrationPlayback = Mumble::InputEnhancement::CalibrationPlayback;
 				const auto error          = static_cast< CalibrationPlayback::Error >(errorValue);
 				QString message;

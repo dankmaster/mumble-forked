@@ -10,12 +10,13 @@
 #include <QtCore/QString>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
 #include <stop_token>
-#include <thread>
 
 namespace Mumble::InputEnhancement {
 
@@ -32,6 +33,9 @@ public:
 	static constexpr unsigned int sampleRateHz      = 48'000;
 	static constexpr unsigned int maximumSeconds    = 12;
 	static constexpr std::size_t maximumSampleCount = static_cast< std::size_t >(sampleRateHz) * maximumSeconds;
+	static constexpr unsigned int maximumQueueMilliseconds = 20;
+	static constexpr std::size_t maximumQueueFrames =
+		static_cast< std::size_t >(sampleRateHz) * maximumQueueMilliseconds / 1000U;
 
 	enum class EndpointRole { Communications, Multimedia, Console };
 
@@ -50,6 +54,7 @@ public:
 		UnsupportedBackend,
 		ExclusiveOutput,
 		ThreadStartFailed,
+		PlaybackBusy,
 		DeviceUnavailable,
 		UnsupportedFormat,
 		BackendFailure
@@ -64,12 +69,25 @@ public:
 
 	using ReadyCallback = std::function< void(StartResult) >;
 
+	/// A cancellation-aware view of the owned calibration PCM. Backends must not
+	/// retain sample pointers. writeInterleavedStereo() converts at most 20 ms
+	/// directly into an already acquired render buffer and fails as soon as
+	/// stop() has synchronously wiped the clip.
+	class Clip {
+	public:
+		virtual ~Clip() = default;
+
+		virtual std::size_t sampleCount() const noexcept = 0;
+		virtual bool writeInterleavedStereo(std::size_t offset, std::span< float > destination,
+										float gain) const noexcept = 0;
+	};
+
 	/// The backend interface is public only to permit deterministic tests without
 	/// opening a physical output endpoint. Production uses the platform backend.
 	class Backend {
 	public:
 		virtual ~Backend()                           = default;
-		virtual StartResult run(std::span< const float > mono48k, const Target &target, std::stop_token stopToken,
+		virtual StartResult run(const Clip &mono48k, const Target &target, std::stop_token stopToken,
 								ReadyCallback ready) = 0;
 	};
 
@@ -88,21 +106,38 @@ public:
 	/// The source may be wiped by CalibrationRuntimeBridge as soon as this call
 	/// succeeds.
 	StartResult start(std::span< const float > mono48k, const Target &target);
-	/// Synchronously stops playback, joins the worker and wipes the owned PCM.
+	/// Synchronously requests cancellation and wipes the owned PCM. This never
+	/// waits for a driver/COM call; a wedged backend is allowed to unwind later.
 	void stop() noexcept;
 	bool active() const noexcept;
+	quint64 generation() const noexcept;
+
+	/// Waits until the process-wide detached playback worker has completed all
+	/// wrapper cleanup and released its lease. This only waits on the registry
+	/// condition variable; it never joins a worker or enters a backend/COM call.
+	static bool waitForProcessIdle(std::chrono::milliseconds timeout) noexcept;
 
 signals:
-	void playbackStarted(bool usedDefaultFallback);
-	void playbackFailed(int error, bool afterStart);
-	void playbackFinished();
+	void playbackStarted(quint64 generation, bool usedDefaultFallback);
+	void playbackFailed(quint64 generation, int error, bool afterStart);
+	void playbackFinished(quint64 generation);
 
 private:
-	static std::unique_ptr< Backend > createPlatformBackend();
+	enum class PlaybackEvent { Started, FailedBeforeStart, FailedAfterStart, Finished };
+	struct EventRelay;
+	struct RunControl;
+	struct WorkerLease;
+	struct WorkerRegistry;
 
-	std::unique_ptr< Backend > m_backend;
-	std::jthread m_worker;
-	std::atomic_bool m_active{ false };
+	static std::unique_ptr< Backend > createPlatformBackend();
+	static WorkerRegistry &workerRegistry() noexcept;
+	static void postEvent(const std::shared_ptr< EventRelay > &relay, quint64 generation, PlaybackEvent event,
+						  StartResult result);
+
+	std::shared_ptr< Backend > m_backend;
+	std::shared_ptr< RunControl > m_run;
+	std::shared_ptr< EventRelay > m_eventRelay;
+	std::atomic_uint64_t m_generation{ 0 };
 };
 
 } // namespace Mumble::InputEnhancement
