@@ -723,6 +723,25 @@ def _materialize_fixture(
 		def benchmark_report(profile: str, latency: int, output_sha256: str) -> Mapping[str, Any]:
 			worker_p99 = 2.0 if profile in ("Quality", "VoiceFocus", "Auto") else 0.0
 			engine = "DeepFilterNet" if profile in ("Quality", "VoiceFocus") else "RNNoise" if profile in ("Balanced", "Auto") else "Speex" if profile == "Light" else "None"
+			requested_ui_controls = (50, 50)
+			# The Auto fixture binds its measured runtime to the Balanced recipe.
+			# These ranges mirror validatedControlsForProfile() so the synthetic
+			# benchmark evidence exercises the same one-time UI-to-recipe mapping as
+			# a real schema-v4 campaign.
+			effective_profile = "Balanced" if profile == "Auto" else profile
+			control_ranges = {
+				"Original": ((0, 0), (0, 0)),
+				"Light": ((0, 100), (0, 100)),
+				"Balanced": ((20, 90), (10, 90)),
+				"Quality": ((25, 90), (25, 100)),
+				"VoiceFocus": ((70, 100), (40, 100)),
+			}
+			validated_recipe_controls = tuple(
+				minimum + ((ui_value * (maximum - minimum) + 50) // 100)
+				for ui_value, (minimum, maximum) in zip(
+					requested_ui_controls, control_ranges[effective_profile], strict=True
+				)
+			)
 			recipe_ids = {
 				"Original": "input.original", "Light": "input.light.speex",
 				"Balanced": "input.balanced.self-test", "Quality": "input.quality.self-test",
@@ -743,6 +762,10 @@ def _materialize_fixture(
 				"output_sha256": output_sha256,
 				"requested_recipe_id": recipe_ids[profile],
 				"recipe_revision": 1,
+				"requested_ui_noise_reduction": requested_ui_controls[0],
+				"requested_ui_natural_clear": requested_ui_controls[1],
+				"validated_recipe_noise_reduction": validated_recipe_controls[0],
+				"validated_recipe_natural_clear": validated_recipe_controls[1],
 				"used_fallback": False,
 				"fallback_count": 0,
 				"deadline_misses": 0,
