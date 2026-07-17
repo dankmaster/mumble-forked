@@ -1230,7 +1230,11 @@ def run_self_test() -> None:
 		manifest = LOCK.load_validated_manifest(manifest_path)
 		inventory = PLAN._self_test_inventory(manifest, "mumble-plan-self-test")
 		inventory_path = root / "inventory.json"; _write_json(inventory_path, inventory)
-		plan = PLAN.generate_plan(manifest, inventory, "pr_smoke", "validation", "mumble-plan-self-test", 4, 1000)
+		# Keep the orchestration fixture bound to a fully valid PR-smoke plan.  The
+		# schema-v4 plan contract qualifies both control-grid endpoints for every
+		# product profile, which deliberately cannot be represented by the old
+		# four-case shortcut used by this self-test.
+		plan = PLAN.generate_plan(manifest, inventory, "pr_smoke", "validation", "mumble-plan-self-test", 30, 1000)
 		plan_path = root / "plan.json"; _write_json(plan_path, plan)
 		selected_case = plan["cases"][3]
 		if selected_case["profile"] != "Quality":
