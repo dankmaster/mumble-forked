@@ -304,8 +304,34 @@ def _group_choice(values: Sequence[Mapping[str, Any]], seed: str, case_index: in
 	return _choice(sorted(grouped[group_id], key=lambda item: item["id"]), seed, case_index, f"{label}:{group_id}")
 
 
+def _window_sample_count(item: Mapping[str, Any], duration_ms: int) -> int:
+	return math.ceil(duration_ms * item["sample_rate_hz"] / 1000)
+
+
+def _window_eligible_sources(
+	values: Sequence[Mapping[str, Any]], duration_ms: int, split: str, label: str,
+) -> list[Mapping[str, Any]]:
+	"""Keep only whole source windows that fit the requested fixed timeline.
+
+	Filtering happens after the immutable group-to-split assignment.  A short
+	item can therefore never move its group, or any replacement group, across a
+	split boundary.  Noise that intentionally needs repetition must be expanded
+	and hash-attested while the inventory is materialized; the qualification plan
+	never silently loops or zero-pads a selected source.
+	"""
+	eligible = [
+		item for item in values
+		if item["duration_samples"] >= _window_sample_count(item, duration_ms)
+	]
+	_expect(
+		bool(eligible), f"inventory.{split}.{label}",
+		f"has no source long enough for the requested {duration_ms} ms window",
+	)
+	return eligible
+
+
 def _source_window(item: Mapping[str, Any], duration_ms: int, seed: str, case_index: int, label: str) -> dict[str, int]:
-	needed = math.ceil(duration_ms * item["sample_rate_hz"] / 1000)
+	needed = _window_sample_count(item, duration_ms)
 	_expect(item["duration_samples"] >= needed, item["id"], f"shorter than requested {duration_ms} ms")
 	maximum_start = item["duration_samples"] - needed
 	start = _stable_int(seed, "window-v1", case_index, label) % (maximum_start + 1)
@@ -315,6 +341,8 @@ def _source_window(item: Mapping[str, Any], duration_ms: int, seed: str, case_in
 def generate_plan(
 	manifest: Mapping[str, Any], inventory: Any, suite: str, split: str, seed: str, case_count: int, duration_ms: int
 ) -> Mapping[str, Any]:
+	_expect(case_count > 0, "case_count", "must be positive")
+	_expect(duration_ms >= 1000 and duration_ms % 10 == 0, "duration_ms", "must be >=1000 and align to 10 ms")
 	lock_sha = LOCK.canonical_manifest_sha256(manifest)
 	items = validate_inventory(inventory, manifest, lock_sha, suite, seed, split)
 	speech = sorted(
@@ -337,12 +365,16 @@ def generate_plan(
 		),
 		key=lambda item: item["id"],
 	)
+	# Source-window eligibility is duration-dependent and therefore belongs in
+	# the plan generator rather than the corpus split assignment.  In particular,
+	# do not let a short candidate fail only after its group has already been
+	# selected by _group_choice().
+	speech = _window_eligible_sources(speech, duration_ms, split, "speech")
+	noise = _window_eligible_sources(noise, duration_ms, split, "noise")
 	_expect(speech, "inventory", f"no speech groups assigned to {split}")
 	_expect(noise, "inventory", f"no noise groups assigned to {split}")
 	_expect(rirs, "inventory", f"no RIR groups assigned to {split}")
 	_expect(microphone_responses, "inventory", f"no microphone-response groups assigned to {split}")
-	_expect(case_count > 0, "case_count", "must be positive")
-	_expect(duration_ms >= 1000 and duration_ms % 10 == 0, "duration_ms", "must be >=1000 and align to 10 ms")
 
 	profile_schedule = [_profile_for_case(suite, case_count, index) for index in range(case_count)]
 	profile_totals = {profile: profile_schedule.count(profile) for profile in PROFILES}
@@ -497,6 +529,13 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	_expect(value["format"]["sample_rate_hz"] == 48000, "plan.format.sample_rate_hz", "must be 48000")
 	_expect(value["format"]["channels"] == 1, "plan.format.channels", "must be mono")
 	_expect(value["format"]["frame_samples"] == 480, "plan.format.frame_samples", "must be 10 ms")
+	_expect(
+		isinstance(value["format"].get("duration_ms"), int)
+		and not isinstance(value["format"]["duration_ms"], bool)
+		and value["format"]["duration_ms"] >= 1000
+		and value["format"]["duration_ms"] % 10 == 0,
+		"plan.format.duration_ms", "must be >=1000 and align to 10 ms",
+	)
 	_expect(isinstance(value["cases"], list) and value["cases"], "plan.cases", "must not be empty")
 	case_ids = []
 	startup_modes = set()
@@ -531,6 +570,24 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 				and source["size_bytes"] > 0,
 				f"{path}.{label}.size_bytes",
 				"must be a positive integer",
+			)
+		for label, source in (("speech", case["speech"]), ("noise", case["noise"])):
+			if source is None:
+				continue
+			window = source.get("window")
+			_expect(isinstance(window, dict), f"{path}.{label}.window", "must be an object")
+			_exact_keys(window, {"length_samples", "start_sample"}, set(), f"{path}.{label}.window")
+			for field in ("start_sample", "length_samples"):
+				_expect(
+					isinstance(window[field], int) and not isinstance(window[field], bool),
+					f"{path}.{label}.window.{field}", "must be an integer",
+				)
+			_expect(window["start_sample"] >= 0, f"{path}.{label}.window.start_sample", "must be non-negative")
+			expected_length = math.ceil(value["format"]["duration_ms"] * source["input_sample_rate_hz"] / 1000)
+			_expect(
+				window["length_samples"] == expected_length,
+				f"{path}.{label}.window.length_samples",
+				"does not cover the requested fixed timeline",
 			)
 		_expect(case["profile"] in PROFILES, f"{path}.profile", "unknown profile")
 		_expect(isinstance(case.get("controls"), dict), f"{path}.controls", "must be an object")
@@ -764,6 +821,44 @@ def run_self_test() -> None:
 	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	if canonical_sha256(first) != canonical_sha256(second):
 		raise AssertionError("identical inputs did not produce an identical plan")
+	short_sources = copy.deepcopy(inventory)
+	short_ids = set()
+	for kind in ("speech", "noise"):
+		item = next(
+			value for value in short_sources["items"]
+			if value["kind"] == kind and assigned_split(seed, kind, value["group_id"]) == "validation"
+		)
+		item["duration_samples"] = 1
+		short_ids.add(item["id"])
+	short_plan = generate_plan(manifest, short_sources, "pr_smoke", "validation", seed, 30, 6000)
+	selected_ids = {
+		case[label]["item_id"]
+		for case in short_plan["cases"]
+		for label in ("speech", "noise")
+		if case[label] is not None
+	}
+	if short_ids & selected_ids:
+		raise AssertionError("duration-ineligible speech or noise entered a generated plan")
+	all_short = copy.deepcopy(inventory)
+	for item in all_short["items"]:
+		if item["kind"] == "noise" and assigned_split(seed, "noise", item["group_id"]) == "validation":
+			item["duration_samples"] = 1
+	try:
+		generate_plan(manifest, all_short, "pr_smoke", "validation", seed, 30, 6000)
+	except PlanError as error:
+		if "no source long enough" not in str(error):
+			raise
+	else:
+		raise AssertionError("plan generator accepted a split with only short noise sources")
+	bad_window = copy.deepcopy(first)
+	bad_window["cases"][0]["speech"]["window"]["length_samples"] -= 1
+	try:
+		validate_plan(bad_window)
+	except PlanError as error:
+		if "requested fixed timeline" not in str(error):
+			raise
+	else:
+		raise AssertionError("plan validator accepted a truncated speech source window")
 	if { case["startup"]["preroll_ms"] for case in first["cases"] } != { 0, 300 }:
 		raise AssertionError("cold/warm coverage is missing")
 	for profile, dimensions in PROFILE_RECIPE_CONTROL_GRID.items():

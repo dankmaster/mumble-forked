@@ -49,7 +49,7 @@ class BuildError(ValueError):
 	"""Raised when corpus material cannot be produced reproducibly."""
 
 
-SCRIPT_VERSION = "3"
+SCRIPT_VERSION = "4"
 # Identifier-only search across the frozen speech/noise/RIR/device group IDs.
 # This seed gives every split the full master-quality diversity floor without
 # looking at, rendering, listening to, or scoring any audio.
@@ -597,9 +597,47 @@ def _wav_info(path: Path) -> tuple[int, int, int, int]:
 	return info
 
 
+def _repeat_pcm16_wav_to_minimum(path: Path, minimum_duration_ms: int) -> bool:
+	"""Repeat a short noise recording to one exact, deterministic minimum.
+
+	This is deliberately a materialization-time operation: the repeated bytes,
+	their hash and the policy parameters enter the inventory.  Plan rendering can
+	then require a real contiguous source window and never hide short input with
+	implicit looping or zero padding.
+	"""
+	_expect(
+		isinstance(minimum_duration_ms, int) and not isinstance(minimum_duration_ms, bool)
+		and minimum_duration_ms >= 1000
+		and minimum_duration_ms % 10 == 0,
+		str(path), "minimum duration must be >=1000 ms and align to 10 ms",
+	)
+	rate, channels, sample_width, source_samples = _wav_info(path)
+	required_samples = math.ceil(minimum_duration_ms * rate / 1000)
+	if source_samples >= required_samples:
+		return False
+	with wave.open(str(path), "rb") as stream:
+		payload = stream.readframes(source_samples)
+	_expect(len(payload) == source_samples * channels * sample_width, str(path), "truncated PCM payload")
+	repetitions = math.ceil(required_samples / source_samples)
+	frame_bytes = channels * sample_width
+	repeated = (payload * repetitions)[: required_samples * frame_bytes]
+	temporary = path.with_name(f".{path.name}.repeat-{os.getpid()}.tmp.wav")
+	try:
+		with wave.open(str(temporary), "wb") as stream:
+			stream.setnchannels(channels)
+			stream.setsampwidth(sample_width)
+			stream.setframerate(rate)
+			stream.writeframes(repeated)
+		_expect(_wav_info(temporary)[3] == required_samples, str(path), "repeated output duration changed")
+		os.replace(temporary, path)
+	finally:
+		temporary.unlink(missing_ok=True)
+	return True
+
+
 def _convert_member(
 	reader: ArchiveReader, member: str, destination: Path, ffmpeg: Path,
-	ffmpeg_identity: Mapping[str, str], scratch: Path,
+	ffmpeg_identity: Mapping[str, str], scratch: Path, *, minimum_duration_ms: int | None = None,
 ) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
 	payload = reader.read(member)
 	parent_sha = hashlib.sha256(payload).hexdigest()
@@ -608,6 +646,11 @@ def _convert_member(
 		"ffmpeg_version": ffmpeg_identity["version"], "sample_rate_hz": 48000,
 		"flags": ["-bitexact", "-fflags", "+bitexact", "-flags:a", "+bitexact", "-map_metadata", "-1", "-threads", "1"],
 	}
+	if minimum_duration_ms is not None:
+		parameters.update({
+			"minimum_duration_ms": minimum_duration_ms,
+			"short_source_policy": "repeat-whole-clip-to-exact-minimum-v1",
+		})
 	parameters_sha = _canonical_sha256(parameters)
 	suffix = PurePosixPath(member).suffix or ".bin"
 	with tempfile.NamedTemporaryFile(prefix="source-", suffix=suffix, dir=scratch, delete=False) as stream:
@@ -626,6 +669,9 @@ def _convert_member(
 		except (OSError, subprocess.SubprocessError) as error:
 			raise BuildError(f"ffmpeg failed for {member}: {error}") from error
 		info = _wav_info(temporary_output)
+		if minimum_duration_ms is not None:
+			_repeat_pcm16_wav_to_minimum(temporary_output, minimum_duration_ms)
+			info = _wav_info(temporary_output)
 		destination.parent.mkdir(parents=True, exist_ok=True)
 		_expect(not destination.exists(), str(destination), "refusing to overwrite output")
 		os.replace(temporary_output, destination)
@@ -1192,7 +1238,10 @@ def _materialize_fsd50k(
 		_expect(clip["required_label"] in labels[clip_id], clip_id, "required direct label is absent")
 		member = _resolve_selected_member(reader.names, clip["member"], clip_id)
 		relative = f"audio/noise/fsd50k-{clip_id}.wav"
-		common, transform = _convert_member(reader, member, destination / relative, ffmpeg, identity, scratch)  # type: ignore[arg-type]
+		common, transform = _convert_member(
+			reader, member, destination / relative, ffmpeg, identity, scratch,
+			minimum_duration_ms=MIN_AUDIO_MS,
+		)  # type: ignore[arg-type]
 		item = {
 			"id": f"noise-fsd50k-{clip_id}", "kind": "noise", "source_id": source["id"],
 			"relative_path": relative, "group_id": clip["group_id"], "noise_class": clip["noise_class"],
@@ -1520,6 +1569,13 @@ def build(
 			mcgill_transcripts = sum(1 for name in mcgill_reader.names if "transcript" in name.lower())
 		items.extend(_materialize_responses(temporary, split_seed, transforms))
 		items = sorted(items, key=lambda item: item["id"])
+		for item in items:
+			if item["kind"] in ("speech", "noise"):
+				minimum_samples = math.ceil(MIN_AUDIO_MS * item["sample_rate_hz"] / 1000)
+				_expect(
+					item["duration_samples"] >= minimum_samples, item["id"],
+					f"materialized {item['kind']} is shorter than {MIN_AUDIO_MS} ms",
+				)
 		transformation_manifest = {
 			"schema_version": 1, "generator": "mumble-corpus-builder", "generator_version": SCRIPT_VERSION,
 			"corpus_lock_sha256": LOCK.canonical_manifest_sha256(manifest), "corpus_state_sha256": state_sha,
@@ -1675,6 +1731,20 @@ def run_self_test() -> None:
 		response = root / "response.wav"
 		_write_pcm16_wav(response, _response_samples(definition["families"][0]["base_taps_q15"], 3, definition["frame_samples"]))
 		_wav_info(response)
+		short_noise = root / "short-noise.wav"
+		short_cycle = [index - 240 for index in range(480)]
+		_write_pcm16_wav(short_noise, short_cycle)
+		if not _repeat_pcm16_wav_to_minimum(short_noise, 1000):
+			raise AssertionError("short noise fixture was not repeated")
+		if _wav_info(short_noise)[3] != 48000:
+			raise AssertionError("repeated noise fixture has the wrong fixed duration")
+		first_hash = _file_sha256(short_noise)
+		if _repeat_pcm16_wav_to_minimum(short_noise, 1000) or _file_sha256(short_noise) != first_hash:
+			raise AssertionError("minimum-duration noise normalization is not idempotent")
+		with wave.open(str(short_noise), "rb") as stream:
+			first_two_cycles = stream.readframes(960)
+		if first_two_cycles[:960] != first_two_cycles[960:]:
+			raise AssertionError("noise repetition did not preserve the exact source cycle")
 	device_groups = []
 	device_families = {}
 	for family in definition["families"]:
