@@ -5,6 +5,9 @@ param(
 	[Parameter(Mandatory = $true)] [ValidateRange(1, 2147483647)] [int]$BuildNumber,
 	[Parameter(Mandatory = $true)] [string]$ExecutorPath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExecutorSha256,
+	[Parameter(Mandatory = $true)] [string]$TestEd25519PrivateKeyPath,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$TestEd25519PrivateKeySha256,
+	[Parameter(Mandatory = $true)] [string]$TestEd25519PublicKeyHex,
 	[Parameter(Mandatory = $true)] [string]$UnsignedHandoffArchivePath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UnsignedHandoffArchiveSha256,
 	[Parameter(Mandatory = $true)] [string]$MeasuredEvidenceArchivePath,
@@ -59,6 +62,7 @@ if ($forbiddenEnvironment.Count -ne 0) {
 
 $protectedInputs = @(
 	@('executor', $ExecutorPath, $ExecutorSha256),
+	@('prebuilt test Ed25519 private key', $TestEd25519PrivateKeyPath, $TestEd25519PrivateKeySha256),
 	@('unsigned handoff archive', $UnsignedHandoffArchivePath, $UnsignedHandoffArchiveSha256),
 	@('measured evidence archive', $MeasuredEvidenceArchivePath, $MeasuredEvidenceArchiveSha256),
 	@('listening qualification', $ListeningQualificationPath, $ListeningQualificationSha256),
@@ -89,6 +93,15 @@ foreach ($input in $protectedInputs) {
 if ([IO.Path]::GetExtension($resolvedInputs.executor) -cne '.ps1') {
 	throw 'Protected rehearsal executor must be a PowerShell script.'
 }
+$publicKeyHex = Assert-Ed25519PublicKeyHex -PublicKeyHex $TestEd25519PublicKeyHex
+$privateKeyBase64 = [Convert]::ToBase64String(
+	[IO.File]::ReadAllBytes($resolvedInputs['prebuilt test Ed25519 private key']))
+$derivedPublicKeyHex = Get-Ed25519PublicKeyHexFromPrivateKey `
+	-PrivateKeyBase64 $privateKeyBase64 -OpenSslPath $openssl
+if ($derivedPublicKeyHex -cne $publicKeyHex) {
+	throw 'Protected prebuilt test Ed25519 private/public key pair does not match.'
+}
+$privateKeyBase64 = $null
 $executorSource = Get-Content -LiteralPath $resolvedInputs.executor -Raw
 foreach ($forbiddenPattern in @(
 	'(?i)\bgh\s+release\b', '(?i)api\.github\.com/.*/releases', '(?i)artifact[- ]?signing',
@@ -101,10 +114,9 @@ foreach ($forbiddenPattern in @(
 
 $outputRootPath = Initialize-InputEnhancementRehearsalOutputRoot `
 	-OutputRoot $OutputRoot -AllowedOutputParent $AllowedOutputParent -SourceRoot $sourceRootPath
-$keyRoot = Join-Path ([IO.Path]::GetTempPath()) ('mumble-rehearsal-ephemeral-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Force -Path $keyRoot | Out-Null
-$pfxPath = Join-Path $keyRoot 'ephemeral-test-signing.pfx'
-$ed25519Path = Join-Path $keyRoot 'ephemeral-test-ed25519.pem'
+$certificateRoot = Join-Path ([IO.Path]::GetTempPath()) ('mumble-rehearsal-certificate-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $certificateRoot | Out-Null
+$pfxPath = Join-Path $certificateRoot 'ephemeral-test-signing.pfx'
 $certificate = $null
 $passwordText = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $securePassword = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
@@ -116,10 +128,6 @@ try {
 		-CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable `
 		-HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(1)
 	Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
-	& $openssl genpkey -algorithm Ed25519 -out $ed25519Path
-	if ($LASTEXITCODE -ne 0) { throw 'OpenSSL failed to generate the ephemeral test Ed25519 key.' }
-	$privateKeyBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ed25519Path))
-	$publicKeyHex = Get-Ed25519PublicKeyHexFromPrivateKey -PrivateKeyBase64 $privateKeyBase64 -OpenSslPath $openssl
 	$env:MUMBLE_REHEARSAL_PFX_PASSWORD = $passwordText
 	$executorArguments = @{
 		SourceRoot                              = $sourceRootPath
@@ -147,8 +155,9 @@ try {
 		EphemeralPfxPasswordEnvironmentVariable = 'MUMBLE_REHEARSAL_PFX_PASSWORD'
 		EphemeralCertificateSubject             = $subject
 		EphemeralCertificateThumbprint          = $certificate.Thumbprint
-		EphemeralEd25519PrivateKeyPath           = $ed25519Path
-		EphemeralEd25519PublicKeyHex             = $publicKeyHex
+		PrebuiltTestEd25519PrivateKeyPath         = $resolvedInputs['prebuilt test Ed25519 private key']
+		PrebuiltTestEd25519PrivateKeySha256       = $TestEd25519PrivateKeySha256
+		PrebuiltTestEd25519PublicKeyHex           = $publicKeyHex
 		TimestampUrl                            = $TimestampUrl
 		DraftArtifactName                       = $DraftArtifactName
 		OutputRoot                              = $outputRootPath
@@ -163,13 +172,14 @@ try {
 	if ($certificate) {
 		Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
 	}
-	Remove-Item -LiteralPath $keyRoot -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -LiteralPath $certificateRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 if (-not $executorSucceeded) { throw 'Release rehearsal did not complete.' }
 
-# The rehearsal executor receives ephemeral signing material for the draft and
-# therefore cannot attest its own runtime/VM observations. Replace those files
-# with exact protected receipts acquired independently of that executor.
+# The rehearsal executor receives the test manifest-signing key and ephemeral
+# Authenticode material for the draft, so it cannot attest its own runtime/VM
+# observations. Replace those files with exact protected receipts acquired
+# independently of that executor.
 Copy-Item -LiteralPath $resolvedInputs['kill-switch observer receipt'] `
 	-Destination (Join-Path $outputRootPath 'kill-switch-observer-receipt.json') -Force
 Copy-Item -LiteralPath $resolvedInputs['updater VM receipt'] `
@@ -216,13 +226,15 @@ if (Test-Path -LiteralPath $listeningEvidenceDestination) {
 $rehearsal = Read-ReleaseJson -Path (Join-Path $outputRootPath 'rehearsal.json')
 if ([string]$rehearsal.ephemeralSigning.certificateSubject -cne $subject -or
 	[string]$rehearsal.ephemeralSigning.certificateThumbprint -cne [string]$certificate.Thumbprint -or
-	[string]$rehearsal.ephemeralSigning.ed25519PublicKeyHex -cne $publicKeyHex) {
-	throw 'Rehearsal evidence does not identify the exact ephemeral keys generated by this invocation.'
+	[string]$rehearsal.ephemeralSigning.ed25519PublicKeyHex -cne $publicKeyHex -or
+	[string]$rehearsal.ephemeralSigning.ed25519Provisioning -cne 'prebuilt-before-candidate-build') {
+	throw 'Rehearsal evidence does not identify the exact prebuilt test key and ephemeral certificate used by this invocation.'
 }
 
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-release-rehearsal.ps1') `
 	-Root $outputRootPath -ExpectedSourceSha $SourceSha -ExpectedBuildId $buildId `
 	-ExpectedDraftArtifactName $DraftArtifactName `
+	-ExpectedEd25519PublicKeyHex $publicKeyHex `
 	-ExpectedExecutorSha256 $ExecutorSha256 `
 	-ExpectedUnsignedHandoffSha256 $UnsignedHandoffArchiveSha256 `
 	-ExpectedMeasuredEvidenceArchiveSha256 $MeasuredEvidenceArchiveSha256 `

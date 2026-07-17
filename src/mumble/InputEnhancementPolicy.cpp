@@ -5,6 +5,7 @@
 
 #include "InputEnhancementPolicy.h"
 
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -209,6 +210,29 @@ QByteArray configuredPolicyPublicKey() {
 
 bool hasConfiguredPolicyPublicKey() {
 	return configuredPolicyPublicKey().size() == Ed25519PublicKeyBytes;
+}
+
+QByteArray configuredPolicyBuildIdentity(const std::uint64_t currentBuild) {
+	const QByteArray publicKey = configuredPolicyPublicKey();
+	QString verificationMode   = QStringLiteral("invalid");
+	if (currentBuild > 0 && publicKey.size() == Ed25519PublicKeyBytes) {
+		verificationMode = QStringLiteral("managed-signed");
+	} else if (currentBuild == 0 && publicKey.isEmpty()) {
+		verificationMode = QStringLiteral("unmanaged-build-zero");
+	}
+
+	const QString publicKeySha256 =
+		publicKey.size() == Ed25519PublicKeyBytes
+			? QString::fromLatin1(QCryptographicHash::hash(publicKey, QCryptographicHash::Sha256).toHex())
+			: QString{};
+	const QJsonObject identity{
+		{ QStringLiteral("buildNumber"), static_cast< qint64 >(currentBuild) },
+		{ QStringLiteral("configuredPublicKeySha256"), publicKeySha256 },
+		{ QStringLiteral("kind"), QStringLiteral("mumble-input-enhancement-build-identity") },
+		{ QStringLiteral("packageVerificationMode"), verificationMode },
+		{ QStringLiteral("schemaVersion"), 1 },
+	};
+	return QJsonDocument(identity).toJson(QJsonDocument::Compact);
 }
 
 bool verifyWithConfiguredPolicyPublicKey(const QByteArray &exactBytes, const QByteArray &detachedSignature) noexcept {

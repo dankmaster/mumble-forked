@@ -25,6 +25,13 @@ QByteArray configuredPolicyPublicKey();
 QString configuredPolicyPublicKeyHex();
 bool hasConfiguredPolicyPublicKey();
 
+/// Emits the exact machine-readable identity used by the pre-Azure rehearsal
+/// to prove that the launched candidate has a positive build number and the
+/// expected Ed25519 public key compiled into its package verifier. The result
+/// contains no private material and is deliberately independent of
+/// Authenticode, which may be applied after the program was built.
+QByteArray configuredPolicyBuildIdentity(std::uint64_t currentBuild);
+
 /// Verifies exact bytes with the release key compiled into this client. An
 /// unconfigured developer build, malformed signature or unavailable crypto
 /// backend returns false.

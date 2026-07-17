@@ -16,6 +16,9 @@ param(
 	[string]$ExpectedDraftArtifactName,
 
 	[Parameter(Mandatory = $true)]
+	[string]$ExpectedEd25519PublicKeyHex,
+
+	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
 	[string]$ExpectedExecutorSha256,
 
@@ -104,6 +107,21 @@ function Assert-Sha256 {
 	return $text
 }
 
+function Get-RawPublicKeySha256 {
+	param([string]$PublicKeyHex)
+	$normalized = Assert-Ed25519PublicKeyHex -PublicKeyHex $PublicKeyHex
+	[byte[]]$bytes = [byte[]]::new(32)
+	for ($index = 0; $index -lt $bytes.Length; ++$index) {
+		$bytes[$index] = [Convert]::ToByte($normalized.Substring($index * 2, 2), 16)
+	}
+	$sha = [Security.Cryptography.SHA256]::Create()
+	try {
+		return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+	} finally {
+		$sha.Dispose()
+	}
+}
+
 $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
 $rehearsalPath = Join-Path $rootPath 'rehearsal.json'
 $rehearsal = Read-ReleaseJson -Path $rehearsalPath
@@ -139,29 +157,38 @@ if ($security.azureUsed -ne $false -or $security.contentsWrite -ne $false -or
 
 $signing = $rehearsal.ephemeralSigning
 Assert-ExactProperties $signing @(
-	'certificateSubject', 'certificateThumbprint', 'ed25519PublicKeyHex', 'testOnly', 'timestampMode'
+	'certificateSubject', 'certificateThumbprint', 'ed25519Provisioning', 'ed25519PublicKeyHex', 'testOnly',
+	'timestampMode'
 ) 'Release rehearsal ephemeral signing'
 $ed25519PublicKey = Assert-Ed25519PublicKeyHex -PublicKeyHex ([string]$signing.ed25519PublicKeyHex)
+$expectedEd25519PublicKey = Assert-Ed25519PublicKeyHex -PublicKeyHex $ExpectedEd25519PublicKeyHex
 if ($signing.testOnly -ne $true -or
+	$ed25519PublicKey -cne $expectedEd25519PublicKey -or
 	[string]$signing.certificateSubject -cnotmatch '^CN=Mumble Input Enhancement Rehearsal [A-Za-z0-9._-]+$' -or
 	[string]$signing.certificateThumbprint -cnotmatch '^[0-9A-Fa-f]{40}$' -or
+	[string]$signing.ed25519Provisioning -cne 'prebuilt-before-candidate-build' -or
 	[string]$signing.timestampMode -cne 'test-rfc3161') {
-	throw 'Release rehearsal must use only its ephemeral test certificate and test Ed25519 key.'
+	throw 'Release rehearsal must use an ephemeral test certificate and the prebuilt test Ed25519 key.'
 }
 
 $binding = $rehearsal.binding
 Assert-ExactProperties $binding @(
 	'caseSetSha256', 'corpusInventorySha256', 'executorSha256', 'fixtureManifestSha256',
-	'listeningInputSha256', 'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
+	'embeddedKeyAttestationSha256', 'embeddedPublicKeySha256', 'listeningInputSha256',
+	'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
 	'recipeManifestSha256', 'recipeSetVersion', 'releaseSmokeHarnessSha256', 'serverExecutableSha256',
 	'stagedPayloadSha256', 'testedBinarySha256', 'unsignedHandoffSha256'
 ) 'Release rehearsal binding'
 foreach ($name in @(
 	'caseSetSha256', 'corpusInventorySha256', 'executorSha256', 'fixtureManifestSha256',
-	'listeningInputSha256', 'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
+	'embeddedKeyAttestationSha256', 'embeddedPublicKeySha256', 'listeningInputSha256',
+	'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
 	'recipeManifestSha256', 'releaseSmokeHarnessSha256', 'serverExecutableSha256', 'stagedPayloadSha256',
 	'testedBinarySha256', 'unsignedHandoffSha256'
 )) { $null = Assert-Sha256 $binding.$name "Release rehearsal binding $name" }
+if ([string]$binding.embeddedPublicKeySha256 -cne (Get-RawPublicKeySha256 -PublicKeyHex $ed25519PublicKey)) {
+	throw 'Release rehearsal embedded-public-key binding does not match the protected test key.'
+}
 $expectedBinding = [ordered]@{
 	executorSha256                = $ExpectedExecutorSha256
 	unsignedHandoffSha256         = $ExpectedUnsignedHandoffSha256
@@ -182,7 +209,8 @@ if ([string]$binding.recipeSetVersion -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,6
 }
 
 $expectedSequence = @(
-	'verify-pre-azure-inputs', 'sign-pe-ephemeral', 'build-msi-from-signed-payload', 'sign-msi-ephemeral',
+	'verify-pre-azure-inputs', 'sign-pe-ephemeral', 'attest-positive-build-embedded-key',
+	'build-msi-from-signed-payload', 'sign-msi-ephemeral',
 	'assemble-immutable-artifacts', 'qualify-core', 'release-smoke-6-plus-24',
 	'simulate-updater-protocol-v4', 'verify-updater-vm-rollback-matrix', 'stage-local-draft',
 	'exercise-policy-kill-switch'
@@ -220,6 +248,7 @@ if ($killSwitch.startupChecked -ne $true -or $killSwitch.passed -ne $true -or
 
 $requiredAssetNames = @(
 	'auditArtifact', 'caseSet', 'channelPointer', 'channelPointerSignature', 'fixtureManifest', 'installer',
+	'embeddedKeyAttestation',
 	'killSwitchObserverReceipt', 'killSwitchPolicy', 'killSwitchPolicySignature', 'killSwitchRuntimeTrace',
 	'killSwitchRuntimeTraceSignature',
 	'listeningQualification', 'measuredEvidence', 'modelManifest',
@@ -246,6 +275,8 @@ foreach ($name in $requiredAssetNames) {
 	$resolvedAssets[$name] = $item.FullName
 }
 if ((Get-ReleaseFileSha256 -Path $resolvedAssets.listeningQualification) -cne $ExpectedListeningQualificationSha256 -or
+	(Get-ReleaseFileSha256 -Path $resolvedAssets.embeddedKeyAttestation) -cne
+		[string]$binding.embeddedKeyAttestationSha256 -or
 	(Get-ReleaseFileSha256 -Path $resolvedAssets.modelManifest) -cne [string]$binding.modelManifestSha256 -or
 	(Get-ReleaseFileSha256 -Path $resolvedAssets.recipeManifest) -cne [string]$binding.recipeManifestSha256) {
 	throw 'Release rehearsal candidate/listening/manifest bytes do not match the protected binding.'
@@ -331,6 +362,11 @@ $qualification = Read-ReleaseJson -Path $resolvedAssets.qualification
 if ([string]$qualification.buildId -cne $ExpectedBuildId -or [string]$qualification.source.sha -cne $ExpectedSourceSha) {
 	throw 'Release rehearsal qualification belongs to another build.'
 }
+& (Join-Path $PSScriptRoot 'assert-input-enhancement-embedded-key-attestation.ps1') `
+	-EvidencePath $resolvedAssets.embeddedKeyAttestation `
+	-ExpectedCandidateExecutableSha256 ([string]$qualification.installer.executableSha256) `
+	-ExpectedBuildNumber ([int]$qualification.buildNumber) `
+	-ExpectedPublicKeyHex $ed25519PublicKey
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-qualification.ps1') `
 	-QualificationPath $resolvedAssets.qualification `
 	-ArtifactPath $resolvedAssets.auditArtifact `

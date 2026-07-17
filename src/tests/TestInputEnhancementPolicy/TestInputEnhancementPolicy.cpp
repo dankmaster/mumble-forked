@@ -8,6 +8,7 @@
 
 #include <QtTest>
 
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -191,6 +192,7 @@ private slots:
 	void expiredCacheIsNeverEffective();
 	void verifiesRfc8032VectorWithOpenSsl();
 	void exposesOnlyAValidConfiguredReleasePublicKey();
+	void emitsMachineReadableConfiguredBuildIdentity();
 	void configuredReleaseKeyVerifiesExactBytesOrFailsClosed();
 	void acceptsSignedChannelPointerAsInstallablePackage();
 	void verifiesChannelPointerSignatureOverExactBytes();
@@ -376,6 +378,38 @@ void TestInputEnhancementPolicy::exposesOnlyAValidConfiguredReleasePublicKey() {
 	QCOMPARE(configuredPolicyPublicKey().size(), 32);
 	QCOMPARE(configuredPolicyPublicKey(), QByteArray::fromHex(configuredHex));
 	QCOMPARE(configuredPolicyPublicKeyHex(), QString::fromLatin1(configuredHex).toLower());
+}
+
+void TestInputEnhancementPolicy::emitsMachineReadableConfiguredBuildIdentity() {
+	const QJsonDocument positiveDocument = QJsonDocument::fromJson(configuredPolicyBuildIdentity(42));
+	QVERIFY(positiveDocument.isObject());
+	const QJsonObject positive = positiveDocument.object();
+	QCOMPARE(positive.value(QStringLiteral("schemaVersion")).toInt(), 1);
+	QCOMPARE(positive.value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("mumble-input-enhancement-build-identity"));
+	QCOMPARE(positive.value(QStringLiteral("buildNumber")).toInt(), 42);
+
+	const QByteArray configuredHex(MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX);
+	if (configuredHex.isEmpty()) {
+		QCOMPARE(positive.value(QStringLiteral("packageVerificationMode")).toString(), QStringLiteral("invalid"));
+		QVERIFY(positive.value(QStringLiteral("configuredPublicKeySha256")).toString().isEmpty());
+
+		const QJsonObject development = QJsonDocument::fromJson(configuredPolicyBuildIdentity(0)).object();
+		QCOMPARE(development.value(QStringLiteral("buildNumber")).toInt(), 0);
+		QCOMPARE(development.value(QStringLiteral("packageVerificationMode")).toString(),
+				 QStringLiteral("unmanaged-build-zero"));
+		QVERIFY(development.value(QStringLiteral("configuredPublicKeySha256")).toString().isEmpty());
+		return;
+	}
+
+	const QByteArray publicKey = QByteArray::fromHex(configuredHex);
+	QCOMPARE(positive.value(QStringLiteral("packageVerificationMode")).toString(),
+			 QStringLiteral("managed-signed"));
+	QCOMPARE(positive.value(QStringLiteral("configuredPublicKeySha256")).toString(),
+			 QString::fromLatin1(QCryptographicHash::hash(publicKey, QCryptographicHash::Sha256).toHex()));
+
+	const QJsonObject zeroBuild = QJsonDocument::fromJson(configuredPolicyBuildIdentity(0)).object();
+	QCOMPARE(zeroBuild.value(QStringLiteral("packageVerificationMode")).toString(), QStringLiteral("invalid"));
 }
 
 void TestInputEnhancementPolicy::configuredReleaseKeyVerifiesExactBytesOrFailsClosed() {
