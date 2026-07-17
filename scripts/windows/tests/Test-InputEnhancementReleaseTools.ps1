@@ -3226,7 +3226,7 @@ raise SystemExit(1)
 		New-Item -ItemType Directory -Force -Path $fakeBuildRoot | Out-Null
 		[System.IO.File]::WriteAllLines(
 			(Join-Path $fakeBuildRoot "CMakeCache.txt"),
-			@("tests:BOOL=ON", "benchmarks:BOOL=ON"),
+			@("tests:BOOL=ON", "benchmarks:BOOL=ON", "speech-cleanup-e2e:BOOL=ON"),
 			[System.Text.UTF8Encoding]::new($false)
 		)
 		$fakeCTest = Join-Path $tempRoot "fake-ctest.cmd"
@@ -3251,7 +3251,7 @@ raise SystemExit(1)
 		Assert-TestGateResults -GateResults (Read-ReleaseJson -Path $fakeGatePath)
 		[System.IO.File]::WriteAllLines(
 			(Join-Path $fakeBuildRoot "CMakeCache.txt"),
-			@("tests:BOOL=ON", "benchmarks:BOOL=OFF"),
+			@("tests:BOOL=ON", "benchmarks:BOOL=OFF", "speech-cleanup-e2e:BOOL=ON"),
 			[System.Text.UTF8Encoding]::new($false)
 		)
 		Assert-Throws -Description "release build with benchmarks disabled" -Script {
@@ -3259,6 +3259,17 @@ raise SystemExit(1)
 				-BuildRoot $fakeBuildRoot `
 				-CTestPath $fakeCTest `
 				-OutputPath (Join-Path $tempRoot "must-not-pass-gates.json")
+		}
+		[System.IO.File]::WriteAllLines(
+			(Join-Path $fakeBuildRoot "CMakeCache.txt"),
+			@("tests:BOOL=ON", "benchmarks:BOOL=ON", "speech-cleanup-e2e:BOOL=OFF"),
+			[System.Text.UTF8Encoding]::new($false)
+		)
+		Assert-Throws -Description "release build without the exact-binary E2E backend" -Script {
+			& (Join-Path $scriptsRoot "invoke-input-enhancement-release-tests.ps1") `
+				-BuildRoot $fakeBuildRoot `
+				-CTestPath $fakeCTest `
+				-OutputPath (Join-Path $tempRoot "must-not-pass-without-e2e.json")
 		}
 	}
 

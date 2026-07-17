@@ -24,7 +24,7 @@ if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
 	throw "Release qualification requires CMakeCache.txt under '$buildRootPath'."
 }
 $cache = Get-Content -LiteralPath $cachePath
-foreach ($option in @("tests", "benchmarks")) {
+foreach ($option in @("tests", "benchmarks", "speech-cleanup-e2e")) {
 	$matches = @($cache | Where-Object { $_ -match "^$([regex]::Escape($option)):BOOL=(?<value>.*)$" })
 	if ($matches.Count -ne 1 -or $matches[0] -notmatch '=ON$') {
 		throw "Release qualification requires CMake option $option=ON."
@@ -91,8 +91,9 @@ $document = [ordered]@{
 	passed        = $allPassed
 	buildType     = $BuildType
 	cmakeOptions  = [ordered]@{
-		tests      = $true
-		benchmarks = $true
+		tests            = $true
+		benchmarks       = $true
+		speechCleanupE2e = $true
 	}
 	gates         = $gateResults.ToArray()
 }

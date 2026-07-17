@@ -282,7 +282,8 @@ jobs:
             EnvironmentCommit = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}'
             AdditionalCMakeOptions = @(
               '-Dserver=OFF', '-Dtests=ON', '-Dbenchmarks=ON', '-Drnnoise=ON', '-Ddtln=ON',
-              '-Ddeepfilternet=ON', '-Dinput-enhancement-signed-policy-required=OFF',
+              '-Ddeepfilternet=ON', '-Dspeech-cleanup-e2e=ON',
+              '-Dinput-enhancement-signed-policy-required=OFF',
               '-Dmodern-layout-automation=ON', '-Dmodern-layout-mockups=OFF'
             )
             EnablePackaging = $true
@@ -501,7 +502,8 @@ jobs:
             EnvironmentCommit = '${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}'
             AdditionalCMakeOptions = @(
               '-Dserver=OFF', '-Dtests=ON', '-Dbenchmarks=ON', '-Drnnoise=ON', '-Ddtln=ON',
-              '-Ddeepfilternet=ON', '-Dinput-enhancement-signed-policy-required=ON',
+              '-Ddeepfilternet=ON', '-Dspeech-cleanup-e2e=ON',
+              '-Dinput-enhancement-signed-policy-required=ON',
               "-DMUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX=$env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX",
               '-Dmodern-layout-automation=ON', '-Dmodern-layout-mockups=OFF'
             )
