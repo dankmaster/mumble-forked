@@ -30,7 +30,7 @@ class MeasurementEvidenceError(ValueError):
 
 SCHEMA_VERSION = 1
 INDEX_KIND = "mumble-input-enhancement-measurement-index-v1"
-SOAK_KIND = "mumble-input-enhancement-soak-v1"
+SOAK_KIND = "mumble-input-enhancement-soak-v2"
 TRANSITION_KIND = "mumble-input-enhancement-auto-transition-v1"
 METRICS_RUNTIME_KIND = "mumble-audio-metrics-runtime-attestation-v1"
 CASE_BINDING_KIND = "mumble-input-enhancement-case-binding-v1"
@@ -329,6 +329,27 @@ def _merge_counters(target: MutableMapping[str, int], source: Mapping[str, int])
 		target[key] += int(value)
 
 
+def _validated_control_ranges(profile: str, engine: str) -> tuple[tuple[int, int], tuple[int, int]]:
+	ranges = {
+		"Original": ((0, 0), (0, 0)),
+		"Light": ((0, 100), (0, 100)),
+		"Balanced": ((20, 90), (10, 90)),
+		"Quality": ((25, 90), (25, 100)),
+		"VoiceFocus": ((70, 100), (40, 100)),
+	}
+	effective_profile = profile
+	if profile == "Auto":
+		effective_profile = {
+			"Speex": "Light", "RNNoise": "Balanced", "DeepFilterNet": "Quality",
+		}[engine]
+	return ranges[effective_profile]
+
+
+def _map_ui_control_to_recipe(requested: int, interval: tuple[int, int]) -> int:
+	minimum, maximum = interval
+	return minimum + ((requested * (maximum - minimum) + 50) // 100)
+
+
 def _adapter_measurement(
 	document: Mapping[str, Any], *, role: str, profile: str, input_sha256: str, build: Mapping[str, Any],
 	profile_bindings: Mapping[str, Sequence[Mapping[str, Any]]], path: str,
@@ -449,6 +470,21 @@ def _benchmark_measurement(
 	):
 		value = _integer(document[field], f"{path}.{field}", 0)
 		_expect(value <= 100, f"{path}.{field}", "must be an integer from 0 to 100")
+	requested_noise = int(document["requested_ui_noise_reduction"])
+	requested_character = int(document["requested_ui_natural_clear"])
+	noise_range, character_range = _validated_control_ranges(profile, str(engine))
+	expected_noise = _map_ui_control_to_recipe(requested_noise, noise_range)
+	expected_character = _map_ui_control_to_recipe(requested_character, character_range)
+	_expect(
+		document["validated_recipe_noise_reduction"] == expected_noise,
+		f"{path}.validated_recipe_noise_reduction",
+		"does not equal the one-time profile-range mapping of the requested UI control",
+	)
+	_expect(
+		document["validated_recipe_natural_clear"] == expected_character,
+		f"{path}.validated_recipe_natural_clear",
+		"does not equal the one-time profile-range mapping of the requested UI control",
+	)
 	_expect(document["sample_rate"] == SAMPLE_RATE_HZ, f"{path}.sample_rate", "must be 48 kHz")
 	for field in ("input_sha256", "clean_reference_sha256", "output_sha256"):
 		_hash(document[field], f"{path}.{field}")
@@ -1130,19 +1166,39 @@ def _apply_soak_reports(
 			_same_reference(reference, previous, f"{path}.report")
 		report = _load_reference_json(root, reference, f"{path}.report")
 		required = {
-			"active_bindings", "callback_p99_ms", "deadline_miss_count", "declared_latency_samples", "duration_seconds",
+			"active_bindings", "audio_duration_seconds", "callback_p99_ms", "deadline_miss_count",
+			"declared_latency_samples",
 			"execution_identity", "fallback_count", "invalid_output_count", "kind",
 			"maximum_internal_processing_ms", "mean_rtf", "memory_growth_bytes_after_warmup",
 			"new_clipping_count", "profile", "schema_version", "status", "tail_drain_failure_count",
-			"worker_p99_ms",
+			"rss_end_bytes", "rss_peak_bytes", "rss_warmup_bytes", "wall_duration_seconds", "worker_p99_ms",
 		}
 		_exact_keys(report, required, f"{path}.report")
-		_expect(report["schema_version"] == 1 and report["kind"] == SOAK_KIND and report["status"] == "completed", f"{path}.report", "unsupported soak report")
+		_expect(report["schema_version"] == 2 and report["kind"] == SOAK_KIND and report["status"] == "completed", f"{path}.report", "unsupported soak report")
 		_expect(report["profile"] == profile, f"{path}.report.profile", "profile mismatch")
 		active_bindings = report["active_bindings"]
 		_expect(isinstance(active_bindings, list) and active_bindings == list(profile_bindings[profile]), f"{path}.report.active_bindings", "must equal the complete authorized profile binding set in canonical order")
 		_validate_execution_identity(report["execution_identity"], build, f"{path}.report.execution_identity")
-		duration = _integer(report["duration_seconds"], f"{path}.report.duration_seconds", 1)
+		audio_duration = _number(report["audio_duration_seconds"], f"{path}.report.audio_duration_seconds", 1)
+		wall_duration = _number(report["wall_duration_seconds"], f"{path}.report.wall_duration_seconds", 1)
+		_expect(
+			wall_duration >= audio_duration,
+			f"{path}.report.wall_duration_seconds",
+			"must be at least the declared audio duration for a realtime soak",
+		)
+		rss_warmup = _integer(report["rss_warmup_bytes"], f"{path}.report.rss_warmup_bytes", 0)
+		rss_end = _integer(report["rss_end_bytes"], f"{path}.report.rss_end_bytes", 0)
+		rss_peak = _integer(report["rss_peak_bytes"], f"{path}.report.rss_peak_bytes", 0)
+		memory_growth = _integer(
+			report["memory_growth_bytes_after_warmup"],
+			f"{path}.report.memory_growth_bytes_after_warmup",
+		)
+		_expect(rss_peak >= max(rss_warmup, rss_end), f"{path}.report.rss_peak_bytes", "must cover warmup and end RSS")
+		_expect(
+			memory_growth == rss_end - rss_warmup,
+			f"{path}.report.memory_growth_bytes_after_warmup",
+			"must equal rss_end_bytes - rss_warmup_bytes",
+		)
 		mean_rtf = _number(report["mean_rtf"], f"{path}.report.mean_rtf", 0)
 		callback = _number(report["callback_p99_ms"], f"{path}.report.callback_p99_ms", 0)
 		worker = _number(report["worker_p99_ms"], f"{path}.report.worker_p99_ms", 0)
@@ -1150,13 +1206,16 @@ def _apply_soak_reports(
 		profile_keys = sorted(key for key in derived_by_key if key[0] == profile)
 		_expect(bool(profile_keys), path, "profile has no measured cases")
 		target = derived_by_key[profile_keys[0]]
-		target["performance"]["audio_duration_seconds"] += duration
-		target["performance"]["processing_duration_seconds"] += duration * mean_rtf
+		target["performance"]["audio_duration_seconds"] += audio_duration
+		target["performance"]["processing_duration_seconds"] += audio_duration * mean_rtf
 		target["performance"]["callback_durations_ms"].append(callback)
 		target["performance"]["worker_durations_ms"].append(worker)
 		target["performance"]["max_internal_processing_ms"] = max(target["performance"]["max_internal_processing_ms"], maximum)
-		target["performance"]["memory_growth_bytes"] = _integer(report["memory_growth_bytes_after_warmup"], f"{path}.report.memory_growth_bytes_after_warmup")
-		target["performance"]["soak_duration_seconds"] = duration
+		target["performance"]["memory_growth_bytes"] = memory_growth
+		# Qualification is earned by audio actually processed, never by time the
+		# process merely remained alive. Wall time is retained only to prove that
+		# the audio duration was not produced faster than realtime.
+		target["performance"]["soak_duration_seconds"] = math.floor(audio_duration)
 		target["counters"]["deadline_misses"] += _integer(report["deadline_miss_count"], f"{path}.report.deadline_miss_count", 0)
 		target["counters"]["unexplained_fallbacks"] += _integer(report["fallback_count"], f"{path}.report.fallback_count", 0)
 		target["counters"]["nan_or_inf_count"] += _integer(report["invalid_output_count"], f"{path}.report.invalid_output_count", 0)
@@ -1568,6 +1627,59 @@ def run_self_test() -> None:
 			"models": [],
 		}
 		quality_binding = adapter_profile_bindings["Quality"][0]
+		control_mapping_expectations = {
+			("Original", "None"): ((0, 0, 0), (0, 0, 0)),
+			("Light", "Speex"): ((0, 50, 100), (0, 50, 100)),
+			("Balanced", "RNNoise"): ((20, 55, 90), (10, 50, 90)),
+			("Quality", "DeepFilterNet"): ((25, 58, 90), (25, 63, 100)),
+			("VoiceFocus", "DeepFilterNet"): ((70, 85, 100), (40, 70, 100)),
+			("Auto", "Speex"): ((0, 50, 100), (0, 50, 100)),
+			("Auto", "RNNoise"): ((20, 55, 90), (10, 50, 90)),
+			("Auto", "DeepFilterNet"): ((25, 58, 90), (25, 63, 100)),
+		}
+		for (mapping_profile, mapping_engine), (noise_expected, character_expected) in control_mapping_expectations.items():
+			noise_range, character_range = _validated_control_ranges(mapping_profile, mapping_engine)
+			noise_actual = tuple(_map_ui_control_to_recipe(value, noise_range) for value in (0, 50, 100))
+			character_actual = tuple(_map_ui_control_to_recipe(value, character_range) for value in (0, 50, 100))
+			if noise_actual != noise_expected or character_actual != character_expected:
+				raise AssertionError(f"control mapping drift for {mapping_profile}/{mapping_engine}")
+		benchmark_document = {
+			"schema_version": 1, "kind": BENCHMARK_MEASUREMENT_KIND,
+			"source_report_sha256": "1" * 64,
+			"processing_mode": "product-profile", "requested_profile": "Quality", "active_profile": "Quality",
+			"active_engine": "DeepFilterNet", "requested_recipe_id": quality_binding["recipe"]["id"],
+			"recipe_revision": quality_binding["recipe"]["revision"],
+			"requested_ui_noise_reduction": 10, "requested_ui_natural_clear": 10,
+			"validated_recipe_noise_reduction": 32, "validated_recipe_natural_clear": 33,
+			"active_model_id": quality_binding["models"][0]["id"],
+			"active_model_sha256": quality_binding["models"][0]["sha256"],
+			"sample_rate": SAMPLE_RATE_HZ, "input_sha256": "2" * 64,
+			"clean_reference_sha256": "3" * 64, "output_sha256": "4" * 64,
+			"reported_latency_samples": 2400, "drain_sample_count": 2400,
+			"input_sample_count": SAMPLE_RATE_HZ, "output_sample_count": SAMPLE_RATE_HZ + 2400,
+			"sample_count": SAMPLE_RATE_HZ + 2400, "processing_padding_sample_count": 0,
+			"input_saturated_sample_count": 0, "saturated_sample_count": 0,
+			"used_fallback": False, "fallback_count": 0, "deadline_misses": 0,
+			"non_finite_sample_count": 0, "out_of_range_sample_count": 0,
+			"audio_ms": 1000.0, "processing_wall_ms": 100.0, "rtf": 0.1,
+			"callback_p99_ms": 2.0, "worker_processing_p99_ms": 3.0,
+			"maximum_processing_ms": 4.0,
+		}
+		_benchmark_measurement(
+			benchmark_document, profile="Quality", build=build,
+			profile_bindings={"Quality": [quality_binding]}, path="self-test benchmark controls",
+		)
+		bad_controls = copy.deepcopy(benchmark_document)
+		bad_controls["validated_recipe_noise_reduction"] = 33
+		try:
+			_benchmark_measurement(
+				bad_controls, profile="Quality", build=build,
+				profile_bindings={"Quality": [quality_binding]}, path="self-test tampered benchmark controls",
+			)
+		except MeasurementEvidenceError:
+			pass
+		else:
+			raise AssertionError("benchmark evidence accepted a validated control not derived from the UI request")
 		e2e_bindings = {"Original": [original_binding], "Quality": [quality_binding]}
 		clean_sha256 = "f" * 64
 		source_sha256 = "b" * 64
@@ -1734,28 +1846,50 @@ def run_self_test() -> None:
 			pass
 		else:
 			raise AssertionError("Original accepted distinct unbound candidate/control alias reports")
-		auto_soak_binding = {
-			"profile": "Auto", "engine": "DeepFilterNet",
-			"recipe": {
-				"catalog_revision": "self-test-v2", "id": "input.auto.quality.self-test",
-				"manifest_sha256": build["recipe_manifest_sha256"], "revision": 1,
+		auto_soak_bindings = [
+			{
+				"profile": "Light", "engine": "Speex",
+				"recipe": {
+					"catalog_revision": "self-test-v2", "id": "input.auto.light.self-test",
+					"manifest_sha256": build["recipe_manifest_sha256"], "revision": 1,
+				},
+				"models": [],
 			},
-			"models": copy.deepcopy(quality_binding["models"]),
-		}
+			{
+				"profile": "Balanced", "engine": "RNNoise",
+				"recipe": {
+					"catalog_revision": "self-test-v2", "id": "input.auto.balanced.self-test",
+					"manifest_sha256": build["recipe_manifest_sha256"], "revision": 1,
+				},
+				"models": [{"id": "rnnoise:self-test", "sha256": "a" * 64, "version": "1"}],
+			},
+			{
+				"profile": "Quality", "engine": "DeepFilterNet",
+				"recipe": {
+					"catalog_revision": "self-test-v2", "id": "input.auto.quality.self-test",
+					"manifest_sha256": build["recipe_manifest_sha256"], "revision": 1,
+				},
+				"models": copy.deepcopy(quality_binding["models"]),
+			},
+		]
 		soak_document = {
-			"schema_version": 1,
+			"schema_version": 2,
 			"kind": SOAK_KIND,
 			"status": "completed",
 			"profile": "Auto",
-			"active_bindings": [auto_soak_binding],
+			"active_bindings": auto_soak_bindings,
 			"execution_identity": identity,
-			"duration_seconds": 3599,
+			"audio_duration_seconds": 3599,
+			"wall_duration_seconds": 3599.75,
 			"declared_latency_samples": 2400,
 			"mean_rtf": 0.1,
 			"callback_p99_ms": 4.0,
 			"worker_p99_ms": 5.0,
 			"maximum_internal_processing_ms": 9.0,
 			"memory_growth_bytes_after_warmup": 0,
+			"rss_warmup_bytes": 100_000,
+			"rss_end_bytes": 100_000,
+			"rss_peak_bytes": 110_000,
 			"deadline_miss_count": 0,
 			"fallback_count": 0,
 			"invalid_output_count": 0,
@@ -1764,14 +1898,18 @@ def run_self_test() -> None:
 		}
 		soak_path = root.joinpath(*PurePosixPath(prefix + "measurements/auto-soak.json").parts)
 		soak_path.parent.mkdir(parents=True)
-		soak_payload = canonical_json_bytes(soak_document) + b"\n"
-		soak_path.write_bytes(soak_payload)
-		soak_reference = {
-			"contains_audio_samples": False,
-			"path": soak_path.relative_to(root).as_posix(),
-			"sha256": hashlib.sha256(soak_payload).hexdigest(),
-			"size_bytes": len(soak_payload),
-		}
+
+		def write_soak_report(document: Mapping[str, Any]) -> Mapping[str, Any]:
+			payload = canonical_json_bytes(document) + b"\n"
+			soak_path.write_bytes(payload)
+			return {
+				"contains_audio_samples": False,
+				"path": soak_path.relative_to(root).as_posix(),
+				"sha256": hashlib.sha256(payload).hexdigest(),
+				"size_bytes": len(payload),
+			}
+
+		soak_reference = write_soak_report(soak_document)
 		derived_case: MutableMapping[str, Any] = {
 			"algorithmic_latency_ms": 50.0,
 			"speech_edge_loss_ms": 0.0,
@@ -1793,10 +1931,46 @@ def run_self_test() -> None:
 			"nightly",
 			"auto",
 			build,
-			{"Auto": [auto_soak_binding]},
+			{"Auto": auto_soak_bindings},
 			{("Auto", "case-001"): derived_case},
 			{},
 		)
+		accelerated_soak = copy.deepcopy(soak_document)
+		accelerated_soak["audio_duration_seconds"] = 3600
+		accelerated_soak["wall_duration_seconds"] = 300
+		try:
+			_apply_soak_reports(
+				root, prefix, [{"profile": "Auto", "report": write_soak_report(accelerated_soak)}],
+				"nightly", "auto", build, {"Auto": auto_soak_bindings},
+				{("Auto", "case-001"): copy.deepcopy(derived_case)}, {},
+			)
+		except MeasurementEvidenceError:
+			pass
+		else:
+			raise AssertionError("3600 seconds of audio processed in 300 wall seconds was accepted as a realtime soak")
+		idle_inflated_soak = copy.deepcopy(soak_document)
+		idle_inflated_soak["audio_duration_seconds"] = 1
+		idle_inflated_soak["wall_duration_seconds"] = 3600
+		idle_target = copy.deepcopy(derived_case)
+		_apply_soak_reports(
+			root, prefix, [{"profile": "Auto", "report": write_soak_report(idle_inflated_soak)}],
+			"nightly", "auto", build, {"Auto": auto_soak_bindings},
+			{("Auto", "case-001"): idle_target}, {},
+		)
+		if idle_target["performance"]["soak_duration_seconds"] != 1:
+			raise AssertionError("idle wall time was incorrectly counted as processed soak audio")
+		rss_tamper = copy.deepcopy(soak_document)
+		rss_tamper["rss_end_bytes"] += 1
+		try:
+			_apply_soak_reports(
+				root, prefix, [{"profile": "Auto", "report": write_soak_report(rss_tamper)}],
+				"nightly", "auto", build, {"Auto": auto_soak_bindings},
+				{("Auto", "case-001"): copy.deepcopy(derived_case)}, {},
+			)
+		except MeasurementEvidenceError:
+			pass
+		else:
+			raise AssertionError("RSS growth inconsistent with warmup/end samples was accepted")
 		caller_case = {
 			"metrics": {"algorithmic_latency_ms": 50.0, "speech_edge_loss_ms": 0.0},
 			"counters": copy.deepcopy(derived_case["counters"]),
