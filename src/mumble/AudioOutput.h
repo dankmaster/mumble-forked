@@ -15,7 +15,9 @@
 #	include "ManualPlugin.h"
 #endif
 
+#include <cstdint>
 #include <memory>
+#include <span>
 
 #ifndef SPEAKER_FRONT_LEFT
 #	define SPEAKER_FRONT_LEFT 0x1
@@ -78,6 +80,7 @@ private:
 	float *fSpeakers         = nullptr;
 	float *fSpeakerVolume    = nullptr;
 	bool *bSpeakerPositional = nullptr;
+	std::uint64_t m_nextOutputTokenId = 1;
 	/// Used when panning stereo stream w.r.t. each speaker.
 	float *fStereoPanningFactor = nullptr;
 	void invalidateBuffer(const void *);
@@ -124,6 +127,10 @@ public:
 
 	void addFrameToBuffer(ClientUser *sender, const Mumble::Protocol::AudioData &audioData);
 	AudioOutputToken playSample(const QString &filename, float volume, bool loop = false);
+	/// Plays an owned, local-only copy of finite mono 48 kHz PCM. The sample is
+	/// validated and prepared before insertion into the real-time mixer.
+	AudioOutputToken playMemorySample(std::span< const float > monoPcm, unsigned int sampleRate,
+									float volume = 1.0f);
 	void run() Q_DECL_OVERRIDE = 0;
 	virtual bool isAlive() const;
 	const float *getSpeakerPos(unsigned int &nspeakers);

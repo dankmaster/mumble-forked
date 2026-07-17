@@ -92,6 +92,7 @@ private slots:
 	void settingsControllerEditsShortcutDataAndTargets();
 	void settingsControllerClampsAudioSetupPayload();
 	void settingsControllerRollsBackVoiceReplayPreview();
+	void settingsControllerRoutesOpaqueCalibrationPlaybackActions();
 	void settingsControllerReconcilesPluginRuntimeState();
 	void settingsControllerAutoProfileIsRuntimeGated();
 	void settingsControllerEnhancementFollowsDraftSelectedMicrophone();
@@ -1338,6 +1339,47 @@ void TestModernDialogControllers::settingsControllerRollsBackVoiceReplayPreview(
 	QCOMPARE(cancel.settingsToApply->atTransmit, Settings::PushToTalk);
 	QCOMPARE(cancel.settingsToApply->lmLoopMode, Settings::None);
 	QCOMPARE(cancel.settingsToApply->noiseCancelMode, Settings::NoiseCancelOff);
+}
+
+void TestModernDialogControllers::settingsControllerRoutesOpaqueCalibrationPlaybackActions() {
+	Settings settings;
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("audioInput"));
+
+	const QString token = QStringLiteral("18446744073709551001");
+	const ModernSettingsController::ActionResult play = controller.invokeAction(
+		QStringLiteral("playInputEnhancementCalibration"),
+		QVariantMap { { QStringLiteral("playbackToken"), token },
+					  { QStringLiteral("pcm"), QByteArrayLiteral("must-not-cross-the-controller") } });
+	QVERIFY(!play.stateChanged);
+	QCOMPARE(play.externalActionID, QStringLiteral("playInputEnhancementCalibration"));
+	QCOMPARE(play.externalActionPayload.size(), 1);
+	QCOMPARE(play.externalActionPayload.value(QStringLiteral("playbackToken")).toString(), token);
+	QVERIFY(!play.externalActionPayload.contains(QStringLiteral("pcm")));
+
+	const ModernSettingsController::ActionResult invalid = controller.invokeAction(
+		QStringLiteral("playInputEnhancementCalibration"),
+		QVariantMap { { QStringLiteral("playbackToken"), QStringLiteral("not-a-token") } });
+	QVERIFY(!invalid.stateChanged);
+	QVERIFY(invalid.externalActionID.isEmpty());
+
+	const ModernSettingsController::ActionResult stop = controller.invokeAction(
+		QStringLiteral("stopInputEnhancementCalibrationPlayback"), QVariantMap());
+	QVERIFY(!stop.stateChanged);
+	QCOMPARE(stop.externalActionID, QStringLiteral("stopInputEnhancementCalibrationPlayback"));
+	QVERIFY(stop.externalActionPayload.isEmpty());
+
+	ModernDialogController dialog;
+	dialog.openSettings(settings, QStringLiteral("audioInput"));
+	const ModernDialogController::ActionResult routed = dialog.invokeAction(
+		QStringLiteral("settings"), QStringLiteral("playInputEnhancementCalibration"),
+		QVariantMap { { QStringLiteral("playbackToken"), token },
+					  { QStringLiteral("pcm"), QByteArrayLiteral("discard-me") } });
+	QVERIFY(routed.genericAction.has_value());
+	QCOMPARE(routed.genericAction->dialogID, QStringLiteral("settings"));
+	QCOMPARE(routed.genericAction->actionID, QStringLiteral("playInputEnhancementCalibration"));
+	QCOMPARE(routed.genericAction->payload.size(), 1);
+	QCOMPARE(routed.genericAction->payload.value(QStringLiteral("playbackToken")).toString(), token);
 }
 
 void TestModernDialogControllers::audioInputVoiceActivitySnapshotIsBounded() {

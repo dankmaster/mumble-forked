@@ -8,6 +8,7 @@
 #include "AudioInput.h"
 #include "AudioOutputSample.h"
 #include "AudioOutputSpeech.h"
+#include "AudioOutputToken.h"
 #include "Channel.h"
 #include "ChannelListenerManager.h"
 #include "Log.h"
@@ -278,11 +279,23 @@ void AudioOutput::removeUser(const ClientUser *user) {
 }
 
 void AudioOutput::invalidateToken(const AudioOutputToken &token) {
-	invalidateBuffer(token.m_buffer);
+	if (!token.m_buffer || token.m_tokenId == 0) {
+		return;
+	}
+
+	QWriteLocker locker(&qrwlOutputs);
+	for (auto iter = qmOutputs.begin(); iter != qmOutputs.end(); ++iter) {
+		AudioOutputBuffer *buffer = iter.value();
+		if (buffer == token.m_buffer && buffer->m_outputTokenId == token.m_tokenId) {
+			delete buffer;
+			qmOutputs.erase(iter);
+			return;
+		}
+	}
 }
 
 AudioOutputToken AudioOutput::playSample(const QString &filename, float volume, bool loop) {
-	SoundFile *handle = AudioOutputSample::loadSndfile(filename);
+	std::unique_ptr< SoundFile > handle(AudioOutputSample::loadSndfile(filename));
 	if (!handle)
 		return AudioOutputToken();
 
@@ -301,11 +314,54 @@ AudioOutputToken AudioOutput::playSample(const QString &filename, float volume, 
 	if (!iMixerFreq)
 		return AudioOutputToken();
 
-	QWriteLocker locker(&qrwlOutputs);
-	AudioOutputSample *sample = new AudioOutputSample(handle, volume, loop, iMixerFreq, iBufferSize);
-	qmOutputs.insert(nullptr, sample);
+	auto sample = std::make_unique< AudioOutputSample >(handle.release(), volume, loop, iMixerFreq, iBufferSize);
+	if (!sample->isValid()) {
+		return AudioOutputToken();
+	}
 
-	return AudioOutputToken(sample);
+	QWriteLocker locker(&qrwlOutputs);
+	AudioOutputSample *samplePtr = sample.release();
+	const std::uint64_t tokenId = m_nextOutputTokenId++;
+	if (m_nextOutputTokenId == 0) {
+		m_nextOutputTokenId = 1;
+	}
+	samplePtr->m_outputTokenId = tokenId;
+	qmOutputs.insert(nullptr, samplePtr);
+
+	return AudioOutputToken(samplePtr, tokenId);
+}
+
+AudioOutputToken AudioOutput::playMemorySample(const std::span< const float > monoPcm,
+											  const unsigned int sampleRate, const float volume) {
+	Timer timer;
+	while (!timer.isElapsed(std::chrono::seconds(1)) && (iMixerFreq == 0) && isAlive()) {
+		QThread::yieldCurrentThread();
+	}
+	if (timer.isElapsed(std::chrono::seconds(1))) {
+		qWarning("AudioOutput: playMemorySample() timed out after 1 second: device not ready");
+		return AudioOutputToken();
+	}
+	if (!iMixerFreq) {
+		return AudioOutputToken();
+	}
+
+	// Copy, validate and (when needed) resample before taking the mixer write
+	// lock. The audio callback therefore only ever sees a fully prepared object.
+	auto sample =
+		std::make_unique< AudioOutputSample >(monoPcm, sampleRate, volume, iMixerFreq, iBufferSize);
+	if (!sample->isValid()) {
+		return AudioOutputToken();
+	}
+
+	QWriteLocker locker(&qrwlOutputs);
+	AudioOutputSample *samplePtr = sample.release();
+	const std::uint64_t tokenId = m_nextOutputTokenId++;
+	if (m_nextOutputTokenId == 0) {
+		m_nextOutputTokenId = 1;
+	}
+	samplePtr->m_outputTokenId = tokenId;
+	qmOutputs.insert(nullptr, samplePtr);
+	return AudioOutputToken(samplePtr, tokenId);
 }
 
 void AudioOutput::initializeMixer(const unsigned int *chanmasks, bool forceheadphone) {
