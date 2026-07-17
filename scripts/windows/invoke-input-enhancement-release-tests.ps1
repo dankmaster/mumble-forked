@@ -46,6 +46,7 @@ $requiredTests = @(
 	"TestModernDialogControllers",
 	"TestUpdateHealth",
 	"TestUpdaterHealthIntegration",
+	"TestUpdaterProtocolV4Simulation",
 	"TestSpeechCleanup",
 	"SpeechCleanupBenchmarkSelfTest"
 )

@@ -36,6 +36,13 @@ struct DefaultPreference {
 	bool operator==(const DefaultPreference &other) const;
 };
 
+/// The schema retains the fixed-profile autoAdapt bit so a future qualified
+/// implementation can restore the user's choice. The community core runtime
+/// deliberately enables adaptation only for the explicit experimental Auto
+/// profile; a stored bit on Original/Light/Balanced/Quality/VoiceFocus is
+/// therefore dormant and must not change live audio or block calibration.
+bool runtimeAutoAdaptationEnabled(const DefaultPreference &preference) noexcept;
+
 struct DeviceIdentity {
 	QString backendId;
 	QString physicalId;

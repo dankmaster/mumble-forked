@@ -27,10 +27,76 @@ The fetcher refuses ambiguous, restricted, non-commercial, evaluation-only
 training, and unpinned downloads. Existing archives are accepted only after
 their locked byte size and SHA-256 both match. The selected set now includes
 OpenSLR SLR28, a 1,311,166,223-byte Apache-2.0 archive with real isotropic and
-point-source noise plus real/simulated RIRs. The fetcher does not extract
-archives. Its schema-v3 `corpus-state.json` records the canonical lock hash,
-fetcher hash, URL hash, and each `source_artifact_sha256`. Re-fetch or verify
-the corpus after changing the lock; older state files are not release evidence.
+point-source noise plus real/simulated RIRs, and the exact-revision Swedish
+FLEURS train archive plus its separately hash-pinned transcript sidecar. The
+fetcher verifies sidecars but does not extract archives. Its schema-v3
+`corpus-state.json` records the canonical lock hash, fetcher hash, URL hash, and
+each primary `source_artifact_sha256`; the canonical lock additionally binds
+every sidecar byte hash. Re-fetch or verify the corpus after changing the lock;
+older state files are not release evidence.
+
+Artifact verification follows the selected use policy. The eighteen DEMAND
+archives are required for `local-eval`, while their explicit
+`blocked_evaluation_only` statuses make training and redistributable-fixture
+selection fail closed:
+
+```powershell
+python scripts/audio-quality/validate-corpus-lock.py `
+  --artifact-root .tmp/audio-quality-corpus `
+  --purpose local-eval
+```
+
+Materialize the tracked community-release subset with an exact ffmpeg binary.
+The output directory must not already exist:
+
+```powershell
+$ffmpeg = (Get-Command ffmpeg).Source
+$ffmpegSha256 = (Get-FileHash -Algorithm SHA256 $ffmpeg).Hash.ToLowerInvariant()
+python scripts/audio-quality/build-corpus-inventory-v3.py `
+  --corpus-state .tmp/audio-quality-corpus/corpus-state.json `
+  --artifact-root .tmp/audio-quality-corpus `
+  --ffmpeg $ffmpeg `
+  --ffmpeg-sha256 $ffmpegSha256 `
+  --output .tmp/audio-quality-corpus/community-release-v3
+```
+
+The builder verifies all twenty-two release-required primary archives and safely
+reads only selected members. Mini LibriSpeech supplies transcripted English
+speech; pinned FLEURS `sv_se` supplies transcripted Swedish regression speech;
+OpenSLR28 supplies isotropic room noise and simulated RIRs; eighteen pinned DEMAND
+archives supply six real environmental-noise scenes per split; the checked-in
+`modeled-microphone-responses-v1.json` supplies hash-bound, explicitly modeled
+FIR responses. McGill TSP is hash- and structure-verified but deliberately
+recorded as `verified-not-materialized-missing-transcripts`: its archive has no
+utterance transcripts, so it cannot silently become release speech. The result
+contains `inventory-v3.json`, `transformation-manifest.json`, and
+`split-summary.json`; all extracted audio remains local.
+
+FLEURS does not publish persistent speaker IDs. The release builder therefore
+does not invent them or cluster voices. Instead, it selects the first numeric
+sentence whose three valid recordings are all at least six seconds and whose
+recording identifiers cover the three existing hash splits. The FLEURS
+collection protocol states that the three recordings of one sentence are made
+by three different native speakers. Exactly those three recordings are used,
+one per tuning/validation/holdout split. The selection uses identifiers,
+metadata duration, and the frozen split seed only; it never reads a quality
+score or model output. If the pinned TSV or archive structure changes, hash and
+structure checks fail closed.
+
+The default `mumble-community-master-v2-00909005` split seed was frozen solely
+from the tracked speech/noise/RIR/device group IDs. DEMAND assigns DKITCHEN,
+NFIELD, OHALLWAY, OMEETING, SPSQUARE and TMETRO to tuning; DWASHING, OOFFICE,
+PRESTO, PSTATION, TBUS and TCAR to validation; and DLIVING, NPARK, NRIVER,
+PCAFETER, SCAFE and STRAFFIC to holdout. The identifier-only search did not read
+audio or use a metric, model output, recipe result, or profile output. The
+builder regression-tests this exact 6/6/6 mapping and validates the stronger
+`master_quality` diversity floor for every split.
+
+DEMAND preparation always selects `ch01.wav` and the fixed 60,000–120,000 ms
+window, then converts it to mono 48 kHz PCM16. Holdout conversion and hashing
+are mechanical corpus preparation only. Holdout WAVs must not be listened to,
+mixture-rendered, scored, or used for a recipe decision before final release
+qualification; only tuning and validation plans are rendered during development.
 
 ## Deterministic mixture plans
 
@@ -55,10 +121,10 @@ are distinct asset kinds rather than generated labels:
     {
       "id": "speech-0001",
       "kind": "speech",
-      "source_id": "mcgill-tsp-speech-v2-48k",
-      "relative_path": "extracted/tsp/speech-0001.wav",
-      "group_id": "speaker-001",
-      "speaker_id": "speaker-001",
+      "source_id": "openslr31-mini-librispeech-dev-clean-2",
+      "relative_path": "audio/speech/1272-128104-0000.wav",
+      "group_id": "librispeech-speaker-1272",
+      "speaker_id": "speaker-1272",
       "language": "en-US",
       "transcript": {
         "status": "verified",
@@ -72,12 +138,12 @@ are distinct asset kinds rather than generated labels:
       "duration_samples": 576000,
       "size_bytes": 1152044,
       "sha256": "<SHA-256 of this extracted/converted WAV>",
-      "source_artifact_sha256": "9cfb3a3a13014c8ff90770a5d1923f376da73ac927b9100f09826f60cf06cf43",
+      "source_artifact_sha256": "176ec501490eced2d6c1f89f4f0ddc7dfe799e649e5322f8ba49fe3ff50c8012",
       "provenance": {
         "derivation": "extracted",
         "parent_sha256": "<archive member SHA-256>",
         "parameters_sha256": "<canonical conversion parameters SHA-256>",
-        "source_path": "TSP/.../speech-0001.wav",
+        "source_path": "LibriSpeech/dev-clean-2/.../1272-128104-0000.flac",
         "tool": "ffmpeg",
         "tool_version": "8.0"
       }
@@ -108,6 +174,35 @@ all four kinds are assigned disjointly to tuning, validation, or holdout by
 SHA-256. The renderer verifies and applies the locked response WAVs using a
 bounded deterministic sparse-impulse transform.
 
+Release plans require at least two independent speakers/noise/RIR/device groups,
+two device families, and three distinct noise classes in each split. PR smoke
+requires two noise classes; master and nightly raise all diversity floors.
+`generate-mixture-plan.py` cycles independent groups before reusing one, and
+canonical qualification evidence carries speaker/noise/RIR/device group IDs so
+a harness cannot qualify by repeating one source under new case names.
+
+The current fully verified corpus satisfies `master_quality` without relabeling
+channels or time windows as independent groups. It deliberately remains
+ineligible for `nightly`: eighteen independent DEMAND scenes plus nine
+independent OpenSLR28 isotropic environments provide 27 real noise groups total,
+which cannot honestly satisfy sixteen groups in each of three disjoint splits.
+The ten available noise labels also do not occur ten times in every split. A
+future nightly corpus must lock additional independently recorded, labelled
+noise and transcripted speakers; the validator fails closed until then.
+The 30-case release plan is also stratified as five profiles × two languages ×
+three cases. Every profile/language cell contains one clean and two noisy cases,
+cold and warm startup, and three different transport recipes. Every case keeps
+its speaker group ID. The current intentionally small Swedish regression subset
+has one independent FLEURS recording per split, so that within-split group is
+reused across profile cells; it never crosses into another split.
+Quality and Voice Focus additionally share six hash-identical comparator scenes
+per split: one clean and two severe-noise scenes for each language. Their
+`comparison_scene_id`, source windows, mixture transforms, controls, startup and
+Opus transport are identical; only the requested profile changes. This makes
+Voice Focus versus Quality scoring and blind A/B listening paired rather than a
+comparison across unrelated speech or noise. The E2E harness still captures an
+Original transport baseline separately for every candidate case.
+
 Migrate an old schema-v2 inventory only as an explicit draft. Migration never
 invents transcript hashes or response assets, so the result remains ineligible
 until curated:
@@ -119,16 +214,18 @@ python scripts/audio-quality/corpus-inventory-v3.py `
   --output .tmp/audio-quality-corpus/inventory-v3-draft.json
 
 python scripts/audio-quality/corpus-inventory-v3.py `
-  --validate .tmp/audio-quality-corpus/inventory-v3.json `
-  --require-release-eligible
+  --validate .tmp/audio-quality-corpus/community-release-v3/inventory-v3.json `
+  --require-release-eligible `
+  --suite master_quality `
+  --split-seed mumble-community-master-v2-00909005
 ```
 
 ```powershell
 python scripts/audio-quality/generate-mixture-plan.py `
-  --inventory .tmp/audio-quality-corpus/inventory.json `
+  --inventory .tmp/audio-quality-corpus/community-release-v3/inventory-v3.json `
   --suite pr_smoke `
   --split validation `
-  --seed mumble-input-enhancement-v1 `
+  --seed mumble-community-master-v2-00909005 `
   --output .tmp/audio-quality-runs/pr-smoke-plan.json
 ```
 
@@ -188,9 +285,67 @@ python scripts/audio-quality/score-fixed-timeline.py `
 ```
 
 This scorer reports loudness-matched fixed-timeline SDR, onset/end loss, tail
-loss and clipping. It deliberately performs no temporal search. DNSMOS, eSTOI
-and WER stay in the protected quality harness and are joined to this evidence
-by case ID.
+loss and clipping. It deliberately performs no temporal search. The tracked
+objective scorer runs the pinned DNSMOS, eSTOI and faster-whisper runtime with
+the same rule: both latencies are caller declarations and a too-short scoring
+window fails instead of being padded or correlation-aligned:
+
+```powershell
+C:/protected-audio/metrics-venv/Scripts/python.exe scripts/audio-quality/score-objective-quality.py `
+  --case-id validation-00003 --profile Quality --condition noisy --dataset-split validation `
+  --signal-stage receiver-capture `
+  --clean-reference C:/protected-audio/rendered/validation-00003/clean-reference.wav `
+  --noisy-original C:/protected-audio/results/validation-00003/original.wav `
+  --candidate C:/protected-audio/results/validation-00003/quality.wav `
+  --original-latency-samples 0 --candidate-latency-samples 2400 `
+  --route-control-wav C:/protected-audio/results/validation-00003/clean-original-control.wav `
+  --route-control-score C:/protected-audio/results/validation-00003/control-fixed-timeline.json `
+  --candidate-fixed-timeline-score C:/protected-audio/results/validation-00003/quality-fixed-timeline.json `
+  --route-e2e-manifest C:/protected-audio/results/validation-00003/e2e-manifest.json `
+  --metrics-runtime-root C:/protected-audio/metrics-runtime `
+  --metrics-manifest C:/protected-audio/metrics-runtime/metrics-manifest.json `
+  --language en --wer-reference-kind clean-asr-consistency `
+  --clean-asr-reference C:/protected-audio/private-references/validation-00003.json `
+  --output C:/protected-audio/results/validation-00003/quality-objective.json
+```
+
+`clean-asr-consistency` transcribes the exact clean rendered window once,
+persists the normalized text in the local private-reference tree, and binds it
+to the clean WAV plus pinned language/model/runtime hashes. Later runs reuse
+that exact reference and report candidate-minus-Original
+`clean-ASR-consistency WER`; they do not call it ground truth. The optional
+`segment-ground-truth` mode requires a separate
+`mumble-segment-matched-transcript-v1` attestation whose source and transcript
+coverage exactly equal the rendered window. A whole-utterance inventory
+transcript, a missing attestation, the raw `holdout` split, or any correlation
+search fails closed. Score JSON contains transcript hashes, never transcript
+text or audio.
+
+`release-holdout` is a separate protected final-qualification path, not an
+ordinary scoring split. It is accepted only for receiver-capture evidence with
+a complete qualified two-client route binding and an externally pinned
+inventory, mixture plan, exact release-client file, and opening-attestation
+hash. Before reading any WAV, the scorer verifies a detached raw Ed25519
+signature with a pinned 32-byte release-owner key, enforces a validity window of
+at most 24 hours, and atomically creates a unique receipt and opening report.
+The protected caller must pass
+`--expected-release-holdout-approval-public-key-sha256`; the scorer rejects a
+valid signature from any self-declared key outside that trust root.
+Each case consumes its own UUIDv4 opening; reuse fails closed. The score records
+only path-free hash/size provenance. The measurement index later reopens every
+attestation, signature, key, receipt, and report, verifies the signature again,
+and requires the tested client, plan, and inventory hashes to equal the final
+release qualification. Offline campaign/tuning continues to reject both raw
+`holdout` and `release-holdout`.
+
+Receiver-capture mode additionally requires the independently passing Original
+control WAV, its fixed-timeline score, the candidate fixed-timeline score and
+the passing E2E manifest. Those four hashes must bind the same clean reference,
+case, client/server/runtime provenance, Original comparison WAV and candidate
+WAV. The scorer adds only the control score's qualified, 10 ms-frame-aligned
+route offset to each caller-declared latency; edge/tail gates remain separate.
+Use `--signal-stage sender-pre-opus` only for explicit pre-Opus artifacts, where
+route arguments are forbidden and window starts equal declared latencies.
 
 The localhost Mumble receive path has a small startup delay from the unchanged
 Opus/jitter path, and that delay is not an input-enhancement latency. For the
@@ -353,6 +508,19 @@ maps `embedded-retained` to the non-blocking retained outcome and
 `custom-selected` to the promoted outcome; operators cannot enter campaign
 status or outcome manually. Omitting the pair leaves the track pending.
 
+## Offline campaign and measurement-index assembly
+
+`run-offline-quality-campaign.py` runs the product benchmark and pinned scorer
+over the private rendered tuning/validation plan. Pass `--case-set` on every run
+that may become qualification evidence. After the campaign passes, invoke the
+same tool with `--assemble-measurement-index --campaign-root <run>
+--artifact-root <qualification-root> --qualification-envelope <json>`. The
+assembler copies only its exact audio-free fragment allowlist, binds the staged
+benchmark/runtime and non-advanced product-model set, and writes the canonical
+index below `artifacts/pr_smoke-<runner>/`. It remains deliberately restricted
+to core `pr_smoke`; validation via the real Mumble route is required for master,
+nightly, and release suites.
+
 ## Tracked two-client E2E core
 
 `run-two-client-e2e.py` owns the portable client 1 → localhost server → client
@@ -372,7 +540,10 @@ may anchor fixed speech-edge/tail scoring, and a noisy Original comparison
 retained for OVRL/BAK/SIG/eSTOI/WER comparison. Enhanced cases then run the
 candidate on the same noisy mixture. Leading room noise can therefore never
 qualify a broken transport anchor by crossing the speech threshold before the
-utterance starts.
+utterance starts. Both the clean control and enhanced edge probe publish strict
+pre-Opus fixed-timeline scores. The receiver route uses a separately attested
+OG Opus/jitter startup budget; VAD may omit trailing room silence but may not
+hide more than one 10 ms speech-edge frame or skip causal tail drain.
 
 Only machine operations remain local. A runner-local adapter receives
 `--contract <json> --result <json>` and starts the two clients/server, streams
@@ -393,6 +564,7 @@ python scripts/audio-quality/run-two-client-e2e.py `
   --model-manifest build-input-enhancement/shared-webengine-stage/input-models.json `
   --recipe-manifest build-input-enhancement/shared-webengine-stage/input-recipes.json `
   --metrics-manifest C:/protected-audio-harness/metrics-manifest.json `
+  --qualification-case-set C:/protected-audio-harness/master-quality-cases.json `
   --adapter scripts/local/run-two-client-e2e-adapter.py `
   --adapter-arg=--client-build-dir `
   --adapter-arg=build-input-enhancement `
@@ -594,26 +766,55 @@ by correlation alignment.
 
 `quality-qualification.schema.json` describes the schema-v3 portable result
 envelope; schema v1/v2 self-reported summaries are deliberately ineligible.
-Every v3 envelope must hash-attest an audio-free `case_evidence_jsonl` artifact.
-Its first canonical JSONL record binds the exact scope, suite, and complete
-`build` object; subsequent records are sorted profile/case measurements (plus
-sorted transition measurements for Auto). `validate-quality-qualification.py`
-requires the artifact bytes, verifies size/hash/canonical encoding and then
-recomputes coverage, profile/cohort/language medians, catastrophe rate, all
-counters, RTF, callback p99, processing maximum, memory growth, and soak time.
-Reported totals must match those independent calculations. A passing result
+Every v3 envelope must hash-attest both an audio-free `case_evidence_jsonl`
+artifact and a canonical `measurement_index_json`. The JSONL header binds the
+exact scope, suite, and complete `build` object; subsequent records are sorted
+profile/case summaries (plus sorted transition summaries for Auto). The index
+binds those rows to the exact build, corpus/plan/case-set hashes, scorer/runtime
+fingerprint, and hash/size of every objective, benchmark, two-client,
+fixed-timeline, transition, and soak report. Master, nightly, and release cases
+must use receiver-capture evidence from the real two-client route.
+
+The index additionally carries exact profile bindings. Original, Light,
+Balanced, Quality, and VoiceFocus must identify an authorized engine, recipe
+revision/catalog hash, and exact model ID/version/hash matching the unsigned
+staged product manifests; runtime adapter and benchmark reports must select one
+of those bindings. A separate metrics-runtime attestation inventories every
+pinned scorer/model file and binds the identical runtime/scorer metadata shared
+by every objective score. Offline benchmark evidence is a strict audio-free
+projection with no local paths; it retains the private raw-report hash plus
+sample counts, wall time, exact RTF, latency/drain, clipping, callback and worker
+measurements. The private raw report and WAVs never enter the upload namespace.
+Nightly soak reports also repeat the complete authorized active-binding set;
+profile text alone cannot qualify an Original or wrong-model run as a
+Quality/VoiceFocus/Auto soak.
+
+`validate-quality-qualification.py` reopens the complete graph and derives
+latency, speech-edge/tail loss, fallback/deadline/invalid-output/clipping
+counters, callback and worker p99, RTF, processing maximum, memory growth, and
+soak time from those runtime reports. Flattened values in the JSONL are checked
+against the derived values and cannot authorize themselves. Reported totals
+must then match the independently recomputed case summary. A passing result
 must include fixed-timeline cold/warm coverage,
 receiver cleanup disabled, all five core profiles, clean/noisy quality limits,
 Balanced/Quality/VoiceFocus performance limits, zero invalid-output/hash/fallback counters,
 and hashed JUnit/JSON/HTML/CSV/Parquet/spectrogram-index artifacts. It also
 requires zero deadline, latency-attestation, and tail-drain failures. Artifact
-metadata explicitly forbids raw or encoded audio samples while allowing the
-failure spectrograms required for diagnostics.
+metadata explicitly forbids raw or encoded audio samples. Only the audio-free
+failure-spectrogram index is uploaded by the current contract; rendered images
+remain protected runner-local diagnostics unless a later explicit safe format
+is added to the allowlist.
 
-All artifact paths are namespaced below
+All public evidence paths are namespaced below
 `artifacts/<suite>-<runner_class>/`. This prevents the low-performance,
 mainstream, master and nightly evidence trees from colliding when they are
-merged into the measured release handoff.
+merged into the measured release handoff. The CI uploader follows only the
+measurement index's hash/size allowlist, rejects reparse points, audio suffixes,
+missing files and unindexed files in that namespace, and verifies every copied
+byte. It snapshots all verified source hashes before copying, rejects a source
+mutation between verification and copy, then validates the copied closure
+independently. The copied `upload/` tree is therefore revalidatable after the
+private harness output has been removed.
 
 `quality-case-evidence.schema.json` documents each JSONL record. The tracked
 canonicalizer is intended for the protected harness; it refuses to overwrite
@@ -624,13 +825,27 @@ summary values that belong in `qualification.json`:
 python scripts/audio-quality/generate-quality-case-evidence.py `
   --qualification C:/protected-audio/results/qualification-template.json `
   --records C:/protected-audio/results/case-records.json `
+  --artifact-root C:/protected-audio/results `
   --output C:/protected-audio/results/artifacts/master_quality-low-performance/case-evidence.jsonl
 ```
 
-The input record envelope is `{ "schema_version": 1, "cases": [...],
-"auto_transitions": [...] }`. Average RTF is total processing time divided by
-total audio time; callback p99 uses nearest rank over all recorded callback
-durations; memory growth is the worst per-case value; soak seconds are summed.
+The input record envelope is `{ "schema_version": 3, "cases": [...],
+"auto_transitions": [...] }`. Every case binds a separately hash-attested
+objective-score JSON. The generator reopens that artifact below
+`--artifact-root`, rejects unknown splits and correlation alignment, permits
+`release-holdout` only in the final `release` suite with the signed one-shot
+opening above, and recomputes declared latency plus DNSMOS/eSTOI/WER deltas
+instead of trusting
+flattened case metrics. Clean eSTOI, DNSMOS-SIG and WER gates use the worst
+per-language median, so one language cannot be hidden by an aggregate median.
+Every severe VoiceFocus row also names its paired Quality case; the validator
+requires identical scene, clean/Original inputs, language/reference, metrics
+runtime and qualified route identity, then recomputes VoiceFocus candidate BAK
+minus Quality candidate BAK. Average RTF is total measured processing time
+divided by total measured audio time. The performance gate uses the worst
+report-level callback and worker p99 so a percentile-of-percentiles cannot hide
+one bad case; memory growth and soak duration come only from the separately
+hash-bound soak report.
 No raw/encoded audio, transcript, endpoint, username, path, or device ID belongs
 in this evidence.
 
@@ -665,6 +880,11 @@ suites are eligible for self-hosted execution only when all of these are true:
 - repository variable `INPUT_ENHANCEMENT_QUALITY_LEGACY_BINARY` is an absolute
   path to the immutable runner-local legacy `mumble.exe` used for all 45
   Original comparisons;
+- protected path/hash pairs are configured for the OG server, corpus inventory,
+  case set, frozen mixture plan, release fixtures and metrics runtime. The
+  mixture pair is `INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN` plus
+  `INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN_SHA256`; a missing value or hash
+  mismatch fails before the trusted harness starts;
 - protected runners exist with labels `input-enhancement-low` and
   `input-enhancement-mainstream` in a runner group restricted to this workflow.
 
@@ -687,6 +907,21 @@ The trusted harness receives this contract:
 | complete staged client root | `-StagedClientRoot` | `--staged-client-root` |
 | unsigned model manifest | `-ModelManifestPath` | `--model-manifest` |
 | unsigned recipe manifest | `-RecipeManifestPath` | `--recipe-manifest` |
+| exact OG server executable | `-ServerBinaryPath` | `--server-binary` |
+| protected corpus inventory | `-CorpusInventoryPath` | `--corpus-inventory` |
+| protected qualification case set | `-CaseSetPath` | `--case-set` |
+| frozen protected mixture plan | `-MixturePlanPath` | `--mixture-plan` |
+| protected release fixtures | `-ReleaseFixturesPath` | `--release-fixtures` |
+| pinned metrics-runtime directory | `-MetricsRuntimePath` | `--metrics-runtime` |
+| qualified runner class | `-RunnerClass` | `--runner-class` |
+| hardware fingerprint SHA-256 | `-HardwareFingerprintSha256` | `--hardware-fingerprint-sha256` |
+| independently computed harness SHA-256 | `-HarnessSha256` | `--harness-sha256` |
+| externally pinned release-owner key SHA-256 (release only) | `-ReleaseHoldoutApprovalPublicKeySha256` | `--release-holdout-approval-public-key-sha256` |
+
+For `--suite release`, the CI wrapper itself additionally requires
+`--expected-release-holdout-approval-public-key-sha256` from the protected
+workflow/environment and compares it with both `qualification.build` and the
+measurement-index trust root. The value is forbidden for other suites.
 
 It must write `qualification.json`, `original-voice-qualification.json`, and
 the audio-free artifacts named by `qualification.json` below the result root.

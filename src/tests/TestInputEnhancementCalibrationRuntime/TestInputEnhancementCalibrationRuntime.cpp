@@ -151,7 +151,8 @@ private slots:
 	void localEvaluatorUsesPipelineAndOpusForOriginal();
 	void localEvaluatorIncludesOptionalLocalNoiseInObjective();
 	void standardCandidatesAlwaysStartWithOriginalAndExcludeAuto();
-	void calibrationRejectsAutoAsRollbackBaseline();
+	void applyRechecksCpuReadiness();
+	void calibrationRejectsAutoButAcceptsDormantFixedAutoAdapt();
 	void probationMarksHealthyOnlyAfterBothThresholds();
 	void autoProbationPreservesFullSetFingerprintAcrossRollbackUndoAndHealthy();
 	void probationFailureRollsBackAndUndoRestoresCandidate();
@@ -317,6 +318,9 @@ void TestInputEnhancementCalibrationRuntime::localEvaluatorUsesPipelineAndOpusFo
 	QVERIFY(light.candidate.localPipelineAndOpusEvaluated);
 	QVERIFY(light.candidate.loudnessMatched);
 	QCOMPARE(light.playbackPcm.size(), voice.size());
+	QVERIFY(light.recipeBinding.has_value());
+	const Recipe lightRecipe = recipeFor(Profile::Light, 50, 50);
+	QVERIFY(recipeBindingMatches(*light.recipeBinding, lightRecipe, QStringLiteral("deny-neural-local"), {}, {}));
 }
 
 void TestInputEnhancementCalibrationRuntime::localEvaluatorIncludesOptionalLocalNoiseInObjective() {
@@ -357,13 +361,36 @@ void TestInputEnhancementCalibrationRuntime::standardCandidatesAlwaysStartWithOr
 	QCOMPARE(enumValue(voiceFocusCandidates.back().profile), enumValue(Profile::VoiceFocus));
 }
 
-void TestInputEnhancementCalibrationRuntime::calibrationRejectsAutoAsRollbackBaseline() {
+void TestInputEnhancementCalibrationRuntime::calibrationRejectsAutoButAcceptsDormantFixedAutoAdapt() {
 	CalibrationRuntimeBridge bridge(std::make_unique< FakeEvaluator >());
 	QVERIFY(!bridge.start(identity(), preference(Profile::Auto, 63, 71, true), false, 0x1234));
 	QVERIFY(!bridge.transmissionBlocked());
-	QVERIFY(!bridge.start(identity(), preference(Profile::Balanced, 63, 71, true), false, 0x1234,
-						  bindingFor(Profile::Balanced, 63, 71)));
-	QVERIFY(!bridge.transmissionBlocked());
+	QVERIFY(bridge.start(identity(), preference(Profile::Balanced, 63, 71, true), false, 0x1234,
+						 bindingFor(Profile::Balanced, 63, 71)));
+	QVERIFY(bridge.transmissionBlocked());
+	QVERIFY(bridge.cancel());
+}
+
+void TestInputEnhancementCalibrationRuntime::applyRechecksCpuReadiness() {
+	std::vector< float > storage(CalibrationSession::requiredStorageSamples);
+	CalibrationRuntimeBridge bridge(storage, std::make_unique< FakeEvaluator >(), CpuClass::Standard);
+	QVERIFY(bridge.start(identity(), preference(Profile::Original, 50, 50), false, 0x5511));
+	QVERIFY(reachEvaluation(bridge));
+	const std::array candidates = { selection(Profile::Original, 0, 50, 1),
+									  selection(Profile::Quality, 70, 70, 99) };
+	QVERIFY(bridge.evaluateCandidates(candidates));
+	const CalibrationSession::BlindPair pair = bridge.blindPair();
+	const auto left  = bridge.playbackForToken(pair.leftPlaybackToken);
+	const auto right = bridge.playbackForToken(pair.rightPlaybackToken);
+	QVERIFY(!left.empty());
+	QVERIFY(!right.empty());
+	const std::uint64_t qualityToken = left.front() > right.front() ? pair.leftPlaybackToken : pair.rightPlaybackToken;
+	QVERIFY(bridge.selectBlindWinner(qualityToken));
+	QVERIFY(bridge.draftPreference());
+	QCOMPARE(bridge.draftPreference()->profile, Profile::Quality);
+	Settings settings;
+	QVERIFY(!bridge.apply(settings, 123456));
+	QCOMPARE(enumValue(bridge.state()), enumValue(CalibrationSession::State::Aborted));
 }
 
 void TestInputEnhancementCalibrationRuntime::immutablePackageAuthorizationFailsClosed() {

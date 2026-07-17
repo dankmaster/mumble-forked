@@ -61,14 +61,14 @@ $requiredStartups = @("cold", "warm")
 $requiredModelIds = @{
 	Light = ""
 	Balanced = "rnnoise:embedded"
-	Quality = "deepfilternet:balanced"
-	VoiceFocus = "deepfilternet:balanced"
+	Quality = "deepfilternet:low-latency"
+	VoiceFocus = "deepfilternet:low-latency"
 }
 $requiredRecipeIds = @{
 	Light = "input.light.speex"
 	Balanced = "input.balanced.rnnoise-embedded"
-	Quality = "input.quality.deepfilternet-balanced"
-	VoiceFocus = "input.voice-focus.deepfilternet-balanced"
+	Quality = "input.quality.deepfilternet-low-latency"
+	VoiceFocus = "input.voice-focus.deepfilternet-low-latency"
 }
 
 function Assert-ExactProperties {
@@ -683,14 +683,14 @@ foreach ($case in $cases) {
 	foreach ($counter in @("fallbackCount", "modelHashMismatchCount", "invalidOutputCount", "tailErrorCount", "latencyErrorCount")) {
 		Assert-ZeroCounter -Object $case -Name $counter -Context "Release-smoke case '$id'"
 	}
-	$expectedTailMinimum = if ($profile -ceq 'Light') { 0 } else { 1 }
+	$expectedTailMinimum = 1
 	if ([int64]$case.tailDrainExpectedFrames -lt $expectedTailMinimum -or
 		[int64]$case.tailDrainActualFrames -ne [int64]$case.tailDrainExpectedFrames) {
 		throw "Release-smoke case '$id' did not drain the exact expected enhancement tail."
 	}
 	$latencyMs = [double]$case.enhancementLatencyMs
 	$latencyBudgetMs = if ($profile -ceq 'Light') { 10.0 } elseif ($profile -ceq "Balanced") { 30.0 } else { 50.0 }
-	$latencyMinimumMs = if ($profile -ceq 'Light') { 0.0 } else { [double]::Epsilon }
+	$latencyMinimumMs = if ($profile -ceq 'Light') { 10.0 } else { [double]::Epsilon }
 	if ([double]::IsNaN($latencyMs) -or [double]::IsInfinity($latencyMs) -or $latencyMs -lt $latencyMinimumMs -or $latencyMs -gt $latencyBudgetMs) {
 		throw "Release-smoke case '$id' enhancement latency '$latencyMs' ms exceeds the $latencyBudgetMs ms profile budget."
 	}

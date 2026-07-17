@@ -1,6 +1,6 @@
 # Corpus source audit
 
-Verified 2026-07-15. This note records why some sources in
+Verified 2026-07-16. This note records why some sources in
 `corpus-lock.json` intentionally have no `artifact_path`. The fetcher treats
 that omission as a hard block.
 
@@ -24,9 +24,73 @@ that omission as a hard block.
 - Project policy permits private local evaluation and mixture generation only.
   Product training and redistribution remain blocked even though Apache-2.0 is
   commercially compatible. Extracted audio stays outside Git and CI artifacts.
-- Inventory schema v2 binds each extracted/converted WAV's byte size and
+- Inventory schema v3 binds each extracted/converted WAV's byte size and
   SHA-256 to the source archive SHA-256. The renderer re-hashes the WAV before
   use, so archive substitution or post-inventory file changes fail closed.
+
+## DEMAND environmental noise
+
+- Primary record: [DEMAND on Zenodo](https://zenodo.org/records/1227121). Its
+  description explicitly applies CC-BY-SA-3.0 to the work, audio data and
+  document. This project conservatively uses that term even though other Zenodo
+  metadata is less restrictive.
+- Eighteen scene archives are independently pinned by official MD5, locally
+  verified SHA-256 and byte size in `corpus-lock.json`: DKITCHEN, DLIVING,
+  DWASHING, NFIELD, NPARK, NRIVER, OHALLWAY, OMEETING, OOFFICE, PCAFETER,
+  PRESTO, PSTATION, SCAFE, SPSQUARE, STRAFFIC, TBUS, TCAR and TMETRO. Each
+  contains sixteen
+  separate mono channel WAVs. Product training and redistribution remain
+  blocked by project policy; only private local evaluation and mixture
+  generation are approved.
+- The frozen identifier-only seed `mumble-community-master-v2-00909005` maps
+  six DEMAND scene groups to each split. DKITCHEN/NFIELD/OHALLWAY/OMEETING/
+  SPSQUARE/TMETRO map to tuning; DWASHING/OOFFICE/PRESTO/PSTATION/TBUS/TCAR
+  map to validation; DLIVING/NPARK/NRIVER/PCAFETER/SCAFE/STRAFFIC map to
+  holdout. No audio, metric, model output, recipe result or profile output
+  participated in the seed search, and an exact 6/6/6 regression test protects
+  the mapping.
+- The builder selects `ch01.wav` and the fixed 60,000–120,000 ms window from
+  every archive, converts it to mono 48 kHz PCM16 and binds both source-member
+  and output hashes. Holdout conversion is blind, deterministic corpus
+  preparation only: it may be hashed into inventory but must not be listened
+  to, mixture-rendered, scored, or used for a recipe decision before final
+  release qualification.
+- Together with the nine independent OpenSLR28 RVB2014 isotropic environments,
+  this is enough for the master-quality floor in every split without treating
+  array channels or time windows as separate groups. It is not enough for the
+  nightly floor of sixteen noise groups and ten noise classes in each of three
+  disjoint splits; nightly remains fail-closed pending another reviewed,
+  independently recorded and labelled noise source.
+
+## Google FLEURS Swedish (`sv_se`)
+
+- Primary repository: [Google FLEURS on Hugging Face](https://huggingface.co/datasets/google/fleurs).
+  The corpus is documented by the [FLEURS paper](https://arxiv.org/abs/2205.12446)
+  and the dataset card declares CC-BY-4.0.
+- This project pins dataset revision
+  [`d7c758a6dceecd54a98cac43404d3d576e721f07`](https://huggingface.co/datasets/google/fleurs/tree/d7c758a6dceecd54a98cac43404d3d576e721f07/data/sv_se),
+  predating the later repository-wide Parquet conversion. The language-local
+  `train.tar.gz` is 1,459,456,451 bytes and its Git LFS object SHA-256 is
+  `04a18cb93720cfed1ed992abebe977ac3880cab17ec7cf9cb5afe77d439988d3`.
+  A clean local download matched both values.
+- The exact-revision `train.tsv` sidecar is 1,313,805 bytes with independently
+  verified SHA-256
+  `e379de2d6d9ba18d5e75a2e83c75b9cf59aa3760524cd49c468e4c87c9a1e6bf`.
+  It contains 2,385 rows for 1,373 sentence IDs and binds each WAV filename to
+  Swedish raw/normalized transcripts and its 16 kHz sample count.
+- FLEURS does not expose persistent speaker IDs. The paper does state that the
+  three recordings collected for a sentence are made by three different native
+  speakers. To preserve that guarantee without voice clustering or invented
+  cross-sentence identities, the builder selects all three recordings from one
+  sentence only. For the frozen split seed, sentence ID `8` is the first numeric
+  eligible sentence whose three at-least-six-second recording IDs map one each
+  to tuning, validation and holdout. No audio quality score or model output is
+  consulted.
+- A real local materialization verified 2,385 float32 WAV members against the
+  TSV, converted only the selected three to mono PCM16 48 kHz, bound their
+  transcript hashes, and produced two-language coverage in every release split.
+  Raw archives, extracted clips and mixtures remain ignored local evidence and
+  are never redistributed in Mumble artifacts.
 
 ## Common Voice Swedish 26.0
 

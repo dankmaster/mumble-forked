@@ -28,6 +28,32 @@ class PlanError(ValueError):
 SUITE_CASES = { "pr_smoke": 30, "master_quality": 500, "nightly": 5000, "release": 30 }
 SPLITS = ("tuning", "validation", "holdout")
 PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
+# Product recipes expose only pre-qualified control intervals.  Plans must use
+# values the client can actually persist instead of relying on runtime clamping.
+# Quality and VoiceFocus deliberately share their intersection so the locked
+# paired scenes differ only by profile/recipe, not by user controls.
+PROFILE_CONTROL_VALUES = {
+	"Original": {
+		"noise_reduction": (50,),
+		"natural_clear": (50,),
+	},
+	"Light": {
+		"noise_reduction": (0, 25, 50, 75, 100),
+		"natural_clear": (0, 25, 50, 75, 100),
+	},
+	"Balanced": {
+		"noise_reduction": (20, 40, 60, 80),
+		"natural_clear": (10, 30, 50, 70, 90),
+	},
+	"Quality": {
+		"noise_reduction": (70, 75, 80, 85, 90),
+		"natural_clear": (40, 55, 70, 85, 100),
+	},
+	"VoiceFocus": {
+		"noise_reduction": (70, 75, 80, 85, 90),
+		"natural_clear": (40, 55, 70, 85, 100),
+	},
+}
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
 GAIN_DB = (-6, -3, 0, 3, 6)
@@ -120,22 +146,34 @@ def _stable_int(seed: str, *parts: object) -> int:
 
 
 def assigned_split(seed: str, kind: str, group_id: str) -> str:
-	bucket = _stable_int(seed, "split-v1", kind, group_id) % 100
-	return "tuning" if bucket < 60 else "validation" if bucket < 80 else "holdout"
+	return INVENTORY.assigned_split(seed, kind, group_id)
 
 
 def validate_inventory(
-	value: Any, manifest: Mapping[str, Any], expected_lock_sha256: str
+	value: Any, manifest: Mapping[str, Any], expected_lock_sha256: str, suite: str, seed: str
 ) -> list[Mapping[str, Any]]:
 	_expect(value.get("corpus_lock_sha256") == expected_lock_sha256, "inventory.corpus_lock_sha256", "lock mismatch")
 	try:
-		return INVENTORY.validate_inventory(value, manifest, require_release=True)
+		items = INVENTORY.validate_inventory(value, manifest, require_release=True)
+		INVENTORY.validate_diversity(items, suite, seed)
+		return items
 	except INVENTORY.InventoryError as error:
 		raise PlanError(str(error)) from error
 
 
 def _choice(values: Sequence[Any], seed: str, case_index: int, label: str) -> Any:
 	return values[_stable_int(seed, "choice-v1", case_index, label) % len(values)]
+
+
+def _group_choice(values: Sequence[Mapping[str, Any]], seed: str, case_index: int, label: str) -> Mapping[str, Any]:
+	"""Cycle independent groups before selecting a deterministic item within one."""
+	grouped: dict[str, list[Mapping[str, Any]]] = {}
+	for value in values:
+		grouped.setdefault(str(value["group_id"]), []).append(value)
+	groups = sorted(grouped)
+	offset = _stable_int(seed, "group-order-v1", label) % len(groups)
+	group_id = groups[(case_index + offset) % len(groups)]
+	return _choice(sorted(grouped[group_id], key=lambda item: item["id"]), seed, case_index, f"{label}:{group_id}")
 
 
 def _source_window(item: Mapping[str, Any], duration_ms: int, seed: str, case_index: int, label: str) -> dict[str, int]:
@@ -150,7 +188,7 @@ def generate_plan(
 	manifest: Mapping[str, Any], inventory: Any, suite: str, split: str, seed: str, case_count: int, duration_ms: int
 ) -> Mapping[str, Any]:
 	lock_sha = LOCK.canonical_manifest_sha256(manifest)
-	items = validate_inventory(inventory, manifest, lock_sha)
+	items = validate_inventory(inventory, manifest, lock_sha, suite, seed)
 	speech = sorted(
 		(item for item in items if item["kind"] == "speech" and assigned_split(seed, "speech", item["group_id"]) == split),
 		key=lambda item: item["id"],
@@ -180,17 +218,46 @@ def generate_plan(
 
 	cases = []
 	for index in range(case_count):
-		clean = _choice(speech, seed, index, "speech")
-		rir = _choice(rirs, seed, index, "rir")
-		microphone_response = _choice(microphone_responses, seed, index, "microphone-response")
-		snr = SNR_DB[index % len(SNR_DB)]
-		selected_noise = None if snr is None else _choice(noise, seed, index, "noise")
+		comparison_scene_id = None
+		if suite == "release" and case_count == SUITE_CASES["release"]:
+			_expect(
+				{"en-US", "sv-SE"}.issubset({item["language"] for item in speech}),
+				"inventory", "release matrix requires en-US and sv-SE speech",
+			)
+			profile = PROFILES[index // 6]
+			language = ("en-US", "sv-SE")[(index // 3) % 2]
+			variant = index % 3
+			scene_index = index - 6 if profile == "VoiceFocus" else index
+			if profile in ("Quality", "VoiceFocus"):
+				comparison_scene_id = f"{suite}-{split}-quality-voicefocus-{language.lower()}-{variant}"
+			language_speech = [item for item in speech if item["language"] == language]
+			clean = _group_choice(language_speech, seed, scene_index, f"speech:{language}")
+			if profile in ("Quality", "VoiceFocus"):
+				snr = None if variant == 0 else (-5, 0)[variant - 1]
+			else:
+				snr = None if variant == 0 else SNR_DB[((scene_index // 3) * 2 + variant - 1) % (len(SNR_DB) - 1)]
+			noise_choice_index = (scene_index // 3) * 2 + max(0, variant - 1)
+			preroll_ms = 0 if variant != 1 else 300
+		else:
+			profile = PROFILES[index % len(PROFILES)]
+			scene_index = index
+			clean = _group_choice(speech, seed, scene_index, "speech")
+			snr = SNR_DB[index % len(SNR_DB)]
+			noise_choice_index = index
+			preroll_ms = 0 if index % 2 == 0 else 300
+		rir = _group_choice(rirs, seed, scene_index, "rir")
+		microphone_response = _group_choice(microphone_responses, seed, scene_index, "microphone-response")
+		selected_noise = None if snr is None else _group_choice(noise, seed, noise_choice_index, "noise")
 		case = {
 			"case_id": f"{suite}-{split}-{index + 1:05d}",
-			"profile": PROFILES[index % len(PROFILES)],
+			"profile": profile,
 			"controls": {
-				"noise_reduction": _choice((20, 40, 60, 80), seed, index, "reduction"),
-				"natural_clear": _choice((20, 40, 60, 80), seed, index, "character"),
+				"noise_reduction": _choice(
+					PROFILE_CONTROL_VALUES[profile]["noise_reduction"], seed, scene_index, "reduction"
+				),
+				"natural_clear": _choice(
+					PROFILE_CONTROL_VALUES[profile]["natural_clear"], seed, scene_index, "character"
+				),
 			},
 			"speech": {
 				"item_id": clean["id"],
@@ -205,14 +272,14 @@ def generate_plan(
 				"sha256": clean["sha256"],
 				"size_bytes": clean["size_bytes"],
 				"source_artifact_sha256": clean["source_artifact_sha256"],
-				"window": _source_window(clean, duration_ms, seed, index, "speech"),
+				"window": _source_window(clean, duration_ms, seed, scene_index, "speech"),
 			},
 			"noise": None,
 			"mix": {
 				"snr_db": snr,
-				"speech_gain_db": _choice(GAIN_DB, seed, index, "gain"),
-				"mild_clipping": (_stable_int(seed, "clip-v1", index) % 10) == 0,
-				"distance_cm": _choice(DISTANCE_CM, seed, index, "distance"),
+				"speech_gain_db": _choice(GAIN_DB, seed, scene_index, "gain"),
+				"mild_clipping": (_stable_int(seed, "clip-v1", scene_index) % 10) == 0,
+				"distance_cm": _choice(DISTANCE_CM, seed, scene_index, "distance"),
 				"rir": {
 					"item_id": rir["id"], "group_id": rir["group_id"], "relative_path": rir["relative_path"],
 					"input_sample_rate_hz": rir["sample_rate_hz"], "input_channels": rir["channels"],
@@ -233,13 +300,15 @@ def generate_plan(
 				},
 			},
 			"transport": {
-				"opus_bitrate_bps": BITRATES[index % len(BITRATES)],
-				"frames_per_packet": PACKET_FRAMES[index % len(PACKET_FRAMES)],
-				"transmit_mode": TRANSMIT_MODES[index % len(TRANSMIT_MODES)],
+				"opus_bitrate_bps": BITRATES[scene_index % len(BITRATES)],
+				"frames_per_packet": PACKET_FRAMES[scene_index % len(PACKET_FRAMES)],
+				"transmit_mode": TRANSMIT_MODES[scene_index % len(TRANSMIT_MODES)],
 				"receiver_cleanup": False,
 			},
-			"startup": { "preroll_ms": 0 if index % 2 == 0 else 300 },
+			"startup": { "preroll_ms": preroll_ms },
 		}
+		if comparison_scene_id is not None:
+			case["comparison_scene_id"] = comparison_scene_id
 		if selected_noise is not None:
 			case["noise"] = {
 				"item_id": selected_noise["id"],
@@ -253,7 +322,7 @@ def generate_plan(
 				"sha256": selected_noise["sha256"],
 				"size_bytes": selected_noise["size_bytes"],
 				"source_artifact_sha256": selected_noise["source_artifact_sha256"],
-				"window": _source_window(selected_noise, duration_ms, seed, index, "noise"),
+				"window": _source_window(selected_noise, duration_ms, seed, scene_index, "noise"),
 				"loop_if_needed": False,
 			}
 		cases.append(case)
@@ -329,6 +398,12 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 			)
 		_expect(case["profile"] in PROFILES, f"{path}.profile", "unknown profile")
 		_expect("natural_clear" in case["controls"] and "natural_crisp" not in case["controls"], f"{path}.controls", "must use natural_clear")
+		for control_name in ("noise_reduction", "natural_clear"):
+			_expect(
+				case["controls"].get(control_name) in PROFILE_CONTROL_VALUES[case["profile"]][control_name],
+				f"{path}.controls.{control_name}",
+				"is outside the pre-qualified product values for this profile",
+			)
 		_expect(case["transport"]["receiver_cleanup"] is False, f"{path}.transport.receiver_cleanup", "must be false")
 		_expect(case["transport"]["opus_bitrate_bps"] in BITRATES, f"{path}.transport.opus_bitrate_bps", "unsupported")
 		_expect(case["transport"]["frames_per_packet"] in PACKET_FRAMES, f"{path}.transport.frames_per_packet", "unsupported")
@@ -342,6 +417,59 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 		case_ids.append(case["case_id"])
 	_expect(case_ids == sorted(set(case_ids)), "plan.cases", "case ids must be unique and sorted")
 	_expect(startup_modes == { 0, 300 } or len(value["cases"]) == 1, "plan.cases", "must cover cold and warm start")
+	requirements = INVENTORY.DIVERSITY_REQUIREMENTS[value["suite"]]
+	diversity = {
+		"speaker_groups": len({case["speech"]["group_id"] for case in value["cases"]}),
+		"languages": len({case["speech"]["language"] for case in value["cases"]}),
+		"noise_groups": len({case["noise"]["group_id"] for case in value["cases"] if case["noise"] is not None}),
+		"noise_classes": len({case["noise"]["class"] for case in value["cases"] if case["noise"] is not None}),
+		"rir_groups": len({case["mix"]["rir"]["group_id"] for case in value["cases"]}),
+		"device_groups": len({case["mix"]["microphone_response"]["group_id"] for case in value["cases"]}),
+		"device_families": len({case["mix"]["microphone_response"]["device_family"] for case in value["cases"]}),
+	}
+	for key, minimum in requirements.items():
+		_expect(diversity[key] >= minimum, f"plan.diversity.{key}", f"requires at least {minimum}; found {diversity[key]}")
+	if value["suite"] == "release" and len(value["cases"]) == SUITE_CASES["release"]:
+		for profile in PROFILES:
+			for language in ("en-US", "sv-SE"):
+				rows = [
+					case for case in value["cases"]
+					if case["profile"] == profile and case["speech"]["language"] == language
+				]
+				label = f"plan.release_matrix.{profile}.{language}"
+				_expect(len(rows) == 3, label, f"requires exactly three cases; found {len(rows)}")
+				_expect(sum(case["noise"] is None for case in rows) == 1, label, "requires exactly one clean case")
+				_expect(sum(case["noise"] is not None for case in rows) == 2, label, "requires exactly two noisy cases")
+				_expect({case["startup"]["preroll_ms"] for case in rows} == {0, 300}, label, "requires cold and warm start")
+				transport = {
+					(
+						case["transport"]["opus_bitrate_bps"], case["transport"]["frames_per_packet"],
+						case["transport"]["transmit_mode"],
+					)
+					for case in rows
+				}
+				_expect(len(transport) == 3, label, "requires three distinct transport recipes")
+		paired: dict[str, list[Mapping[str, Any]]] = {}
+		for case in value["cases"]:
+			comparison_scene_id = case.get("comparison_scene_id")
+			if comparison_scene_id is not None:
+				_expect(isinstance(comparison_scene_id, str) and bool(comparison_scene_id), "plan.comparison_scene_id", "must be non-empty")
+				paired.setdefault(comparison_scene_id, []).append(case)
+		_expect(len(paired) == 6, "plan.quality_voicefocus_pairs", f"requires six paired scenes; found {len(paired)}")
+		for comparison_scene_id, rows in paired.items():
+			label = f"plan.quality_voicefocus_pairs.{comparison_scene_id}"
+			_expect({row["profile"] for row in rows} == {"Quality", "VoiceFocus"}, label, "requires one Quality and one VoiceFocus case")
+			_expect(len(rows) == 2, label, f"requires exactly two cases; found {len(rows)}")
+			normalized = []
+			for row in rows:
+				copy_row = copy.deepcopy(row)
+				copy_row.pop("case_id")
+				copy_row.pop("profile")
+				copy_row.pop("comparison_scene_id")
+				normalized.append(copy_row)
+			_expect(normalized[0] == normalized[1], label, "paired profiles do not share an identical rendered scene and transport")
+			if rows[0]["noise"] is not None:
+				_expect(rows[0]["mix"]["snr_db"] in (-5, 0), label, "paired noisy comparator must be severe")
 	return value
 
 
@@ -363,8 +491,12 @@ def _self_test_inventory(manifest: Mapping[str, Any], seed: str) -> Mapping[str,
 	items = []
 	for kind in INVENTORY.KINDS:
 		for index in range(80):
-			source_id = "openslr28-rirs-noises" if kind in ("noise", "rir") else "mcgill-tsp-speech-v2-48k"
-			artifact_sha256 = sources[source_id]["integrity"]["digest"]
+			if kind == "microphone_response":
+				source_id = INVENTORY.MODELED_RESPONSE_SOURCE_ID
+				artifact_sha256 = INVENTORY.file_sha256(INVENTORY.MODELED_RESPONSE_DEFINITION)
+			else:
+				source_id = "openslr28-rirs-noises" if kind in ("noise", "rir") else "mcgill-tsp-speech-v2-48k"
+				artifact_sha256 = sources[source_id]["integrity"]["digest"]
 			file_sha256 = hashlib.sha256(f"{kind}-{index:03d}".encode("utf-8")).hexdigest()
 			item = {
 				"id": f"{kind}-{index:03d}",
@@ -424,7 +556,7 @@ def run_self_test() -> None:
 	bad_file_hash = copy.deepcopy(inventory)
 	bad_file_hash["items"][0]["sha256"] = "A" * 64
 	try:
-		validate_inventory(bad_file_hash, manifest, LOCK.canonical_manifest_sha256(manifest))
+		validate_inventory(bad_file_hash, manifest, LOCK.canonical_manifest_sha256(manifest), "pr_smoke", seed)
 	except PlanError:
 		pass
 	else:
@@ -432,11 +564,22 @@ def run_self_test() -> None:
 	bad_artifact_hash = copy.deepcopy(inventory)
 	bad_artifact_hash["items"][0]["source_artifact_sha256"] = "0" * 64
 	try:
-		validate_inventory(bad_artifact_hash, manifest, LOCK.canonical_manifest_sha256(manifest))
+		validate_inventory(bad_artifact_hash, manifest, LOCK.canonical_manifest_sha256(manifest), "pr_smoke", seed)
 	except PlanError:
 		pass
 	else:
 		raise AssertionError("inventory accepted a file bound to the wrong source artifact")
+	one_noise_class = copy.deepcopy(inventory)
+	for item in one_noise_class["items"]:
+		if item["kind"] == "noise":
+			item["noise_class"] = "fan"
+	try:
+		validate_inventory(one_noise_class, manifest, LOCK.canonical_manifest_sha256(manifest), "release", seed)
+	except PlanError as error:
+		if "noise_classes" not in str(error):
+			raise
+	else:
+		raise AssertionError("release inventory accepted a single noise class")
 	first = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	if canonical_sha256(first) != canonical_sha256(second):
@@ -447,6 +590,35 @@ def run_self_test() -> None:
 		split: generate_plan(manifest, inventory, "release", split, seed, 30, 6000)
 		for split in SPLITS
 	}
+	bad_release_matrix = copy.deepcopy(plans["validation"])
+	bad_release_matrix["cases"][0]["speech"]["language"] = "sv-SE"
+	try:
+		validate_plan(bad_release_matrix)
+	except PlanError as error:
+		if "release_matrix" not in str(error):
+			raise
+	else:
+		raise AssertionError("release plan accepted incomplete profile-by-language coverage")
+	bad_comparator = copy.deepcopy(plans["validation"])
+	voice_case = next(case for case in bad_comparator["cases"] if case["profile"] == "VoiceFocus")
+	voice_case["mix"]["distance_cm"] = 999
+	try:
+		validate_plan(bad_comparator)
+	except PlanError as error:
+		if "quality_voicefocus_pairs" not in str(error):
+			raise
+	else:
+		raise AssertionError("release plan accepted mismatched Quality/VoiceFocus comparator scenes")
+	bad_controls = copy.deepcopy(plans["validation"])
+	voice_case = next(case for case in bad_controls["cases"] if case["profile"] == "VoiceFocus")
+	voice_case["controls"]["noise_reduction"] = 60
+	try:
+		validate_plan(bad_controls)
+	except PlanError as error:
+		if "pre-qualified product values" not in str(error):
+			raise
+	else:
+		raise AssertionError("release plan accepted VoiceFocus controls outside the qualified recipe interval")
 	room_ids = {
 		split: { case["mix"]["rir"]["item_id"] for case in plan["cases"] }
 		for split, plan in plans.items()

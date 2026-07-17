@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Set
 
@@ -50,6 +51,7 @@ REDISTRIBUTION_STATUSES = {
 	"blocked_noncommercial",
 	"source_license_review_required",
 }
+PURPOSES = ("local-eval", "training", "fixture")
 SOURCE_REQUIRED_KEYS = {
 	"audio",
 	"id",
@@ -63,6 +65,7 @@ SOURCE_REQUIRED_KEYS = {
 	"training_status",
 	"version",
 }
+SIDECAR_REQUIRED_KEYS = { "id", "integrity", "kind", "source_url" }
 EXCLUDED_REQUIRED_KEYS = {
 	"id",
 	"integrity",
@@ -189,10 +192,39 @@ def _validate_audio(value: Any, path: str) -> None:
 		)
 
 
+def _validate_sidecars(value: Any, path: str) -> None:
+	_expect(isinstance(value, list) and bool(value), path, "expected a non-empty array")
+	ids: List[str] = []
+	for index, raw_sidecar in enumerate(value):
+		sidecar_path = f"{path}[{index}]"
+		sidecar = _expect_mapping(raw_sidecar, sidecar_path)
+		_expect_exact_keys(sidecar, SIDECAR_REQUIRED_KEYS, set(), sidecar_path)
+		sidecar_id = _expect_nonempty_string(sidecar["id"], f"{sidecar_path}.id")
+		_expect(
+			bool(re.fullmatch(r"[a-z0-9][a-z0-9-]*", sidecar_id)),
+			f"{sidecar_path}.id",
+			"must be a lowercase slug",
+		)
+		_expect(
+			sidecar["kind"] == "transcript_metadata",
+			f"{sidecar_path}.kind",
+			"only reviewed transcript_metadata sidecars are supported",
+		)
+		_expect_https_url(sidecar["source_url"], f"{sidecar_path}.source_url")
+		_validate_integrity(sidecar["integrity"], f"{sidecar_path}.integrity")
+		_expect(
+			"artifact_path" in sidecar["integrity"],
+			f"{sidecar_path}.integrity",
+			"sidecars must pin a downloadable local artifact",
+		)
+		ids.append(sidecar_id)
+	_expect(ids == sorted(set(ids)), path, "sidecar ids must be unique and sorted")
+
+
 def _validate_source(value: Any, path: str, allowed_roles: Set[str], excluded: bool) -> None:
 	source = _expect_mapping(value, path)
 	required = EXCLUDED_REQUIRED_KEYS if excluded else SOURCE_REQUIRED_KEYS
-	_expect_exact_keys(source, required, { "notes" }, path)
+	_expect_exact_keys(source, required, { "notes", "sidecars" } if not excluded else { "notes" }, path)
 	source_id = _expect_nonempty_string(source["id"], f"{path}.id")
 	_expect(bool(re.fullmatch(r"[a-z0-9][a-z0-9-]*", source_id)), f"{path}.id", "must be a lowercase slug")
 	_expect_nonempty_string(source["kind"], f"{path}.kind")
@@ -201,6 +233,8 @@ def _validate_source(value: Any, path: str, allowed_roles: Set[str], excluded: b
 		_expect_nonempty_string(source["version"], f"{path}.version")
 		_expect_https_url(source["landing_page"], f"{path}.landing_page")
 		_validate_audio(source["audio"], f"{path}.audio")
+		if "sidecars" in source:
+			_validate_sidecars(source["sidecars"], f"{path}.sidecars")
 	else:
 		_expect_nonempty_string(source["reason"], f"{path}.reason")
 	_validate_integrity(source["integrity"], f"{path}.integrity")
@@ -299,6 +333,22 @@ def validate_manifest(value: Any) -> Mapping[str, Any]:
 	_expect(excluded_ids == sorted(excluded_ids), "root.excluded_sources", "sources must be sorted by id")
 	all_ids = source_ids + excluded_ids
 	_expect(len(all_ids) == len(set(all_ids)), "root", "source ids must be unique")
+	artifact_owners: Dict[str, str] = {}
+	for source in sources:
+		descriptors = [("primary", source["integrity"])] + [
+			(sidecar["id"], sidecar["integrity"]) for sidecar in source.get("sidecars", [])
+		]
+		for artifact_id, integrity in descriptors:
+			if "artifact_path" not in integrity:
+				continue
+			artifact_path = integrity["artifact_path"]
+			owner = f"{source['id']}:{artifact_id}"
+			_expect(
+				artifact_path not in artifact_owners,
+				"root.sources",
+				f"artifact_path {artifact_path!r} is shared by {artifact_owners.get(artifact_path)} and {owner}",
+			)
+			artifact_owners[artifact_path] = owner
 	return manifest
 
 
@@ -323,6 +373,29 @@ def load_validated_manifest(path: Path) -> Mapping[str, Any]:
 	return validate_manifest(_load_json(path))
 
 
+def source_policy_error(source: Mapping[str, Any], purpose: str) -> str | None:
+	"""Return why a source is ineligible for a concrete artifact use.
+
+	This is also used by artifact verification.  Merely having an artifact_path
+	does not make a blocked or ambiguously licensed archive required evidence.
+	"""
+	_expect(purpose in PURPOSES, "purpose", f"must be one of {', '.join(PURPOSES)}")
+	license_info = source["license"]
+	if license_info["status"] != "verified" or str(license_info["spdx"]).startswith("LicenseRef-"):
+		return f"license {license_info['spdx']} is not verified"
+	if "-NC-" in license_info["spdx"]:
+		return f"non-commercial license {license_info['spdx']} is blocked"
+	if purpose == "local-eval" and "local_eval" not in source["roles"]:
+		return "source is not approved for local evaluation"
+	if purpose == "training" and source["training_status"] != "allowed_with_attribution":
+		return f"training status is {source['training_status']}"
+	if purpose == "fixture" and source["redistribution_status"] != "allowed_with_attribution":
+		return f"redistribution status is {source['redistribution_status']}"
+	if source["integrity"]["algorithm"] != "sha256" or "artifact_path" not in source["integrity"]:
+		return "source is not represented by a pinned downloadable archive"
+	return None
+
+
 def _sha256_file(path: Path) -> str:
 	digest = hashlib.sha256()
 	with path.open("rb") as stream:
@@ -331,17 +404,21 @@ def _sha256_file(path: Path) -> str:
 	return digest.hexdigest()
 
 
-def verify_artifacts(manifest: Mapping[str, Any], artifact_root: Path) -> int:
+def verify_artifacts(manifest: Mapping[str, Any], artifact_root: Path, purpose: str = "local-eval") -> int:
 	verified = 0
 	for source in manifest["sources"]:
-		integrity = source["integrity"]
-		if "artifact_path" not in integrity:
+		if source_policy_error(source, purpose) is not None:
 			continue
-		path = artifact_root.joinpath(*PurePosixPath(integrity["artifact_path"]).parts)
-		_expect(path.is_file(), source["id"], f"artifact is missing: {path}")
-		_expect(path.stat().st_size == integrity["size_bytes"], source["id"], "artifact size does not match lock")
-		_expect(_sha256_file(path) == integrity["digest"], source["id"], "artifact sha256 does not match lock")
-		verified += 1
+		descriptors = [("primary", source["integrity"])] + [
+			(sidecar["id"], sidecar["integrity"]) for sidecar in source.get("sidecars", [])
+		]
+		for artifact_id, integrity in descriptors:
+			path = artifact_root.joinpath(*PurePosixPath(integrity["artifact_path"]).parts)
+			label = f"{source['id']}:{artifact_id}"
+			_expect(path.is_file(), label, f"artifact is missing: {path}")
+			_expect(path.stat().st_size == integrity["size_bytes"], label, "artifact size does not match lock")
+			_expect(_sha256_file(path) == integrity["digest"], label, "artifact sha256 does not match lock")
+			verified += 1
 	return verified
 
 
@@ -422,12 +499,53 @@ def run_self_test() -> None:
 	else:
 		raise AssertionError("self-test accepted a non-canonical hash")
 
+	policy_fixture = copy.deepcopy(fixture)
+	safe = policy_fixture["sources"][0]
+	safe["integrity"] = {
+		"algorithm": "sha256", "artifact_path": "downloads/safe.bin",
+		"digest": hashlib.sha256(b"x").hexdigest(), "size_bytes": 1,
+	}
+	safe["sidecars"] = [
+		{
+			"id": "transcripts", "kind": "transcript_metadata",
+			"source_url": "https://example.invalid/transcripts.tsv",
+			"integrity": {
+				"algorithm": "sha256", "artifact_path": "downloads/transcripts.tsv",
+				"digest": hashlib.sha256(b"metadata").hexdigest(), "size_bytes": 8,
+			},
+		}
+	]
+	blocked = copy.deepcopy(safe)
+	blocked.pop("sidecars")
+	blocked["id"] = "blocked-source"
+	blocked["integrity"] = {
+		"algorithm": "sha256", "artifact_path": "downloads/blocked.bin",
+		"digest": hashlib.sha256(b"missing").hexdigest(), "size_bytes": 7,
+	}
+	blocked["license"] = {
+		"spdx": "LicenseRef-DEMAND-Ambiguous", "status": "ambiguous",
+		"evidence_url": "https://example.invalid/ambiguous-license",
+	}
+	blocked["training_status"] = "blocked_ambiguous_license"
+	blocked["redistribution_status"] = "blocked_ambiguous_license"
+	blocked["roles"] = [ "local_eval" ]
+	policy_fixture["sources"] = [ blocked, safe ]
+	validate_manifest(policy_fixture)
+	with tempfile.TemporaryDirectory(prefix="mumble-corpus-lock-") as directory:
+		root = Path(directory)
+		(root / "downloads").mkdir()
+		(root / "downloads" / "safe.bin").write_bytes(b"x")
+		(root / "downloads" / "transcripts.tsv").write_bytes(b"metadata")
+		if verify_artifacts(policy_fixture, root, "local-eval") != 2:
+			raise AssertionError("artifact verification did not select the policy-eligible primary and sidecar")
+
 
 def main(argv: Sequence[str] | None = None) -> int:
 	default_manifest = Path(__file__).with_name("corpus-lock.json")
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("manifest", nargs="?", type=Path, default=default_manifest)
 	parser.add_argument("--artifact-root", type=Path, help="also verify pinned local archives below this directory")
+	parser.add_argument("--purpose", choices=PURPOSES, default="local-eval", help="verify only archives eligible for this use")
 	parser.add_argument("--self-test", action="store_true", help="run built-in policy regression tests first")
 	args = parser.parse_args(argv)
 
@@ -436,7 +554,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 			run_self_test()
 			print("corpus-lock validator self-test: ok")
 		manifest = load_validated_manifest(args.manifest)
-		verified = verify_artifacts(manifest, args.artifact_root) if args.artifact_root else 0
+		verified = verify_artifacts(manifest, args.artifact_root, args.purpose) if args.artifact_root else 0
 		print(
 			f"corpus lock: ok; sources={len(manifest['sources'])}; excluded={len(manifest['excluded_sources'])}; "
 			f"artifacts_verified={verified}; manifest_sha256={canonical_manifest_sha256(manifest)}"

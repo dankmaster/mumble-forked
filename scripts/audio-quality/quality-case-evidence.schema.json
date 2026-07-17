@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mumble.info/schemas/input-enhancement-quality-case-evidence-v1.json",
+  "$id": "https://mumble.info/schemas/input-enhancement-quality-case-evidence-v3.json",
   "title": "One canonical JSONL record from input-enhancement quality case evidence",
   "description": "The file is LF-delimited canonical JSON: one header, then profile/case sorted case records, then optional Auto transition records.",
   "oneOf": [
@@ -23,7 +23,7 @@
       ],
       "properties": {
         "record_type": { "const": "header" },
-        "schema_version": { "const": 1 },
+        "schema_version": { "const": 3 },
         "qualification_binding_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "case_count": { "type": "integer", "minimum": 1 },
         "transition_case_count": { "type": "integer", "minimum": 0 }
@@ -59,27 +59,70 @@
         "cohort_id",
         "condition",
         "counters",
+        "dataset_split",
+        "device_group_id",
         "failed",
         "fixed_timeline",
         "language",
         "metrics",
+        "noise_class",
+        "noise_group_id",
+        "objective_score",
         "performance",
         "profile",
+        "quality_pair_case_id",
         "receiver_cleanup_enabled",
         "record_type",
+        "rir_group_id",
+        "speaker_group_id",
         "startup_preroll_ms"
       ],
       "properties": {
         "record_type": { "const": "case" },
         "case_id": { "$ref": "#/$defs/identifier" },
         "profile": { "enum": ["Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto"] },
+        "quality_pair_case_id": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/identifier" }
+          ]
+        },
         "condition": { "enum": ["clean", "noisy", "severe"] },
+        "dataset_split": { "enum": ["tuning", "validation", "pr-smoke", "release-fixture", "release-holdout"] },
         "cohort_id": { "$ref": "#/$defs/identifier" },
+        "speaker_group_id": { "$ref": "#/$defs/identifier" },
+        "noise_group_id": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/identifier" }
+          ]
+        },
+        "noise_class": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/identifier" }
+          ]
+        },
+        "rir_group_id": { "$ref": "#/$defs/identifier" },
+        "device_group_id": { "$ref": "#/$defs/identifier" },
         "language": { "type": "string", "minLength": 1 },
         "startup_preroll_ms": { "enum": [0, 300] },
         "fixed_timeline": { "type": "boolean" },
         "receiver_cleanup_enabled": { "type": "boolean" },
         "failed": { "type": "boolean" },
+        "objective_score": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "signal_stage", "size_bytes", "wer_reference_kind", "wer_reference_text_sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "pattern": "^[^\\\\].*\\.json$" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "signal_stage": { "enum": ["sender-pre-opus", "receiver-capture"] },
+            "size_bytes": { "type": "integer", "minimum": 1 },
+            "wer_reference_kind": { "enum": ["clean-asr-consistency", "segment-ground-truth"] },
+            "wer_reference_text_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
         "metrics": {
           "type": "object",
           "additionalProperties": false,
@@ -114,12 +157,18 @@
             "max_internal_processing_ms",
             "memory_growth_bytes",
             "processing_duration_seconds",
-            "soak_duration_seconds"
+            "soak_duration_seconds",
+            "worker_durations_ms"
           ],
           "properties": {
             "audio_duration_seconds": { "type": "number", "exclusiveMinimum": 0 },
             "processing_duration_seconds": { "type": "number", "minimum": 0 },
             "callback_durations_ms": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "number", "minimum": 0 }
+            },
+            "worker_durations_ms": {
               "type": "array",
               "minItems": 1,
               "items": { "type": "number", "minimum": 0 }

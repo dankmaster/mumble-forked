@@ -21,6 +21,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -35,6 +36,7 @@ class E2EError(RuntimeError):
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
+SAMPLE_RATE_HZ = 48_000
 FRAME_SAMPLES = 480
 # The unchanged local Mumble route has a bounded startup buffer that is not
 # profile latency: four fixed 10 ms route frames plus the selected Opus packet
@@ -53,6 +55,13 @@ PERFORMANCE_BUDGETS = {
 }
 CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 PRODUCT_PROFILES = (*CORE_PROFILES, "Auto")
+FIXED_RECIPE_CONTRACTS = {
+	"Original": ({"None"}, 0.0, "Low"),
+	"Light": ({"Speex"}, 10.0, "Low"),
+	"Balanced": ({"RNNoise"}, 30.0, "Standard"),
+	"Quality": ({"DeepFilterNet"}, 50.0, "High"),
+	"VoiceFocus": ({"DeepFilterNet"}, 50.0, "High"),
+}
 FIXED_PROFILE_MODEL_INITIALIZATION_ATTEMPTS = {
 	"Original": 0,
 	"Light": 0,
@@ -139,7 +148,7 @@ def _below(root: Path, relative: Any, label: str) -> Path:
 
 def _verified_file(path: Path, expected_hash: str | None = None, expected_size: int | None = None) -> Mapping[str, Any]:
 	resolved = path.resolve()
-	if not resolved.is_file() or resolved.is_symlink():
+	if not resolved.is_file() or _is_reparse(resolved):
 		raise E2EError(f"required regular file is missing: {resolved}")
 	size = resolved.stat().st_size
 	actual = _file_sha256(resolved)
@@ -150,14 +159,35 @@ def _verified_file(path: Path, expected_hash: str | None = None, expected_size: 
 	return {"path": str(resolved), "sha256": actual, "size_bytes": size}
 
 
+def _is_reparse(path: Path) -> bool:
+	metadata = os.lstat(path)
+	return path.is_symlink() or bool(getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _assert_file_attestation(path: Path, attestation: Mapping[str, Any], label: str) -> None:
+	current = _verified_file(path)
+	if current["sha256"] != attestation["sha256"] or current["size_bytes"] != attestation["size_bytes"]:
+		raise E2EError(f"{label} changed after run provenance was sealed")
+
+
 def _tree_attestation(root: Path) -> Mapping[str, Any]:
 	root = root.resolve()
-	if not root.is_dir():
+	if not root.is_dir() or _is_reparse(root):
 		raise E2EError(f"runtime root does not exist: {root}")
 	entries = []
-	for path in sorted(root.rglob("*"), key=lambda candidate: candidate.relative_to(root).as_posix().lower()):
-		if path.is_symlink():
-			raise E2EError(f"runtime payload contains a symbolic link: {path}")
+	files: list[Path] = []
+	for current, directories, names in os.walk(root, topdown=True):
+		current_path = Path(current)
+		for directory in directories:
+			candidate = current_path / directory
+			if _is_reparse(candidate):
+				raise E2EError(f"runtime payload contains a reparse directory: {candidate}")
+		for name in names:
+			candidate = current_path / name
+			if _is_reparse(candidate):
+				raise E2EError(f"runtime payload contains a reparse file: {candidate}")
+			files.append(candidate)
+	for path in sorted(files, key=lambda candidate: candidate.relative_to(root).as_posix().lower()):
 		if path.is_file():
 			info = _verified_file(path)
 			entries.append({
@@ -168,6 +198,19 @@ def _tree_attestation(root: Path) -> Mapping[str, Any]:
 	if not entries:
 		raise E2EError("runtime payload is empty")
 	return {"root": str(root), "file_count": len(entries), "sha256": _canonical_sha256(entries)}
+
+
+def _assert_packaged_runtime_root(root: Path) -> None:
+	"""Reject mutable CMake trees before sealing release runtime evidence."""
+	root = root.resolve()
+	if not root.is_dir():
+		raise E2EError(f"runtime root does not exist: {root}")
+	build_markers = [name for name in ("CMakeCache.txt", "build.ninja", "Testing") if (root / name).exists()]
+	if build_markers:
+		raise E2EError(
+			"runtime root must be a staged/packaged payload, not a mutable CMake build tree; "
+			f"found build marker(s): {', '.join(build_markers)}"
+		)
 
 
 def _verify_metric_models(manifest_path: Path) -> Mapping[str, Any]:
@@ -241,6 +284,47 @@ def _control_range(value: Any, label: str) -> None:
 		raise E2EError(f"{label}: minimum exceeds maximum")
 
 
+def _milliseconds_to_samples(value: Any, label: str) -> int:
+	milliseconds = _finite_number(value, 0.0, 1000.0, label)
+	exact = milliseconds * SAMPLE_RATE_HZ / 1000.0
+	samples = round(exact)
+	if not math.isclose(exact, samples, rel_tol=0.0, abs_tol=1e-9):
+		raise E2EError(f"{label}: must resolve to an exact 48 kHz sample count")
+	return samples
+
+
+def _expected_recipe_latency_samples(
+	engine: str, execution_semantics_version: int, model_ids: Sequence[str],
+	models: Mapping[str, Mapping[str, Any]], latency_budget_ms: Any, label: str,
+) -> int:
+	if engine == "None":
+		if model_ids:
+			raise E2EError(f"{label}: Original must not bind a model")
+		expected = 0
+	elif engine == "Speex":
+		if model_ids:
+			raise E2EError(f"{label}: Speex must not bind a model")
+		expected = FRAME_SAMPLES
+	elif engine in {"RNNoise", "DeepFilterNet"}:
+		if len(model_ids) != 1:
+			raise E2EError(f"{label}: {engine} requires exactly one model")
+		model = models[model_ids[0]]
+		expected = int(model["algorithmic_latency_samples"])
+		if engine == "DeepFilterNet":
+			# Semantics v5 runs the realtime worker. It gives inference two full
+			# callback periods and emits frame N at N+2; the catalog value is only
+			# the model's intrinsic latency.
+			expected += (2 if execution_semantics_version >= 5 else 1) * FRAME_SAMPLES
+	else:
+		raise E2EError(f"{label}: no qualified core latency contract for engine {engine}")
+	budget = _milliseconds_to_samples(latency_budget_ms, f"{label}.latencyBudgetMs")
+	if expected > budget:
+		raise E2EError(f"{label}: exact execution latency exceeds latencyBudgetMs")
+	if expected % FRAME_SAMPLES != 0:
+		raise E2EError(f"{label}: exact execution latency must be 10 ms frame aligned")
+	return expected
+
+
 def _verify_product_catalog(
 	model_manifest_path: Path, recipe_manifest_path: Path, runtime_root: Path
 ) -> Mapping[str, Any]:
@@ -286,7 +370,9 @@ def _verify_product_catalog(
 		asset_paths.add(path_key)
 		size = _exact_integer(model["size"], 1, 4 * 1024 * 1024 * 1024, f"{label}.size")
 		_exact_integer(model["sampleRateHz"], 1, 384000, f"{label}.sampleRateHz")
-		_finite_number(model["algorithmicLatencyMs"], 0.0, 1000.0, f"{label}.algorithmicLatencyMs")
+		algorithmic_latency_samples = _milliseconds_to_samples(
+			model["algorithmicLatencyMs"], f"{label}.algorithmicLatencyMs"
+		)
 		asset = _below(runtime_root, relative_path.as_posix(), f"{label}.path")
 		verified_asset = _verified_file(asset, _sha256_text(model["sha256"], f"{label}.sha256"), size)
 		compatibility = model["recipeCompatibility"]
@@ -301,12 +387,14 @@ def _verify_product_catalog(
 			"version": version,
 			"backend": backend,
 			"sha256": verified_asset["sha256"],
+			"algorithmic_latency_samples": algorithmic_latency_samples,
 		}
 		model_compatibility[model_id] = set(compatibility)
 
 	if not isinstance(recipe_manifest["recipes"], list) or not recipe_manifest["recipes"]:
 		raise E2EError("recipe manifest recipes must be a non-empty array")
 	recipe_models: dict[str, set[str]] = {}
+	expected_latency_samples_by_recipe_id: dict[str, int] = {}
 	bindings: list[Mapping[str, Any]] = []
 	seen_recipe_ids: set[str] = set()
 	seen_profiles: set[str] = set()
@@ -350,13 +438,27 @@ def _verify_product_catalog(
 			raise E2EError(f"{label}.latencyBudgetMs: must map to whole 48 kHz samples")
 		if recipe["minimumCpuClass"] not in {"Low", "Standard", "High"}:
 			raise E2EError(f"{label}.minimumCpuClass: unsupported CPU class")
-		for field in ("executionSemanticsVersion", "mixCurveVersion", "adaptationPolicyVersion"):
+		if profile in FIXED_RECIPE_CONTRACTS:
+			allowed_engines, required_latency_ms, required_cpu = FIXED_RECIPE_CONTRACTS[profile]
+			if engine not in allowed_engines:
+				raise E2EError(f"{label}.engine: violates the fixed {profile} recipe contract")
+			if latency_ms != required_latency_ms:
+				raise E2EError(f"{label}.latencyBudgetMs: violates the fixed {profile} recipe contract")
+			if recipe["minimumCpuClass"] != required_cpu:
+				raise E2EError(f"{label}.minimumCpuClass: violates the fixed {profile} recipe contract")
+		execution_semantics_version = _exact_integer(
+			recipe["executionSemanticsVersion"], 1, 2**31 - 1, f"{label}.executionSemanticsVersion"
+		)
+		for field in ("mixCurveVersion", "adaptationPolicyVersion"):
 			_exact_integer(recipe[field], 1, 2**31 - 1, f"{label}.{field}")
 		advanced_only = recipe.get("advancedOnly", False)
 		if not isinstance(advanced_only, bool):
 			raise E2EError(f"{label}.advancedOnly: expected boolean")
 		recipe_models[recipe_id] = set(model_ids)
 		if not advanced_only:
+			expected_latency_samples_by_recipe_id[recipe_id] = _expected_recipe_latency_samples(
+				engine, execution_semantics_version, model_ids, models, recipe["latencyBudgetMs"], label
+			)
 			bindings.append({
 				"profile": profile,
 				"engine": engine,
@@ -389,6 +491,7 @@ def _verify_product_catalog(
 		"model_manifest": model_manifest_info,
 		"recipe_manifest": recipe_manifest_info,
 		"bindings": bindings,
+		"expected_latency_samples_by_recipe_id": expected_latency_samples_by_recipe_id,
 	}
 
 
@@ -432,6 +535,7 @@ def _rendered_case(plan: Mapping[str, Any], case: Mapping[str, Any], render_mani
 	reference_path = _below(render_root, entry["clean_reference"]["path"], "render.clean_reference.path")
 	return {
 		"manifest": _verified_file(render_manifest_path),
+		"entry_sha256": _canonical_sha256(entry),
 		"input": _verified_file(input_path, entry["input"]["sha256"]),
 		"clean_reference": _verified_file(reference_path, entry["clean_reference"]["sha256"]),
 	}
@@ -518,6 +622,7 @@ def _validate_adapter_result(
 	contract_path: Path,
 	expected_contract_sha256: str,
 	role_root: Path,
+	expected_latency_samples: int,
 ) -> tuple[Mapping[str, Any], Path, Path]:
 	if _file_sha256(contract_path) != expected_contract_sha256:
 		raise E2EError("adapter contract changed while the machine adapter was running")
@@ -591,7 +696,15 @@ def _validate_adapter_result(
 			raise E2EError(f"adapter reported {key}={diagnostics[key]}")
 	if diagnostics["tail_drained"] is not True:
 		raise E2EError("adapter did not drain the causal tail")
-	_exact_integer(diagnostics["declared_latency_samples"], 0, 2**31 - 1, "adapter diagnostics.declared_latency_samples")
+	declared_latency_samples = _exact_integer(
+		diagnostics["declared_latency_samples"], 0, 2**31 - 1,
+		"adapter diagnostics.declared_latency_samples",
+	)
+	if declared_latency_samples != expected_latency_samples:
+		raise E2EError(
+			"adapter declared latency does not match the manifest-derived execution contract: "
+			f"expected={expected_latency_samples} observed={declared_latency_samples}"
+		)
 	active_recipe = diagnostics["active_recipe"]
 	if not isinstance(active_recipe, dict) or set(active_recipe) != {
 		"catalog_revision", "id", "manifest_sha256", "revision",
@@ -687,9 +800,13 @@ def _score(
 	require_complete_tail: bool = True,
 	max_onset_loss_samples: int = FRAME_SAMPLES,
 	max_end_loss_samples: int = FRAME_SAMPLES,
+	scorer_attestation: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
+	scorer_path = Path(__file__).with_name("score-fixed-timeline.py")
+	if scorer_attestation is not None:
+		_assert_file_attestation(scorer_path, scorer_attestation, "fixed-timeline scorer")
 	command = [
-		sys.executable, str(Path(__file__).with_name("score-fixed-timeline.py")),
+		sys.executable, str(scorer_path),
 		"--reference", str(reference), "--received", str(received),
 		"--latency-samples", str(latency),
 		"--max-onset-loss-samples", str(max_onset_loss_samples),
@@ -704,6 +821,8 @@ def _score(
 			"--qualified-transport-baseline",
 		])
 	completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	if scorer_attestation is not None:
+		_assert_file_attestation(scorer_path, scorer_attestation, "fixed-timeline scorer")
 	if completed.returncode != 0:
 		raise E2EError(f"fixed-timeline scoring failed ({completed.returncode}): {completed.stdout.strip()}")
 	return _load_json(output)
@@ -724,6 +843,7 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 		raise E2EError("plan does not bind the supplied inventory")
 	if LOCK.canonical_manifest_sha256(manifest) != plan["corpus_lock_sha256"]:
 		raise E2EError("plan does not bind the supplied corpus lock")
+	_assert_packaged_runtime_root(args.runtime_root)
 	if args.output_root.exists() and any(args.output_root.iterdir()):
 		raise E2EError(f"output root must be empty: {args.output_root}")
 	args.output_root.mkdir(parents=True, exist_ok=True)
@@ -750,6 +870,10 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 		"plan": _verified_file(args.plan),
 		"corpus_lock": _verified_file(args.corpus_lock),
 		"corpus_inventory": _verified_file(args.inventory),
+		"qualification_case_set": (
+			_verified_file(args.qualification_case_set)
+			if getattr(args, "qualification_case_set", None) is not None else None
+		),
 		"render_manifest": rendered["manifest"],
 		"runtime_payload": runtime,
 		"client_binary": client,
@@ -824,13 +948,21 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 	results: dict[str, Any] = {}
 	captures: dict[str, Path] = {}
 	sender_pre_opus_artifacts: dict[str, Path] = {}
+	_assert_file_attestation(Path(__file__), provenance["orchestrator"], "two-client orchestrator")
+	_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 	for role, contract, contract_path, contract_sha256, result_path in contracts:
+		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 		command = _adapter_command(args.adapter.resolve(), contract_path.resolve(), result_path.resolve(), args.adapter_arg)
 		completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 		if completed.returncode != 0:
 			raise E2EError(f"machine adapter failed for {role} ({completed.returncode}): {completed.stdout.strip()}")
+		authorized_binding = contract["authorized_product_bindings"][0]
+		recipe_id = str(authorized_binding["recipe"]["id"])
+		expected_latency_samples = product_catalog["expected_latency_samples_by_recipe_id"][recipe_id]
 		result, capture, sender_pre_opus = _validate_adapter_result(
-			result_path, contract, contract_path, contract_sha256, result_path.parent
+			result_path, contract, contract_path, contract_sha256, result_path.parent,
+			expected_latency_samples,
 		)
 		results[role] = result
 		captures[role] = capture
@@ -847,6 +979,7 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 			require_complete_tail=True,
 			max_onset_loss_samples=FRAME_SAMPLES,
 			max_end_loss_samples=FRAME_SAMPLES,
+			scorer_attestation=provenance["fixed_timeline_scorer"],
 		)
 	control_score_path = args.output_root / "control" / "fixed-timeline-score.json"
 	# VAD intentionally stops transmitting trailing room silence after the
@@ -874,6 +1007,7 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 		require_complete_tail=require_complete_capture_tail,
 		max_onset_loss_samples=control_onset_budget_samples,
 		max_end_loss_samples=control_end_budget_samples,
+		scorer_attestation=provenance["fixed_timeline_scorer"],
 	)
 	scores: dict[str, Any] = {"control": control_score}
 	if "candidate" in results:
@@ -885,7 +1019,10 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 			require_complete_tail=require_complete_capture_tail,
 			max_onset_loss_samples=control_onset_budget_samples,
 			max_end_loss_samples=control_end_budget_samples,
+			scorer_attestation=provenance["fixed_timeline_scorer"],
 		)
+	_assert_file_attestation(Path(__file__), provenance["orchestrator"], "two-client orchestrator")
+	_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 	manifest_result = {
 		"schema_version": 3,
 		"status": "passed",
@@ -893,6 +1030,20 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 		"profile": case["profile"],
 		"run_provenance_sha256": provenance_sha256,
 		"receiver_cleanup": False,
+		"qualification_binding": {
+			"mixture_plan_sha256": provenance["plan"]["sha256"],
+			"case_set_sha256": provenance["qualification_case_set"]["sha256"] if provenance["qualification_case_set"] is not None else None,
+			"corpus_inventory_sha256": provenance["corpus_inventory"]["sha256"],
+			"corpus_lock_sha256": plan["corpus_lock_sha256"],
+			"case_id": case["case_id"],
+			"profile": case["profile"],
+			"dataset_split": plan["split"],
+			"plan_case_sha256": _canonical_sha256(case),
+			"render_manifest_sha256": rendered["manifest"]["sha256"],
+			"render_entry_sha256": rendered["entry_sha256"],
+			"source_input_sha256": rendered["input"]["sha256"],
+			"clean_reference_sha256": rendered["clean_reference"]["sha256"],
+		},
 		"input_timeline_gate": {
 			"artifact": "sender_pre_opus",
 			"alignment": "fixed-declared-latency",
@@ -960,6 +1111,16 @@ def run_self_test() -> None:
 		root = Path(directory)
 		runtime = root / "runtime"; runtime.mkdir()
 		client = runtime / "mumble.exe"; client.write_bytes(b"client")
+		(runtime / "CMakeCache.txt").write_text("mutable build marker\n", encoding="utf-8")
+		try:
+			_assert_packaged_runtime_root(runtime)
+		except E2EError as error:
+			if "staged/packaged payload" not in str(error):
+				raise AssertionError("mutable build-root rejection returned the wrong error") from error
+		else:
+			raise AssertionError("mutable CMake build tree was accepted as a release runtime")
+		(runtime / "CMakeCache.txt").unlink()
+		_assert_packaged_runtime_root(runtime)
 		server = root / "mumble-server.exe"; server.write_bytes(b"server")
 		rnnoise_asset = runtime / "rnnoise.dll"; rnnoise_asset.write_bytes(b"rnnoise-self-test")
 		deepfilter_asset = runtime / "deepfilternet" / "model.tar.gz"
@@ -980,13 +1141,13 @@ def run_self_test() -> None:
 					],
 				},
 				{
-					"id": "deepfilternet:balanced", "version": "self-test-deepfilter", "backend": "DeepFilterNet",
+					"id": "deepfilternet:low-latency", "version": "self-test-deepfilter-ll", "backend": "DeepFilterNet",
 					"path": "deepfilternet/model.tar.gz", "sha256": _file_sha256(deepfilter_asset),
 					"size": deepfilter_asset.stat().st_size, "licenseSpdx": "MIT OR Apache-2.0",
-					"sampleRateHz": 48000, "algorithmicLatencyMs": 40,
+					"sampleRateHz": 48000, "algorithmicLatencyMs": 10,
 					"recipeCompatibility": [
-						"input.quality.deepfilternet-balanced", "input.auto.quality.deepfilternet-balanced",
-						"input.voice-focus.deepfilternet-balanced",
+						"input.quality.deepfilternet-low-latency", "input.auto.quality.deepfilternet-low-latency",
+						"input.voice-focus.deepfilternet-low-latency",
 					],
 				},
 			],
@@ -1000,12 +1161,12 @@ def run_self_test() -> None:
 				"id": recipe_id, "revision": 1, "profile": profile, "engine": engine,
 				"modelIds": model_ids, "noiseReductionRange": noise_range,
 				"naturalCrispRange": character_range, "latencyBudgetMs": latency_ms,
-				"minimumCpuClass": minimum_cpu, "executionSemanticsVersion": 2,
-				"mixCurveVersion": 2, "adaptationPolicyVersion": 1,
+				"minimumCpuClass": minimum_cpu, "executionSemanticsVersion": 5,
+				"mixCurveVersion": 4, "adaptationPolicyVersion": 1,
 			}
 
 		recipe_manifest = runtime / "input-recipes.json"
-		_write_json(recipe_manifest, {
+		recipe_manifest_payload = {
 			"schemaVersion": 2,
 			"catalogRevision": "self-test-catalog-v2",
 			"modelManifestSha256": _file_sha256(model_manifest),
@@ -1017,8 +1178,8 @@ def run_self_test() -> None:
 					30, "Standard", [20, 90], [10, 90],
 				),
 				recipe(
-					"input.quality.deepfilternet-balanced", "Quality", "DeepFilterNet",
-					["deepfilternet:balanced"], 50, "High", [25, 90], [25, 100],
+					"input.quality.deepfilternet-low-latency", "Quality", "DeepFilterNet",
+					["deepfilternet:low-latency"], 50, "High", [25, 90], [25, 100],
 				),
 				recipe("input.auto.light.speex", "Auto", "Speex", [], 10, "Low", [0, 100], [0, 100]),
 				recipe(
@@ -1026,15 +1187,26 @@ def run_self_test() -> None:
 					30, "Standard", [20, 90], [10, 90],
 				),
 				recipe(
-					"input.auto.quality.deepfilternet-balanced", "Auto", "DeepFilterNet",
-					["deepfilternet:balanced"], 50, "High", [25, 90], [25, 100],
+					"input.auto.quality.deepfilternet-low-latency", "Auto", "DeepFilterNet",
+					["deepfilternet:low-latency"], 50, "High", [25, 90], [25, 100],
 				),
 				recipe(
-					"input.voice-focus.deepfilternet-balanced", "VoiceFocus", "DeepFilterNet",
-					["deepfilternet:balanced"], 50, "High", [70, 100], [40, 100],
+					"input.voice-focus.deepfilternet-low-latency", "VoiceFocus", "DeepFilterNet",
+					["deepfilternet:low-latency"], 50, "High", [70, 100], [40, 100],
 				),
 			],
-		})
+		}
+		_write_json(recipe_manifest, recipe_manifest_payload)
+		bad_fixed_contract = json.loads(json.dumps(recipe_manifest_payload))
+		bad_fixed_contract["recipes"][3]["minimumCpuClass"] = "Standard"
+		_write_json(recipe_manifest, bad_fixed_contract)
+		try:
+			_verify_product_catalog(model_manifest, recipe_manifest, runtime)
+		except E2EError:
+			pass
+		else:
+			raise AssertionError("fixed Quality CPU contract drift was accepted")
+		_write_json(recipe_manifest, recipe_manifest_payload)
 		metrics_runtime = root / "metrics-runtime.lock"; metrics_runtime.write_bytes(b"python-lock")
 		metric_models = []
 		for metric_id in ("dnsmos", "estoi", "wer-en", "wer-sv"):
@@ -1079,7 +1251,7 @@ def run_self_test() -> None:
 		render_manifest_path = root / "render.json"; _write_json(render_manifest_path, render_manifest)
 		adapter = root / "adapter.py"
 		adapter.write_text(
-			"import argparse,hashlib,json,shutil\n"
+			"import argparse,hashlib,json,wave\n"
 			"from pathlib import Path\n"
 			"def fh(path):\n"
 			" d=hashlib.sha256()\n"
@@ -1092,10 +1264,16 @@ def run_self_test() -> None:
 			" for path in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix().lower()):\n"
 			"  if path.is_file(): entries.append({'relative_path':path.relative_to(root).as_posix(),'sha256':fh(path),'size_bytes':path.stat().st_size})\n"
 			" return canonical(entries)\n"
+			"def delayed(source,target,latency):\n"
+			" with wave.open(str(source),'rb') as r:\n"
+			"  params=r.getparams(); frames=r.readframes(r.getnframes())\n"
+			" with wave.open(str(target),'wb') as w:\n"
+			"  w.setparams(params); w.writeframes(b'\\0\\0'*latency+frames)\n"
 			"p=argparse.ArgumentParser();p.add_argument('--contract');p.add_argument('--result');a=p.parse_args()\n"
 			"c=json.load(open(a.contract,encoding='utf8')); out=c['output_root']+'/capture.wav'; pre=c['output_root']+'/sender-pre-opus.wav'\n"
-			"shutil.copy2(c['clean_reference']['path'],out); shutil.copy2(c['clean_reference']['path'],pre); data=open(out,'rb').read(); pre_data=open(pre,'rb').read()\n"
 			"paths=c['paths']; binding=c['authorized_product_bindings'][0]; engine=binding['engine']\n"
+			"latency={'Original':0,'Light':480,'Balanced':1440,'Quality':1440,'VoiceFocus':1440}[c['profile']]\n"
+			"delayed(c['clean_reference']['path'],out,latency); delayed(c['clean_reference']['path'],pre,latency); data=open(out,'rb').read(); pre_data=open(pre,'rb').read()\n"
 			"identity={'contract_file_sha256':fh(a.contract),'run_provenance_sha256':canonical(json.load(open(paths['run_provenance'],encoding='utf8'))),'runtime_payload_sha256':tree(paths['runtime_root']),'client_binary_sha256':fh(paths['client_binary']),'server_binary_sha256':fh(paths['server_binary']),'model_manifest_sha256':fh(paths['model_manifest']),'recipe_manifest_sha256':fh(paths['recipe_manifest'])}\n"
 			"worker_frames=100 if engine=='DeepFilterNet' else 0\n"
 			"r={'schema_version':3,'status':'passed','role':c['role'],'profile':c['profile'],"
@@ -1104,7 +1282,7 @@ def run_self_test() -> None:
 			"'transport':{k:c['transport'][k] for k in ('opus_bitrate_bps','frames_per_packet','transmit_mode')},"
 			"'capture':{'relative_path':'capture.wav','sha256':hashlib.sha256(data).hexdigest(),'size_bytes':len(data)},"
 			"'sender_pre_opus':{'relative_path':'sender-pre-opus.wav','sha256':hashlib.sha256(pre_data).hexdigest(),'size_bytes':len(pre_data)},"
-			"'diagnostics':{'active_profile':c['profile'],'active_engine':engine,'active_recipe':binding['recipe'],'active_models':binding['models'],'callback_frame_count':100,'callback_p99_ms':1.0,'model_initialization_attempts':1 if engine in ('RNNoise','DeepFilterNet') else 0,'worker_frame_count':worker_frames,'worker_p99_ms':2.0 if worker_frames else 0.0,'mean_rtf':0.1,'deadline_miss_count':0,'declared_latency_samples':0,'fallback_count':0,'invalid_output_count':0,'tail_drained':True}}\n"
+			"'diagnostics':{'active_profile':c['profile'],'active_engine':engine,'active_recipe':binding['recipe'],'active_models':binding['models'],'callback_frame_count':100,'callback_p99_ms':1.0,'model_initialization_attempts':1 if engine in ('RNNoise','DeepFilterNet') else 0,'worker_frame_count':worker_frames,'worker_p99_ms':2.0 if worker_frames else 0.0,'mean_rtf':0.1,'deadline_miss_count':0,'declared_latency_samples':latency,'fallback_count':0,'invalid_output_count':0,'tail_drained':True}}\n"
 			"json.dump(r,open(a.result,'w',encoding='utf8'),sort_keys=True)\n",
 			encoding="utf-8",
 		)
@@ -1113,7 +1291,7 @@ def run_self_test() -> None:
 			render_root=audio, runtime_root=runtime, client_binary=client, server_binary=server,
 			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
 			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
-			adapter_arg=[], output_root=root / "output", emit_contracts_only=False,
+			qualification_case_set=plan_path, adapter_arg=[], output_root=root / "output", emit_contracts_only=False,
 		)
 		result = run(args)
 		if result["status"] != "passed" or set(result["results"]) != {
@@ -1140,6 +1318,15 @@ def run_self_test() -> None:
 			"complete_tail_required": True,
 		}:
 			raise AssertionError("hard input timeline gate has unexpected semantics")
+		binding = result.get("qualification_binding")
+		if (
+			not isinstance(binding, dict)
+			or binding.get("mixture_plan_sha256") != _file_sha256(plan_path)
+			or binding.get("case_set_sha256") != _file_sha256(plan_path)
+			or binding.get("plan_case_sha256") != _canonical_sha256(selected_case)
+			or binding.get("render_entry_sha256") != _canonical_sha256(render_manifest["cases"][0])
+		):
+			raise AssertionError("E2E manifest did not bind the exact protected plan, case, and render entry")
 		if original_contract["input"]["sha256"] != render_manifest["cases"][0]["input"]["sha256"]:
 			raise AssertionError("noisy Original comparison did not use the rendered mixture")
 		if (
@@ -1165,8 +1352,8 @@ def run_self_test() -> None:
 		candidate_evidence = result["results"]["candidate"]
 		candidate_edge_evidence = result["results"]["candidate_edge"]
 		if (
-			candidate_evidence["active_recipe"]["id"] != "input.quality.deepfilternet-balanced"
-			or candidate_evidence["active_models"][0]["id"] != "deepfilternet:balanced"
+			candidate_evidence["active_recipe"]["id"] != "input.quality.deepfilternet-low-latency"
+			or candidate_evidence["active_models"][0]["id"] != "deepfilternet:low-latency"
 			or candidate_evidence["performance"]["model_initialization_attempts"] != 1
 			or candidate_evidence["performance"]["worker_frame_count"] <= 0
 			or candidate_evidence["execution_identity"]["run_provenance_sha256"] != result["run_provenance_sha256"]
@@ -1189,7 +1376,7 @@ def run_self_test() -> None:
 			try:
 				_validate_adapter_result(
 					negative_result_path, candidate_contract, candidate_contract_path,
-					candidate_contract_sha256, candidate_root,
+					candidate_contract_sha256, candidate_root, 1440,
 				)
 			except E2EError:
 				return
@@ -1207,6 +1394,10 @@ def run_self_test() -> None:
 		expect_result_failure(
 			"active model",
 			lambda value: value["diagnostics"]["active_models"][0].__setitem__("sha256", "0" * 64),
+		)
+		expect_result_failure(
+			"declared semantics-v5 latency",
+			lambda value: value["diagnostics"].__setitem__("declared_latency_samples", 960),
 		)
 		expect_result_failure(
 			"sender pre-Opus artifact",
@@ -1258,6 +1449,52 @@ def run_self_test() -> None:
 		else:
 			raise AssertionError("hard pre-Opus timeline gate accepted a two-frame onset regression")
 
+		# A VAD sender is allowed to stop producing packet-path callbacks once only
+		# trailing room silence remains, but its attested pre-Opus WAV still has a
+		# source-timeline contract. Keep the complete-tail gate strict: the runtime
+		# capture backend must reconstruct that unsent source interval as zero PCM,
+		# while any causal latency beyond the source still needs real drain output.
+		vad_reference = candidate_edge_root / "vad-source-timeline.wav"
+		vad_truncated = candidate_edge_root / "vad-truncated-pre-opus.wav"
+		vad_completed = candidate_edge_root / "vad-completed-pre-opus.wav"
+		speech_samples = FRAME_SAMPLES * 6
+		trailing_silence_samples = FRAME_SAMPLES * 3
+		speech_pcm = b"".join(
+			struct.pack("<h", round(6000 * math.sin(2 * math.pi * 330 * index / 48000)))
+			for index in range(speech_samples)
+		)
+		with wave.open(str(vad_reference), "wb") as target:
+			target.setnchannels(1); target.setsampwidth(2); target.setframerate(48000)
+			target.writeframes(speech_pcm + b"\x00\x00" * trailing_silence_samples)
+		with wave.open(str(vad_truncated), "wb") as target:
+			target.setnchannels(1); target.setsampwidth(2); target.setframerate(48000)
+			target.writeframes(speech_pcm)
+		with wave.open(str(vad_completed), "wb") as target:
+			target.setnchannels(1); target.setsampwidth(2); target.setframerate(48000)
+			target.writeframes(speech_pcm + b"\x00\x00" * trailing_silence_samples)
+
+		truncated_score_path = candidate_edge_root / "vad-truncated-score.json"
+		try:
+			_score(vad_reference, vad_truncated, 0, truncated_score_path, require_complete_tail=True)
+		except E2EError:
+			truncated_score = _load_json(truncated_score_path)
+			if (
+				truncated_score.get("passed") is not False
+				or truncated_score.get("missing_tail_samples") != trailing_silence_samples
+				or truncated_score.get("onset_loss_samples") > FRAME_SAMPLES
+				or truncated_score.get("end_loss_samples") > FRAME_SAMPLES
+			):
+				raise AssertionError("truncated VAD source timeline failed for an unexpected reason")
+		else:
+			raise AssertionError("complete-tail gate accepted a truncated VAD source timeline")
+
+		completed_score = _score(
+			vad_reference, vad_completed, 0, candidate_edge_root / "vad-completed-score.json",
+			require_complete_tail=True,
+		)
+		if completed_score.get("passed") is not True or completed_score.get("missing_tail_samples") != 0:
+			raise AssertionError("zero-completed VAD source timeline did not satisfy the strict tail gate")
+
 
 def main(argv: Sequence[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
@@ -1271,6 +1508,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--model-manifest", type=Path)
 	parser.add_argument("--recipe-manifest", type=Path)
 	parser.add_argument("--inventory", type=Path)
+	parser.add_argument(
+		"--qualification-case-set", type=Path,
+		help="optional protected case-set file; required downstream before E2E evidence can qualify a release",
+	)
 	parser.add_argument("--corpus-lock", type=Path, default=Path(__file__).with_name("corpus-lock.json"))
 	parser.add_argument("--metrics-manifest", type=Path)
 	parser.add_argument("--adapter", type=Path)

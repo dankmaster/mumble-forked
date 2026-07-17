@@ -39,6 +39,7 @@ private:
 	void submitInputFrame(float *samples, unsigned int sampleCount);
 	void observePreOpusPcm(short *samples, unsigned int sampleCount, unsigned int channelCount,
 						 unsigned int sampleRate, bool isSpeech);
+	void completeVadPreOpusSourceTimeline(std::uint64_t submittedSamples);
 	bool writePreOpusCapture(QString *errorMessage) const;
 	void beginVoiceContractObservation();
 	void finishVoiceContractObservation();

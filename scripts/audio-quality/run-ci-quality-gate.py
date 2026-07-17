@@ -8,13 +8,22 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from measurement_evidence import (
+	MeasurementEvidenceError,
+	canonical_json_bytes as canonical_measurement_json_bytes,
+	indexed_artifact_references,
+)
 
-SUITES = ("master_quality", "nightly")
+
+SUITES = ("master_quality", "nightly", "release")
+CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 QUALITY_QUALIFICATION = "qualification.json"
 ORIGINAL_QUALIFICATION = "original-voice-qualification.json"
 UPLOAD_DIRECTORY = "upload"
@@ -22,6 +31,7 @@ ARTIFACT_SUFFIXES = {
 	"case_evidence_jsonl": ".jsonl",
 	"failure_spectrogram_index": ".json",
 	"junit": ".xml",
+	"measurement_index_json": ".json",
 	"per_case_csv": ".csv",
 	"per_case_parquet": ".parquet",
 	"summary_html": ".html",
@@ -185,18 +195,20 @@ def harness_command(
 	server_binary: Path,
 	corpus_inventory: Path,
 	case_set: Path,
+	mixture_plan: Path,
 	release_fixtures: Path,
 	metrics_runtime: Path,
 	runner_class: str,
 	hardware_fingerprint_sha256: str,
 	harness_sha256: str,
+	release_holdout_approval_public_key_sha256: str | None = None,
 ) -> list[str]:
 	common_values = (suite, str(source_root), str(output_root), source_sha, str(corpus_lock))
 	if harness.suffix.lower() == ".ps1":
 		pwsh = shutil.which("pwsh")
 		if not pwsh:
 			raise GateError("pwsh is required to execute the configured PowerShell quality harness")
-		return [
+		command = [
 			pwsh,
 			"-NoLogo",
 			"-NoProfile",
@@ -229,6 +241,8 @@ def harness_command(
 			str(corpus_inventory),
 			"-CaseSetPath",
 			str(case_set),
+			"-MixturePlanPath",
+			str(mixture_plan),
 			"-ReleaseFixturesPath",
 			str(release_fixtures),
 			"-MetricsRuntimePath",
@@ -240,13 +254,19 @@ def harness_command(
 			"-HarnessSha256",
 			harness_sha256,
 		]
+		if release_holdout_approval_public_key_sha256 is not None:
+			command.extend([
+				"-ReleaseHoldoutApprovalPublicKeySha256",
+				release_holdout_approval_public_key_sha256,
+			])
+		return command
 	if harness.suffix.lower() == ".py":
 		command = [ sys.executable, str(harness) ]
 	elif os.name == "nt" and harness.suffix.lower() in (".bat", ".cmd"):
 		command = [ os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", str(harness) ]
 	else:
 		command = [ str(harness) ]
-	return command + [
+	command += [
 		"--suite",
 		common_values[0],
 		"--source-root",
@@ -273,6 +293,8 @@ def harness_command(
 		str(corpus_inventory),
 		"--case-set",
 		str(case_set),
+		"--mixture-plan",
+		str(mixture_plan),
 		"--release-fixtures",
 		str(release_fixtures),
 		"--metrics-runtime",
@@ -284,6 +306,12 @@ def harness_command(
 		"--harness-sha256",
 		harness_sha256,
 	]
+	if release_holdout_approval_public_key_sha256 is not None:
+		command.extend([
+			"--release-holdout-approval-public-key-sha256",
+			release_holdout_approval_public_key_sha256,
+		])
+	return command
 
 
 def run_validator(command: Sequence[str], label: str) -> None:
@@ -331,7 +359,8 @@ def validate_identity(
 
 
 def validate_recipe_and_models(
-	quality: Mapping[str, Any], model_manifest: Mapping[str, Any], recipe_manifest: Mapping[str, Any]
+	quality: Mapping[str, Any], model_manifest: Mapping[str, Any], recipe_manifest: Mapping[str, Any],
+	measurement_index: Mapping[str, Any],
 ) -> None:
 	catalog_revision = model_manifest.get("catalogRevision")
 	if not isinstance(catalog_revision, str) or not catalog_revision or recipe_manifest.get("catalogRevision") != catalog_revision:
@@ -364,13 +393,105 @@ def validate_recipe_and_models(
 	reported_hashes = build.get("model_hashes") if isinstance(build, dict) else None
 	if not isinstance(reported_hashes, list) or sorted(reported_hashes) != expected_hashes:
 		raise GateError("quality evidence model hashes do not match the exact unsigned product model assets")
+	model_by_id = {
+		str(model["id"]): model
+		for model in models
+		if isinstance(model, dict) and isinstance(model.get("id"), str)
+	}
+	manifest_sha256 = build.get("recipe_manifest_sha256")
+	expected_bindings = []
+	for profile in CORE_PROFILES:
+		matches = [
+			recipe for recipe in recipes
+			if isinstance(recipe, dict) and recipe.get("profile") == profile and recipe.get("advancedOnly") is not True
+		]
+		if len(matches) != 1:
+			raise GateError(f"unsigned recipe manifest must expose exactly one product binding for {profile}")
+		recipe = matches[0]
+		model_ids = recipe.get("modelIds")
+		if not isinstance(model_ids, list) or any(not isinstance(model_id, str) for model_id in model_ids):
+			raise GateError(f"unsigned recipe manifest has invalid model IDs for {profile}")
+		try:
+			binding_models = [
+				{
+					"id": model_id,
+					"sha256": model_by_id[model_id]["sha256"],
+					"version": model_by_id[model_id]["version"],
+				}
+				for model_id in model_ids
+			]
+		except (KeyError, TypeError) as error:
+			raise GateError(f"unsigned model manifest cannot resolve the exact {profile} model binding") from error
+		expected_bindings.append({
+			"profile": profile,
+			"engine": recipe.get("engine"),
+			"recipe": {
+				"catalog_revision": catalog_revision,
+				"id": recipe.get("id"),
+				"manifest_sha256": manifest_sha256,
+				"revision": recipe.get("revision"),
+			},
+			"models": sorted(binding_models, key=lambda model: str(model["id"])),
+		})
+	if measurement_index.get("profile_bindings") != expected_bindings:
+		raise GateError("measurement index profile bindings do not exactly match the unsigned product manifests")
 
 
-def safe_artifact_paths(quality: Mapping[str, Any]) -> list[str]:
+def validate_release_holdout_trust_root(
+	quality: Mapping[str, Any], measurement_index: Mapping[str, Any], expected_public_key_sha256: str | None,
+) -> None:
+	suite = quality.get("suite")
+	build = quality.get("build")
+	if not isinstance(build, dict):
+		raise GateError("quality evidence build is missing")
+	build_value = build.get("release_holdout_approval_public_key_sha256")
+	index_value = measurement_index.get("release_holdout_approval_public_key_sha256")
+	if suite == "release":
+		if expected_public_key_sha256 is None:
+			raise GateError("release qualification requires an externally pinned release-owner public-key SHA-256")
+		if build_value != expected_public_key_sha256 or index_value != expected_public_key_sha256:
+			raise GateError("release holdout approval key does not match the externally pinned trust root")
+	else:
+		if expected_public_key_sha256 is not None or build_value is not None or index_value is not None:
+			raise GateError("release holdout approval key is forbidden outside the release suite")
+
+
+def _is_reparse(path: Path) -> bool:
+	try:
+		metadata = os.lstat(path)
+	except OSError as error:
+		raise GateError(f"unable to inspect upload source {path}: {error}") from error
+	attributes = getattr(metadata, "st_file_attributes", 0)
+	reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+	return path.is_symlink() or bool(attributes & reparse_flag)
+
+
+def _safe_existing_file(output_root: Path, relative: str, expected: Mapping[str, Any]) -> Path:
+	resolved_output = output_root.resolve()
+	current = resolved_output
+	for part in PurePosixPath(relative).parts:
+		current = current / part
+		if not current.exists():
+			raise GateError(f"validated upload source is missing: {relative}")
+		if _is_reparse(current):
+			raise GateError(f"validated upload source is a symlink/reparse point: {relative}")
+	source = current.resolve()
+	try:
+		source.relative_to(resolved_output)
+	except ValueError as error:
+		raise GateError(f"upload source escapes output root: {relative}") from error
+	if not source.is_file():
+		raise GateError(f"validated upload source is not a regular file: {relative}")
+	if source.stat().st_size != expected.get("size_bytes") or file_sha256(source) != expected.get("sha256"):
+		raise GateError(f"validated upload source bytes do not match their measurement index: {relative}")
+	return source
+
+
+def safe_artifact_paths(output_root: Path, quality: Mapping[str, Any]) -> list[str]:
 	artifacts = quality.get("artifacts")
 	if not isinstance(artifacts, dict):
 		raise GateError("qualification artifacts are missing")
-	paths = []
+	paths: list[str] = []
 	for name, value in artifacts.items():
 		if not isinstance(value, dict) or value.get("contains_audio_samples") is not False:
 			raise GateError(f"artifact {name!r} is not explicitly marked audio-free")
@@ -384,27 +505,118 @@ def safe_artifact_paths(quality: Mapping[str, Any]) -> list[str]:
 		if expected_suffix is None or parsed.suffix.lower() != expected_suffix:
 			raise GateError(f"artifact {name!r} does not use the required {expected_suffix!r} suffix")
 		paths.append(path)
-	return sorted(set(paths))
+	measurement_value = artifacts.get("measurement_index_json")
+	if not isinstance(measurement_value, dict):
+		raise GateError("qualification does not contain measurement_index_json")
+	measurement_path = str(measurement_value["path"])
+	measurement_file = _safe_existing_file(output_root, measurement_path, measurement_value)
+	try:
+		raw = measurement_file.read_bytes()
+		index = json.loads(raw.decode("utf-8"))
+	except (OSError, UnicodeError, json.JSONDecodeError) as error:
+		raise GateError(f"unable to load measurement index: {error}") from error
+	if not isinstance(index, dict) or raw != canonical_measurement_json_bytes(index) + b"\n":
+		raise GateError("measurement index must be canonical sorted-key UTF-8 JSON with one LF")
+	build = quality.get("build")
+	runner_class = build.get("runner_class") if isinstance(build, dict) else None
+	suite = quality.get("suite")
+	if not isinstance(runner_class, str) or not isinstance(suite, str):
+		raise GateError("qualification suite/runner identity is missing")
+	prefix = f"artifacts/{suite}-{runner_class}/"
+	try:
+		indexed = indexed_artifact_references(index, prefix)
+	except MeasurementEvidenceError as error:
+		raise GateError(f"measurement index upload allowlist is invalid: {error}") from error
+	for name, value in artifacts.items():
+		if name == "measurement_index_json":
+			continue
+		path = str(value["path"])
+		if path not in indexed:
+			raise GateError(f"qualification artifact {name!r} is not transitively listed by measurement-index.json")
+		for field in ("contains_audio_samples", "path", "sha256", "size_bytes"):
+			if indexed[path].get(field) != value.get(field):
+				raise GateError(f"qualification artifact {name!r} differs from its measurement-index reference")
+	for relative, reference in indexed.items():
+		_safe_existing_file(output_root, relative, reference)
+	paths.extend(indexed)
+	paths = sorted(set(paths))
+
+	namespace_root = output_root.joinpath(*PurePosixPath(prefix.rstrip("/")).parts)
+	if not namespace_root.is_dir() or _is_reparse(namespace_root):
+		raise GateError(f"measurement artifact namespace is missing or unsafe: {prefix}")
+	observed: list[str] = []
+	for current, directories, names in os.walk(namespace_root):
+		current_path = Path(current)
+		for directory in directories:
+			if _is_reparse(current_path / directory):
+				raise GateError(f"measurement artifact namespace contains a reparse directory: {current_path / directory}")
+		for name in names:
+			candidate = current_path / name
+			if _is_reparse(candidate) or not candidate.is_file():
+				raise GateError(f"measurement artifact namespace contains an unsafe entry: {candidate}")
+			observed.append(candidate.relative_to(output_root).as_posix())
+	if sorted(observed) != paths:
+		missing = sorted(set(paths) - set(observed))
+		extra = sorted(set(observed) - set(paths))
+		raise GateError(f"measurement artifact namespace differs from the exact index; missing={missing!r}; unindexed={extra!r}")
+	return paths
 
 
-def prepare_safe_upload(output_root: Path, quality: Mapping[str, Any]) -> None:
+def prepare_safe_upload(
+	output_root: Path, quality: Mapping[str, Any],
+	root_evidence_snapshot: Mapping[str, Mapping[str, Any]] | None = None,
+) -> None:
 	upload_root = output_root / UPLOAD_DIRECTORY
 	if upload_root.exists():
 		raise GateError(f"safe upload directory already exists: {upload_root}")
+	validated_paths = safe_artifact_paths(output_root, quality)
+	artifacts = quality.get("artifacts")
+	if not isinstance(artifacts, dict):
+		raise GateError("qualification artifacts are missing")
+	measurement_reference = artifacts.get("measurement_index_json")
+	if not isinstance(measurement_reference, dict):
+		raise GateError("qualification does not contain measurement_index_json")
+	measurement_file = _safe_existing_file(output_root, str(measurement_reference["path"]), measurement_reference)
+	try:
+		measurement_raw = measurement_file.read_bytes()
+		measurement_index = json.loads(measurement_raw.decode("utf-8"))
+	except (OSError, UnicodeError, json.JSONDecodeError) as error:
+		raise GateError(f"unable to snapshot measurement index before upload: {error}") from error
+	if not isinstance(measurement_index, dict) or measurement_raw != canonical_measurement_json_bytes(measurement_index) + b"\n":
+		raise GateError("measurement index changed after validation")
+	build = quality.get("build")
+	runner_class = build.get("runner_class") if isinstance(build, dict) else None
+	suite = quality.get("suite")
+	if not isinstance(runner_class, str) or not isinstance(suite, str):
+		raise GateError("qualification suite/runner identity is missing")
+	try:
+		indexed = indexed_artifact_references(measurement_index, f"artifacts/{suite}-{runner_class}/")
+	except MeasurementEvidenceError as error:
+		raise GateError(f"measurement index upload allowlist changed after validation: {error}") from error
+	expected: dict[str, Mapping[str, Any]] = {str(measurement_reference["path"]): measurement_reference, **indexed}
+	for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION):
+		source = output_root.joinpath(*PurePosixPath(relative).parts)
+		if not source.is_file() or _is_reparse(source):
+			raise GateError(f"validated upload source is missing or unsafe: {relative}")
+		if root_evidence_snapshot is None:
+			expected[relative] = {"size_bytes": source.stat().st_size, "sha256": file_sha256(source)}
+		else:
+			reference = root_evidence_snapshot.get(relative)
+			if not isinstance(reference, dict):
+				raise GateError(f"validated root evidence has no immutable pre-validation snapshot: {relative}")
+			expected[relative] = reference
+	paths = list(dict.fromkeys([QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, *validated_paths]))
 	upload_root.mkdir(parents=True)
-	paths = [ QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, *safe_artifact_paths(quality) ]
-	resolved_output = output_root.resolve()
 	for relative in paths:
-		source = output_root.joinpath(*PurePosixPath(relative).parts).resolve()
-		try:
-			source.relative_to(resolved_output)
-		except ValueError as error:
-			raise GateError(f"upload source escapes output root: {relative}") from error
-		if not source.is_file():
-			raise GateError(f"validated upload source is missing: {relative}")
+		reference = expected.get(relative)
+		if reference is None:
+			raise GateError(f"validated upload source has no immutable hash snapshot: {relative}")
+		resolved_source = _safe_existing_file(output_root, relative, reference)
 		destination = upload_root.joinpath(*PurePosixPath(relative).parts)
 		destination.parent.mkdir(parents=True, exist_ok=True)
-		shutil.copy2(source, destination)
+		shutil.copy2(resolved_source, destination)
+		if destination.stat().st_size != reference["size_bytes"] or file_sha256(destination) != reference["sha256"]:
+			raise GateError(f"copied upload artifact differs from its immutable pre-copy hash: {relative}")
 	(upload_root / ".safe-to-upload").write_text("validated audio-free evidence\n", encoding="utf-8")
 
 
@@ -419,49 +631,195 @@ def append_github_output(path: Path | None, safe_upload: bool) -> None:
 
 
 def run_self_test() -> None:
+	if "release" not in SUITES:
+		raise AssertionError("protected CI gate cannot parse the final release suite")
 	if canonical_json_sha256({ "b": 2, "a": 1 }) != canonical_json_sha256({ "a": 1, "b": 2 }):
 		raise AssertionError("canonical JSON hashing is not order-independent")
 	command = harness_command(
 		Path("trusted-harness.py"), "master_quality", Path("source"), Path("output"), "a" * 40,
 		Path("corpus-lock.json"), Path("candidate.exe"), Path("legacy.exe"), Path("stage"),
 		Path("models.json"), Path("recipes.json"), Path("server.exe"), Path("inventory.json"),
-		Path("cases.json"), Path("release-fixtures"), Path("metrics-runtime"), "low-performance",
+		Path("cases.json"), Path("mixture-plan.json"), Path("release-fixtures"), Path("metrics-runtime"), "low-performance",
 		"b" * 64, "c" * 64,
 	)
 	if command[command.index("--legacy-binary") + 1] != "legacy.exe":
 		raise AssertionError("trusted harness command is not bound to the supplied legacy executable")
 	if command[command.index("--runner-class") + 1] != "low-performance":
 		raise AssertionError("trusted harness command is not bound to the supplied runner class")
-	if safe_artifact_paths(
-		{
-			"artifacts": {
-				"case_evidence_jsonl": {
-					"contains_audio_samples": False,
-					"path": "artifacts/master_quality-low-performance/case-evidence.jsonl",
-				},
-				"junit": {
-					"contains_audio_samples": False,
-					"path": "reports/junit.xml",
-				}
-			}
-		}
-	) != [ "artifacts/master_quality-low-performance/case-evidence.jsonl", "reports/junit.xml" ]:
-		raise AssertionError("safe artifact path classification regression")
+	if command[command.index("--mixture-plan") + 1] != "mixture-plan.json":
+		raise AssertionError("trusted harness command is not bound to the supplied mixture plan")
+	release_command = harness_command(
+		Path("trusted-harness.py"), "release", Path("source"), Path("output"), "a" * 40,
+		Path("corpus-lock.json"), Path("candidate.exe"), Path("legacy.exe"), Path("stage"),
+		Path("models.json"), Path("recipes.json"), Path("server.exe"), Path("inventory.json"),
+		Path("cases.json"), Path("mixture-plan.json"), Path("release-fixtures"), Path("metrics-runtime"), "low-performance",
+		"b" * 64, "c" * 64, "d" * 64,
+	)
+	if release_command[release_command.index("--release-holdout-approval-public-key-sha256") + 1] != "d" * 64:
+		raise AssertionError("trusted release harness command is not bound to the externally pinned release-owner key")
+	validate_release_holdout_trust_root(
+		{"suite": "release", "build": {"release_holdout_approval_public_key_sha256": "d" * 64}},
+		{"release_holdout_approval_public_key_sha256": "d" * 64}, "d" * 64,
+	)
 	try:
-		safe_artifact_paths(
-			{
-				"artifacts": {
-					"capture": {
-						"contains_audio_samples": True,
-						"path": "private/capture.wav",
-					}
-				}
-			}
+		validate_release_holdout_trust_root(
+			{"suite": "release", "build": {"release_holdout_approval_public_key_sha256": "e" * 64}},
+			{"release_holdout_approval_public_key_sha256": "e" * 64}, "d" * 64,
 		)
 	except GateError:
 		pass
 	else:
-		raise AssertionError("audio-bearing artifact was accepted")
+		raise AssertionError("self-declared release-owner key bypassed the external CI trust root")
+	with tempfile.TemporaryDirectory(prefix="mumble-safe-quality-upload-") as directory:
+		output = Path(directory)
+		prefix = "artifacts/master_quality-low-performance"
+		artifact_root = output / prefix
+		artifact_root.mkdir(parents=True)
+
+		def write(relative: str, payload: bytes) -> Mapping[str, Any]:
+			path = output.joinpath(*PurePosixPath(relative).parts)
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_bytes(payload)
+			return {
+				"contains_audio_samples": False,
+				"path": relative,
+				"sha256": hashlib.sha256(payload).hexdigest(),
+				"size_bytes": len(payload),
+			}
+
+		junit = write(f"{prefix}/junit.xml", b"<testsuite/>\n")
+		objective = write(f"{prefix}/measurements/case-001/objective-quality.json", b"{}\n")
+		metrics_attestation = write(f"{prefix}/measurements/metrics-runtime-attestation.json", b"{}\n")
+		index = {
+			"schema_version": 1,
+			"kind": "mumble-input-enhancement-measurement-index-v1",
+			"qualification_scope": "core",
+			"suite": "master_quality",
+			"qualification_binding_sha256": "1" * 64,
+			"objective_runtime_binding_sha256": "2" * 64,
+			"metrics_runtime_attestation": metrics_attestation,
+			"build": {},
+			"plan_binding": {},
+			"profile_bindings": [],
+			"published_artifacts": [{"name": "junit", "artifact": junit}],
+			"cases": [{"reports": {"objective_score": objective}}],
+			"release_holdout_approval_public_key_sha256": None,
+			"release_holdout_openings": [],
+			"soak_reports": [],
+			"transitions": [],
+		}
+		index_payload = canonical_measurement_json_bytes(index) + b"\n"
+		measurement_index = write(f"{prefix}/measurement-index.json", index_payload)
+		quality_upload = {
+			"suite": "master_quality",
+			"build": {"runner_class": "low-performance"},
+			"artifacts": {"junit": junit, "measurement_index_json": measurement_index},
+		}
+		(output / QUALITY_QUALIFICATION).write_text("{}\n", encoding="utf-8")
+		(output / ORIGINAL_QUALIFICATION).write_text("{}\n", encoding="utf-8")
+		expected_paths = sorted((junit["path"], metrics_attestation["path"], objective["path"], measurement_index["path"]))
+		if safe_artifact_paths(output, quality_upload) != expected_paths:
+			raise AssertionError("measurement index did not produce the exact transitive upload closure")
+
+		unindexed = artifact_root / "unindexed.json"
+		unindexed.write_text("{}\n", encoding="utf-8")
+		try:
+			safe_artifact_paths(output, quality_upload)
+		except GateError:
+			pass
+		else:
+			raise AssertionError("unindexed evidence inside the public namespace was accepted")
+		unindexed.unlink()
+
+		original_copy2 = shutil.copy2
+		objective_path = output.joinpath(*PurePosixPath(str(objective["path"])).parts).resolve()
+		raced = False
+		def racing_copy2(source: Any, destination: Any, *args: Any, **kwargs: Any) -> Any:
+			nonlocal raced
+			if not raced and Path(source).resolve() == objective_path:
+				objective_path.write_bytes(b'{"tampered":true}\n')
+				raced = True
+			return original_copy2(source, destination, *args, **kwargs)
+		shutil.copy2 = racing_copy2
+		try:
+			prepare_safe_upload(output, quality_upload)
+		except GateError:
+			pass
+		else:
+			raise AssertionError("source mutation between validation and copy was accepted")
+		finally:
+			shutil.copy2 = original_copy2
+			objective_path.write_bytes(b"{}\n")
+			shutil.rmtree(output / UPLOAD_DIRECTORY, ignore_errors=True)
+
+		prepare_safe_upload(output, quality_upload)
+		upload = output / UPLOAD_DIRECTORY
+		for relative in expected_paths:
+			output.joinpath(*PurePosixPath(relative).parts).unlink()
+		if safe_artifact_paths(upload, quality_upload) != expected_paths:
+			raise AssertionError("the copied upload closure was not independently self-contained")
+		if any(PurePosixPath(path).suffix.lower() in {".wav", ".flac", ".opus"} for path in expected_paths):
+			raise AssertionError("audio leaked into the safe upload allowlist")
+
+	catalog_revision = "self-test-v2"
+	rnnoise_hash = "1" * 64
+	deepfilter_hash = "2" * 64
+	model_manifest = {
+		"catalogRevision": catalog_revision,
+		"models": [
+			{"id": "rnnoise:embedded", "sha256": rnnoise_hash, "version": "1"},
+			{"id": "deepfilternet:low-latency", "sha256": deepfilter_hash, "version": "1"},
+		],
+	}
+	recipe_rows = [
+		("Original", "None", "input.original", []),
+		("Light", "Speex", "input.light.speex", []),
+		("Balanced", "RNNoise", "input.balanced", ["rnnoise:embedded"]),
+		("Quality", "DeepFilterNet", "input.quality", ["deepfilternet:low-latency"]),
+		("VoiceFocus", "DeepFilterNet", "input.voice-focus", ["deepfilternet:low-latency"]),
+		("Auto", "Speex", "input.auto.light", []),
+		("Auto", "RNNoise", "input.auto.balanced", ["rnnoise:embedded"]),
+		("Auto", "DeepFilterNet", "input.auto.quality", ["deepfilternet:low-latency"]),
+	]
+	recipe_manifest = {
+		"catalogRevision": catalog_revision,
+		"recipes": [
+			{"profile": profile, "engine": engine, "id": recipe_id, "revision": 1, "modelIds": model_ids}
+			for profile, engine, recipe_id, model_ids in recipe_rows
+		],
+	}
+	recipe_manifest_hash = "3" * 64
+	model_lookup = {model["id"]: model for model in model_manifest["models"]}
+	profile_bindings = []
+	for profile, engine, recipe_id, model_ids in recipe_rows[:5]:
+		profile_bindings.append({
+			"profile": profile,
+			"engine": engine,
+			"recipe": {
+				"catalog_revision": catalog_revision, "id": recipe_id,
+				"manifest_sha256": recipe_manifest_hash, "revision": 1,
+			},
+			"models": [
+				{"id": model_id, "sha256": model_lookup[model_id]["sha256"], "version": model_lookup[model_id]["version"]}
+				for model_id in model_ids
+			],
+		})
+	product_quality = {
+		"build": {
+			"recipe_set_version": catalog_revision,
+			"recipe_manifest_sha256": recipe_manifest_hash,
+			"model_hashes": sorted([rnnoise_hash, deepfilter_hash]),
+		},
+	}
+	validate_recipe_and_models(product_quality, model_manifest, recipe_manifest, {"profile_bindings": profile_bindings})
+	wrong_bindings = json.loads(json.dumps(profile_bindings))
+	wrong_bindings[3]["recipe"]["id"] = "input.quality.not-in-product-manifest"
+	try:
+		validate_recipe_and_models(product_quality, model_manifest, recipe_manifest, {"profile_bindings": wrong_bindings})
+	except GateError:
+		pass
+	else:
+		raise AssertionError("measurement profile bindings were not tied to the exact product manifests")
 
 	digest = "a" * 64
 	source_sha = "b" * 40
@@ -531,6 +889,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--server-binary", type=Path)
 	parser.add_argument("--corpus-inventory", type=Path)
 	parser.add_argument("--case-set", type=Path)
+	parser.add_argument("--mixture-plan", type=Path)
 	parser.add_argument("--release-fixtures", type=Path)
 	parser.add_argument("--metrics-runtime", type=Path)
 	parser.add_argument("--runner-class", choices=("low-performance", "mainstream", "local-development"))
@@ -540,8 +899,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--expected-server-binary-sha256")
 	parser.add_argument("--expected-corpus-inventory-sha256")
 	parser.add_argument("--expected-case-set-sha256")
+	parser.add_argument("--expected-mixture-plan-sha256")
 	parser.add_argument("--expected-release-fixtures-sha256")
 	parser.add_argument("--expected-metrics-runtime-sha256")
+	parser.add_argument("--expected-release-holdout-approval-public-key-sha256")
 	parser.add_argument("--github-output", type=Path)
 	parser.add_argument("--validate-only", action="store_true", help="validate pre-existing output without invoking a harness")
 	parser.add_argument("--self-test", action="store_true")
@@ -558,12 +919,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 			raise GateError("--suite, --source-root, and --output-root are required")
 		if not args.validate_only and args.harness is None:
 			raise GateError("--harness is required unless --validate-only is used")
+		expected_release_holdout_key_sha256: str | None = None
+		if args.suite == "release":
+			if args.expected_release_holdout_approval_public_key_sha256 is None:
+				raise GateError("release suite requires --expected-release-holdout-approval-public-key-sha256")
+			expected_release_holdout_key_sha256 = lowercase_sha256(
+				args.expected_release_holdout_approval_public_key_sha256,
+				"expected release holdout approval public key",
+			)
+		elif args.expected_release_holdout_approval_public_key_sha256 is not None:
+			raise GateError("release holdout approval key pin is forbidden outside --suite release")
 		if not args.validate_only and any(value is None for value in (
 			args.tested_binary, args.legacy_binary, args.staged_client_root, args.model_manifest, args.recipe_manifest,
-			args.server_binary, args.corpus_inventory, args.case_set, args.release_fixtures, args.metrics_runtime,
+			args.server_binary, args.corpus_inventory, args.case_set, args.mixture_plan, args.release_fixtures, args.metrics_runtime,
 			args.runner_class, args.hardware_fingerprint_sha256, args.expected_harness_sha256,
 			args.expected_legacy_binary_sha256, args.expected_server_binary_sha256,
-			args.expected_corpus_inventory_sha256, args.expected_case_set_sha256,
+			args.expected_corpus_inventory_sha256, args.expected_case_set_sha256, args.expected_mixture_plan_sha256,
 			args.expected_release_fixtures_sha256, args.expected_metrics_runtime_sha256,
 		)):
 			raise GateError("measured runs require every protected binary, fixture, metric runtime, runner identity, and expected hash")
@@ -588,6 +959,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 		server_binary: Path | None = None
 		corpus_inventory: Path | None = None
 		case_set: Path | None = None
+		mixture_plan: Path | None = None
 		release_fixtures: Path | None = None
 		metrics_runtime: Path | None = None
 		harness_sha: str | None = None
@@ -641,6 +1013,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 			("server_binary_sha256", args.server_binary, args.expected_server_binary_sha256, "trusted OG server"),
 			("corpus_inventory_sha256", args.corpus_inventory, args.expected_corpus_inventory_sha256, "frozen corpus inventory"),
 			("case_set_sha256", args.case_set, args.expected_case_set_sha256, "frozen qualification case set"),
+			("mixture_plan_sha256", args.mixture_plan, args.expected_mixture_plan_sha256, "frozen mixture plan"),
 			("release_fixtures_sha256", args.release_fixtures, args.expected_release_fixtures_sha256, "release fixture set"),
 			("metrics_runtime_sha256", args.metrics_runtime, args.expected_metrics_runtime_sha256, "pinned metrics runtime"),
 		)
@@ -656,8 +1029,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 		server_binary = resolved_protected.get("server_binary_sha256")
 		corpus_inventory = resolved_protected.get("corpus_inventory_sha256")
 		case_set = resolved_protected.get("case_set_sha256")
+		mixture_plan = resolved_protected.get("mixture_plan_sha256")
 		release_fixtures = resolved_protected.get("release_fixtures_sha256")
 		metrics_runtime = resolved_protected.get("metrics_runtime_sha256")
+		if metrics_runtime is not None and not metrics_runtime.is_dir():
+			raise GateError("pinned metrics runtime must be a directory so its complete file inventory can be attested")
 		if args.hardware_fingerprint_sha256 is not None:
 			hardware_fingerprint_sha = lowercase_sha256(
 				args.hardware_fingerprint_sha256, "hardware fingerprint"
@@ -690,17 +1066,34 @@ def main(argv: Sequence[str] | None = None) -> int:
 				raise GateError("trusted quality harness does not match its configured SHA-256")
 			assert tested_binary is not None and legacy_binary is not None and staged_client_root is not None
 			assert args.model_manifest is not None and args.recipe_manifest is not None
-			assert server_binary is not None and corpus_inventory is not None and case_set is not None
+			assert server_binary is not None and corpus_inventory is not None and case_set is not None and mixture_plan is not None
 			assert release_fixtures is not None and metrics_runtime is not None
 			assert args.runner_class is not None and hardware_fingerprint_sha is not None
 			command = harness_command(
 				harness, args.suite, source_root, output_root, source_sha, corpus_lock,
 				tested_binary, legacy_binary, staged_client_root, args.model_manifest.resolve(), args.recipe_manifest.resolve(),
-				server_binary, corpus_inventory, case_set, release_fixtures, metrics_runtime, args.runner_class,
+				server_binary, corpus_inventory, case_set, mixture_plan, release_fixtures, metrics_runtime, args.runner_class,
 				hardware_fingerprint_sha, harness_sha,
+				expected_release_holdout_key_sha256,
 			)
 			print("Running trusted quality harness: " + subprocess.list2cmdline(command))
 			harness_return_code = subprocess.run(command, check=False).returncode
+			post_run_checks = {
+				"trusted harness": (harness, harness_sha),
+				"tested client": (tested_binary, tested_binary_sha),
+				"legacy client": (legacy_binary, legacy_binary_sha),
+				"staged payload": (staged_client_root, staged_payload_sha),
+				"model manifest": (args.model_manifest.resolve(), model_manifest_sha),
+				"recipe manifest": (args.recipe_manifest.resolve(), recipe_manifest_sha),
+			}
+			for label, (protected_path, before_sha256) in post_run_checks.items():
+				if before_sha256 is None or payload_sha256(protected_path) != before_sha256:
+					raise GateError(f"{label} changed while the trusted quality harness was running")
+			for field, protected_path in resolved_protected.items():
+				if payload_sha256(protected_path) != protected_hashes[field]:
+					raise GateError(f"protected {field} changed while the trusted quality harness was running")
+			if canonical_json_sha256(load_json(corpus_lock)) != corpus_sha or git_head(source_root) != source_sha:
+				raise GateError("checked-out source identity changed while the trusted quality harness was running")
 
 		quality_path = output_root / QUALITY_QUALIFICATION
 		original_path = output_root / ORIGINAL_QUALIFICATION
@@ -708,6 +1101,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 			raise GateError(
 				"harness did not produce qualification.json and original-voice-qualification.json; no gate can be claimed"
 			)
+		root_evidence_snapshot = {
+			relative: {
+				"size_bytes": (output_root / relative).stat().st_size,
+				"sha256": file_sha256(output_root / relative),
+			}
+			for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION)
+		}
 		run_validator(
 			[
 				sys.executable,
@@ -727,6 +1127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 			],
 			"Original voice qualification validator",
 		)
+		for relative, reference in root_evidence_snapshot.items():
+			_safe_existing_file(output_root, relative, reference)
 		quality = load_json(quality_path)
 		original = load_json(original_path)
 		expected_build: dict[str, str] | None = None
@@ -741,6 +1143,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 				"recipe_manifest_sha256": recipe_manifest_sha,
 				**protected_hashes,
 			}
+			if expected_release_holdout_key_sha256 is not None:
+				expected_build["release_holdout_approval_public_key_sha256"] = expected_release_holdout_key_sha256
 			if harness_sha is not None:
 				expected_build["harness_sha256"] = harness_sha
 			if args.runner_class is not None:
@@ -748,9 +1152,27 @@ def main(argv: Sequence[str] | None = None) -> int:
 			if hardware_fingerprint_sha is not None:
 				expected_build["hardware_fingerprint_sha256"] = hardware_fingerprint_sha
 		validate_identity(quality, original, args.suite, source_sha, corpus_sha, expected_build)
+		artifacts = quality.get("artifacts")
+		measurement_reference = artifacts.get("measurement_index_json") if isinstance(artifacts, dict) else None
+		if not isinstance(measurement_reference, dict) or not isinstance(measurement_reference.get("path"), str):
+			raise GateError("quality evidence has no measurement index for trust-root verification")
+		measurement_file = _safe_existing_file(output_root, str(measurement_reference["path"]), measurement_reference)
+		measurement_index = load_json(measurement_file)
+		validate_release_holdout_trust_root(quality, measurement_index, expected_release_holdout_key_sha256)
 		if model_manifest is not None and recipe_manifest is not None:
-			validate_recipe_and_models(quality, model_manifest, recipe_manifest)
-		prepare_safe_upload(output_root, quality)
+			validate_recipe_and_models(quality, model_manifest, recipe_manifest, measurement_index)
+		if not args.validate_only:
+			for label, (protected_path, before_sha256) in post_run_checks.items():
+				if before_sha256 is None or payload_sha256(protected_path) != before_sha256:
+					raise GateError(f"{label} changed after the trusted quality harness completed")
+			for field, protected_path in resolved_protected.items():
+				if payload_sha256(protected_path) != protected_hashes[field]:
+					raise GateError(f"protected {field} changed after the trusted quality harness completed")
+			if canonical_json_sha256(load_json(corpus_lock)) != corpus_sha or git_head(source_root) != source_sha:
+				raise GateError("checked-out source identity changed after the trusted quality harness completed")
+		for relative, reference in root_evidence_snapshot.items():
+			_safe_existing_file(output_root, relative, reference)
+		prepare_safe_upload(output_root, quality, root_evidence_snapshot)
 		safe_upload = True
 
 		if harness_return_code != 0:

@@ -233,6 +233,14 @@ def _validate_training_sources(
 		for key in ("source_id", "sha256", "size_bytes", "source_artifact_sha256"):
 			_expect(asset.get(key) == item[key], f"mixture asset {item_id}.{key}", "inventory binding mismatch")
 		source_id = item["source_id"]
+		if kind == "microphone_response" and source_id == INVENTORY.MODELED_RESPONSE_SOURCE_ID:
+			_expect(
+				item["source_artifact_sha256"] == INVENTORY.file_sha256(INVENTORY.MODELED_RESPONSE_DEFINITION),
+				f"source {source_id}", "tracked response-definition hash mismatch",
+			)
+			_expect(item["provenance"]["derivation"] == "synthesized", f"source {source_id}", "modeled response is not a synthesized transform")
+			kinds.add(kind)
+			continue
 		_expect(source_id in locked, f"source {source_id}", "not present in corpus lock")
 		source = locked[source_id]
 		_expect(source["license"]["status"] == "verified", f"source {source_id}.license", "license is not verified")
@@ -513,14 +521,18 @@ def run_self_test() -> None:
 		for case in clean_only["cases"]:
 			case["noise"] = None
 			case["mix"]["snr_db"] = None
-		MIXTURE.validate_plan(clean_only)
 		try:
-			freeze_campaign(manifest, inventory, clean_only, validation_mixture, holdout_mixture, toolchain, input_file_hashes=hashes,
-				campaign_id="self-test", seed_root="stable-root", seed_count=5)
-		except CampaignError as error:
-			_expect("noise" in str(error), "self-test", "missing-noise failure did not fail closed")
+			MIXTURE.validate_plan(clean_only)
+		except MIXTURE.PlanError as error:
+			_expect("noise" in str(error), "self-test", "plan diversity did not explain the clean-only rejection")
 		else:
-			raise CampaignError("self-test: clean-only training plan was accepted")
+			try:
+				freeze_campaign(manifest, inventory, clean_only, validation_mixture, holdout_mixture, toolchain, input_file_hashes=hashes,
+					campaign_id="self-test", seed_root="stable-root", seed_count=5)
+			except CampaignError as error:
+				_expect("noise" in str(error), "self-test", "missing-noise failure did not fail closed")
+			else:
+				raise CampaignError("self-test: clean-only training plan was accepted")
 
 
 def _parser() -> argparse.ArgumentParser:

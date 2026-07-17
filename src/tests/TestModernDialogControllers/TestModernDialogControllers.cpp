@@ -69,6 +69,8 @@ private slots:
 	void settingsControllerAutoProfileIsRuntimeGated();
 	void settingsControllerEnhancementFollowsDraftSelectedMicrophone();
 	void settingsControllerRevalidatesEnhancementBeforeApply();
+	void settingsControllerPreservedLegacyOverrideBypassesProductPreflight();
+	void settingsControllerStoresAdvancedLegacyOverrideOnCurrentMicrophone();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
@@ -603,7 +605,7 @@ void TestModernDialogControllers::settingsControllerAutoProfileIsRuntimeGated() 
 	bool foundBasicAutoOption        = false;
 	bool foundAdvancedAutoControl    = false;
 	bool advancedAutoControlDisabled = false;
-	bool autoAdaptIsAdvanced         = false;
+	bool foundFixedProfileAutoAdapt  = false;
 	for (const QVariant &sectionValue : controller.state().value(QStringLiteral("sections")).toList()) {
 		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
 			const QVariantMap field = fieldValue.toMap();
@@ -622,17 +624,24 @@ void TestModernDialogControllers::settingsControllerAutoProfileIsRuntimeGated() 
 				advancedAutoControlDisabled = !field.value(QStringLiteral("enabled"), true).toBool();
 			} else if (field.value(QStringLiteral("id")).toString()
 					   == QLatin1String("audio.inputEnhancementAutoAdapt")) {
-				autoAdaptIsAdvanced = field.value(QStringLiteral("advanced")).toBool();
+				foundFixedProfileAutoAdapt = true;
 			}
 		}
 	}
 	QVERIFY(!foundBasicAutoOption);
 	QVERIFY(foundAdvancedAutoControl);
 	QVERIFY(advancedAutoControlDisabled);
-	QVERIFY(autoAdaptIsAdvanced);
+	QVERIFY(!foundFixedProfileAutoAdapt);
 	QCOMPARE(controller.draft().inputEnhancement.defaultPreference.profile,
 			 Mumble::InputEnhancement::Profile::Original);
 	QVERIFY(!controller.draft().inputEnhancement.defaultPreference.autoAdapt);
+	controller.updateField(QStringLiteral("audio.inputEnhancementAutoAdapt"), true);
+	QVERIFY(!controller.draft().inputEnhancement.defaultPreference.autoAdapt);
+	settings.inputEnhancement.defaultPreference.profile   = Mumble::InputEnhancement::Profile::Original;
+	settings.inputEnhancement.defaultPreference.autoAdapt = true;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.inputEnhancementAutoAdapt"), false);
+	QVERIFY(controller.draft().inputEnhancement.defaultPreference.autoAdapt);
 
 	// A previously persisted experimental selection remains readable, but the
 	// user can always leave it even when the Auto runtime is unavailable.
@@ -749,6 +758,68 @@ void TestModernDialogControllers::settingsControllerRevalidatesEnhancementBefore
 	QVERIFY(accepted.settingsToApply.has_value());
 	QCOMPARE(preferenceForDevice(accepted.settingsToApply->inputEnhancement, identity).profile,
 			 Profile::Light);
+}
+
+void TestModernDialogControllers::settingsControllerPreservedLegacyOverrideBypassesProductPreflight() {
+	using namespace Mumble::InputEnhancement;
+	ScopedGlobalOverride noGlobal(nullptr);
+	::Settings migrated;
+	migrated.inputEnhancement.defaultPreference.profile = Profile::Quality;
+	migrated.inputEnhancement.legacyOverride =
+		LegacyOverride{ static_cast< int >(::Settings::NoiseCancelRNN),
+						static_cast< int >(::Settings::DTLNBackend), QStringLiteral("dtln:norm40h"),
+						QStringLiteral("C:/preserved/model"), -67 };
+
+	ModernSettingsController controller;
+	controller.open(migrated, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.quality"), 96);
+	const ModernSettingsController::ActionResult result =
+		controller.invokeAction(QStringLiteral("ok"), QVariantMap());
+
+	QVERIFY(result.settingsToApply.has_value());
+	QVERIFY(result.accepted);
+	QVERIFY(result.closeDialog);
+	QCOMPARE(result.settingsToApply->iQuality, 96000);
+	QVERIFY(result.settingsToApply->inputEnhancement.legacyOverride.has_value());
+	QVERIFY(*result.settingsToApply->inputEnhancement.legacyOverride
+			== *migrated.inputEnhancement.legacyOverride);
+}
+
+void TestModernDialogControllers::settingsControllerStoresAdvancedLegacyOverrideOnCurrentMicrophone() {
+	using namespace Mumble::InputEnhancement;
+	ScopedGlobalOverride noGlobal(nullptr);
+	DraftInputRegistrar registrar;
+	::Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	const DeviceIdentity micA = registrar.resolveDeviceIdentity(settings);
+	DeviceProfileState productProfile;
+	productProfile.identity           = micA;
+	productProfile.preference.profile = Profile::Balanced;
+	QVERIFY(upsertDeviceProfile(settings.inputEnhancement, productProfile));
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.noiseCancelMode"),
+								   static_cast< int >(::Settings::NoiseCancelRNN));
+	controller.updateField(QStringLiteral("audio.noiseCancelBackend"),
+								   static_cast< int >(::Settings::DTLNBackend));
+	controller.updateField(QStringLiteral("audio.noiseCancelModel"), QStringLiteral("dtln:norm40h"));
+	controller.updateField(QStringLiteral("audio.speexNoiseStrength"), 67);
+	const ModernSettingsController::ActionResult result =
+		controller.invokeAction(QStringLiteral("ok"), QVariantMap());
+
+	QVERIFY(result.settingsToApply.has_value());
+	QVERIFY(result.accepted);
+	const DeviceProfileState *saved = findDeviceProfile(result.settingsToApply->inputEnhancement, micA);
+	QVERIFY(saved);
+	QVERIFY(saved->legacyOverride.has_value());
+	QCOMPARE(saved->legacyOverride->noiseCancelMode, static_cast< int >(::Settings::NoiseCancelRNN));
+	QCOMPARE(saved->legacyOverride->backend, static_cast< int >(::Settings::DTLNBackend));
+	QCOMPARE(saved->legacyOverride->modelId, QStringLiteral("dtln:norm40h"));
+	QCOMPARE(saved->legacyOverride->speexNoiseCancelStrength, -67);
+	QVERIFY(!saved->pendingValidation);
+	QVERIFY(!result.settingsToApply->inputEnhancement.legacyOverride.has_value());
 }
 
 void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignals() {

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-release-holdout-opening-v1.json",
+  "title": "One-shot signed authorization to open the input-enhancement release holdout",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "attestation",
+    "authorization",
+    "authorized_at_utc",
+    "dataset_split",
+    "expected",
+    "opening_report_relative_path",
+    "purpose",
+    "receipt_relative_path",
+    "run_id",
+    "schema_version",
+    "valid_until_utc"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "attestation": { "const": "mumble-input-enhancement-release-holdout-opening-v1" },
+    "dataset_split": { "const": "release-holdout" },
+    "purpose": { "const": "input-enhancement-community-release-final-qualification" },
+    "run_id": { "$ref": "#/$defs/uuid4" },
+    "authorized_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+    "valid_until_utc": { "$ref": "#/$defs/utcTimestamp" },
+    "receipt_relative_path": { "type": "string", "pattern": "^receipts/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.json$" },
+    "opening_report_relative_path": { "type": "string", "pattern": "^reports/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.json$" },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["corpus_inventory_sha256", "mixture_plan_sha256", "release_build"],
+      "properties": {
+        "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+        "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "release_build": { "$ref": "#/$defs/file" }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "kind", "public_key_sha256", "signature_encoding"],
+      "properties": {
+        "kind": { "const": "detached-ed25519-release-owner-approval-v1" },
+        "key_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        "public_key_sha256": { "$ref": "#/$defs/sha256" },
+        "signature_encoding": { "const": "raw-ed25519-64-byte-file" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "uuid4": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "utcTimestamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

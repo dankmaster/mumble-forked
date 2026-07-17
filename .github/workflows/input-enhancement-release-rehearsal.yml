@@ -163,6 +163,7 @@ jobs:
             -UpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
             -UpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `
             -DraftArtifactName $env:REHEARSAL_ARTIFACT_NAME `
+            -AllowedOutputParent $env:RUNNER_TEMP `
             -OutputRoot $outputRoot `
             -CommunitySize ([int]$env:REQUESTED_COMMUNITY_SIZE)
           "REHEARSAL_OUTPUT_ROOT=$outputRoot" >> $env:GITHUB_ENV

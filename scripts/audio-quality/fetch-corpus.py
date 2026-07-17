@@ -62,25 +62,10 @@ def validate_artifact_root(root: Path) -> Path:
 
 
 def source_policy_error(source: Mapping[str, Any], purpose: str) -> str | None:
-	license_info = source["license"]
-	if license_info["status"] != "verified" or str(license_info["spdx"]).startswith("LicenseRef-"):
-		return f"license {license_info['spdx']} is not verified"
-	if "-NC-" in license_info["spdx"]:
-		return f"non-commercial license {license_info['spdx']} is blocked"
-	if purpose == "local-eval":
-		if "local_eval" not in source["roles"]:
-			return "source is not approved for local evaluation"
-	elif purpose == "training":
-		if source["training_status"] != "allowed_with_attribution":
-			return f"training status is {source['training_status']}"
-	elif purpose == "fixture":
-		if source["redistribution_status"] != "allowed_with_attribution":
-			return f"redistribution status is {source['redistribution_status']}"
-	else:
-		raise FetchError(f"unknown fetch purpose: {purpose}")
-	if source["integrity"]["algorithm"] != "sha256" or "artifact_path" not in source["integrity"]:
-		return "source is not represented by a pinned downloadable archive"
-	return None
+	try:
+		return LOCK.source_policy_error(source, purpose)
+	except LOCK.ValidationError as error:
+		raise FetchError(str(error)) from error
 
 
 def _sha256(path: Path) -> str:
@@ -116,17 +101,18 @@ def _destination(root: Path, source: Mapping[str, Any]) -> Path:
 	return destination
 
 
-def fetch_archive(source: Mapping[str, Any], root: Path, dry_run: bool = False) -> tuple[str, Path]:
-	destination = _destination(root, source)
+def _fetch_locked_artifact(
+	label: str, source_url: str, integrity: Mapping[str, Any], destination: Path, dry_run: bool = False
+) -> tuple[str, Path]:
 	if destination.exists():
-		verify_archive(destination, source["integrity"])
+		verify_archive(destination, integrity)
 		return "verified-existing", destination
 	if dry_run:
 		return "would-download", destination
 
 	destination.parent.mkdir(parents=True, exist_ok=True)
 	request = urllib.request.Request(
-		source["source_url"],
+		source_url,
 		headers={ "User-Agent": "MumbleInputEnhancementCorpus/1" },
 	)
 	temporary: Path | None = None
@@ -143,18 +129,40 @@ def fetch_archive(source: Mapping[str, Any], root: Path, dry_run: bool = False) 
 					output.write(chunk)
 			output.flush()
 			os.fsync(output.fileno())
-		verify_archive(temporary, source["integrity"])
+		verify_archive(temporary, integrity)
 		os.replace(temporary, destination)
 		temporary = None
 		return "downloaded", destination
 	except (OSError, urllib.error.URLError) as error:
-		raise FetchError(f"failed to fetch {source['id']}: {error}") from error
+		raise FetchError(f"failed to fetch {label}: {error}") from error
 	finally:
 		if temporary is not None:
 			try:
 				temporary.unlink(missing_ok=True)
 			except OSError:
 				pass
+
+
+def fetch_archive(source: Mapping[str, Any], root: Path, dry_run: bool = False) -> tuple[str, Path]:
+	return _fetch_locked_artifact(
+		source["id"], source["source_url"], source["integrity"], _destination(root, source), dry_run
+	)
+
+
+def fetch_sidecars(source: Mapping[str, Any], root: Path, dry_run: bool = False) -> list[tuple[Mapping[str, Any], str, Path]]:
+	results = []
+	for sidecar in source.get("sidecars", []):
+		parts = PurePosixPath(sidecar["integrity"]["artifact_path"]).parts
+		destination = root.joinpath(*parts).resolve()
+		try:
+			destination.relative_to(root)
+		except ValueError as error:
+			raise FetchError(f"unsafe sidecar artifact path for {source['id']}:{sidecar['id']}") from error
+		status, path = _fetch_locked_artifact(
+			f"{source['id']}:{sidecar['id']}", sidecar["source_url"], sidecar["integrity"], destination, dry_run
+		)
+		results.append((sidecar, status, path))
+	return results
 
 
 def _selected_sources(
@@ -210,8 +218,13 @@ def _write_state(
 def run_self_test() -> None:
 	manifest = LOCK.load_validated_manifest(Path(__file__).with_name("corpus-lock.json"))
 	by_id = { source["id"]: source for source in manifest["sources"] }
-	if source_policy_error(by_id["demand-ooffice-48k"], "local-eval") is None:
-		raise AssertionError("ambiguous DEMAND license was accepted")
+	demand = by_id["demand-ooffice-16k"]
+	if source_policy_error(demand, "local-eval") is not None:
+		raise AssertionError("reviewed DEMAND local-evaluation source was rejected")
+	if source_policy_error(demand, "training") is None:
+		raise AssertionError("evaluation-only DEMAND source was accepted for training")
+	if source_policy_error(demand, "fixture") is None:
+		raise AssertionError("local-only DEMAND source was accepted as a redistributable fixture")
 	if source_policy_error(by_id["mcgill-tsp-speech-v2-48k"], "training") is not None:
 		raise AssertionError("reviewed McGill training source was rejected")
 	if source_policy_error(by_id["openslr28-rirs-noises"], "local-eval") is not None:
@@ -221,6 +234,9 @@ def run_self_test() -> None:
 		raise AssertionError("--all local-eval does not include a fetchable real noise/RIR source")
 	if source_policy_error(by_id["openslr31-mini-librispeech-dev-clean-2"], "training") is None:
 		raise AssertionError("evaluation-only source was accepted for training")
+	fleurs = by_id["google-fleurs-sv-se-train-v2"]
+	if source_policy_error(fleurs, "local-eval") is not None or len(fleurs.get("sidecars", [])) != 1:
+		raise AssertionError("reviewed Swedish FLEURS archive and transcript sidecar were rejected")
 	with tempfile.TemporaryDirectory() as directory:
 		external = validate_artifact_root(Path(directory))
 		if external != Path(directory).resolve():
@@ -259,12 +275,9 @@ def run_self_test() -> None:
 		pass
 	else:
 		raise AssertionError("tracked corpus destination was accepted")
-	try:
-		_selected_sources(manifest, [ "demand-ooffice-48k" ], False, "local-eval")
-	except FetchError:
-		pass
-	else:
-		raise AssertionError("explicit selection accepted a blocked source")
+	selected_demand = _selected_sources(manifest, [ "demand-ooffice-16k" ], False, "local-eval")
+	if [source["id"] for source in selected_demand] != ["demand-ooffice-16k"]:
+		raise AssertionError("explicit DEMAND local-evaluation selection changed")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -303,6 +316,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 			status, path = fetch_archive(source, root, dry_run=args.dry_run)
 			results.append((source, status, path))
 			print(f"{source['id']}: {status}: {path}")
+			for sidecar, sidecar_status, sidecar_path in fetch_sidecars(source, root, dry_run=args.dry_run):
+				print(f"{source['id']}:{sidecar['id']}: {sidecar_status}: {sidecar_path}")
 		if not args.dry_run:
 			root.mkdir(parents=True, exist_ok=True)
 			_write_state(root, manifest, args.purpose, results)

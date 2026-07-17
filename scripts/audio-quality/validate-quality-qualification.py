@@ -15,13 +15,25 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, MutableMapping, Sequence
 
+from objective_quality_score import _sample_score
+
+from measurement_evidence import (
+	INDEX_KIND,
+	MeasurementEvidenceError,
+	canonical_json_bytes as canonical_measurement_json_bytes,
+	canonical_json_sha256 as canonical_measurement_json_sha256,
+	load_and_verify_measurement_index,
+)
+
 from quality_case_evidence import (
 	AUTO_DIRECTED_PAIRS,
 	CORE_PROFILES,
 	AUTO_PROFILES,
 	CaseEvidenceError,
 	load_case_evidence,
+	qualification_binding_sha256,
 	summarize_case_evidence,
+	verify_objective_score_references,
 	write_case_evidence,
 )
 
@@ -64,6 +76,7 @@ ARTIFACT_NAMES = (
 	"case_evidence_jsonl",
 	"failure_spectrogram_index",
 	"junit",
+	"measurement_index_json",
 	"per_case_csv",
 	"per_case_parquet",
 	"summary_html",
@@ -73,6 +86,7 @@ ARTIFACT_SUFFIXES = {
 	"case_evidence_jsonl": ".jsonl",
 	"failure_spectrogram_index": ".json",
 	"junit": ".xml",
+	"measurement_index_json": ".json",
 	"per_case_csv": ".csv",
 	"per_case_parquet": ".parquet",
 	"summary_html": ".html",
@@ -206,15 +220,18 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 	_expect(stamp.tzinfo is not None and stamp.utcoffset() == dt.timedelta(0), "qualification.generated_at_utc", "must be UTC")
 
 	build = _mapping(root["build"], "qualification.build")
+	build_keys = {
+		"case_set_sha256", "corpus_inventory_sha256", "corpus_lock_sha256", "git_sha",
+		"hardware_fingerprint_sha256", "harness_sha256", "legacy_binary_sha256",
+		"metrics_runtime_sha256", "mixture_plan_sha256", "model_hashes", "model_manifest_sha256",
+		"recipe_manifest_sha256", "recipe_set_version", "release_fixtures_sha256", "runner_class",
+		"server_binary_sha256", "staged_payload_sha256", "tested_binary_sha256",
+	}
+	if root["suite"] == "release":
+		build_keys.add("release_holdout_approval_public_key_sha256")
 	_exact_keys(
 		build,
-		{
-			"case_set_sha256", "corpus_inventory_sha256", "corpus_lock_sha256", "git_sha",
-			"hardware_fingerprint_sha256", "harness_sha256", "legacy_binary_sha256",
-			"metrics_runtime_sha256", "mixture_plan_sha256", "model_hashes", "model_manifest_sha256",
-			"recipe_manifest_sha256", "recipe_set_version", "release_fixtures_sha256", "runner_class",
-			"server_binary_sha256", "staged_payload_sha256", "tested_binary_sha256",
-		},
+		build_keys,
 		"qualification.build",
 	)
 	_hash(build["git_sha"], "qualification.build.git_sha", 40)
@@ -225,6 +242,8 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		"server_binary_sha256", "staged_payload_sha256", "tested_binary_sha256",
 	):
 		_hash(build[key], f"qualification.build.{key}", 64)
+	if root["suite"] == "release":
+		_hash(build["release_holdout_approval_public_key_sha256"], "qualification.build.release_holdout_approval_public_key_sha256", 64)
 	_expect(
 		build["runner_class"] in ("low-performance", "mainstream", "local-development"),
 		"qualification.build.runner_class",
@@ -255,16 +274,35 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		case_records, transition_records = load_case_evidence(
 			resolved_artifacts["case_evidence_jsonl"], build, scope, root["suite"]
 		)
-		case_summary = summarize_case_evidence(case_records, transition_records, scope)
+		objective_scores = verify_objective_score_references(
+			case_records,
+			artifact_root,
+			"receiver-capture" if root["suite"] in ("master_quality", "nightly", "release") else None,
+		)
+		derived_cases, derived_transitions, _ = load_and_verify_measurement_index(
+			resolved_artifacts["measurement_index_json"],
+			artifact_root,
+			build,
+			scope,
+			root["suite"],
+			qualification_binding_sha256(build, scope, root["suite"]),
+			artifacts,
+			case_records,
+			transition_records,
+			objective_scores,
+		)
+		case_summary = summarize_case_evidence(derived_cases, derived_transitions, scope, root["suite"])
 	except CaseEvidenceError as error:
 		raise QualificationError(f"qualification.artifacts.case_evidence_jsonl: {error}") from error
+	except MeasurementEvidenceError as error:
+		raise QualificationError(f"qualification.artifacts.measurement_index_json: {error}") from error
 
 	coverage = _mapping(root["coverage"], "qualification.coverage")
 	_exact_keys(
 		coverage,
 		{
 			"case_count", "cold_start_cases", "failed_case_count", "fixed_timeline_cases", "languages",
-			"receiver_cleanup_cases", "warm_start_cases",
+			"objective_signal_stages", "receiver_cleanup_cases", "source_diversity", "wer_reference_kinds", "warm_start_cases",
 		},
 		"qualification.coverage",
 	)
@@ -317,8 +355,8 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		_expect(isinstance(profile["passed"], bool), f"{path}.passed", "expected boolean")
 		metrics = _mapping(profile["metrics"], f"{path}.metrics")
 		metric_keys = {
-			"algorithmic_latency_ms_max", "catastrophe_rate_percent", "clean_dnsmos_sig_loss_median",
-			"clean_estoi_loss_median", "deadline_misses", "latency_attestation_failures",
+			"algorithmic_latency_ms_max", "catastrophe_rate_percent", "worst_language_clean_dnsmos_sig_loss_median",
+			"worst_language_clean_estoi_loss_median", "deadline_misses", "latency_attestation_failures",
 			"max_speech_edge_loss_ms", "model_hash_errors", "nan_or_inf_count", "new_clipping_cases",
 			"noisy_dnsmos_bak_improvement_median", "noisy_dnsmos_ovrl_improvement_median",
 			"severe_noise_bak_improvement_over_quality_median",
@@ -327,8 +365,8 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		}
 		_exact_keys(metrics, metric_keys, f"{path}.metrics")
 		computed_metrics = computed_profile["metrics"]
-		clean_estoi = _same_number(metrics["clean_estoi_loss_median"], computed_metrics["clean_estoi_loss_median"], f"{path}.metrics.clean_estoi_loss_median")
-		clean_sig = _same_number(metrics["clean_dnsmos_sig_loss_median"], computed_metrics["clean_dnsmos_sig_loss_median"], f"{path}.metrics.clean_dnsmos_sig_loss_median")
+		clean_estoi = _same_number(metrics["worst_language_clean_estoi_loss_median"], computed_metrics["worst_language_clean_estoi_loss_median"], f"{path}.metrics.worst_language_clean_estoi_loss_median")
+		clean_sig = _same_number(metrics["worst_language_clean_dnsmos_sig_loss_median"], computed_metrics["worst_language_clean_dnsmos_sig_loss_median"], f"{path}.metrics.worst_language_clean_dnsmos_sig_loss_median")
 		wer_loss = _same_number(metrics["worst_language_wer_loss_percentage_points"], computed_metrics["worst_language_wer_loss_percentage_points"], f"{path}.metrics.worst_language_wer_loss_percentage_points")
 		ovrl = _same_number(metrics["noisy_dnsmos_ovrl_improvement_median"], computed_metrics["noisy_dnsmos_ovrl_improvement_median"], f"{path}.metrics.noisy_dnsmos_ovrl_improvement_median")
 		bak = _same_number(metrics["noisy_dnsmos_bak_improvement_median"], computed_metrics["noisy_dnsmos_bak_improvement_median"], f"{path}.metrics.noisy_dnsmos_bak_improvement_median")
@@ -362,12 +400,13 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		performance = _mapping(profile["performance"], f"{path}.performance")
 		performance_keys = {
 			"average_rtf", "max_internal_processing_ms", "memory_growth_bytes", "p99_callback_ms",
-			"soak_duration_seconds",
+			"p99_worker_ms", "soak_duration_seconds",
 		}
 		_exact_keys(performance, performance_keys, f"{path}.performance")
 		computed_performance = computed_profile["performance"]
 		average_rtf = _same_number(performance["average_rtf"], computed_performance["average_rtf"], f"{path}.performance.average_rtf")
 		p99 = _same_number(performance["p99_callback_ms"], computed_performance["p99_callback_ms"], f"{path}.performance.p99_callback_ms")
+		worker_p99 = _same_number(performance["p99_worker_ms"], computed_performance["p99_worker_ms"], f"{path}.performance.p99_worker_ms")
 		max_internal = _same_number(performance["max_internal_processing_ms"], computed_performance["max_internal_processing_ms"], f"{path}.performance.max_internal_processing_ms")
 		memory_growth = _integer(performance["memory_growth_bytes"], f"{path}.performance.memory_growth_bytes")
 		soak_duration = _integer(performance["soak_duration_seconds"], f"{path}.performance.soak_duration_seconds", 0)
@@ -377,7 +416,7 @@ def validate_qualification(value: Any, artifact_root: Path | None = None) -> Map
 		if name == "Balanced":
 			performance_passed = average_rtf <= 0.15 and p99 <= 5.0
 		elif name in ("Quality", "VoiceFocus", "Auto"):
-			performance_passed = average_rtf <= 0.35 and p99 <= 8.0
+			performance_passed = average_rtf <= 0.35 and p99 <= 8.0 and worker_p99 <= 8.0
 		if root["suite"] == "nightly" and name in ("Balanced", "Quality", "VoiceFocus", "Auto"):
 			performance_passed = performance_passed and soak_duration >= 3600 and max_internal <= 10.0 and memory_growth <= 0
 		expected_profile_pass = metric_passed and performance_passed and computed_profile["failed_case_count"] == 0
@@ -473,15 +512,30 @@ def _case_record(profile: str, index: int) -> Mapping[str, Any]:
 		"case_id": f"case-{index:03d}",
 		"profile": profile,
 		"condition": condition,
+		"dataset_split": "pr-smoke",
 		"cohort_id": { "clean": "clean-room", "noisy": "noisy-hvac", "severe": "severe-babble" }[condition],
+		"speaker_group_id": f"speaker-{index % 8:03d}",
+		"noise_group_id": None if condition == "clean" else f"noise-{index % 8:03d}",
+		"noise_class": None if condition == "clean" else ("hvac", "keyboard", "traffic", "babble")[index % 4],
+		"rir_group_id": f"room-{index % 8:03d}",
+		"device_group_id": f"device-{index % 4:03d}",
 		"language": ("en-US", "sv-SE")[index % 2],
 		"startup_preroll_ms": 0 if index % 2 == 0 else 300,
 		"fixed_timeline": True,
 		"receiver_cleanup_enabled": False,
 		"failed": False,
+		"quality_pair_case_id": f"case-{index:03d}" if profile == "VoiceFocus" and condition == "severe" else None,
+		"objective_score": {
+			"path": f"artifacts/pr_smoke-local-development/measurements/{profile}/{index:03d}/objective-quality.json",
+			"sha256": "0" * 64,
+			"signal_stage": "sender-pre-opus",
+			"size_bytes": 1,
+			"wer_reference_kind": "clean-asr-consistency",
+			"wer_reference_text_sha256": "1" * 64,
+		},
 		"metrics": {
 			"algorithmic_latency_ms": latency,
-			"dnsmos_bak_improvement": 0.55,
+			"dnsmos_bak_improvement": 0.65 if profile == "VoiceFocus" and condition == "severe" else 0.55,
 			"dnsmos_ovrl_improvement": -0.05 if condition == "clean" else 0.25,
 			"dnsmos_sig_loss": 0.02,
 			"estoi_loss": 0.005,
@@ -502,6 +556,7 @@ def _case_record(profile: str, index: int) -> Mapping[str, Any]:
 			"audio_duration_seconds": 10.0,
 			"processing_duration_seconds": 1.0,
 			"callback_durations_ms": [ 4.0 ],
+			"worker_durations_ms": [ 2.0 if profile in ("Quality", "VoiceFocus", "Auto") else 0.0 ],
 			"max_internal_processing_ms": 9.0,
 			"memory_growth_bytes": 0,
 			"soak_duration_seconds": 0,
@@ -534,7 +589,7 @@ def _passing_fixture(scope: str) -> tuple[Mapping[str, Any], list[Mapping[str, A
 	per_profile = 6 if scope == "core" else 12
 	cases = [ _case_record(profile, index) for profile in profiles for index in range(per_profile) ]
 	transitions = [ _transition_record(index) for index in range(12) ] if scope == "auto" else []
-	summary = summarize_case_evidence(cases, transitions, scope)
+	summary = summarize_case_evidence(cases, transitions, scope, "pr_smoke")
 	profile_results = [
 		{
 			"profile": profile,
@@ -560,6 +615,8 @@ def _passing_fixture(scope: str) -> tuple[Mapping[str, Any], list[Mapping[str, A
 			"path": (
 				"artifacts/pr_smoke-local-development/case-evidence.jsonl"
 				if name == "case_evidence_jsonl"
+				else "artifacts/pr_smoke-local-development/measurement-index.json"
+				if name == "measurement_index_json"
 				else f"artifacts/pr_smoke-local-development/{name}{ARTIFACT_SUFFIXES[name]}"
 			),
 			"sha256": "3" * 64,
@@ -590,7 +647,280 @@ def _materialize_fixture(
 	cases: Sequence[Mapping[str, Any]],
 	transitions: Sequence[Mapping[str, Any]],
 ) -> None:
+	artifact_prefix = f"artifacts/{fixture['suite']}-{fixture['build']['runner_class']}"
+
+	def write_json(path: Path, value: Mapping[str, Any], canonical: bool = False) -> Mapping[str, Any]:
+		path.parent.mkdir(parents=True, exist_ok=True)
+		payload = (
+			canonical_measurement_json_bytes(value) + b"\n"
+			if canonical
+			else (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+		)
+		path.write_bytes(payload)
+		return {
+			"contains_audio_samples": False,
+			"path": path.relative_to(root).as_posix(),
+			"sha256": hashlib.sha256(payload).hexdigest(),
+			"size_bytes": len(payload),
+		}
+
+	def execution_identity() -> Mapping[str, Any]:
+		build = fixture["build"]
+		return {
+			"client_binary_sha256": build["tested_binary_sha256"],
+			"model_manifest_sha256": build["model_manifest_sha256"],
+			"recipe_manifest_sha256": build["recipe_manifest_sha256"],
+			"run_provenance_sha256": "a" * 64,
+			"runtime_payload_sha256": build["staged_payload_sha256"],
+			"server_binary_sha256": build["server_binary_sha256"],
+		}
+
+	case_index_entries: list[Mapping[str, Any]] = []
+	objective_documents: list[Mapping[str, Any]] = []
+	for case in cases:
+		original_metric = {
+			"dnsmos_bak": 2.0,
+			"dnsmos_ovrl": 2.0,
+			"dnsmos_sig": 2.0,
+			"estoi": 0.8,
+			"wer": {"errors": 0, "reference_words": 200, "rate": 0.0, "hypothesis_sha256": "2" * 64},
+		}
+		deltas = {
+			"dnsmos_bak": case["metrics"]["dnsmos_bak_improvement"],
+			"dnsmos_ovrl": case["metrics"]["dnsmos_ovrl_improvement"],
+			"dnsmos_sig": -case["metrics"]["dnsmos_sig_loss"],
+			"estoi": -case["metrics"]["estoi_loss"],
+			"wer_delta_kind": "clean-asr-consistency",
+			"wer_delta_percentage_points": case["metrics"]["wer_loss_percentage_points"],
+		}
+		candidate_metric = {
+			"dnsmos_bak": original_metric["dnsmos_bak"] + deltas["dnsmos_bak"],
+			"dnsmos_ovrl": original_metric["dnsmos_ovrl"] + deltas["dnsmos_ovrl"],
+			"dnsmos_sig": original_metric["dnsmos_sig"] + deltas["dnsmos_sig"],
+			"estoi": original_metric["estoi"] + deltas["estoi"],
+			"wer": {"errors": 1, "reference_words": 200, "rate": 0.005, "hypothesis_sha256": "4" * 64},
+		}
+		document = copy.deepcopy(_sample_score())
+		document.update({
+			"case_id": case["case_id"],
+			"profile": case["profile"],
+			"condition": case["condition"],
+			"dataset_split": case["dataset_split"],
+			"metrics": {"original": original_metric, "candidate": candidate_metric},
+			"candidate_minus_original": deltas,
+		})
+		latency_samples = int(round(float(case["metrics"]["algorithmic_latency_ms"]) * 48.0))
+		document["alignment"].update({"candidate_latency_samples": latency_samples, "candidate_window_start_samples": latency_samples})
+		document["wer_reference"].update({"text_sha256": "1" * 64, "word_count": 200, "language": str(case["language"]).split("-", 1)[0].casefold()})
+		objective_path = root.joinpath(*PurePosixPath(case["objective_score"]["path"]).parts)
+		objective_reference = write_json(objective_path, document)
+		case["objective_score"]["sha256"] = objective_reference["sha256"]
+		case["objective_score"]["size_bytes"] = objective_reference["size_bytes"]
+		objective_documents.append(document)
+
+		case_root = root / artifact_prefix / "measurements" / str(case["profile"]) / str(case["case_id"])
+		input_samples = 480_000
+		def benchmark_report(profile: str, latency: int, output_sha256: str) -> Mapping[str, Any]:
+			worker_p99 = 2.0 if profile in ("Quality", "VoiceFocus", "Auto") else 0.0
+			engine = "DeepFilterNet" if profile in ("Quality", "VoiceFocus") else "RNNoise" if profile in ("Balanced", "Auto") else "Speex" if profile == "Light" else "None"
+			recipe_ids = {
+				"Original": "input.original", "Light": "input.light.speex",
+				"Balanced": "input.balanced.self-test", "Quality": "input.quality.self-test",
+				"VoiceFocus": "input.voice-focus.self-test", "Auto": "input.auto.balanced.self-test",
+			}
+			return {
+				"schema_version": 1,
+				"kind": "mumble-input-enhancement-benchmark-measurement-v1",
+				"source_report_sha256": "8" * 64,
+				"processing_mode": "product-profile",
+				"requested_profile": profile,
+				"active_profile": profile,
+				"active_engine": engine,
+				"active_model_id": f"{engine.casefold()}:self-test" if engine in ("RNNoise", "DeepFilterNet") else "",
+				"active_model_sha256": fixture["build"]["model_hashes"][0] if engine in ("RNNoise", "DeepFilterNet") else "",
+				"input_sha256": document["inputs"]["noisy_original"]["sha256"],
+				"clean_reference_sha256": document["inputs"]["clean_reference"]["sha256"],
+				"output_sha256": output_sha256,
+				"requested_recipe_id": recipe_ids[profile],
+				"recipe_revision": 1,
+				"used_fallback": False,
+				"fallback_count": 0,
+				"deadline_misses": 0,
+				"reported_latency_samples": latency,
+				"input_sample_count": input_samples,
+				"output_sample_count": input_samples + latency,
+				"drain_sample_count": latency,
+				"processing_padding_sample_count": 0,
+				"sample_count": input_samples + latency,
+				"sample_rate": 48_000,
+				"non_finite_sample_count": 0,
+				"input_saturated_sample_count": 0,
+				"saturated_sample_count": 0,
+				"out_of_range_sample_count": 0,
+				"audio_ms": 10_000.0,
+				"processing_wall_ms": 1_000.0,
+				"rtf": 0.1,
+				"callback_p99_ms": 4.0,
+				"worker_processing_p99_ms": worker_p99,
+				"maximum_processing_ms": 9.0,
+			}
+		original_reference = write_json(
+			case_root / "original-benchmark.json",
+			benchmark_report("Original", 0, document["inputs"]["noisy_original"]["sha256"]),
+		)
+		candidate_reference = write_json(
+			case_root / "candidate-benchmark.json",
+			benchmark_report(str(case["profile"]), latency_samples, document["inputs"]["candidate"]["sha256"]),
+		)
+		edge_document = {
+			"schema_version": 3,
+			"scorer": "mumble-fixed-timeline-v3",
+			"timeline_alignment": "fixed",
+			"sample_rate_hz": 48_000,
+			"frame_samples": 480,
+			"declared_latency_samples": latency_samples,
+			"reference_sha256": document["inputs"]["clean_reference"]["sha256"],
+			"received_sha256": document["inputs"]["candidate"]["sha256"],
+			"onset_loss_samples": 480,
+			"end_loss_samples": 0,
+			"missing_tail_samples": 0,
+			"reference_clipped_samples": 0,
+			"received_clipped_samples": 0,
+			"qualification_limits": {
+				"max_onset_loss_samples": 480,
+				"max_end_loss_samples": 480,
+				"require_complete_tail": True,
+				"fail_on_new_clipping": True,
+			},
+			"passed": True,
+		}
+		edge_reference = write_json(case_root / "edge-fixed-timeline-score.json", edge_document)
+		plan_case_sha256 = hashlib.sha256(f"plan:{case['profile']}:{case['case_id']}".encode("utf-8")).hexdigest()
+		render_entry_sha256 = hashlib.sha256(f"render:{case['profile']}:{case['case_id']}".encode("utf-8")).hexdigest()
+		case_binding_reference = write_json(case_root / "case-binding.json", {
+			"schema_version": 1,
+			"kind": "mumble-input-enhancement-case-binding-v1",
+			"measurement_mode": "offline",
+			"case_id": case["case_id"],
+			"profile": case["profile"],
+			"condition": case["condition"],
+			"dataset_split": case["dataset_split"],
+			"build_binding": {
+				field: fixture["build"][field]
+				for field in ("case_set_sha256", "corpus_inventory_sha256", "corpus_lock_sha256", "mixture_plan_sha256")
+			},
+			"plan_case_sha256": plan_case_sha256,
+			"render_manifest_sha256": "9" * 64,
+			"render_entry_sha256": render_entry_sha256,
+			"source_input_sha256": document["inputs"]["noisy_original"]["sha256"],
+			"clean_reference_sha256": document["inputs"]["clean_reference"]["sha256"],
+		})
+		case_index_entries.append({
+			"case_id": case["case_id"],
+			"profile": case["profile"],
+			"condition": case["condition"],
+			"dataset_split": case["dataset_split"],
+			"measurement_mode": "offline",
+			"plan_case_sha256": plan_case_sha256,
+			"render_entry_sha256": render_entry_sha256,
+			"source_input_sha256": document["inputs"]["noisy_original"]["sha256"],
+			"clean_reference_sha256": document["inputs"]["clean_reference"]["sha256"],
+			"reports": {
+				"objective_score": objective_reference,
+				"case_binding_report": case_binding_reference,
+				"original_benchmark_report": original_reference,
+				"candidate_benchmark_report": candidate_reference,
+				"edge_fixed_timeline_score": edge_reference,
+			},
+		})
+
+	objective_runtime_binding_sha256 = canonical_measurement_json_sha256({
+		"runtime": objective_documents[0]["runtime"],
+		"scorer_files": objective_documents[0]["scorer_files"],
+	})
+	runtime_manifest = objective_documents[0]["runtime"]["manifest"]
+	metrics_runtime_files = [{
+		"path": runtime_manifest["relative_path"],
+		"sha256": runtime_manifest["sha256"],
+		"size_bytes": runtime_manifest["size_bytes"],
+	}]
+	fixture["build"]["metrics_runtime_sha256"] = canonical_measurement_json_sha256(metrics_runtime_files)
+	metrics_attestation_document = {
+		"schema_version": 1,
+		"kind": "mumble-audio-metrics-runtime-attestation-v1",
+		"payload_kind": "directory",
+		"payload_sha256": fixture["build"]["metrics_runtime_sha256"],
+		"objective_runtime_binding_sha256": objective_runtime_binding_sha256,
+		"files": metrics_runtime_files,
+	}
+	metrics_attestation_reference = write_json(
+		root / artifact_prefix / "measurements" / "metrics-runtime-attestation.json",
+		metrics_attestation_document,
+	)
+	def profile_binding(profile: str, engine: str, recipe_id: str) -> Mapping[str, Any]:
+		models = []
+		if engine in ("RNNoise", "DeepFilterNet"):
+			models = [{
+				"id": f"{engine.casefold()}:self-test",
+				"sha256": fixture["build"]["model_hashes"][0],
+				"version": "1",
+			}]
+		return {
+			"profile": profile,
+			"engine": engine,
+			"recipe": {
+				"catalog_revision": "self-test-v2", "id": recipe_id,
+				"manifest_sha256": fixture["build"]["recipe_manifest_sha256"], "revision": 1,
+			},
+			"models": models,
+		}
+	if fixture["qualification_scope"] == "core":
+		profile_bindings = [
+			profile_binding("Original", "None", "input.original"),
+			profile_binding("Light", "Speex", "input.light.speex"),
+			profile_binding("Balanced", "RNNoise", "input.balanced.self-test"),
+			profile_binding("Quality", "DeepFilterNet", "input.quality.self-test"),
+			profile_binding("VoiceFocus", "DeepFilterNet", "input.voice-focus.self-test"),
+		]
+	else:
+		profile_bindings = [
+			profile_binding("Original", "None", "input.original"),
+			profile_binding("Auto", "RNNoise", "input.auto.balanced.self-test"),
+			profile_binding("Auto", "Speex", "input.auto.light.self-test"),
+			profile_binding("Auto", "DeepFilterNet", "input.auto.quality.self-test"),
+		]
+
+	transition_index_entries = []
+	for transition in sorted(transitions, key=lambda item: (AUTO_DIRECTED_PAIRS.index(str(item["directed_pair"])), str(item["case_id"]))):
+		transition_path = root / artifact_prefix / "measurements" / "auto-transitions" / str(transition["case_id"]) / "transition-report.json"
+		report = {
+			"schema_version": 1,
+			"kind": "mumble-input-enhancement-auto-transition-v1",
+			"status": "completed",
+			"case_id": transition["case_id"],
+			"directed_pair": transition["directed_pair"],
+			"execution_identity": execution_identity(),
+			"fixed_timeline": transition["fixed_timeline"],
+			"receiver_cleanup": transition["receiver_cleanup_enabled"],
+			"startup_preroll_ms": transition["startup_preroll_ms"],
+			"speech_edge_loss_samples": round(float(transition["metrics"]["speech_edge_loss_ms"]) * 48.0),
+			"transition_processing_ms": transition["metrics"]["transition_processing_ms"],
+			"deadline_miss_count": transition["counters"]["deadline_misses"],
+			"fallback_count": transition["counters"]["unexplained_fallbacks"],
+			"invalid_output_count": transition["counters"]["nan_or_inf_count"],
+			"new_clipping_count": transition["counters"]["new_clipping_cases"],
+			"memory_growth_bytes_after_warmup": transition["performance"]["memory_growth_bytes"],
+			"soak_duration_seconds": transition["performance"]["soak_duration_seconds"],
+		}
+		transition_index_entries.append({
+			"case_id": transition["case_id"],
+			"directed_pair": transition["directed_pair"],
+			"report": write_json(transition_path, report),
+		})
+
 	for name, artifact in fixture["artifacts"].items():
+		if name == "measurement_index_json":
+			continue
 		path = root.joinpath(*PurePosixPath(artifact["path"]).parts)
 		path.parent.mkdir(parents=True, exist_ok=True)
 		if name == "case_evidence_jsonl":
@@ -600,6 +930,37 @@ def _materialize_fixture(
 		payload = path.read_bytes()
 		artifact["sha256"] = hashlib.sha256(payload).hexdigest()
 		artifact["size_bytes"] = len(payload)
+
+	index = {
+		"schema_version": 1,
+		"kind": INDEX_KIND,
+		"qualification_scope": fixture["qualification_scope"],
+		"suite": fixture["suite"],
+		"qualification_binding_sha256": qualification_binding_sha256(fixture["build"], fixture["qualification_scope"], fixture["suite"]),
+		"build": copy.deepcopy(fixture["build"]),
+		"plan_binding": {
+			field: fixture["build"][field]
+			for field in ("case_set_sha256", "corpus_inventory_sha256", "corpus_lock_sha256", "mixture_plan_sha256")
+		},
+		"objective_runtime_binding_sha256": objective_runtime_binding_sha256,
+		"metrics_runtime_attestation": metrics_attestation_reference,
+		"profile_bindings": profile_bindings,
+		"published_artifacts": [
+			{"name": name, "artifact": copy.deepcopy(fixture["artifacts"][name])}
+			for name in sorted(fixture["artifacts"])
+			if name != "measurement_index_json"
+		],
+		"cases": case_index_entries,
+		"release_holdout_approval_public_key_sha256": None,
+		"release_holdout_openings": [],
+		"soak_reports": [],
+		"transitions": transition_index_entries,
+	}
+	index_artifact = fixture["artifacts"]["measurement_index_json"]
+	index_path = root.joinpath(*PurePosixPath(index_artifact["path"]).parts)
+	index_reference = write_json(index_path, index, canonical=True)
+	index_artifact["sha256"] = index_reference["sha256"]
+	index_artifact["size_bytes"] = index_reference["size_bytes"]
 
 
 def _expect_rejected(label: str, fixture: Mapping[str, Any], root: Path | None) -> None:
@@ -614,15 +975,159 @@ def run_self_test() -> None:
 	with tempfile.TemporaryDirectory() as directory:
 		root = Path(directory) / "core"
 		fixture, cases, transitions = _passing_fixture("core")
+		language_skew = copy.deepcopy(cases)
+		for record in language_skew:
+			if record["profile"] == "Balanced" and record["condition"] == "clean":
+				record["metrics"]["estoi_loss"] = 0.02 if record["language"] == "sv-SE" else 0.0
+				record["metrics"]["dnsmos_sig_loss"] = 0.10 if record["language"] == "sv-SE" else 0.0
+		language_summary = summarize_case_evidence(language_skew, transitions, "core", "pr_smoke")
+		balanced_language_metrics = language_summary["profiles"]["Balanced"]["metrics"]
+		if balanced_language_metrics["worst_language_clean_estoi_loss_median"] != 0.02 or balanced_language_metrics["worst_language_clean_dnsmos_sig_loss_median"] != 0.10:
+			raise AssertionError("one failing clean-speech language was hidden by an aggregate median")
+		wer_skew = copy.deepcopy(cases)
+		for record in wer_skew:
+			if record["profile"] != "Balanced":
+				continue
+			if record["condition"] == "clean":
+				record["metrics"]["wer_loss_percentage_points"] = 2.0 if record["language"] == "sv-SE" else 0.0
+			else:
+				record["metrics"]["wer_loss_percentage_points"] = -10.0
+		wer_summary = summarize_case_evidence(wer_skew, transitions, "core", "pr_smoke")
+		if wer_summary["profiles"]["Balanced"]["metrics"]["worst_language_wer_loss_percentage_points"] != 2.0:
+			raise AssertionError("noisy WER improvement hid a failing clean-speech language")
+		collapsed = copy.deepcopy(cases)
+		for record in collapsed:
+			record["speaker_group_id"] = "speaker-repeated"
+			record["rir_group_id"] = "room-repeated"
+			record["device_group_id"] = "device-repeated"
+			if record["condition"] != "clean":
+				record["noise_group_id"] = "noise-repeated"
+				record["noise_class"] = "noise-class-repeated"
+		try:
+			summarize_case_evidence(collapsed, transitions, "core", "pr_smoke")
+		except CaseEvidenceError:
+			pass
+		else:
+			raise AssertionError("repeating one source group was accepted as diverse qualification evidence")
 		_materialize_fixture(root, fixture, cases, transitions)
 		validate_qualification(fixture, root)
+
+		def rewrite_indexed_report(
+			test_root: Path,
+			test_fixture: Mapping[str, Any],
+			report_name: str,
+			mutate: Any,
+		) -> None:
+			index_artifact = test_fixture["artifacts"]["measurement_index_json"]
+			index_path = test_root.joinpath(*PurePosixPath(index_artifact["path"]).parts)
+			index = json.loads(index_path.read_text(encoding="utf-8"))
+			entry = next(item for item in index["cases"] if item["profile"] == "Balanced")
+			reference = entry["reports"][report_name]
+			report_path = test_root.joinpath(*PurePosixPath(reference["path"]).parts)
+			report = json.loads(report_path.read_text(encoding="utf-8"))
+			mutate(report)
+			report_payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+			report_path.write_bytes(report_payload)
+			reference["sha256"] = hashlib.sha256(report_payload).hexdigest()
+			reference["size_bytes"] = len(report_payload)
+			index_payload = canonical_measurement_json_bytes(index) + b"\n"
+			index_path.write_bytes(index_payload)
+			index_artifact["sha256"] = hashlib.sha256(index_payload).hexdigest()
+			index_artifact["size_bytes"] = len(index_payload)
+
+		deadline_root = Path(directory) / "runtime-deadline-mismatch"
+		deadline_fixture, deadline_cases, deadline_transitions = _passing_fixture("core")
+		_materialize_fixture(deadline_root, deadline_fixture, deadline_cases, deadline_transitions)
+		rewrite_indexed_report(
+			deadline_root,
+			deadline_fixture,
+			"candidate_benchmark_report",
+			lambda report: report.__setitem__("deadline_misses", 1),
+		)
+		_expect_rejected("case counters hiding a runtime deadline miss", deadline_fixture, deadline_root)
+
+		latency_root = Path(directory) / "runtime-latency-mismatch"
+		latency_fixture, latency_cases, latency_transitions = _passing_fixture("core")
+		_materialize_fixture(latency_root, latency_fixture, latency_cases, latency_transitions)
+		rewrite_indexed_report(
+			latency_root,
+			latency_fixture,
+			"candidate_benchmark_report",
+			lambda report: report.__setitem__("reported_latency_samples", int(report["reported_latency_samples"]) + 480),
+		)
+		_expect_rejected("case latency differing from the runtime report", latency_fixture, latency_root)
+
+		private_path_root = Path(directory) / "private-path-report"
+		private_path_fixture, private_path_cases, private_path_transitions = _passing_fixture("core")
+		_materialize_fixture(private_path_root, private_path_fixture, private_path_cases, private_path_transitions)
+		rewrite_indexed_report(
+			private_path_root,
+			private_path_fixture,
+			"candidate_benchmark_report",
+			lambda report: report.__setitem__("input_path", r"C:\\protected-audio\\private.wav"),
+		)
+		_expect_rejected("offline benchmark report leaking a private path", private_path_fixture, private_path_root)
+
+		rtf_root = Path(directory) / "runtime-rtf-mismatch"
+		rtf_fixture, rtf_cases, rtf_transitions = _passing_fixture("core")
+		_materialize_fixture(rtf_root, rtf_fixture, rtf_cases, rtf_transitions)
+		rewrite_indexed_report(
+			rtf_root,
+			rtf_fixture,
+			"candidate_benchmark_report",
+			lambda report: report.__setitem__("audio_ms", float(report["audio_ms"]) * 10.0),
+		)
+		_expect_rejected("benchmark audio duration understating RTF", rtf_fixture, rtf_root)
+
+		recipe_root = Path(directory) / "runtime-recipe-mismatch"
+		recipe_fixture, recipe_cases, recipe_transitions = _passing_fixture("core")
+		_materialize_fixture(recipe_root, recipe_fixture, recipe_cases, recipe_transitions)
+		rewrite_indexed_report(
+			recipe_root,
+			recipe_fixture,
+			"candidate_benchmark_report",
+			lambda report: report.__setitem__("requested_recipe_id", "input.balanced.wrong-model"),
+		)
+		_expect_rejected("profile measured with an unauthorized recipe/model binding", recipe_fixture, recipe_root)
+
+		case_binding_root = Path(directory) / "case-plan-binding-mismatch"
+		case_binding_fixture, case_binding_cases, case_binding_transitions = _passing_fixture("core")
+		_materialize_fixture(case_binding_root, case_binding_fixture, case_binding_cases, case_binding_transitions)
+		rewrite_indexed_report(
+			case_binding_root,
+			case_binding_fixture,
+			"case_binding_report",
+			lambda report: report.__setitem__("plan_case_sha256", "0" * 64),
+		)
+		_expect_rejected("offline report differing from the indexed plan case", case_binding_fixture, case_binding_root)
+
+		metrics_root = Path(directory) / "metrics-runtime-mismatch"
+		metrics_fixture, metrics_cases, metrics_transitions = _passing_fixture("core")
+		_materialize_fixture(metrics_root, metrics_fixture, metrics_cases, metrics_transitions)
+		metrics_index_artifact = metrics_fixture["artifacts"]["measurement_index_json"]
+		metrics_index_path = metrics_root.joinpath(*PurePosixPath(metrics_index_artifact["path"]).parts)
+		metrics_index = json.loads(metrics_index_path.read_text(encoding="utf-8"))
+		metrics_reference = metrics_index["metrics_runtime_attestation"]
+		metrics_report_path = metrics_root.joinpath(*PurePosixPath(metrics_reference["path"]).parts)
+		metrics_report = json.loads(metrics_report_path.read_text(encoding="utf-8"))
+		metrics_report["payload_sha256"] = "0" * 64
+		metrics_report_payload = (json.dumps(metrics_report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+		metrics_report_path.write_bytes(metrics_report_payload)
+		metrics_reference["sha256"] = hashlib.sha256(metrics_report_payload).hexdigest()
+		metrics_reference["size_bytes"] = len(metrics_report_payload)
+		metrics_index_payload = canonical_measurement_json_bytes(metrics_index) + b"\n"
+		metrics_index_path.write_bytes(metrics_index_payload)
+		metrics_index_artifact["sha256"] = hashlib.sha256(metrics_index_payload).hexdigest()
+		metrics_index_artifact["size_bytes"] = len(metrics_index_payload)
+		_expect_rejected("metrics runtime attestation differing from the qualified build", metrics_fixture, metrics_root)
+
 		_expect_rejected("missing artifact root", fixture, None)
 		legacy = copy.deepcopy(fixture)
 		legacy["schema_version"] = 2
 		_expect_rejected("self-reported schema v2", legacy, root)
 		for label, mutate in (
 			("receiver cleanup summary", lambda value: value["coverage"].__setitem__("receiver_cleanup_cases", 1)),
-			("clean median summary", lambda value: value["profiles"][2]["metrics"].__setitem__("clean_estoi_loss_median", 0.02)),
+			("clean median summary", lambda value: value["profiles"][2]["metrics"].__setitem__("worst_language_clean_estoi_loss_median", 0.02)),
 			("catastrophe summary", lambda value: value["profiles"][2]["metrics"].__setitem__("catastrophe_rate_percent", 0.4)),
 			("counter summary", lambda value: value["profiles"][2]["metrics"].__setitem__("deadline_misses", 1)),
 			("performance summary", lambda value: value["profiles"][2]["performance"].__setitem__("average_rtf", 0.01)),

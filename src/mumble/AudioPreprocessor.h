@@ -178,9 +178,21 @@ public:
 	 */
 	psd_t getPSD() const;
 	/**
+	 * Copies the current power spectrum into caller-owned fixed storage.
+	 * This overload performs no allocation and is suitable for diagnostics
+	 * around the real-time Light processor.
+	 */
+	bool getPSD(std::int32_t *values, std::size_t count) const;
+	/**
 	 * \return The noise estimate (vector of squared values).
 	 */
 	psd_t getNoisePSD() const;
+	/**
+	 * Copies the current noise power spectrum into caller-owned fixed storage.
+	 * This overload performs no allocation and is suitable for the audio
+	 * callback when count exactly matches the configured frame size.
+	 */
+	bool getNoisePSD(std::int32_t *values, std::size_t count) const;
 
 	/**
 	 * \return The amount of probability there was speech in the last processed frame, in percentual scale (0-100).

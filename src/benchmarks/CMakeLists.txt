@@ -12,6 +12,12 @@ FetchContent_Declare(
 )
 
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "")
+# The benchmark binaries are qualification tools, not distributable client
+# payload.  Leaving googlebenchmark's install rules enabled makes a
+# `cmake --install --prefix <stage>` release build try to install its docs via
+# the dependency's cached absolute prefix (and also pollutes the staged app
+# with development libraries and headers).
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Do not install the googlebenchmark dependency" FORCE)
 
 FetchContent_MakeAvailable(googlebenchmark)
 
