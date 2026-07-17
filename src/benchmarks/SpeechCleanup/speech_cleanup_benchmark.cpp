@@ -202,6 +202,24 @@ namespace {
 		return QStringLiteral("Unknown");
 	}
 
+	QString attestedProductModelPath(const Mumble::InputEnhancement::Recipe &recipe,
+								 const QString &authorizedModelPath) {
+		// The embedded RNNoise model deliberately keeps the historical empty-path
+		// diagnostic. Every externally packaged model must, however, publish the
+		// same canonical path that Pipeline::configure() has already verified
+		// against the processor and the authorized SHA-256.
+		if (!recipe.usesNeuralProcessor() || recipe.modelId() == QLatin1String("rnnoise:embedded")
+			|| authorizedModelPath.isEmpty()) {
+			return {};
+		}
+
+		const QString canonicalPath = QFileInfo(authorizedModelPath).canonicalFilePath();
+		if (canonicalPath.isEmpty()) {
+			throw std::runtime_error("Authorized product model path no longer resolves after pipeline configuration");
+		}
+		return canonicalPath;
+	}
+
 	Mumble::InputEnhancement::CpuClass parseCpuClass(const QString &value) {
 		using CpuClass = Mumble::InputEnhancement::CpuClass;
 		if (value.compare(QLatin1String("low"), Qt::CaseInsensitive) == 0) {
@@ -783,6 +801,7 @@ namespace {
 		metrics.initializationMs =
 			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
 		metrics.mixFactor        = recipe.mixFactor();
+		metrics.activeModelPath  = attestedProductModelPath(recipe, authorizedModelPath);
 		metrics.inputSampleCount = samples.size();
 		metrics.reportedLatencySamples = pipeline.latencySamples();
 		const SignalMetrics inputMetrics = measureSignal(samples);
@@ -1057,6 +1076,27 @@ namespace {
 				&& productMetrics.activeProfile == QLatin1String("Original")
 				&& productMetrics.activeEngine == QLatin1String("None") && !productMetrics.usedFallback,
 				"Product Original benchmark diagnostics failed");
+
+		Mumble::InputEnhancement::ResolveRequest balancedRequest;
+		balancedRequest.profile = Mumble::InputEnhancement::Profile::Balanced;
+		balancedRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe balancedRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(balancedRequest);
+		require(attestedProductModelPath(balancedRecipe, QCoreApplication::applicationFilePath()).isEmpty(),
+				"Embedded RNNoise benchmark path exception failed");
+
+		Mumble::InputEnhancement::ResolveRequest qualityRequest;
+		qualityRequest.profile = Mumble::InputEnhancement::Profile::Quality;
+		qualityRequest.cpuClass = Mumble::InputEnhancement::CpuClass::High;
+		qualityRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe qualityRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(qualityRequest);
+		const QString benchmarkPath = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
+		require(!benchmarkPath.isEmpty()
+				&& attestedProductModelPath(qualityRecipe, QCoreApplication::applicationFilePath()) == benchmarkPath,
+				"External product model benchmark path attestation failed");
+		require(attestedProductModelPath(qualityRecipe, {}).isEmpty(),
+				"Unmanaged development model path must remain unpublished");
 	}
 } // namespace
 
