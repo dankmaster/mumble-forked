@@ -324,7 +324,8 @@ foreach ($runner in @($masterRunners + $nightlyRunners)) {
 		}
 		$evidence = Read-ReleaseJson -Path $filePath
 		if ($recordName -ceq "qualityQualification") {
-			& $PythonPath (Join-Path (Split-Path -Parent $PSScriptRoot) "audio-quality/validate-quality-qualification.py") $filePath
+			& $PythonPath (Join-Path (Split-Path -Parent $PSScriptRoot) "audio-quality/validate-quality-qualification.py") `
+				$filePath --artifact-root $measuredEvidenceItem.DirectoryName
 			if ($LASTEXITCODE -ne 0) {
 				throw "Measured quality evidence for '$suite/$runnerClass' failed the semantic qualification validator."
 			}

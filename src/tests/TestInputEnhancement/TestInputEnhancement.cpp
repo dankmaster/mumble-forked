@@ -5,6 +5,7 @@
 
 #include "DeepFilterNetRealtimeWorker.h"
 #include "InputEnhancement.h"
+#include "InputEnhancementLightProcessor.h"
 #include "SpeechCleanupProcessor.h"
 
 #include <QtTest>
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -207,6 +209,8 @@ private slots:
 	void defaultPipelineStartsAsZeroLatencyOriginal();
 	void originalPreservesPcmBitsWithoutInitializingProcessor();
 	void originalAndLightNeverConstructNeuralProcessor();
+	void lightClassicMixAlignsAndProtectsSpeech();
+	void lightProcessorUsesExactProductConfigurationAndTail();
 	void neuralRecipeIsPreparedAndReported();
 	void neuralRecipeBindsAuthorizationToLoadedAsset();
 	void offlinePreparationDelegatesAndFailsClosed();
@@ -215,6 +219,7 @@ private slots:
 	void realtimePreparationFailureFailsClosed();
 	void neuralRecipeWarmupFailureFailsClosed();
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
+	void balancedProtectsFirstDelayedDrySpeechFrame();
 	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
 	void runtimeUnhealthyProcessorFailsClosed();
@@ -245,10 +250,11 @@ void TestInputEnhancement::catalogDefinesStableProductRecipes() {
 		{ Profile::Light, Engine::Speex, "input.light.speex", "", lightLatencyBudgetSamples },
 		{ Profile::Balanced, Engine::RNNoise, "input.balanced.rnnoise-embedded", "rnnoise:embedded",
 		  balancedLatencyBudgetSamples },
-		{ Profile::Quality, Engine::DeepFilterNet, "input.quality.deepfilternet-balanced", "deepfilternet:balanced",
+		{ Profile::Quality, Engine::DeepFilterNet, "input.quality.deepfilternet-low-latency",
+		  "deepfilternet:low-latency",
 		  qualityLatencyBudgetSamples },
-		{ Profile::VoiceFocus, Engine::DeepFilterNet, "input.voice-focus.deepfilternet-balanced",
-		  "deepfilternet:balanced", voiceFocusLatencyBudgetSamples },
+		{ Profile::VoiceFocus, Engine::DeepFilterNet, "input.voice-focus.deepfilternet-low-latency",
+		  "deepfilternet:low-latency", voiceFocusLatencyBudgetSamples },
 	} };
 
 	for (const Expected &item : expected) {
@@ -291,17 +297,31 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 	const ValidatedControls qualityMaximum = validatedControlsForProfile(Profile::Quality, 100, 100);
 	QCOMPARE(qualityMaximum.noiseReduction, 90);
 	QCOMPARE(qualityMaximum.naturalCrisp, 100);
+	const ValidatedControls qualityDefault = validatedControlsForProfile(Profile::Quality, 30, 50);
+	QCOMPARE(qualityDefault.noiseReduction, 45);
+	QCOMPARE(qualityDefault.naturalCrisp, 63);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 0, 0) - 0.70f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 30, 50) - 0.75f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 100, 100) - 0.90f) < 0.00001f);
 	const ValidatedControls focusMinimum = validatedControlsForProfile(Profile::VoiceFocus, 0, 0);
 	QCOMPARE(focusMinimum.noiseReduction, 70);
 	QCOMPARE(focusMinimum.naturalCrisp, 40);
 	const ValidatedControls focusMaximum = validatedControlsForProfile(Profile::VoiceFocus, 100, 100);
 	QCOMPARE(focusMaximum.noiseReduction, 100);
 	QCOMPARE(focusMaximum.naturalCrisp, 100);
-	QVERIFY(mixFactorForControls(Profile::VoiceFocus, 0, 0) > mixFactorForControls(Profile::Quality, 0, 0));
-	QCOMPARE(mixFactorForControls(Profile::VoiceFocus, 100, 100), 0.99f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 0, 0) - 0.90f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 30, 50) - 0.90f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 100, 100) - 0.95f) < 0.00001f);
 	QVERIFY(mixFactorForControls(Profile::Quality, 100, 100)
 			< mixFactorForControls(Profile::VoiceFocus, 100, 100));
 	QCOMPARE(mixFactorForControls(Profile::Original, 100, 100), 0.0f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 0, 0) - 0.50f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 40, 40) - 0.70f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 100, 100) - 1.0f) < 0.00001f);
+	QCOMPARE(lightSpeexSuppressionDb(-1), -5);
+	QCOMPARE(lightSpeexSuppressionDb(40), -15);
+	QCOMPARE(lightSpeexSuppressionDb(80), -25);
+	QCOMPARE(lightSpeexSuppressionDb(101), -30);
 }
 
 void TestInputEnhancement::profileValuesAndReadinessAreStable() {
@@ -475,7 +495,112 @@ void TestInputEnhancement::originalAndLightNeverConstructNeuralProcessor() {
 	QVERIFY(!pipeline.processFrame(frame));
 	QVERIFY(frame == original);
 	QCOMPARE(state.factoryCalls, 0);
-	QCOMPARE(enumValue(pipeline.diagnostics().activeEngine()), enumValue(Engine::Speex));
+	pipeline.recordClassicProcessingFrame(240'000);
+	const Diagnostics diagnostics = pipeline.diagnostics();
+	QCOMPARE(diagnostics.requestedRecipeId(), QStringLiteral("input.light.speex"));
+	QCOMPARE(enumValue(diagnostics.requestedProfile()), enumValue(Profile::Light));
+	QCOMPARE(enumValue(diagnostics.activeProfile()), enumValue(Profile::Light));
+	QCOMPARE(enumValue(diagnostics.activeEngine()), enumValue(Engine::Speex));
+	QVERIFY(diagnostics.activeModelId().isEmpty());
+	QVERIFY(diagnostics.activeModelSha256().isEmpty());
+	QCOMPARE(diagnostics.latencyBudgetSamples(), lightLatencyBudgetSamples);
+	QCOMPARE(diagnostics.actualLatencySamples(), lightLatencyBudgetSamples);
+	QCOMPARE(diagnostics.processedFrames(), std::uint64_t{ 2 });
+	QCOMPARE(diagnostics.neuralFrames(), std::uint64_t{ 0 });
+	QCOMPARE(diagnostics.totalProcessingNanoseconds(), std::uint64_t{ 240'000 });
+	QCOMPARE(diagnostics.maximumProcessingNanoseconds(), std::uint64_t{ 240'000 });
+	QCOMPARE(diagnostics.processingP99Nanoseconds(), std::uint64_t{ 240'000 });
+	QVERIFY(!diagnostics.fallbackActive());
+	QCOMPARE(enumValue(diagnostics.fallbackReason()), enumValue(FallbackReason::None));
+}
+
+void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
+	FakeState state;
+	Pipeline pipeline(factoryFor(state));
+	QVERIFY(pipeline.configure(RecipeCatalog::resolve(requestFor(Profile::Light))));
+	QCOMPARE(pipeline.latencySamples(), frameSamples);
+
+	std::array< std::int16_t, frameSamples > drySpeech = {};
+	for (std::size_t index = 0; index < drySpeech.size(); ++index) {
+		drySpeech[index] = static_cast< std::int16_t >((static_cast< int >(index % 101) - 50) * 200);
+	}
+	std::array< std::int16_t, frameSamples > silence = {};
+	std::array< std::int16_t, frameSamples > wet = {};
+
+	// The first callback is the declared one-frame causal pre-roll.
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), drySpeech.data(), frameSamples, 100, 0, 1.0f));
+	QVERIFY(std::all_of(wet.cbegin(), wet.cend(), [](std::int16_t sample) { return sample == 0; }));
+	pipeline.recordClassicProcessingFrame(100'000);
+
+	// Speex's next wet frame is deliberately corrupt here. The previous frame's
+	// high speech probability must select the exactly aligned dry speech instead.
+	wet.fill(-12'000);
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1.0f));
+	QCOMPARE(std::memcmp(wet.data(), drySpeech.data(), sizeof(wet)), 0);
+	pipeline.recordClassicProcessingFrame(100'000);
+
+	// A stable noisy scene must be observed before the wet path opens. The
+	// all-fixed histogram and caller-owned PSD sum keep this callback-safe.
+	std::array< std::int16_t, frameSamples > dryNoise = {};
+	dryNoise.fill(1'000);
+	bool sawWetMix = false;
+	for (unsigned int frame = 0; frame < 80; ++frame) {
+		wet.fill(10'000);
+		QVERIFY(pipeline.mixClassicFrame(wet.data(), dryNoise.data(), frameSamples, 0, 100, 1.0f));
+		if (wet.front() > dryNoise.front()) {
+			sawWetMix = true;
+		}
+		pipeline.recordClassicProcessingFrame(100'000);
+	}
+	QVERIFY(sawWetMix);
+
+	// The noisy background path fades in rather than switching spectrally.
+	std::array< std::int16_t, frameSamples > dryTail = {};
+	dryTail.fill(5'000);
+	wet.fill(10'000);
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), dryTail.data(), frameSamples, 0, 100, 1.0f));
+	QVERIFY(wet.front() > dryNoise.front());
+	pipeline.recordClassicProcessingFrame(Pipeline::defaultFrameDeadlineNanoseconds + 1);
+	QVERIFY(pipeline.fallbackActive());
+	QVERIFY(pipeline.alignedFallbackActive());
+
+	// A deadline failure stays on Light's established 10 ms timeline and emits
+	// delayed dry tail instead of jumping to the current Original frame.
+	wet.fill(-20'000);
+	QVERIFY(!pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1.0f));
+	QCOMPARE(std::memcmp(wet.data(), dryTail.data(), sizeof(wet)), 0);
+}
+
+void TestInputEnhancement::lightProcessorUsesExactProductConfigurationAndTail() {
+	ResolveRequest request = requestFor(Profile::Light);
+	request.noiseReduction = 40;
+	request.naturalCrisp   = 40;
+	const Recipe recipe    = RecipeCatalog::resolve(request);
+	Pipeline pipeline;
+	LightProcessor processor;
+	QVERIFY(processor.configure(recipe, pipeline));
+	QVERIFY(processor.ready());
+	QCOMPARE(processor.suppressionDb(), lightSpeexSuppressionDb(recipe.noiseReduction()));
+	QVERIFY(processor.denoiseEnabled());
+	QVERIFY(!processor.agcEnabled());
+	QVERIFY(!processor.vadEnabled());
+	QVERIFY(!processor.dereverbEnabled());
+	QCOMPARE(pipeline.latencySamples(), frameSamples);
+
+	std::array< std::int16_t, frameSamples > speech = {};
+	speech.front() = 12'000;
+	const auto expectedTail = speech;
+	QVERIFY(processor.processFrame(speech.data()));
+	QVERIFY(std::all_of(speech.cbegin(), speech.cend(), [](std::int16_t sample) { return sample == 0; }));
+
+	std::array< std::int16_t, frameSamples > zeroDrain = {};
+	QVERIFY(processor.processFrame(zeroDrain.data()));
+	QCOMPARE(std::memcmp(zeroDrain.data(), expectedTail.data(), sizeof(zeroDrain)), 0);
+	QVERIFY(!pipeline.fallbackActive());
+	const Diagnostics diagnostics = pipeline.diagnostics();
+	QCOMPARE(diagnostics.actualLatencySamples(), frameSamples);
+	QCOMPARE(diagnostics.processedFrames(), std::uint64_t { 2 });
+	QCOMPARE(diagnostics.neuralFrames(), std::uint64_t { 0 });
 }
 
 void TestInputEnhancement::neuralRecipeIsPreparedAndReported() {
@@ -675,6 +800,30 @@ void TestInputEnhancement::liveMixOverrideUsesConfiguredProcessorWithoutReconfig
 	QCOMPARE(state.processCalls
 				 - static_cast< int >(Pipeline::processorWarmupFrames + Pipeline::processorPostResetProbeFrames),
 			 1);
+}
+
+void TestInputEnhancement::balancedProtectsFirstDelayedDrySpeechFrame() {
+	FakeState state;
+	state.latency = balancedLatencyBudgetSamples;
+	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+	const Recipe recipe = RecipeCatalog::resolve(requestFor(Profile::Balanced));
+	QVERIFY(pipeline.configure(recipe));
+	state.observedMixes.clear();
+
+	std::array< float, frameSamples > frame = {};
+	for (unsigned int index = 0; index < 6; ++index) {
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	for (unsigned int index = 0; index < 8; ++index) {
+		frame.fill(0.25f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+
+	const auto protectedFrame = std::find(state.observedMixes.cbegin(), state.observedMixes.cend(), 0.0f);
+	QVERIFY(protectedFrame != state.observedMixes.cend());
+	QCOMPARE(*protectedFrame, 0.0f);
+	QVERIFY(std::next(protectedFrame) != state.observedMixes.cend());
+	QVERIFY(std::abs(*std::next(protectedFrame) - recipe.mixFactor()) < 0.00001f);
 }
 
 void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {

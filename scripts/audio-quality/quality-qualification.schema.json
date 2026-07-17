@@ -64,6 +64,7 @@
         "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
         "recipe_manifest_sha256": { "$ref": "#/$defs/sha256" },
         "recipe_set_version": { "type": "string", "minLength": 1 },
+        "release_holdout_approval_public_key_sha256": { "$ref": "#/$defs/sha256" },
         "model_hashes": {
           "type": "array",
           "minItems": 1,
@@ -81,7 +82,10 @@
         "failed_case_count",
         "fixed_timeline_cases",
         "languages",
+        "objective_signal_stages",
         "receiver_cleanup_cases",
+        "source_diversity",
+        "wer_reference_kinds",
         "warm_start_cases"
       ],
       "properties": {
@@ -96,6 +100,31 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
+        },
+        "objective_signal_stages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["sender-pre-opus", "receiver-capture"] }
+        },
+        "wer_reference_kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["clean-asr-consistency", "segment-ground-truth"] }
+        },
+        "source_diversity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device_groups", "languages", "noise_classes", "noise_groups", "rir_groups", "speaker_groups"],
+          "properties": {
+            "speaker_groups": { "type": "integer", "minimum": 1 },
+            "languages": { "type": "integer", "minimum": 1 },
+            "noise_groups": { "type": "integer", "minimum": 1 },
+            "noise_classes": { "type": "integer", "minimum": 1 },
+            "rir_groups": { "type": "integer", "minimum": 1 },
+            "device_groups": { "type": "integer", "minimum": 1 }
+          }
         }
       }
     },
@@ -118,6 +147,7 @@
         "case_evidence_jsonl",
         "failure_spectrogram_index",
         "junit",
+        "measurement_index_json",
         "per_case_csv",
         "per_case_parquet",
         "summary_html",
@@ -127,6 +157,7 @@
         "case_evidence_jsonl": { "$ref": "#/$defs/artifact" },
         "failure_spectrogram_index": { "$ref": "#/$defs/artifact" },
         "junit": { "$ref": "#/$defs/artifact" },
+        "measurement_index_json": { "$ref": "#/$defs/artifact" },
         "per_case_csv": { "$ref": "#/$defs/artifact" },
         "per_case_parquet": { "$ref": "#/$defs/artifact" },
         "summary_html": { "$ref": "#/$defs/artifact" },
@@ -153,6 +184,14 @@
           "auto_transitions": { "$ref": "#/$defs/autoTransitions" }
         }
       }
+    },
+    {
+      "if": { "properties": { "suite": { "const": "release" } }, "required": ["suite"] },
+      "then": {
+        "properties": {
+          "build": { "required": ["release_holdout_approval_public_key_sha256"] }
+        }
+      }
     }
   ],
   "$defs": {
@@ -174,8 +213,8 @@
       "required": [
         "algorithmic_latency_ms_max",
         "catastrophe_rate_percent",
-        "clean_dnsmos_sig_loss_median",
-        "clean_estoi_loss_median",
+        "worst_language_clean_dnsmos_sig_loss_median",
+        "worst_language_clean_estoi_loss_median",
         "deadline_misses",
         "latency_attestation_failures",
         "max_speech_edge_loss_ms",
@@ -192,8 +231,8 @@
       ],
       "properties": {
         "algorithmic_latency_ms_max": { "type": "number", "minimum": 0 },
-        "clean_estoi_loss_median": { "type": "number" },
-        "clean_dnsmos_sig_loss_median": { "type": "number" },
+        "worst_language_clean_estoi_loss_median": { "type": "number" },
+        "worst_language_clean_dnsmos_sig_loss_median": { "type": "number" },
         "worst_language_wer_loss_percentage_points": { "type": "number" },
         "noisy_dnsmos_ovrl_improvement_median": { "type": "number" },
         "noisy_dnsmos_bak_improvement_median": { "type": "number" },
@@ -218,11 +257,13 @@
         "max_internal_processing_ms",
         "memory_growth_bytes",
         "p99_callback_ms",
+        "p99_worker_ms",
         "soak_duration_seconds"
       ],
       "properties": {
         "average_rtf": { "type": "number", "minimum": 0 },
         "p99_callback_ms": { "type": "number", "minimum": 0 },
+        "p99_worker_ms": { "type": "number", "minimum": 0 },
         "max_internal_processing_ms": { "type": "number", "minimum": 0 },
         "memory_growth_bytes": { "type": "integer" },
         "soak_duration_seconds": { "type": "integer", "minimum": 0 }

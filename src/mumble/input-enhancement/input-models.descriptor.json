@@ -93,11 +93,7 @@
       "licenseSpdx": "MIT OR Apache-2.0",
       "sampleRateHz": 48000,
       "algorithmicLatencyMs": 40,
-      "recipeCompatibility": [
-        "input.quality.deepfilternet-balanced",
-        "input.auto.quality.deepfilternet-balanced",
-        "input.voice-focus.deepfilternet-balanced"
-      ]
+      "recipeCompatibility": []
     },
     {
       "id": "deepfilternet:low-latency",
@@ -106,8 +102,13 @@
       "path": "deepfilternet/DeepFilterNet3_ll_onnx.tar.gz",
       "licenseSpdx": "MIT OR Apache-2.0",
       "sampleRateHz": 48000,
-      "algorithmicLatencyMs": 20,
-      "recipeCompatibility": ["input.expert.deepfilternet-low-latency"]
+      "algorithmicLatencyMs": 10,
+      "recipeCompatibility": [
+        "input.quality.deepfilternet-low-latency",
+        "input.auto.quality.deepfilternet-low-latency",
+        "input.voice-focus.deepfilternet-low-latency",
+        "input.expert.deepfilternet-low-latency"
+      ]
     }
   ]
 }

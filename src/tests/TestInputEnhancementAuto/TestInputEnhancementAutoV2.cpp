@@ -58,20 +58,20 @@ AutoRecipeCandidateBinding candidateBinding(const Profile profile) {
 			binding.minimumCpuClass      = CpuClass::Standard;
 			break;
 		case Profile::Quality:
-			binding.recipeId             = QStringLiteral("input.auto.quality.deepfilternet-balanced");
+			binding.recipeId             = QStringLiteral("input.auto.quality.deepfilternet-low-latency");
 			binding.engine               = Engine::DeepFilterNet;
-			binding.modelId              = QStringLiteral("deepfilternet:balanced");
+			binding.modelId              = QStringLiteral("deepfilternet:low-latency");
 			binding.modelSha256          = QString(64, QLatin1Char('c'));
-			binding.modelRelativePath    = QStringLiteral("deepfilternet/DeepFilterNet3.tar.gz");
+			binding.modelRelativePath    = QStringLiteral("deepfilternet/DeepFilterNet3_ll.tar.gz");
 			binding.latencyBudgetSamples = qualityLatencyBudgetSamples;
 			binding.minimumCpuClass      = CpuClass::High;
 			break;
 		case Profile::VoiceFocus:
-			binding.recipeId             = QStringLiteral("input.auto.voice-focus.deepfilternet-balanced");
+			binding.recipeId             = QStringLiteral("input.auto.voice-focus.deepfilternet-low-latency");
 			binding.engine               = Engine::DeepFilterNet;
-			binding.modelId              = QStringLiteral("deepfilternet:balanced");
+			binding.modelId              = QStringLiteral("deepfilternet:low-latency");
 			binding.modelSha256          = QString(64, QLatin1Char('d'));
-			binding.modelRelativePath    = QStringLiteral("deepfilternet/DeepFilterNet3.tar.gz");
+			binding.modelRelativePath    = QStringLiteral("deepfilternet/DeepFilterNet3_ll.tar.gz");
 			binding.latencyBudgetSamples = voiceFocusLatencyBudgetSamples;
 			binding.minimumCpuClass      = CpuClass::High;
 			break;

@@ -36,6 +36,7 @@ class TestSpeechCleanup : public QObject {
 private slots:
 	void modelDomainNormalizationIsExplicitAndPartOfSelectionIdentity();
 	void transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame();
+	void transmitDrainCanAppendUncountedTerminalFlushFrame();
 	void transmitDrainCanBeCancelledForFreshSpeech();
 #ifdef TEST_EXPECT_RNNOISE
 	void customModelDirectoryFallsBackSafely();
@@ -104,6 +105,7 @@ void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFra
 		const auto frame = drain.takeFrame(480);
 		QVERIFY(frame.draining);
 		drainedSamples.push_back(frame.zeroInputSamples);
+		QCOMPARE(frame.causalDrainSamples, frame.zeroInputSamples);
 		QCOMPARE(frame.terminator, !drain.active());
 	}
 
@@ -117,6 +119,7 @@ void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFra
 	QVERIFY(!exhaustedFrame.draining);
 	QVERIFY(!exhaustedFrame.terminator);
 	QCOMPARE(exhaustedFrame.zeroInputSamples, 0u);
+	QCOMPARE(exhaustedFrame.causalDrainSamples, 0u);
 
 	drain.begin(0);
 	QVERIFY(!drain.active());
@@ -143,6 +146,51 @@ void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
 	QCOMPARE(drain.remainingSamples(), 0u);
 	QCOMPARE(drain.drainedSamples(), 0u);
 	QVERIFY(!drain.takeFrame(480).draining);
+}
+
+void TestSpeechCleanup::transmitDrainCanAppendUncountedTerminalFlushFrame() {
+	Mumble::SpeechCleanup::TransmitDrain drain;
+	drain.begin(960, 1);
+
+	const auto first = drain.takeFrame(480);
+	QVERIFY(first.draining);
+	QVERIFY(!first.terminalFlush);
+	QVERIFY(!first.terminator);
+	QCOMPARE(first.zeroInputSamples, 480u);
+	QCOMPARE(first.causalDrainSamples, 480u);
+
+	const auto second = drain.takeFrame(480);
+	QVERIFY(second.draining);
+	QVERIFY(!second.terminalFlush);
+	QVERIFY(!second.terminator);
+	QCOMPARE(second.zeroInputSamples, 480u);
+	QCOMPARE(second.causalDrainSamples, 480u);
+	QCOMPARE(drain.drainedSamples(), 960u);
+	QCOMPARE(drain.remainingTerminalFlushFrames(), 1u);
+
+	const auto flush = drain.takeFrame(480);
+	QVERIFY(flush.draining);
+	QVERIFY(flush.terminalFlush);
+	QVERIFY(flush.terminator);
+	QCOMPARE(flush.zeroInputSamples, 480u);
+	QCOMPARE(flush.causalDrainSamples, 0u);
+	QCOMPARE(drain.requestedSamples(), 960u);
+	QCOMPARE(drain.drainedSamples(), 960u);
+	QCOMPARE(drain.remainingTerminalFlushFrames(), 0u);
+	QVERIFY(!drain.active());
+
+	// A zero-latency Original E2E release still needs one callback to flush the
+	// unchanged common preprocessor and carry a real terminator.
+	drain.begin(0, 1);
+	QVERIFY(drain.active());
+	const auto originalFlush = drain.takeFrame(480);
+	QVERIFY(originalFlush.draining);
+	QVERIFY(originalFlush.terminalFlush);
+	QVERIFY(originalFlush.terminator);
+	QCOMPARE(originalFlush.zeroInputSamples, 480u);
+	QCOMPARE(originalFlush.causalDrainSamples, 0u);
+	QCOMPARE(drain.requestedSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
 }
 
 Mumble::SpeechCleanup::Selection TestSpeechCleanup::customSelection(const QString &path) {

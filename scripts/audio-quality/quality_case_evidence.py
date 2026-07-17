@@ -8,14 +8,17 @@ import json
 import math
 import re
 import statistics
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, MutableMapping, Sequence
+
+from objective_quality_score import ALLOWED_DATASET_SPLITS, SIGNAL_STAGES, ObjectiveScoreError, validate_score_document
 
 
 class CaseEvidenceError(ValueError):
 	"""Raised when case evidence is incomplete, ambiguous, or non-canonical."""
 
 
+CASE_EVIDENCE_SCHEMA_VERSION = 3
 CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 AUTO_PROFILES = ("Auto",)
 PROFILES_BY_SCOPE = { "core": CORE_PROFILES, "auto": AUTO_PROFILES }
@@ -59,10 +62,12 @@ CASE_PERFORMANCE_NAMES = (
 	"memory_growth_bytes",
 	"processing_duration_seconds",
 	"soak_duration_seconds",
+	"worker_durations_ms",
 )
 CASE_KEYS = {
-	"case_id", "cohort_id", "condition", "counters", "failed", "fixed_timeline", "language",
-	"metrics", "performance", "profile", "receiver_cleanup_enabled", "record_type", "startup_preroll_ms",
+	"case_id", "cohort_id", "condition", "counters", "dataset_split", "failed", "fixed_timeline", "language",
+	"metrics", "noise_class", "objective_score", "performance", "profile", "receiver_cleanup_enabled",
+	"quality_pair_case_id", "record_type", "startup_preroll_ms", "speaker_group_id", "noise_group_id", "rir_group_id", "device_group_id",
 }
 TRANSITION_KEYS = {
 	"case_id", "counters", "directed_pair", "failed", "fixed_timeline", "metrics", "performance",
@@ -72,6 +77,12 @@ HEADER_KEYS = {
 	"case_count", "qualification_binding_sha256", "record_type", "schema_version", "transition_case_count",
 }
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+SOURCE_DIVERSITY_REQUIREMENTS = {
+	"pr_smoke": { "speaker_groups": 2, "languages": 1, "noise_groups": 2, "noise_classes": 2, "rir_groups": 2, "device_groups": 2 },
+	"release": { "speaker_groups": 2, "languages": 1, "noise_groups": 2, "noise_classes": 3, "rir_groups": 2, "device_groups": 2 },
+	"master_quality": { "speaker_groups": 8, "languages": 2, "noise_groups": 8, "noise_classes": 6, "rir_groups": 6, "device_groups": 4 },
+	"nightly": { "speaker_groups": 16, "languages": 2, "noise_groups": 16, "noise_classes": 10, "rir_groups": 12, "device_groups": 8 },
+}
 
 
 def _expect(condition: bool, path: str, message: str) -> None:
@@ -112,6 +123,20 @@ def _identifier(value: Any, path: str) -> str:
 	return value
 
 
+def _hash(value: Any, path: str) -> str:
+	_expect(isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value)), path, "invalid lowercase SHA-256")
+	return value
+
+
+def _safe_relative_path(value: Any, path: str) -> str:
+	_expect(isinstance(value, str) and bool(value), path, "expected a non-empty path")
+	parsed = PurePosixPath(value)
+	_expect(value == parsed.as_posix(), path, "must use normalized forward slashes")
+	_expect(not parsed.is_absolute() and "." not in parsed.parts and ".." not in parsed.parts, path, "unsafe path")
+	_expect(parsed.suffix.lower() == ".json", path, "objective score must be JSON")
+	return value
+
+
 def canonical_json_bytes(value: Any) -> bytes:
 	return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -128,7 +153,7 @@ def make_header(
 ) -> Mapping[str, Any]:
 	return {
 		"record_type": "header",
-		"schema_version": 1,
+		"schema_version": CASE_EVIDENCE_SCHEMA_VERSION,
 		"qualification_binding_sha256": qualification_binding_sha256(build, qualification_scope, suite),
 		"case_count": case_count,
 		"transition_case_count": transition_case_count,
@@ -157,13 +182,35 @@ def validate_case_record(value: Any, path: str, allowed_profiles: Sequence[str])
 	_expect(record["record_type"] == "case", f"{path}.record_type", "must be case")
 	_identifier(record["case_id"], f"{path}.case_id")
 	_identifier(record["cohort_id"], f"{path}.cohort_id")
+	_identifier(record["speaker_group_id"], f"{path}.speaker_group_id")
+	_identifier(record["rir_group_id"], f"{path}.rir_group_id")
+	_identifier(record["device_group_id"], f"{path}.device_group_id")
 	_expect(record["profile"] in allowed_profiles, f"{path}.profile", "profile is outside qualification scope")
 	_expect(record["condition"] in ("clean", "noisy", "severe"), f"{path}.condition", "unsupported condition")
+	_expect(record["dataset_split"] in ALLOWED_DATASET_SPLITS, f"{path}.dataset_split", "holdout and unknown splits are forbidden")
+	if record["condition"] == "clean":
+		_expect(record["noise_group_id"] is None, f"{path}.noise_group_id", "clean cases must use null")
+		_expect(record["noise_class"] is None, f"{path}.noise_class", "clean cases must use null")
+	else:
+		_identifier(record["noise_group_id"], f"{path}.noise_group_id")
+		_identifier(record["noise_class"], f"{path}.noise_class")
 	_expect(isinstance(record["language"], str) and bool(record["language"]) and "\n" not in record["language"], f"{path}.language", "invalid language")
 	_expect(record["startup_preroll_ms"] in (0, 300), f"{path}.startup_preroll_ms", "must be 0 or 300")
 	_expect(isinstance(record["fixed_timeline"], bool), f"{path}.fixed_timeline", "expected a boolean")
 	_expect(isinstance(record["receiver_cleanup_enabled"], bool), f"{path}.receiver_cleanup_enabled", "expected a boolean")
 	_expect(isinstance(record["failed"], bool), f"{path}.failed", "expected a boolean")
+	objective = _mapping(record["objective_score"], f"{path}.objective_score")
+	_exact_keys(objective, {"path", "sha256", "signal_stage", "size_bytes", "wer_reference_kind", "wer_reference_text_sha256"}, f"{path}.objective_score")
+	_safe_relative_path(objective["path"], f"{path}.objective_score.path")
+	_hash(objective["sha256"], f"{path}.objective_score.sha256")
+	_integer(objective["size_bytes"], f"{path}.objective_score.size_bytes", 1)
+	_expect(objective["signal_stage"] in SIGNAL_STAGES, f"{path}.objective_score.signal_stage", "unsupported signal stage")
+	_expect(objective["wer_reference_kind"] in ("clean-asr-consistency", "segment-ground-truth"), f"{path}.objective_score.wer_reference_kind", "unsupported WER reference")
+	_hash(objective["wer_reference_text_sha256"], f"{path}.objective_score.wer_reference_text_sha256")
+	if record["profile"] == "VoiceFocus" and record["condition"] == "severe":
+		_identifier(record["quality_pair_case_id"], f"{path}.quality_pair_case_id")
+	else:
+		_expect(record["quality_pair_case_id"] is None, f"{path}.quality_pair_case_id", "must be null outside severe VoiceFocus cases")
 
 	metrics = _mapping(record["metrics"], f"{path}.metrics")
 	_exact_keys(metrics, set(CASE_METRIC_NAMES), f"{path}.metrics")
@@ -190,6 +237,10 @@ def validate_case_record(value: Any, path: str, allowed_profiles: Sequence[str])
 	_expect(isinstance(callbacks, list) and callbacks, f"{path}.performance.callback_durations_ms", "expected a non-empty array")
 	for index, duration in enumerate(callbacks):
 		_number(duration, f"{path}.performance.callback_durations_ms[{index}]", 0)
+	workers = performance["worker_durations_ms"]
+	_expect(isinstance(workers, list) and workers, f"{path}.performance.worker_durations_ms", "expected a non-empty array")
+	for index, duration in enumerate(workers):
+		_number(duration, f"{path}.performance.worker_durations_ms[{index}]", 0)
 	_number(performance["max_internal_processing_ms"], f"{path}.performance.max_internal_processing_ms", 0)
 	_integer(performance["memory_growth_bytes"], f"{path}.performance.memory_growth_bytes")
 	_integer(performance["soak_duration_seconds"], f"{path}.performance.soak_duration_seconds", 0)
@@ -248,7 +299,137 @@ def validate_records(
 		_expect(not validated_transitions, "auto_transitions", "core evidence must not contain Auto transitions")
 	else:
 		_expect(bool(validated_transitions), "auto_transitions", "Auto evidence requires transition cases")
+	case_registry = {(record["profile"], record["case_id"]): record for record in validated_cases}
+	pair_fields = (
+		"cohort_id", "condition", "dataset_split", "device_group_id", "language", "noise_class",
+		"noise_group_id", "rir_group_id", "speaker_group_id", "startup_preroll_ms",
+	)
+	for index, record in enumerate(validated_cases):
+		if record["profile"] != "VoiceFocus" or record["condition"] != "severe":
+			continue
+		quality = case_registry.get(("Quality", record["quality_pair_case_id"]))
+		_expect(quality is not None, f"cases[{index}].quality_pair_case_id", "does not identify a Quality case")
+		for field in pair_fields:
+			_expect(quality[field] == record[field], f"cases[{index}].quality_pair_case_id", f"Quality pair differs in {field}")
 	return validated_cases, validated_transitions
+
+
+def validate_suite_splits(cases: Sequence[Mapping[str, Any]], suite: str) -> None:
+	"""Keep the one-shot protected holdout exclusive to final release evidence."""
+
+	_expect(suite in SOURCE_DIVERSITY_REQUIREMENTS, "suite", "unknown qualification suite")
+	holdout_count = sum(record["dataset_split"] == "release-holdout" for record in cases)
+	if suite == "release":
+		_expect(holdout_count == len(cases), "case evidence dataset_split", "every final release case must use release-holdout")
+	else:
+		_expect(holdout_count == 0, "case evidence dataset_split", "release-holdout is forbidden outside the final release suite")
+
+
+def source_diversity(cases: Sequence[Mapping[str, Any]]) -> Mapping[str, int]:
+	return {
+		"speaker_groups": len({str(record["speaker_group_id"]) for record in cases}),
+		"languages": len({str(record["language"]) for record in cases}),
+		"noise_groups": len({str(record["noise_group_id"]) for record in cases if record["noise_group_id"] is not None}),
+		"noise_classes": len({str(record["noise_class"]) for record in cases if record["noise_class"] is not None}),
+		"rir_groups": len({str(record["rir_group_id"]) for record in cases}),
+		"device_groups": len({str(record["device_group_id"]) for record in cases}),
+	}
+
+
+def validate_source_diversity(cases: Sequence[Mapping[str, Any]], qualification_scope: str, suite: str) -> Mapping[str, int]:
+	_expect(suite in SOURCE_DIVERSITY_REQUIREMENTS, "suite", "unknown qualification suite")
+	requirements = SOURCE_DIVERSITY_REQUIREMENTS[suite]
+	global_summary = source_diversity(cases)
+	for key, minimum in requirements.items():
+		_expect(global_summary[key] >= minimum, f"case evidence source diversity.{key}", f"requires at least {minimum}; found {global_summary[key]}")
+	for profile in PROFILES_BY_SCOPE[qualification_scope]:
+		rows = [record for record in cases if record["profile"] == profile]
+		profile_summary = source_diversity(rows)
+		for key, minimum in requirements.items():
+			_expect(profile_summary[key] >= minimum, f"case evidence profile {profile} source diversity.{key}", f"requires at least {minimum}; found {profile_summary[key]}")
+	return global_summary
+
+
+def _sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open("rb") as stream:
+		for block in iter(lambda: stream.read(1024 * 1024), b""):
+			digest.update(block)
+	return digest.hexdigest()
+
+
+def verify_objective_score_references(
+	cases: Sequence[Mapping[str, Any]], artifact_root: Path, required_signal_stage: str | None = None
+) -> list[Mapping[str, Any]]:
+	"""Recompute case metrics from separately hash-attested objective scores."""
+
+	resolved_root = artifact_root.resolve()
+	validated_scores: list[Mapping[str, Any]] = []
+	score_registry: dict[tuple[str, str], Mapping[str, Any]] = {}
+	for index, case in enumerate(cases):
+		path = f"cases[{index}].objective_score"
+		reference = _mapping(case["objective_score"], path)
+		relative = _safe_relative_path(reference["path"], f"{path}.path")
+		actual = resolved_root.joinpath(*PurePosixPath(relative).parts).resolve()
+		try:
+			actual.relative_to(resolved_root)
+		except ValueError as error:
+			raise CaseEvidenceError(f"{path}.path: escapes artifact root") from error
+		_expect(actual.is_file() and not actual.is_symlink(), f"{path}.path", f"missing regular score artifact: {actual}")
+		_expect(actual.stat().st_size == reference["size_bytes"], f"{path}.size_bytes", "artifact size mismatch")
+		_expect(_sha256(actual) == reference["sha256"], f"{path}.sha256", "artifact hash mismatch")
+		try:
+			score = validate_score_document(_load_json_line(actual.read_bytes(), index + 1))
+		except (OSError, ObjectiveScoreError) as error:
+			raise CaseEvidenceError(f"{path}: invalid objective score: {error}") from error
+		_expect(score["case_id"] == case["case_id"], f"{path}.case_id", "does not match case evidence")
+		_expect(score["profile"] == case["profile"], f"{path}.profile", "does not match case evidence")
+		_expect(score["condition"] == case["condition"], f"{path}.condition", "does not match case evidence")
+		_expect(score["dataset_split"] == case["dataset_split"], f"{path}.dataset_split", "does not match case evidence")
+		_expect(score["alignment"]["signal_stage"] == reference["signal_stage"], f"{path}.signal_stage", "does not match score")
+		if required_signal_stage is not None:
+			_expect(reference["signal_stage"] == required_signal_stage, f"{path}.signal_stage", f"{required_signal_stage} evidence is required")
+		wer_reference = score["wer_reference"]
+		expected_wer_language = str(case["language"]).split("-", 1)[0].split("_", 1)[0].casefold()
+		_expect(expected_wer_language in ("en", "sv"), f"{path}.language", "objective WER currently supports only English or Swedish")
+		_expect(wer_reference["language"] == expected_wer_language, f"{path}.language", "score WER language does not match the case")
+		_expect(wer_reference["kind"] == reference["wer_reference_kind"], f"{path}.wer_reference_kind", "does not match score")
+		_expect(wer_reference["text_sha256"] == reference["wer_reference_text_sha256"], f"{path}.wer_reference_text_sha256", "does not match score")
+		deltas = score["candidate_minus_original"]
+		expected_metrics = {
+			"algorithmic_latency_ms": score["alignment"]["candidate_latency_samples"] / 48.0,
+			"dnsmos_bak_improvement": deltas["dnsmos_bak"],
+			"dnsmos_ovrl_improvement": deltas["dnsmos_ovrl"],
+			"dnsmos_sig_loss": -deltas["dnsmos_sig"],
+			"estoi_loss": -deltas["estoi"],
+			"wer_loss_percentage_points": deltas["wer_delta_percentage_points"],
+		}
+		for metric_name, expected in expected_metrics.items():
+			actual_metric = float(case["metrics"][metric_name])
+			_expect(math.isclose(actual_metric, float(expected), rel_tol=1e-9, abs_tol=1e-9), f"{path}.{metric_name}", f"does not match objective score ({expected!r})")
+		validated_scores.append(score)
+		score_registry[(str(case["profile"]), str(case["case_id"]))] = score
+	for index, case in enumerate(cases):
+		if case["profile"] != "VoiceFocus" or case["condition"] != "severe":
+			continue
+		voice_focus = score_registry[("VoiceFocus", str(case["case_id"]))]
+		quality = score_registry.get(("Quality", str(case["quality_pair_case_id"])))
+		_expect(quality is not None, f"cases[{index}].quality_pair_case_id", "paired Quality objective score is missing")
+		_expect(voice_focus["inputs"]["clean_reference"] == quality["inputs"]["clean_reference"], f"cases[{index}].quality_pair_case_id", "clean reference differs from Quality")
+		_expect(voice_focus["inputs"]["noisy_original"] == quality["inputs"]["noisy_original"], f"cases[{index}].quality_pair_case_id", "noisy input scene differs from Quality")
+		_expect(voice_focus["runtime"] == quality["runtime"], f"cases[{index}].quality_pair_case_id", "metrics runtime differs from Quality")
+		_expect(voice_focus["wer_reference"] == quality["wer_reference"], f"cases[{index}].quality_pair_case_id", "language/reference differs from Quality")
+		for field in ("signal_stage", "original_latency_samples", "original_window_start_samples"):
+			_expect(voice_focus["alignment"][field] == quality["alignment"][field], f"cases[{index}].quality_pair_case_id", f"alignment differs in {field}")
+		if voice_focus["alignment"]["signal_stage"] == "receiver-capture":
+			voice_route = voice_focus["alignment"]["qualified_route_binding"]
+			quality_route = quality["alignment"]["qualified_route_binding"]
+			for field in ("control_wav", "control_fixed_timeline_score", "route_offset_samples", "stable_execution_identity"):
+				_expect(voice_route[field] == quality_route[field], f"cases[{index}].quality_pair_case_id", f"qualified route differs in {field}")
+		expected_pair_bak = float(voice_focus["metrics"]["candidate"]["dnsmos_bak"]) - float(quality["metrics"]["candidate"]["dnsmos_bak"])
+		actual_pair_bak = float(case["metrics"]["severe_noise_bak_improvement_over_quality"])
+		_expect(math.isclose(actual_pair_bak, expected_pair_bak, rel_tol=1e-9, abs_tol=1e-9), f"cases[{index}].metrics.severe_noise_bak_improvement_over_quality", f"does not match paired VoiceFocus minus Quality objective BAK ({expected_pair_bak!r})")
+	return validated_scores
 
 
 def write_case_evidence(
@@ -260,6 +441,8 @@ def write_case_evidence(
 	transitions: Sequence[Any],
 ) -> None:
 	validated_cases, validated_transitions = validate_records(cases, transitions, qualification_scope)
+	validate_suite_splits(validated_cases, suite)
+	validate_source_diversity(validated_cases, qualification_scope, suite)
 	header = make_header(build, qualification_scope, suite, len(validated_cases), len(validated_transitions))
 	records = [
 		header,
@@ -297,7 +480,7 @@ def load_case_evidence(
 	header = records[0]
 	_exact_keys(header, HEADER_KEYS, "case evidence header")
 	_expect(header["record_type"] == "header", "case evidence header.record_type", "must be header")
-	_expect(header["schema_version"] == 1, "case evidence header.schema_version", "unsupported version")
+	_expect(header["schema_version"] == CASE_EVIDENCE_SCHEMA_VERSION, "case evidence header.schema_version", "unsupported version")
 	_expect(
 		header["qualification_binding_sha256"] == qualification_binding_sha256(build, qualification_scope, suite),
 		"case evidence header.qualification_binding_sha256",
@@ -315,6 +498,8 @@ def load_case_evidence(
 		else:
 			raise CaseEvidenceError(f"case evidence line {index}.record_type: unsupported record")
 	validated_cases, validated_transitions = validate_records(cases, transitions, qualification_scope)
+	validate_suite_splits(validated_cases, suite)
+	validate_source_diversity(validated_cases, qualification_scope, suite)
 	_expect(len(validated_cases) == case_count, "case evidence header.case_count", "does not match record count")
 	_expect(len(validated_transitions) == transition_count, "case evidence header.transition_case_count", "does not match record count")
 	expected_order = [
@@ -338,9 +523,10 @@ def _nearest_rank_percentile(values: Sequence[float], percentile: float) -> floa
 
 
 def summarize_case_evidence(
-	cases: Sequence[Mapping[str, Any]], transitions: Sequence[Mapping[str, Any]], qualification_scope: str
+	cases: Sequence[Mapping[str, Any]], transitions: Sequence[Mapping[str, Any]], qualification_scope: str, suite: str
 ) -> Mapping[str, Any]:
 	profiles = PROFILES_BY_SCOPE[qualification_scope]
+	diversity = validate_source_diversity(cases, qualification_scope, suite)
 	coverage = {
 		"case_count": len(cases),
 		"failed_case_count": sum(1 for record in cases if record["failed"]),
@@ -349,6 +535,9 @@ def summarize_case_evidence(
 		"fixed_timeline_cases": sum(1 for record in cases if record["fixed_timeline"]),
 		"receiver_cleanup_cases": sum(1 for record in cases if record["receiver_cleanup_enabled"]),
 		"languages": sorted({ str(record["language"]) for record in cases }),
+		"wer_reference_kinds": sorted({ str(record["objective_score"]["wer_reference_kind"]) for record in cases }),
+		"objective_signal_stages": sorted({ str(record["objective_score"]["signal_stage"]) for record in cases }),
+		"source_diversity": diversity,
 	}
 	profile_summaries: dict[str, Mapping[str, Any]] = {}
 	for profile in profiles:
@@ -365,8 +554,22 @@ def summarize_case_evidence(
 			_expect(bool(severe), "case evidence profile VoiceFocus", "requires severe-noise cases")
 		language_wer_medians = [
 			_median(
-				[ float(record["metrics"]["wer_loss_percentage_points"]) for record in rows if record["language"] == language ],
-				f"case evidence profile {profile} language {language} WER",
+				[ float(record["metrics"]["wer_loss_percentage_points"]) for record in clean if record["language"] == language ],
+				f"case evidence profile {profile} language {language} clean WER",
+			)
+			for language in coverage["languages"]
+		]
+		language_clean_estoi_medians = [
+			_median(
+				[float(record["metrics"]["estoi_loss"]) for record in clean if record["language"] == language],
+				f"case evidence profile {profile} language {language} clean eSTOI",
+			)
+			for language in coverage["languages"]
+		]
+		language_clean_sig_medians = [
+			_median(
+				[float(record["metrics"]["dnsmos_sig_loss"]) for record in clean if record["language"] == language],
+				f"case evidence profile {profile} language {language} clean SIG",
 			)
 			for language in coverage["languages"]
 		]
@@ -383,8 +586,8 @@ def summarize_case_evidence(
 		)
 		metrics = {
 			"algorithmic_latency_ms_max": max(float(record["metrics"]["algorithmic_latency_ms"]) for record in rows),
-			"clean_estoi_loss_median": _median([ float(record["metrics"]["estoi_loss"]) for record in clean ], f"{profile} clean eSTOI"),
-			"clean_dnsmos_sig_loss_median": _median([ float(record["metrics"]["dnsmos_sig_loss"]) for record in clean ], f"{profile} clean SIG"),
+			"worst_language_clean_estoi_loss_median": max(language_clean_estoi_medians),
+			"worst_language_clean_dnsmos_sig_loss_median": max(language_clean_sig_medians),
 			"worst_language_wer_loss_percentage_points": max(language_wer_medians),
 			"noisy_dnsmos_ovrl_improvement_median": _median([ float(record["metrics"]["dnsmos_ovrl_improvement"]) for record in noisy ], f"{profile} noisy OVRL"),
 			"noisy_dnsmos_bak_improvement_median": _median([ float(record["metrics"]["dnsmos_bak_improvement"]) for record in noisy ], f"{profile} noisy BAK"),
@@ -406,9 +609,18 @@ def summarize_case_evidence(
 			for record in rows
 			for duration in record["performance"]["callback_durations_ms"]
 		]
+		workers = [
+			float(duration)
+			for record in rows
+			for duration in record["performance"]["worker_durations_ms"]
+		]
 		performance = {
 			"average_rtf": sum(float(record["performance"]["processing_duration_seconds"]) for record in rows) / total_audio,
-			"p99_callback_ms": _nearest_rank_percentile(callbacks, 0.99),
+			# Each runtime report publishes its own frame-level p99.  The release
+			# gate uses the worst case p99 instead of taking a percentile of
+			# percentiles, which could hide one callback/worker regression.
+			"p99_callback_ms": max(callbacks),
+			"p99_worker_ms": max(workers),
 			"max_internal_processing_ms": max(float(record["performance"]["max_internal_processing_ms"]) for record in rows),
 			"memory_growth_bytes": max(int(record["performance"]["memory_growth_bytes"]) for record in rows),
 			"soak_duration_seconds": sum(int(record["performance"]["soak_duration_seconds"]) for record in rows),

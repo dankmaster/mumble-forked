@@ -371,6 +371,10 @@ bool DefaultPreference::operator==(const DefaultPreference &other) const {
 		   && autoAdapt == other.autoAdapt;
 }
 
+bool runtimeAutoAdaptationEnabled(const DefaultPreference &preference) noexcept {
+	return preference.profile == Profile::Auto;
+}
+
 bool DeviceIdentity::operator==(const DeviceIdentity &other) const {
 	return backendId == other.backendId && physicalId == other.physicalId && displayName == other.displayName
 		   && followsSystemDefault == other.followsSystemDefault && stable == other.stable;

@@ -31,6 +31,7 @@ param(
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmSnapshotSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmHardwareFingerprintSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')] [string]$DraftArtifactName,
+	[Parameter(Mandatory = $true)] [string]$AllowedOutputParent,
 	[Parameter(Mandatory = $true)] [string]$OutputRoot,
 	[ValidateRange(0, 1000)] [int]$CommunitySize = 0,
 	[string]$OpenSslPath = '',
@@ -98,9 +99,8 @@ foreach ($forbiddenPattern in @(
 	}
 }
 
-$outputRootPath = [IO.Path]::GetFullPath($OutputRoot)
-Remove-Item -LiteralPath $outputRootPath -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $outputRootPath | Out-Null
+$outputRootPath = Initialize-InputEnhancementRehearsalOutputRoot `
+	-OutputRoot $OutputRoot -AllowedOutputParent $AllowedOutputParent -SourceRoot $sourceRootPath
 $keyRoot = Join-Path ([IO.Path]::GetTempPath()) ('mumble-rehearsal-ephemeral-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $keyRoot | Out-Null
 $pfxPath = Join-Path $keyRoot 'ephemeral-test-signing.pfx'

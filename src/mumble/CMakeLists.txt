@@ -174,6 +174,8 @@ set(MUMBLE_SOURCES
 	"GlobalShortcutTypes.h"
 	"InputEnhancement.cpp"
 	"InputEnhancement.h"
+	"InputEnhancementLightProcessor.cpp"
+	"InputEnhancementLightProcessor.h"
 	"InputEnhancementAuto.cpp"
 	"InputEnhancementAuto.h"
 	"InputEnhancementAutoV2.cpp"

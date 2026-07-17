@@ -28,7 +28,14 @@ $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
 	$ManifestPath = Join-Path $rootPath 'draft-manifest.json'
 }
-$manifestItem = Get-Item -LiteralPath $ManifestPath -ErrorAction Stop
+$manifestItem = Get-Item -LiteralPath $ManifestPath -Force -ErrorAction Stop
+$manifestFullPath = [IO.Path]::GetFullPath($manifestItem.FullName)
+$manifestParent = [IO.Path]::GetDirectoryName($manifestFullPath).TrimEnd('\', '/')
+if ($manifestItem.PSIsContainer -or
+	($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+	-not $manifestParent.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+	throw 'Draft manifest must be a regular direct child of the rehearsal root.'
+}
 $manifest = Read-ReleaseJson -Path $manifestItem.FullName
 Assert-ExactProperties $manifest @(
 	'artifactName', 'audioFree', 'createdAtUtc', 'draft', 'fileCount', 'files', 'kind', 'schemaVersion'
@@ -44,18 +51,13 @@ if (-not [datetimeoffset]::TryParse([string]$manifest.createdAtUtc, [Globalizati
 	throw 'Rehearsal draft manifest createdAtUtc is invalid.'
 }
 
-$manifestFullPath = [IO.Path]::GetFullPath($manifestItem.FullName)
-$actualFiles = @(
-	Get-ChildItem -LiteralPath $rootPath -File -Recurse |
-		Where-Object { [IO.Path]::GetFullPath($_.FullName) -cne $manifestFullPath } |
-		Sort-Object FullName
-)
+$actualFiles = @(Get-ValidatedInputEnhancementRehearsalDraftFiles `
+	-Root $rootPath -ExcludedPath $manifestFullPath)
 $records = @($manifest.files)
 if ([int]$manifest.fileCount -ne $records.Count -or $records.Count -ne $actualFiles.Count) {
 	throw 'Rehearsal draft manifest file count does not match the remotely downloaded draft.'
 }
 
-$forbiddenExtensions = @('.aac', '.flac', '.key', '.m4a', '.mp3', '.ogg', '.opus', '.pem', '.pfx', '.raw', '.wav')
 $seen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
 foreach ($record in $records) {
 	Assert-ExactProperties $record @('path', 'sha256', 'size') 'Rehearsal draft file record'
@@ -67,10 +69,8 @@ foreach ($record in $records) {
 		throw "Rehearsal draft file '$relativePath' has invalid size/hash metadata."
 	}
 	$path = Join-Path $rootPath ($relativePath.Replace('/', '\'))
-	$item = Get-Item -LiteralPath $path -ErrorAction Stop
+	$item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
 	if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-		$item.Extension.ToLowerInvariant() -cin $forbiddenExtensions -or
-		$item.Name -match '(?i)(private[-_.]?key|client[-_.]?secret|production[-_.]?credential)' -or
 		[int64]$record.size -ne [int64]$item.Length -or
 		[string]$record.sha256 -cne (Get-ReleaseFileSha256 -Path $item.FullName)) {
 		throw "Rehearsal draft file '$relativePath' failed exact remote byte verification."

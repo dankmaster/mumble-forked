@@ -640,6 +640,8 @@ jobs:
           CORPUS_INVENTORY_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CORPUS_INVENTORY_SHA256 }}
           CASE_SET_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET }}
           CASE_SET_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_CASE_SET_SHA256 }}
+          MIXTURE_PLAN_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN }}
+          MIXTURE_PLAN_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_MIXTURE_PLAN_SHA256 }}
           RELEASE_FIXTURES_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES }}
           RELEASE_FIXTURES_EXPECTED_SHA256: ${{ vars.INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES_SHA256 }}
           METRICS_RUNTIME_PATH: ${{ vars.INPUT_ENHANCEMENT_QUALITY_METRICS_RUNTIME }}
@@ -682,6 +684,7 @@ jobs:
             @{ Name = 'OG server'; Path = $env:SERVER_BINARY_PATH; Hash = $env:SERVER_EXPECTED_SHA256 },
             @{ Name = 'corpus inventory'; Path = $env:CORPUS_INVENTORY_PATH; Hash = $env:CORPUS_INVENTORY_EXPECTED_SHA256 },
             @{ Name = 'qualification case set'; Path = $env:CASE_SET_PATH; Hash = $env:CASE_SET_EXPECTED_SHA256 },
+            @{ Name = 'frozen mixture plan'; Path = $env:MIXTURE_PLAN_PATH; Hash = $env:MIXTURE_PLAN_EXPECTED_SHA256 },
             @{ Name = 'release fixtures'; Path = $env:RELEASE_FIXTURES_PATH; Hash = $env:RELEASE_FIXTURES_EXPECTED_SHA256 },
             @{ Name = 'metrics runtime'; Path = $env:METRICS_RUNTIME_PATH; Hash = $env:METRICS_RUNTIME_EXPECTED_SHA256 }
           )
@@ -731,6 +734,8 @@ jobs:
             --expected-corpus-inventory-sha256 $env:CORPUS_INVENTORY_EXPECTED_SHA256 `
             --case-set $env:CASE_SET_PATH `
             --expected-case-set-sha256 $env:CASE_SET_EXPECTED_SHA256 `
+            --mixture-plan $env:MIXTURE_PLAN_PATH `
+            --expected-mixture-plan-sha256 $env:MIXTURE_PLAN_EXPECTED_SHA256 `
             --release-fixtures $env:RELEASE_FIXTURES_PATH `
             --expected-release-fixtures-sha256 $env:RELEASE_FIXTURES_EXPECTED_SHA256 `
             --metrics-runtime $env:METRICS_RUNTIME_PATH `

@@ -515,7 +515,8 @@ try {
 		'INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256',
-		'INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256'
+		'INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256',
+		'-AllowedOutputParent $env:RUNNER_TEMP'
 	)) {
 		if (-not $rehearsalWorkflowSource.Contains($requiredMarker)) {
 			throw "Pre-Azure rehearsal workflow is missing '$requiredMarker'."
@@ -530,15 +531,151 @@ try {
 			throw "Pre-Azure rehearsal workflow contains forbidden production capability '$forbiddenPattern'."
 		}
 	}
+	$outputParent = Join-Path $tempRoot 'rehearsal-output-parent'
+	New-Item -ItemType Directory -Path $outputParent | Out-Null
+	$validOutputRoot = Join-Path $outputParent 'run-1'
+	$initializedOutputRoot = Initialize-InputEnhancementRehearsalOutputRoot `
+		-OutputRoot $validOutputRoot -AllowedOutputParent $outputParent -SourceRoot $sourceRoot
+	if (-not $initializedOutputRoot.Equals([IO.Path]::GetFullPath($validOutputRoot),
+		[StringComparison]::OrdinalIgnoreCase) -or
+		-not (Test-Path -LiteralPath $initializedOutputRoot -PathType Container)) {
+		throw 'Safe rehearsal output-root initialization did not create the expected directory.'
+	}
+	Assert-Throws -Description 'pre-existing rehearsal output root' -Script {
+		Initialize-InputEnhancementRehearsalOutputRoot `
+			-OutputRoot $validOutputRoot -AllowedOutputParent $outputParent -SourceRoot $sourceRoot
+	}
+	Assert-Throws -Description 'rehearsal output outside its approved parent' -Script {
+		Initialize-InputEnhancementRehearsalOutputRoot `
+			-OutputRoot (Join-Path $tempRoot 'outside-approved-parent') `
+			-AllowedOutputParent $outputParent -SourceRoot $sourceRoot
+	}
+	Assert-Throws -Description 'rehearsal output overlapping source checkout' -Script {
+		Initialize-InputEnhancementRehearsalOutputRoot `
+			-OutputRoot (Join-Path $sourceRoot 'must-not-create') `
+			-AllowedOutputParent $sourceRoot -SourceRoot $sourceRoot
+	}
+	Assert-Throws -Description 'filesystem root as rehearsal output' -Script {
+		Initialize-InputEnhancementRehearsalOutputRoot `
+			-OutputRoot ([IO.Path]::GetPathRoot($tempRoot)) `
+			-AllowedOutputParent $outputParent -SourceRoot $sourceRoot
+	}
+
 	$draftManifestRoot = Join-Path $tempRoot 'rehearsal-draft-manifest-fixture'
 	New-Item -ItemType Directory -Force -Path $draftManifestRoot | Out-Null
-	[IO.File]::WriteAllText((Join-Path $draftManifestRoot 'rehearsal.json'), '{}', [Text.UTF8Encoding]::new($false))
-	[IO.File]::WriteAllBytes((Join-Path $draftManifestRoot 'candidate.msi'), [byte[]](1, 2, 3))
+	Write-ReleaseJson -Path (Join-Path $draftManifestRoot 'rehearsal.json') -Value ([ordered]@{
+		artifacts = [ordered]@{
+			installer = [ordered]@{ fileName = 'candidate.msi' }
+		}
+	})
+	$candidatePath = Join-Path $draftManifestRoot 'candidate.msi'
+	$candidateBytes = [byte[]](1, 2, 3)
+	[IO.File]::WriteAllBytes($candidatePath, $candidateBytes)
 	& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
 		-Root $draftManifestRoot -ArtifactName 'self-test-draft'
 	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
 		-Root $draftManifestRoot -ExpectedArtifactName 'self-test-draft'
-	[IO.File]::AppendAllText((Join-Path $draftManifestRoot 'candidate.msi'), 'tamper')
+	$unexpectedPath = Join-Path $draftManifestRoot 'unmanifested-extra.bin'
+	[IO.File]::WriteAllBytes($unexpectedPath, [byte[]](4, 5, 6))
+	Assert-Throws -Description 'unallowlisted rehearsal draft file during manifest creation' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $draftManifestRoot -ArtifactName 'self-test-draft'
+	}
+	Assert-Throws -Description 'unallowlisted rehearsal draft file after remote download' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $draftManifestRoot -ExpectedArtifactName 'self-test-draft'
+	}
+	Remove-Item -LiteralPath $unexpectedPath -Force
+	$unexpectedDirectory = Join-Path $draftManifestRoot 'unmanifested-directory'
+	New-Item -ItemType Directory -Path $unexpectedDirectory | Out-Null
+	Assert-Throws -Description 'unallowlisted rehearsal draft directory' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $draftManifestRoot -ArtifactName 'self-test-draft'
+	}
+	Remove-Item -LiteralPath $unexpectedDirectory -Force
+	[IO.File]::WriteAllText($candidatePath,
+		'-----BEGIN PRIVATE KEY-----`nprivate-test-material`n-----END PRIVATE KEY-----',
+		[Text.UTF8Encoding]::new($false))
+	Assert-Throws -Description 'PEM private key hidden under an allowed artifact name' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $draftManifestRoot -ArtifactName 'self-test-draft'
+	}
+	[IO.File]::WriteAllBytes($candidatePath, $candidateBytes)
+
+	$latePemDraftRoot = Join-Path $tempRoot 'rehearsal-late-pem-fixture'
+	New-Item -ItemType Directory -Path $latePemDraftRoot | Out-Null
+	Write-ReleaseJson -Path (Join-Path $latePemDraftRoot 'rehearsal.json') -Value ([ordered]@{
+		artifacts = [ordered]@{
+			diagnostics = [ordered]@{ fileName = 'late-private-material.json' }
+		}
+	})
+	$latePemPath = Join-Path $latePemDraftRoot 'late-private-material.json'
+	$latePemPadding = 'x' * (72 * 1024)
+	[IO.File]::WriteAllText($latePemPath,
+		('{"padding":"' + $latePemPadding + '","material":"-----BEGIN PRIVATE KEY-----"}'),
+		[Text.UTF8Encoding]::new($false))
+	Assert-Throws -Description 'PEM private key after the first 70 KiB of an allowed text artifact' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $latePemDraftRoot -ArtifactName 'self-test-late-pem-draft'
+	}
+
+	$privateDraftRoot = Join-Path $tempRoot 'rehearsal-private-material-fixture'
+	New-Item -ItemType Directory -Path $privateDraftRoot | Out-Null
+	Write-ReleaseJson -Path (Join-Path $privateDraftRoot 'rehearsal.json') -Value ([ordered]@{
+		artifacts = [ordered]@{
+			installer = [ordered]@{ fileName = 'ephemeral-test-signing.p12' }
+		}
+	})
+	[IO.File]::WriteAllBytes((Join-Path $privateDraftRoot 'ephemeral-test-signing.p12'), [byte[]](7, 8, 9))
+	Assert-Throws -Description 'allowlisted private-key container in rehearsal draft' -Script {
+		& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+			-Root $privateDraftRoot -ArtifactName 'self-test-private-draft'
+	}
+
+	$listeningDraftRoot = Join-Path $tempRoot 'rehearsal-listening-evidence-fixture'
+	$listeningEvidenceName = 'listening-fixture.evidence'
+	$listeningEvidenceRoot = Join-Path $listeningDraftRoot $listeningEvidenceName
+	$listeningPrivateRoot = Join-Path $listeningEvidenceRoot 'private'
+	$listeningSessionRoot = Join-Path $listeningEvidenceRoot 'sessions'
+	New-Item -ItemType Directory -Path $listeningPrivateRoot, $listeningSessionRoot | Out-Null
+	$listeningSourcePath = Join-Path $listeningEvidenceRoot 'source-manifest.json'
+	$listeningAnswerPath = Join-Path $listeningPrivateRoot 'answer-key.json'
+	$listeningSessionPath = Join-Path $listeningSessionRoot '000000-session.json'
+	[IO.File]::WriteAllText($listeningSourcePath, '{}', [Text.UTF8Encoding]::new($false))
+	[IO.File]::WriteAllText($listeningAnswerPath, '{}', [Text.UTF8Encoding]::new($false))
+	[IO.File]::WriteAllText($listeningSessionPath, '{}', [Text.UTF8Encoding]::new($false))
+	$listeningQualificationPath = Join-Path $listeningDraftRoot 'listening-qualification.json'
+	Write-ReleaseJson -Path $listeningQualificationPath -Value ([ordered]@{
+		session_manifest = [ordered]@{
+			evidence_root = $listeningEvidenceName
+			source_manifest = [ordered]@{
+				relative_path = "$listeningEvidenceName/source-manifest.json"
+				sha256 = Get-ReleaseFileSha256 -Path $listeningSourcePath
+			}
+			answer_key = [ordered]@{
+				relative_path = "$listeningEvidenceName/private/answer-key.json"
+				sha256 = Get-ReleaseFileSha256 -Path $listeningAnswerPath
+			}
+			sessions = @([ordered]@{
+				relative_path = "$listeningEvidenceName/sessions/000000-session.json"
+				sha256 = Get-ReleaseFileSha256 -Path $listeningSessionPath
+			})
+		}
+	})
+	$listeningCandidatePath = Join-Path $listeningDraftRoot 'candidate.msi'
+	[IO.File]::WriteAllBytes($listeningCandidatePath, $candidateBytes)
+	Write-ReleaseJson -Path (Join-Path $listeningDraftRoot 'rehearsal.json') -Value ([ordered]@{
+		artifacts = [ordered]@{
+			installer = [ordered]@{ fileName = 'candidate.msi' }
+			listeningQualification = [ordered]@{ fileName = 'listening-qualification.json' }
+		}
+	})
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $listeningDraftRoot -ArtifactName 'self-test-listening-draft'
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $listeningDraftRoot -ExpectedArtifactName 'self-test-listening-draft'
+
+	[IO.File]::AppendAllText($candidatePath, 'tamper')
 	Assert-Throws -Description 'remote rehearsal draft byte tampering' -Script {
 		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
 			-Root $draftManifestRoot -ExpectedArtifactName 'self-test-draft'
@@ -569,14 +706,14 @@ try {
 				recipeCompatibility = @("input.balanced.rnnoise-embedded")
 			},
 			[ordered]@{
-				id = "deepfilternet:balanced"
+				id = "deepfilternet:low-latency"
 				version = "1"
 				backend = "deepfilternet"
 				path = "deepfilternet/test-model.bin"
 				licenseSpdx = "MIT OR Apache-2.0"
 				sampleRateHz = 48000
-				algorithmicLatencyMs = 30
-				recipeCompatibility = @("input.quality.deepfilternet-balanced", "input.voice-focus.deepfilternet-balanced")
+				algorithmicLatencyMs = 20
+				recipeCompatibility = @("input.quality.deepfilternet-low-latency", "input.voice-focus.deepfilternet-low-latency")
 			}
 		)
 	})
@@ -584,8 +721,8 @@ try {
 		[ordered]@{ id = "input.original"; revision = 1; profile = "Original"; modelIds = @() },
 		[ordered]@{ id = "input.light.speex"; revision = 1; profile = "Light"; modelIds = @() },
 		[ordered]@{ id = "input.balanced.rnnoise-embedded"; revision = 1; profile = "Balanced"; modelIds = @("rnnoise:embedded") },
-		[ordered]@{ id = "input.quality.deepfilternet-balanced"; revision = 1; profile = "Quality"; modelIds = @("deepfilternet:balanced") },
-		[ordered]@{ id = "input.voice-focus.deepfilternet-balanced"; revision = 1; profile = "VoiceFocus"; modelIds = @("deepfilternet:balanced") },
+		[ordered]@{ id = "input.quality.deepfilternet-low-latency"; revision = 1; profile = "Quality"; modelIds = @("deepfilternet:low-latency") },
+		[ordered]@{ id = "input.voice-focus.deepfilternet-low-latency"; revision = 1; profile = "VoiceFocus"; modelIds = @("deepfilternet:low-latency") },
 		[ordered]@{ id = "input.auto.light.speex"; revision = 1; profile = "Auto"; modelIds = @() }
 	)
 	Write-ReleaseJson -Path $recipeDescriptorPath -Value ([ordered]@{
@@ -1119,6 +1256,7 @@ try {
 		case_evidence_jsonl       = 'case-evidence.jsonl'
 		failure_spectrogram_index = 'failure-spectrogram-index.json'
 		junit                     = 'junit.xml'
+		measurement_index_json    = 'measurement-index.json'
 		per_case_csv               = 'per-case.csv'
 		per_case_parquet           = 'per-case.parquet'
 		summary_html               = 'summary.html'
@@ -1151,8 +1289,8 @@ try {
 				passed = $true
 				metrics = [ordered]@{
 					algorithmic_latency_ms_max = [double]$latencies[$profile]
-					clean_estoi_loss_median = 0.005
-					clean_dnsmos_sig_loss_median = 0.02
+					worst_language_clean_estoi_loss_median = 0.005
+					worst_language_clean_dnsmos_sig_loss_median = 0.02
 					worst_language_wer_loss_percentage_points = 0.5
 					noisy_dnsmos_ovrl_improvement_median = 0.25
 					noisy_dnsmos_bak_improvement_median = 0.55
@@ -1171,6 +1309,7 @@ try {
 				performance = [ordered]@{
 					average_rtf = 0.10
 					p99_callback_ms = 4.0
+					p99_worker_ms = 4.0
 					max_internal_processing_ms = 9.0
 					memory_growth_bytes = 0
 					soak_duration_seconds = if ($Suite -ceq 'nightly' -and $profile -cin @('Balanced', 'Quality', 'VoiceFocus')) { 3600 } else { 0 }
@@ -1220,6 +1359,16 @@ try {
 				fixed_timeline_cases = $caseCount
 				receiver_cleanup_cases = 0
 				languages = @('en-US', 'sv-SE')
+				objective_signal_stages = @('receiver-capture')
+				wer_reference_kinds = @('clean-asr-consistency')
+				source_diversity = [ordered]@{
+					speaker_groups = if ($Suite -ceq 'nightly') { 16 } else { 8 }
+					languages = 2
+					noise_groups = if ($Suite -ceq 'nightly') { 16 } else { 8 }
+					noise_classes = if ($Suite -ceq 'nightly') { 10 } else { 6 }
+					rir_groups = if ($Suite -ceq 'nightly') { 12 } else { 6 }
+					device_groups = if ($Suite -ceq 'nightly') { 8 } else { 4 }
+				}
 			}
 			profiles = $profiles
 			auto_transitions = $null
@@ -1228,10 +1377,24 @@ try {
 		}
 	}
 	$qualityCaseRecords = {
-		param([string]$Suite)
+		param([string]$Suite, [string]$RunnerClass, [string]$ArtifactRoot)
 		$caseCount = if ($Suite -ceq 'nightly') { 5000 } else { 500 }
 		$perProfileCases = [int]($caseCount / 5)
+		$speakerCount = if ($Suite -ceq 'nightly') { 16 } else { 8 }
+		$noiseGroupCount = if ($Suite -ceq 'nightly') { 16 } else { 8 }
+		$noiseClassCount = if ($Suite -ceq 'nightly') { 10 } else { 6 }
+		$roomCount = if ($Suite -ceq 'nightly') { 12 } else { 6 }
+		$deviceCount = if ($Suite -ceq 'nightly') { 8 } else { 4 }
 		$latencies = @{ Original = 0.0; Light = 10.0; Balanced = 30.0; Quality = 50.0; VoiceFocus = 50.0 }
+		$hashA = ('aa' * 32)
+		$hashB = ('bb' * 32)
+		$hashC = ('cc' * 32)
+		$runtimeFile = [ordered]@{ relative_path = 'pinned/file.bin'; sha256 = $hashA; size_bytes = 1 }
+		$audioFile = [ordered]@{ sha256 = $hashA; size_bytes = 1; channels = 1; frames = 52000; sample_rate_hz = 48000 }
+		$runtimeModels = [ordered]@{}
+		foreach ($modelId in @('dnsmos', 'estoi', 'wer-en', 'wer-sv')) {
+			$runtimeModels[$modelId] = [ordered]@{ id = $modelId; relative_path = "models/$modelId.bin"; sha256 = $hashA; size_bytes = 1 }
+		}
 		foreach ($profile in @('Original', 'Light', 'Balanced', 'Quality', 'VoiceFocus')) {
 			for ($caseIndex = 0; $caseIndex -lt $perProfileCases; $caseIndex++) {
 				$condition = switch ($caseIndex % 6) {
@@ -1247,21 +1410,144 @@ try {
 					'noisy' { 'noisy-hvac' }
 					default { 'severe-babble' }
 				}
-				[ordered]@{
-					record_type = 'case'
-					case_id = "case-$($caseIndex.ToString('D6'))"
+				$caseId = "case-$($caseIndex.ToString('D6'))"
+				$language = if (($caseIndex % 2) -eq 0) { 'en-US' } else { 'sv-SE' }
+				$werLanguage = if ($language -clike 'sv-*') { 'sv' } else { 'en' }
+				$noiseClassId = if ($condition -ceq 'clean') {
+					$null
+				} else {
+					$noiseOrdinal = ([math]::Floor($caseIndex / 6) * 4) + ($caseIndex % 6) - 2
+					"noise-class-$([int]($noiseOrdinal % $noiseClassCount))"
+				}
+				$candidateLatencySamples = [int]([double]$latencies[$profile] * 48.0)
+				$routeOffsetSamples = 480
+				$ovrlDelta = if ($condition -ceq 'clean') { -0.05 } else { 0.25 }
+				$bakDelta = if ($profile -ceq 'VoiceFocus' -and $condition -ceq 'severe') { 0.65 } else { 0.55 }
+				$objectiveRelativePath = "artifacts/$Suite-$RunnerClass/objective-scores/$profile/$caseId.json"
+				$objectivePath = Join-Path $ArtifactRoot $objectiveRelativePath
+				New-Item -ItemType Directory -Force -Path (Split-Path -Parent $objectivePath) | Out-Null
+				$objectiveScore = [ordered]@{
+					schema_version = 2
+					scorer = 'mumble-objective-quality-v2'
+					status = 'passed'
+					case_id = $caseId
 					profile = $profile
 					condition = $condition
+					dataset_split = 'validation'
+					alignment = [ordered]@{
+						method = 'caller-declared-fixed-latency'
+						correlation_search_used = $false
+						signal_stage = 'receiver-capture'
+						sample_rate_hz = 48000
+						reference_samples = 48000
+						original_latency_samples = 0
+						candidate_latency_samples = $candidateLatencySamples
+						original_window_start_samples = $routeOffsetSamples
+						candidate_window_start_samples = $routeOffsetSamples + $candidateLatencySamples
+						qualified_route_binding = [ordered]@{
+							route_offset_samples = $routeOffsetSamples
+							control_wav = [ordered]@{ sha256 = $hashA; size_bytes = 1 }
+							control_fixed_timeline_score = [ordered]@{ sha256 = $hashA; size_bytes = 1 }
+							candidate_fixed_timeline_score = [ordered]@{ sha256 = $hashB; size_bytes = 1 }
+							e2e_manifest = [ordered]@{ sha256 = $hashC; size_bytes = 1 }
+							stable_execution_identity = [ordered]@{
+								client_binary_sha256 = $hashA
+								model_manifest_sha256 = $hashA
+								recipe_manifest_sha256 = $hashA
+								run_provenance_sha256 = $hashA
+								runtime_payload_sha256 = $hashA
+								server_binary_sha256 = $hashA
+							}
+							edge_tail_gate = [ordered]@{
+								candidate_passed = $true
+								control_passed = $true
+								pre_opus_complete_tail_required = $true
+								pre_opus_max_end_loss_samples = 480
+								pre_opus_max_onset_loss_samples = 480
+							}
+						}
+					}
+					inputs = [ordered]@{
+						clean_reference = [ordered]@{ sha256 = $hashA; size_bytes = 1; channels = 1; frames = 48000; sample_rate_hz = 48000 }
+						noisy_original = $audioFile
+						candidate = $audioFile
+					}
+					runtime = [ordered]@{
+						id = 'self-test-runtime'
+						version = '1'
+						manifest = $runtimeFile
+						lock = $runtimeFile
+						inventory = $runtimeFile
+						sources = [ordered]@{
+							dnsmos = [ordered]@{ repository = 'microsoft/DNS-Challenge'; revision = ('11' * 20) }
+							wer = [ordered]@{ repository = 'Systran/faster-whisper-small'; revision = ('22' * 20) }
+						}
+						assets_tree_sha256 = $hashA
+						distributions_tree_sha256 = $hashA
+						whisper_tree_sha256 = $hashA
+						models = $runtimeModels
+						legacy_local_scorer_pin = $runtimeFile
+					}
+					scorer_files = [ordered]@{
+						cli = [ordered]@{ name = 'score-objective-quality.py'; sha256 = $hashA; size_bytes = 1 }
+						implementation = [ordered]@{ name = 'objective_quality_score.py'; sha256 = $hashA; size_bytes = 1 }
+					}
+					wer_reference = [ordered]@{
+						kind = 'clean-asr-consistency'
+						label = 'clean-ASR-consistency WER'
+						language = $werLanguage
+						normalization = 'unicode-nfkc-casefold-alnum-v1'
+						text_sha256 = $hashA
+						word_count = 200
+						artifact = [ordered]@{ sha256 = $hashA; size_bytes = 1 }
+						attestation = $null
+					}
+					metrics = [ordered]@{
+						original = [ordered]@{
+							dnsmos_bak = 2.0; dnsmos_ovrl = 2.0; dnsmos_sig = 2.0; estoi = 0.8
+							wer = [ordered]@{ errors = 0; reference_words = 200; rate = 0.0; hypothesis_sha256 = $hashA }
+						}
+						candidate = [ordered]@{
+							dnsmos_bak = 2.0 + $bakDelta; dnsmos_ovrl = 2.0 + $ovrlDelta; dnsmos_sig = 1.98; estoi = 0.795
+							wer = [ordered]@{ errors = 1; reference_words = 200; rate = 0.005; hypothesis_sha256 = $hashB }
+						}
+					}
+					candidate_minus_original = [ordered]@{
+						dnsmos_bak = $bakDelta; dnsmos_ovrl = $ovrlDelta; dnsmos_sig = -0.02; estoi = -0.005
+						wer_delta_kind = 'clean-asr-consistency'; wer_delta_percentage_points = 0.5
+					}
+				}
+				Write-ReleaseJson -Path $objectivePath -Value $objectiveScore
+				[ordered]@{
+					record_type = 'case'
+					case_id = $caseId
+					profile = $profile
+					condition = $condition
+					dataset_split = 'validation'
 					cohort_id = $cohortId
-					language = if (($caseIndex % 2) -eq 0) { 'en-US' } else { 'sv-SE' }
+					speaker_group_id = "speaker-$($caseIndex % $speakerCount)"
+					noise_group_id = if ($condition -ceq 'clean') { $null } else { "noise-$($caseIndex % $noiseGroupCount)" }
+					noise_class = $noiseClassId
+					rir_group_id = "room-$($caseIndex % $roomCount)"
+					device_group_id = "device-$($caseIndex % $deviceCount)"
+					language = $language
 					startup_preroll_ms = if (($caseIndex % 2) -eq 0) { 0 } else { 300 }
 					fixed_timeline = $true
 					receiver_cleanup_enabled = $false
 					failed = $false
+					quality_pair_case_id = if ($profile -ceq 'VoiceFocus' -and $condition -ceq 'severe') { $caseId } else { $null }
+					objective_score = [ordered]@{
+						path = $objectiveRelativePath
+						sha256 = Get-ReleaseFileSha256 -Path $objectivePath
+						signal_stage = 'receiver-capture'
+						size_bytes = [int64](Get-Item -LiteralPath $objectivePath).Length
+						wer_reference_kind = 'clean-asr-consistency'
+						wer_reference_text_sha256 = $hashA
+					}
 					metrics = [ordered]@{
 						algorithmic_latency_ms = [double]$latencies[$profile]
-						dnsmos_bak_improvement = 0.55
-						dnsmos_ovrl_improvement = if ($condition -ceq 'clean') { -0.05 } else { 0.25 }
+						dnsmos_bak_improvement = $bakDelta
+						dnsmos_ovrl_improvement = $ovrlDelta
 						dnsmos_sig_loss = 0.02
 						estoi_loss = 0.005
 						severe_noise_bak_improvement_over_quality = if ($profile -ceq 'VoiceFocus' -and $condition -ceq 'severe') { 0.10 } else { 0.0 }
@@ -1269,26 +1555,541 @@ try {
 						wer_loss_percentage_points = 0.5
 					}
 					counters = [ordered]@{
-						deadline_misses = 0
-						latency_attestation_failures = 0
-						model_hash_errors = 0
-						nan_or_inf_count = 0
-						new_clipping_cases = 0
-						tail_drain_failures = 0
-						unexplained_fallbacks = 0
+						deadline_misses = 0; latency_attestation_failures = 0; model_hash_errors = 0
+						nan_or_inf_count = 0; new_clipping_cases = 0; tail_drain_failures = 0; unexplained_fallbacks = 0
 					}
 					performance = [ordered]@{
-						audio_duration_seconds = 10.0
-						processing_duration_seconds = 1.0
-						callback_durations_ms = @(4.0)
-						max_internal_processing_ms = 9.0
-						memory_growth_bytes = 0
+						audio_duration_seconds = 10.0; processing_duration_seconds = 1.0
+						callback_durations_ms = @(4.0); worker_durations_ms = @(4.0)
+						max_internal_processing_ms = 9.0; memory_growth_bytes = 0
 						soak_duration_seconds = if ($Suite -ceq 'nightly' -and $caseIndex -eq 0 -and $profile -cin @('Balanced', 'Quality', 'VoiceFocus')) { 3600 } else { 0 }
 					}
 				}
 			}
 		}
 	}
+	$measurementFixtureGeneratorPath = Join-Path $tempRoot 'materialize-measurement-fixture.py'
+	$measurementFixtureGeneratorSource = @'
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import sys
+from pathlib import Path, PurePosixPath
+
+quality_path = Path(sys.argv[1])
+records_path = Path(sys.argv[2])
+artifact_root = Path(sys.argv[3])
+audio_quality_root = Path(sys.argv[4])
+sys.path.insert(0, str(audio_quality_root))
+
+from measurement_evidence import (  # noqa: E402
+    INDEX_KIND,
+    METRICS_RUNTIME_KIND,
+    SOAK_KIND,
+    canonical_json_bytes,
+    canonical_json_sha256,
+)
+from quality_case_evidence import (  # noqa: E402
+    qualification_binding_sha256,
+    summarize_case_evidence,
+    write_case_evidence,
+)
+
+
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def write_json(relative: str, value, *, canonical: bool = False):
+    path = artifact_root.joinpath(*PurePosixPath(relative).parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (
+        canonical_json_bytes(value) + b'\n'
+        if canonical
+        else (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
+    )
+    path.write_bytes(payload)
+    return {
+        'contains_audio_samples': False,
+        'path': relative,
+        'sha256': hashlib.sha256(payload).hexdigest(),
+        'size_bytes': len(payload),
+    }
+
+
+def existing_reference(relative: str):
+    path = artifact_root.joinpath(*PurePosixPath(relative).parts)
+    payload = path.read_bytes()
+    return {
+        'contains_audio_samples': False,
+        'path': relative,
+        'sha256': hashlib.sha256(payload).hexdigest(),
+        'size_bytes': len(payload),
+    }
+
+
+quality = load_json(quality_path)
+record_document = load_json(records_path)
+cases = record_document['cases']
+transitions = record_document['auto_transitions']
+build = quality['build']
+suite = quality['suite']
+runner_class = build['runner_class']
+prefix = f'artifacts/{suite}-{runner_class}/'
+profiles = ('Original', 'Light', 'Balanced', 'Quality', 'VoiceFocus')
+latency_samples = {'Original': 0, 'Light': 480, 'Balanced': 1440, 'Quality': 2400, 'VoiceFocus': 2400}
+engines = {'Original': 'None', 'Light': 'Speex', 'Balanced': 'RNNoise', 'Quality': 'DeepFilterNet', 'VoiceFocus': 'DeepFilterNet'}
+recipe_ids = {
+    'Original': 'input.original',
+    'Light': 'input.light.speex',
+    'Balanced': 'input.balanced.self-test',
+    'Quality': 'input.quality.self-test',
+    'VoiceFocus': 'input.voice-focus.self-test',
+}
+model_ids = {'Balanced': 'rnnoise:self-test', 'Quality': 'deepfilternet:self-test', 'VoiceFocus': 'deepfilternet:self-test'}
+model_hashes = list(build['model_hashes'])
+
+
+def profile_binding(profile: str):
+    engine = engines[profile]
+    models = []
+    if engine == 'RNNoise':
+        models = [{'id': model_ids[profile], 'sha256': model_hashes[0], 'version': '1'}]
+    elif engine == 'DeepFilterNet':
+        models = [{'id': model_ids[profile], 'sha256': model_hashes[-1], 'version': '1'}]
+    return {
+        'profile': profile,
+        'engine': engine,
+        'recipe': {
+            'catalog_revision': 'self-test-v2',
+            'id': recipe_ids[profile],
+            'manifest_sha256': build['recipe_manifest_sha256'],
+            'revision': 1,
+        },
+        'models': models,
+    }
+
+
+profile_bindings = [profile_binding(profile) for profile in profiles]
+binding_by_profile = {binding['profile']: binding for binding in profile_bindings}
+objective_by_key = {}
+for case in cases:
+    key = (case['profile'], case['case_id'])
+    objective_path = artifact_root.joinpath(*PurePosixPath(case['objective_score']['path']).parts)
+    objective_by_key[key] = load_json(objective_path)
+
+runtime_bindings = {
+    canonical_json_sha256({'runtime': score['runtime'], 'scorer_files': score['scorer_files']})
+    for score in objective_by_key.values()
+}
+if len(runtime_bindings) != 1:
+    raise RuntimeError('fixture objective reports do not share one metrics runtime binding')
+objective_runtime_binding_sha256 = next(iter(runtime_bindings))
+first_objective = next(iter(objective_by_key.values()))
+runtime_manifest = first_objective['runtime']['manifest']
+runtime_files = [{
+    'path': runtime_manifest['relative_path'],
+    'sha256': runtime_manifest['sha256'],
+    'size_bytes': runtime_manifest['size_bytes'],
+}]
+build['metrics_runtime_sha256'] = canonical_json_sha256(runtime_files)
+
+run_provenance_sha256 = sha256_text(f'{suite}:{runner_class}:release-fixture-provenance')
+
+
+def execution_identity(*, contract: str | None = None):
+    value = {
+        'client_binary_sha256': build['tested_binary_sha256'],
+        'model_manifest_sha256': build['model_manifest_sha256'],
+        'recipe_manifest_sha256': build['recipe_manifest_sha256'],
+        'run_provenance_sha256': run_provenance_sha256,
+        'runtime_payload_sha256': build['staged_payload_sha256'],
+        'server_binary_sha256': build['server_binary_sha256'],
+    }
+    if contract is not None:
+        value['contract_file_sha256'] = sha256_text(f'{suite}:{runner_class}:{contract}:adapter-contract')
+    return value
+
+
+def adapter_document(role: str, profile: str, input_sha256: str, capture_sha256: str, sender_sha256: str):
+    binding = binding_by_profile[profile]
+    return {
+        'schema_version': 3,
+        'status': 'passed',
+        'role': role,
+        'profile': profile,
+        'receiver_cleanup': False,
+        'input_sha256': input_sha256,
+        'execution_identity': execution_identity(contract=f'{profile}:{role}'),
+        'transport': {'opus_bitrate_bps': 40000, 'frames_per_packet': 2, 'transmit_mode': 'VAD'},
+        'capture': {'relative_path': f'private/{profile}-{role}-capture.wav', 'sha256': capture_sha256, 'size_bytes': 1},
+        'sender_pre_opus': {'relative_path': f'private/{profile}-{role}-sender.wav', 'sha256': sender_sha256, 'size_bytes': 1},
+        'diagnostics': {
+            'active_engine': binding['engine'],
+            'active_models': copy.deepcopy(binding['models']),
+            'active_profile': profile,
+            'active_recipe': copy.deepcopy(binding['recipe']),
+            'callback_frame_count': 1000,
+            'callback_p99_ms': 4.0,
+            'deadline_miss_count': 0,
+            'declared_latency_samples': latency_samples[profile],
+            'fallback_count': 0,
+            'invalid_output_count': 0,
+            'mean_rtf': 0.1,
+            'model_initialization_attempts': 1 if binding['models'] else 0,
+            'tail_drained': True,
+            'worker_frame_count': 1000,
+            'worker_p99_ms': 4.0,
+        },
+    }
+
+
+source_hashes = {score['inputs']['noisy_original']['sha256'] for score in objective_by_key.values()}
+clean_hashes = {score['inputs']['clean_reference']['sha256'] for score in objective_by_key.values()}
+if len(source_hashes) != 1 or len(clean_hashes) != 1:
+    raise RuntimeError('release-tool fixture expects one reusable source and clean hash')
+source_sha256 = next(iter(source_hashes))
+clean_sha256 = next(iter(clean_hashes))
+
+shared_root = prefix + 'measurements/shared/'
+original_document = adapter_document('original_comparison', 'Original', source_sha256, source_sha256, sha256_text('original-sender'))
+control_document = adapter_document('control', 'Original', clean_sha256, clean_sha256, sha256_text('control-sender'))
+original_reference = write_json(shared_root + 'original-adapter-result.json', original_document)
+control_reference = write_json(shared_root + 'control-adapter-result.json', control_document)
+
+
+def fixed_score(received_sha256: str, latency: int, alignment: str, complete_tail: bool, limit: int):
+    return {
+        'schema_version': 3,
+        'scorer': 'mumble-fixed-timeline-v3',
+        'timeline_alignment': alignment,
+        'sample_rate_hz': 48000,
+        'frame_samples': 480,
+        'declared_latency_samples': latency,
+        'reference_sha256': clean_sha256,
+        'received_sha256': received_sha256,
+        'onset_loss_samples': 0,
+        'end_loss_samples': 0,
+        'missing_tail_samples': 0 if complete_tail else 480,
+        'reference_clipped_samples': 0,
+        'received_clipped_samples': 0,
+        'qualification_limits': {
+            'max_onset_loss_samples': limit,
+            'max_end_loss_samples': limit,
+            'require_complete_tail': complete_tail,
+            'fail_on_new_clipping': True,
+        },
+        'passed': True,
+    }
+
+
+control_fixed_reference = write_json(
+    shared_root + 'control-fixed-timeline-score.json',
+    fixed_score(control_document['capture']['sha256'], 0, 'fixed', False, 2880),
+)
+control_pre_opus_reference = write_json(
+    shared_root + 'control-pre-opus-fixed-timeline-score.json',
+    fixed_score(control_document['sender_pre_opus']['sha256'], 0, 'fixed', True, 480),
+)
+
+profile_reports = {}
+for profile in profiles:
+    if profile == 'Original':
+        candidate_document = original_document
+        edge_document = control_document
+        candidate_reference = original_reference
+        edge_reference = control_reference
+        route_reference = control_fixed_reference
+        edge_fixed_reference = control_pre_opus_reference
+    else:
+        profile_scores = [score for (candidate_profile, _), score in objective_by_key.items() if candidate_profile == profile]
+        candidate_hashes = {score['inputs']['candidate']['sha256'] for score in profile_scores}
+        if len(candidate_hashes) != 1:
+            raise RuntimeError(f'{profile} fixture cases do not share one candidate signal hash')
+        candidate_sha256 = next(iter(candidate_hashes))
+        candidate_document = adapter_document('candidate', profile, source_sha256, candidate_sha256, sha256_text(f'{profile}-candidate-sender'))
+        edge_document = adapter_document('candidate_edge', profile, clean_sha256, clean_sha256, sha256_text(f'{profile}-edge-sender'))
+        candidate_reference = write_json(shared_root + f'{profile}-candidate-adapter-result.json', candidate_document)
+        edge_reference = write_json(shared_root + f'{profile}-edge-adapter-result.json', edge_document)
+        route_reference = write_json(
+            shared_root + f'{profile}-route-fixed-timeline-score.json',
+            fixed_score(candidate_document['capture']['sha256'], latency_samples[profile], 'fixed-paired-original-route', False, 2880),
+        )
+        edge_fixed_reference = write_json(
+            shared_root + f'{profile}-edge-fixed-timeline-score.json',
+            fixed_score(edge_document['sender_pre_opus']['sha256'], latency_samples[profile], 'fixed', True, 480),
+        )
+    profile_reports[profile] = {
+        'candidate_document': candidate_document,
+        'candidate_reference': candidate_reference,
+        'edge_document': edge_document,
+        'edge_reference': edge_reference,
+        'route_reference': route_reference,
+        'edge_fixed_reference': edge_fixed_reference,
+    }
+
+
+def manifest_result(role: str, document, reference, route_reference, edge_reference):
+    diagnostics = document['diagnostics']
+    return {
+        'adapter_contract_sha256': document['execution_identity']['contract_file_sha256'],
+        'adapter_result_sha256': reference['sha256'],
+        'capture_sha256': document['capture']['sha256'],
+        'sender_pre_opus_sha256': document['sender_pre_opus']['sha256'],
+        'execution_identity': copy.deepcopy(document['execution_identity']),
+        'active_recipe': copy.deepcopy(diagnostics['active_recipe']),
+        'active_models': copy.deepcopy(diagnostics['active_models']),
+        'performance': {
+            'callback_frame_count': diagnostics['callback_frame_count'],
+            'callback_p99_ms': diagnostics['callback_p99_ms'],
+            'model_initialization_attempts': diagnostics['model_initialization_attempts'],
+            'worker_frame_count': diagnostics['worker_frame_count'],
+            'worker_p99_ms': diagnostics['worker_p99_ms'],
+            'mean_rtf': diagnostics['mean_rtf'],
+        },
+        'fixed_timeline_score_sha256': route_reference['sha256'] if role in ('candidate', 'control') else None,
+        'pre_opus_fixed_timeline_score_sha256': edge_reference['sha256'] if role in ('candidate_edge', 'control') else None,
+        'qualification_purpose': {
+            'candidate': 'noisy-enhanced-candidate',
+            'candidate_edge': 'clean-enhanced-input-edge-probe',
+            'original_comparison': 'noisy-original-quality-comparison',
+            'control': 'clean-original-route-control',
+        }[role],
+    }
+
+
+case_index_entries = []
+for case in cases:
+    profile = case['profile']
+    case_id = case['case_id']
+    reports = profile_reports[profile]
+    plan_case_sha256 = sha256_text(f'{suite}:{profile}:{case_id}:plan-case')
+    render_entry_sha256 = sha256_text(f'{suite}:{profile}:{case_id}:render-entry')
+    render_manifest_sha256 = sha256_text(f'{suite}:render-manifest')
+    original_result = manifest_result('original_comparison', original_document, original_reference, control_fixed_reference, control_pre_opus_reference)
+    control_result = manifest_result('control', control_document, control_reference, control_fixed_reference, control_pre_opus_reference)
+    results = {'original_comparison': original_result, 'control': control_result}
+    if profile != 'Original':
+        results = {
+            'candidate': manifest_result('candidate', reports['candidate_document'], reports['candidate_reference'], reports['route_reference'], reports['edge_fixed_reference']),
+            'candidate_edge': manifest_result('candidate_edge', reports['edge_document'], reports['edge_reference'], reports['route_reference'], reports['edge_fixed_reference']),
+            **results,
+        }
+    manifest = {
+        'schema_version': 3,
+        'status': 'passed',
+        'case_id': case_id,
+        'profile': profile,
+        'run_provenance_sha256': run_provenance_sha256,
+        'receiver_cleanup': False,
+        'qualification_binding': {
+            'mixture_plan_sha256': build['mixture_plan_sha256'],
+            'case_set_sha256': build['case_set_sha256'],
+            'corpus_inventory_sha256': build['corpus_inventory_sha256'],
+            'corpus_lock_sha256': build['corpus_lock_sha256'],
+            'case_id': case_id,
+            'profile': profile,
+            'dataset_split': case['dataset_split'],
+            'plan_case_sha256': plan_case_sha256,
+            'render_manifest_sha256': render_manifest_sha256,
+            'render_entry_sha256': render_entry_sha256,
+            'source_input_sha256': source_sha256,
+            'clean_reference_sha256': clean_sha256,
+        },
+        'input_timeline_gate': {
+            'artifact': 'sender_pre_opus',
+            'alignment': 'fixed-declared-latency',
+            'roles': ['control'] if profile == 'Original' else ['control', 'candidate_edge'],
+            'max_onset_loss_samples': 480,
+            'max_end_loss_samples': 480,
+            'complete_tail_required': True,
+        },
+        'route_control': {
+            'onset_budget_samples': 2880,
+            'end_loss_budget_samples': 2880,
+            'receiver_edge_gate': 'route-bounded-not-input-latency',
+            'capture_tail_rule': 'vad-speech-edge',
+            'causal_tail_drain_required': True,
+            'legacy_original_parity_required': True,
+        },
+        'results': results,
+        'private_audio_do_not_upload': True,
+    }
+    manifest_reference = write_json(
+        prefix + f'measurements/cases/{profile}/{case_id}/e2e-manifest.json',
+        manifest,
+    )
+
+    objective = objective_by_key[(profile, case_id)]
+    objective['alignment']['qualified_route_binding'] = {
+        'route_offset_samples': 480,
+        'control_wav': {'sha256': control_document['capture']['sha256'], 'size_bytes': control_document['capture']['size_bytes']},
+        'control_fixed_timeline_score': {'sha256': control_fixed_reference['sha256'], 'size_bytes': control_fixed_reference['size_bytes']},
+        'candidate_fixed_timeline_score': {'sha256': reports['route_reference']['sha256'], 'size_bytes': reports['route_reference']['size_bytes']},
+        'e2e_manifest': {'sha256': manifest_reference['sha256'], 'size_bytes': manifest_reference['size_bytes']},
+        'stable_execution_identity': execution_identity(),
+        'edge_tail_gate': {
+            'candidate_passed': True,
+            'control_passed': True,
+            'pre_opus_complete_tail_required': True,
+            'pre_opus_max_end_loss_samples': 480,
+            'pre_opus_max_onset_loss_samples': 480,
+        },
+    }
+    objective_reference = write_json(case['objective_score']['path'], objective)
+    case['objective_score'].update({
+        'sha256': objective_reference['sha256'],
+        'size_bytes': objective_reference['size_bytes'],
+    })
+    case['metrics']['speech_edge_loss_ms'] = 0.0
+    case['performance'] = {
+        'audio_duration_seconds': 10.0,
+        'processing_duration_seconds': 1.0,
+        'callback_durations_ms': [4.0],
+        'worker_durations_ms': [4.0],
+        'max_internal_processing_ms': 4.0,
+        'memory_growth_bytes': 0,
+        'soak_duration_seconds': 0,
+    }
+    case_index_entries.append({
+        'case_id': case_id,
+        'profile': profile,
+        'condition': case['condition'],
+        'dataset_split': case['dataset_split'],
+        'measurement_mode': 'e2e',
+        'plan_case_sha256': plan_case_sha256,
+        'render_entry_sha256': render_entry_sha256,
+        'source_input_sha256': source_sha256,
+        'clean_reference_sha256': clean_sha256,
+        'reports': {
+            'candidate_adapter_result': reports['candidate_reference'],
+            'control_adapter_result': control_reference,
+            'control_fixed_timeline_score': control_fixed_reference,
+            'control_pre_opus_fixed_timeline_score': control_pre_opus_reference,
+            'e2e_manifest': manifest_reference,
+            'edge_adapter_result': reports['edge_reference'],
+            'edge_fixed_timeline_score': reports['edge_fixed_reference'],
+            'objective_score': objective_reference,
+            'original_adapter_result': original_reference,
+            'route_fixed_timeline_score': reports['route_reference'],
+        },
+    })
+
+metrics_runtime_attestation = write_json(
+    shared_root + 'metrics-runtime-attestation.json',
+    {
+        'schema_version': 1,
+        'kind': METRICS_RUNTIME_KIND,
+        'payload_kind': 'directory',
+        'payload_sha256': build['metrics_runtime_sha256'],
+        'objective_runtime_binding_sha256': objective_runtime_binding_sha256,
+        'files': runtime_files,
+    },
+)
+
+soak_reports = []
+if suite == 'nightly':
+    for profile in ('Balanced', 'Quality', 'VoiceFocus'):
+        report = {
+            'schema_version': 1,
+            'kind': SOAK_KIND,
+            'status': 'completed',
+            'profile': profile,
+            'active_bindings': [copy.deepcopy(binding_by_profile[profile])],
+            'execution_identity': execution_identity(),
+            'declared_latency_samples': latency_samples[profile],
+            'duration_seconds': 3600,
+            'mean_rtf': 0.1,
+            'callback_p99_ms': 4.0,
+            'worker_p99_ms': 4.0,
+            'maximum_internal_processing_ms': 9.0,
+            'memory_growth_bytes_after_warmup': 0,
+            'deadline_miss_count': 0,
+            'fallback_count': 0,
+            'invalid_output_count': 0,
+            'new_clipping_count': 0,
+            'tail_drain_failure_count': 0,
+        }
+        reference = write_json(shared_root + f'{profile}-soak-report.json', report)
+        soak_reports.append({'profile': profile, 'report': reference})
+        target = min(
+            (case for case in cases if case['profile'] == profile),
+            key=lambda case: case['case_id'],
+        )
+        target['performance']['audio_duration_seconds'] += 3600.0
+        target['performance']['processing_duration_seconds'] += 360.0
+        target['performance']['callback_durations_ms'].append(4.0)
+        target['performance']['worker_durations_ms'].append(4.0)
+        target['performance']['max_internal_processing_ms'] = 9.0
+        target['performance']['soak_duration_seconds'] = 3600
+
+case_evidence_relative = quality['artifacts']['case_evidence_jsonl']['path']
+case_evidence_path = artifact_root.joinpath(*PurePosixPath(case_evidence_relative).parts)
+case_evidence_path.parent.mkdir(parents=True, exist_ok=True)
+if case_evidence_path.exists():
+    case_evidence_path.unlink()
+write_case_evidence(case_evidence_path, build, quality['qualification_scope'], suite, cases, transitions)
+
+summary = summarize_case_evidence(cases, transitions, quality['qualification_scope'], suite)
+quality['coverage'] = summary['coverage']
+quality['profiles'] = [
+    {
+        'profile': profile,
+        'case_count': summary['profiles'][profile]['case_count'],
+        'passed': True,
+        'metrics': summary['profiles'][profile]['metrics'],
+        'performance': summary['profiles'][profile]['performance'],
+    }
+    for profile in profiles
+]
+quality['status'] = 'passed'
+quality['violations'] = []
+
+for name, artifact in quality['artifacts'].items():
+    if name == 'measurement_index_json':
+        continue
+    quality['artifacts'][name] = existing_reference(artifact['path'])
+
+index = {
+    'schema_version': 1,
+    'kind': INDEX_KIND,
+    'qualification_scope': quality['qualification_scope'],
+    'suite': suite,
+    'qualification_binding_sha256': qualification_binding_sha256(build, quality['qualification_scope'], suite),
+    'objective_runtime_binding_sha256': objective_runtime_binding_sha256,
+    'metrics_runtime_attestation': metrics_runtime_attestation,
+    'build': copy.deepcopy(build),
+    'plan_binding': {
+        field: build[field]
+        for field in ('case_set_sha256', 'corpus_inventory_sha256', 'corpus_lock_sha256', 'mixture_plan_sha256')
+    },
+    'profile_bindings': profile_bindings,
+    'published_artifacts': [
+        {'name': name, 'artifact': copy.deepcopy(quality['artifacts'][name])}
+        for name in sorted(quality['artifacts'])
+        if name != 'measurement_index_json'
+    ],
+    'release_holdout_approval_public_key_sha256': None,
+    'release_holdout_openings': [],
+    'cases': sorted(case_index_entries, key=lambda entry: (profiles.index(entry['profile']), entry['case_id'])),
+    'soak_reports': soak_reports,
+    'transitions': [],
+}
+index_reference = write_json(quality['artifacts']['measurement_index_json']['path'], index, canonical=True)
+quality['artifacts']['measurement_index_json'] = index_reference
+quality_path.write_text(json.dumps(quality, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
+'@
+	[System.IO.File]::WriteAllText(
+		$measurementFixtureGeneratorPath,
+		$measurementFixtureGeneratorSource,
+		[System.Text.UTF8Encoding]::new($false)
+	)
 	$originalEvidence = {
 		param([string]$Suite, [string]$RunnerClass)
 		return [ordered]@{
@@ -1309,6 +2110,7 @@ try {
 	$fakePythonPath = Join-Path $tempRoot 'fake-python.cmd'
 	[System.IO.File]::WriteAllText($fakePythonPath, "@exit /b 0`r`n", [System.Text.Encoding]::ASCII)
 	$measuredRunnerRoots = @{}
+	$artifactRootRegressionCovered = $false
 	foreach ($suite in @('master_quality', 'nightly')) {
 		foreach ($runnerClass in @('low-performance', 'mainstream')) {
 		$runnerKey = "$suite|$runnerClass"
@@ -1320,14 +2122,14 @@ try {
 		Write-ReleaseJson -Path $qualityPath -Value $quality
 		$caseRecordsPath = Join-Path $runnerRoot 'case-records.json'
 		Write-ReleaseJson -Path $caseRecordsPath -Value ([ordered]@{
-			schema_version = 1
-			cases = @(& $qualityCaseRecords $suite)
+			schema_version = 3
+			cases = @(& $qualityCaseRecords $suite $runnerClass $runnerRoot)
 			auto_transitions = @()
 		})
 		$artifactNamespace = Join-Path (Join-Path $runnerRoot 'artifacts') "$suite-$runnerClass"
 		New-Item -ItemType Directory -Force -Path $artifactNamespace | Out-Null
 		foreach ($artifactName in $qualityArtifactFileNames.Keys) {
-			if ($artifactName -ceq 'case_evidence_jsonl') {
+			if ($artifactName -cin @('case_evidence_jsonl', 'measurement_index_json')) {
 				continue
 			}
 			$qualityEvidenceArtifactPath = Join-Path $artifactNamespace $qualityArtifactFileNames[$artifactName]
@@ -1337,28 +2139,51 @@ try {
 				[System.Text.UTF8Encoding]::new($false)
 			)
 		}
-		$caseEvidencePath = Join-Path $artifactNamespace $qualityArtifactFileNames['case_evidence_jsonl']
-		$caseEvidenceGenerator = Join-Path (Split-Path -Parent $scriptsRoot) `
-			'audio-quality\generate-quality-case-evidence.py'
-		$null = & python $caseEvidenceGenerator `
-			--qualification $qualityPath `
-			--records $caseRecordsPath `
-			--output $caseEvidencePath
+		$audioQualityRoot = Join-Path (Split-Path -Parent $scriptsRoot) 'audio-quality'
+		$null = & python $measurementFixtureGeneratorPath `
+			$qualityPath $caseRecordsPath $runnerRoot $audioQualityRoot
 		if ($LASTEXITCODE -ne 0) {
-			throw "Unable to generate schema-v3 case evidence for '$suite/$runnerClass'."
+			throw "Unable to materialize transitive measurement evidence for '$suite/$runnerClass'."
 		}
 		Remove-Item -LiteralPath $caseRecordsPath -Force
-		foreach ($artifactName in $qualityArtifactFileNames.Keys) {
-			$qualityEvidenceArtifactPath = Join-Path $artifactNamespace $qualityArtifactFileNames[$artifactName]
-			$quality.artifacts[$artifactName].sha256 = Get-ReleaseFileSha256 -Path $qualityEvidenceArtifactPath
-			$quality.artifacts[$artifactName].size_bytes = [int64](Get-Item -LiteralPath $qualityEvidenceArtifactPath).Length
-		}
-		Write-ReleaseJson -Path $qualityPath -Value $quality
 		$qualityValidator = Join-Path (Split-Path -Parent $scriptsRoot) `
 			'audio-quality\validate-quality-qualification.py'
 		$null = & python $qualityValidator $qualityPath --artifact-root $runnerRoot
 		if ($LASTEXITCODE -ne 0) {
 			throw "Schema-v3 quality fixture failed semantic validation for '$suite/$runnerClass'."
+		}
+		if (-not $artifactRootRegressionCovered) {
+			$artifactRootProbe = @'
+import json
+import importlib.util
+import sys
+from pathlib import Path
+
+module_root = Path(sys.argv[4])
+sys.path.insert(0, str(module_root))
+spec = importlib.util.spec_from_file_location('validate_quality_qualification', module_root / 'validate-quality-qualification.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+document = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
+root = None if sys.argv[1] == 'missing' else Path(sys.argv[3])
+try:
+    module.validate_qualification(document, root)
+except module.QualificationError:
+    raise SystemExit(0)
+raise SystemExit(1)
+'@
+			$wrongArtifactRoot = Join-Path $runnerRoot 'wrong-artifact-root'
+			New-Item -ItemType Directory -Force -Path $wrongArtifactRoot | Out-Null
+			$null = & python -c $artifactRootProbe missing $qualityPath $wrongArtifactRoot $audioQualityRoot
+			if ($LASTEXITCODE -ne 0) {
+				throw 'Quality validator accepted a missing artifact root.'
+			}
+			$null = & python -c $artifactRootProbe wrong $qualityPath $wrongArtifactRoot $audioQualityRoot
+			if ($LASTEXITCODE -ne 0) {
+				throw 'Quality validator accepted the wrong artifact root.'
+			}
+			$artifactRootRegressionCovered = $true
 		}
 		Write-ReleaseJson -Path (Join-Path $runnerRoot 'original-voice-qualification.json') `
 			-Value (& $originalEvidence $suite $runnerClass)
@@ -1435,10 +2260,18 @@ try {
 			[ordered]@{ name = "TestModernDialogControllers"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdateHealth"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdaterHealthIntegration"; passed = $true; exitCode = 0; durationMs = 1 },
+			[ordered]@{ name = "TestUpdaterProtocolV4Simulation"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestSpeechCleanup"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "SpeechCleanupBenchmarkSelfTest"; passed = $true; exitCode = 0; durationMs = 1 }
 		)
 	})
+	$missingProtocolGate = Read-ReleaseJson -Path $gatePath
+	$missingProtocolGate.gates = @($missingProtocolGate.gates | Where-Object {
+		[string]$_.name -cne 'TestUpdaterProtocolV4Simulation'
+	})
+	Assert-Throws -Description 'missing mandatory updater protocol-v4 simulation gate' -Script {
+		Assert-TestGateResults -GateResults $missingProtocolGate
+	}
 	$signerSubject = "CN=Mumble Input Enhancement Release Test"
 	$signingPath = Join-Path $tempRoot "signing-results.json"
 	Write-ReleaseJson -Path $signingPath -Value ([ordered]@{
@@ -1554,14 +2387,14 @@ try {
 	$fixedModelIds = @{
 		Light = ""
 		Balanced = "rnnoise:embedded"
-		Quality = "deepfilternet:balanced"
-		VoiceFocus = "deepfilternet:balanced"
+		Quality = "deepfilternet:low-latency"
+		VoiceFocus = "deepfilternet:low-latency"
 	}
 	$fixedRecipeIds = @{
 		Light = "input.light.speex"
 		Balanced = "input.balanced.rnnoise-embedded"
-		Quality = "input.quality.deepfilternet-balanced"
-		VoiceFocus = "input.voice-focus.deepfilternet-balanced"
+		Quality = "input.quality.deepfilternet-low-latency"
+		VoiceFocus = "input.voice-focus.deepfilternet-low-latency"
 	}
 	$releaseSmokeHarnessHash = ("13" * 32)
 	$releaseSmokeServerHash = ("16" * 32)
@@ -1680,9 +2513,9 @@ try {
 					invalidOutputCount = 0
 					tailErrorCount = 0
 					latencyErrorCount = 0
-					tailDrainExpectedFrames = if ($profile -ceq 'Light') { 0 } else { 3 }
-					tailDrainActualFrames = if ($profile -ceq 'Light') { 0 } else { 3 }
-					enhancementLatencyMs = if ($profile -ceq 'Light') { 0.0 } elseif ($profile -ceq "Balanced") { 30.0 } else { 40.0 }
+					tailDrainExpectedFrames = if ($profile -ceq 'Light') { 1 } else { 3 }
+					tailDrainActualFrames = if ($profile -ceq 'Light') { 1 } else { 3 }
+					enhancementLatencyMs = if ($profile -ceq 'Light') { 10.0 } elseif ($profile -ceq "Balanced") { 30.0 } else { 40.0 }
 					fixedTimelinePassed = $true
 					onsetLossSamples = 0
 					endLossSamples = 0
@@ -2223,7 +3056,7 @@ try {
 				"@echo off",
 				"echo %* | findstr /C:`"--show-only=json-v1`" >nul",
 				"if %errorlevel%==0 (",
-				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
+				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestUpdaterProtocolV4Simulation`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
 				"  exit /b 0",
 				")",
 				"exit /b 0"

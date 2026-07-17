@@ -36,9 +36,11 @@ EXPECTED = {
 	"Original": ("None", "input.original", 0, ""),
 	"Light": ("Speex", "input.light.speex", 0, ""),
 	"Balanced": ("RNNoise", "input.balanced.rnnoise-embedded", 1_440, "rnnoise:embedded"),
-	"Quality": ("DeepFilterNet", "input.quality.deepfilternet-balanced", 2_400, "deepfilternet:balanced"),
+	"Quality": (
+		"DeepFilterNet", "input.quality.deepfilternet-low-latency", 1_440, "deepfilternet:low-latency"
+	),
 	"VoiceFocus": (
-		"DeepFilterNet", "input.voice-focus.deepfilternet-balanced", 2_400, "deepfilternet:balanced"
+		"DeepFilterNet", "input.voice-focus.deepfilternet-low-latency", 1_440, "deepfilternet:low-latency"
 	),
 }
 

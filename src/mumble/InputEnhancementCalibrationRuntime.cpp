@@ -5,7 +5,7 @@
 
 #include "InputEnhancementCalibrationRuntime.h"
 
-#include "AudioPreprocessor.h"
+#include "InputEnhancementLightProcessor.h"
 
 #include <opus.h>
 
@@ -144,7 +144,11 @@ namespace {
 		}
 
 		Pipeline pipeline;
-		if (!pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath)) {
+		LightProcessor lightProcessor;
+		const bool lightProfile = recipe.effectiveProfile() == Profile::Light;
+		const bool configured = lightProfile ? lightProcessor.configure(recipe, pipeline)
+										 : pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath);
+		if (!configured) {
 			return false;
 		}
 		const unsigned int latency = pipeline.latencySamples();
@@ -153,6 +157,7 @@ namespace {
 		SecureFloatVector causal;
 		causal.values.reserve(frames * frameSamples);
 		std::array< float, frameSamples > frame = {};
+		SecureArray< std::int16_t, frameSamples > lightFrame;
 		for (std::size_t frameIndex = 0; frameIndex < frames; ++frameIndex) {
 			frame.fill(0.0f);
 			const std::size_t inputOffset = frameIndex * frameSamples;
@@ -163,9 +168,22 @@ namespace {
 			if (!pipeline.prepareOfflineFrame()) {
 				return false;
 			}
-			const bool processed = pipeline.processFrame(frame);
-			if (recipe.usesNeuralProcessor() && !processed) {
-				return false;
+			if (lightProfile) {
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					const float scaled = std::clamp(frame[index] * 32768.0f, -32768.0f, 32767.0f);
+					lightFrame.values[index] = static_cast< std::int16_t >(std::lrint(scaled));
+				}
+				if (!lightProcessor.processFrame(lightFrame.values.data(), frameSamples)) {
+					return false;
+				}
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					frame[index] = static_cast< float >(lightFrame.values[index]) / 32768.0f;
+				}
+			} else {
+				const bool processed = pipeline.processFrame(frame);
+				if (recipe.usesNeuralProcessor() && !processed) {
+					return false;
+				}
 			}
 			causal.values.insert(causal.values.end(), frame.begin(), frame.end());
 		}
@@ -178,44 +196,6 @@ namespace {
 		alignedOutput.values.assign(causal.values.begin() + static_cast< std::ptrdiff_t >(latency),
 									causal.values.begin() + static_cast< std::ptrdiff_t >(latency + input.size()));
 		return true;
-	}
-
-	bool runLightPipeline(std::span< const float > roomNoise, std::span< const float > guidedVoice,
-						  std::span< const float > localNoise, const CalibrationSession::Selection &selection,
-						  SecureFloatVector &processedRoom, SecureFloatVector &processedVoice,
-						  SecureFloatVector &processedLocalNoise) {
-		const ValidatedControls controls =
-			validatedControlsForProfile(Profile::Light, selection.noiseReduction, selection.naturalCrisp);
-		AudioPreprocessor processor;
-		if (!processor.init(CalibrationSession::sampleRate, frameSamples) || !processor.setEchoState(nullptr)
-			|| !processor.setAGC(false) || !processor.setVAD(false) || !processor.setDereverb(false)
-			|| !processor.setDenoise(true) || !processor.setNoiseSuppress(-controls.noiseReduction)) {
-			return false;
-		}
-
-		auto process = [&processor](std::span< const float > input, SecureFloatVector &output) {
-			output.values.clear();
-			output.values.reserve(input.size());
-			SecureArray< std::int16_t, frameSamples > frame;
-			for (std::size_t offset = 0; offset < input.size(); offset += frameSamples) {
-				frame.values.fill(0);
-				const std::size_t count = std::min< std::size_t >(frameSamples, input.size() - offset);
-				for (std::size_t index = 0; index < count; ++index) {
-					const float scaled  = std::clamp(input[offset + index] * 32768.0f, -32768.0f, 32767.0f);
-					frame.values[index] = static_cast< std::int16_t >(std::lrint(scaled));
-				}
-				processor.run(frame.values.front());
-				for (std::size_t index = 0; index < count; ++index) {
-					output.values.push_back(static_cast< float >(frame.values[index]) / 32768.0f);
-				}
-			}
-			return output.values.size() == input.size();
-		};
-
-		// Prime exactly the same Speex state with the captured room before the
-		// guided utterance, without enabling AEC, AGC, VAD, or dereverb.
-		return process(roomNoise, processedRoom) && process(guidedVoice, processedVoice)
-			   && (localNoise.empty() || process(localNoise, processedLocalNoise));
 	}
 
 	double combinedNoiseImprovementDb(std::span< const float > roomNoise, std::span< const float > processedRoom,
@@ -360,8 +340,10 @@ bool CalibrationPackageAuthorization::recipeAuthorized(const Recipe &recipe, QSt
 
 LocalCalibrationCandidateEvaluator::LocalCalibrationCandidateEvaluator(CalibrationOpusConfiguration opus,
 																	   CalibrationPackageAuthorization authorization,
-																	   const CpuClass cpuClass) noexcept
-	: m_opus(opus), m_authorization(std::move(authorization)), m_cpuClass(cpuClass) {
+																	   const CpuClass cpuClass,
+																	   CaptureDeviceContext captureDevice) noexcept
+	: m_opus(opus), m_authorization(std::move(authorization)), m_cpuClass(cpuClass),
+	  m_captureDevice(std::move(captureDevice)) {
 }
 
 bool LocalCalibrationCandidateEvaluator::evaluate(const CalibrationSession::CaptureView &capture,
@@ -385,6 +367,11 @@ bool LocalCalibrationCandidateEvaluator::evaluate(const CalibrationSession::Capt
 	availabilityRequest.naturalCrisp        = selection.naturalCrisp;
 	availabilityRequest.cpuClass            = m_cpuClass;
 	availabilityRequest.backendAvailability = BackendAvailability::compiled();
+	availabilityRequest.captureDevice       = m_captureDevice;
+	if (!profileReadiness(availabilityRequest).selectable) {
+		output.candidate.eligible = false;
+		return true;
+	}
 	const Recipe candidateRecipe            = RecipeCatalog::resolve(availabilityRequest);
 	if (candidateRecipe.effectiveProfile() != selection.profile) {
 		output.candidate.eligible = false;
@@ -410,14 +397,11 @@ bool LocalCalibrationCandidateEvaluator::evaluate(const CalibrationSession::Capt
 	SecureFloatVector processedLocalNoise;
 	SecureFloatVector opusVoice;
 	const bool processed =
-		selection.profile == Profile::Light
-			? runLightPipeline(capture.roomNoise, capture.guidedVoice, capture.localNoise, selection, processedRoom,
-							   processedVoice, processedLocalNoise)
-			: runProductPipeline(capture.guidedVoice, selection, m_authorization, m_cpuClass, processedVoice)
-				  && runProductPipeline(capture.roomNoise, selection, m_authorization, m_cpuClass, processedRoom)
-				  && (capture.localNoise.empty()
-					  || runProductPipeline(capture.localNoise, selection, m_authorization, m_cpuClass,
-											processedLocalNoise));
+		runProductPipeline(capture.guidedVoice, selection, m_authorization, m_cpuClass, processedVoice)
+		&& runProductPipeline(capture.roomNoise, selection, m_authorization, m_cpuClass, processedRoom)
+		&& (capture.localNoise.empty()
+			|| runProductPipeline(capture.localNoise, selection, m_authorization, m_cpuClass,
+								  processedLocalNoise));
 	if (!opusRoundTrip(capture.guidedVoice, m_opus, referenceVoice) || !processed
 		|| !opusRoundTrip(processedVoice.values, m_opus, opusVoice)) {
 		return false;
@@ -450,8 +434,9 @@ bool LocalCalibrationCandidateEvaluator::evaluate(const CalibrationSession::Capt
 	return true;
 }
 
-CalibrationRuntimeBridge::CalibrationRuntimeBridge(std::unique_ptr< CalibrationCandidateEvaluator > evaluator)
-	: m_evaluator(std::move(evaluator)) {
+CalibrationRuntimeBridge::CalibrationRuntimeBridge(std::unique_ptr< CalibrationCandidateEvaluator > evaluator,
+																	   const CpuClass readinessCpuClass)
+	: m_evaluator(std::move(evaluator)), m_readinessCpuClass(readinessCpuClass) {
 	if (!m_evaluator) {
 		m_evaluator = std::make_unique< LocalCalibrationCandidateEvaluator >();
 	}
@@ -459,8 +444,9 @@ CalibrationRuntimeBridge::CalibrationRuntimeBridge(std::unique_ptr< CalibrationC
 }
 
 CalibrationRuntimeBridge::CalibrationRuntimeBridge(std::span< float > preallocatedStorage,
-												   std::unique_ptr< CalibrationCandidateEvaluator > evaluator)
-	: m_session(preallocatedStorage), m_evaluator(std::move(evaluator)) {
+													   std::unique_ptr< CalibrationCandidateEvaluator > evaluator,
+													   const CpuClass readinessCpuClass)
+	: m_session(preallocatedStorage), m_evaluator(std::move(evaluator)), m_readinessCpuClass(readinessCpuClass) {
 	if (!m_evaluator) {
 		m_evaluator = std::make_unique< LocalCalibrationCandidateEvaluator >();
 	}
@@ -478,8 +464,8 @@ CalibrationRuntimeBridge::~CalibrationRuntimeBridge() {
 bool CalibrationRuntimeBridge::start(const DeviceIdentity &identity, const DefaultPreference &previousPreference,
 									 bool captureOptionalLocalNoise, std::uint64_t blindSeed,
 									 std::optional< RecipeBinding > previousRecipeBinding) {
-	if (identity.backendId.isEmpty() || identity.physicalId.isEmpty() || previousPreference.profile == Profile::Auto
-		|| previousPreference.autoAdapt
+	if (identity.backendId.isEmpty() || identity.physicalId.isEmpty()
+		|| runtimeAutoAdaptationEnabled(previousPreference)
 		|| (previousRecipeBinding && !recipeBindingMatchesPreference(*previousRecipeBinding, previousPreference))
 		|| (previousPreference.profile != Profile::Original && !previousRecipeBinding)) {
 		return false;
@@ -687,7 +673,19 @@ bool CalibrationRuntimeBridge::selectBlindWinner(std::uint64_t playbackToken) no
 
 bool CalibrationRuntimeBridge::apply(Settings &settings, qint64 nowEpochMs) {
 	pauseCallback();
-	if (!m_hasDraftPreference || !m_draftRecipeBinding
+	ResolveRequest readinessRequest;
+	readinessRequest.profile             = m_draftPreference.profile;
+	readinessRequest.noiseReduction      = m_draftPreference.reduction;
+	readinessRequest.naturalCrisp        = m_draftPreference.character;
+	readinessRequest.cpuClass            = m_readinessCpuClass;
+	readinessRequest.backendAvailability = BackendAvailability::compiled();
+	readinessRequest.captureDevice      = CaptureDeviceContext::liveDevice(m_identity.backendId, m_identity.stable);
+	const ProfileReadiness readiness = profileReadiness(readinessRequest);
+	const Recipe readyRecipe         = RecipeCatalog::resolve(readinessRequest);
+	if (!m_hasDraftPreference || !m_draftRecipeBinding || !readiness.selectable
+		|| readyRecipe.effectiveProfile() != m_draftPreference.profile
+		|| !recipeBindingMatches(*m_draftRecipeBinding, readyRecipe, m_draftRecipeBinding->catalogRevision,
+								 m_draftRecipeBinding->modelSha256, m_draftRecipeBinding->modelRelativePath)
 		|| !recipeBindingMatchesPreference(*m_draftRecipeBinding, m_draftPreference)
 		|| (m_previousPreference.profile != Profile::Original
 			&& (!m_previousRecipeBinding
@@ -796,6 +794,10 @@ const DefaultPreference *CalibrationRuntimeBridge::draftPreference() noexcept {
 	pauseCallback();
 	publishState();
 	return m_hasDraftPreference ? &m_draftPreference : nullptr;
+}
+
+const RecipeBinding *CalibrationRuntimeBridge::draftRecipeBinding() noexcept {
+	return m_hasDraftPreference && m_draftRecipeBinding ? &*m_draftRecipeBinding : nullptr;
 }
 
 CalibrationSession::Selection

@@ -88,12 +88,14 @@ private slots:
 	void selectsProfileByOpenedPhysicalDevice();
 	void editableDeviceProfileInheritsDefaultWithoutMutatingIt();
 	void autoProfileAlwaysEnablesAdaptationOnLoad();
+	void fixedProfileAutoAdaptationIsPersistedButRuntimeDormant();
 	void evictsOnlyLeastRecentlyUsedUncalibratedProfile();
 	void openedPhysicalDeviceAdvancesLruWithoutCreatingEntries();
 	void sessionOnlyProfilesAreNotPersistedAndKeysAreVerified();
 	void migratesNonEmptyLegacyQSettings();
 	void pendingWithoutLastKnownGoodFailsSafeOnParseAndSelection();
 	void rejectsMalformedRecipeBindings();
+	void qualityExpertBindingsRequireQualifiedCpuAndLatency();
 	void exactRecipeBindingDetectsCatalogRecipeAndModelDrift();
 	void unmanagedBuildZeroNeuralBindingRemainsHashBound();
 	void abnormalExitRollsBackPendingValidation();
@@ -110,6 +112,27 @@ void TestInputEnhancementSettings::newInstallDefaultsToOriginal() {
 	QCOMPARE(settings.inputEnhancement.defaultPreference.character, 50);
 	QVERIFY(!settings.inputEnhancement.defaultPreference.autoAdapt);
 	QVERIFY(!settings.inputEnhancement.legacyOverride.has_value());
+}
+
+void TestInputEnhancementSettings::fixedProfileAutoAdaptationIsPersistedButRuntimeDormant() {
+	using namespace Mumble::InputEnhancement;
+	for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Quality,
+								   Profile::VoiceFocus }) {
+		DefaultPreference stored = preference(profile);
+		stored.autoAdapt         = true;
+		QVERIFY(!runtimeAutoAdaptationEnabled(stored));
+	}
+
+	DefaultPreference experimentalAuto = preference(Profile::Auto);
+	QVERIFY(runtimeAutoAdaptationEnabled(experimentalAuto));
+
+	Mumble::InputEnhancement::Settings settings;
+	settings.defaultPreference.profile   = Profile::Balanced;
+	settings.defaultPreference.autoAdapt = true;
+	Mumble::InputEnhancement::Settings restored;
+	QVERIFY(deserializeSettings(serializeSettings(settings), restored));
+	QVERIFY(restored.defaultPreference.autoAdapt);
+	QVERIFY(!runtimeAutoAdaptationEnabled(restored.defaultPreference));
 }
 
 void TestInputEnhancementSettings::migratesLegacyTuple_data() {
@@ -651,6 +674,27 @@ void TestInputEnhancementSettings::rejectsMalformedRecipeBindings() {
 		QCOMPARE(restored.defaultPreference.profile, Profile::Original);
 		QVERIFY(restored.deviceProfiles.isEmpty());
 	}
+}
+
+void TestInputEnhancementSettings::qualityExpertBindingsRequireQualifiedCpuAndLatency() {
+	using namespace Mumble::InputEnhancement;
+	RecipeBinding dtln = exactBinding(Profile::Quality);
+	dtln.recipeId          = QStringLiteral("input.expert.dtln-norm40h");
+	dtln.engine            = Engine::DTLN;
+	dtln.modelId           = QStringLiteral("dtln:norm40h:model-1");
+	dtln.modelRelativePath = QStringLiteral("dtln/norm_40h/model_1.onnx");
+	QVERIFY(isValidRecipeBinding(dtln));
+
+	RecipeBinding underClassed = dtln;
+	underClassed.minimumCpuClass  = CpuClass::Standard;
+	QVERIFY(!isValidRecipeBinding(underClassed));
+
+	RecipeBinding underBudgeted = exactBinding(Profile::Quality);
+	underBudgeted.recipeId              = QStringLiteral("input.expert.deepfilternet-low-latency");
+	underBudgeted.latencyBudgetSamples = 40U * 48U;
+	QVERIFY(!isValidRecipeBinding(underBudgeted));
+	underBudgeted.latencyBudgetSamples = qualityLatencyBudgetSamples;
+	QVERIFY(isValidRecipeBinding(underBudgeted));
 }
 
 void TestInputEnhancementSettings::exactRecipeBindingDetectsCatalogRecipeAndModelDrift() {

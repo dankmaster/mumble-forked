@@ -109,7 +109,7 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 															 QStringLiteral("input.auto.balanced.rnnoise-embedded") } },
 	};
 	QJsonObject deepFilterModel{
-		{ QStringLiteral("id"), QStringLiteral("deepfilternet:balanced") },
+		{ QStringLiteral("id"), QStringLiteral("deepfilternet:low-latency") },
 		{ QStringLiteral("version"), QStringLiteral("test-deepfilter-v1") },
 		{ QStringLiteral("backend"), QStringLiteral("DeepFilterNet") },
 		{ QStringLiteral("path"), QStringLiteral("deepfilternet/model.tar.gz") },
@@ -118,10 +118,10 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 		{ QStringLiteral("size"), DeepFilterAsset.size() },
 		{ QStringLiteral("licenseSpdx"), QStringLiteral("MIT OR Apache-2.0") },
 		{ QStringLiteral("sampleRateHz"), 48000 },
-		{ QStringLiteral("algorithmicLatencyMs"), 40 },
+		{ QStringLiteral("algorithmicLatencyMs"), 10 },
 		{ QStringLiteral("recipeCompatibility"),
-		  QJsonArray{ QStringLiteral("input.quality.deepfilternet-balanced"),
-					  QStringLiteral("input.voice-focus.deepfilternet-balanced") } },
+		  QJsonArray{ QStringLiteral("input.quality.deepfilternet-low-latency"),
+					  QStringLiteral("input.voice-focus.deepfilternet-low-latency") } },
 	};
 	QJsonObject modelRoot{
 		{ QStringLiteral("schemaVersion"), 1 },
@@ -143,11 +143,11 @@ PackageBytes writeValidPackage(const QTemporaryDir &root,
 			  recipe(QStringLiteral("input.balanced.rnnoise-embedded"), QStringLiteral("Balanced"),
 					 QStringLiteral("RNNoise"), QJsonArray{ QStringLiteral("rnnoise:embedded") },
 					 QStringLiteral("Standard"), 30),
-			  recipe(QStringLiteral("input.quality.deepfilternet-balanced"), QStringLiteral("Quality"),
-					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:balanced") },
+			  recipe(QStringLiteral("input.quality.deepfilternet-low-latency"), QStringLiteral("Quality"),
+					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:low-latency") },
 					 QStringLiteral("High"), 50),
-			  recipe(QStringLiteral("input.voice-focus.deepfilternet-balanced"), QStringLiteral("VoiceFocus"),
-					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:balanced") },
+			  recipe(QStringLiteral("input.voice-focus.deepfilternet-low-latency"), QStringLiteral("VoiceFocus"),
+					 QStringLiteral("DeepFilterNet"), QJsonArray{ QStringLiteral("deepfilternet:low-latency") },
 					 QStringLiteral("High"), 50),
 			  recipe(QStringLiteral("input.auto.balanced.rnnoise-embedded"), QStringLiteral("Auto"),
 					 QStringLiteral("RNNoise"), QJsonArray{ QStringLiteral("rnnoise:embedded") },
@@ -218,7 +218,7 @@ void TestInputEnhancementPackageVerifier::acceptsExactSignedCatalogAndPublishesM
 	QVERIFY(!verifier.modelAuthorized(QStringLiteral("rnnoise:embedded"),
 									  QDir(root.path()).filePath(QStringLiteral("deepfilternet/model.tar.gz"))));
 	QVERIFY(
-		verifier.modelsAuthorized({ QStringLiteral("rnnoise:embedded"), QStringLiteral("deepfilternet:balanced") }));
+		verifier.modelsAuthorized({ QStringLiteral("rnnoise:embedded"), QStringLiteral("deepfilternet:low-latency") }));
 }
 
 void TestInputEnhancementPackageVerifier::bindsRuntimeRecipesToSignedCatalog() {
@@ -442,10 +442,10 @@ void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() 
 	QCOMPARE(attestedVerifier.catalogRevision(), CatalogRevision);
 	QCOMPARE(attestedVerifier.modelSha256Hex(QStringLiteral("rnnoise:embedded")),
 			 QString::fromLatin1(QCryptographicHash::hash(RnnoiseAsset, QCryptographicHash::Sha256).toHex()));
-	QCOMPARE(attestedVerifier.modelSha256Hex(QStringLiteral("deepfilternet:balanced")),
+	QCOMPARE(attestedVerifier.modelSha256Hex(QStringLiteral("deepfilternet:low-latency")),
 			 QString::fromLatin1(QCryptographicHash::hash(DeepFilterAsset, QCryptographicHash::Sha256).toHex()));
 	QVERIFY(attestedVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
-	QVERIFY(attestedVerifier.modelAuthorized(QStringLiteral("deepfilternet:balanced")));
+	QVERIFY(attestedVerifier.modelAuthorized(QStringLiteral("deepfilternet:low-latency")));
 	QVERIFY(attestedVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Balanced, 50, 50, CpuClass::High,
 															 BackendAvailability{ true, true, true } })));
 	QVERIFY(attestedVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Quality, 50, 50, CpuClass::High,
@@ -490,7 +490,7 @@ void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() 
 	InputEnhancementPackageVerifier invalidVerifier(std::move(invalidConfiguration));
 	QCOMPARE(errorValue(invalidVerifier.verify().error), errorValue(PackageVerificationError::AssetHashMismatch));
 	QVERIFY(!invalidVerifier.verificationHealthy());
-	QVERIFY(!invalidVerifier.modelAuthorized(QStringLiteral("deepfilternet:balanced")));
+	QVERIFY(!invalidVerifier.modelAuthorized(QStringLiteral("deepfilternet:low-latency")));
 }
 
 QTEST_GUILESS_MAIN(TestInputEnhancementPackageVerifier)

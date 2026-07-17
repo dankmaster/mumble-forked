@@ -4,8 +4,8 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "Audio.h"
-#include "AudioPreprocessor.h"
 #include "InputEnhancement.h"
+#include "InputEnhancementLightProcessor.h"
 #include "SpeechCleanup.h"
 #include "SpeechCleanupProcessor.h"
 
@@ -95,6 +95,18 @@ namespace {
 		std::uint64_t callbackP50Nanoseconds = 0;
 		std::uint64_t callbackP95Nanoseconds = 0;
 		std::uint64_t callbackP99Nanoseconds = 0;
+		std::uint64_t lightSpeechProbabilityP10 = 0;
+		std::uint64_t lightSpeechProbabilityP50 = 0;
+		std::uint64_t lightSpeechProbabilityP90 = 0;
+		std::uint64_t lightNoisePsdSumP10 = 0;
+		std::uint64_t lightNoisePsdSumP50 = 0;
+		std::uint64_t lightNoisePsdSumP90 = 0;
+		std::uint64_t lightNoiseToSignalPpmP10 = 0;
+		std::uint64_t lightNoiseToSignalPpmP50 = 0;
+		std::uint64_t lightNoiseToSignalPpmP90 = 0;
+		std::uint64_t lightDryRmsPpbP10 = 0;
+		std::uint64_t lightDryRmsPpbP50 = 0;
+		std::uint64_t lightDryRmsPpbP90 = 0;
 		bool usedFallback       = false;
 		unsigned int reportedLatencySamples = 0;
 		int alignmentLagSamples = 0;
@@ -753,7 +765,11 @@ namespace {
 		constexpr std::uint64_t deadline = 10'000'000;
 		const auto initializationStart = std::chrono::steady_clock::now();
 		Pipeline pipeline(Pipeline::ProcessorFactory {}, Pipeline::NanosecondClock {}, deadline);
-		if (!pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath)) {
+		LightProcessor lightProcessor;
+		const bool lightProfile = recipe.effectiveProfile() == Profile::Light;
+		const bool configured = lightProfile ? lightProcessor.configure(recipe, pipeline)
+															 : pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath);
+		if (!configured) {
 			const Diagnostics diagnostics = pipeline.diagnostics();
 			throw std::runtime_error(
 				QStringLiteral("Product recipe %1 failed to initialize: %2")
@@ -761,16 +777,6 @@ namespace {
 					.toStdString());
 		}
 
-		std::unique_ptr< AudioPreprocessor > lightProcessor;
-		if (recipe.effectiveProfile() == Profile::Light) {
-			lightProcessor = std::make_unique< AudioPreprocessor >();
-			if (!lightProcessor->init(SAMPLE_RATE, frameSamples) || !lightProcessor->setEchoState(nullptr)
-				|| !lightProcessor->setAGC(false) || !lightProcessor->setVAD(false)
-				|| !lightProcessor->setDereverb(false) || !lightProcessor->setDenoise(true)
-				|| !lightProcessor->setNoiseSuppress(-recipe.noiseReduction())) {
-				throw std::runtime_error("Failed to initialize the product Light Speex recipe");
-			}
-		}
 		const auto initializationEnd = std::chrono::steady_clock::now();
 
 		BenchmarkMetrics metrics;
@@ -797,8 +803,17 @@ namespace {
 		std::vector< float > processed(metrics.outputSampleCount, 0.0f);
 		std::array< float, frameSamples > frame = {};
 		std::array< std::int16_t, frameSamples > lightFrame = {};
+		std::array< std::int32_t, frameSamples > lightSignalPsd = {};
 		std::vector< std::uint64_t > callbackDurations;
 		callbackDurations.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightSpeechProbabilities;
+		lightSpeechProbabilities.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightNoisePsdSums;
+		lightNoisePsdSums.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightNoiseToSignalPpm;
+		lightNoiseToSignalPpm.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightDryRmsPpb;
+		lightDryRmsPpb.reserve(framedInput.size() / frameSamples);
 		const auto startedAt = std::chrono::steady_clock::now();
 		for (std::size_t offset = 0; offset < framedInput.size(); offset += frameSamples) {
 			std::copy_n(framedInput.data() + offset, frame.size(), frame.data());
@@ -815,7 +830,10 @@ namespace {
 						.toStdString());
 			}
 			const auto callbackStartedAt = std::chrono::steady_clock::now();
-			const bool neuralProcessed = pipeline.processFrame(frame);
+			bool neuralProcessed = false;
+			if (recipe.usesNeuralProcessor()) {
+				neuralProcessed = pipeline.processFrame(frame);
+			}
 			if (recipe.usesNeuralProcessor() && !neuralProcessed) {
 				const Diagnostics diagnostics = pipeline.diagnostics();
 				throw std::runtime_error(
@@ -824,19 +842,49 @@ namespace {
 						.arg(fallbackReasonName(diagnostics.fallbackReason()))
 						.toStdString());
 			}
-			if (lightProcessor) {
+			if (lightProfile) {
 				for (std::size_t index = 0; index < frame.size(); ++index) {
 					const float scaled = std::clamp(frame[index] * 32768.0f, -32768.0f, 32767.0f);
 					lightFrame[index] = static_cast< std::int16_t >(std::lrint(scaled));
 				}
-				lightProcessor->run(lightFrame.front());
+				double dryEnergy = 0.0;
+				for (const std::int16_t sample : lightFrame) {
+					const double normalized = static_cast< double >(sample) / 32768.0;
+					dryEnergy += normalized * normalized;
+				}
+				lightDryRmsPpb.push_back(static_cast< std::uint64_t >(std::llround(
+					std::sqrt(dryEnergy / static_cast< double >(lightFrame.size())) * 1'000'000'000.0)));
+				if (!lightProcessor.processFrame(lightFrame.data(), frameSamples)) {
+					const Diagnostics diagnostics = pipeline.diagnostics();
+					throw std::runtime_error(
+						QStringLiteral("Product Light pipeline failed at frame %1: %2")
+							.arg(static_cast< quint64 >(offset / frameSamples))
+							.arg(fallbackReasonName(diagnostics.fallbackReason()))
+							.toStdString());
+				}
+				const int speechProbability = lightProcessor.lastSpeechProbability();
+				lightSpeechProbabilities.push_back(static_cast< std::uint64_t >(speechProbability));
+				const std::uint64_t noiseSum = lightProcessor.lastNoisePsdSum();
+				lightNoisePsdSums.push_back(noiseSum);
+				if (lightProcessor.copySignalPsd(lightSignalPsd.data(), lightSignalPsd.size())) {
+					const std::uint64_t signalSum = std::accumulate(
+						lightSignalPsd.cbegin(), lightSignalPsd.cend(), std::uint64_t { 0 },
+						[](std::uint64_t total, std::int32_t value) {
+							return total + static_cast< std::uint64_t >(std::max(value, std::int32_t { 0 }));
+						});
+					const double ratio = signalSum == 0
+						? 0.0
+						: (static_cast< double >(noiseSum) * 1'000'000.0) / static_cast< double >(signalSum);
+					lightNoiseToSignalPpm.push_back(static_cast< std::uint64_t >(std::llround(ratio)));
+				}
 				for (std::size_t index = 0; index < frame.size(); ++index) {
 					frame[index] = static_cast< float >(lightFrame[index]) / 32768.0f;
 				}
 			}
 			const auto callbackFinishedAt = std::chrono::steady_clock::now();
-			callbackDurations.push_back(static_cast< std::uint64_t >(
-				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count()));
+			const std::uint64_t callbackDuration = static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count());
+			callbackDurations.push_back(callbackDuration);
 			if (offset < processed.size()) {
 				const std::size_t count = std::min< std::size_t >(frame.size(), processed.size() - offset);
 				std::copy_n(frame.data(), count, processed.data() + offset);
@@ -860,6 +908,18 @@ namespace {
 		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
 		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
 		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
+		metrics.lightSpeechProbabilityP10 = nearestRankPercentile(lightSpeechProbabilities, 0.10);
+		metrics.lightSpeechProbabilityP50 = nearestRankPercentile(lightSpeechProbabilities, 0.50);
+		metrics.lightSpeechProbabilityP90 = nearestRankPercentile(lightSpeechProbabilities, 0.90);
+		metrics.lightNoisePsdSumP10 = nearestRankPercentile(lightNoisePsdSums, 0.10);
+		metrics.lightNoisePsdSumP50 = nearestRankPercentile(lightNoisePsdSums, 0.50);
+		metrics.lightNoisePsdSumP90 = nearestRankPercentile(lightNoisePsdSums, 0.90);
+		metrics.lightNoiseToSignalPpmP10 = nearestRankPercentile(lightNoiseToSignalPpm, 0.10);
+		metrics.lightNoiseToSignalPpmP50 = nearestRankPercentile(lightNoiseToSignalPpm, 0.50);
+		metrics.lightNoiseToSignalPpmP90 = nearestRankPercentile(lightNoiseToSignalPpm, 0.90);
+		metrics.lightDryRmsPpbP10 = nearestRankPercentile(lightDryRmsPpb, 0.10);
+		metrics.lightDryRmsPpbP50 = nearestRankPercentile(lightDryRmsPpb, 0.50);
+		metrics.lightDryRmsPpbP90 = nearestRankPercentile(lightDryRmsPpb, 0.90);
 
 		const Diagnostics diagnostics = pipeline.diagnostics();
 		metrics.requestedRecipeId = diagnostics.requestedRecipeId();
@@ -1281,6 +1341,18 @@ int main(int argc, char **argv) {
 			{ "callback_p50_ms", static_cast< double >(metrics.callbackP50Nanoseconds) / 1'000'000.0 },
 			{ "callback_p95_ms", static_cast< double >(metrics.callbackP95Nanoseconds) / 1'000'000.0 },
 			{ "callback_p99_ms", static_cast< double >(metrics.callbackP99Nanoseconds) / 1'000'000.0 },
+			{ "light_speech_probability_p10", metrics.lightSpeechProbabilityP10 },
+			{ "light_speech_probability_p50", metrics.lightSpeechProbabilityP50 },
+			{ "light_speech_probability_p90", metrics.lightSpeechProbabilityP90 },
+			{ "light_noise_psd_sum_p10", metrics.lightNoisePsdSumP10 },
+			{ "light_noise_psd_sum_p50", metrics.lightNoisePsdSumP50 },
+			{ "light_noise_psd_sum_p90", metrics.lightNoisePsdSumP90 },
+			{ "light_noise_to_signal_ppm_p10", metrics.lightNoiseToSignalPpmP10 },
+			{ "light_noise_to_signal_ppm_p50", metrics.lightNoiseToSignalPpmP50 },
+			{ "light_noise_to_signal_ppm_p90", metrics.lightNoiseToSignalPpmP90 },
+			{ "light_dry_rms_ppb_p10", metrics.lightDryRmsPpbP10 },
+			{ "light_dry_rms_ppb_p50", metrics.lightDryRmsPpbP50 },
+			{ "light_dry_rms_ppb_p90", metrics.lightDryRmsPpbP90 },
 			{ "reported_latency_samples", metrics.reportedLatencySamples },
 			{ "reported_latency_ms",
 			  static_cast< double >(metrics.reportedLatencySamples) * 1000.0 / SAMPLE_RATE },

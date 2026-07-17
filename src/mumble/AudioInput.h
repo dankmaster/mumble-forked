@@ -30,6 +30,7 @@
 #include "InputEnhancement.h"
 #include "InputEnhancementAuto.h"
 #include "InputEnhancementCalibrationRuntime.h"
+#include "InputEnhancementLightProcessor.h"
 #include "MumbleProtocol.h"
 #include "SpeechCleanup.h"
 #include "SpeechCleanupTransmitDrain.h"
@@ -243,6 +244,7 @@ private:
 	int m_inputEnhancementActiveReduction                   = 50;
 	int m_inputEnhancementActiveCharacter                   = 50;
 	int m_inputEnhancementSpeexStrength                      = -30;
+	Mumble::InputEnhancement::LightProcessor m_inputEnhancementLightProcessor;
 	Settings::NoiseCancel m_configuredLegacyNoiseCancelMode = Settings::NoiseCancelOff;
 	std::unique_ptr< SpeechCleanupProcessor > m_speechCleanupProcessor;
 	Mumble::SpeechCleanup::Selection m_speechCleanupSelection = {};
@@ -475,6 +477,9 @@ public:
 		bool captureOptionalLocalNoise, std::uint64_t blindSeed,
 		InputEnhancementCalibrationStartError *error = nullptr);
 	Mumble::InputEnhancement::CalibrationRuntimeBridge *inputEnhancementCalibrationRuntime() noexcept;
+	/// Revalidates the selected calibration recipe against the current device,
+	/// CPU capability, and package catalog immediately before persisting it.
+	bool applyInputEnhancementCalibration(Mumble::InputEnhancement::Settings &settings, qint64 nowEpochMs);
 	/// Clear the independent final-encode block only after a terminal runtime
 	/// transition has quiesced capture callbacks.
 	void synchronizeInputEnhancementCalibrationTransmissionBlock() noexcept;

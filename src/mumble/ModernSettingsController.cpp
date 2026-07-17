@@ -382,9 +382,6 @@ namespace {
 			  QObject::tr("Adjust noise reduction only within the selected recipe's qualified range.") },
 			{ QStringLiteral("audio.inputEnhancementCharacter"),
 			  QObject::tr("Balance natural voice character against a clearer, more processed result.") },
-			{ QStringLiteral("audio.inputEnhancementAutoAdapt"),
-			  QObject::tr(
-				  "Let the current profile make bounded adjustments from local noise, voice activity, and CPU headroom.") },
 			{ QStringLiteral("audio.inputEnhancementExperimentalAuto"),
 			  QObject::tr(
 				  "Advanced experimental profile switching among Light, Balanced, and Quality; Voice Focus is excluded.") },
@@ -688,10 +685,32 @@ namespace {
 		return legacy;
 	}
 
+	Mumble::InputEnhancement::DeviceIdentity draftInputEnhancementDeviceIdentity(const Settings &settings);
+
 	void captureLegacyInputOverride(Settings &settings) {
-		settings.inputEnhancement.legacyOverride = legacyInputOverride(settings);
-		settings.inputEnhancement.defaultPreference.profile = Mumble::InputEnhancement::profileForLegacy(
-			static_cast< int >(settings.noiseCancelMode), static_cast< int >(settings.noiseCancelBackend));
+		using namespace Mumble::InputEnhancement;
+		const LegacyOverride legacy = legacyInputOverride(settings);
+		const Profile mappedProfile  = profileForLegacy(static_cast< int >(settings.noiseCancelMode),
+														static_cast< int >(settings.noiseCancelBackend));
+		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(settings);
+		if (!identity.backendId.isEmpty() && !identity.physicalId.isEmpty()) {
+			if (DeviceProfileState *profile = ensureDeviceProfile(settings.inputEnhancement, identity)) {
+				profile->legacyOverride        = legacy;
+				profile->preference.profile     = mappedProfile;
+				profile->preference.autoAdapt   = false;
+				profile->calibrated             = false;
+				profile->pendingValidation      = false;
+				profile->pendingRecipeBinding.reset();
+				profile->pendingAutoRecipeSetFingerprint.reset();
+				profile->rollbackUndoPreference.reset();
+				profile->rollbackUndoRecipeBinding.reset();
+				profile->rollbackUndoAutoRecipeSetFingerprint.reset();
+				return;
+			}
+		}
+
+		settings.inputEnhancement.legacyOverride             = legacy;
+		settings.inputEnhancement.defaultPreference.profile   = mappedProfile;
 		settings.inputEnhancement.defaultPreference.autoAdapt = false;
 	}
 
@@ -711,6 +730,28 @@ namespace {
 		const Settings &settings) {
 		return Mumble::InputEnhancement::preferenceForDevice(
 			settings.inputEnhancement, draftInputEnhancementDeviceIdentity(settings));
+	}
+
+	bool currentInputEnhancementUsesLegacyOverride(const Settings &settings) {
+		using namespace Mumble::InputEnhancement;
+		const DeviceIdentity identity            = draftInputEnhancementDeviceIdentity(settings);
+		const DeviceProfileState *deviceProfile   = findDeviceProfile(settings.inputEnhancement, identity);
+		if (deviceProfile) {
+			const bool unsafePendingState =
+				deviceProfile->pendingValidation
+				&& (!deviceProfile->lastKnownGood
+					|| !executionBindingMatchesPreference(deviceProfile->preference,
+														 deviceProfile->pendingRecipeBinding,
+														 deviceProfile->pendingAutoRecipeSetFingerprint)
+					|| !executionBindingMatchesPreference(*deviceProfile->lastKnownGood,
+														 deviceProfile->lastKnownGoodRecipeBinding,
+														 deviceProfile->lastKnownGoodAutoRecipeSetFingerprint));
+			return !unsafePendingState && deviceProfile->legacyOverride
+				   && isValidLegacyOverride(*deviceProfile->legacyOverride);
+		}
+
+		return settings.inputEnhancement.legacyOverride
+			   && isValidLegacyOverride(*settings.inputEnhancement.legacyOverride);
 	}
 
 	Mumble::InputEnhancement::DefaultPreference *editableCurrentInputEnhancementPreference(Settings &settings) {
@@ -753,7 +794,7 @@ namespace {
 			case Profile::VoiceFocus:
 				settings.noiseCancelMode            = Settings::NoiseCancelRNN;
 				settings.noiseCancelBackend         = Settings::DeepFilterNetBackend;
-				settings.noiseCancelModelId = QStringLiteral("deepfilternet:balanced");
+				settings.noiseCancelModelId         = QStringLiteral("deepfilternet:low-latency");
 				settings.noiseCancelCustomModelPath.clear();
 				break;
 			case Profile::Auto:
@@ -2477,13 +2518,9 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 			projectInputEnhancementPreference(m_draft);
 		}
 	} else if (id == QLatin1String("audio.inputEnhancementAutoAdapt")) {
-		if (Mumble::InputEnhancement::DefaultPreference *preference =
-				editableCurrentInputEnhancementPreference(m_draft)) {
-			preference->autoAdapt = preference->profile == Mumble::InputEnhancement::Profile::Auto
-									? true
-									: value.toBool();
-			projectInputEnhancementPreference(m_draft);
-		}
+		// Kept as a no-op compatibility endpoint for a stale settings surface.
+		// The schema value is retained, but fixed-profile adaptation is neither
+		// exposed nor active until it has its own release qualification.
 	} else if (id == QLatin1String("audio.noiseCancelMode")) {
 		m_draft.noiseCancelMode = static_cast< Settings::NoiseCancel >(value.toInt());
 		captureLegacyInputOverride(m_draft);
@@ -3016,8 +3053,8 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 
 	if (action == QLatin1String("applyInputEnhancementCalibration")) {
 		const AudioInputPtr input = currentAudioInput();
-		auto *runtime             = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
-		if (!runtime || !runtime->apply(m_draft.inputEnhancement, QDateTime::currentMSecsSinceEpoch())) {
+		if (!input || !input->applyInputEnhancementCalibration(m_draft.inputEnhancement,
+															 QDateTime::currentMSecsSinceEpoch())) {
 			result.stateChanged = false;
 			return result;
 		}
@@ -3156,14 +3193,19 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	if (action == QLatin1String("apply") || action == QLatin1String("ok")) {
 		const Mumble::InputEnhancement::DefaultPreference &preference =
 			currentInputEnhancementPreference(m_draft);
-		const Mumble::InputEnhancement::ProfileReadiness readiness = inputEnhancementReadinessForSettings(
-			m_draft, preference.profile, preference.reduction, preference.character);
-		if (!readiness.selectable) {
-			m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement settings were not saved: %1")
-												 .arg(inputEnhancementReadinessReasonText(readiness.reason));
-			result.accepted    = false;
-			result.closeDialog = false;
-			return result;
+		// A migration-preserved legacy tuple is the active runtime contract until
+		// the user explicitly selects a product profile. Do not block unrelated
+		// settings changes by preflighting the merely descriptive mapped profile.
+		if (!currentInputEnhancementUsesLegacyOverride(m_draft)) {
+			const Mumble::InputEnhancement::ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+				m_draft, preference.profile, preference.reduction, preference.character);
+			if (!readiness.selectable) {
+				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement settings were not saved: %1")
+													 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+				result.accepted    = false;
+				result.closeDialog = false;
+				return result;
+			}
 		}
 		m_inputEnhancementReadinessUiError.clear();
 		m_shortcutCaptureIndex = -1;
@@ -3492,8 +3534,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 			inputEnhancementAutoHint += QObject::tr("Unavailable: %1").arg(inputEnhancementAutoReadinessReason);
 		}
 		const QString inputEnhancementCalibrationUiError =
-			(inputEnhancementPreference.profile == Mumble::InputEnhancement::Profile::Auto
-			 || inputEnhancementPreference.autoAdapt)
+			Mumble::InputEnhancement::runtimeAutoAdaptationEnabled(inputEnhancementPreference)
 				? autoCalibrationUnavailableText()
 				: m_inputEnhancementCalibrationUiError;
 
@@ -3607,12 +3648,6 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 														  QObject::tr("Natural ↔ Clear"),
 													  inputEnhancementPreference.character,
 															  0, 100, 1, QStringLiteral("%")),
-										   advancedField(enabledField(
-											   boolField(QStringLiteral("audio.inputEnhancementAutoAdapt"),
-													 QObject::tr("Adapt automatically"),
-													 inputEnhancementPreference.autoAdapt),
-											   inputEnhancementPreference.profile
-												   != Mumble::InputEnhancement::Profile::Auto)),
 										   advancedField(hintedField(
 											   enabledField(
 												   boolField(QStringLiteral("audio.inputEnhancementExperimentalAuto"),

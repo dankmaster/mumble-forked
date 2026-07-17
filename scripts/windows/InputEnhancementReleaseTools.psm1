@@ -154,6 +154,7 @@ function Assert-TestGateResults {
 			"TestModernDialogControllers",
 			"TestUpdateHealth",
 			"TestUpdaterHealthIntegration",
+			"TestUpdaterProtocolV4Simulation",
 			"TestSpeechCleanup",
 			"SpeechCleanupBenchmarkSelfTest"
 		)
@@ -262,6 +263,255 @@ function Assert-SafeRelativeReleasePath {
 	}
 
 	return ($segments -join "/")
+}
+
+function Initialize-InputEnhancementRehearsalOutputRoot {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$OutputRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$AllowedOutputParent,
+
+		[Parameter(Mandatory = $true)]
+		[string]$SourceRoot
+	)
+
+	$sourceItem = Get-Item -LiteralPath $SourceRoot -Force -ErrorAction Stop
+	$parentItem = Get-Item -LiteralPath $AllowedOutputParent -Force -ErrorAction Stop
+	if (-not $sourceItem.PSIsContainer -or
+		($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+		throw 'Release rehearsal source root must be a regular directory.'
+	}
+	if (-not $parentItem.PSIsContainer -or
+		($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+		throw 'Release rehearsal output parent must be a regular directory.'
+	}
+
+	$sourceRootPath = [IO.Path]::GetFullPath($sourceItem.FullName).TrimEnd('\', '/')
+	$parentPath = [IO.Path]::GetFullPath($parentItem.FullName).TrimEnd('\', '/')
+	$outputRootPath = [IO.Path]::GetFullPath($OutputRoot).TrimEnd('\', '/')
+	$outputPathRoot = [IO.Path]::GetPathRoot($outputRootPath).TrimEnd('\', '/')
+	if ([string]::IsNullOrWhiteSpace($outputRootPath) -or
+		$outputRootPath.Equals($outputPathRoot, [StringComparison]::OrdinalIgnoreCase)) {
+		throw 'Release rehearsal output root cannot be a filesystem root.'
+	}
+	$actualParent = [IO.Path]::GetDirectoryName($outputRootPath).TrimEnd('\', '/')
+	if (-not $actualParent.Equals($parentPath, [StringComparison]::OrdinalIgnoreCase)) {
+		throw 'Release rehearsal output root must be a direct child of the allowed output parent.'
+	}
+	if ($outputRootPath.Equals($sourceRootPath, [StringComparison]::OrdinalIgnoreCase) -or
+		$outputRootPath.StartsWith("$sourceRootPath\", [StringComparison]::OrdinalIgnoreCase) -or
+		$sourceRootPath.StartsWith("$outputRootPath\", [StringComparison]::OrdinalIgnoreCase)) {
+		throw 'Release rehearsal output root must not overlap the source checkout.'
+	}
+	if (Test-Path -LiteralPath $outputRootPath) {
+		throw 'Release rehearsal output root must not already exist.'
+	}
+
+	New-Item -ItemType Directory -Path $outputRootPath -ErrorAction Stop | Out-Null
+	return $outputRootPath
+}
+
+function Assert-InputEnhancementRehearsalDraftFileSafety {
+	param(
+		[Parameter(Mandatory = $true)]
+		[IO.FileInfo]$File,
+
+		[Parameter(Mandatory = $true)]
+		[string]$RelativePath
+	)
+
+	$forbiddenExtensions = @(
+		'.aac', '.aif', '.aiff', '.alac', '.amr', '.au', '.avi', '.caf', '.flac', '.key', '.m4a', '.mka',
+		'.mkv', '.mov', '.mp3', '.mp4', '.mpeg', '.mpg', '.ogg', '.opus', '.p12', '.p7b', '.p7c', '.p8',
+		'.pem', '.pfx', '.ppk', '.raw', '.wav', '.wave', '.weba', '.webm', '.wma', '.jks', '.kdbx', '.keystore'
+	)
+	if ($File.Extension.ToLowerInvariant() -cin $forbiddenExtensions -or
+		$File.Name -match '(?i)(private[-_.]?key|client[-_.]?secret|production[-_.]?credential|credentials?|id_(rsa|dsa|ecdsa|ed25519))') {
+		throw "Rehearsal draft contains forbidden private material or audio: '$RelativePath'."
+	}
+
+	$textExtensions = @(
+		'.csv', '.htm', '.html', '.json', '.log', '.md', '.ps1', '.psd1', '.psm1', '.sha256',
+		'.txt', '.xml', '.yaml', '.yml'
+	)
+	$scanLength = if ($File.Extension.ToLowerInvariant() -cin $textExtensions) {
+		[int64]$File.Length
+	} else {
+		[int64][Math]::Min([int64]65536, [int64]$File.Length)
+	}
+	if ($scanLength -eq 0) { return }
+
+	$privateKeyPattern = '-----BEGIN (?:ENCRYPTED |RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+	$buffer = [byte[]]::new(65536)
+	$carry = ''
+	$remaining = $scanLength
+	$stream = [IO.File]::Open($File.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+	try {
+		while ($remaining -gt 0) {
+			$requested = [int][Math]::Min([int64]$buffer.Length, $remaining)
+			$bytesRead = $stream.Read($buffer, 0, $requested)
+			if ($bytesRead -le 0) { break }
+			$remaining -= $bytesRead
+
+			$text = $carry + [Text.Encoding]::ASCII.GetString($buffer, 0, $bytesRead)
+			if ($text -match $privateKeyPattern) {
+				throw "Rehearsal draft contains PEM private-key material: '$RelativePath'."
+			}
+			# Retain enough decoded bytes to catch a marker split across read boundaries.
+			$carryLength = [Math]::Min(64, $text.Length)
+			$carry = $text.Substring($text.Length - $carryLength, $carryLength)
+		}
+	} finally {
+		$stream.Dispose()
+	}
+}
+
+function Get-ValidatedInputEnhancementRehearsalDraftFiles {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Root,
+
+		[string]$ExcludedPath = ''
+	)
+
+	$rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction Stop
+	if (-not $rootItem.PSIsContainer -or
+		($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+		throw 'Rehearsal draft root must be a regular directory.'
+	}
+	$rootPath = [IO.Path]::GetFullPath($rootItem.FullName).TrimEnd('\', '/')
+	$excludedFullPath = ''
+	if (-not [string]::IsNullOrWhiteSpace($ExcludedPath)) {
+		$excludedFullPath = [IO.Path]::GetFullPath($ExcludedPath)
+		$excludedParent = [IO.Path]::GetDirectoryName($excludedFullPath).TrimEnd('\', '/')
+		if (-not $excludedParent.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+			throw 'Rehearsal draft manifest must be a direct child of the draft root.'
+		}
+	}
+
+	$rehearsalPath = Join-Path $rootPath 'rehearsal.json'
+	$rehearsalItem = Get-Item -LiteralPath $rehearsalPath -Force -ErrorAction Stop
+	if ($rehearsalItem.PSIsContainer -or
+		($rehearsalItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+		throw 'Rehearsal draft identity must be a regular rehearsal.json file.'
+	}
+	$rehearsal = Read-ReleaseJson -Path $rehearsalItem.FullName
+	$artifacts = Assert-ObjectProperty -Object $rehearsal -Name 'artifacts' -Context 'Release rehearsal'
+	$artifactProperties = @($artifacts.PSObject.Properties)
+	if ($artifactProperties.Count -eq 0) {
+		throw 'Release rehearsal contains no artifact allowlist.'
+	}
+
+	$allowedFiles = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
+	$null = $allowedFiles.Add('rehearsal.json')
+	foreach ($property in $artifactProperties) {
+		$fileName = Assert-SafeRelativeReleasePath `
+			-Path ([string](Assert-ObjectProperty -Object $property.Value -Name 'fileName' `
+				-Context "Release rehearsal artifact '$($property.Name)'")) `
+			-Context "Release rehearsal artifact '$($property.Name)'"
+		if ($fileName.Contains('/')) {
+			throw "Release rehearsal artifact '$($property.Name)' must be a direct child of the draft root."
+		}
+		if (-not $allowedFiles.Add($fileName)) {
+			throw "Release rehearsal artifact allowlist contains duplicate file '$fileName'."
+		}
+	}
+
+	$listeningProperty = $artifacts.PSObject.Properties['listeningQualification']
+	if ($null -ne $listeningProperty) {
+		$listeningFileName = Assert-SafeRelativeReleasePath `
+			-Path ([string](Assert-ObjectProperty -Object $listeningProperty.Value -Name 'fileName' `
+				-Context 'Release rehearsal listening qualification')) `
+			-Context 'Release rehearsal listening qualification'
+		$listeningItem = Get-Item -LiteralPath (Join-Path $rootPath $listeningFileName) -Force -ErrorAction Stop
+		if ($listeningItem.PSIsContainer -or
+			($listeningItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+			throw 'Listening qualification must be a regular draft file.'
+		}
+		$listening = Read-ReleaseJson -Path $listeningItem.FullName
+		$sessionManifest = Assert-ObjectProperty -Object $listening -Name 'session_manifest' `
+			-Context 'Listening qualification'
+		$evidenceRoot = Assert-SafeRelativeReleasePath `
+			-Path ([string](Assert-ObjectProperty -Object $sessionManifest -Name 'evidence_root' `
+				-Context 'Listening session manifest')) `
+			-Context 'Listening evidence root'
+		if ($evidenceRoot.Contains('/') -or $evidenceRoot -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.evidence$') {
+			throw 'Listening evidence root must be one direct sibling .evidence directory.'
+		}
+
+		$evidenceReferences = New-Object System.Collections.Generic.List[object]
+		$evidenceReferences.Add((Assert-ObjectProperty -Object $sessionManifest -Name 'source_manifest' `
+			-Context 'Listening session manifest'))
+		$evidenceReferences.Add((Assert-ObjectProperty -Object $sessionManifest -Name 'answer_key' `
+			-Context 'Listening session manifest'))
+		$sessions = @(Assert-ObjectProperty -Object $sessionManifest -Name 'sessions' `
+			-Context 'Listening session manifest')
+		if ($sessions.Count -eq 0) { throw 'Listening session manifest contains no session evidence.' }
+		foreach ($session in $sessions) { $evidenceReferences.Add($session) }
+		foreach ($reference in $evidenceReferences) {
+			$relativePath = Assert-SafeRelativeReleasePath `
+				-Path ([string](Assert-ObjectProperty -Object $reference -Name 'relative_path' `
+					-Context 'Listening evidence reference')) `
+				-Context 'Listening evidence reference'
+			$sha256 = [string](Assert-ObjectProperty -Object $reference -Name 'sha256' `
+				-Context "Listening evidence reference '$relativePath'")
+			if (-not $relativePath.StartsWith("$evidenceRoot/", [StringComparison]::Ordinal) -or
+				$sha256 -cnotmatch '^[0-9a-f]{64}$') {
+				throw "Listening evidence reference '$relativePath' escapes its root or has an invalid SHA-256."
+			}
+			if (-not $allowedFiles.Add($relativePath)) {
+				throw "Listening evidence allowlist contains duplicate file '$relativePath'."
+			}
+		}
+	}
+
+	$allowedDirectories = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
+	foreach ($relativePath in $allowedFiles) {
+		$parent = [IO.Path]::GetDirectoryName($relativePath.Replace('/', '\'))
+		while (-not [string]::IsNullOrWhiteSpace($parent)) {
+			$null = $allowedDirectories.Add($parent.Replace('\', '/'))
+			$parent = [IO.Path]::GetDirectoryName($parent)
+		}
+	}
+
+	$actualFiles = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
+	$actualDirectories = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
+	$validatedFiles = New-Object System.Collections.Generic.List[IO.FileInfo]
+	foreach ($item in @(Get-ChildItem -LiteralPath $rootPath -Force -Recurse)) {
+		if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+			throw "Rehearsal draft contains a reparse point: '$($item.FullName)'."
+		}
+		$fullPath = [IO.Path]::GetFullPath($item.FullName)
+		if (-not $item.PSIsContainer -and -not [string]::IsNullOrWhiteSpace($excludedFullPath) -and
+			$fullPath.Equals($excludedFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+			continue
+		}
+		$relativePath = Assert-SafeRelativeReleasePath `
+			-Path ([IO.Path]::GetRelativePath($rootPath, $fullPath).Replace('\', '/')) `
+			-Context 'Rehearsal draft item'
+		if ($item.PSIsContainer) {
+			$null = $actualDirectories.Add($relativePath)
+			continue
+		}
+		Assert-InputEnhancementRehearsalDraftFileSafety -File $item -RelativePath $relativePath
+		$null = $actualFiles.Add($relativePath)
+		$validatedFiles.Add($item)
+	}
+
+	$missingFiles = @($allowedFiles | Where-Object { -not $actualFiles.Contains($_) } | Sort-Object)
+	$unexpectedFiles = @($actualFiles | Where-Object { -not $allowedFiles.Contains($_) } | Sort-Object)
+	if ($missingFiles.Count -ne 0 -or $unexpectedFiles.Count -ne 0) {
+		throw "Rehearsal draft file-set mismatch. Missing: [$($missingFiles -join ', ')]; unexpected: [$($unexpectedFiles -join ', ')]."
+	}
+	$missingDirectories = @($allowedDirectories | Where-Object { -not $actualDirectories.Contains($_) } | Sort-Object)
+	$unexpectedDirectories = @($actualDirectories | Where-Object { -not $allowedDirectories.Contains($_) } | Sort-Object)
+	if ($missingDirectories.Count -ne 0 -or $unexpectedDirectories.Count -ne 0) {
+		throw "Rehearsal draft directory-set mismatch. Missing: [$($missingDirectories -join ', ')]; unexpected: [$($unexpectedDirectories -join ', ')]."
+	}
+
+	return @($validatedFiles | Sort-Object FullName)
 }
 
 function Assert-Ed25519PublicKeyHex {
@@ -690,6 +940,8 @@ Export-ModuleMember -Function @(
 	"Assert-TestGateResults",
 	"Assert-SigningResults",
 	"Assert-SafeRelativeReleasePath",
+	"Initialize-InputEnhancementRehearsalOutputRoot",
+	"Get-ValidatedInputEnhancementRehearsalDraftFiles",
 	"Assert-Ed25519PublicKeyHex",
 	"Assert-CanonicalInputEnhancementPolicy",
 	"Assert-InputEnhancementPromotionPolicy",

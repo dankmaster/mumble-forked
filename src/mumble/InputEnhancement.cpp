@@ -33,11 +33,59 @@ namespace {
 		return minimum + ((clamped * (maximum - minimum)) + 50) / 100;
 	}
 
+	float normalizedRangeControl(int value, int minimum, int maximum) noexcept {
+		return std::clamp(static_cast< float >(value - minimum) / static_cast< float >(maximum - minimum), 0.0f,
+						  1.0f);
+	}
+
+	float weightedProfileControl(const ValidatedControls &controls, int minimumReduction, int maximumReduction,
+							 int minimumCharacter, int maximumCharacter) noexcept {
+		const float reduction = normalizedRangeControl(controls.noiseReduction, minimumReduction, maximumReduction);
+		const float character = normalizedRangeControl(controls.naturalCrisp, minimumCharacter, maximumCharacter);
+		return (0.75f * reduction) + (0.25f * character);
+	}
+
 	float mixFactorForValidatedControls(Profile profile, const ValidatedControls &controls) noexcept {
+		if (profile == Profile::Light) {
+			// Light uses Speex only as a low-cost background estimate. Speech is
+			// protected by mixClassicFrame(), while this curve controls the maximum
+			// wet contribution during confidently non-speech frames.
+			const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
+			const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
+			return std::clamp(0.50f + (0.40f * reduction) + (0.10f * character), 0.0f, 1.0f);
+		}
+		if (profile == Profile::Quality) {
+			// The frozen low-latency product curve stays inside the two validated
+			// tuning anchors. The normal UI defaults (30 reduction, 50 clear) map
+			// exactly to the selected 0.75 wet mix, while the full qualified control
+			// surface interpolates monotonically from 0.70 to 0.90.
+			// Public defaults 30/50 are first mapped by validatedControlsForProfile
+			// to 45/63. Express the anchor in that validated coordinate system.
+			constexpr int defaultValidatedReduction = 45;
+			constexpr int defaultValidatedCharacter = 63;
+			constexpr float nominalControl =
+				(0.75f * (static_cast< float >(defaultValidatedReduction - 25) / 65.0f))
+				+ (0.25f * (static_cast< float >(defaultValidatedCharacter - 25) / 75.0f));
+			const float control = weightedProfileControl(controls, 25, 90, 25, 100);
+			const float normalizedMix = control <= nominalControl
+									? (control / nominalControl) * 0.25f
+									: 0.25f + ((control - nominalControl) / (1.0f - nominalControl)) * 0.75f;
+			return 0.70f + (0.20f * normalizedMix);
+		}
+		if (profile == Profile::VoiceFocus) {
+			// Voice Focus is intentionally aggressive and explicit-only. Its normal
+			// defaults use the validated 0.90 mix; only controls above that anchor
+			// increase wet mix, capped at the separately qualified 0.95 endpoint.
+			constexpr float nominalControl = (0.75f * 0.30f) + (0.25f * 0.50f);
+			const float control = weightedProfileControl(controls, 70, 100, 40, 100);
+			const float normalizedMix = control <= nominalControl
+									? 0.0f
+									: (control - nominalControl) / (1.0f - nominalControl);
+			return 0.90f + (0.05f * normalizedMix);
+		}
 		const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
 		const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
-		const float mixFactor = std::clamp(reduction * (0.75f + 0.25f * character), 0.0f, 1.0f);
-		return profile == Profile::VoiceFocus ? std::min(mixFactor, 0.99f) : mixFactor;
+		return std::clamp(reduction * (0.75f + 0.25f * character), 0.0f, 1.0f);
 	}
 
 	void appendFingerprintU32(QByteArray &bytes, const std::uint32_t value) {
@@ -101,6 +149,11 @@ float mixFactorForControls(Profile profile, int noiseReduction, int naturalCrisp
 	return mixFactorForValidatedControls(profile, validatedControlsForProfile(profile, noiseReduction, naturalCrisp));
 }
 
+int lightSpeexSuppressionDb(int noiseReduction) noexcept {
+	const int boundedReduction = clampControl(noiseReduction);
+	return -5 - ((boundedReduction * 25) + 50) / 100;
+}
+
 Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProfile, int noiseReduction,
 								 int naturalCrisp) {
 	const ValidatedControls controls = validatedControlsForProfile(effectiveProfile, noiseReduction, naturalCrisp);
@@ -120,6 +173,7 @@ Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProf
 			break;
 		case Profile::Light:
 			engine        = Engine::Speex;
+			mixFactor     = mixFactorForValidatedControls(effectiveProfile, controls);
 			latencyBudget = lightLatencyBudgetSamples;
 			id            = requestedProfile == Profile::Light ? QStringLiteral("input.light.speex")
 							: requestedProfile == Profile::Auto
@@ -139,23 +193,23 @@ Recipe RecipeCatalog::makeRecipe(Profile requestedProfile, Profile effectiveProf
 			break;
 		case Profile::Quality:
 			engine          = Engine::DeepFilterNet;
-			modelId         = QStringLiteral("deepfilternet:balanced");
+			modelId         = QStringLiteral("deepfilternet:low-latency");
 			mixFactor       = mixFactorForValidatedControls(effectiveProfile, controls);
 			latencyBudget   = qualityLatencyBudgetSamples;
 			minimumCpuClass = CpuClass::High;
-			id = requestedProfile == Profile::Quality ? QStringLiteral("input.quality.deepfilternet-balanced")
-													  : QStringLiteral("input.auto.quality.deepfilternet-balanced");
+			id = requestedProfile == Profile::Quality ? QStringLiteral("input.quality.deepfilternet-low-latency")
+													  : QStringLiteral("input.auto.quality.deepfilternet-low-latency");
 			break;
 		case Profile::Auto:
 			// Auto is a request, never an executable recipe.
 			break;
 		case Profile::VoiceFocus:
 			engine          = Engine::DeepFilterNet;
-			modelId         = QStringLiteral("deepfilternet:balanced");
+			modelId         = QStringLiteral("deepfilternet:low-latency");
 			mixFactor       = mixFactorForValidatedControls(effectiveProfile, controls);
 			latencyBudget   = voiceFocusLatencyBudgetSamples;
 			minimumCpuClass = CpuClass::High;
-			id              = QStringLiteral("input.voice-focus.deepfilternet-balanced");
+			id              = QStringLiteral("input.voice-focus.deepfilternet-low-latency");
 			break;
 	}
 
@@ -561,13 +615,22 @@ bool Pipeline::configure(const Recipe &recipe, const QString &authorizedModelSha
 	m_alignedDryDelayPosition = 0;
 	m_activeModelId.clear();
 	m_activeModelSha256.clear();
-	m_actualLatencySamples = 0;
+	// Speex preprocessing is causal but emits the preceding 10 ms frame. Treat
+	// that delay as part of the product contract so fixed-timeline scoring and
+	// utterance tail drain cannot hide or discard it. Original remains exactly
+	// zero-latency and neural processors publish their measured latency below.
+	m_actualLatencySamples = recipe.engine() == Engine::Speex ? frameSamples : 0;
 	m_fallbackActive       = false;
 	m_fallbackReason       = FallbackReason::None;
 	resetCounters();
-	resetDeepFilterEdgeProtection();
+	resetSpeechEdgeProtection();
+	resetClassicMix();
 
 	if (!recipe.usesNeuralProcessor()) {
+		if (m_actualLatencySamples > recipe.latencyBudgetSamples()) {
+			failClosed(FallbackReason::LatencyBudgetExceeded);
+			return false;
+		}
 		return true;
 	}
 
@@ -791,7 +854,7 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 		++m_neuralFrames;
 		return elapsedNanoseconds;
 	};
-	const float protectedMixFactor = deepFilterEdgeProtectedMixFactor(mixFactor);
+	const float protectedMixFactor = speechEdgeProtectedMixFactor(mixFactor);
 	try {
 		m_processor->processInPlace(samples, frameSamples, protectedMixFactor);
 	} catch (...) {
@@ -841,28 +904,33 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 	return true;
 }
 
-void Pipeline::resetDeepFilterEdgeProtection() noexcept {
-	m_deepFilterNoiseFloorRms           = 0.0f;
-	m_deepFilterSpeechPeakRms           = 0.0f;
-	m_deepFilterBaselineFrames          = 0;
-	m_deepFilterBelowReleaseFrames      = 0;
-	m_deepFilterOnsetProtectionFrame    = deepFilterOnsetProtectionFrames;
-	m_deepFilterSpeechActive            = false;
+void Pipeline::resetSpeechEdgeProtection() noexcept {
+	m_speechEdgeNoiseFloorRms       = 0.0f;
+	m_speechEdgePeakRms             = 0.0f;
+	m_speechEdgeBaselineFrames      = 0;
+	m_speechEdgeBelowReleaseFrames  = 0;
+	m_speechEdgeProtectionFrame     = deepFilterOnsetRampFrames;
+	m_speechEdgeActive              = false;
 }
 
-float Pipeline::deepFilterEdgeProtectedMixFactor(float requestedMixFactor) noexcept {
+float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept {
 	const float boundedMixFactor = std::clamp(requestedMixFactor, 0.0f, 1.0f);
-	if (!m_recipe || (m_recipe->effectiveProfile() != Profile::Quality
-					  && m_recipe->effectiveProfile() != Profile::VoiceFocus)) {
+	if (!m_recipe) {
+		return boundedMixFactor;
+	}
+	const bool balancedProfile = m_recipe->effectiveProfile() == Profile::Balanced;
+	const bool deepFilterProfile = m_recipe->effectiveProfile() == Profile::Quality
+								   || m_recipe->effectiveProfile() == Profile::VoiceFocus;
+	if (!balancedProfile && !deepFilterProfile) {
 		return boundedMixFactor;
 	}
 
-	// DeepFilterNet can suppress low-energy consonants while its speech estimate
-	// rises from a quiet background. Detect that edge on the already delayed dry
-	// frame, which is aligned to the output being mixed in this callback. This
-	// adds no look-ahead or latency and keeps the normal profile mix after the
-	// bounded attack window. A quiet-room release guard similarly preserves low-
-	// energy word endings that the model would otherwise erase.
+	// Neural denoisers can suppress low-energy consonants while their speech
+	// estimate rises from a quiet background. Detect that edge on the already
+	// delayed dry frame, which is aligned to the model output being mixed in this
+	// callback. This adds no look-ahead or latency. Balanced preserves exactly
+	// the first 10 ms edge frame; DeepFilterNet uses its longer bounded ramp and
+	// quiet-room release guard.
 	double energy = 0.0;
 	for (const float sample : m_alignedDryFrame) {
 		energy += static_cast< double >(sample) * static_cast< double >(sample);
@@ -876,63 +944,70 @@ float Pipeline::deepFilterEdgeProtectedMixFactor(float requestedMixFactor) noexc
 	constexpr unsigned int releaseFramesRequired  = 5;
 	constexpr float releaseToSpeechPeakRatio = 0.25f;
 	constexpr float quietRoomToSpeechPeakRatio = 0.10f;
-	constexpr std::array< float, deepFilterOnsetProtectionFrames > onsetMixCaps = {
+	constexpr std::array< float, deepFilterOnsetRampFrames > onsetMixCaps = {
 		0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f
 	};
 
-	const float learnedFloor = m_deepFilterNoiseFloorRms > 0.0f ? m_deepFilterNoiseFloorRms
-														  : absoluteNoiseFloorRms;
+	const float learnedFloor = m_speechEdgeNoiseFloorRms > 0.0f ? m_speechEdgeNoiseFloorRms
+													   : absoluteNoiseFloorRms;
 	const float onsetThreshold = std::max(absoluteNoiseFloorRms, learnedFloor * onsetToFloorRatio);
 	const float releaseThreshold = std::max(absoluteNoiseFloorRms, learnedFloor * releaseToFloorRatio);
 	bool protectRelease = false;
 
-	if (!m_deepFilterSpeechActive) {
-		if (m_deepFilterBaselineFrames >= baselineFramesRequired && rms > onsetThreshold) {
-			m_deepFilterSpeechActive         = true;
-			m_deepFilterSpeechPeakRms        = rms;
-			m_deepFilterBelowReleaseFrames   = 0;
-			m_deepFilterOnsetProtectionFrame = 0;
+	if (!m_speechEdgeActive) {
+		if (m_speechEdgeBaselineFrames >= baselineFramesRequired && rms > onsetThreshold) {
+			m_speechEdgeActive             = true;
+			m_speechEdgePeakRms            = rms;
+			m_speechEdgeBelowReleaseFrames = 0;
+			m_speechEdgeProtectionFrame    = 0;
 		} else {
 			// Before the first edge, learn the current stable room floor quickly.
 			// Once armed, only follow values that still look like background so a
 			// rising phoneme cannot move the threshold out of its own way.
-			if (m_deepFilterBaselineFrames == 0) {
-				m_deepFilterNoiseFloorRms = rms;
+			if (m_speechEdgeBaselineFrames == 0) {
+				m_speechEdgeNoiseFloorRms = rms;
 			} else if (rms <= onsetThreshold) {
-				m_deepFilterNoiseFloorRms = (m_deepFilterNoiseFloorRms * 0.9f) + (rms * 0.1f);
+				m_speechEdgeNoiseFloorRms = (m_speechEdgeNoiseFloorRms * 0.9f) + (rms * 0.1f);
 			}
-			if (m_deepFilterBaselineFrames < baselineFramesRequired) {
-				++m_deepFilterBaselineFrames;
+			if (m_speechEdgeBaselineFrames < baselineFramesRequired) {
+				++m_speechEdgeBaselineFrames;
 			}
 		}
 	} else {
-		m_deepFilterSpeechPeakRms = std::max(m_deepFilterSpeechPeakRms, rms);
+		m_speechEdgePeakRms = std::max(m_speechEdgePeakRms, rms);
 		const float lowEnergyThreshold = std::max(releaseThreshold,
-			m_deepFilterSpeechPeakRms * releaseToSpeechPeakRatio);
+			m_speechEdgePeakRms * releaseToSpeechPeakRatio);
 		const bool quietRoom = learnedFloor <= std::max(absoluteNoiseFloorRms,
-			m_deepFilterSpeechPeakRms * quietRoomToSpeechPeakRatio);
+			m_speechEdgePeakRms * quietRoomToSpeechPeakRatio);
 		protectRelease = quietRoom && rms <= lowEnergyThreshold;
 		if (rms <= releaseThreshold) {
-			++m_deepFilterBelowReleaseFrames;
-			if (m_deepFilterBelowReleaseFrames >= releaseFramesRequired) {
-				m_deepFilterSpeechActive         = false;
-				m_deepFilterSpeechPeakRms        = 0.0f;
-				m_deepFilterBaselineFrames       = 0;
-				m_deepFilterBelowReleaseFrames   = 0;
-				m_deepFilterOnsetProtectionFrame = deepFilterOnsetProtectionFrames;
-				m_deepFilterNoiseFloorRms         = rms;
+			++m_speechEdgeBelowReleaseFrames;
+			if (m_speechEdgeBelowReleaseFrames >= releaseFramesRequired) {
+				m_speechEdgeActive             = false;
+				m_speechEdgePeakRms            = 0.0f;
+				m_speechEdgeBaselineFrames      = 0;
+				m_speechEdgeBelowReleaseFrames  = 0;
+				m_speechEdgeProtectionFrame     = deepFilterOnsetRampFrames;
+				m_speechEdgeNoiseFloorRms        = rms;
 			}
 		} else {
-			m_deepFilterBelowReleaseFrames = 0;
+			m_speechEdgeBelowReleaseFrames = 0;
 		}
 	}
 
-	if (m_deepFilterOnsetProtectionFrame < deepFilterOnsetProtectionFrames) {
-		const float protectedMix = std::min(boundedMixFactor, onsetMixCaps[m_deepFilterOnsetProtectionFrame]);
-		++m_deepFilterOnsetProtectionFrame;
+	if (m_speechEdgeProtectionFrame < deepFilterOnsetRampFrames) {
+		if (balancedProfile) {
+			// RNNoise's causal output and its internal dry delay are already aligned
+			// here. One dry frame preserves the initial consonant without extending
+			// the declared 30 ms timeline or weakening the rest of the recipe.
+			m_speechEdgeProtectionFrame = deepFilterOnsetRampFrames;
+			return 0.0f;
+		}
+		const float protectedMix = std::min(boundedMixFactor, onsetMixCaps[m_speechEdgeProtectionFrame]);
+		++m_speechEdgeProtectionFrame;
 		return protectedMix;
 	}
-	if (protectRelease) {
+	if (deepFilterProfile && protectRelease) {
 		return 0.0f;
 	}
 	return boundedMixFactor;
@@ -946,6 +1021,197 @@ bool Pipeline::processFrame(std::array< float, frameSamples > &samples, float mi
 	return processFrame(samples.data(), static_cast< unsigned int >(samples.size()), mixFactor);
 }
 
+void Pipeline::resetClassicMix() noexcept {
+	m_classicPreviousSpeechProbability = 100;
+	m_classicPreviousNoisePsdSum       = 0;
+	m_classicRmsHistogram.fill(0);
+	m_classicSpeechProbabilityHistogram.fill(0);
+	m_classicRmsHistogramCount  = 0;
+	m_classicRmsHistogramFrames = 0;
+	m_classicSmoothedNoisePsdSum = 0.0f;
+	m_classicWetMix              = 0.0f;
+}
+
+bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
+							   unsigned int sampleCount, int currentSpeechProbability,
+							   std::uint64_t currentNoisePsdSum) noexcept {
+	return mixClassicFrame(processedSamples, currentDrySamples, sampleCount, currentSpeechProbability,
+					   currentNoisePsdSum, m_recipe ? m_recipe->mixFactor() : 0.0f);
+}
+
+bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
+							   unsigned int sampleCount, int currentSpeechProbability,
+							   std::uint64_t currentNoisePsdSum, float mixFactor) noexcept {
+	if (!m_recipe || m_recipe->engine() != Engine::Speex || m_recipe->usesNeuralProcessor() || !processedSamples
+		|| !currentDrySamples || sampleCount != frameSamples || m_actualLatencySamples != frameSamples) {
+		failClosed(FallbackReason::InvalidFrame);
+		return false;
+	}
+
+	for (unsigned int index = 0; index < frameSamples; ++index) {
+		const float dry = static_cast< float >(currentDrySamples[index]) / 32768.0f;
+		m_alignedDryFrame[index]                         = m_alignedDryDelay[m_alignedDryDelayPosition];
+		m_alignedDryDelay[m_alignedDryDelayPosition]     = dry;
+		m_alignedDryDelayPosition = (m_alignedDryDelayPosition + 1) % m_actualLatencySamples;
+	}
+
+	const int alignedSpeechProbability       = m_classicPreviousSpeechProbability;
+	const std::uint64_t alignedNoisePsdSum   = m_classicPreviousNoisePsdSum;
+	m_classicPreviousSpeechProbability = std::clamp(currentSpeechProbability, 0, 100);
+	m_classicPreviousNoisePsdSum = currentNoisePsdSum;
+
+	double dryEnergy = 0.0;
+	for (const float sample : m_alignedDryFrame) {
+		dryEnergy += static_cast< double >(sample) * static_cast< double >(sample);
+	}
+	const float dryRms = static_cast< float >(std::sqrt(dryEnergy / static_cast< double >(frameSamples)));
+	const float dryRmsDb = 20.0f * std::log10(std::max(dryRms, 0.000001f));
+	const std::size_t dryRmsBin = static_cast< std::size_t >(
+		std::clamp(static_cast< int >(std::lround(dryRmsDb + 120.0f)), 0, 120));
+	++m_classicRmsHistogram[dryRmsBin];
+	++m_classicSpeechProbabilityHistogram[static_cast< std::size_t >(alignedSpeechProbability)];
+	++m_classicRmsHistogramCount;
+	++m_classicRmsHistogramFrames;
+	if ((m_classicRmsHistogramFrames % 256U) == 0U) {
+		m_classicRmsHistogramCount = 0;
+		for (std::uint16_t &count : m_classicRmsHistogram) {
+			count = static_cast< std::uint16_t >((count + 1U) / 2U);
+			m_classicRmsHistogramCount += count;
+		}
+		for (std::uint16_t &count : m_classicSpeechProbabilityHistogram) {
+			count = static_cast< std::uint16_t >((count + 1U) / 2U);
+		}
+	}
+	m_classicSmoothedNoisePsdSum = m_classicRmsHistogramFrames == 1
+		? static_cast< float >(alignedNoisePsdSum)
+		: (0.95f * m_classicSmoothedNoisePsdSum) + (0.05f * static_cast< float >(alignedNoisePsdSum));
+	if (m_fallbackActive) {
+		for (unsigned int index = 0; index < frameSamples; ++index) {
+			const float scaled = std::clamp(m_alignedDryFrame[index] * 32768.0f, -32768.0f, 32767.0f);
+			processedSamples[index] = static_cast< std::int16_t >(std::lrint(scaled));
+		}
+		return false;
+	}
+
+	auto histogramPercentileBin = [this](unsigned int percentile) noexcept {
+		const std::uint32_t target =
+			std::max(1U, (m_classicRmsHistogramCount * percentile + 99U) / 100U);
+		std::uint32_t cumulative = 0;
+		for (std::size_t index = 0; index < m_classicRmsHistogram.size(); ++index) {
+			cumulative += m_classicRmsHistogram[index];
+			if (cumulative >= target) {
+				return static_cast< unsigned int >(index);
+			}
+		}
+		return static_cast< unsigned int >(m_classicRmsHistogram.size() - 1U);
+	};
+	const unsigned int rmsP10Bin = histogramPercentileBin(10);
+	const unsigned int rmsP90Bin = histogramPercentileBin(90);
+	auto speechProbabilityPercentile = [this](unsigned int percentile) noexcept {
+		std::uint32_t histogramCount = 0;
+		for (const std::uint16_t count : m_classicSpeechProbabilityHistogram) {
+			histogramCount += count;
+		}
+		const std::uint32_t target =
+			std::max(1U, (histogramCount * percentile + 99U) / 100U);
+		std::uint32_t cumulative = 0;
+		for (std::size_t index = 0; index < m_classicSpeechProbabilityHistogram.size(); ++index) {
+			cumulative += m_classicSpeechProbabilityHistogram[index];
+			if (cumulative >= target) {
+				return static_cast< unsigned int >(index);
+			}
+		}
+		return 100U;
+	};
+	const unsigned int speechProbabilityP10 = speechProbabilityPercentile(10);
+	const unsigned int rmsDynamicRangeDb = rmsP90Bin >= rmsP10Bin ? rmsP90Bin - rmsP10Bin : 0;
+	constexpr std::uint32_t sceneWarmupFrames = 64;
+	constexpr unsigned int noisyDynamicRangeDb = 30;
+	constexpr float noisyPsdSumThreshold = 8.0f;
+	const bool noisyScene = m_classicRmsHistogramFrames >= sceneWarmupFrames
+		&& rmsDynamicRangeDb <= noisyDynamicRangeDb && m_classicSmoothedNoisePsdSum >= noisyPsdSumThreshold;
+
+	const float maximumWetMix = std::clamp(mixFactor, 0.0f, 1.0f);
+	constexpr int fullBackgroundProbability = 35;
+	constexpr int protectedSpeechProbability = 80;
+	constexpr float protectedSpeechWetFraction = 0.0f;
+	float speechProtection = 0.0f;
+	if (alignedSpeechProbability >= protectedSpeechProbability) {
+		speechProtection = 1.0f;
+	} else if (alignedSpeechProbability > fullBackgroundProbability) {
+		speechProtection = static_cast< float >(alignedSpeechProbability - fullBackgroundProbability)
+			/ static_cast< float >(protectedSpeechProbability - fullBackgroundProbability);
+	}
+	const float protectedWetMix = maximumWetMix * protectedSpeechWetFraction;
+	float targetWetMix = noisyScene
+		? maximumWetMix + (speechProtection * (protectedWetMix - maximumWetMix))
+		: 0.0f;
+	// In an attested noisy scene, retain enough suppression through persistent
+	// traffic or competing speech for the background estimate to remain useful.
+	// Quiet scenes stay exactly delayed-dry, independent of VAD mistakes.
+	if (noisyScene) {
+		const bool persistentHighProbability = speechProbabilityP10 >= 45U;
+		if (persistentHighProbability) {
+			targetWetMix = std::max(targetWetMix, maximumWetMix * 0.85f);
+		} else if (dryRmsBin >= std::min< std::size_t >(120U, rmsP10Bin + 4U)) {
+			// In stationary HVAC/hum scenes the low RMS quantile is a useful
+			// background anchor even when classic VAD misses a consonant. Preserve
+			// frames at least 4 dB above that floor exactly delayed-dry.
+			targetWetMix = 0.0f;
+		}
+	}
+	// Protect a newly detected consonant immediately. Re-introduce stronger
+	// background suppression over several frames after speech probability falls,
+	// avoiding a hard spectral step at the word boundary.
+	if (targetWetMix <= m_classicWetMix) {
+		m_classicWetMix = targetWetMix;
+	} else {
+		m_classicWetMix = std::min(targetWetMix, m_classicWetMix + 0.15f);
+	}
+
+	for (unsigned int index = 0; index < frameSamples; ++index) {
+		const float wet = static_cast< float >(processedSamples[index]) / 32768.0f;
+		const float mixed = m_alignedDryFrame[index] + (m_classicWetMix * (wet - m_alignedDryFrame[index]));
+		const float scaled = std::clamp(mixed * 32768.0f, -32768.0f, 32767.0f);
+		processedSamples[index] = static_cast< std::int16_t >(std::lrint(scaled));
+	}
+	return true;
+}
+
+void Pipeline::recordClassicProcessingFrame(std::uint64_t durationNanoseconds) noexcept {
+	if (!m_recipe || m_recipe->engine() != Engine::Speex || m_recipe->usesNeuralProcessor()
+		|| m_fallbackActive) {
+		return;
+	}
+
+	++m_processedFrames;
+	m_lastProcessingNanoseconds = durationNanoseconds;
+	recordProcessingDuration(durationNanoseconds);
+	if (durationNanoseconds > m_frameDeadlineNanoseconds) {
+		++m_deadlineMisses;
+		failClosed(FallbackReason::DeadlineExceeded);
+	}
+}
+
+void Pipeline::markClassicProcessingFailure(FallbackReason reason) noexcept {
+	if (!m_recipe || m_recipe->engine() != Engine::Speex || m_recipe->usesNeuralProcessor()) {
+		return;
+	}
+	failClosed(reason == FallbackReason::None ? FallbackReason::ProcessorUnavailable : reason);
+}
+
+bool Pipeline::restoreClassicAlignedDryFrame(std::int16_t *samples, unsigned int sampleCount) const noexcept {
+	if (!samples || sampleCount != frameSamples || !m_recipe || m_recipe->engine() != Engine::Speex
+		|| m_actualLatencySamples != frameSamples) {
+		return false;
+	}
+	for (unsigned int index = 0; index < frameSamples; ++index) {
+		const float scaled = std::clamp(m_alignedDryFrame[index] * 32768.0f, -32768.0f, 32767.0f);
+		samples[index]     = static_cast< std::int16_t >(std::lrint(scaled));
+	}
+	return true;
+}
+
 bool Pipeline::fallbackActive() const noexcept {
 	return m_fallbackActive;
 }
@@ -955,7 +1221,8 @@ FallbackReason Pipeline::fallbackReason() const noexcept {
 }
 
 bool Pipeline::alignedFallbackActive() const noexcept {
-	return m_fallbackActive && m_recipe && m_recipe->usesNeuralProcessor() && m_actualLatencySamples > 0;
+	return m_fallbackActive && m_recipe && m_recipe->effectiveProfile() != Profile::Original
+		&& m_actualLatencySamples > 0;
 }
 
 unsigned int Pipeline::latencySamples() const noexcept {
@@ -1024,6 +1291,7 @@ void Pipeline::failClosed(FallbackReason reason) noexcept {
 }
 
 void Pipeline::recordProcessingDuration(std::uint64_t durationNanoseconds) noexcept {
+	++m_timedProcessingFrames;
 	m_totalProcessingNanoseconds += durationNanoseconds;
 	m_maximumProcessingNanoseconds  = std::max(m_maximumProcessingNanoseconds, durationNanoseconds);
 	const std::uint64_t quotient    = durationNanoseconds / processingHistogramBucketNanoseconds;
@@ -1035,10 +1303,10 @@ void Pipeline::recordProcessingDuration(std::uint64_t durationNanoseconds) noexc
 }
 
 std::uint64_t Pipeline::processingPercentileNanoseconds(unsigned int percentile) const noexcept {
-	if (m_neuralFrames == 0 || percentile == 0 || percentile > 100) {
+	if (m_timedProcessingFrames == 0 || percentile == 0 || percentile > 100) {
 		return 0;
 	}
-	const std::uint64_t targetRank = (m_neuralFrames * percentile + 99) / 100;
+	const std::uint64_t targetRank = (m_timedProcessingFrames * percentile + 99) / 100;
 	std::uint64_t accumulated      = 0;
 	for (std::size_t bucket = 0; bucket < m_processingHistogram.size(); ++bucket) {
 		accumulated += m_processingHistogram[bucket];
@@ -1055,6 +1323,7 @@ std::uint64_t Pipeline::processingPercentileNanoseconds(unsigned int percentile)
 void Pipeline::resetCounters() noexcept {
 	m_processedFrames              = 0;
 	m_neuralFrames                 = 0;
+	m_timedProcessingFrames        = 0;
 	m_sanitizedInputSamples        = 0;
 	m_clampedInputSamples          = 0;
 	m_clampedOutputSamples         = 0;

@@ -355,6 +355,37 @@ void SpeechCleanupTestAudioInput::observePreOpusPcm(short *samples, unsigned int
 	++m_preOpusCallbacks;
 }
 
+void SpeechCleanupTestAudioInput::completeVadPreOpusSourceTimeline(std::uint64_t submittedSamples) {
+	if (environmentValue(ENV_PRE_OPUS_WAV).isEmpty() || !m_preOpusCaptureValid
+		|| Global::get().s.atTransmit != Settings::VAD) {
+		return;
+	}
+
+	// audioInputEncountered is deliberately emitted only by the packet-producing
+	// path. VAD therefore leaves no callback after it closes on trailing room
+	// silence. The capture is nevertheless declared to use the source timeline,
+	// so retain that intentionally non-transmitted interval as zero PCM. This is
+	// bounded by the submitted source span: causal processor output beyond the
+	// source must still be observed from real drain callbacks and can never be
+	// manufactured by this completion step.
+	const std::uint64_t preRollSamples =
+		static_cast< std::uint64_t >(configuredPreRollFrames()) * TEST_FRAME_SIZE;
+	if (submittedSamples < preRollSamples) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Submitted source timeline is shorter than its pre-roll");
+		return;
+	}
+	const std::uint64_t sourceTimelineSamples = submittedSamples - preRollSamples;
+	if (sourceTimelineSamples > static_cast< std::uint64_t >(std::numeric_limits< std::size_t >::max())) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Submitted source timeline exceeds the addressable capture");
+		return;
+	}
+	if (m_preOpusPcm.size() < sourceTimelineSamples) {
+		m_preOpusPcm.resize(static_cast< std::size_t >(sourceTimelineSamples), 0);
+	}
+}
+
 bool SpeechCleanupTestAudioInput::writePreOpusCapture(QString *errorMessage) const {
 	const QString path = environmentValue(ENV_PRE_OPUS_WAV);
 	if (path.isEmpty()) {
@@ -421,6 +452,7 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 											std::uint64_t submittedFrames) {
 	QString finalError = errorMessage;
 	QString preOpusError;
+	completeVadPreOpusSourceTimeline(submittedFrames);
 	if (!writePreOpusCapture(&preOpusError)) {
 		ok = false;
 		if (!finalError.isEmpty()) {

@@ -26,6 +26,28 @@ class InventoryError(ValueError):
 
 
 KINDS = ("speech", "noise", "rir", "microphone_response")
+SPLITS = ("tuning", "validation", "holdout")
+DEFAULT_SPLIT_SEED = "mumble-input-enhancement-v1"
+MODELED_RESPONSE_SOURCE_ID = "mumble-modeled-microphone-responses-v1"
+MODELED_RESPONSE_DEFINITION = Path(__file__).with_name("modeled-microphone-responses-v1.json")
+DIVERSITY_REQUIREMENTS = {
+	"pr_smoke": {
+		"speaker_groups": 2, "languages": 1, "noise_groups": 2, "noise_classes": 2,
+		"rir_groups": 2, "device_groups": 2, "device_families": 2,
+	},
+	"release": {
+		"speaker_groups": 2, "languages": 1, "noise_groups": 2, "noise_classes": 3,
+		"rir_groups": 2, "device_groups": 2, "device_families": 2,
+	},
+	"master_quality": {
+		"speaker_groups": 8, "languages": 2, "noise_groups": 8, "noise_classes": 6,
+		"rir_groups": 6, "device_groups": 4, "device_families": 4,
+	},
+	"nightly": {
+		"speaker_groups": 16, "languages": 2, "noise_groups": 16, "noise_classes": 10,
+		"rir_groups": 12, "device_groups": 8, "device_families": 4,
+	},
+}
 NOISE_CLASSES = (
 	"fan", "hvac", "hum", "keyboard", "mouse", "traffic", "rain", "wind",
 	"handling", "babble", "music-tv", "competing-speech", "paired-noisy-speech",
@@ -59,6 +81,53 @@ def file_sha256(path: Path) -> str:
 		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
 			digest.update(chunk)
 	return digest.hexdigest()
+
+
+def _stable_int(seed: str, *parts: object) -> int:
+	payload = "\0".join((seed, *(str(part) for part in parts))).encode("utf-8")
+	return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+
+
+def assigned_split(seed: str, kind: str, group_id: str) -> str:
+	bucket = _stable_int(seed, "split-v1", kind, group_id) % 100
+	return "tuning" if bucket < 60 else "validation" if bucket < 80 else "holdout"
+
+
+def diversity_summary(items: Sequence[Mapping[str, Any]], seed: str, split: str) -> Mapping[str, int]:
+	selected = [item for item in items if assigned_split(seed, item["kind"], item["group_id"]) == split]
+	return {
+		"speaker_groups": len({item["group_id"] for item in selected if item["kind"] == "speech"}),
+		"languages": len({item["language"] for item in selected if item["kind"] == "speech"}),
+		"noise_groups": len({item["group_id"] for item in selected if item["kind"] == "noise"}),
+		"noise_classes": len({item["noise_class"] for item in selected if item["kind"] == "noise"}),
+		"rir_groups": len({item["group_id"] for item in selected if item["kind"] == "rir"}),
+		"device_groups": len({item["group_id"] for item in selected if item["kind"] == "microphone_response"}),
+		"device_families": len({
+			item["microphone_response"]["device_family"]
+			for item in selected if item["kind"] == "microphone_response"
+		}),
+	}
+
+
+def validate_diversity(
+	items: Sequence[Mapping[str, Any]], suite: str, seed: str = DEFAULT_SPLIT_SEED,
+	required_splits: Sequence[str] = SPLITS,
+) -> Mapping[str, Mapping[str, int]]:
+	_expect(suite in DIVERSITY_REQUIREMENTS, "suite", "unknown qualification suite")
+	_expect(isinstance(seed, str) and bool(seed), "split_seed", "must be non-empty")
+	_expect(bool(required_splits) and all(split in SPLITS for split in required_splits), "splits", "unknown split")
+	requirements = DIVERSITY_REQUIREMENTS[suite]
+	summaries: dict[str, Mapping[str, int]] = {}
+	for split in required_splits:
+		summary = diversity_summary(items, seed, split)
+		for key, minimum in requirements.items():
+			_expect(
+				summary[key] >= minimum,
+				f"inventory.diversity.{split}.{key}",
+				f"requires at least {minimum} distinct values for {suite}; found {summary[key]}",
+			)
+		summaries[split] = summary
+	return summaries
 
 
 def _load_json(path: Path) -> Any:
@@ -212,14 +281,20 @@ def validate_inventory(
 		_identifier(item["id"], f"{path}.id")
 		_identifier(item["group_id"], f"{path}.group_id")
 		_safe_path(item["relative_path"], f"{path}.relative_path")
-		_expect(item["source_id"] not in excluded, f"{path}.source_id", "excluded source")
-		_expect(item["source_id"] in allowed, f"{path}.source_id", "source is not approved for local evaluation")
-		_hash(item["sha256"], f"{path}.sha256")
-		_expect(
-			item["source_artifact_sha256"] == allowed[item["source_id"]]["integrity"]["digest"],
-			f"{path}.source_artifact_sha256",
-			"does not match locked source artifact",
+		modeled_source = (
+			kind == "microphone_response"
+			and item.get("source_id") == MODELED_RESPONSE_SOURCE_ID
+			and isinstance(item.get("microphone_response"), dict)
+			and item["microphone_response"].get("response_kind") == "modeled"
 		)
+		_expect(item["source_id"] not in excluded, f"{path}.source_id", "excluded source")
+		_expect(modeled_source or item["source_id"] in allowed, f"{path}.source_id", "source is not approved for local evaluation")
+		_hash(item["sha256"], f"{path}.sha256")
+		expected_artifact_sha256 = (
+			file_sha256(MODELED_RESPONSE_DEFINITION)
+			if modeled_source else allowed[item["source_id"]]["integrity"]["digest"]
+		)
+		_expect(item["source_artifact_sha256"] == expected_artifact_sha256, f"{path}.source_artifact_sha256", "does not match its pinned source artifact")
 		for key in ("channels", "duration_samples", "sample_rate_hz", "size_bytes"):
 			_positive_integer(item[key], f"{path}.{key}")
 		_validate_provenance(item["provenance"], f"{path}.provenance")
@@ -253,6 +328,8 @@ def validate_inventory(
 			_expect(response["response_kind"] in ("measured", "modeled"), f"{path}.microphone_response.response_kind", "unsupported")
 			if response["response_kind"] == "modeled":
 				_expect(item["provenance"]["derivation"] == "synthesized", f"{path}.provenance.derivation", "modeled response must be synthesized")
+				_expect(modeled_source, f"{path}.source_id", "modeled responses must bind the tracked response definition")
+				_expect(item["provenance"]["parent_sha256"] == expected_artifact_sha256, f"{path}.provenance.parent_sha256", "must bind the tracked response definition")
 			else:
 				_expect(item["provenance"]["derivation"] in ("recorded", "extracted", "decoded", "resampled"), f"{path}.provenance.derivation", "measured response must come from recorded material")
 			_expect(response["device_family"] in ("headset", "laptop", "usb", "phone"), f"{path}.microphone_response.device_family", "unsupported")
@@ -381,6 +458,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--manifest", type=Path, default=Path(__file__).with_name("corpus-lock.json"))
 	parser.add_argument("--validate", type=Path)
 	parser.add_argument("--require-release-eligible", action="store_true")
+	parser.add_argument("--suite", choices=tuple(DIVERSITY_REQUIREMENTS), default="release")
+	parser.add_argument("--split-seed", default=DEFAULT_SPLIT_SEED)
 	parser.add_argument("--migrate-v2", type=Path)
 	parser.add_argument("--corpus-state", type=Path)
 	parser.add_argument("--inventory-id", default="mumble-input-enhancement-v3")
@@ -397,6 +476,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 		if args.validate is not None:
 			inventory = _load_json(args.validate)
 			items = validate_inventory(inventory, manifest, require_release=args.require_release_eligible)
+			if args.require_release_eligible:
+				validate_diversity(items, args.suite, args.split_seed)
 			print(f"corpus inventory: ok; items={len(items)}; sha256={canonical_sha256(inventory)}")
 			return 0
 		if args.migrate_v2 is not None:

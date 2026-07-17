@@ -18,7 +18,8 @@ class SpeechCleanupProcessor;
 
 namespace Mumble::InputEnhancement {
 
-inline constexpr unsigned int frameSamples                   = 480;
+inline constexpr unsigned int sampleRateHz                   = 48'000;
+inline constexpr unsigned int frameSamples                   = sampleRateHz / 100;
 inline constexpr unsigned int originalLatencyBudgetSamples   = 0;
 inline constexpr unsigned int lightLatencyBudgetSamples      = 480;
 inline constexpr unsigned int balancedLatencyBudgetSamples   = 1440;
@@ -32,8 +33,8 @@ inline constexpr unsigned int crispLatencyBudgetSamples = qualityLatencyBudgetSa
 // persisted execution fingerprint. Any change to recipe execution, the
 // qualified mix curve, or callback-safe adaptation policy must increment the
 // corresponding value.
-inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 2;
-inline constexpr std::uint32_t qualifiedMixCurveVersion        = 2;
+inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 5;
+inline constexpr std::uint32_t qualifiedMixCurveVersion        = 5;
 inline constexpr std::uint32_t adaptationPolicyVersion         = 1;
 
 enum class Profile : std::uint8_t {
@@ -84,6 +85,11 @@ ValidatedControls validatedControlsForProfile(Profile profile, int noiseReductio
 /// Maps the public 0-100 controls to the qualified dry/wet mix for the active
 /// concrete profile. Engine/model changes still require off-callback setup.
 float mixFactorForControls(Profile profile, int noiseReduction, int naturalCrisp) noexcept;
+
+/// Maps Light's public reduction control to the bounded Speex suppression
+/// used by the product recipe. Legacy Speex settings deliberately bypass this
+/// helper and retain their historical direct dB value.
+int lightSpeexSuppressionDb(int noiseReduction) noexcept;
 
 enum class FallbackReason : std::uint8_t {
 	None,
@@ -244,9 +250,11 @@ public:
 	std::uint64_t clampedOutputSamples() const noexcept;
 	std::uint64_t deadlineMisses() const noexcept;
 	std::uint64_t fallbackCount() const noexcept;
-	/// Full valid neural processFrame path, from input sanitization through
-	/// processor health and output validation. Failed processor attempts are
-	/// included; Original and Light never start this timer.
+	/// Full product callback path. Neural profiles time processFrame() from
+	/// input sanitization through processor health and output validation; Light
+	/// times the established external Speex preprocessor through
+	/// recordClassicProcessingFrame(). Failed processor attempts are included;
+	/// Original never starts this timer.
 	std::uint64_t totalProcessingNanoseconds() const noexcept;
 	std::uint64_t maximumProcessingNanoseconds() const noexcept;
 	std::uint64_t processingP50Nanoseconds() const noexcept;
@@ -350,6 +358,26 @@ public:
 	/// Engine/model changes still require configure() off the callback.
 	bool processFrame(float *samples, unsigned int sampleCount, float mixFactor) noexcept;
 	bool processFrame(std::array< float, frameSamples > &samples, float mixFactor) noexcept;
+	/// Aligns the external Speex output with the recipe's one-frame dry delay and
+	/// applies the speech-protected Light mix. The current dry frame and current
+	/// Speex speech probability are captured after Speex has produced the delayed
+	/// wet frame; both are retained in fixed storage for the following callback.
+	bool mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
+						 unsigned int sampleCount, int currentSpeechProbability,
+						 std::uint64_t currentNoisePsdSum) noexcept;
+	bool mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
+						 unsigned int sampleCount, int currentSpeechProbability,
+						 std::uint64_t currentNoisePsdSum, float mixFactor) noexcept;
+	/// Records one completed callback of the existing Speex/classic DSP path for
+	/// a configured Light recipe. This only updates the common product
+	/// diagnostics contract: it neither touches PCM nor creates a processor.
+	void recordClassicProcessingFrame(std::uint64_t durationNanoseconds) noexcept;
+	/// Latches an external Light processor failure into the same fail-closed
+	/// state used by neural processors.
+	void markClassicProcessingFailure(FallbackReason reason) noexcept;
+	/// Replaces a just-produced Light frame with the already advanced aligned dry
+	/// frame. This is used when full-path timing crosses the deadline after mix.
+	bool restoreClassicAlignedDryFrame(std::int16_t *samples, unsigned int sampleCount) const noexcept;
 
 	bool fallbackActive() const noexcept;
 	FallbackReason fallbackReason() const noexcept;
@@ -371,11 +399,12 @@ private:
 	void recordProcessingDuration(std::uint64_t durationNanoseconds) noexcept;
 	std::uint64_t processingPercentileNanoseconds(unsigned int percentile) const noexcept;
 	void resetCounters() noexcept;
-	void resetDeepFilterEdgeProtection() noexcept;
-	float deepFilterEdgeProtectedMixFactor(float requestedMixFactor) noexcept;
+	void resetSpeechEdgeProtection() noexcept;
+	float speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept;
+	void resetClassicMix() noexcept;
 	static constexpr std::uint64_t processingHistogramBucketNanoseconds = 10'000;
 	static constexpr std::size_t processingHistogramBucketCount         = 2'001;
-	static constexpr unsigned int deepFilterOnsetProtectionFrames       = 8;
+	static constexpr unsigned int deepFilterOnsetRampFrames             = 8;
 
 	ProcessorFactory m_processorFactory;
 	NanosecondClock m_clock;
@@ -385,12 +414,21 @@ private:
 	std::array< float, frameSamples > m_alignedDryFrame              = {};
 	std::array< float, crispLatencyBudgetSamples > m_alignedDryDelay = {};
 	unsigned int m_alignedDryDelayPosition                           = 0;
+	int m_classicPreviousSpeechProbability                           = 100;
+	std::uint64_t m_classicPreviousNoisePsdSum                       = 0;
+	std::array< std::uint16_t, 121 > m_classicRmsHistogram          = {};
+	std::array< std::uint16_t, 101 > m_classicSpeechProbabilityHistogram = {};
+	std::uint32_t m_classicRmsHistogramCount                         = 0;
+	std::uint32_t m_classicRmsHistogramFrames                        = 0;
+	float m_classicSmoothedNoisePsdSum                               = 0.0f;
+	float m_classicWetMix                                            = 0.0f;
 	QString m_activeModelId;
 	QString m_activeModelSha256;
 	unsigned int m_actualLatencySamples                                               = 0;
 	FallbackReason m_fallbackReason                                                   = FallbackReason::None;
 	std::uint64_t m_processedFrames                                                   = 0;
 	std::uint64_t m_neuralFrames                                                      = 0;
+	std::uint64_t m_timedProcessingFrames                                             = 0;
 	std::uint64_t m_sanitizedInputSamples                                             = 0;
 	std::uint64_t m_clampedInputSamples                                               = 0;
 	std::uint64_t m_clampedOutputSamples                                              = 0;
@@ -400,12 +438,12 @@ private:
 	std::uint64_t m_maximumProcessingNanoseconds                                      = 0;
 	std::uint64_t m_lastProcessingNanoseconds                                         = 0;
 	std::array< std::uint64_t, processingHistogramBucketCount > m_processingHistogram = {};
-	float m_deepFilterNoiseFloorRms                                                  = 0.0f;
-	float m_deepFilterSpeechPeakRms                                                  = 0.0f;
-	unsigned int m_deepFilterBaselineFrames                                          = 0;
-	unsigned int m_deepFilterBelowReleaseFrames                                      = 0;
-	unsigned int m_deepFilterOnsetProtectionFrame                                    = deepFilterOnsetProtectionFrames;
-	bool m_deepFilterSpeechActive                                                    = false;
+	float m_speechEdgeNoiseFloorRms                                                  = 0.0f;
+	float m_speechEdgePeakRms                                                        = 0.0f;
+	unsigned int m_speechEdgeBaselineFrames                                          = 0;
+	unsigned int m_speechEdgeBelowReleaseFrames                                      = 0;
+	unsigned int m_speechEdgeProtectionFrame                                         = deepFilterOnsetRampFrames;
+	bool m_speechEdgeActive                                                          = false;
 	bool m_fallbackActive                                                             = false;
 };
 

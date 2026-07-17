@@ -20,25 +20,16 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 	$OutputPath = Join-Path $rootPath 'draft-manifest.json'
 }
 $outputFullPath = [IO.Path]::GetFullPath($OutputPath)
-if (-not $outputFullPath.StartsWith("$rootPath\", [StringComparison]::OrdinalIgnoreCase)) {
-	throw 'Draft manifest must be written inside the rehearsal root.'
+$outputParent = [IO.Path]::GetDirectoryName($outputFullPath).TrimEnd('\', '/')
+if (-not $outputParent.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+	throw 'Draft manifest must be written directly inside the rehearsal root.'
 }
 
-$forbiddenExtensions = @('.aac', '.flac', '.key', '.m4a', '.mp3', '.ogg', '.opus', '.pem', '.pfx', '.raw', '.wav')
+$files = @(Get-ValidatedInputEnhancementRehearsalDraftFiles `
+	-Root $rootPath -ExcludedPath $outputFullPath)
 $records = New-Object System.Collections.Generic.List[object]
-foreach ($file in @(Get-ChildItem -LiteralPath $rootPath -File -Recurse | Sort-Object FullName)) {
-	if ([IO.Path]::GetFullPath($file.FullName) -ceq $outputFullPath) {
-		continue
-	}
-	if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-		throw "Rehearsal draft contains a reparse-point file: '$($file.FullName)'."
-	}
+foreach ($file in $files) {
 	$relativePath = [IO.Path]::GetRelativePath($rootPath, $file.FullName).Replace('\', '/')
-	$null = Assert-SafeRelativeReleasePath -Path $relativePath -Context 'Rehearsal draft file'
-	if ($file.Extension.ToLowerInvariant() -cin $forbiddenExtensions -or
-		$file.Name -match '(?i)(private[-_.]?key|client[-_.]?secret|production[-_.]?credential)') {
-		throw "Rehearsal draft contains forbidden private material or audio: '$relativePath'."
-	}
 	$records.Add([ordered]@{
 		path   = $relativePath
 		sha256 = Get-ReleaseFileSha256 -Path $file.FullName

@@ -91,7 +91,8 @@ class LocalCalibrationCandidateEvaluator final : public CalibrationCandidateEval
 public:
 	explicit LocalCalibrationCandidateEvaluator(CalibrationOpusConfiguration opus             = {},
 												CalibrationPackageAuthorization authorization = {},
-												CpuClass cpuClass = CpuClass::High) noexcept;
+												CpuClass cpuClass = CpuClass::High,
+												CaptureDeviceContext captureDevice = {}) noexcept;
 	bool evaluate(const CalibrationSession::CaptureView &capture, const CalibrationSession::Selection &selection,
 				  Output &output) override;
 
@@ -99,6 +100,7 @@ private:
 	CalibrationOpusConfiguration m_opus;
 	const CalibrationPackageAuthorization m_authorization;
 	const CpuClass m_cpuClass;
+	const CaptureDeviceContext m_captureDevice;
 };
 
 struct CalibrationEvaluationObserver final {
@@ -159,9 +161,11 @@ private:
 /// no heap allocation and takes no lock after start().
 class CalibrationRuntimeBridge final {
 public:
-	explicit CalibrationRuntimeBridge(std::unique_ptr< CalibrationCandidateEvaluator > evaluator = {});
+	explicit CalibrationRuntimeBridge(std::unique_ptr< CalibrationCandidateEvaluator > evaluator = {},
+									CpuClass readinessCpuClass = CpuClass::High);
 	CalibrationRuntimeBridge(std::span< float > preallocatedStorage,
-							 std::unique_ptr< CalibrationCandidateEvaluator > evaluator = {});
+								 std::unique_ptr< CalibrationCandidateEvaluator > evaluator = {},
+								 CpuClass readinessCpuClass = CpuClass::High);
 	~CalibrationRuntimeBridge();
 
 	CalibrationRuntimeBridge(const CalibrationRuntimeBridge &)            = delete;
@@ -192,6 +196,7 @@ public:
 	bool rawAudioCleared() noexcept;
 	bool playbackBuffersCleared() const noexcept;
 	const DefaultPreference *draftPreference() noexcept;
+	const RecipeBinding *draftRecipeBinding() noexcept;
 
 	static CalibrationSession::Selection selectionForPreference(const DefaultPreference &preference) noexcept;
 	static DefaultPreference preferenceForSelection(const CalibrationSession::Selection &selection) noexcept;
@@ -216,6 +221,7 @@ private:
 
 	CalibrationSession m_session;
 	std::unique_ptr< CalibrationCandidateEvaluator > m_evaluator;
+	CpuClass m_readinessCpuClass = CpuClass::High;
 	DeviceIdentity m_identity;
 	DefaultPreference m_previousPreference;
 	std::optional< RecipeBinding > m_previousRecipeBinding;
