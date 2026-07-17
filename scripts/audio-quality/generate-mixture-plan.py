@@ -28,31 +28,33 @@ class PlanError(ValueError):
 SUITE_CASES = { "pr_smoke": 30, "master_quality": 500, "nightly": 5000, "release": 30 }
 SPLITS = ("tuning", "validation", "holdout")
 PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
-# Product recipes expose only pre-qualified control intervals.  Plans must use
-# values the client can actually persist instead of relying on runtime clamping.
-# Quality and VoiceFocus deliberately share their intersection so the locked
-# paired scenes differ only by profile/recipe, not by user controls.
-PROFILE_CONTROL_VALUES = {
-	"Original": {
-		"noise_reduction": (50,),
-		"natural_clear": (50,),
-	},
-	"Light": {
-		"noise_reduction": (0, 25, 50, 75, 100),
-		"natural_clear": (0, 25, 50, 75, 100),
-	},
-	"Balanced": {
-		"noise_reduction": (20, 40, 60, 80),
-		"natural_clear": (10, 30, 50, 70, 90),
-	},
-	"Quality": {
-		"noise_reduction": (70, 75, 80, 85, 90),
-		"natural_clear": (40, 55, 70, 85, 100),
-	},
-	"VoiceFocus": {
-		"noise_reduction": (70, 75, 80, 85, 90),
-		"natural_clear": (40, 55, 70, 85, 100),
-	},
+CONTROL_DIMENSIONS = ("noise_reduction", "natural_clear")
+# Plan ``controls`` are persisted public UI integers in [0, 100].  These are
+# deliberately separate from the validated recipe coordinates below.  C++ maps
+# UI to recipe space exactly once with:
+#
+#   minimum + ((ui * (maximum - minimum) + 50) / 100)
+#
+# using integer division.  Qualification targets the complete five-point recipe
+# grid and stores the nearest canonical UI integer that round-trips exactly.
+PROFILE_RECIPE_CONTROL_RANGES = {
+	"Light": {"noise_reduction": (0, 100), "natural_clear": (0, 100)},
+	"Balanced": {"noise_reduction": (20, 90), "natural_clear": (10, 90)},
+	"Quality": {"noise_reduction": (25, 90), "natural_clear": (25, 100)},
+	"VoiceFocus": {"noise_reduction": (70, 100), "natural_clear": (40, 100)},
+}
+PROFILE_RECIPE_CONTROL_GRID = {
+	profile: {
+		dimension: tuple(range(bounds[0], bounds[1] + 1, 5))
+		for dimension, bounds in dimensions.items()
+	}
+	for profile, dimensions in PROFILE_RECIPE_CONTROL_RANGES.items()
+}
+CONTROL_SEMANTICS = {
+	"plan_values": "persisted-ui-integers-0-100",
+	"recipe_values": "profile-qualified-integer-grid-step-5",
+	"mapping": "minimum+((ui*(maximum-minimum)+50)//100)",
+	"inverse": "nearest-exact-round-trip-lower-tie-v1",
 }
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
@@ -145,6 +147,69 @@ def _stable_int(seed: str, *parts: object) -> int:
 	return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
 
 
+def map_ui_control_to_recipe(profile: str, dimension: str, ui_value: int) -> int:
+	"""Mirror C++ validatedControlsForProfile() using persisted UI coordinates."""
+	_expect(profile in PROFILES, "control.profile", "unknown profile")
+	_expect(dimension in CONTROL_DIMENSIONS, "control.dimension", "unknown dimension")
+	_expect(
+		isinstance(ui_value, int) and not isinstance(ui_value, bool) and 0 <= ui_value <= 100,
+		"control.ui_value",
+		"must be an integer from 0 to 100",
+	)
+	if profile == "Original":
+		return 0
+	minimum, maximum = PROFILE_RECIPE_CONTROL_RANGES[profile][dimension]
+	return minimum + ((ui_value * (maximum - minimum) + 50) // 100)
+
+
+def nearest_ui_control_for_recipe(profile: str, dimension: str, recipe_value: int) -> int:
+	"""Choose the nearest canonical UI integer that maps to one recipe-grid value."""
+	_expect(profile in PROFILE_RECIPE_CONTROL_GRID, "control.profile", "profile has no qualified recipe grid")
+	_expect(dimension in CONTROL_DIMENSIONS, "control.dimension", "unknown dimension")
+	_expect(
+		recipe_value in PROFILE_RECIPE_CONTROL_GRID[profile][dimension],
+		"control.recipe_value",
+		"is outside the qualified five-point recipe grid",
+	)
+	minimum, maximum = PROFILE_RECIPE_CONTROL_RANGES[profile][dimension]
+	candidates = [
+		ui_value for ui_value in range(101)
+		if map_ui_control_to_recipe(profile, dimension, ui_value) == recipe_value
+	]
+	_expect(bool(candidates), "control.recipe_value", "has no exact persisted-UI round trip")
+	# Compare exact integer numerators rather than floats.  A lower UI value wins
+	# the mathematically exact tie, making generation stable across Python builds.
+	ideal_numerator = (recipe_value - minimum) * 100
+	range_width = maximum - minimum
+	return min(candidates, key=lambda ui_value: (abs(ui_value * range_width - ideal_numerator), ui_value))
+
+
+def qualified_ui_control_values(profile: str, dimension: str) -> tuple[int, ...]:
+	if profile == "Original":
+		return (50,)
+	return tuple(
+		nearest_ui_control_for_recipe(profile, dimension, recipe_value)
+		for recipe_value in PROFILE_RECIPE_CONTROL_GRID[profile][dimension]
+	)
+
+
+def validated_recipe_controls(profile: str, controls: Mapping[str, Any]) -> dict[str, int]:
+	"""Return the exact C++ recipe coordinates expected from plan UI controls."""
+	return {
+		dimension: map_ui_control_to_recipe(profile, dimension, controls.get(dimension))
+		for dimension in CONTROL_DIMENSIONS
+	}
+
+
+PROFILE_UI_CONTROL_VALUES = {
+	profile: {
+		dimension: qualified_ui_control_values(profile, dimension)
+		for dimension in CONTROL_DIMENSIONS
+	}
+	for profile in PROFILES
+}
+
+
 def assigned_split(seed: str, kind: str, group_id: str) -> str:
 	return INVENTORY.assigned_split(seed, kind, group_id)
 
@@ -163,6 +228,59 @@ def validate_inventory(
 
 def _choice(values: Sequence[Any], seed: str, case_index: int, label: str) -> Any:
 	return values[_stable_int(seed, "choice-v1", case_index, label) % len(values)]
+
+
+def _evenly_spaced(values: Sequence[int], index: int, count: int) -> int:
+	_expect(bool(values), "control grid", "must not be empty")
+	_expect(count > 0 and 0 <= index < count, "control grid", "invalid subset index")
+	if count == 1:
+		return values[len(values) // 2]
+	# Integer nearest-neighbour selection with deterministic lower ties.  The
+	# first and final occurrences therefore always exercise both endpoints.
+	position_numerator = index * (len(values) - 1)
+	denominator = count - 1
+	position = (2 * position_numerator + denominator - 1) // (2 * denominator)
+	return values[position]
+
+
+def _profile_for_case(suite: str, case_count: int, index: int) -> str:
+	if suite == "release" and case_count == SUITE_CASES["release"]:
+		return PROFILES[index // 6]
+	return PROFILES[index % len(PROFILES)]
+
+
+def _planned_ui_controls(
+	suite: str, split: str, seed: str, profile: str, occurrence: int, occurrence_count: int,
+) -> dict[str, int]:
+	if profile == "Original":
+		return {"noise_reduction": 50, "natural_clear": 50}
+
+	# Release's locked severe comparator requires byte-identical scenes and
+	# persisted UI controls for Quality and Voice Focus.  Select only canonical UI
+	# representatives shared by both profiles; each profile may still map those
+	# public values to its own separately qualified recipe range.
+	if suite == "release" and occurrence_count == 6 and profile in ("Quality", "VoiceFocus"):
+		controls = {}
+		for dimension in CONTROL_DIMENSIONS:
+			shared = tuple(sorted(
+				set(PROFILE_UI_CONTROL_VALUES["Quality"][dimension])
+				& set(PROFILE_UI_CONTROL_VALUES["VoiceFocus"][dimension])
+			))
+			_expect(len(shared) >= 2, f"release controls.{dimension}", "paired profiles have no endpoint-safe UI subset")
+			controls[dimension] = _evenly_spaced(shared, occurrence, occurrence_count)
+		return controls
+
+	controls = {}
+	full_grid = suite in ("master_quality", "nightly") and split in ("tuning", "validation")
+	for dimension in CONTROL_DIMENSIONS:
+		grid = PROFILE_RECIPE_CONTROL_GRID[profile][dimension]
+		if full_grid:
+			offset = _stable_int(seed, "recipe-grid-offset-v1", split, profile, dimension) % len(grid)
+			recipe_value = grid[(occurrence + offset) % len(grid)]
+		else:
+			recipe_value = _evenly_spaced(grid, occurrence, occurrence_count)
+		controls[dimension] = nearest_ui_control_for_recipe(profile, dimension, recipe_value)
+	return controls
 
 
 def _group_choice(values: Sequence[Mapping[str, Any]], seed: str, case_index: int, label: str) -> Mapping[str, Any]:
@@ -216,6 +334,9 @@ def generate_plan(
 	_expect(case_count > 0, "case_count", "must be positive")
 	_expect(duration_ms >= 1000 and duration_ms % 10 == 0, "duration_ms", "must be >=1000 and align to 10 ms")
 
+	profile_schedule = [_profile_for_case(suite, case_count, index) for index in range(case_count)]
+	profile_totals = {profile: profile_schedule.count(profile) for profile in PROFILES}
+	profile_occurrences = {profile: 0 for profile in PROFILES}
 	cases = []
 	for index in range(case_count):
 		comparison_scene_id = None
@@ -224,7 +345,7 @@ def generate_plan(
 				{"en-US", "sv-SE"}.issubset({item["language"] for item in speech}),
 				"inventory", "release matrix requires en-US and sv-SE speech",
 			)
-			profile = PROFILES[index // 6]
+			profile = profile_schedule[index]
 			language = ("en-US", "sv-SE")[(index // 3) % 2]
 			variant = index % 3
 			scene_index = index - 6 if profile == "VoiceFocus" else index
@@ -239,7 +360,7 @@ def generate_plan(
 			noise_choice_index = (scene_index // 3) * 2 + max(0, variant - 1)
 			preroll_ms = 0 if variant != 1 else 300
 		else:
-			profile = PROFILES[index % len(PROFILES)]
+			profile = profile_schedule[index]
 			scene_index = index
 			clean = _group_choice(speech, seed, scene_index, "speech")
 			snr = SNR_DB[index % len(SNR_DB)]
@@ -248,17 +369,16 @@ def generate_plan(
 		rir = _group_choice(rirs, seed, scene_index, "rir")
 		microphone_response = _group_choice(microphone_responses, seed, scene_index, "microphone-response")
 		selected_noise = None if snr is None else _group_choice(noise, seed, noise_choice_index, "noise")
+		profile_occurrence = profile_occurrences[profile]
+		profile_occurrences[profile] += 1
 		case = {
 			"case_id": f"{suite}-{split}-{index + 1:05d}",
 			"profile": profile,
-			"controls": {
-				"noise_reduction": _choice(
-					PROFILE_CONTROL_VALUES[profile]["noise_reduction"], seed, scene_index, "reduction"
-				),
-				"natural_clear": _choice(
-					PROFILE_CONTROL_VALUES[profile]["natural_clear"], seed, scene_index, "character"
-				),
-			},
+			# Persist exactly what the client settings/UI stores.  The validator and
+			# benchmark independently derive the profile-qualified recipe values.
+			"controls": _planned_ui_controls(
+				suite, split, seed, profile, profile_occurrence, profile_totals[profile]
+			),
 			"speech": {
 				"item_id": clean["id"],
 				"source_id": clean["source_id"],
@@ -328,8 +448,9 @@ def generate_plan(
 		cases.append(case)
 
 	plan = {
-		"schema_version": 3,
-		"generator": "mumble-audio-mixture-plan-v3",
+		"schema_version": 4,
+		"generator": "mumble-audio-mixture-plan-v4",
+		"control_semantics": CONTROL_SEMANTICS,
 		"corpus_lock_sha256": lock_sha,
 		"corpus_inventory_sha256": INVENTORY.canonical_sha256(inventory),
 		"seed": seed,
@@ -349,14 +470,15 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	_exact_keys(
 		value,
 		{
-			"cases", "corpus_inventory_sha256", "corpus_lock_sha256", "format", "generator", "schema_version", "seed", "split",
-			"split_algorithm", "suite", "timeline_alignment",
+			"cases", "control_semantics", "corpus_inventory_sha256", "corpus_lock_sha256", "format", "generator",
+			"schema_version", "seed", "split", "split_algorithm", "suite", "timeline_alignment",
 		},
 		set(),
 		"plan",
 	)
-	_expect(value["schema_version"] == 3, "plan.schema_version", "unsupported version")
-	_expect(value["generator"] == "mumble-audio-mixture-plan-v3", "plan.generator", "unknown generator")
+	_expect(value["schema_version"] == 4, "plan.schema_version", "unsupported version")
+	_expect(value["generator"] == "mumble-audio-mixture-plan-v4", "plan.generator", "unknown generator")
+	_expect(value["control_semantics"] == CONTROL_SEMANTICS, "plan.control_semantics", "unknown UI-to-recipe mapping")
 	_expect(value["split"] in SPLITS, "plan.split", "unknown split")
 	_expect(value["suite"] in SUITE_CASES, "plan.suite", "unknown suite")
 	_expect(value["timeline_alignment"] == "fixed", "plan.timeline_alignment", "release plans require fixed alignment")
@@ -368,6 +490,10 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	_expect(isinstance(value["cases"], list) and value["cases"], "plan.cases", "must not be empty")
 	case_ids = []
 	startup_modes = set()
+	recipe_control_coverage = {
+		profile: {dimension: set() for dimension in CONTROL_DIMENSIONS}
+		for profile in PROFILE_RECIPE_CONTROL_GRID
+	}
 	for index, case in enumerate(value["cases"]):
 		path = f"plan.cases[{index}]"
 		for label, source in (
@@ -397,13 +523,24 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 				"must be a positive integer",
 			)
 		_expect(case["profile"] in PROFILES, f"{path}.profile", "unknown profile")
-		_expect("natural_clear" in case["controls"] and "natural_crisp" not in case["controls"], f"{path}.controls", "must use natural_clear")
-		for control_name in ("noise_reduction", "natural_clear"):
+		_expect(isinstance(case.get("controls"), dict), f"{path}.controls", "must be an object")
+		_exact_keys(case["controls"], set(CONTROL_DIMENSIONS), set(), f"{path}.controls")
+		for control_name in CONTROL_DIMENSIONS:
+			control_value = case["controls"].get(control_name)
 			_expect(
-				case["controls"].get(control_name) in PROFILE_CONTROL_VALUES[case["profile"]][control_name],
+				isinstance(control_value, int) and not isinstance(control_value, bool) and 0 <= control_value <= 100,
 				f"{path}.controls.{control_name}",
-				"is outside the pre-qualified product values for this profile",
+				"must be a persisted UI integer from 0 to 100",
 			)
+			_expect(
+				control_value in PROFILE_UI_CONTROL_VALUES[case["profile"]][control_name],
+				f"{path}.controls.{control_name}",
+				"is not the canonical UI representative of a qualified recipe-grid value",
+			)
+		if case["profile"] in recipe_control_coverage:
+			validated = validated_recipe_controls(case["profile"], case["controls"])
+			for control_name in CONTROL_DIMENSIONS:
+				recipe_control_coverage[case["profile"]][control_name].add(validated[control_name])
 		_expect(case["transport"]["receiver_cleanup"] is False, f"{path}.transport.receiver_cleanup", "must be false")
 		_expect(case["transport"]["opus_bitrate_bps"] in BITRATES, f"{path}.transport.opus_bitrate_bps", "unsupported")
 		_expect(case["transport"]["frames_per_packet"] in PACKET_FRAMES, f"{path}.transport.frames_per_packet", "unsupported")
@@ -417,6 +554,18 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 		case_ids.append(case["case_id"])
 	_expect(case_ids == sorted(set(case_ids)), "plan.cases", "case ids must be unique and sorted")
 	_expect(startup_modes == { 0, 300 } or len(value["cases"]) == 1, "plan.cases", "must cover cold and warm start")
+	full_grid_required = value["suite"] in ("master_quality", "nightly") and value["split"] in ("tuning", "validation")
+	endpoint_coverage_required = value["suite"] in ("pr_smoke", "release")
+	for profile, dimensions in PROFILE_RECIPE_CONTROL_GRID.items():
+		for control_name, expected_grid in dimensions.items():
+			actual = recipe_control_coverage[profile][control_name]
+			label = f"plan.control_coverage.{profile}.{control_name}"
+			if full_grid_required:
+				missing = sorted(set(expected_grid) - actual)
+				_expect(not missing, label, f"missing qualified recipe-grid values: {missing}")
+			elif endpoint_coverage_required:
+				missing = sorted({expected_grid[0], expected_grid[-1]} - actual)
+				_expect(not missing, label, f"missing qualified recipe-grid endpoints: {missing}")
 	requirements = INVENTORY.DIVERSITY_REQUIREMENTS[value["suite"]]
 	diversity = {
 		"speaker_groups": len({case["speech"]["group_id"] for case in value["cases"]}),
@@ -586,6 +735,11 @@ def run_self_test() -> None:
 		raise AssertionError("identical inputs did not produce an identical plan")
 	if { case["startup"]["preroll_ms"] for case in first["cases"] } != { 0, 300 }:
 		raise AssertionError("cold/warm coverage is missing")
+	for profile, dimensions in PROFILE_RECIPE_CONTROL_GRID.items():
+		for dimension, grid in dimensions.items():
+			for recipe_value, ui_value in zip(grid, PROFILE_UI_CONTROL_VALUES[profile][dimension]):
+				if map_ui_control_to_recipe(profile, dimension, ui_value) != recipe_value:
+					raise AssertionError(f"{profile}/{dimension} UI inverse did not round-trip {recipe_value}")
 	plans = {
 		split: generate_plan(manifest, inventory, "release", split, seed, 30, 6000)
 		for split in SPLITS
@@ -609,16 +763,52 @@ def run_self_test() -> None:
 			raise
 	else:
 		raise AssertionError("release plan accepted mismatched Quality/VoiceFocus comparator scenes")
-	bad_controls = copy.deepcopy(plans["validation"])
-	voice_case = next(case for case in bad_controls["cases"] if case["profile"] == "VoiceFocus")
-	voice_case["controls"]["noise_reduction"] = 60
+	for profile in ("Quality", "VoiceFocus"):
+		bad_controls = copy.deepcopy(first)
+		profile_case = next(case for case in bad_controls["cases"] if case["profile"] == profile)
+		# These are legacy *recipe* values that the schema-v3 generator wrote into
+		# persisted UI fields and the client then mapped a second time.
+		profile_case["controls"]["noise_reduction"] = 70
+		try:
+			validate_plan(bad_controls)
+		except PlanError as error:
+			if "canonical UI representative" not in str(error):
+				raise
+		else:
+			raise AssertionError(f"plan accepted legacy double-mapped {profile} controls")
+
+	missing_endpoint = copy.deepcopy(first)
+	light_midpoint = nearest_ui_control_for_recipe("Light", "noise_reduction", 50)
+	for case in missing_endpoint["cases"]:
+		if case["profile"] == "Light" and map_ui_control_to_recipe(
+			"Light", "noise_reduction", case["controls"]["noise_reduction"]
+		) == 0:
+			case["controls"]["noise_reduction"] = light_midpoint
 	try:
-		validate_plan(bad_controls)
+		validate_plan(missing_endpoint)
 	except PlanError as error:
-		if "pre-qualified product values" not in str(error):
+		if "control_coverage.Light.noise_reduction" not in str(error) or "endpoints" not in str(error):
 			raise
 	else:
-		raise AssertionError("release plan accepted VoiceFocus controls outside the qualified recipe interval")
+		raise AssertionError("PR plan accepted missing qualified recipe-grid endpoint coverage")
+
+	master = generate_plan(manifest, inventory, "master_quality", "validation", seed, 500, 6000)
+	missing_grid = copy.deepcopy(master)
+	quality_grid = PROFILE_RECIPE_CONTROL_GRID["Quality"]["natural_clear"]
+	removed_value = quality_grid[len(quality_grid) // 2]
+	replacement_ui = nearest_ui_control_for_recipe("Quality", "natural_clear", quality_grid[0])
+	for case in missing_grid["cases"]:
+		if case["profile"] == "Quality" and map_ui_control_to_recipe(
+			"Quality", "natural_clear", case["controls"]["natural_clear"]
+		) == removed_value:
+			case["controls"]["natural_clear"] = replacement_ui
+	try:
+		validate_plan(missing_grid)
+	except PlanError as error:
+		if "control_coverage.Quality.natural_clear" not in str(error) or "missing qualified recipe-grid values" not in str(error):
+			raise
+	else:
+		raise AssertionError("master plan accepted incomplete qualified recipe-grid coverage")
 	room_ids = {
 		split: { case["mix"]["rir"]["item_id"] for case in plan["cases"] }
 		for split, plan in plans.items()

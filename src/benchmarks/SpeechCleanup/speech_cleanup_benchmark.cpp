@@ -82,6 +82,10 @@ namespace {
 		QString activeProfile;
 		QString activeEngine;
 		QString fallbackReason;
+		int requestedUiNoiseReduction     = -1;
+		int requestedUiNaturalClear       = -1;
+		int validatedRecipeNoiseReduction = -1;
+		int validatedRecipeNaturalClear   = -1;
 		std::uint32_t recipeRevision = 0;
 		std::uint64_t processedFrames = 0;
 		std::uint64_t neuralFrames = 0;
@@ -802,6 +806,10 @@ namespace {
 			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
 		metrics.mixFactor        = recipe.mixFactor();
 		metrics.activeModelPath  = attestedProductModelPath(recipe, authorizedModelPath);
+		metrics.requestedUiNoiseReduction     = request.noiseReduction;
+		metrics.requestedUiNaturalClear       = request.naturalCrisp;
+		metrics.validatedRecipeNoiseReduction = recipe.noiseReduction();
+		metrics.validatedRecipeNaturalClear   = recipe.naturalCrisp();
 		metrics.inputSampleCount = samples.size();
 		metrics.reportedLatencySamples = pipeline.latencySamples();
 		const SignalMetrics inputMetrics = measureSignal(samples);
@@ -1076,6 +1084,10 @@ namespace {
 				&& productMetrics.activeProfile == QLatin1String("Original")
 				&& productMetrics.activeEngine == QLatin1String("None") && !productMetrics.usedFallback,
 				"Product Original benchmark diagnostics failed");
+		require(productMetrics.requestedUiNoiseReduction == 50 && productMetrics.requestedUiNaturalClear == 50
+				&& productMetrics.validatedRecipeNoiseReduction == 0
+				&& productMetrics.validatedRecipeNaturalClear == 0,
+				"Product Original control-coordinate diagnostics failed");
 
 		Mumble::InputEnhancement::ResolveRequest balancedRequest;
 		balancedRequest.profile = Mumble::InputEnhancement::Profile::Balanced;
@@ -1087,16 +1099,31 @@ namespace {
 
 		Mumble::InputEnhancement::ResolveRequest qualityRequest;
 		qualityRequest.profile = Mumble::InputEnhancement::Profile::Quality;
+		qualityRequest.noiseReduction = 8;
+		qualityRequest.naturalCrisp = 33;
 		qualityRequest.cpuClass = Mumble::InputEnhancement::CpuClass::High;
 		qualityRequest.backendAvailability = { true, true, true };
 		const Mumble::InputEnhancement::Recipe qualityRecipe =
 			Mumble::InputEnhancement::RecipeCatalog::resolve(qualityRequest);
+		require(qualityRecipe.noiseReduction() == 30 && qualityRecipe.naturalCrisp() == 50,
+				"Quality persisted-UI to validated-recipe control mapping failed");
 		const QString benchmarkPath = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
 		require(!benchmarkPath.isEmpty()
 				&& attestedProductModelPath(qualityRecipe, QCoreApplication::applicationFilePath()) == benchmarkPath,
 				"External product model benchmark path attestation failed");
 		require(attestedProductModelPath(qualityRecipe, {}).isEmpty(),
 				"Unmanaged development model path must remain unpublished");
+
+		Mumble::InputEnhancement::ResolveRequest voiceFocusRequest;
+		voiceFocusRequest.profile = Mumble::InputEnhancement::Profile::VoiceFocus;
+		voiceFocusRequest.noiseReduction = 17;
+		voiceFocusRequest.naturalCrisp = 25;
+		voiceFocusRequest.cpuClass = Mumble::InputEnhancement::CpuClass::High;
+		voiceFocusRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe voiceFocusRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(voiceFocusRequest);
+		require(voiceFocusRecipe.noiseReduction() == 75 && voiceFocusRecipe.naturalCrisp() == 55,
+				"Voice Focus persisted-UI to validated-recipe control mapping failed");
 	}
 } // namespace
 
@@ -1351,6 +1378,10 @@ int main(int argc, char **argv) {
 			{ "active_engine", metrics.activeEngine.toStdString() },
 			{ "requested_recipe_id", metrics.requestedRecipeId.toStdString() },
 			{ "recipe_revision", metrics.recipeRevision },
+			{ "requested_ui_noise_reduction", metrics.requestedUiNoiseReduction },
+			{ "requested_ui_natural_clear", metrics.requestedUiNaturalClear },
+			{ "validated_recipe_noise_reduction", metrics.validatedRecipeNoiseReduction },
+			{ "validated_recipe_natural_clear", metrics.validatedRecipeNaturalClear },
 			{ "active_model_id", metrics.activeModelId.toStdString() },
 			{ "active_model_path", metrics.activeModelPath.toStdString() },
 			{ "active_model_sha256", metrics.activeModelSha256.toStdString() },

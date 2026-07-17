@@ -425,7 +425,8 @@ def _benchmark_measurement(
 		"out_of_range_sample_count", "output_sample_count", "processing_mode", "processing_padding_sample_count",
 		"output_sha256", "processing_wall_ms", "reported_latency_samples", "requested_profile", "rtf", "sample_count",
 		"kind", "requested_recipe_id", "recipe_revision", "sample_rate", "saturated_sample_count", "schema_version",
-		"source_report_sha256", "used_fallback",
+		"source_report_sha256", "used_fallback", "requested_ui_noise_reduction", "requested_ui_natural_clear",
+		"validated_recipe_noise_reduction", "validated_recipe_natural_clear",
 		"worker_processing_p99_ms",
 	}
 	_exact_keys(document, required, path)
@@ -442,6 +443,12 @@ def _benchmark_measurement(
 	_expect(engine in expected_engines[profile], f"{path}.active_engine", "engine is not authorized for the profile")
 	_expect(isinstance(document["requested_recipe_id"], str) and bool(document["requested_recipe_id"]), f"{path}.requested_recipe_id", "required")
 	_integer(document["recipe_revision"], f"{path}.recipe_revision", 1)
+	for field in (
+		"requested_ui_noise_reduction", "requested_ui_natural_clear",
+		"validated_recipe_noise_reduction", "validated_recipe_natural_clear",
+	):
+		value = _integer(document[field], f"{path}.{field}", 0)
+		_expect(value <= 100, f"{path}.{field}", "must be an integer from 0 to 100")
 	_expect(document["sample_rate"] == SAMPLE_RATE_HZ, f"{path}.sample_rate", "must be 48 kHz")
 	for field in ("input_sha256", "clean_reference_sha256", "output_sha256"):
 		_hash(document[field], f"{path}.{field}")
@@ -503,6 +510,14 @@ def _benchmark_measurement(
 		"engine": engine,
 		"model_id": model_id,
 		"model_sha256": model_digest,
+		"requested_ui_controls": {
+			"noise_reduction": document["requested_ui_noise_reduction"],
+			"natural_clear": document["requested_ui_natural_clear"],
+		},
+		"validated_recipe_controls": {
+			"noise_reduction": document["validated_recipe_noise_reduction"],
+			"natural_clear": document["validated_recipe_natural_clear"],
+		},
 		"input_sha256": document["input_sha256"],
 		"clean_reference_sha256": document["clean_reference_sha256"],
 		"output_sha256": document["output_sha256"],
