@@ -203,6 +203,20 @@ Voice Focus versus Quality scoring and blind A/B listening paired rather than a
 comparison across unrelated speech or noise. The E2E harness still captures an
 Original transport baseline separately for every candidate case.
 
+Mixture-plan schema v4 gives `controls.noise_reduction` and
+`controls.natural_clear` one unambiguous meaning: they are the integer 0–100
+values persisted by the client UI. They are not already-mapped recipe values.
+The plan generator mirrors the client's exact integer mapping
+`minimum + ((ui * (maximum - minimum) + 50) // 100)` and selects the nearest
+canonical UI integer that round-trips to each qualified five-point recipe-grid
+value. The internal grids are Light 0–100 for both controls, Balanced
+20–90 / 10–90, Quality 25–90 / 25–100, and Voice Focus 70–100 / 40–100. Master and nightly
+tuning/validation plans must cover every value in each dimension; PR smoke and
+release plans must cover both endpoints. Release Quality/Voice Focus pairs keep
+identical persisted UI controls while mapping into their separate recipe ranges.
+Schema-v3 plans that wrote internal Quality or Voice Focus values into UI fields
+are rejected rather than silently mapped a second time.
+
 Migrate an old schema-v2 inventory only as an explicit draft. Migration never
 invents transcript hashes or response assets, so the result remains ineligible
 until curated:
@@ -520,6 +534,13 @@ benchmark/runtime and non-advanced product-model set, and writes the canonical
 index below `artifacts/pr_smoke-<runner>/`. It remains deliberately restricted
 to core `pr_smoke`; validation via the real Mumble route is required for master,
 nightly, and release suites.
+
+Every product benchmark report records four integer-only control fields:
+`requested_ui_noise_reduction`, `requested_ui_natural_clear`,
+`validated_recipe_noise_reduction`, and `validated_recipe_natural_clear`.
+The campaign independently computes the schema-v4 round-trip from the plan and
+fails if the C++ recipe reports anything else. Sanitized measurement evidence
+retains these integers but excludes the private model and filesystem paths.
 
 ## Tracked two-client E2E core
 

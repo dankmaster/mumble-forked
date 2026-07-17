@@ -103,7 +103,9 @@ PUBLIC_BENCHMARK_KEYS = {
 	"kind", "non_finite_sample_count", "out_of_range_sample_count", "output_sample_count",
 	"output_sha256", "processing_mode", "processing_padding_sample_count", "processing_wall_ms",
 	"reported_latency_samples", "requested_profile", "requested_recipe_id", "recipe_revision",
+	"requested_ui_natural_clear", "requested_ui_noise_reduction",
 	"rtf", "sample_count", "sample_rate", "saturated_sample_count", "schema_version", "source_report_sha256", "used_fallback",
+	"validated_recipe_natural_clear", "validated_recipe_noise_reduction",
 	"worker_processing_p99_ms",
 }
 
@@ -923,6 +925,11 @@ def _case_binding(
 	reduction = _integer(controls.get("noise_reduction"), f"case {case['case_id']}.controls.noise_reduction")
 	character = _integer(controls.get("natural_clear"), f"case {case['case_id']}.controls.natural_clear")
 	_expect(reduction <= 100 and character <= 100, f"case {case['case_id']}.controls", "controls must be <= 100")
+	ui_controls = {"noise_reduction": reduction, "natural_clear": character}
+	try:
+		validated_controls = PLAN.validated_recipe_controls(str(case["profile"]), ui_controls)
+	except PLAN.PlanError as error:
+		raise CampaignError(f"case {case['case_id']}.controls: {error}") from error
 	case_cpu = case.get("cpu_class")
 	control_cpu = controls.get("cpu_class")
 	_expect(case_cpu is None or control_cpu is None or case_cpu == control_cpu, f"case {case['case_id']}.cpu_class", "conflicting plan CPU classes")
@@ -949,7 +956,8 @@ def _case_binding(
 		"profile": case["profile"],
 		"plan_case_sha256": _canonical_sha256(case),
 		"render_entry_sha256": _canonical_sha256(render_entry),
-		"controls": {"noise_reduction": reduction, "natural_clear": character},
+		"controls": ui_controls,
+		"validated_recipe_controls": validated_controls,
 		"cpu_class": cpu_class,
 		"cpu_class_source": cpu_source,
 		"recipe": {
@@ -1039,10 +1047,13 @@ def _benchmark_arguments(
 def _validate_benchmark_report(
 	report_path: Path, output_path: Path, input_path: Path, clean_path: Path, profile: str,
 	recipe: Mapping[str, Any], model: Mapping[str, Any] | None, expected_model_path: Path | None,
+	expected_ui_controls: Mapping[str, Any], expected_recipe_controls: Mapping[str, Any],
 ) -> Mapping[str, Any]:
 	report = _mapping(_load_json(report_path, f"{profile} benchmark report"), f"{profile} benchmark report")
 	for key in (
 		"processing_mode", "requested_profile", "active_profile", "requested_recipe_id", "recipe_revision", "active_engine",
+		"requested_ui_noise_reduction", "requested_ui_natural_clear",
+		"validated_recipe_noise_reduction", "validated_recipe_natural_clear",
 		"active_model_id", "active_model_path", "active_model_sha256", "used_fallback", "fallback_reason", "fallback_count",
 		"deadline_misses", "reported_latency_ms", "reported_latency_samples", "input_sample_count",
 		"clean_reference_sample_count", "output_sample_count", "drain_sample_count",
@@ -1054,6 +1065,15 @@ def _validate_benchmark_report(
 	_expect(report["requested_profile"] == profile and report["active_profile"] == profile, f"{profile} report.profile", "requested/active profile mismatch")
 	_expect(report["requested_recipe_id"] == recipe["id"] and report["recipe_revision"] == recipe["revision"], f"{profile} report.recipe", "recipe mismatch")
 	_expect(report["active_engine"] == recipe["engine"], f"{profile} report.active_engine", "engine mismatch")
+	for report_key, controls, control_key in (
+		("requested_ui_noise_reduction", expected_ui_controls, "noise_reduction"),
+		("requested_ui_natural_clear", expected_ui_controls, "natural_clear"),
+		("validated_recipe_noise_reduction", expected_recipe_controls, "noise_reduction"),
+		("validated_recipe_natural_clear", expected_recipe_controls, "natural_clear"),
+	):
+		actual_control = _integer(report[report_key], f"{profile} report.{report_key}")
+		expected_control = _integer(controls.get(control_key), f"{profile} expected {report_key}")
+		_expect(actual_control == expected_control, f"{profile} report.{report_key}", "UI-to-recipe control mapping mismatch")
 	_expect(report["used_fallback"] is False and report["fallback_reason"] == "None" and report["fallback_count"] == 0, f"{profile} report.fallback", "fallback is forbidden")
 	_expect(report["deadline_misses"] == 0, f"{profile} report.deadline_misses", "deadline misses are forbidden")
 	_expect(report["non_finite_sample_count"] == 0 and report["out_of_range_sample_count"] == 0, f"{profile} report.output", "invalid samples are forbidden")
@@ -1529,12 +1549,16 @@ def _materialize_measurement_fragments(
 			_below(execution_root, str(candidate_model["path"]), f"{case_id} execution model")
 			if candidate_model is not None else None
 		)
+		ui_controls = binding["controls"]
+		original_recipe_controls = PLAN.validated_recipe_controls("Original", ui_controls)
 		original_report = _validate_benchmark_report(
 			original_report_path, original_wav, input_path, clean_path, "Original", original_recipe, None, None,
+			ui_controls, original_recipe_controls,
 		)
 		candidate_report = _validate_benchmark_report(
 			candidate_report_path, candidate_wav, input_path, clean_path, str(case["profile"]),
 			candidate_recipe, candidate_model, candidate_model_path,
+			ui_controls, binding["validated_recipe_controls"],
 		)
 		edge_score = _validate_edge_fixed_timeline(
 			edge_score_path, clean_path, candidate_wav, int(candidate_report["reported_latency_samples"]),
@@ -2202,6 +2226,7 @@ def _execute_case(
 		)
 		original_document = _validate_benchmark_report(
 			original_report, original_wav, input_path, clean_path, "Original", original_recipe, None, None,
+			controls, PLAN.validated_recipe_controls("Original", controls),
 		)
 		_expect(original_document["reported_latency_samples"] == 0 and original_document["drain_sample_count"] == 0, f"{case_id} Original timeline", "must add zero latency/tail")
 		_assert_same_samples(input_path, original_wav, f"{case_id} Original exact input")
@@ -2216,7 +2241,7 @@ def _execute_case(
 		)
 		candidate_document = _validate_benchmark_report(
 			candidate_report, candidate_wav, input_path, clean_path, str(case["profile"]), candidate_recipe,
-			candidate_model, candidate_model_path,
+			candidate_model, candidate_model_path, controls, binding["validated_recipe_controls"],
 		)
 		if case["profile"] == "Original":
 			_assert_same_samples(original_wav, candidate_wav, f"{case_id} Original repeat")
@@ -2474,9 +2499,23 @@ recipe={'Original':'input.original','Light':'input.light.speex','Balanced':'inpu
 engine={'Original':'None','Light':'Speex','Balanced':'RNNoise','Quality':'DeepFilterNet','VoiceFocus':'DeepFilterNet'}[a.profile]
 model={'Balanced':'rnnoise:embedded','Quality':'deepfilternet:fake','VoiceFocus':'deepfilternet:fake'}.get(a.profile,'')
 active_model_path='' if a.profile == 'Balanced' else (a.authorized_model_path or '')
+ranges={
+ 'Light':{'noise_reduction':(0,100),'natural_clear':(0,100)},
+ 'Balanced':{'noise_reduction':(20,90),'natural_clear':(10,90)},
+ 'Quality':{'noise_reduction':(25,90),'natural_clear':(25,100)},
+ 'VoiceFocus':{'noise_reduction':(70,100),'natural_clear':(40,100)},
+}
+ui_reduction=int(a.noise_reduction); ui_natural_clear=int(a.natural_clear)
+def validated(dimension,value):
+    if a.profile == 'Original': return 0
+    minimum,maximum=ranges[a.profile][dimension]
+    return minimum+((value*(maximum-minimum)+50)//100)
 report={
  'processing_mode':'product-profile','requested_profile':a.profile,'active_profile':a.profile,
  'requested_recipe_id':recipe,'recipe_revision':1,'active_engine':engine,'active_model_id':model,
+ 'requested_ui_noise_reduction':ui_reduction,'requested_ui_natural_clear':ui_natural_clear,
+ 'validated_recipe_noise_reduction':validated('noise_reduction',ui_reduction),
+ 'validated_recipe_natural_clear':validated('natural_clear',ui_natural_clear),
  'active_model_path':active_model_path,'active_model_sha256':a.authorized_model_sha256 or '',
  'used_fallback':False,'fallback_reason':'None','fallback_count':0,'deadline_misses':0,
  'reported_latency_ms':latency*1000.0/48000.0,'reported_latency_samples':latency,
@@ -2855,6 +2894,7 @@ def run_self_test() -> None:
 				_validate_benchmark_report(
 					light_report_path, light_output_path, light_input_path, light_clean_path,
 					"Light", light_recipe, None, None,
+					light_state["binding"]["controls"], light_state["binding"]["validated_recipe_controls"],
 				)
 			except CampaignError as error:
 				_expect("signed recipe execution contract" in str(error), "self-test forged latency", f"unexpected error: {error}")
@@ -2876,12 +2916,28 @@ def run_self_test() -> None:
 			)
 			quality_report_bytes = quality_report_path.read_bytes()
 			quality_report = _load_json(quality_report_path, "self-test Quality report")
+			quality_report["validated_recipe_noise_reduction"] += 1
+			_write_json_atomic(quality_report_path, quality_report)
+			try:
+				_validate_benchmark_report(
+					quality_report_path, quality_output_path, quality_input_path, quality_clean_path,
+					"Quality", quality_recipe, quality_model, runtime / str(quality_model["path"]),
+					quality_state["binding"]["controls"], quality_state["binding"]["validated_recipe_controls"],
+				)
+			except CampaignError as error:
+				_expect("control mapping mismatch" in str(error), "self-test control mapping", f"unexpected error: {error}")
+			else:
+				raise AssertionError("benchmark validation accepted Python/C++ control-mapping drift")
+			quality_report_path.write_bytes(quality_report_bytes)
+
+			quality_report = _load_json(quality_report_path, "self-test Quality report")
 			quality_report["active_model_path"] = ""
 			_write_json_atomic(quality_report_path, quality_report)
 			try:
 				_validate_benchmark_report(
 					quality_report_path, quality_output_path, quality_input_path, quality_clean_path,
 					"Quality", quality_recipe, quality_model, runtime / str(quality_model["path"]),
+					quality_state["binding"]["controls"], quality_state["binding"]["validated_recipe_controls"],
 				)
 			except CampaignError as error:
 				_expect("may only be empty" in str(error), "self-test external empty model path", f"unexpected error: {error}")
@@ -2898,6 +2954,7 @@ def run_self_test() -> None:
 				_validate_benchmark_report(
 					quality_report_path, quality_output_path, quality_input_path, quality_clean_path,
 					"Quality", quality_recipe, quality_model, runtime / str(quality_model["path"]),
+					quality_state["binding"]["controls"], quality_state["binding"]["validated_recipe_controls"],
 				)
 			except CampaignError as error:
 				_expect(
