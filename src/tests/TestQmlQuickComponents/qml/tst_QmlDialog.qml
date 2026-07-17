@@ -31,6 +31,30 @@ TestCase {
 		dialogState.setSpecialState("generic", {});
     }
 
+	function setInputEnhancementCalibrationState(state, overrides) {
+		const field = {
+			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
+			"value": { "available": true, "amplitude": 40 }, "staticMeter": true,
+			"inputEnhancementCalibrationState": state,
+			"inputEnhancementCalibrationWorkerState": "idle",
+			"inputEnhancementCalibrationStartActionId": "startInputEnhancementCalibration",
+			"inputEnhancementCalibrationAdvanceActionId": "advanceInputEnhancementCalibration",
+			"inputEnhancementCalibrationCancelActionId": "cancelInputEnhancementCalibration",
+			"inputEnhancementCalibrationSkipNoiseActionId": "skipInputEnhancementCalibrationNoise",
+			"inputEnhancementCalibrationEvaluateActionId": "evaluateInputEnhancementCalibration",
+			"inputEnhancementCalibrationRefreshActionId": "refreshInputEnhancementCalibration",
+			"inputEnhancementCalibrationSelectActionId": "selectInputEnhancementCalibration",
+			"inputEnhancementCalibrationApplyActionId": "applyInputEnhancementCalibration",
+			"inputEnhancementProbationUndoActionId": "undoInputEnhancementRollback",
+			"replayStartActionId": "startVoiceReplay",
+			"replayStopActionId": "stopVoiceReplay",
+			"replayLabel": "Replay"
+		};
+		const additions = overrides || {};
+		Object.keys(additions).forEach(function(key) { field[key] = additions[key]; });
+		dialogState.setSections([{ "title": "Input enhancement", "fields": [field] }]);
+	}
+
 	function test_before_open_can_defer_modal_until_host_is_ready() {
 		dialogState.open = false;
 		tryCompare(loader.item, "visible", false);
@@ -583,14 +607,21 @@ TestCase {
 			return comparison !== null && comparison.visible && playA !== null && playB !== null
 				&& preferB !== null && privacy !== null;
 		});
-		verify(privacy.text.indexOf("Nothing is sent to the server") >= 0);
+		verify(privacy.text.indexOf("never sent to the server") >= 0);
 
 		playA.clicked();
 		compare(dialogState.lastAction, "playInputEnhancementCalibration");
 		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551001");
 		compare(Object.keys(dialogState.lastPayload).length, 1);
 		compare(playA.text, "Stop A");
+		compare(comparison.playbackExpiryMs, 12000);
+		comparison.expirePlaybackState();
+		compare(dialogState.lastAction, "playInputEnhancementCalibration");
+		compare(playA.text, "Play A");
 
+		playA.clicked();
+		compare(dialogState.lastAction, "playInputEnhancementCalibration");
+		compare(playA.text, "Stop A");
 		playA.clicked();
 		compare(dialogState.lastAction, "stopInputEnhancementCalibrationPlayback");
 		compare(playA.text, "Play A");
@@ -602,6 +633,122 @@ TestCase {
 		compare(dialogState.lastAction, "selectInputEnhancementCalibration");
 		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551002");
 		compare(playB.text, "Play B");
+	}
+
+	function test_input_enhancement_calibration_renders_every_runtime_state() {
+		const expectedHeadings = [
+			"Tune input enhancement", "Check microphone level", "Check microphone level",
+			"Capture room sound", "Capture room sound", "Capture your voice", "Capture your voice",
+			"Capture local noise", "Capture local noise", "Compare safe candidates", "Blind comparison",
+			"Selection ready", "Calibration applied", "Calibration cancelled", "Calibration stopped",
+			"Calibration could not finish"
+		];
+		for (let state = 0; state <= 15; ++state) {
+			const extras = {};
+			if (state === 10 || state === 11) {
+				extras.inputEnhancementCalibrationLeftPlaybackToken = "90071992547410001";
+				extras.inputEnhancementCalibrationRightPlaybackToken = "90071992547410002";
+			}
+			if (state === 15)
+				extras.inputEnhancementCalibrationErrorText = "Safe test failure";
+			setInputEnhancementCalibrationState(state, extras);
+			tryVerify(function() {
+				const calibration = findChild(loader.item.contentItem, "inputEnhancementCalibration");
+				const heading = findChild(loader.item.contentItem, "inputEnhancementCalibrationHeading");
+				const status = findChild(loader.item.contentItem, "inputEnhancementCalibrationStatus");
+				return calibration !== null && calibration.visible && heading !== null && status !== null
+					&& heading.text === expectedHeadings[state] && status.text.length > 0;
+			});
+		}
+
+		setInputEnhancementCalibrationState(5);
+		const voicePrompt = findChild(loader.item.contentItem, "inputEnhancementCalibrationStatus");
+		tryVerify(function() { return voicePrompt !== null && voicePrompt.text.indexOf("s, sh, f") >= 0; });
+		verify(voicePrompt.text.indexOf("p, t, k") >= 0);
+	}
+
+	function test_input_enhancement_calibration_routes_guided_actions_and_refresh() {
+		setInputEnhancementCalibrationState(0);
+		let calibration = findChild(loader.item.contentItem, "inputEnhancementCalibration");
+		let optionalNoise = findChild(loader.item.contentItem, "inputEnhancementCalibrationOptionalNoise");
+		let action = findChild(loader.item.contentItem, "inputEnhancementCalibrationStart");
+		tryVerify(function() {
+			return calibration !== null && calibration.visible && optionalNoise !== null && optionalNoise.visible
+				&& action !== null && action.visible;
+		});
+		calibration.captureOptionalLocalNoise = true;
+		tryCompare(optionalNoise, "checked", true);
+		action.clicked();
+		compare(dialogState.lastAction, "startInputEnhancementCalibration");
+		compare(dialogState.lastPayload.captureOptionalLocalNoise, true);
+		compare(Object.keys(dialogState.lastPayload).length, 1);
+
+		setInputEnhancementCalibrationState(1);
+		calibration = findChild(loader.item.contentItem, "inputEnhancementCalibration");
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationCancel");
+		tryVerify(function() { return calibration !== null && calibration.refreshTimerRunning && action !== null; });
+		calibration.requestRefresh();
+		compare(dialogState.lastAction, "refreshInputEnhancementCalibration");
+		action.clicked();
+		compare(dialogState.lastAction, "cancelInputEnhancementCalibration");
+
+		setInputEnhancementCalibrationState(2, {
+			"inputEnhancementCalibrationLevelStatus": 2,
+			"inputEnhancementCalibrationLevelPeakPercent": 24,
+			"inputEnhancementCalibrationLevelRmsPercent": 8
+		});
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationAdvance");
+		tryVerify(function() { return action !== null && action.visible && action.text === "Retry level check"; });
+		action.clicked();
+		compare(dialogState.lastAction, "advanceInputEnhancementCalibration");
+
+		setInputEnhancementCalibrationState(7);
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationSkipNoise");
+		tryVerify(function() { return action !== null && action.visible; });
+		action.clicked();
+		compare(dialogState.lastAction, "skipInputEnhancementCalibrationNoise");
+
+		setInputEnhancementCalibrationState(9, {
+			"inputEnhancementCalibrationWorkerState": "idle",
+			"inputEnhancementCalibrationProgress": 0
+		});
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationEvaluate");
+		tryVerify(function() { return action !== null && action.visible; });
+		action.clicked();
+		compare(dialogState.lastAction, "evaluateInputEnhancementCalibration");
+
+		setInputEnhancementCalibrationState(9, {
+			"inputEnhancementCalibrationWorkerState": "running",
+			"inputEnhancementCalibrationProgress": 45,
+			"inputEnhancementCalibrationTransmissionBlocked": true
+		});
+		const progress = findChild(loader.item.contentItem, "inputEnhancementCalibrationEvaluationProgress");
+		const legacyReplay = findChild(loader.item.contentItem, "voiceMeterReplay_audio.inputMeter");
+		tryVerify(function() {
+			return progress !== null && progress.visible && progress.value === 45
+				&& legacyReplay !== null && legacyReplay.visible && !legacyReplay.enabled;
+		});
+
+		setInputEnhancementCalibrationState(11, {
+			"inputEnhancementCalibrationLeftPlaybackToken": "90071992547410001",
+			"inputEnhancementCalibrationRightPlaybackToken": "90071992547410002"
+		});
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationApply");
+		tryVerify(function() { return action !== null && action.visible; });
+		action.clicked();
+		compare(dialogState.lastAction, "applyInputEnhancementCalibration");
+
+		setInputEnhancementCalibrationState(12, {
+			"inputEnhancementProbationRunning": true,
+			"inputEnhancementProbationUndoAvailable": true
+		});
+		calibration = findChild(loader.item.contentItem, "inputEnhancementCalibration");
+		action = findChild(loader.item.contentItem, "inputEnhancementCalibrationUndo");
+		tryVerify(function() {
+			return calibration !== null && calibration.refreshTimerRunning && action !== null && action.visible;
+		});
+		action.clicked();
+		compare(dialogState.lastAction, "undoInputEnhancementRollback");
 	}
 
 	function test_dialog_metadata_controls_loading_status_size_primary_and_focus() {
