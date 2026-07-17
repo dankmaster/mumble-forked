@@ -184,6 +184,8 @@ set(MUMBLE_SOURCES
 	"InputEnhancementChannelPointer.h"
 	"InputEnhancementCalibration.cpp"
 	"InputEnhancementCalibration.h"
+	"InputEnhancementCalibrationPlayback.cpp"
+	"InputEnhancementCalibrationPlayback.h"
 	"InputEnhancementCalibrationRuntime.cpp"
 	"InputEnhancementCalibrationRuntime.h"
 	"InputEnhancementCalibrationWorker.cpp"
@@ -1240,7 +1242,7 @@ if(wasapi)
 	)
 
 	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_WASAPI")
-	target_link_libraries(mumble_client_object_lib PUBLIC avrt.lib)
+	target_link_libraries(mumble_client_object_lib PUBLIC avrt.lib ole32.lib)
 	if(MINGW)
 		target_link_libraries(mumble_client_object_lib PUBLIC ksuser.lib)
 	endif()

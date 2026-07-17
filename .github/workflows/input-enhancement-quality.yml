@@ -301,7 +301,7 @@ jobs:
             TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
             TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
             TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
-            TestAudioOutputMemorySample TestModernDialogControllers TestQmlQuickComponents `
+            TestInputEnhancementCalibrationPlayback TestModernDialogControllers TestQmlQuickComponents `
             TestUpdateHealth TestSpeechCleanup --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build PR input-enhancement correctness targets.' }
           .\scripts\windows\new-input-enhancement-package-manifests.ps1 `
@@ -521,7 +521,7 @@ jobs:
             TestInputEnhancementCalibrationRuntime TestInputEnhancementPolicy `
             TestInputEnhancementPolicyConfiguredKey TestInputEnhancementPolicyController `
             TestInputEnhancementPackageVerifier TestInputEnhancementSettings `
-            TestAudioOutputMemorySample TestModernDialogControllers TestQmlQuickComponents `
+            TestInputEnhancementCalibrationPlayback TestModernDialogControllers TestQmlQuickComponents `
             TestUpdateHealth TestSpeechCleanup mumble-updater mumble-updater-test `
             speech_cleanup_benchmark --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'Failed to build mandatory qualification targets.' }

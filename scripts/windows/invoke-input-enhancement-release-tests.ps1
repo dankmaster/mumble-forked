@@ -43,7 +43,7 @@ $requiredTests = @(
 	"TestInputEnhancementPolicyController",
 	"TestInputEnhancementPackageVerifier",
 	"TestInputEnhancementSettings",
-	"TestAudioOutputMemorySample",
+	"TestInputEnhancementCalibrationPlayback",
 	"TestModernDialogControllers",
 	"TestQmlQuickComponents",
 	"TestUpdateHealth",

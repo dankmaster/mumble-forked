@@ -2409,7 +2409,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	}
 
 	if (classicProductPipeline) {
-		const bool processed = m_inputEnhancementLightProcessor.processFrame(psSource, iFrameSize);
+		[[maybe_unused]] const bool processed = m_inputEnhancementLightProcessor.processFrame(psSource, iFrameSize);
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
 		if ((processed || classicProductPipeline->alignedFallbackActive()) && speechCleanupDrainFrame.draining) {
 			m_speechCleanupE2ECurrentDrainSamples += speechCleanupDrainFrame.causalDrainSamples;

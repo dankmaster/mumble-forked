@@ -11,11 +11,7 @@
 #include <QtCore/QDebug>
 #include <QtWidgets/QFileDialog>
 
-#include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstring>
-#include <limits>
 
 SoundFile::SoundFile(const QString &fname) {
 	siInfo.frames     = 0;
@@ -140,7 +136,7 @@ AudioOutputSample::AudioOutputSample(SoundFile *psndfile, float volume, bool loo
 		iBufferSize = systemMaxBufferSize * 2;
 		bStereo     = true;
 	} else {
-		// Keep ownership of the invalid handle so the destructor can close it.
+		sfHandle = nullptr; // sound file is corrupted
 		return;
 	}
 
@@ -157,10 +153,8 @@ AudioOutputSample::AudioOutputSample(SoundFile *psndfile, float volume, bool loo
 								   3, &err);
 		if (err != RESAMPLER_ERR_SUCCESS) {
 			qWarning() << "Initialize " << sfHandle->samplerate() << " to " << iOutSampleRate << " resampler failed!";
-			if (srs) {
-				speex_resampler_destroy(srs);
-			}
-			srs = nullptr;
+			srs      = nullptr;
+			sfHandle = nullptr;
 			return;
 		}
 	} else {
@@ -171,123 +165,13 @@ AudioOutputSample::AudioOutputSample(SoundFile *psndfile, float volume, bool loo
 	m_volume                     = volume;
 	bLoop                        = loop;
 	bEof                         = false;
-	m_valid                      = true;
-}
-
-AudioOutputSample::AudioOutputSample(std::span< const float > monoPcm, const unsigned int sampleRate,
-									 const float volume, const unsigned int outputSampleRate,
-									 const unsigned int systemMaxBufferSize)
-	: iOutSampleRate(outputSampleRate), m_volume(volume), m_memorySample(true) {
-	bStereo = false;
-	if (!std::isfinite(volume) || volume < 0.0f
-		|| systemMaxBufferSize > std::numeric_limits< unsigned int >::max() - INTERAURAL_DELAY
-		|| !initializeMemoryPcm(monoPcm, sampleRate, outputSampleRate)) {
-		return;
-	}
-
-	// Positional mixing may read up to INTERAURAL_DELAY samples beyond the
-	// requested frame. Reserve that tail before entering the mixer so the
-	// callback never has to resize this buffer.
-	iBufferSize = std::max(1U, systemMaxBufferSize) + INTERAURAL_DELAY;
-	pfBuffer    = new float[iBufferSize];
-	std::fill_n(pfBuffer, iBufferSize, 0.0f);
-	m_valid = true;
-}
-
-bool AudioOutputSample::initializeMemoryPcm(const std::span< const float > monoPcm,
-										 const unsigned int sampleRate,
-										 const unsigned int outputSampleRate) {
-	if (sampleRate != memorySampleRate || outputSampleRate < 8000U || outputSampleRate > 192000U
-		|| monoPcm.empty() || monoPcm.size() > maximumMemorySampleCount
-		|| !std::all_of(monoPcm.begin(), monoPcm.end(), [](const float sample) { return std::isfinite(sample); })) {
-		return false;
-	}
-
-	if (outputSampleRate == sampleRate) {
-		m_ownedMemoryPcm.assign(monoPcm.begin(), monoPcm.end());
-		return true;
-	}
-
-	const std::uint64_t scaledCount = static_cast< std::uint64_t >(monoPcm.size()) * outputSampleRate;
-	const std::size_t outputCount = static_cast< std::size_t >(
-		(scaledCount + sampleRate - 1U) / sampleRate);
-	if (outputCount == 0 || outputCount > static_cast< std::size_t >(outputSampleRate) * maximumMemorySampleSeconds) {
-		return false;
-	}
-
-	int error = RESAMPLER_ERR_SUCCESS;
-	SpeexResamplerState *resampler = speex_resampler_init(1, sampleRate, outputSampleRate, 3, &error);
-	if (!resampler || error != RESAMPLER_ERR_SUCCESS) {
-		if (resampler) {
-			speex_resampler_destroy(resampler);
-		}
-		return false;
-	}
-
-	// Remove the resampler's leading filter delay. Any filter tail still needed
-	// for the exact clip duration is generated from a fixed zero block below.
-	speex_resampler_skip_zeros(resampler);
-	m_ownedMemoryPcm.assign(outputCount, 0.0f);
-
-	std::size_t inputOffset  = 0;
-	std::size_t outputOffset = 0;
-	bool conversionOk        = true;
-	while (inputOffset < monoPcm.size() && outputOffset < outputCount) {
-		spx_uint32_t inputLength = static_cast< spx_uint32_t >(monoPcm.size() - inputOffset);
-		spx_uint32_t outputLength = static_cast< spx_uint32_t >(outputCount - outputOffset);
-		const int result = speex_resampler_process_float(resampler, 0, monoPcm.data() + inputOffset,
-													&inputLength, m_ownedMemoryPcm.data() + outputOffset,
-													&outputLength);
-		if (result != RESAMPLER_ERR_SUCCESS || (inputLength == 0 && outputLength == 0)) {
-			conversionOk = false;
-			break;
-		}
-		inputOffset += inputLength;
-		outputOffset += outputLength;
-	}
-
-	std::array< float, 256 > zeroTail = {};
-	while (conversionOk && inputOffset == monoPcm.size() && outputOffset < outputCount) {
-		spx_uint32_t inputLength  = static_cast< spx_uint32_t >(zeroTail.size());
-		spx_uint32_t outputLength = static_cast< spx_uint32_t >(outputCount - outputOffset);
-		const int result = speex_resampler_process_float(resampler, 0, zeroTail.data(), &inputLength,
-													m_ownedMemoryPcm.data() + outputOffset, &outputLength);
-		if (result != RESAMPLER_ERR_SUCCESS || outputLength == 0) {
-			conversionOk = false;
-			break;
-		}
-		outputOffset += outputLength;
-	}
-
-	speex_resampler_destroy(resampler);
-	if (!conversionOk || inputOffset != monoPcm.size()) {
-		secureWipe(m_ownedMemoryPcm.data(), m_ownedMemoryPcm.size());
-		m_ownedMemoryPcm.clear();
-		return false;
-	}
-	return true;
-}
-
-void AudioOutputSample::secureWipe(float *samples, const std::size_t sampleCount) noexcept {
-	volatile float *cursor = samples;
-	for (std::size_t index = 0; cursor && index < sampleCount; ++index) {
-		cursor[index] = 0.0f;
-	}
 }
 
 float AudioOutputSample::getVolume() const {
 	return m_volume;
 }
 
-bool AudioOutputSample::isValid() const noexcept {
-	return m_valid;
-}
-
 AudioOutputSample::~AudioOutputSample() {
-	if (m_memorySample) {
-		secureWipe(m_ownedMemoryPcm.data(), m_ownedMemoryPcm.size());
-		secureWipe(pfBuffer, iBufferSize);
-	}
 	if (srs)
 		speex_resampler_destroy(srs);
 
@@ -338,30 +222,6 @@ QString AudioOutputSample::browseForSndfile(QString defaultpath) {
 }
 
 bool AudioOutputSample::prepareSampleBuffer(unsigned int frameCount) {
-	if (!m_valid || frameCount == 0) {
-		return false;
-	}
-
-	if (m_memorySample) {
-		if (m_memoryCursor >= m_ownedMemoryPcm.size()
-			|| frameCount > iBufferSize || INTERAURAL_DELAY > iBufferSize - frameCount) {
-			return false;
-		}
-
-		const std::size_t requiredSamples = static_cast< std::size_t >(frameCount) + INTERAURAL_DELAY;
-		std::fill_n(pfBuffer, requiredSamples, 0.0f);
-		const std::size_t remaining = m_ownedMemoryPcm.size() - m_memoryCursor;
-		const std::size_t toCopy    = std::min< std::size_t >(frameCount, remaining);
-		std::copy_n(m_ownedMemoryPcm.data() + m_memoryCursor, toCopy, pfBuffer);
-		m_memoryCursor += toCopy;
-		bEof = m_memoryCursor == m_ownedMemoryPcm.size();
-
-		// Deliberately return one final, zero-padded frame. The following mixer
-		// callback observes EOF and removes the sample. No signal/event or memory
-		// allocation is performed from this real-time path.
-		return true;
-	}
-
 	unsigned int channels    = bStereo ? 2 : 1;
 	unsigned int sampleCount = frameCount * channels;
 	// Forward the buffer

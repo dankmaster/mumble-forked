@@ -24,7 +24,6 @@
 #include <QtCore/QObject>
 
 #include "ACL.h"
-#include "AudioOutputToken.h"
 #include "ConnectionFailTypes.h"
 #include "Log.h"
 #include "ModernShellMenuSerializer.h"
@@ -84,6 +83,10 @@ class QUrl;
 
 namespace Search {
 class SearchDialog;
+}
+
+namespace Mumble::InputEnhancement {
+class CalibrationPlayback;
 }
 
 class ListenerVolumeController;
@@ -898,8 +901,7 @@ protected:
 	};
 	QHash< QString, PendingPluginLoadedTransition > m_pendingPluginLoadedTransitions;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
-	AudioOutputToken m_inputEnhancementCalibrationPlaybackToken;
-	std::weak_ptr< AudioOutput > m_inputEnhancementCalibrationPlaybackOutput;
+	std::unique_ptr< Mumble::InputEnhancement::CalibrationPlayback > m_inputEnhancementCalibrationPlayback;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;

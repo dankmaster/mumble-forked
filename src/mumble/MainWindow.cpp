@@ -8,7 +8,6 @@
 #include "ACL.h"
 #include "AudioInput.h"
 #include "AudioOutput.h"
-#include "AudioOutputSample.h"
 #include "CertService.h"
 #include "Channel.h"
 #include "Connection.h"
@@ -31,6 +30,7 @@
 #include "ChatFeature.h"
 #include "ChatPerfTrace.h"
 #include "HostAddress.h"
+#include "InputEnhancementCalibrationPlayback.h"
 #include "License.h"
 #include "Markdown.h"
 #include "ModernTheme.h"
@@ -18614,8 +18614,8 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		}
 
 		// The token stays opaque outside the native runtime. PCM is copied directly
-		// into AudioOutput's owned memory sample; it never enters QVariant/QML, a
-		// temporary file, the network, or the Mumble voice transport.
+		// into an independent local render session; it never enters QVariant/QML,
+		// AudioOutput, a temporary file, the network, or the Mumble voice transport.
 		const std::span< const float > playback =
 			runtime->playbackForToken(static_cast< std::uint64_t >(playbackToken));
 		if (playback.empty() || !startInputEnhancementCalibrationPlayback(playback)) {
@@ -19735,30 +19735,71 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 
 bool MainWindow::startInputEnhancementCalibrationPlayback(const std::span< const float > monoPcm) {
 	stopInputEnhancementCalibrationPlayback();
-	const AudioOutputPtr output = Global::get().ao;
-	if (!output) {
-		return false;
+	if (!m_inputEnhancementCalibrationPlayback) {
+		m_inputEnhancementCalibrationPlayback = std::make_unique< Mumble::InputEnhancement::CalibrationPlayback >();
+		connect(
+			m_inputEnhancementCalibrationPlayback.get(),
+			&Mumble::InputEnhancement::CalibrationPlayback::playbackStarted, this, [](const bool usedDefaultFallback) {
+				if (usedDefaultFallback) {
+					qWarning("Input calibration playback: configured output disappeared; using the default endpoint");
+				}
+			});
+		connect(
+			m_inputEnhancementCalibrationPlayback.get(), &Mumble::InputEnhancement::CalibrationPlayback::playbackFailed,
+			this, [this](const int errorValue, const bool afterStart) {
+				using CalibrationPlayback = Mumble::InputEnhancement::CalibrationPlayback;
+				const auto error          = static_cast< CalibrationPlayback::Error >(errorValue);
+				QString message;
+				switch (error) {
+					case CalibrationPlayback::Error::UnsupportedPlatform:
+					case CalibrationPlayback::Error::UnsupportedBackend:
+						message = tr("Local calibration playback requires the Windows WASAPI output backend.");
+						break;
+					case CalibrationPlayback::Error::ExclusiveOutput:
+						message = tr("The output device is in exclusive use. Disable exclusive output and try again.");
+						break;
+					case CalibrationPlayback::Error::DeviceUnavailable:
+						message = tr("The selected output device is unavailable.");
+						break;
+					case CalibrationPlayback::Error::UnsupportedFormat:
+						message = tr("The output device could not open the calibration playback format.");
+						break;
+					default:
+						message = afterStart ? tr("Calibration playback stopped before the comparison clip completed.")
+											 : tr("The local comparison clip could not be played.");
+						break;
+				}
+				qWarning("Input calibration playback failed: error=%d afterStart=%d", errorValue,
+						 static_cast< int >(afterStart));
+				publishModernToast(QStringLiteral("error"), tr("Input calibration"), message);
+			});
 	}
 
-	const AudioOutputToken token =
-		output->playMemorySample(monoPcm, AudioOutputSample::memorySampleRate, 1.0f);
-	if (!token) {
-		return false;
+	Mumble::InputEnhancement::CalibrationPlayback::Target target;
+	target.outputBackend   = Global::get().s.qsAudioOutput;
+	target.endpointId      = Global::get().s.qsWASAPIOutput;
+	target.gain            = Global::get().s.fVolume;
+	target.exclusiveOutput = Global::get().s.bExclusiveOutput;
+	const QString role     = Global::get().s.qsWASAPIRole.trimmed().toLower();
+	if (role == QLatin1String("console")) {
+		target.role = Mumble::InputEnhancement::CalibrationPlayback::EndpointRole::Console;
+	} else if (role == QLatin1String("multimedia")) {
+		target.role = Mumble::InputEnhancement::CalibrationPlayback::EndpointRole::Multimedia;
 	}
 
-	m_inputEnhancementCalibrationPlaybackToken  = token;
-	m_inputEnhancementCalibrationPlaybackOutput = output;
+	const Mumble::InputEnhancement::CalibrationPlayback::StartResult result =
+		m_inputEnhancementCalibrationPlayback->start(monoPcm, target);
+	if (!result) {
+		qWarning("Input calibration playback failed: error=%d", static_cast< int >(result.error));
+		return false;
+	}
 	return true;
 }
 
 void MainWindow::stopInputEnhancementCalibrationPlayback() {
-	if (m_inputEnhancementCalibrationPlaybackToken) {
-		if (const AudioOutputPtr output = m_inputEnhancementCalibrationPlaybackOutput.lock()) {
-			output->invalidateToken(m_inputEnhancementCalibrationPlaybackToken);
-		}
+	if (m_inputEnhancementCalibrationPlayback) {
+		m_inputEnhancementCalibrationPlayback->stop();
 	}
-	m_inputEnhancementCalibrationPlaybackToken = AudioOutputToken();
-	m_inputEnhancementCalibrationPlaybackOutput.reset();
 }
 
 bool MainWindow::tryModernAutoConnectLastServer() {
@@ -19767,8 +19808,8 @@ bool MainWindow::tryModernAutoConnectLastServer() {
 	const std::optional< ModernAutoConnectTarget > target =
 		modernAutoConnectTargetForLastServer(favorites, Global::get().s);
 	if (!target) {
-		appendModernShellConnectTrace(QStringLiteral("auto-connect last-server no-direct-target favorites=%1")
-										  .arg(favorites.size()));
+		appendModernShellConnectTrace(
+			QStringLiteral("auto-connect last-server no-direct-target favorites=%1").arg(favorites.size()));
 		return false;
 	}
 
@@ -19781,7 +19822,7 @@ bool MainWindow::tryModernAutoConnectLastServer() {
 }
 
 bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, ClientUser *contextUser,
-											 Channel *contextChannel) {
+													 Channel *contextChannel) {
 	const QString action = actionID.trimmed();
 	if (action.isEmpty()) {
 		return false;

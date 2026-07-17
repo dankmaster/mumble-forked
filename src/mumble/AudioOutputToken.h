@@ -11,22 +11,18 @@
 #include <QObject>
 
 #include <cassert>
-#include <cstdint>
 
 class AudioOutputBuffer;
 
 class AudioOutputToken {
 public:
 	AudioOutputToken() = default;
-	AudioOutputToken(AudioOutputBuffer *buffer, const std::uint64_t tokenId)
-		: m_buffer(buffer), m_tokenId(tokenId) {}
+	AudioOutputToken(AudioOutputBuffer *buffer) : m_buffer(buffer) {}
 
 	~AudioOutputToken() = default;
 
-	inline bool operator==(const AudioOutputToken &rhs) const {
-		return m_buffer == rhs.m_buffer && m_tokenId == rhs.m_tokenId;
-	}
-	inline bool operator!=(const AudioOutputToken &rhs) const { return !(*this == rhs); }
+	inline bool operator==(const AudioOutputToken &rhs) const { return m_buffer == rhs.m_buffer; }
+	inline bool operator!=(const AudioOutputToken &rhs) const { return m_buffer != rhs.m_buffer; }
 
 	operator bool() const { return m_buffer; }
 
@@ -38,7 +34,6 @@ public:
 
 private:
 	AudioOutputBuffer *m_buffer = nullptr;
-	std::uint64_t m_tokenId     = 0;
 
 	friend class AudioOutput;
 };

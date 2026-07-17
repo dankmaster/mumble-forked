@@ -151,7 +151,7 @@ function Assert-TestGateResults {
 			"TestInputEnhancementPolicyController",
 			"TestInputEnhancementPackageVerifier",
 			"TestInputEnhancementSettings",
-			"TestAudioOutputMemorySample",
+			"TestInputEnhancementCalibrationPlayback",
 			"TestModernDialogControllers",
 			"TestQmlQuickComponents",
 			"TestUpdateHealth",

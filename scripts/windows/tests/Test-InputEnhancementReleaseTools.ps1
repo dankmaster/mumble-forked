@@ -2435,7 +2435,7 @@ raise SystemExit(1)
 			[ordered]@{ name = "TestInputEnhancementPolicyController"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementPackageVerifier"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestInputEnhancementSettings"; passed = $true; exitCode = 0; durationMs = 1 },
-			[ordered]@{ name = "TestAudioOutputMemorySample"; passed = $true; exitCode = 0; durationMs = 1 },
+			[ordered]@{ name = "TestInputEnhancementCalibrationPlayback"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestModernDialogControllers"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestQmlQuickComponents"; passed = $true; exitCode = 0; durationMs = 1 },
 			[ordered]@{ name = "TestUpdateHealth"; passed = $true; exitCode = 0; durationMs = 1 },
@@ -3236,7 +3236,7 @@ raise SystemExit(1)
 				"@echo off",
 				"echo %* | findstr /C:`"--show-only=json-v1`" >nul",
 				"if %errorlevel%==0 (",
-				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestAudioOutputMemorySample`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestQmlQuickComponents`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestUpdaterProtocolV4Simulation`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
+				"  echo {`"kind`":`"ctestInfo`",`"version`":{`"major`":1,`"minor`":0},`"tests`":[{`"name`":`"DeepFilterNetCapiTests`"},{`"name`":`"TestInputEnhancement`"},{`"name`":`"TestInputEnhancementAuto`"},{`"name`":`"TestInputEnhancementAutoV2`"},{`"name`":`"TestInputEnhancementCalibration`"},{`"name`":`"TestInputEnhancementCalibrationRuntime`"},{`"name`":`"TestInputEnhancementPolicy`"},{`"name`":`"TestInputEnhancementPolicyConfiguredKey`"},{`"name`":`"TestInputEnhancementPolicyController`"},{`"name`":`"TestInputEnhancementPackageVerifier`"},{`"name`":`"TestInputEnhancementSettings`"},{`"name`":`"TestInputEnhancementCalibrationPlayback`"},{`"name`":`"TestModernDialogControllers`"},{`"name`":`"TestQmlQuickComponents`"},{`"name`":`"TestUpdateHealth`"},{`"name`":`"TestUpdaterHealthIntegration`"},{`"name`":`"TestUpdaterProtocolV4Simulation`"},{`"name`":`"TestSpeechCleanup`"},{`"name`":`"SpeechCleanupBenchmarkSelfTest`"}]}",
 				"  exit /b 0",
 				")",
 				"exit /b 0"
