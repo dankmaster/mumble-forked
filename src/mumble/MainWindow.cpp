@@ -18587,13 +18587,6 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 	if (dialogID == QLatin1String("settings")
 		&& actionID == QLatin1String("playInputEnhancementCalibration")) {
 		stopInputEnhancementCalibrationPlayback();
-
-		// The committed Qt Quick base intentionally has no CalibrationRuntime.
-		// After the audio branch is rebased, resolve this opaque token only from
-		// the active runtime while it is in BlindComparison/DraftReady, then pass
-		// runtime->playbackForToken(token) to
-		// startInputEnhancementCalibrationPlayback(). Never put PCM in a QVariant,
-		// QML property, temporary file, or network message.
 		bool validToken = false;
 		const qulonglong playbackToken =
 			payload.value(QStringLiteral("playbackToken")).toString().toULongLong(&validToken);
@@ -18603,8 +18596,32 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			return true;
 		}
 
-		publishModernToast(QStringLiteral("warning"), tr("Input calibration"),
-							   tr("Local comparison playback is not available in this build."));
+		const AudioInputPtr input = Global::get().ai;
+		Mumble::InputEnhancement::CalibrationRuntimeBridge *runtime =
+			input ? input->inputEnhancementCalibrationRuntime() : nullptr;
+		if (!runtime) {
+			publishModernToast(QStringLiteral("error"), tr("Input calibration"),
+							   tr("The local comparison session is no longer active."));
+			return true;
+		}
+
+		const Mumble::InputEnhancement::CalibrationSession::State state = runtime->state();
+		if (state != Mumble::InputEnhancement::CalibrationSession::State::BlindComparison
+			&& state != Mumble::InputEnhancement::CalibrationSession::State::DraftReady) {
+			publishModernToast(QStringLiteral("error"), tr("Input calibration"),
+							   tr("The local comparison clip is not available at this calibration step."));
+			return true;
+		}
+
+		// The token stays opaque outside the native runtime. PCM is copied directly
+		// into AudioOutput's owned memory sample; it never enters QVariant/QML, a
+		// temporary file, the network, or the Mumble voice transport.
+		const std::span< const float > playback =
+			runtime->playbackForToken(static_cast< std::uint64_t >(playbackToken));
+		if (playback.empty() || !startInputEnhancementCalibrationPlayback(playback)) {
+			publishModernToast(QStringLiteral("error"), tr("Input calibration"),
+							   tr("The local comparison clip could not be played."));
+		}
 		return true;
 	}
 
@@ -20368,14 +20385,17 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	}
 
 	bool probationPersistedBeforeAudioStart = false;
-	for (const Mumble::InputEnhancement::DeviceProfileState &device :
-		 Global::get().s.inputEnhancement.deviceProfiles) {
-		if (device.pendingValidation) {
-			// The candidate can fail while Audio::start initializes its model.
-			// Arm crash recovery on disk before executing any candidate code.
-			Global::get().s.save();
-			probationPersistedBeforeAudioStart = true;
-			break;
+	if (accepted) {
+		for (const Mumble::InputEnhancement::DeviceProfileState &device :
+			 Global::get().s.inputEnhancement.deviceProfiles) {
+			if (device.pendingValidation) {
+				// The candidate can fail while Audio::start initializes its model.
+				// Arm crash recovery on disk before executing any candidate code.
+				// Runtime-only previews are never durable settings commits.
+				Global::get().s.save();
+				probationPersistedBeforeAudioStart = true;
+				break;
+			}
 		}
 	}
 	if (!Global::get().s.bAttenuateOthersOnTalk) {

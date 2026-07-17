@@ -1322,6 +1322,13 @@ void TestModernDialogControllers::settingsControllerRollsBackVoiceReplayPreview(
 	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
 	QCOMPARE(controller.draft().lmLoopMode, Settings::Server);
 
+	const ModernSettingsController::ActionResult calibrationWhileReplaying =
+		controller.invokeAction(QStringLiteral("startInputEnhancementCalibration"), {});
+	QVERIFY(calibrationWhileReplaying.stateChanged);
+	QVERIFY(!calibrationWhileReplaying.settingsToApply.has_value());
+	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
+	QCOMPARE(controller.draft().lmLoopMode, Settings::Server);
+
 	const ModernSettingsController::ActionResult stop =
 		controller.invokeAction(QStringLiteral("stopVoiceReplay"), {});
 	QVERIFY(stop.settingsToApply.has_value());

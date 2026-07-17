@@ -1509,6 +1509,9 @@ Dialog {
 				ModernButton {
 					objectName: "voiceMeterReplay_" + String(voiceMeterRoot.field.id || "")
 					visible: String(voiceMeterRoot.field.replayStartActionId || voiceMeterRoot.field.replayStopActionId || "").length > 0
+					enabled: !voiceMeterRoot.field.inputEnhancementCalibrationTransmissionBlocked
+						&& String(voiceMeterRoot.field.inputEnhancementCalibrationWorkerState || "idle") !== "running"
+						&& String(voiceMeterRoot.field.inputEnhancementCalibrationWorkerState || "idle") !== "cancelling"
 					text: voiceMeterRoot.replayActive ? qsTr("Stop replay") : (voiceMeterRoot.field.replayLabel || qsTr("Replay"))
 					tone: voiceMeterRoot.replayActive ? "warning" : ""
 					ToolTip.visible: hovered && String(voiceMeterRoot.field.replayTooltip || "").length > 0

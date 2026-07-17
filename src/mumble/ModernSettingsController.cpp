@@ -2387,7 +2387,12 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.bScreenShareAutoOpenCurrentRoom = value.toBool();
 	} else if (id == QLatin1String("screenShare.diagnostics")) {
 		m_draft.bScreenShareDiagnostics = value.toBool();
-	} else if (id == QLatin1String("audio.inputSystem")) {
+	}
+
+	// Keep the large settings dispatch in separate mutually exclusive chains.
+	// MSVC counts every `else if` as a nested block and rejects the otherwise
+	// valid function once the chain crosses its compiler nesting limit.
+	if (id == QLatin1String("audio.inputSystem")) {
 		const QList< QString > systems = inputSystemNames();
 		m_draft.qsAudioInput          = systemNameAt(systems, value, m_draft.qsAudioInput);
 		if (!AudioInputRegistrar::current.isEmpty() && m_draft.qsAudioInput.isEmpty()) {
@@ -2712,8 +2717,12 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	ActionResult result;
 	const QString action = actionID.trimmed();
 	if (action == QLatin1String("selectPage")) {
+		const bool leavingAudioInput = m_activePage == QLatin1String("audioInput");
 		m_shortcutCaptureIndex = -1;
 		setActivePage(payload.value(QStringLiteral("pageId")).toString());
+		if (leavingAudioInput && m_activePage != QLatin1String("audioInput")) {
+			cancelInputEnhancementCalibration();
+		}
 		return result;
 	}
 
@@ -2747,6 +2756,7 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("reset")) {
+		cancelInputEnhancementCalibration();
 		m_draft = m_original;
 		m_inputEnhancementReadinessUiError.clear();
 		m_shortcutCaptureIndex = -1;
@@ -2970,6 +2980,12 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("startInputEnhancementCalibration")) {
+		if (m_voiceReplayPreviousTransmitMode) {
+			m_inputEnhancementCalibrationUiError =
+				QObject::tr("Stop microphone replay before starting input calibration.");
+			result.stateChanged = true;
+			return result;
+		}
 		const AudioInputPtr input = currentAudioInput();
 		if (!input) {
 			result.stateChanged = false;
@@ -3186,6 +3202,15 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("startVoiceReplay")) {
+		const AudioInputPtr input = currentAudioInput();
+		const auto *runtime = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
+		if (m_inputEnhancementCalibrationWorker->snapshot().active()
+			|| (runtime && runtime->transmissionBlocked())) {
+			m_inputEnhancementCalibrationUiError =
+				QObject::tr("Cancel or finish input calibration before starting microphone replay.");
+			result.stateChanged = true;
+			return result;
+		}
 		if (!m_voiceReplayPreviousTransmitMode) {
 			m_voiceReplayPreviousTransmitMode = m_draft.atTransmit;
 			m_voiceReplayPreviousLoopMode      = m_draft.lmLoopMode;
@@ -4010,14 +4035,15 @@ void ModernSettingsController::refreshShortcutRestartFlag() {
 void ModernSettingsController::cancelInputEnhancementCalibration() {
 	const AudioInputPtr input = currentAudioInput();
 	auto *runtime             = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
-	if (m_inputEnhancementCalibrationWorker->snapshot().active()) {
+	const bool workerActive = m_inputEnhancementCalibrationWorker->snapshot().active();
+	if (workerActive) {
 		m_inputEnhancementCalibrationWorker->cancel();
-		return;
-	}
-	if (runtime && runtime->transmissionBlocked()) {
+	} else if (runtime && runtime->transmissionBlocked()) {
 		runtime->cancel();
 	}
-	if (input) {
+	if (input && !workerActive) {
 		input->synchronizeInputEnhancementCalibrationTransmissionBlock();
 	}
+	m_inputEnhancementCalibrationControls.reset();
+	m_inputEnhancementCalibrationUiError.clear();
 }
