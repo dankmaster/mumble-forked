@@ -25,15 +25,29 @@ python scripts/audio-quality/fetch-corpus.py `
 
 The fetcher refuses ambiguous, restricted, non-commercial, evaluation-only
 training, and unpinned downloads. Existing archives are accepted only after
-their locked byte size and SHA-256 both match. The selected set now includes
-OpenSLR SLR28, a 1,311,166,223-byte Apache-2.0 archive with real isotropic and
-point-source noise plus real/simulated RIRs, and the exact-revision Swedish
-FLEURS train archive plus its separately hash-pinned transcript sidecar. The
-fetcher verifies sidecars but does not extract archives. Its schema-v3
+their locked byte size and SHA-256 both match. The selected set now also
+includes OpenSLR12 test-clean, the exact RixVox v1 revision's two required
+audio shards and metadata, and the clip-level-CC0 FSD50K evaluation subset.
+FSD50K's two split-ZIP volumes, license metadata and ground truth are all
+independently pinned. The fetcher verifies sidecars but does not extract
+archives. Its schema-v3
 `corpus-state.json` records the canonical lock hash, fetcher hash, URL hash, and
 each primary `source_artifact_sha256`; the canonical lock additionally binds
 every sidecar byte hash. Re-fetch or verify the corpus after changing the lock;
-older state files are not release evidence.
+older state files are not release evidence. A targeted fetch merges any other
+already-present, hash-valid primary archives into the new state.
+
+Fetch only the nightly additions (about 14.7 GB) with:
+
+```powershell
+python scripts/audio-quality/fetch-corpus.py `
+  --source fsd50k-eval-cc0-subset `
+  --source openslr12-librispeech-test-clean `
+  --source rixvox-v1-dev-0 `
+  --source rixvox-v1-test-0 `
+  --purpose local-eval `
+  --artifact-root .tmp/audio-quality-corpus
+```
 
 Artifact verification follows the selected use policy. The eighteen DEMAND
 archives are required for `local-eval`, while their explicit
@@ -71,6 +85,31 @@ recorded as `verified-not-materialized-missing-transcripts`: its archive has no
 utterance transcripts, so it cannot silently become release speech. The result
 contains `inventory-v3.json`, `transformation-manifest.json`, and
 `split-summary.json`; all extracted audio remains local.
+
+The nightly builder uses the audited, privacy-scrubbed
+`nightly-corpus-selection-v1.json`. By default it materializes only tuning and
+validation additions and writes a hash-bound `nightly-partial` inventory with
+`sealed_splits: ["holdout"]`; the new holdout members remain unopened. This
+builder has no unauthenticated unseal flag. A later final-qualification path
+must consume the existing signed one-shot holdout opening/receipt contract:
+
+```powershell
+python scripts/audio-quality/build-corpus-inventory-v3.py `
+  --suite nightly `
+  --corpus-state .tmp/audio-quality-corpus/corpus-state.json `
+  --artifact-root .tmp/audio-quality-corpus `
+  --ffmpeg $ffmpeg `
+  --ffmpeg-sha256 $ffmpegSha256 `
+  --output .tmp/audio-quality-corpus/nightly-tuning-validation-v3
+```
+
+RixVox contributes five Swedish speaker groups per split. Its raw Parliament
+speaker ID is used only transiently to derive a domain-separated SHA-256 group;
+names, party, gender, birth year and demographic fields are never persisted.
+OpenSLR12 contributes two speaker-disjoint English groups per split. FSD50K
+contributes 6/7/8 unique uploader groups to tuning/validation/holdout; before a
+clip is decoded, the builder rechecks its exact CC0 URI, direct label and
+privacy-hashed uploader group against the pinned metadata.
 
 FLEURS does not publish persistent speaker IDs. The release builder therefore
 does not invent them or cluster voices. Instead, it selects the first numeric
@@ -181,14 +220,13 @@ requires two noise classes; master and nightly raise all diversity floors.
 canonical qualification evidence carries speaker/noise/RIR/device group IDs so
 a harness cannot qualify by repeating one source under new case names.
 
-The current fully verified corpus satisfies `master_quality` without relabeling
-channels or time windows as independent groups. It deliberately remains
-ineligible for `nightly`: eighteen independent DEMAND scenes plus nine
-independent OpenSLR28 isotropic environments provide 27 real noise groups total,
-which cannot honestly satisfy sixteen groups in each of three disjoint splits.
-The ten available noise labels also do not occur ten times in every split. A
-future nightly corpus must lock additional independently recorded, labelled
-noise and transcripted speakers; the validator fails closed until then.
+The current fully verified base corpus satisfies `master_quality` without
+relabeling channels or time windows as independent groups. The locked
+OpenSLR12/RixVox/FSD50K expansion reaches the `nightly` diversity floor once
+those local archives are fetched and final sealed-holdout qualification is
+explicitly opened. Tuning/validation can be materialized first without opening
+new holdout members. Such an inventory is accepted only for nightly tuning or
+validation plans; holdout and release-plan generation fail closed.
 The 30-case release plan is also stratified as five profiles × two languages ×
 three cases. Every profile/language cell contains one clean and two noisy cases,
 cold and warm startup, and three different transport recipes. Every case keeps

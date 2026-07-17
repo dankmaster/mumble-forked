@@ -15,8 +15,13 @@
   "properties": {
     "schema_version": { "const": 3 },
     "inventory_id": { "$ref": "#/$defs/id" },
-    "eligibility": { "enum": ["draft", "release"] },
+    "eligibility": { "enum": ["draft", "nightly-partial", "release"] },
     "corpus_lock_sha256": { "$ref": "#/$defs/sha256" },
+    "selection_sha256": { "$ref": "#/$defs/sha256" },
+    "sealed_splits": {
+      "type": "array",
+      "const": ["holdout"]
+    },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
@@ -34,6 +39,23 @@
       "items": { "$ref": "#/$defs/item" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "eligibility": { "const": "nightly-partial" } },
+        "required": ["eligibility"]
+      },
+      "then": { "required": ["selection_sha256", "sealed_splits"] },
+      "else": {
+        "not": {
+          "anyOf": [
+            { "required": ["selection_sha256"] },
+            { "required": ["sealed_splits"] }
+          ]
+        }
+      }
+    }
+  ],
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

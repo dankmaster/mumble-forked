@@ -428,6 +428,72 @@
       "redistribution_status": "blocked_evaluation_only"
     },
     {
+      "id": "fsd50k-eval-cc0-subset",
+      "kind": "environmental_noise",
+      "version": "FSD50K evaluation set; Zenodo record 4060432; tracked selection is clip-level CC0 only",
+      "source_url": "https://zenodo.org/record/4060432/files/FSD50K.eval_audio.zip?download=1",
+      "landing_page": "https://doi.org/10.5281/zenodo.4060432",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/fsd50k/FSD50K.eval_audio.zip",
+        "digest": "e3d78e77115ff8d8df1ff3dae7ca5cd5864924c054561f61ba836764254bf50e",
+        "size_bytes": 3037675767
+      },
+      "sidecars": [
+        {
+          "id": "eval-audio-first-volume",
+          "kind": "archive_part",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.eval_audio.z01?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.eval_audio.z01",
+            "digest": "a1b776a5a9466a0cf17d0cb9a2a98f641454084f0292f511718aacb48e6c401d",
+            "size_bytes": 3221225472
+          }
+        },
+        {
+          "id": "eval-clip-metadata",
+          "kind": "license_metadata",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.metadata.zip?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.metadata.zip",
+            "digest": "9a738e032546f9a2c6e3d04566928d04a65fb79b422cc9d78bb781723537bd19",
+            "size_bytes": 6700838
+          }
+        },
+        {
+          "id": "eval-ground-truth",
+          "kind": "label_metadata",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.ground_truth.zip?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.ground_truth.zip",
+            "digest": "db2396260a7b1fb06feb6ccac71685794fc89917d71c3a8d64a1de85c2cc0ebf",
+            "size_bytes": 334701
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://zenodo.org/records/4060432",
+        "notes": "The dataset is CC BY 4.0 at collection level, while Freesound clips retain per-clip terms. The builder accepts only the tracked 21 clips whose exact metadata license URI is CC0-1.0 and fails closed on any mismatch."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 10231,
+        "sample_rate_hz": 44100
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The two official split-ZIP volumes, license metadata and ground truth are independently SHA-256 pinned. Uploader identifiers are used transiently only to construct one-way hashed disjoint groups and are never written to an inventory. No FSD50K holdout clip was decoded, listened to, rendered or scored while selecting this metadata-only subset."
+    },
+    {
       "id": "google-fleurs-sv-se-train-v2",
       "kind": "clean_speech",
       "version": "2.0.0 (google/fleurs revision d7c758a6dceecd54a98cac43404d3d576e721f07; sv_se train)",
@@ -504,6 +570,37 @@
       "redistribution_status": "source_license_review_required"
     },
     {
+      "id": "openslr12-librispeech-test-clean",
+      "kind": "clean_speech",
+      "version": "LibriSpeech ASR corpus; SLR12 test-clean",
+      "source_url": "https://www.openslr.org/resources/12/test-clean.tar.gz",
+      "landing_page": "https://www.openslr.org/12/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr12/test-clean.tar.gz",
+        "digest": "39fde525e59672dc6d1551919b1478f724438a95aa55f874b576be21967e6c23",
+        "size_bytes": 346663984
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/12/",
+        "notes": "OpenSLR publishes LibriSpeech under CC BY 4.0. The test-clean subset remains evaluation-only in this project to preserve benchmark separation."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 2620,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "Nightly selection adds exactly two identifier-selected, transcripted speakers per frozen split. Speaker IDs are disjoint from the existing SLR31 mini LibriSpeech dev-clean source; no audio or model score participates."
+    },
+    {
       "id": "openslr28-rirs-noises",
       "kind": "environmental_noise_and_rir",
       "version": "SLR28 (archive published 2017-10-03)",
@@ -568,6 +665,96 @@
       ],
       "training_status": "blocked_evaluation_only",
       "redistribution_status": "blocked_evaluation_only"
+    },
+    {
+      "id": "rixvox-v1-dev-0",
+      "kind": "clean_speech",
+      "version": "RixVox v1; KBLab/rixvox revision 9b2b6066ee184faf436363ff0823f2e465ccfb31; dev shard 0",
+      "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/dev/dev_0.tar.gz",
+      "landing_page": "https://huggingface.co/datasets/KBLab/rixvox/tree/9b2b6066ee184faf436363ff0823f2e465ccfb31",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/rixvox/v1/dev/dev_0.tar.gz",
+        "digest": "6c885473594ac2f81ab8cb790103803181eb998dc32cbbb63cee51b93a84c9ab",
+        "size_bytes": 4042055183
+      },
+      "sidecars": [
+        {
+          "id": "split-metadata",
+          "kind": "transcript_metadata",
+          "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/dev_metadata.parquet",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/rixvox/v1/dev_metadata.parquet",
+            "digest": "0e27149421ea68dbaafc6f7635828e3debcadfbae4bf8568f29ff3cf5beccff9",
+            "size_bytes": 1708010
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/KBLab/rixvox/blob/9b2b6066ee184faf436363ff0823f2e465ccfb31/README.md",
+        "notes": "The exact-revision dataset card declares CC BY 4.0 and attributes the Swedish Parliament."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Only identifier-selected utterances in the tracked nightly selection are used. Raw intressent_id, names, party, gender, birth year and other demographic fields are never persisted; speaker groups contain only a salted one-way SHA-256 pseudonym."
+    },
+    {
+      "id": "rixvox-v1-test-0",
+      "kind": "clean_speech",
+      "version": "RixVox v1; KBLab/rixvox revision 9b2b6066ee184faf436363ff0823f2e465ccfb31; test shard 0",
+      "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/test/test_0.tar.gz",
+      "landing_page": "https://huggingface.co/datasets/KBLab/rixvox/tree/9b2b6066ee184faf436363ff0823f2e465ccfb31",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/rixvox/v1/test/test_0.tar.gz",
+        "digest": "7c75945e820a8f8f5dea2b24183c6c97faa7df0028908935f3f4171d82f07f3c",
+        "size_bytes": 4011846841
+      },
+      "sidecars": [
+        {
+          "id": "split-metadata",
+          "kind": "transcript_metadata",
+          "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/test_metadata.parquet",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/rixvox/v1/test_metadata.parquet",
+            "digest": "0d609e6264954fa990b466ca79f7cb36818d65380dc3939bb17a74affdd4feba",
+            "size_bytes": 2028178
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/KBLab/rixvox/blob/9b2b6066ee184faf436363ff0823f2e465ccfb31/README.md",
+        "notes": "The exact-revision dataset card declares CC BY 4.0 and attributes the Swedish Parliament."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Only identifier-selected utterances in the tracked nightly selection are used. Raw intressent_id, names, party, gender, birth year and other demographic fields are never persisted; speaker groups contain only a salted one-way SHA-256 pseudonym."
     },
     {
       "id": "vctk-0-92-48k",
@@ -643,6 +830,27 @@
       "training_status": "blocked_ambiguous_license",
       "redistribution_status": "blocked_ambiguous_license",
       "reason": "The repository revision is pinned, but the roughly 550 GB archived DNS5 bundle has composite per-source licenses and no reviewed SHA-256 lock for every selected archive. Split and approve components individually before any product training or evaluation use."
+    },
+    {
+      "id": "voxpopuli-swedish-speaker-expansion",
+      "kind": "unlabelled_speech_metadata",
+      "source_url": "https://github.com/facebookresearch/voxpopuli/tree/f7a3bb98d664e1d031763ec4f7639c4a530c64e9",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "f7a3bb98d664e1d031763ec4f7639c4a530c64e9"
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "status": "verified",
+        "evidence_url": "https://github.com/facebookresearch/voxpopuli/blob/f7a3bb98d664e1d031763ec4f7639c4a530c64e9/README.md",
+        "notes": "VoxPopuli data is CC0, while raw European Parliament material remains subject to the linked Parliament legal notice."
+      },
+      "roles": [
+        "local_eval"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "reason": "Rejected for the nightly Swedish transcripted-speaker expansion: official ASR languages omit Swedish; unlabelled_v2 has neither transcript nor speaker_id; s2s_sv has no human Swedish target transcript and src_speaker_id identifies the source-language speaker, not a Swedish interpreter. It cannot prove disjoint sv-SE speaker groups or support Swedish WER."
     }
   ]
 }

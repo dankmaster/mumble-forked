@@ -8,7 +8,10 @@ as release speech because its archive has no utterance transcripts. Mini
 LibriSpeech supplies transcripted English; pinned FLEURS supplies three
 transcripted Swedish speakers; OpenSLR28 supplies room noise and RIRs; DEMAND
 supplies split-bound environmental-noise families; tracked FIR definitions
-supply explicitly modeled microphone responses.
+supply explicitly modeled microphone responses. Nightly additionally uses a
+privacy-scrubbed, metadata-only selection over RixVox v1, LibriSpeech
+test-clean and clip-level-CC0 FSD50K. New nightly holdout members remain sealed;
+this builder intentionally has no unauthenticated unseal path.
 
 DEMAND holdout preparation is deliberately mechanical: the fixed member,
 offset and length below are converted and hashed without listening, scoring,
@@ -20,19 +23,24 @@ from __future__ import annotations
 
 import argparse
 import array
+import binascii
+import csv
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 import wave
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, MutableMapping, Sequence
 
@@ -129,6 +137,20 @@ REQUIRED_SOURCE_IDS = (
 	"openslr31-mini-librispeech-dev-clean-2",
 )
 SPEECH_SOURCE_ID = "openslr31-mini-librispeech-dev-clean-2"
+NIGHTLY_SELECTION_PATH = Path(__file__).with_name("nightly-corpus-selection-v1.json")
+NIGHTLY_SPEECH_SOURCE_ID = "openslr12-librispeech-test-clean"
+RIXVOX_SOURCE_IDS = ("rixvox-v1-dev-0", "rixvox-v1-test-0")
+RIXVOX_METADATA_SIDECAR_ID = "split-metadata"
+FSD50K_SOURCE_ID = "fsd50k-eval-cc0-subset"
+FSD50K_FIRST_VOLUME_SIDECAR_ID = "eval-audio-first-volume"
+FSD50K_GROUND_TRUTH_SIDECAR_ID = "eval-ground-truth"
+FSD50K_METADATA_SIDECAR_ID = "eval-clip-metadata"
+NIGHTLY_SOURCE_IDS = (
+	*REQUIRED_SOURCE_IDS,
+	FSD50K_SOURCE_ID,
+	NIGHTLY_SPEECH_SOURCE_ID,
+	*RIXVOX_SOURCE_IDS,
+)
 SWEDISH_SPEECH_SOURCE_ID = "google-fleurs-sv-se-train-v2"
 SWEDISH_TRANSCRIPT_SIDECAR_ID = "train-transcripts"
 ROOM_SOURCE_ID = "openslr28-rirs-noises"
@@ -192,6 +214,85 @@ def _file_sha256(path: Path) -> str:
 		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
 			digest.update(chunk)
 	return digest.hexdigest()
+
+
+def _load_nightly_selection(path: Path = NIGHTLY_SELECTION_PATH) -> tuple[Mapping[str, Any], str]:
+	selection = _load_json(path)
+	_expect(isinstance(selection, dict), str(path), "must be an object")
+	_expect(
+		set(selection) == {
+			"fsd50k", "openslr12_test_clean_speakers", "rixvox", "schema_version",
+			"selection_policy", "split_seed",
+		},
+		str(path), "unexpected selection manifest keys",
+	)
+	_expect(selection["schema_version"] == 1, str(path), "unsupported selection schema")
+	_expect(selection["split_seed"] == COMMUNITY_RELEASE_SPLIT_SEED, str(path), "split seed changed")
+	_expect("no audio" in selection["selection_policy"], str(path), "selection must declare score-free metadata policy")
+
+	openslr = selection["openslr12_test_clean_speakers"]
+	_expect(isinstance(openslr, dict) and set(openslr) == set(INVENTORY.SPLITS), "nightly.openslr12", "requires every split")
+	for split in INVENTORY.SPLITS:
+		speakers = openslr[split]
+		_expect(
+			isinstance(speakers, list) and len(speakers) == 2
+			and speakers == sorted(set(speakers)) and all(re.fullmatch(r"[0-9]+", value) for value in speakers),
+			f"nightly.openslr12.{split}", "requires two sorted unique numeric speaker IDs",
+		)
+		for speaker in speakers:
+			group = f"librispeech-speaker-{speaker}"
+			_expect(INVENTORY.assigned_split(selection["split_seed"], "speech", group) == split, group, "frozen split changed")
+
+	rixvox = selection["rixvox"]
+	_expect(isinstance(rixvox, dict) and set(rixvox) == {"revision", "speaker_group_rule", "utterances"}, "nightly.rixvox", "unexpected keys")
+	_expect(rixvox["revision"] == "9b2b6066ee184faf436363ff0823f2e465ccfb31", "nightly.rixvox.revision", "revision changed")
+	rows = rixvox["utterances"]
+	_expect(isinstance(rows, list) and len(rows) == 15, "nightly.rixvox.utterances", "requires exactly fifteen speakers")
+	groups: set[str] = set()
+	members: set[tuple[str, str]] = set()
+	rixvox_counts = {split: 0 for split in INVENTORY.SPLITS}
+	for index, row in enumerate(rows):
+		label = f"nightly.rixvox.utterances[{index}]"
+		_expect(isinstance(row, dict) and set(row) == {
+			"duration_ms", "group_id", "member", "source_id", "transcript", "utterance_rank_sha256",
+		}, label, "unexpected keys")
+		_expect(row["source_id"] in RIXVOX_SOURCE_IDS, f"{label}.source_id", "unknown shard")
+		_expect(bool(re.fullmatch(r"rixvox-v1-speaker-[0-9a-f]{64}", row["group_id"])), f"{label}.group_id", "must be privacy-hashed")
+		_safe_member(row["member"])
+		_expect(isinstance(row["duration_ms"], int) and row["duration_ms"] >= MIN_AUDIO_MS, f"{label}.duration_ms", "too short")
+		_expect(isinstance(row["transcript"], str) and bool(row["transcript"].strip()), f"{label}.transcript", "missing transcript")
+		_expect(bool(re.fullmatch(r"[0-9a-f]{64}", row["utterance_rank_sha256"])), f"{label}.utterance_rank_sha256", "invalid rank")
+		_expect(row["group_id"] not in groups, f"{label}.group_id", "duplicate speaker")
+		_expect((row["source_id"], row["member"]) not in members, f"{label}.member", "duplicate member")
+		groups.add(row["group_id"])
+		members.add((row["source_id"], row["member"]))
+		rixvox_counts[INVENTORY.assigned_split(selection["split_seed"], "speech", row["group_id"])] += 1
+	_expect(rixvox_counts == {"tuning": 5, "validation": 5, "holdout": 5}, "nightly.rixvox", f"split regression: {rixvox_counts}")
+
+	fsd = selection["fsd50k"]
+	_expect(isinstance(fsd, dict) and set(fsd) == {"clip_license_required", "clips", "group_rule"}, "nightly.fsd50k", "unexpected keys")
+	_expect(fsd["clip_license_required"] == "http://creativecommons.org/publicdomain/zero/1.0/", "nightly.fsd50k", "must remain clip-level CC0")
+	clips = fsd["clips"]
+	_expect(isinstance(clips, list) and len(clips) == 21, "nightly.fsd50k.clips", "requires exactly twenty-one groups")
+	fsd_groups: set[str] = set()
+	clip_ids: set[str] = set()
+	fsd_counts = {split: 0 for split in INVENTORY.SPLITS}
+	for index, clip in enumerate(clips):
+		label = f"nightly.fsd50k.clips[{index}]"
+		_expect(isinstance(clip, dict) and set(clip) == {
+			"clip_id", "group_id", "member", "noise_class", "required_label",
+		}, label, "unexpected keys")
+		_expect(bool(re.fullmatch(r"[0-9]+", clip["clip_id"])), f"{label}.clip_id", "invalid clip id")
+		_expect(clip["member"] == f"FSD50K.eval_audio/{clip['clip_id']}.wav", f"{label}.member", "member/id mismatch")
+		_expect(bool(re.fullmatch(r"fsd50k-uploader-[0-9a-f]{64}", clip["group_id"])), f"{label}.group_id", "must hash uploader")
+		_expect(clip["noise_class"] in INVENTORY.NOISE_CLASSES, f"{label}.noise_class", "unsupported class")
+		_expect(isinstance(clip["required_label"], str) and bool(clip["required_label"]), f"{label}.required_label", "missing direct label")
+		_expect(clip["clip_id"] not in clip_ids and clip["group_id"] not in fsd_groups, label, "clip and uploader groups must be unique")
+		clip_ids.add(clip["clip_id"])
+		fsd_groups.add(clip["group_id"])
+		fsd_counts[INVENTORY.assigned_split(selection["split_seed"], "noise", clip["group_id"])] += 1
+	_expect(fsd_counts == {"tuning": 6, "validation": 7, "holdout": 8}, "nightly.fsd50k", f"split regression: {fsd_counts}")
+	return selection, _file_sha256(path)
 
 
 def _write_json(path: Path, value: Any) -> bytes:
@@ -266,8 +367,154 @@ class ArchiveReader:
 		return payload
 
 
+class SplitZipReader:
+	"""Read selected members from an explicitly ordered, hash-verified split ZIP."""
+
+	def __init__(self, paths: Sequence[Path]) -> None:
+		self.paths = tuple(paths)
+		self._sizes: tuple[int, ...] = ()
+		self._members: dict[str, tuple[int, int, int, int, int, int, int]] = {}
+
+	def _advance(self, disk: int, offset: int) -> tuple[int, int]:
+		while disk < len(self._sizes) and offset >= self._sizes[disk]:
+			offset -= self._sizes[disk]
+			disk += 1
+		_expect(disk < len(self._sizes), "split ZIP", "offset escapes archive volumes")
+		return disk, offset
+
+	def _read_span(self, disk: int, offset: int, length: int) -> bytes:
+		_expect(0 <= disk < len(self.paths) and offset >= 0 and length >= 0, "split ZIP", "invalid span")
+		parts = []
+		remaining = length
+		disk, offset = self._advance(disk, offset)
+		while remaining:
+			available = self._sizes[disk] - offset
+			take = min(available, remaining)
+			with self.paths[disk].open("rb") as stream:
+				stream.seek(offset)
+				payload = stream.read(take)
+			_expect(len(payload) == take, "split ZIP", "truncated volume")
+			parts.append(payload)
+			remaining -= take
+			disk += 1
+			offset = 0
+			_expect(remaining == 0 or disk < len(self.paths), "split ZIP", "span escapes archive volumes")
+		return b"".join(parts)
+
+	@staticmethod
+	def _zip64_values(extra: bytes, uncompressed: int, compressed: int, local_offset: int, disk: int) -> tuple[int, int, int, int]:
+		fields: dict[int, bytes] = {}
+		offset = 0
+		while offset + 4 <= len(extra):
+			field_id, size = struct.unpack_from("<HH", extra, offset)
+			offset += 4
+			_expect(offset + size <= len(extra), "split ZIP extra", "truncated field")
+			fields[field_id] = extra[offset:offset + size]
+			offset += size
+		if not any((uncompressed == 0xFFFFFFFF, compressed == 0xFFFFFFFF, local_offset == 0xFFFFFFFF, disk == 0xFFFF)):
+			return uncompressed, compressed, local_offset, disk
+		_expect(0x0001 in fields, "split ZIP", "ZIP64 values are missing")
+		payload = fields[0x0001]
+		position = 0
+		values = [uncompressed, compressed, local_offset, disk]
+		for index, (sentinel, width) in enumerate(((0xFFFFFFFF, 8), (0xFFFFFFFF, 8), (0xFFFFFFFF, 8), (0xFFFF, 4))):
+			if values[index] != sentinel:
+				continue
+			_expect(position + width <= len(payload), "split ZIP", "truncated ZIP64 field")
+			values[index] = int.from_bytes(payload[position:position + width], "little")
+			position += width
+		return values[0], values[1], values[2], values[3]
+
+	def __enter__(self) -> "SplitZipReader":
+		_expect(len(self.paths) >= 2, "split ZIP", "requires at least two volumes")
+		_expect(all(path.is_file() for path in self.paths), "split ZIP", "a volume is missing")
+		self._sizes = tuple(path.stat().st_size for path in self.paths)
+		tail_size = min(self._sizes[-1], 65557)
+		with self.paths[-1].open("rb") as stream:
+			stream.seek(self._sizes[-1] - tail_size)
+			tail = stream.read(tail_size)
+		eocd_offset = tail.rfind(b"PK\x05\x06")
+		_expect(eocd_offset >= 0 and eocd_offset + 22 <= len(tail), "split ZIP", "end record is missing")
+		(
+			disk_number, directory_disk, entries_on_disk, total_entries,
+			directory_size, directory_offset, comment_size,
+		) = struct.unpack_from("<4H2IH", tail, eocd_offset + 4)
+		_expect(eocd_offset + 22 + comment_size == len(tail), "split ZIP", "invalid end-record comment")
+		_expect(disk_number == len(self.paths) - 1 and directory_disk < len(self.paths), "split ZIP", "volume order/count mismatch")
+		_expect(total_entries not in (0, 0xFFFF) and directory_size != 0xFFFFFFFF and directory_offset != 0xFFFFFFFF, "split ZIP", "unsupported ZIP64 end record")
+		_expect(entries_on_disk <= total_entries and directory_size <= 128 * 1024 * 1024, "split ZIP", "implausible directory")
+		directory = self._read_span(directory_disk, directory_offset, directory_size)
+		offset = 0
+		for _ in range(total_entries):
+			_expect(offset + 46 <= len(directory) and directory[offset:offset + 4] == b"PK\x01\x02", "split ZIP", "invalid central directory")
+			(
+				flags, method, crc32, compressed, uncompressed, filename_size,
+				extra_size, member_comment_size, member_disk, local_offset,
+			) = (
+				struct.unpack_from("<H", directory, offset + 8)[0],
+				struct.unpack_from("<H", directory, offset + 10)[0],
+				struct.unpack_from("<I", directory, offset + 16)[0],
+				struct.unpack_from("<I", directory, offset + 20)[0],
+				struct.unpack_from("<I", directory, offset + 24)[0],
+				struct.unpack_from("<H", directory, offset + 28)[0],
+				struct.unpack_from("<H", directory, offset + 30)[0],
+				struct.unpack_from("<H", directory, offset + 32)[0],
+				struct.unpack_from("<H", directory, offset + 34)[0],
+				struct.unpack_from("<I", directory, offset + 42)[0],
+			)
+			end = offset + 46 + filename_size + extra_size + member_comment_size
+			_expect(end <= len(directory), "split ZIP", "truncated central member")
+			filename_bytes = directory[offset + 46:offset + 46 + filename_size]
+			extra = directory[offset + 46 + filename_size:offset + 46 + filename_size + extra_size]
+			uncompressed, compressed, local_offset, member_disk = self._zip64_values(
+				extra, uncompressed, compressed, local_offset, member_disk,
+			)
+			encoding = "utf-8" if flags & 0x800 else "cp437"
+			try:
+				name = filename_bytes.decode(encoding)
+			except UnicodeError as error:
+				raise BuildError("split ZIP: invalid member filename") from error
+			if not name.endswith("/"):
+				name = _safe_member(name)
+				_expect(name not in self._members, name, "duplicate archive member")
+				_expect(not (flags & 0x1), name, "encrypted members are forbidden")
+				_expect(method in (0, 8), name, "unsupported compression method")
+				_expect(uncompressed <= MAX_MEMBER_BYTES and member_disk < len(self.paths), name, "member exceeds safety limits")
+				self._members[name] = (member_disk, local_offset, flags, method, crc32, compressed, uncompressed)
+			offset = end
+		_expect(offset == len(directory) and len(self._members) > 0, "split ZIP", "directory length/count mismatch")
+		return self
+
+	def __exit__(self, *_: object) -> None:
+		return None
+
+	@property
+	def names(self) -> tuple[str, ...]:
+		return tuple(sorted(self._members))
+
+	def read(self, name: str) -> bytes:
+		_safe_member(name)
+		_expect(name in self._members, name, "archive member is missing")
+		disk, local_offset, flags, method, expected_crc, compressed_size, uncompressed_size = self._members[name]
+		header = self._read_span(disk, local_offset, 30)
+		_expect(header[:4] == b"PK\x03\x04", name, "invalid local header")
+		local_flags, local_method = struct.unpack_from("<HH", header, 6)
+		filename_size, extra_size = struct.unpack_from("<HH", header, 26)
+		_expect(local_flags == flags and local_method == method, name, "central/local header mismatch")
+		data_disk, data_offset = self._advance(disk, local_offset + 30 + filename_size + extra_size)
+		compressed = self._read_span(data_disk, data_offset, compressed_size)
+		try:
+			payload = compressed if method == 0 else zlib.decompress(compressed, -zlib.MAX_WBITS)
+		except zlib.error as error:
+			raise BuildError(f"{name}: invalid deflate payload") from error
+		_expect(len(payload) == uncompressed_size, name, "uncompressed size mismatch")
+		_expect(binascii.crc32(payload) & 0xFFFFFFFF == expected_crc, name, "CRC32 mismatch")
+		return payload
+
+
 def _validate_state(
-	state_path: Path, manifest: Mapping[str, Any], artifact_root: Path
+	state_path: Path, manifest: Mapping[str, Any], artifact_root: Path,
+	required_source_ids: Sequence[str] = REQUIRED_SOURCE_IDS,
 ) -> tuple[Mapping[str, Path], str]:
 	state = _load_json(state_path)
 	_expect(isinstance(state, dict), "corpus-state", "must be an object")
@@ -286,7 +533,7 @@ def _validate_state(
 	by_id = {source["id"]: source for source in manifest["sources"]}
 	resolved: dict[str, Path] = {}
 	root = artifact_root.resolve()
-	for source_id in REQUIRED_SOURCE_IDS:
+	for source_id in required_source_ids:
 		_expect(source_id in archives, f"corpus-state.archives.{source_id}", "required archive is absent")
 		entry = archives[source_id]
 		_expect(
@@ -618,6 +865,60 @@ def _materialize_speech(
 	return items
 
 
+def _materialize_selected_librispeech(
+	reader: ArchiveReader, destination: Path, ffmpeg: Path, identity: Mapping[str, str], scratch: Path,
+	source: Mapping[str, Any], selected_speakers: Mapping[str, Sequence[str]], seed: str,
+	transforms: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+	by_speaker = _parse_librispeech(reader)
+	wanted = {speaker for speakers in selected_speakers.values() for speaker in speakers}
+	_expect(
+		set(selected_speakers) <= set(INVENTORY.SPLITS)
+		and len(wanted) == 2 * len(selected_speakers),
+		source["id"], "nightly LibriSpeech selection must contain two unique speakers per requested split",
+	)
+	_expect(wanted <= set(by_speaker), source["id"], f"selected speakers missing from archive: {sorted(wanted - set(by_speaker))}")
+	items: list[Mapping[str, Any]] = []
+	for speaker in sorted(wanted):
+		group = f"librispeech-speaker-{speaker}"
+		candidates = []
+		for member, transcript in by_speaker[speaker]:
+			if _flac_duration_ms(reader.read(member)) < MIN_AUDIO_MS:
+				continue
+			rank = hashlib.sha256("\0".join((seed, "nightly-openslr12-utterance-v1", group, member)).encode("utf-8")).hexdigest()
+			candidates.append((rank, member, transcript))
+		candidates.sort()
+		_expect(len(candidates) >= UTTERANCES_PER_SPEAKER, group, "not enough six-second utterances")
+		for rank, member, transcript in candidates[:UTTERANCES_PER_SPEAKER]:
+			utterance = PurePosixPath(member).stem.lower()
+			relative = f"audio/speech/openslr12-{utterance}.wav"
+			common, transform = _convert_member(reader, member, destination / relative, ffmpeg, identity, scratch)
+			transcript_relative = f"transcripts/openslr12-{utterance}.txt"
+			transcript_payload = (transcript + "\n").encode("utf-8")
+			transcript_path = destination / transcript_relative
+			transcript_path.parent.mkdir(parents=True, exist_ok=True)
+			with transcript_path.open("xb") as stream:
+				stream.write(transcript_payload)
+			item = {
+				"id": f"speech-openslr12-{utterance}", "kind": "speech", "source_id": source["id"],
+				"relative_path": relative, "group_id": group,
+				"source_artifact_sha256": source["integrity"]["digest"], **common,
+				"language": "en-US", "speaker_id": f"speaker-{speaker}",
+				"transcript": {
+					"status": "verified", "relative_path": transcript_relative,
+					"sha256": hashlib.sha256(transcript_payload).hexdigest(), "size_bytes": len(transcript_payload),
+					"normalization": "exact-utf8",
+				},
+			}
+			items.append(item)
+			transforms.append({
+				"item_id": item["id"], "source_id": source["id"], "output_path": relative,
+				"selection_basis": "frozen-speaker-and-identifier-only-utterance-rank-v1",
+				"utterance_rank_sha256": rank, **transform,
+			})
+	return items
+
+
 def _parse_fleurs_swedish_tsv(path: Path) -> Mapping[str, list[Mapping[str, Any]]]:
 	try:
 		text = path.read_text(encoding="utf-8")
@@ -781,6 +1082,134 @@ def _materialize_fleurs_swedish(
 		"transcript_sidecar_sha256": sidecar["integrity"]["digest"],
 		"recordings": sorted(selection_rows, key=lambda row: row["assigned_split"]),
 	}
+
+
+def _resolve_selected_member(names: Sequence[str], expected: str, label: str) -> str:
+	_safe_member(expected)
+	if expected in names:
+		return expected
+	matches = [name for name in names if name.endswith("/" + expected)]
+	_expect(len(matches) == 1, label, f"selected member {expected!r} is missing or ambiguous")
+	return matches[0]
+
+
+def _materialize_rixvox(
+	readers: Mapping[str, ArchiveReader], selection_rows: Sequence[Mapping[str, Any]], destination: Path,
+	ffmpeg: Path, identity: Mapping[str, str], scratch: Path, by_id: Mapping[str, Mapping[str, Any]],
+	selection_sha256: str, transforms: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+	items: list[Mapping[str, Any]] = []
+	for row in selection_rows:
+		source_id = row["source_id"]
+		source = by_id[source_id]
+		reader = readers[source_id]
+		member = _resolve_selected_member(reader.names, row["member"], source_id)
+		payload = reader.read(member)
+		sample_rate, channels, frames = _fleurs_source_wav_info(payload, member)
+		_expect(channels == 1, member, "RixVox source must be mono")
+		actual_duration_ms = frames * 1000.0 / sample_rate
+		_expect(abs(actual_duration_ms - row["duration_ms"]) <= 10.0, member, "duration disagrees with pinned metadata")
+		stem = PurePosixPath(row["member"]).stem.lower()
+		group_hash = row["group_id"].removeprefix("rixvox-v1-speaker-")
+		relative = f"audio/speech/rixvox-{group_hash[:12]}-{stem}.wav"
+		common, transform = _convert_member(reader, member, destination / relative, ffmpeg, identity, scratch)
+		transcript_relative = f"transcripts/rixvox-{group_hash[:12]}-{stem}.txt"
+		transcript_payload = (row["transcript"] + "\n").encode("utf-8")
+		transcript_path = destination / transcript_relative
+		transcript_path.parent.mkdir(parents=True, exist_ok=True)
+		with transcript_path.open("xb") as stream:
+			stream.write(transcript_payload)
+		item = {
+			"id": f"speech-rixvox-{group_hash[:12]}-{stem}", "kind": "speech", "source_id": source_id,
+			"relative_path": relative, "group_id": row["group_id"],
+			"source_artifact_sha256": source["integrity"]["digest"], **common,
+			"language": "sv-SE", "speaker_id": row["group_id"],
+			"transcript": {
+				"status": "verified", "relative_path": transcript_relative,
+				"sha256": hashlib.sha256(transcript_payload).hexdigest(), "size_bytes": len(transcript_payload),
+				"normalization": "exact-utf8",
+			},
+		}
+		items.append(item)
+		sidecar = next(value for value in source["sidecars"] if value["id"] == RIXVOX_METADATA_SIDECAR_ID)
+		transforms.append({
+			"item_id": item["id"], "source_id": source_id, "output_path": relative,
+			"metadata_sidecar_sha256": sidecar["integrity"]["digest"],
+			"nightly_selection_sha256": selection_sha256,
+			"selection_basis": "privacy-hashed-speaker-reservoir-and-identifier-only-utterance-rank-v1",
+			"utterance_rank_sha256": row["utterance_rank_sha256"], **transform,
+		})
+	return items
+
+
+def _fsd50k_group_id(uploader: str) -> str:
+	digest = hashlib.sha256(b"FSD50K-eval-uploader-v1\0" + uploader.encode("utf-8")).hexdigest()
+	return f"fsd50k-uploader-{digest}"
+
+
+def _read_fsd50k_metadata(metadata_path: Path, ground_truth_path: Path) -> tuple[Mapping[str, Mapping[str, Any]], Mapping[str, set[str]]]:
+	with ArchiveReader(metadata_path) as reader:
+		member = "FSD50K.metadata/eval_clips_info_FSD50K.json"
+		_expect(member in reader.names, "FSD50K metadata", "eval clip metadata is missing")
+		try:
+			metadata = json.loads(reader.read(member).decode("utf-8"))
+		except (UnicodeError, json.JSONDecodeError) as error:
+			raise BuildError("FSD50K metadata: invalid JSON") from error
+	_expect(isinstance(metadata, dict), "FSD50K metadata", "must be an object")
+	with ArchiveReader(ground_truth_path) as reader:
+		member = "FSD50K.ground_truth/eval.csv"
+		_expect(member in reader.names, "FSD50K ground truth", "eval labels are missing")
+		try:
+			rows = csv.DictReader(io.StringIO(reader.read(member).decode("utf-8")))
+			labels = {
+				row["fname"]: set(row["labels"].split(","))
+				for row in rows
+			}
+		except (UnicodeError, csv.Error, KeyError) as error:
+			raise BuildError("FSD50K ground truth: invalid CSV") from error
+	return metadata, labels
+
+
+def _materialize_fsd50k(
+	reader: SplitZipReader, metadata_path: Path, ground_truth_path: Path,
+	selection: Mapping[str, Any], destination: Path, ffmpeg: Path, identity: Mapping[str, str],
+	scratch: Path, source: Mapping[str, Any], selection_sha256: str,
+	transforms: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+	metadata, labels = _read_fsd50k_metadata(metadata_path, ground_truth_path)
+	items: list[Mapping[str, Any]] = []
+	metadata_sidecar = next(value for value in source["sidecars"] if value["id"] == FSD50K_METADATA_SIDECAR_ID)
+	ground_truth_sidecar = next(value for value in source["sidecars"] if value["id"] == FSD50K_GROUND_TRUTH_SIDECAR_ID)
+	for clip in selection["clips"]:
+		clip_id = clip["clip_id"]
+		_expect(clip_id in metadata and clip_id in labels, clip_id, "selected FSD50K metadata is missing")
+		info = metadata[clip_id]
+		_expect(isinstance(info, dict), clip_id, "clip metadata must be an object")
+		_expect(info.get("license") == selection["clip_license_required"], clip_id, "selected clip is not CC0")
+		uploader = info.get("uploader")
+		_expect(isinstance(uploader, str) and bool(uploader), clip_id, "uploader group is missing")
+		_expect(_fsd50k_group_id(uploader) == clip["group_id"], clip_id, "privacy-hashed uploader group changed")
+		_expect(clip["required_label"] in labels[clip_id], clip_id, "required direct label is absent")
+		member = _resolve_selected_member(reader.names, clip["member"], clip_id)
+		relative = f"audio/noise/fsd50k-{clip_id}.wav"
+		common, transform = _convert_member(reader, member, destination / relative, ffmpeg, identity, scratch)  # type: ignore[arg-type]
+		item = {
+			"id": f"noise-fsd50k-{clip_id}", "kind": "noise", "source_id": source["id"],
+			"relative_path": relative, "group_id": clip["group_id"], "noise_class": clip["noise_class"],
+			"source_artifact_sha256": source["integrity"]["digest"], **common,
+		}
+		items.append(item)
+		transforms.append({
+			"item_id": item["id"], "source_id": source["id"], "output_path": relative,
+			"clip_license": selection["clip_license_required"],
+			"ground_truth_sidecar_sha256": ground_truth_sidecar["integrity"]["digest"],
+			"metadata_sidecar_sha256": metadata_sidecar["integrity"]["digest"],
+			"nightly_selection_sha256": selection_sha256,
+			"required_direct_label": clip["required_label"],
+			"selection_basis": "clip-level-cc0-direct-label-and-privacy-hashed-uploader-v1",
+			**transform,
+		})
+	return items
 
 
 NOISE_PATTERN = re.compile(r"RIRS_NOISES/real_rirs_isotropic_noises/RVB2014_type[12]_noise_([a-z0-9]+)_\d+\.wav$")
@@ -998,13 +1427,21 @@ def _materialize_responses(destination: Path, seed: str, transforms: list[Mappin
 
 def build(
 	manifest_path: Path, state_path: Path, artifact_root: Path, output: Path,
-	ffmpeg: Path, ffmpeg_sha256: str, split_seed: str,
+	ffmpeg: Path, ffmpeg_sha256: str, split_seed: str, suite: str = "master_quality",
 ) -> Mapping[str, Any]:
 	_expect(not output.exists(), str(output), "refusing to overwrite an existing output root")
+	_expect(suite in ("master_quality", "nightly"), "suite", "builder supports master_quality or nightly")
 	manifest = LOCK.load_validated_manifest(manifest_path)
-	archives, state_sha = _validate_state(state_path, manifest, artifact_root)
+	required_source_ids = NIGHTLY_SOURCE_IDS if suite == "nightly" else REQUIRED_SOURCE_IDS
+	archives, state_sha = _validate_state(state_path, manifest, artifact_root, required_source_ids)
 	identity = _ffmpeg_identity(ffmpeg, ffmpeg_sha256)
 	by_id = {source["id"]: source for source in manifest["sources"]}
+	nightly_selection: Mapping[str, Any] | None = None
+	nightly_selection_sha256: str | None = None
+	if suite == "nightly":
+		nightly_selection, nightly_selection_sha256 = _load_nightly_selection()
+		_expect(split_seed == nightly_selection["split_seed"], "split_seed", "nightly selection is frozen to its audited seed")
+	nightly_materialized_splits = ("tuning", "validation")
 	output.parent.mkdir(parents=True, exist_ok=True)
 	temporary = Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
 	transforms: list[Mapping[str, Any]] = []
@@ -1014,6 +1451,35 @@ def build(
 		items: list[Mapping[str, Any]] = []
 		with ArchiveReader(archives[SPEECH_SOURCE_ID]) as speech_reader:
 			items.extend(_materialize_speech(speech_reader, temporary, ffmpeg, identity, scratch, split_seed, by_id[SPEECH_SOURCE_ID], transforms))
+		if nightly_selection is not None:
+			openslr_speakers = {
+				split: nightly_selection["openslr12_test_clean_speakers"][split]
+				for split in nightly_materialized_splits
+			}
+			with ArchiveReader(archives[NIGHTLY_SPEECH_SOURCE_ID]) as nightly_speech_reader:
+				nightly_speech_items = _materialize_selected_librispeech(
+					nightly_speech_reader, temporary, ffmpeg, identity, scratch,
+					by_id[NIGHTLY_SPEECH_SOURCE_ID], openslr_speakers,
+					split_seed, transforms,
+				)
+			base_speech_groups = {item["group_id"] for item in items if item["kind"] == "speech"}
+			_expect(
+				base_speech_groups.isdisjoint({item["group_id"] for item in nightly_speech_items}),
+				"nightly LibriSpeech", "speaker overlaps the existing mini LibriSpeech source",
+			)
+			items.extend(nightly_speech_items)
+			assert nightly_selection_sha256 is not None
+			for source_id in RIXVOX_SOURCE_IDS:
+				rows = [
+					row for row in nightly_selection["rixvox"]["utterances"]
+					if row["source_id"] == source_id
+					and INVENTORY.assigned_split(split_seed, "speech", row["group_id"]) in nightly_materialized_splits
+				]
+				with ArchiveReader(archives[source_id]) as rixvox_reader:
+					items.extend(_materialize_rixvox(
+						{source_id: rixvox_reader}, rows, temporary, ffmpeg, identity, scratch,
+						by_id, nightly_selection_sha256, transforms,
+					))
 		with ArchiveReader(archives[SWEDISH_SPEECH_SOURCE_ID]) as swedish_reader:
 			swedish_items, swedish_selection = _materialize_fleurs_swedish(
 				swedish_reader,
@@ -1027,6 +1493,26 @@ def build(
 			archives, temporary, ffmpeg, identity, scratch, split_seed, by_id, transforms,
 		)
 		items.extend(demand_items)
+		if nightly_selection is not None:
+			assert nightly_selection_sha256 is not None
+			fsd_selection = {
+				**nightly_selection["fsd50k"],
+				"clips": [
+					clip for clip in nightly_selection["fsd50k"]["clips"]
+					if INVENTORY.assigned_split(split_seed, "noise", clip["group_id"]) in nightly_materialized_splits
+				],
+			}
+			with SplitZipReader((
+				archives[f"{FSD50K_SOURCE_ID}:{FSD50K_FIRST_VOLUME_SIDECAR_ID}"],
+				archives[FSD50K_SOURCE_ID],
+			)) as fsd_reader:
+				items.extend(_materialize_fsd50k(
+					fsd_reader,
+					archives[f"{FSD50K_SOURCE_ID}:{FSD50K_METADATA_SIDECAR_ID}"],
+					archives[f"{FSD50K_SOURCE_ID}:{FSD50K_GROUND_TRUTH_SIDECAR_ID}"],
+					fsd_selection, temporary, ffmpeg, identity, scratch,
+					by_id[FSD50K_SOURCE_ID], nightly_selection_sha256, transforms,
+				))
 		# Opening McGill is intentional: it verifies archive structure while release
 		# materialization remains fail-closed until a transcript source is pinned.
 		with ArchiveReader(archives["mcgill-tsp-speech-v2-48k"]) as mcgill_reader:
@@ -1039,6 +1525,10 @@ def build(
 			"corpus_lock_sha256": LOCK.canonical_manifest_sha256(manifest), "corpus_state_sha256": state_sha,
 			"split_seed": split_seed, "split_algorithm": "sha256-v1 by kind/group: tuning=0..59, validation=60..79, holdout=80..99",
 			"split_seed_selection_basis": "identifier-only search over frozen speech/noise/RIR/device group IDs for the master-quality diversity floor and a 6/6/6 DEMAND scene assignment; no audio, metric, model output, or recipe result used",
+			"qualification_suite": suite,
+			"nightly_selection_sha256": nightly_selection_sha256,
+			"nightly_materialized_splits": list(nightly_materialized_splits) if nightly_selection is not None else None,
+			"nightly_sealed_splits": ["holdout"] if nightly_selection is not None else None,
 			"ffmpeg": identity,
 			"sources": [
 				{
@@ -1049,7 +1539,7 @@ def build(
 						if source_id == "mcgill-tsp-speech-v2-48k" else "materialized-local-evaluation"
 					),
 				}
-				for source_id in REQUIRED_SOURCE_IDS
+				for source_id in required_source_ids
 			],
 			"mcgill_archive_observation": {"wav_members": mcgill_wavs, "transcript_named_members": mcgill_transcripts},
 			"fleurs_swedish_selection": swedish_selection,
@@ -1057,8 +1547,10 @@ def build(
 			"transforms": sorted(transforms, key=lambda value: value["item_id"]),
 		}
 		transform_payload = _write_json(temporary / "transformation-manifest.json", transformation_manifest)
-		inventory = {
-			"schema_version": 3, "inventory_id": "mumble-community-release-v3", "eligibility": "release",
+		inventory: dict[str, Any] = {
+			"schema_version": 3,
+			"inventory_id": "mumble-community-nightly-v3" if suite == "nightly" else "mumble-community-release-v3",
+			"eligibility": "nightly-partial" if suite == "nightly" else "release",
 			"corpus_lock_sha256": LOCK.canonical_manifest_sha256(manifest),
 			"provenance": {
 				"generator": "mumble-corpus-builder", "generator_version": SCRIPT_VERSION,
@@ -1067,13 +1559,21 @@ def build(
 			},
 			"items": items,
 		}
+		if suite == "nightly":
+			assert nightly_selection_sha256 is not None
+			inventory["selection_sha256"] = nightly_selection_sha256
+			inventory["sealed_splits"] = ["holdout"]
 		try:
-			validated = INVENTORY.validate_inventory(inventory, manifest, require_release=True)
-			summary = INVENTORY.validate_diversity(validated, "master_quality", split_seed)
+			release_eligible = suite != "nightly"
+			validated = INVENTORY.validate_inventory(inventory, manifest, require_release=release_eligible)
+			summary = INVENTORY.validate_diversity(
+				validated, suite, split_seed,
+				required_splits=INVENTORY.SPLITS if release_eligible else nightly_materialized_splits,
+			)
 		except INVENTORY.InventoryError as error:
 			raise BuildError(str(error)) from error
 		_write_json(temporary / "inventory-v3.json", inventory)
-		_write_json(temporary / "split-summary.json", {"schema_version": 1, "split_seed": split_seed, "suite": "master_quality", "splits": summary})
+		_write_json(temporary / "split-summary.json", {"schema_version": 1, "split_seed": split_seed, "suite": suite, "splits": summary})
 		shutil.rmtree(scratch)
 		os.replace(temporary, output)
 		return {"inventory": inventory, "diversity": summary, "output": str(output)}
@@ -1082,7 +1582,33 @@ def build(
 		raise
 
 
+def _write_split_zip_fixture(first: Path, last: Path) -> tuple[str, bytes]:
+	name = "fixture/data.bin"
+	name_bytes = name.encode("utf-8")
+	payload = bytes(range(100))
+	crc = binascii.crc32(payload) & 0xFFFFFFFF
+	local = struct.pack(
+		"<4s5H3I2H", b"PK\x03\x04", 20, 0x800, 0, 0, 0, crc,
+		len(payload), len(payload), len(name_bytes), 0,
+	) + name_bytes + payload
+	split_at = 30 + len(name_bytes) + 17
+	first.write_bytes(local[:split_at])
+	second_prefix = local[split_at:]
+	central = struct.pack(
+		"<4s6H3I5H2I", b"PK\x01\x02", 20, 20, 0x800, 0, 0, 0, crc,
+		len(payload), len(payload), len(name_bytes), 0, 0, 0, 0, 0, 0,
+	) + name_bytes
+	eocd = struct.pack(
+		"<4s4H2IH", b"PK\x05\x06", 1, 1, 1, 1, len(central), len(second_prefix), 0,
+	)
+	last.write_bytes(second_prefix + central + eocd)
+	return name, payload
+
+
 def run_self_test() -> None:
+	selection, selection_sha = _load_nightly_selection()
+	if not re.fullmatch(r"[0-9a-f]{64}", selection_sha) or selection["split_seed"] != COMMUNITY_RELEASE_SPLIT_SEED:
+		raise AssertionError("nightly corpus selection was not hash-bound")
 	demand_split_counts = {split: 0 for split in INVENTORY.SPLITS}
 	for spec in DEMAND_SOURCE_SPECS:
 		actual = INVENTORY.assigned_split(COMMUNITY_RELEASE_SPLIT_SEED, "noise", spec["group_id"])
@@ -1102,6 +1628,12 @@ def run_self_test() -> None:
 			raise AssertionError(f"unsafe archive member was accepted: {unsafe}")
 	with tempfile.TemporaryDirectory(prefix="mumble-corpus-builder-") as directory:
 		root = Path(directory)
+		first_volume = root / "fixture.z01"
+		last_volume = root / "fixture.zip"
+		fixture_member, fixture_payload = _write_split_zip_fixture(first_volume, last_volume)
+		with SplitZipReader((first_volume, last_volume)) as split_reader:
+			if split_reader.names != (fixture_member,) or split_reader.read(fixture_member) != fixture_payload:
+				raise AssertionError("split ZIP reader failed its cross-volume fixture")
 		unsafe_zip = root / "unsafe.zip"
 		with zipfile.ZipFile(unsafe_zip, "w") as archive:
 			archive.writestr("../escape.wav", b"x")
@@ -1189,6 +1721,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--ffmpeg", type=Path)
 	parser.add_argument("--ffmpeg-sha256")
 	parser.add_argument("--split-seed", default=COMMUNITY_RELEASE_SPLIT_SEED)
+	parser.add_argument("--suite", choices=("master_quality", "nightly"), default="master_quality")
 	parser.add_argument("--self-test", action="store_true")
 	args = parser.parse_args(argv)
 	try:
@@ -1199,7 +1732,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 				return 0
 		if any(value is None for value in (args.corpus_state, args.artifact_root, args.output, args.ffmpeg, args.ffmpeg_sha256)):
 			raise BuildError("--corpus-state, --artifact-root, --output, --ffmpeg and --ffmpeg-sha256 are required")
-		result = build(args.manifest, args.corpus_state, args.artifact_root, args.output, args.ffmpeg, args.ffmpeg_sha256, args.split_seed)
+		result = build(
+			args.manifest, args.corpus_state, args.artifact_root, args.output,
+			args.ffmpeg, args.ffmpeg_sha256, args.split_seed, args.suite,
+		)
 		print(f"corpus inventory builder: wrote {len(result['inventory']['items'])} items; output={args.output}")
 		for split, summary in result["diversity"].items():
 			print(f"  {split}: {json.dumps(summary, sort_keys=True)}")

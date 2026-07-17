@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "split_seed": "mumble-community-master-v2-00909005",
+  "selection_policy": "identifier-and-reviewed-metadata-only-v1; no audio, model output, metric, listening result, or holdout result participated",
+  "openslr12_test_clean_speakers": {
+    "tuning": ["1995", "5683"],
+    "validation": ["1221", "4992"],
+    "holdout": ["3729", "8463"]
+  },
+  "rixvox": {
+    "revision": "9b2b6066ee184faf436363ff0823f2e465ccfb31",
+    "speaker_group_rule": "rixvox-v1-speaker- + sha256('RixVox-v1-intressent-id-v1\\0' + raw intressent_id); raw identifiers are never persisted",
+    "utterances": [
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-093548ef70b858a38649b616eda2f3daf58879955e19ba4ba47eea454639df50",
+        "member": "GW01KU11/2442208180024638721_anf42_260_270.wav",
+        "duration_ms": 10440,
+        "transcript": "Vi har motioner i vårt betänkande som berör det politiska ideella uppdraget, och det är en mycket viktig del i Sveriges politiska liv.",
+        "utterance_rank_sha256": "026c7e37e6bdf6b06df5d8b4f98206de66ac9a4c38603a64e877dd892efe79d3"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-12b535ba811f93843e9adbdc1db606a8980a3716cff3a2e075e2957c4a809813",
+        "member": "GT01UU18/2442209290027151321_anf34_29_53.wav",
+        "duration_ms": 24000,
+        "transcript": "Jag är i varje fall glad att nästan alla mer eller mindre har tagit upp frågan i dag i sina anföranden. När det gäller EU finns det en bred enighet. Det kan man se i betänkandet. Nästan alla partier har röstat för. Det är bara fem personer som har röstat emot förslaget i betänkandet.",
+        "utterance_rank_sha256": "01fa2aaa1d69118690c54620b96ed3dc8f42407d296d868fbaf64b29fe9af1d4"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-1f5ae61d4e1fc188bbad4d313bd420921eeac09756a687c849d7cf20ae399890",
+        "member": "GW01CU24/2442208170024432321_anf16_5_34.wav",
+        "duration_ms": 28720,
+        "transcript": "Det handlar om bortförda barn. För en tid sedan läste jag en artikel om en man - vi kan kalla honom Lasse - vars före detta fru hade fört bort deras sexåriga dotter till USA. Han var rädd att han inte skulle få träffa henne igen. Lasses före detta fru är amerikanska. Efter att de skildes hade de delad vårdnad om dottern.",
+        "utterance_rank_sha256": "00f85936e4c2b17d109e3b82eec6c6b990a824443b093eccda33522e6f8a2604"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-28eb86e6f69b8ecc784c3fb394497a6120847ac071e68cd394ea2f7e8eb5b46c",
+        "member": "GR01SFU15/2442210140028274621_anf11_54_78.wav",
+        "duration_ms": 24000,
+        "transcript": "Sedan återkommer jag till min fråga som jag ställde förra gången, den om egen försörjning. I grunden och i grundfördragen i EU ska, även om rättspraxis har varit annorlunda, arbetskraftsinvandring, när man rör sig över gränserna, syfta till egen försörjning. Ställer Vänsterpartiet upp på den tesen, eller vill man ha annan rörelse över gränserna?",
+        "utterance_rank_sha256": "0593ef6cac4462714849ea03f47e88df6889a92957db071810c80e1117f6b6ca"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-328e2e4406b93adcc9d95abcf5fae599a3c0907ec3b96b8b50ad7360c56f835c",
+        "member": "GY01SkU19/2442208040022404121_anf25_270_296.wav",
+        "duration_ms": 25440,
+        "transcript": "Jag skulle vilja att Hans Olsson förtydligade lite vad man menar med detta. Vad menar ni? Vad vill ni kompensera dem med? Det är lätt att säga att man vill kompensera, men hur ska det gå till? Vill ni kompensera också de stora föreningarna, som har en omsättning på över 1 miljon? För dem som har en omsättning på under 1 miljon kommer det ju inte att ske några förändringar. Detta skulle jag vilja få svar på. Det kanske inte blir i dag, men det kan bli en annan gång.",
+        "utterance_rank_sha256": "000b167fa3cc79f9a095ef0d3130d93044dde4c79bd2ca8f973efd0cf7742f0b"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-4327d31f5065227ccd9dc7c53ad09a8f813db50ca0e63b346a156f05bda6038c",
+        "member": "H601UbU1/2442205110011950021_anf55_29_45.wav",
+        "duration_ms": 15480,
+        "transcript": "Det kan också handla om att stärka lärarna, jobba med trygghet och studiero, förstärka de tidiga insatserna och stärka kompetensförsörjningen. Jag är övertygad om att jag i mitt anförande sa detta inte bara en gång utan flera gånger.",
+        "utterance_rank_sha256": "0033eac8fc7dccf3deb5991fcd7a62d00a17788e3d2bbc3041c1a08fe698a6ad"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-597845c0c129e789ac49f3c2047f84ddf73589593b5a4cb03ea0fdd9e0a3d1c3",
+        "member": "H001KU23/2442207160019908221_anf70_95_110.wav",
+        "duration_ms": 15560,
+        "transcript": "Jag yrkar bifall till utskottets förslag i betänkandet, det vill säga att riksdagen lägger skrivelsen till handlingarna.",
+        "utterance_rank_sha256": "000098f4b06561228fcdd39ee4f28a3a7cf8208b43726dca81063764c8213804"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-6761f87c6f8ae62e0d23eedceaaa11794e6cfbecae5311f00c03d13e70080cbe",
+        "member": "GV01KU13/2442208250025296721_anf4_102_120.wav",
+        "duration_ms": 17480,
+        "transcript": "Det är, tror jag, värdefullt att fördjupa sig i och sätta sig in i minoritetsfrågorna för att därmed öka förståelsen för dessa och för dem som direkt omfattas av minoritetspolitiken. Herr talman!",
+        "utterance_rank_sha256": "04c937faff8e48ccbfe49b4e3d876c04f42b035e8dbef4ffd48f0a90fc2f4fb8"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-90add775f93f646b9a5939b3af78d91d232265d3971fc3af4e8f437d7db1bb6f",
+        "member": "H301UU5/2442206110015638721_anf193_273_292.wav",
+        "duration_ms": 18880,
+        "transcript": "Det är i sammanhanget glädjande att EU-domstolen i dag har beslutat att annullera ett av EU:s handelsavtal med Marocko, men det är också sorgligt talande att det är juristerna i EU-domstolen, inte den politiska ledningen för EU, som står upp för folkrätten.",
+        "utterance_rank_sha256": "0001a946bbc633212d0234121d8ebe0c3464469bbc397f552b42a050f2ecc019"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-9461aa8c97d4aa281cc3a16644e0f0fcab1ef003de2fc34e38fcdce5dc4f11cf",
+        "member": "H301CU1/2442206110015638821_anf40_181_204.wav",
+        "duration_ms": 23600,
+        "transcript": "Men problemet kvarstår när utbudet av bostäder är mindre än efterfrågan - i alla fall utbudet på bostäder för den grupp som inte har möjlighet att efterfråga det som finns. När allt handlar om att tjäna så mycket pengar som möjligt måste staten ta ansvar för de människor som annars hamnar utanför.",
+        "utterance_rank_sha256": "009266a2334be2cabe9431557ee642d9e5228a419160399cb13b3846e05183cb"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-ad7e4242475d1ec0bd534ba28a460faf63f594b43c407b329b7af792e66582bb",
+        "member": "GS10170/2442210050027926621_anf23_128_156.wav",
+        "duration_ms": 27800,
+        "transcript": "De visar förvisso att många nya företag har startat på området och att minst 8 000 personer i dag arbetar vitt med hushållstjänster i hemmen. Det är en siffra som förmodligen skulle kunna bli mycket större i Sverige, där den vita marknaden i dag består av en handfull företag som omsätter 150 miljoner kronor och ganska få konsumenter, för att vara riktigt ärlig. Det handlar om höginkomsttagare i våra storstadsregioner, som i dag har råd och möjlighet att köpa den här typen av tjänster.",
+        "utterance_rank_sha256": "00de76ac24aa351cb6b66c6308598eb0a517fac1323fda8d910fbe2219009a01"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-b133e59b596529f3b7ebeea459b2dc999886ca54e47d5fd9a94caaa4c34d73fd",
+        "member": "H001UU8/2442207210020549021_anf110_550_578.wav",
+        "duration_ms": 27680,
+        "transcript": "Likheterna med ockupationen av Palestina, Västbanken och så vidare är ganska stora. I Västsahara har Marocko ockuperat ett område i över 40 år. Marocko har sagt sig vilja ha en folkomröstning men har gjort allt man kan för att förhindra att en folkomröstning sker. Vi menar att det är samma sak här som på palestinskt territorium.",
+        "utterance_rank_sha256": "01c0fbea75e0f0912aca9ff22de06b5f2730c9c39249b99de2cc7cdfbfabc3c9"
+      },
+      {
+        "source_id": "rixvox-v1-test-0",
+        "group_id": "rixvox-v1-speaker-db1a9bd32d0d26321fcfb598c3e5e69cc4b3e5f0e00bf8b1c947d6604045d6da",
+        "member": "H310543/2442207260021374721_anf5_2_27.wav",
+        "duration_ms": 24960,
+        "transcript": "Tack för dialogen och en, och som jag uppfattar statsrådet, förstående ton och ett konstruktivt tonläge i diskussionen, vilket kanske är det viktigaste. Klimatförändringarna föranleder åtgärder här och nu. Det är ingenting som vi kan se framåt i tiden, utan det är här och nu.",
+        "utterance_rank_sha256": "00140d1120fbc0b5960ab99128d5ccdea5d361b18172cbc32d4e17b6362db7f5"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-ed4440fb0bb91d710efa3d612f77690483c1ba29abe42315574b8ebe95ec5045",
+        "member": "GV01TU7/2442208240025258121_anf16_299_328.wav",
+        "duration_ms": 29480,
+        "transcript": "Om människor i ett län tillåts ta sig fram på bussar och tåg utan att behöva betala för det kommer man, heter det, att sluta cykla och gå. I stället kommer man att åka runt med bussen därför att man tycker att det är så kul. I avsaknad av andra aktiviteter kommer man att okynnesåka och så vidare. Vi tror att det senare är ett övergående problem. Vi som reser mycket till och från jobbet längtar väl inte direkt efter att sitta ytterligare några timmar på tåget eller på bussen.",
+        "utterance_rank_sha256": "004c535d5a5ef60dece2c9064d411008dcb8cba16ef25cba8084de7c86253dfc"
+      },
+      {
+        "source_id": "rixvox-v1-dev-0",
+        "group_id": "rixvox-v1-speaker-feea5ed2e1495dd1f93d8f7fd1fc0b548f97ea9b302a28563e72af68911ddc0d",
+        "member": "H210168/2442207040017673821_anf165_47_76.wav",
+        "duration_ms": 29080,
+        "transcript": "Den har deltagit med såväl ceremonimusik som musikunderhållning i personalvårdande syfte. En annan viktig uppgift är att musikkåren har en betydelsefull kulturell roll i Sverige, både historiskt, genom att vara Sveriges näst äldsta musikkår, och i musiklivet i dag. Den har en viktig del i världsarvsstaden Karlskrona och har funnits där i över 300 år.",
+        "utterance_rank_sha256": "008506ad11850598fb22443f5593ae02d0979463534d1d95fccd204b7bfefce2"
+      }
+    ]
+  },
+  "fsd50k": {
+    "clip_license_required": "http://creativecommons.org/publicdomain/zero/1.0/",
+    "group_rule": "fsd50k-uploader- + sha256('FSD50K-eval-uploader-v1\\0' + uploader)",
+    "clips": [
+      {"clip_id":"344220","group_id":"fsd50k-uploader-cac50f89ff2e081ef5953ddcb87d8c9e88b56e87d27e841c23da0f7d97fa21bd","member":"FSD50K.eval_audio/344220.wav","noise_class":"keyboard","required_label":"Computer_keyboard"},
+      {"clip_id":"195522","group_id":"fsd50k-uploader-b0af7dbd4b4b009693092c6d6e17bff8f93eea4cf6ed82d59f59539854d724e6","member":"FSD50K.eval_audio/195522.wav","noise_class":"rain","required_label":"Rain"},
+      {"clip_id":"388879","group_id":"fsd50k-uploader-1a9c4e1cc849fc41292f116179ad16553fe731a1599f6ddb542640f10e00c2d6","member":"FSD50K.eval_audio/388879.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"117592","group_id":"fsd50k-uploader-865e5109e05438d852fe965a8d33e7b9f69c73310cf67a1353953fa67efa4af9","member":"FSD50K.eval_audio/117592.wav","noise_class":"babble","required_label":"Chatter"},
+      {"clip_id":"328830","group_id":"fsd50k-uploader-30d21ec9ff142bec91c76ae1fc40225901bdcba9d33049b4ba4fbb13a633da6c","member":"FSD50K.eval_audio/328830.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"121189","group_id":"fsd50k-uploader-09a5f63f8e38e1a8b3d1fc0b01e2f1bbbb28e38468b4e8159779d6e012c510d3","member":"FSD50K.eval_audio/121189.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"188681","group_id":"fsd50k-uploader-50ea4000ebb24e4970af77226292306c1abe415049129f2bd98834ee640b8cfe","member":"FSD50K.eval_audio/188681.wav","noise_class":"rain","required_label":"Rain"},
+      {"clip_id":"179045","group_id":"fsd50k-uploader-6cb6bae7a9e7bd5d2fab3ac30dac6491aa56744f30d93ab3c354723b48d53680","member":"FSD50K.eval_audio/179045.wav","noise_class":"wind","required_label":"Wind"},
+      {"clip_id":"170107","group_id":"fsd50k-uploader-d9d7eac1ddc5ed589bf0cc6c5d1dd17014167531ea5cc2dc23b73ad7a3a65263","member":"FSD50K.eval_audio/170107.wav","noise_class":"handling","required_label":"Keys_jangling"},
+      {"clip_id":"179308","group_id":"fsd50k-uploader-a78ada7c0046afdd700e63573877cb0d52aef1456198fa938c850ff03af606e4","member":"FSD50K.eval_audio/179308.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"271658","group_id":"fsd50k-uploader-c53d8e0ee8070f1855613538adb8e996329d116300f2b8b6c998e0cf5a3b2583","member":"FSD50K.eval_audio/271658.wav","noise_class":"hvac","required_label":"Mechanical_fan"},
+      {"clip_id":"34869","group_id":"fsd50k-uploader-b1a2cc1d70a4f5f959c98f66bf1d22ccd85e8eb54ffd66b801c4ac7c474f44c0","member":"FSD50K.eval_audio/34869.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"431813","group_id":"fsd50k-uploader-e2b792aaa54044fa063389d8571e1f1367c7a7cc2105846fc14a38eafa68a9d0","member":"FSD50K.eval_audio/431813.wav","noise_class":"music-tv","required_label":"Music"},
+      {"clip_id":"117144","group_id":"fsd50k-uploader-7c4ac2bd7a5126150be1c0414770df0f355c69dc8b5ab9d7d8d694c3575bb9b7","member":"FSD50K.eval_audio/117144.wav","noise_class":"hum","required_label":"Buzz"},
+      {"clip_id":"26479","group_id":"fsd50k-uploader-0e46d32bccff8e7b1ce37d4ab908a4d874f526b13be0d53717c3bdf02310bd61","member":"FSD50K.eval_audio/26479.wav","noise_class":"keyboard","required_label":"Computer_keyboard"},
+      {"clip_id":"31547","group_id":"fsd50k-uploader-cd6ab16d9226aa32c761b99657c324de196800ccf411a8ecd7614a0e14210246","member":"FSD50K.eval_audio/31547.wav","noise_class":"handling","required_label":"Keys_jangling"},
+      {"clip_id":"217806","group_id":"fsd50k-uploader-d5cf0d15949d69cb47fcf35281da89c7bd34f5efb03c9f877a34910bd12869c3","member":"FSD50K.eval_audio/217806.wav","noise_class":"competing-speech","required_label":"Conversation"},
+      {"clip_id":"119445","group_id":"fsd50k-uploader-004a7548bf7f76145b40cc168217a143ef493657ba66ab48b5551fabb3ac51ad","member":"FSD50K.eval_audio/119445.wav","noise_class":"hum","required_label":"Buzz"},
+      {"clip_id":"245935","group_id":"fsd50k-uploader-b8f6901d700e6b176985b48086d1a0585f90fe690145bed7ba4ba820fc63e640","member":"FSD50K.eval_audio/245935.wav","noise_class":"hvac","required_label":"Mechanical_fan"},
+      {"clip_id":"154477","group_id":"fsd50k-uploader-a60c5d11827120aa09598d883c96e962cc192dc71c691e7d33ea06736e4d32ee","member":"FSD50K.eval_audio/154477.wav","noise_class":"handling","required_label":"Crumpling_and_crinkling"},
+      {"clip_id":"241812","group_id":"fsd50k-uploader-181618e1c63e0d21a0a5bee2b879ce535be60d29aeedd289aea7ee58873782ef","member":"FSD50K.eval_audio/241812.wav","noise_class":"handling","required_label":"Keys_jangling"}
+    ]
+  }
+}

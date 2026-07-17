@@ -1,6 +1,6 @@
 # Corpus source audit
 
-Verified 2026-07-16. This note records why some sources in
+Verified 2026-07-17. This note records why some sources in
 `corpus-lock.json` intentionally have no `artifact_path`. The fetcher treats
 that omission as a hard block.
 
@@ -57,10 +57,35 @@ that omission as a hard block.
   release qualification.
 - Together with the nine independent OpenSLR28 RVB2014 isotropic environments,
   this is enough for the master-quality floor in every split without treating
-  array channels or time windows as separate groups. It is not enough for the
-  nightly floor of sixteen noise groups and ten noise classes in each of three
-  disjoint splits; nightly remains fail-closed pending another reviewed,
-  independently recorded and labelled noise source.
+  array channels or time windows as separate groups. The CC0-only FSD50K
+  expansion below supplies the additional independently uploaded groups and
+  missing classes needed by nightly.
+
+## FSD50K evaluation CC0 subset
+
+- Primary record: [FSD50K on Zenodo](https://zenodo.org/records/4060432), DOI
+  `10.5281/zenodo.4060432`. The collection is CC-BY-4.0, but individual
+  Freesound clips retain their own terms. Selection therefore fails closed
+  unless the exact clip metadata URI is CC0-1.0.
+- Both official split-ZIP volumes are independently locked: `FSD50K.eval_audio.z01`
+  is 3,221,225,472 bytes with SHA-256
+  `a1b776a5a9466a0cf17d0cb9a2a98f641454084f0292f511718aacb48e6c401d`;
+  `FSD50K.eval_audio.zip` is 3,037,675,767 bytes with SHA-256
+  `e3d78e77115ff8d8df1ff3dae7ca5cd5864924c054561f61ba836764254bf50e`.
+  The 6,700,838-byte metadata and 334,701-byte ground-truth ZIPs are separately
+  pinned by SHA-256 in the lock.
+- The tracked selection contains 21 unique uploader groups: six tuning, seven
+  validation and eight holdout. It fills keyboard/rain/music-TV in tuning;
+  rain/wind/handling/music-TV in validation; and hum/keyboard/handling/
+  competing-speech in holdout, then adds identifier-ranked groups without
+  inventing independence.
+- The builder reads uploader names only transiently. Inventory group IDs are
+  `fsd50k-uploader-` plus SHA-256 of the domain-separated uploader value;
+  uploader names, titles and descriptions are never persisted. It rechecks
+  both the exact CC0 URI and a direct ground-truth label before decoding a clip.
+- The selection used metadata and identifiers only. No FSD50K holdout audio was
+  decoded, rendered, listened to or scored during this audit. Holdout remains
+  sealed until final qualification.
 
 ## Google FLEURS Swedish (`sv_se`)
 
@@ -92,6 +117,40 @@ that omission as a hard block.
   Raw archives, extracted clips and mixtures remain ignored local evidence and
   are never redistributed in Mumble artifacts.
 
+## RixVox v1 Swedish expansion
+
+- Primary source: [KBLab RixVox](https://huggingface.co/datasets/KBLab/rixvox),
+  exact revision `9b2b6066ee184faf436363ff0823f2e465ccfb31`. The dataset card
+  declares CC-BY-4.0 and attributes the Swedish Parliament.
+- Only two audio shards are required by the identifier-only reservoir:
+  `dev_0.tar.gz` is 4,042,055,183 bytes with SHA-256
+  `6c885473594ac2f81ab8cb790103803181eb998dc32cbbb63cee51b93a84c9ab`;
+  `test_0.tar.gz` is 4,011,846,841 bytes with SHA-256
+  `7c75945e820a8f8f5dea2b24183c6c97faa7df0028908935f3f4171d82f07f3c`.
+  Exact-revision dev/test Parquet metadata are separately locked at 1,708,010
+  and 2,028,178 bytes.
+- Stable source speaker identity is `intressent_id`, but raw IDs and all name,
+  party, gender, birth-year and demographic fields are forbidden from the
+  inventory. The builder uses only a domain-separated SHA-256 pseudonym. The
+  tracked selection contains five unique Swedish speaker groups per frozen
+  split and one transcripted utterance of at least six seconds per group.
+- `nightly-corpus-selection-v1.json` is the privacy-scrubbed derivative of the
+  exact metadata. Its selection is identifier-only and binds source shard,
+  member, transcript, duration, group pseudonym and utterance-rank hash. The
+  builder verifies archive membership/duration and binds the selection file's
+  own SHA-256; it never needs to persist the raw metadata identity fields.
+
+## OpenSLR SLR12 LibriSpeech test-clean expansion
+
+- Official archive: [test-clean.tar.gz](https://www.openslr.org/resources/12/test-clean.tar.gz),
+  346,663,984 bytes, SHA-256
+  `39fde525e59672dc6d1551919b1478f724438a95aa55f874b576be21967e6c23`,
+  licensed CC-BY-4.0 by [OpenSLR SLR12](https://www.openslr.org/12/).
+- The source is deliberately evaluation-only. Two transcripted speakers per
+  frozen split are selected by identifier: tuning 1995/5683, validation
+  1221/4992 and holdout 3729/8463. They are speaker-disjoint from the existing
+  mini LibriSpeech dev-clean source. Utterances are ranked by identifiers only.
+
 ## Common Voice Swedish 26.0
 
 - Primary release record: [Common Voice Scripted Speech 26.0 - Swedish](https://mozilladatacollective.com/datasets/cmqintw0q00xwnr07mjjzpe61).
@@ -99,6 +158,22 @@ that omission as a hard block.
 - The `sv-SE` release row records 50,259 clips, 1,281,634,603 bytes and archive SHA-256 `fc6e3a1c28e05f361badf51b0b8e1770db0d3012b02087b382b22ccd92bb0051`.
 - License is CC0-1.0. Training and local evaluation are allowed. The [current Common Voice terms](https://commonvoice.mozilla.org/terms) and MDC record prohibit speaker identification and re-hosting/re-sharing, so redistribution is blocked in this project.
 - Remaining work: implement an explicit authenticated MDC acquisition flow that records acceptance of the current terms and verifies the archive against the locked size and SHA-256. Until then, no `artifact_path` is present and the generic fetcher cannot download it.
+
+## VoxPopuli Swedish rejection
+
+- Audited official revision:
+  [`f7a3bb98d664e1d031763ec4f7639c4a530c64e9`](https://github.com/facebookresearch/voxpopuli/tree/f7a3bb98d664e1d031763ec4f7639c4a530c64e9).
+  VoxPopuli data is CC0, with the raw European Parliament recordings also
+  subject to the linked Parliament legal notice.
+- It is not usable for this transcripted Swedish-speaker expansion. Swedish is
+  absent from the official ASR languages; `unlabelled_v2` supplies neither a
+  transcript nor `speaker_id`; and `s2s_sv` has no human Swedish target
+  transcript while `src_speaker_id` identifies the source-language speaker,
+  not a Swedish interpreter.
+- Treating those records as Swedish speaker identities would create false
+  split independence and could not support Swedish WER. The source is therefore
+  explicitly rejected in the lock for this purpose, even though it may be
+  reconsidered as a separately audited CC0 training source later.
 
 ## VCTK 0.92
 
