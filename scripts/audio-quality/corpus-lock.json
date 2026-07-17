@@ -18,6 +18,38 @@
   },
   "sources": [
     {
+      "id": "aid-anechoic-interferer-v1-0",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 6974033; DOI 10.5281/zenodo.6974033)",
+      "source_url": "https://zenodo.org/api/records/6974033/files/AID.zip/content",
+      "landing_page": "https://zenodo.org/records/6974033",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/aid/AID-v1.0.zip",
+        "digest": "cc69345e3d778a179446032e984e26c1840c65257ace36e6d352f83a83049b5b",
+        "size_bytes": 283052162
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://zenodo.org/api/records/6974033",
+        "notes": "Version-specific Zenodo metadata assigns CC BY 4.0 to the author-recorded dataset."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 762,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Official MD5 e55212120175759e9f14f08975eced33. Group the three microphone captures of each physical event together before splitting. Raw or derived audio stays outside Git and release artifacts."
+    },
+    {
       "id": "common-voice-swedish-26-0",
       "kind": "clean_speech",
       "version": "26.0 (cv-corpus-26.0-2026-06-12; sv-SE)",

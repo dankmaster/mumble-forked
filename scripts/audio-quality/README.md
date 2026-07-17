@@ -488,10 +488,12 @@ Every source actually referenced as speech, noise, RIR or microphone response
 must have a verified license, `training_status = allowed_with_attribution` and
 the `training_candidate` role in the exact locked corpus. The freezer also
 requires at least one noise asset; a clean-only plan is rejected. The current
-checked-in lock intentionally has no training-approved noise source, so it
-cannot yet produce a product-training campaign. SLR28 remains evaluation-only.
-Approve and pin a genuinely training-licensed noise source before starting a
-campaign; do not loosen the gate to reuse evaluation material.
+checked-in lock pins AID v1.0 as the first training-approved noise source under
+CC BY 4.0. SLR28 and DEMAND remain evaluation-only and must not leak into a
+training plan. AID's three microphone captures of each physical event must use
+one shared group ID so those captures cannot cross a split boundary. Preserve
+the dataset attribution in the frozen plan and model card; do not loosen the
+gate to reuse evaluation-only material.
 
 After the protected trainer produces all frozen model paths, validation and
 holdout are separate commands. Validation must contain every seed candidate;
