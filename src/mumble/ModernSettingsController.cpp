@@ -2337,6 +2337,29 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		return result;
 	}
 
+	if (action == QLatin1String("playInputEnhancementCalibration")) {
+		bool validToken = false;
+		const qulonglong token =
+			payload.value(QStringLiteral("playbackToken")).toString().toULongLong(&validToken);
+		if (!validToken || token == 0) {
+			result.stateChanged = false;
+			return result;
+		}
+		result.stateChanged = false;
+		result.externalActionID = action;
+		// Keep the blind token opaque and discard every other property. In
+		// particular, PCM must never be serialized through QVariant/QML.
+		result.externalActionPayload =
+			QVariantMap { { QStringLiteral("playbackToken"), QString::number(token) } };
+		return result;
+	}
+
+	if (action == QLatin1String("stopInputEnhancementCalibrationPlayback")) {
+		result.stateChanged = false;
+		result.externalActionID = action;
+		return result;
+	}
+
 	if (action == QLatin1String("plugins.toggle")) {
 		result.stateChanged = updatePluginDraft(m_draft, payload);
 		return result;

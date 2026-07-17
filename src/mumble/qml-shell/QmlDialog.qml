@@ -1490,6 +1490,10 @@ Dialog {
 				font.pixelSize: 11
 				wrapMode: Text.Wrap
 			}
+			InputEnhancementCalibration {
+				field: voiceMeterRoot.field
+				controller: dialogState
+			}
 			Flow {
 				Layout.fillWidth: true
 				spacing: Math.max(6, Math.round(Theme.spacing / 2))

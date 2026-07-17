@@ -8,6 +8,7 @@
 #include "ACL.h"
 #include "AudioInput.h"
 #include "AudioOutput.h"
+#include "AudioOutputSample.h"
 #include "CertService.h"
 #include "Channel.h"
 #include "Connection.h"
@@ -15371,6 +15372,7 @@ void MainWindow::publishModernConnectServerPingState() {
 }
 
 void MainWindow::openModernSettingsDialog(const QString &pageName) {
+	stopInputEnhancementCalibrationPlayback();
 	if (!m_modernDialogController) {
 		m_modernDialogController = std::make_unique< ModernDialogController >();
 	}
@@ -18575,7 +18577,37 @@ void MainWindow::commitAsyncPluginInstall(const QString &operationID,
 }
 
 bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
-												 const QVariantMap &fieldValues, const QVariantMap &payload) {
+																 const QVariantMap &fieldValues, const QVariantMap &payload) {
+	if (dialogID == QLatin1String("settings")
+		&& actionID == QLatin1String("stopInputEnhancementCalibrationPlayback")) {
+		stopInputEnhancementCalibrationPlayback();
+		return true;
+	}
+
+	if (dialogID == QLatin1String("settings")
+		&& actionID == QLatin1String("playInputEnhancementCalibration")) {
+		stopInputEnhancementCalibrationPlayback();
+
+		// The committed Qt Quick base intentionally has no CalibrationRuntime.
+		// After the audio branch is rebased, resolve this opaque token only from
+		// the active runtime while it is in BlindComparison/DraftReady, then pass
+		// runtime->playbackForToken(token) to
+		// startInputEnhancementCalibrationPlayback(). Never put PCM in a QVariant,
+		// QML property, temporary file, or network message.
+		bool validToken = false;
+		const qulonglong playbackToken =
+			payload.value(QStringLiteral("playbackToken")).toString().toULongLong(&validToken);
+		if (!validToken || playbackToken == 0) {
+			publishModernToast(QStringLiteral("error"), tr("Input calibration"),
+								   tr("The local comparison clip is no longer available."));
+			return true;
+		}
+
+		publishModernToast(QStringLiteral("warning"), tr("Input calibration"),
+							   tr("Local comparison playback is not available in this build."));
+		return true;
+	}
+
 	if (dialogID == QLatin1String("developerConsole")) {
 		const QString logPath = fieldValues.value(QStringLiteral("developerConsole.logPath")).toString();
 		if (actionID == QLatin1String("developerConsole.openFile")) {
@@ -19684,6 +19716,34 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 	return false;
 }
 
+bool MainWindow::startInputEnhancementCalibrationPlayback(const std::span< const float > monoPcm) {
+	stopInputEnhancementCalibrationPlayback();
+	const AudioOutputPtr output = Global::get().ao;
+	if (!output) {
+		return false;
+	}
+
+	const AudioOutputToken token =
+		output->playMemorySample(monoPcm, AudioOutputSample::memorySampleRate, 1.0f);
+	if (!token) {
+		return false;
+	}
+
+	m_inputEnhancementCalibrationPlaybackToken  = token;
+	m_inputEnhancementCalibrationPlaybackOutput = output;
+	return true;
+}
+
+void MainWindow::stopInputEnhancementCalibrationPlayback() {
+	if (m_inputEnhancementCalibrationPlaybackToken) {
+		if (const AudioOutputPtr output = m_inputEnhancementCalibrationPlaybackOutput.lock()) {
+			output->invalidateToken(m_inputEnhancementCalibrationPlaybackToken);
+		}
+	}
+	m_inputEnhancementCalibrationPlaybackToken = AudioOutputToken();
+	m_inputEnhancementCalibrationPlaybackOutput.reset();
+}
+
 bool MainWindow::tryModernAutoConnectLastServer() {
 	const QList< FavoriteServer > favorites =
 		Global::get().db ? Global::get().db->getFavorites() : QList< FavoriteServer >();
@@ -20005,6 +20065,7 @@ void MainWindow::handleModernDialogClose(const QString &dialogID) {
 	}
 	if (dialogID.isEmpty() || dialogID == QLatin1String("settings")) {
 		cancelModernShortcutCapture();
+		stopInputEnhancementCalibrationPlayback();
 	}
 
 	if (!m_modernDialogController) {
@@ -20055,6 +20116,25 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 										  const QVariantMap &payload) {
 	if (!m_modernDialogController) {
 		return;
+	}
+
+	if (dialogID == QLatin1String("settings")) {
+		const bool leavingAudioInput = actionID == QLatin1String("selectPage")
+			&& payload.value(QStringLiteral("pageId")).toString() != QLatin1String("audioInput");
+		const bool calibrationStateChange =
+			actionID == QLatin1String("startInputEnhancementCalibration")
+			|| actionID == QLatin1String("advanceInputEnhancementCalibration")
+			|| actionID == QLatin1String("skipInputEnhancementCalibrationNoise")
+			|| actionID == QLatin1String("evaluateInputEnhancementCalibration")
+			|| actionID == QLatin1String("selectInputEnhancementCalibration")
+			|| actionID == QLatin1String("applyInputEnhancementCalibration")
+			|| actionID == QLatin1String("cancelInputEnhancementCalibration");
+		const bool settingsCommitOrRollback = actionID == QLatin1String("apply")
+			|| actionID == QLatin1String("ok") || actionID == QLatin1String("cancel")
+			|| actionID == QLatin1String("reset");
+		if (leavingAudioInput || calibrationStateChange || settingsCommitOrRollback) {
+			stopInputEnhancementCalibrationPlayback();
+		}
 	}
 
 	if (dialogID.startsWith(QLatin1String("userInformation:")) && actionID == QLatin1String("identity.openAvatar")) {
@@ -20275,6 +20355,7 @@ void MainWindow::connectFromModernDialog(const QString &host, const unsigned sho
 
 void MainWindow::applyModernSettings(const Settings &settings, const bool accepted, const bool announce) {
 	cancelModernShortcutCapture();
+	stopInputEnhancementCalibrationPlayback();
 	Audio::stop();
 	Global::get().s = settings;
 	int queuedPluginTransitions = 0;
@@ -32207,6 +32288,7 @@ void MainWindow::updateFavoriteButton() {
 // Sets whether or not to show the title bars on the MainWindow's
 // dock widgets.
 MainWindow::~MainWindow() {
+	stopInputEnhancementCalibrationPlayback();
 	m_pendingServerConnection.reset();
 	persistentChatPreviewWorkerQueue().cancelOwner(this);
 	m_screenSharePickerShuttingDown = true;
@@ -32283,6 +32365,7 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 	Global::get().bQuit = true;
 	m_pendingServerConnection.reset();
+	stopInputEnhancementCalibrationPlayback();
 
 	e->accept();
 
@@ -35900,6 +35983,7 @@ void MainWindow::whisperReleased(QVariant scdata) {
 
 void MainWindow::onResetAudio() {
 	qWarning("MainWindow: Start audio reset");
+	stopInputEnhancementCalibrationPlayback();
 	Audio::stop();
 	Audio::start();
 	qWarning("MainWindow: Audio reset complete");

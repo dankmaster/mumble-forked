@@ -55,6 +55,7 @@ if (static AND client)
 endif()
 
 if(client)
+	add_subdirectory("TestAudioOutputMemorySample")
 	add_subdirectory("TestModernDialogControllers")
 	add_subdirectory("TestModernShellMenuSerializer")
 	add_subdirectory("TestModernTheme")

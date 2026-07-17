@@ -9,14 +9,19 @@
 #include <QtCore/QObject>
 
 #include <array>
+#include <cstdint>
 #include <memory>
+
+class AudioOutput;
 
 class AudioOutputBuffer : public QObject {
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(AudioOutputBuffer)
+	std::uint64_t m_outputTokenId = 0;
+	friend class AudioOutput;
 protected:
-	unsigned int iBufferSize;
+	unsigned int iBufferSize = 0;
 
 	/// Used to resize the buffer.
 	/// WARNING:
@@ -33,7 +38,7 @@ public:
 	float m_suggestedVolumeAdjustment = 1.0f;
 	std::unique_ptr< unsigned int[] > piOffset;
 	std::array< float, 3 > fPos = { 0.0, 0.0, 0.0 };
-	bool bStereo;
+	bool bStereo = false;
 	virtual bool prepareSampleBuffer(unsigned int snum) = 0;
 };
 

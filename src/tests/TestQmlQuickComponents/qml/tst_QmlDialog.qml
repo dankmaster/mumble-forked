@@ -564,6 +564,46 @@ TestCase {
 		compare(dialogState.lastPayload.mode, "server");
 	}
 
+	function test_input_enhancement_blind_comparison_routes_only_opaque_tokens() {
+		dialogState.setSections([{ "title": "Input enhancement", "fields": [{
+			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
+			"value": { "available": true, "amplitude": 40 }, "staticMeter": true,
+			"inputEnhancementCalibrationState": 10,
+			"inputEnhancementCalibrationLeftPlaybackToken": "18446744073709551001",
+			"inputEnhancementCalibrationRightPlaybackToken": "18446744073709551002",
+			"inputEnhancementCalibrationSelectActionId": "selectInputEnhancementCalibration"
+		}]}]);
+
+		const comparison = findChild(loader.item.contentItem, "inputEnhancementCalibration");
+		const playA = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayA");
+		const playB = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayB");
+		const preferB = findChild(loader.item.contentItem, "inputEnhancementCalibrationPreferB");
+		const privacy = findChild(loader.item.contentItem, "inputEnhancementCalibrationPrivacy");
+		tryVerify(function() {
+			return comparison !== null && comparison.visible && playA !== null && playB !== null
+				&& preferB !== null && privacy !== null;
+		});
+		verify(privacy.text.indexOf("Nothing is sent to the server") >= 0);
+
+		playA.clicked();
+		compare(dialogState.lastAction, "playInputEnhancementCalibration");
+		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551001");
+		compare(Object.keys(dialogState.lastPayload).length, 1);
+		compare(playA.text, "Stop A");
+
+		playA.clicked();
+		compare(dialogState.lastAction, "stopInputEnhancementCalibrationPlayback");
+		compare(playA.text, "Play A");
+
+		playB.clicked();
+		compare(dialogState.lastAction, "playInputEnhancementCalibration");
+		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551002");
+		preferB.clicked();
+		compare(dialogState.lastAction, "selectInputEnhancementCalibration");
+		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551002");
+		compare(playB.text, "Play B");
+	}
+
 	function test_dialog_metadata_controls_loading_status_size_primary_and_focus() {
 		dialogState.setSpecialState("generic", {
 			"id": "metadata", "loading": true, "loadingScaffold": "acl", "statusMessage": "Fetching permissions",
