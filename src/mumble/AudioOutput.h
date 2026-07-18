@@ -41,6 +41,7 @@
 #include "Audio.h"
 
 class AudioOutput;
+class AudioOutputSpeech;
 class ClientUser;
 class AudioOutputBuffer;
 class AudioOutputToken;
@@ -103,6 +104,13 @@ protected:
 
 	void initializeMixer(const unsigned int *chanmasks, bool forceheadphone = false);
 	bool mix(void *output, unsigned int frameCount);
+
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	/// Developer-only observation point for the deterministic speech-cleanup
+	/// harness. It runs after a speech buffer has been decoded and cleaned, but
+	/// before the public audio-source signal is emitted.
+	virtual void observeSpeechCleanupSourceForE2E(const AudioOutputSpeech *) {}
+#endif
 
 	virtual void prepareOutputBuffers(unsigned int frameCount, QList< AudioOutputBuffer * > &qlMix,
 									  QList< AudioOutputBuffer * > &qlDel);

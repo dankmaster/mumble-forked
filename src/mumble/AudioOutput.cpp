@@ -201,12 +201,27 @@ void AudioOutput::addFrameToBuffer(ClientUser *sender, const Mumble::Protocol::A
 			return;
 		}
 
+		// AudioOutputSpeech snapshots and initializes the selected remote-cleanup
+		// processor in its constructor. Do that before taking qrwlOutputs for
+		// writing: loading a neural model while holding this lock would otherwise
+		// stall the mixer even though the work runs on the network/dispatch thread.
+		auto replacement =
+			std::make_unique< AudioOutputSpeech >(sender, iMixerFreq, audioData.usedCodec, iBufferSize);
+
 		QWriteLocker lock(&qrwlOutputs);
+		// Re-check after the potentially expensive initialization. If another
+		// packet source already installed a compatible stream, use it and let the
+		// unused replacement be destroyed after the write lock is released.
+		speech = qobject_cast< AudioOutputSpeech * >(qmOutputs.value(sender));
+		if (speech && speech->m_codec == audioData.usedCodec) {
+			speech->addFrameToBuffer(audioData);
+			return;
+		}
 		if (speech) {
 			removeBuffer(speech, false);
 		}
 
-		speech = new AudioOutputSpeech(sender, iMixerFreq, audioData.usedCodec, iBufferSize);
+		speech = replacement.release();
 		qmOutputs.replace(sender, speech);
 
 		speech->addFrameToBuffer(audioData);
@@ -675,6 +690,11 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 				const int channels = (speech && speech->bStereo) ? 2 : 1;
 				// If user != nullptr, then the current audio is considered speech
 				assert(channels >= 0);
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+				if (speech) {
+					observeSpeechCleanupSourceForE2E(speech);
+				}
+#endif
 				emit audioSourceFetched(pfBuffer, frameCount, static_cast< unsigned int >(channels), SAMPLE_RATE,
 										static_cast< bool >(user), user);
 

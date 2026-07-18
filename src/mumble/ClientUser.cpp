@@ -30,15 +30,20 @@ QString ClientUser::getLocalNickname() const {
 }
 
 bool ClientUser::isRemoteSpeechCleanupEnabled() const {
-	return m_remoteSpeechCleanupOverride.value_or(Global::get().s.remoteSpeechCleanupEnabled);
+	const std::int8_t override = m_remoteSpeechCleanupOverride.load(std::memory_order_relaxed);
+	return override < 0 ? Global::get().s.remoteSpeechCleanupEnabled : override > 0;
 }
 
 std::optional< bool > ClientUser::getRemoteSpeechCleanupOverride() const {
-	return m_remoteSpeechCleanupOverride;
+	const std::int8_t override = m_remoteSpeechCleanupOverride.load(std::memory_order_relaxed);
+	if (override < 0) {
+		return std::nullopt;
+	}
+	return override > 0;
 }
 
 void ClientUser::setRemoteSpeechCleanupOverride(std::optional< bool > enabled) {
-	m_remoteSpeechCleanupOverride = enabled;
+	m_remoteSpeechCleanupOverride.store(enabled ? (*enabled ? 1 : 0) : -1, std::memory_order_relaxed);
 }
 
 ClientUser *ClientUser::get(unsigned int uiSession) {
