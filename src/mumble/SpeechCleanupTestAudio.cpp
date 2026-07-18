@@ -8,6 +8,7 @@
 #include "ClientUser.h"
 #include "Global.h"
 #include "InputEnhancementPackageVerifier.h"
+#include "InputEnhancementPolicyController.h"
 #include "ServerHandler.h"
 
 #include <QtCore/QByteArrayView>
@@ -523,6 +524,23 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 						 { QStringLiteral("error"), static_cast< int >(report.error) },
 						 { QStringLiteral("detail"), report.detail },
 						 { QStringLiteral("catalog_revision"), verifier->catalogRevision() } });
+	}
+	if (Global::g_global_struct && Global::get().inputEnhancementPolicyController) {
+		const auto *controller = Global::get().inputEnhancementPolicyController;
+		const Mumble::InputEnhancement::EffectivePolicyState state = controller->effectiveState();
+		inputEnhancementDiagnostics.insert(
+			QStringLiteral("channel_policy"),
+			QJsonObject{ { QStringLiteral("decision_ready"), controller->readyForHealthMarker() },
+						 { QStringLiteral("decision_healthy"), controller->policyDecisionHealthy() },
+						 { QStringLiteral("managed"), state.managedBySignedPolicy },
+						 { QStringLiteral("verified"), state.hasVerifiedPolicy },
+						 { QStringLiteral("available"), state.available },
+						 { QStringLiteral("force_original"), state.forceOriginal },
+						 { QStringLiteral("recommended_profile"),
+						   static_cast< int >(state.recommendedProfile) },
+						 { QStringLiteral("runtime_disabled"), Global::get().bDisableInputEnhancement },
+						 { QStringLiteral("recovery_disabled"),
+						   Global::get().bInputEnhancementRecoveryDisabled } });
 	}
 	// Keep model construction observable for every enhanced E2E run, including
 	// preflight failures where no Pipeline object exists yet. Original and Light
