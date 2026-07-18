@@ -666,13 +666,13 @@ top-level fields:
     "active_profile": "Quality",
     "active_engine": "DeepFilterNet",
     "active_recipe": {
-      "catalog_revision": "input-recipes-v2",
-      "id": "input.quality.deepfilternet-balanced",
+      "catalog_revision": "input-recipes-v3",
+      "id": "input.quality.deepfilternet-low-latency",
       "manifest_sha256": "<recipe-manifest SHA-256>",
       "revision": 1
     },
     "active_models": [
-      { "id": "deepfilternet:balanced", "sha256": "<model SHA-256>", "version": "<version>" }
+      { "id": "deepfilternet:low-latency", "sha256": "<model SHA-256>", "version": "<version>" }
     ],
     "callback_frame_count": 100,
     "callback_p99_ms": 4.5,
@@ -682,7 +682,7 @@ top-level fields:
     "deadline_miss_count": 0,
     "fallback_count": 0,
     "invalid_output_count": 0,
-    "declared_latency_samples": 1920,
+    "declared_latency_samples": 1440,
     "tail_drained": true
   }
 }

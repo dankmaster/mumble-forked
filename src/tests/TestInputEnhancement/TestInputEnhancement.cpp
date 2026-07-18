@@ -12,6 +12,10 @@
 
 #include <QCryptographicHash>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -202,6 +206,7 @@ class TestInputEnhancement : public QObject {
 
 private slots:
 	void catalogDefinesStableProductRecipes();
+	void trackedDescriptorExactlyMatchesCompiledCatalog();
 	void catalogClampsControlsAndInterpolatesMix();
 	void profileValuesAndReadinessAreStable();
 	void autoPolicyUsesCpuAndBackendAvailability();
@@ -268,6 +273,186 @@ void TestInputEnhancement::catalogDefinesStableProductRecipes() {
 		QCOMPARE(recipe.revision(), RecipeCatalog::currentRevision);
 		QCOMPARE(recipe.latencyBudgetSamples(), item.latencyBudget);
 	}
+}
+
+void TestInputEnhancement::trackedDescriptorExactlyMatchesCompiledCatalog() {
+	QFile descriptorFile(QString::fromUtf8(MUMBLE_INPUT_ENHANCEMENT_RECIPE_DESCRIPTOR_PATH));
+	QVERIFY2(descriptorFile.open(QIODevice::ReadOnly), qPrintable(descriptorFile.errorString()));
+	QJsonParseError parseError;
+	const QJsonDocument document = QJsonDocument::fromJson(descriptorFile.readAll(), &parseError);
+	QCOMPARE(parseError.error, QJsonParseError::NoError);
+	QVERIFY(document.isObject());
+	const QJsonObject root = document.object();
+	QCOMPARE(root.value(QStringLiteral("schemaVersion")).toInt(-1), 2);
+	QCOMPARE(root.value(QStringLiteral("catalogRevision")).toString(), QStringLiteral("input-recipes-v3"));
+	QCOMPARE(RecipeCatalog::currentRevision, 1U);
+	QCOMPARE(recipeExecutionSemanticsVersion, 6U);
+	QCOMPARE(qualifiedMixCurveVersion, 5U);
+	QCOMPARE(adaptationPolicyVersion, 1U);
+	QVERIFY(root.value(QStringLiteral("recipes")).isArray());
+
+	const QSet< QString > recipeFields = {
+		QStringLiteral("id"),
+		QStringLiteral("revision"),
+		QStringLiteral("profile"),
+		QStringLiteral("engine"),
+		QStringLiteral("modelIds"),
+		QStringLiteral("noiseReductionRange"),
+		QStringLiteral("naturalCrispRange"),
+		QStringLiteral("latencyBudgetMs"),
+		QStringLiteral("minimumCpuClass"),
+		QStringLiteral("executionSemanticsVersion"),
+		QStringLiteral("mixCurveVersion"),
+		QStringLiteral("adaptationPolicyVersion"),
+	};
+	const QSet< QString > expectedExpertIds = {
+		QStringLiteral("input.expert.rnnoise-little"),
+		QStringLiteral("input.expert.dtln-baseline"),
+		QStringLiteral("input.expert.dtln-norm500h"),
+		QStringLiteral("input.expert.dtln-norm40h"),
+		QStringLiteral("input.expert.deepfilternet-low-latency"),
+	};
+
+	QHash< QString, QJsonObject > productEntries;
+	QSet< QString > expertIds;
+	const QJsonArray manifestRecipes = root.value(QStringLiteral("recipes")).toArray();
+	for (const QJsonValue &value : manifestRecipes) {
+		QVERIFY(value.isObject());
+		const QJsonObject entry = value.toObject();
+		const QString id         = entry.value(QStringLiteral("id")).toString();
+		QVERIFY2(!id.isEmpty(), "Descriptor recipe ID must not be empty");
+
+		QSet< QString > actualFields;
+		for (auto iterator = entry.constBegin(); iterator != entry.constEnd(); ++iterator) {
+			actualFields.insert(iterator.key());
+		}
+		const bool advancedOnly = entry.contains(QStringLiteral("advancedOnly"));
+		if (advancedOnly) {
+			QVERIFY2(entry.value(QStringLiteral("advancedOnly")).isBool()
+					 && entry.value(QStringLiteral("advancedOnly")).toBool(),
+					 qPrintable(QStringLiteral("Expert recipe %1 must set advancedOnly=true").arg(id)));
+			QSet< QString > expectedFields = recipeFields;
+			expectedFields.insert(QStringLiteral("advancedOnly"));
+			QVERIFY2(actualFields == expectedFields,
+					 qPrintable(QStringLiteral("Expert recipe %1 has an unexpected field set").arg(id)));
+			QVERIFY2(id.startsWith(QStringLiteral("input.expert.")),
+					 qPrintable(QStringLiteral("advancedOnly recipe %1 is not namespaced as Expert").arg(id)));
+			QVERIFY2(!expertIds.contains(id), qPrintable(QStringLiteral("Duplicate Expert recipe %1").arg(id)));
+			expertIds.insert(id);
+			continue;
+		}
+
+		QVERIFY2(actualFields == recipeFields,
+				 qPrintable(QStringLiteral("Product recipe %1 has an unexpected field set").arg(id)));
+		QVERIFY2(!id.startsWith(QStringLiteral("input.expert.")),
+				 qPrintable(QStringLiteral("Expert recipe %1 is missing advancedOnly=true").arg(id)));
+		QVERIFY2(!productEntries.contains(id), qPrintable(QStringLiteral("Duplicate product recipe %1").arg(id)));
+		productEntries.insert(id, entry);
+	}
+	QCOMPARE(productEntries.size(), 8);
+	QVERIFY(expertIds == expectedExpertIds);
+	QCOMPARE(manifestRecipes.size(), productEntries.size() + expertIds.size());
+
+	struct CatalogRequest {
+		Profile profile;
+		CpuClass cpuClass;
+		const char *profileName;
+	};
+	const std::array< CatalogRequest, 8 > catalogRequests = { {
+		{ Profile::Original, CpuClass::High, "Original" },
+		{ Profile::Light, CpuClass::High, "Light" },
+		{ Profile::Balanced, CpuClass::High, "Balanced" },
+		{ Profile::Quality, CpuClass::High, "Quality" },
+		{ Profile::Auto, CpuClass::Low, "Auto" },
+		{ Profile::Auto, CpuClass::Standard, "Auto" },
+		{ Profile::Auto, CpuClass::High, "Auto" },
+		{ Profile::VoiceFocus, CpuClass::High, "VoiceFocus" },
+	} };
+	const auto engineName = [](const Engine engine) {
+		switch (engine) {
+			case Engine::None:
+				return QStringLiteral("None");
+			case Engine::Speex:
+				return QStringLiteral("Speex");
+			case Engine::RNNoise:
+				return QStringLiteral("RNNoise");
+			case Engine::DeepFilterNet:
+				return QStringLiteral("DeepFilterNet");
+			case Engine::DTLN:
+				return QStringLiteral("DTLN");
+		}
+		return QString{};
+	};
+	const auto cpuClassName = [](const CpuClass cpuClass) {
+		switch (cpuClass) {
+			case CpuClass::Low:
+				return QStringLiteral("Low");
+			case CpuClass::Standard:
+				return QStringLiteral("Standard");
+			case CpuClass::High:
+				return QStringLiteral("High");
+		}
+		return QString{};
+	};
+
+	QSet< QString > compiledIds;
+	for (const CatalogRequest &catalogRequest : catalogRequests) {
+		ResolveRequest minimumRequest;
+		minimumRequest.profile             = catalogRequest.profile;
+		minimumRequest.noiseReduction      = 0;
+		minimumRequest.naturalCrisp        = 0;
+		minimumRequest.cpuClass            = catalogRequest.cpuClass;
+		minimumRequest.backendAvailability = { true, true, true };
+		const Recipe minimum                = RecipeCatalog::resolve(minimumRequest);
+
+		ResolveRequest maximumRequest = minimumRequest;
+		maximumRequest.noiseReduction = 100;
+		maximumRequest.naturalCrisp   = 100;
+		const Recipe maximum          = RecipeCatalog::resolve(maximumRequest);
+		QCOMPARE(maximum.id(), minimum.id());
+		QVERIFY2(productEntries.contains(minimum.id()),
+				 qPrintable(QStringLiteral("Compiled recipe %1 is absent from the descriptor").arg(minimum.id())));
+		QVERIFY2(!compiledIds.contains(minimum.id()),
+				 qPrintable(QStringLiteral("Compiled catalog resolved duplicate recipe %1").arg(minimum.id())));
+		compiledIds.insert(minimum.id());
+
+		const QJsonObject entry = productEntries.value(minimum.id());
+		QCOMPARE(entry.value(QStringLiteral("id")).toString(), minimum.id());
+		QCOMPARE(entry.value(QStringLiteral("profile")).toString(), QString::fromLatin1(catalogRequest.profileName));
+		QCOMPARE(entry.value(QStringLiteral("engine")).toString(), engineName(minimum.engine()));
+		QVERIFY(entry.value(QStringLiteral("modelIds")).isArray());
+		const QJsonArray modelIds = entry.value(QStringLiteral("modelIds")).toArray();
+		QCOMPARE(modelIds.size(), minimum.modelId().isEmpty() ? 0 : 1);
+		if (!minimum.modelId().isEmpty()) {
+			QCOMPARE(modelIds.at(0).toString(), minimum.modelId());
+		}
+
+		QVERIFY(entry.value(QStringLiteral("noiseReductionRange")).isArray());
+		const QJsonArray noiseRange = entry.value(QStringLiteral("noiseReductionRange")).toArray();
+		QCOMPARE(noiseRange.size(), 2);
+		QCOMPARE(noiseRange.at(0).toInt(-1), minimum.noiseReduction());
+		QCOMPARE(noiseRange.at(1).toInt(-1), maximum.noiseReduction());
+		QVERIFY(entry.value(QStringLiteral("naturalCrispRange")).isArray());
+		const QJsonArray characterRange = entry.value(QStringLiteral("naturalCrispRange")).toArray();
+		QCOMPARE(characterRange.size(), 2);
+		QCOMPARE(characterRange.at(0).toInt(-1), minimum.naturalCrisp());
+		QCOMPARE(characterRange.at(1).toInt(-1), maximum.naturalCrisp());
+
+		constexpr unsigned int samplesPerMillisecond = sampleRateHz / 1000;
+		QCOMPARE(minimum.latencyBudgetSamples() % samplesPerMillisecond, 0U);
+		QCOMPARE(entry.value(QStringLiteral("latencyBudgetMs")).toInt(-1),
+				 static_cast< int >(minimum.latencyBudgetSamples() / samplesPerMillisecond));
+		QCOMPARE(entry.value(QStringLiteral("minimumCpuClass")).toString(), cpuClassName(minimum.minimumCpuClass()));
+		QCOMPARE(entry.value(QStringLiteral("revision")).toInt(-1),
+				 static_cast< int >(RecipeCatalog::currentRevision));
+		QCOMPARE(entry.value(QStringLiteral("executionSemanticsVersion")).toInt(-1),
+				 static_cast< int >(recipeExecutionSemanticsVersion));
+		QCOMPARE(entry.value(QStringLiteral("mixCurveVersion")).toInt(-1),
+				 static_cast< int >(qualifiedMixCurveVersion));
+		QCOMPARE(entry.value(QStringLiteral("adaptationPolicyVersion")).toInt(-1),
+				 static_cast< int >(adaptationPolicyVersion));
+	}
+	QCOMPARE(compiledIds.size(), productEntries.size());
 }
 
 void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
