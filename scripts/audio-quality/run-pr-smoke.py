@@ -34,7 +34,7 @@ SCENES = ("clean", "stationary-hvac", "transient-keyboard")
 STARTUPS = (("cold", 0), ("warm", 14_400))
 EXPECTED = {
 	"Original": ("None", "input.original", 0, ""),
-	"Light": ("Speex", "input.light.speex", 0, ""),
+	"Light": ("Speex", "input.light.speex", 480, ""),
 	"Balanced": ("RNNoise", "input.balanced.rnnoise-embedded", 1_440, "rnnoise:embedded"),
 	"Quality": (
 		"DeepFilterNet", "input.quality.deepfilternet-low-latency", 1_440, "deepfilternet:low-latency"
