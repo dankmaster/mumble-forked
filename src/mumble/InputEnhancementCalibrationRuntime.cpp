@@ -236,7 +236,7 @@ CalibrationCandidateEvaluator::Output::~Output() {
 
 CalibrationPackageAuthorization
 	CalibrationPackageAuthorization::signedPackage(std::vector< AuthorizedRecipe > recipes) {
-	return signedPackage(QStringLiteral("input-recipes-v2"), std::move(recipes));
+	return signedPackage(productRecipeCatalogRevision(), std::move(recipes));
 }
 
 CalibrationPackageAuthorization

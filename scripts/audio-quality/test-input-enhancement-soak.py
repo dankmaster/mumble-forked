@@ -73,8 +73,8 @@ def _recipe(
 		"naturalCrispRange": character_range,
 		"latencyBudgetMs": latency_ms,
 		"minimumCpuClass": minimum_cpu,
-		"executionSemanticsVersion": 5,
-		"mixCurveVersion": 4,
+		"executionSemanticsVersion": 8,
+		"mixCurveVersion": 6,
 		"adaptationPolicyVersion": 1,
 	}
 
@@ -96,9 +96,14 @@ if a.output or a.analysis_only or not a.realtime_pace: sys.exit(22)
 fault=os.environ.get('MUMBLE_SOAK_SELF_TEST_FAULT','')
 duration=a.soak_duration_seconds
 if fault!='ready-missing':
- ready={'kind':'mumble-input-enhancement-realtime-ready-v1','nonce':a.realtime_ready_nonce,'process_id':os.getpid()}
+ # Windows executes the copied .py fixture through its registered launcher.
+ # The soak monitor owns that launcher PID, while this interpreter is its
+ # child. Product evidence still executes speech_cleanup_benchmark.exe
+ # directly and therefore writes its own PID.
+ ready_pid=os.getppid() if os.name=='nt' else os.getpid()
+ ready={'kind':'mumble-input-enhancement-realtime-ready-v1','nonce':a.realtime_ready_nonce,'process_id':ready_pid}
  if fault=='ready-nonce': ready['nonce']='f'*64
- if fault=='ready-pid': ready['process_id']=os.getpid()+1
+ if fault=='ready-pid': ready['process_id']=ready_pid+1
  ready_path=Path(a.realtime_ready_file)
  ready_temp=ready_path.with_name(ready_path.name+'.tmp-'+str(os.getpid()))
  ready_temp.write_bytes((json.dumps(ready,sort_keys=True,separators=(',',':'))+'\n').encode('utf8'))
@@ -108,7 +113,7 @@ frames=(duration*48000+latency)//480
 engine='RNNoise' if a.profile=='Balanced' else 'DeepFilterNet'
 model_id='rnnoise:embedded' if a.profile=='Balanced' else 'deepfilternet:self-test'
 recipe_id={'Balanced':'input.balanced.rnnoise-self-test','Quality':'input.quality.deepfilter-self-test','VoiceFocus':'input.voice-focus.deepfilter-self-test'}[a.profile]
-validated_controls={'Balanced':(69,66),'Quality':(71,78),'VoiceFocus':(91,82)}[a.profile]
+validated_controls={'Balanced':(45,66),'Quality':(71,78),'VoiceFocus':(91,82)}[a.profile]
 callback_total=20.0
 worker_total=0.0 if engine=='RNNoise' else 25.0
 processing_total=callback_total+worker_total
@@ -206,11 +211,11 @@ def _make_case(root: Path, fault: str = "") -> argparse.Namespace:
 		"recipes": [
 			_recipe("input.original", "Original", "None", [], 0, "Low", [0, 0], [0, 0]),
 			_recipe("input.light.speex", "Light", "Speex", [], 10, "Low", [0, 100], [0, 100]),
-			_recipe(rn_recipes[0], "Balanced", "RNNoise", ["rnnoise:embedded"], 30, "Standard", [20, 90], [10, 90]),
+			_recipe(rn_recipes[0], "Balanced", "RNNoise", ["rnnoise:embedded"], 30, "Standard", [20, 55], [10, 90]),
 			_recipe(df_recipes[0], "Quality", "DeepFilterNet", ["deepfilternet:self-test"], 50, "High", [25, 90], [25, 100]),
 			_recipe(df_recipes[1], "VoiceFocus", "DeepFilterNet", ["deepfilternet:self-test"], 50, "High", [70, 100], [40, 100]),
 			_recipe("input.auto.light.speex", "Auto", "Speex", [], 10, "Low", [0, 100], [0, 100]),
-			_recipe(rn_recipes[1], "Auto", "RNNoise", ["rnnoise:embedded"], 30, "Standard", [20, 90], [10, 90]),
+			_recipe(rn_recipes[1], "Auto", "RNNoise", ["rnnoise:embedded"], 30, "Standard", [20, 55], [10, 90]),
 			_recipe(df_recipes[2], "Auto", "DeepFilterNet", ["deepfilternet:self-test"], 50, "High", [25, 90], [25, 100]),
 		],
 	})

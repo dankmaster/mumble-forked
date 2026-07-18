@@ -333,7 +333,7 @@ def _validated_control_ranges(profile: str, engine: str) -> tuple[tuple[int, int
 	ranges = {
 		"Original": ((0, 0), (0, 0)),
 		"Light": ((0, 100), (0, 100)),
-		"Balanced": ((20, 90), (10, 90)),
+		"Balanced": ((20, 55), (10, 90)),
 		"Quality": ((25, 90), (25, 100)),
 		"VoiceFocus": ((70, 100), (40, 100)),
 	}
@@ -1636,11 +1636,11 @@ def run_self_test() -> None:
 		control_mapping_expectations = {
 			("Original", "None"): ((0, 0, 0), (0, 0, 0)),
 			("Light", "Speex"): ((0, 50, 100), (0, 50, 100)),
-			("Balanced", "RNNoise"): ((20, 55, 90), (10, 50, 90)),
+			("Balanced", "RNNoise"): ((20, 38, 55), (10, 50, 90)),
 			("Quality", "DeepFilterNet"): ((25, 58, 90), (25, 63, 100)),
 			("VoiceFocus", "DeepFilterNet"): ((70, 85, 100), (40, 70, 100)),
 			("Auto", "Speex"): ((0, 50, 100), (0, 50, 100)),
-			("Auto", "RNNoise"): ((20, 55, 90), (10, 50, 90)),
+			("Auto", "RNNoise"): ((20, 38, 55), (10, 50, 90)),
 			("Auto", "DeepFilterNet"): ((25, 58, 90), (25, 63, 100)),
 		}
 		for (mapping_profile, mapping_engine), (noise_expected, character_expected) in control_mapping_expectations.items():

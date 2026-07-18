@@ -691,8 +691,11 @@ namespace {
 		const Settings &settings, Mumble::InputEnhancement::Profile selectedProfile) {
 		using namespace Mumble::InputEnhancement;
 		auto profileOption = [&](Profile profile, const QString &label, const QString &description) {
+			const std::optional< ExplicitProfileControlPreset > preset = qualifiedExplicitSelectionPreset(profile);
 			const InputEnhancementSettingsReadiness readiness =
-				inputEnhancementReadinessForSettings(settings, profile, 50, 50);
+				inputEnhancementReadinessForSettings(
+					settings, profile, preset ? preset->noiseReduction : 0,
+					preset ? preset->naturalCrisp : 0);
 			QString reason = inputEnhancementReadinessReasonText(readiness);
 			if (readiness.selectable && !readiness.productionQualified) {
 				reason = QObject::tr("Preview/session-only on this input backend or device identity.");
@@ -2771,19 +2774,26 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (knownProfile) {
 			using namespace Mumble::InputEnhancement;
 			const Profile selectedProfile = static_cast< Profile >(profileValue);
-			disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 			const DefaultPreference &currentPreference = currentInputEnhancementPreference(m_draft);
+			DefaultPreference candidate = currentPreference;
+			candidate.profile            = selectedProfile;
+			candidate.autoAdapt          = false;
+			if (const std::optional< ExplicitProfileControlPreset > preset =
+					qualifiedExplicitSelectionPreset(selectedProfile)) {
+				candidate.reduction = preset->noiseReduction;
+				candidate.character = preset->naturalCrisp;
+			}
 			const InputEnhancementSettingsReadiness readiness = inputEnhancementReadinessForSettings(
-				m_draft, selectedProfile, currentPreference.reduction, currentPreference.character);
+				m_draft, selectedProfile, candidate.reduction, candidate.character);
 			if (!readiness.selectable) {
 				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement was not changed: %1")
 												 .arg(inputEnhancementReadinessReasonText(readiness));
 				return;
 			}
+			disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 			if (Mumble::InputEnhancement::DefaultPreference *preference =
 					editableCurrentInputEnhancementPreference(m_draft)) {
-				preference->profile   = selectedProfile;
-				preference->autoAdapt = false;
+				*preference = candidate;
 				m_inputEnhancementPreAutoPreference.reset();
 				projectInputEnhancementPreference(m_draft);
 			}

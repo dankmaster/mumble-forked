@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 class SpeechCleanupProcessor;
 
@@ -33,9 +34,13 @@ inline constexpr unsigned int crispLatencyBudgetSamples = qualityLatencyBudgetSa
 // persisted execution fingerprint. Any change to recipe execution, the
 // qualified mix curve, or callback-safe adaptation policy must increment the
 // corresponding value.
-inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 5;
-inline constexpr std::uint32_t qualifiedMixCurveVersion        = 5;
+inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 8;
+inline constexpr std::uint32_t qualifiedMixCurveVersion        = 6;
 inline constexpr std::uint32_t adaptationPolicyVersion         = 1;
+
+inline QString productRecipeCatalogRevision() {
+	return QStringLiteral("input-recipes-v4");
+}
 
 enum class Profile : std::uint8_t {
 	Original = 0,
@@ -76,6 +81,21 @@ struct ValidatedControls final {
 	int noiseReduction = 0;
 	int naturalCrisp   = 0;
 };
+
+/// Public 0-100 controls applied only when the user explicitly activates a
+/// fixed enhanced profile. Existing and migrated preferences are never
+/// rewritten merely by loading settings or opening the dialog.
+struct ExplicitProfileControlPreset final {
+	int noiseReduction = 0;
+	int naturalCrisp   = 0;
+
+	bool operator==(const ExplicitProfileControlPreset &) const = default;
+};
+
+/// Returns the exact public controls represented by the qualified recipe
+/// candidate. Original retains the user's dormant controls and experimental
+/// Auto restores its complete pre-Auto preference instead of using a preset.
+std::optional< ExplicitProfileControlPreset > qualifiedExplicitSelectionPreset(Profile profile) noexcept;
 
 /// Maps the public 0-100 controls into the concrete profile's qualified
 /// interval. Original always maps to zero. This scalar helper is also used by
@@ -364,10 +384,11 @@ public:
 	/// wet frame; both are retained in fixed storage for the following callback.
 	bool mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
 						 unsigned int sampleCount, int currentSpeechProbability,
-						 std::uint64_t currentNoisePsdSum) noexcept;
+						 std::uint64_t currentNoisePsdSum, std::uint64_t currentSignalPsdSum) noexcept;
 	bool mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
 						 unsigned int sampleCount, int currentSpeechProbability,
-						 std::uint64_t currentNoisePsdSum, float mixFactor) noexcept;
+						 std::uint64_t currentNoisePsdSum, std::uint64_t currentSignalPsdSum,
+						 float mixFactor) noexcept;
 	/// Records one completed callback of the existing Speex/classic DSP path for
 	/// a configured Light recipe. This only updates the common product
 	/// diagnostics contract: it neither touches PCM nor creates a processor.
@@ -416,6 +437,7 @@ private:
 	unsigned int m_alignedDryDelayPosition                           = 0;
 	int m_classicPreviousSpeechProbability                           = 100;
 	std::uint64_t m_classicPreviousNoisePsdSum                       = 0;
+	std::uint64_t m_classicPreviousSignalPsdSum                      = 0;
 	std::array< std::uint16_t, 121 > m_classicRmsHistogram          = {};
 	std::array< std::uint16_t, 101 > m_classicSpeechProbabilityHistogram = {};
 	std::uint32_t m_classicRmsHistogramCount                         = 0;
@@ -440,6 +462,7 @@ private:
 	std::array< std::uint64_t, processingHistogramBucketCount > m_processingHistogram = {};
 	float m_speechEdgeNoiseFloorRms                                                  = 0.0f;
 	float m_speechEdgePeakRms                                                        = 0.0f;
+	float m_speechEdgePreviousRms                                                    = 0.0f;
 	unsigned int m_speechEdgeBaselineFrames                                          = 0;
 	unsigned int m_speechEdgeBelowReleaseFrames                                      = 0;
 	unsigned int m_speechEdgeProtectionFrame                                         = deepFilterOnsetRampFrames;

@@ -48,8 +48,9 @@ namespace {
 	float mixFactorForValidatedControls(Profile profile, const ValidatedControls &controls) noexcept {
 		if (profile == Profile::Light) {
 			// Light uses Speex only as a low-cost background estimate. Speech is
-			// protected by mixClassicFrame(), while this curve controls the maximum
-			// wet contribution during confidently non-speech frames.
+			// protected by mixClassicFrame(). The curve controls the maximum wet
+			// contribution during confidently non-speech frames; Natural -> Clear also
+			// changes the separately bounded noisy-speech responsiveness below.
 			const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
 			const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
 			return std::clamp(0.50f + (0.40f * reduction) + (0.10f * character), 0.0f, 1.0f);
@@ -58,7 +59,9 @@ namespace {
 			// The frozen low-latency product curve stays inside the two validated
 			// tuning anchors. The normal UI defaults (30 reduction, 50 clear) map
 			// exactly to the selected 0.75 wet mix, while the full qualified control
-			// surface interpolates monotonically from 0.70 to 0.90.
+			// surface interpolates monotonically from 0.70 to 0.95. Keep the
+			// lower/default portion unchanged; only explicitly high controls enter
+			// the stronger range that cleared the paired Quality objective gates.
 			// Public defaults 30/50 are first mapped by validatedControlsForProfile
 			// to 45/63. Express the anchor in that validated coordinate system.
 			constexpr int defaultValidatedReduction = 45;
@@ -70,18 +73,22 @@ namespace {
 			const float normalizedMix = control <= nominalControl
 									? (control / nominalControl) * 0.25f
 									: 0.25f + ((control - nominalControl) / (1.0f - nominalControl)) * 0.75f;
-			return 0.70f + (0.20f * normalizedMix);
+			return normalizedMix <= 0.25f
+				? 0.70f + (0.20f * normalizedMix)
+				: 0.75f + (0.20f * ((normalizedMix - 0.25f) / 0.75f));
 		}
 		if (profile == Profile::VoiceFocus) {
 			// Voice Focus is intentionally aggressive and explicit-only. Its normal
 			// defaults use the validated 0.90 mix; only controls above that anchor
-			// increase wet mix, capped at the separately qualified 0.95 endpoint.
+			// increase wet mix towards the explicit fully-wet endpoint. Voice Focus
+			// is never selected by Auto and remains subject to the clean, WER and
+			// catastrophe gates before this endpoint can be frozen.
 			constexpr float nominalControl = (0.75f * 0.30f) + (0.25f * 0.50f);
 			const float control = weightedProfileControl(controls, 70, 100, 40, 100);
 			const float normalizedMix = control <= nominalControl
 									? 0.0f
 									: (control - nominalControl) / (1.0f - nominalControl);
-			return 0.90f + (0.05f * normalizedMix);
+			return 0.90f + (0.10f * normalizedMix);
 		}
 		const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
 		const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
@@ -124,6 +131,24 @@ namespace {
 	}
 } // namespace
 
+std::optional< ExplicitProfileControlPreset > qualifiedExplicitSelectionPreset(Profile profile) noexcept {
+	switch (profile) {
+		case Profile::Light:
+			return ExplicitProfileControlPreset{ 100, 100 };
+		case Profile::Balanced:
+			return ExplicitProfileControlPreset{ 57, 0 };
+		case Profile::Quality:
+			return ExplicitProfileControlPreset{ 92, 80 };
+		case Profile::VoiceFocus:
+			return ExplicitProfileControlPreset{ 67, 100 };
+		case Profile::Original:
+		case Profile::Auto:
+			return std::nullopt;
+	}
+
+	return std::nullopt;
+}
+
 ValidatedControls validatedControlsForProfile(Profile profile, int noiseReduction, int naturalCrisp) noexcept {
 	switch (profile) {
 		case Profile::Original:
@@ -131,7 +156,10 @@ ValidatedControls validatedControlsForProfile(Profile profile, int noiseReductio
 		case Profile::Light:
 			return { clampControl(noiseReduction), clampControl(naturalCrisp) };
 		case Profile::Balanced:
-			return { mapControlToRange(noiseReduction, 20, 90), mapControlToRange(naturalCrisp, 10, 90) };
+			// High-strength RNNoise candidates lost clean utterance ends. Keep the
+			// public slider broad while mapping it only into the empirically safe
+			// candidate interval; the full onset ramp protects initial consonants.
+			return { mapControlToRange(noiseReduction, 20, 55), mapControlToRange(naturalCrisp, 10, 90) };
 		case Profile::Quality:
 			return { mapControlToRange(noiseReduction, 25, 90), mapControlToRange(naturalCrisp, 25, 100) };
 		case Profile::Auto:
@@ -907,6 +935,7 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 void Pipeline::resetSpeechEdgeProtection() noexcept {
 	m_speechEdgeNoiseFloorRms       = 0.0f;
 	m_speechEdgePeakRms             = 0.0f;
+	m_speechEdgePreviousRms         = 0.0f;
 	m_speechEdgeBaselineFrames      = 0;
 	m_speechEdgeBelowReleaseFrames  = 0;
 	m_speechEdgeProtectionFrame     = deepFilterOnsetRampFrames;
@@ -928,9 +957,11 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 	// Neural denoisers can suppress low-energy consonants while their speech
 	// estimate rises from a quiet background. Detect that edge on the already
 	// delayed dry frame, which is aligned to the model output being mixed in this
-	// callback. This adds no look-ahead or latency. Balanced preserves exactly
-	// the first 10 ms edge frame; DeepFilterNet uses its longer bounded ramp and
-	// quiet-room release guard.
+	// callback. This adds no look-ahead or latency. Both neural families use the
+	// same bounded onset ramp and quiet-room release guard. The release guard is
+	// deliberately tied to the learned dry-signal floor: it preserves weak final
+	// consonants and room decay without opening the dry path throughout genuinely
+	// noisy low-energy segments.
 	double energy = 0.0;
 	for (const float sample : m_alignedDryFrame) {
 		energy += static_cast< double >(sample) * static_cast< double >(sample);
@@ -940,6 +971,7 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 	constexpr float absoluteNoiseFloorRms = 0.0000316227766f; // -90 dBFS
 	constexpr float onsetToFloorRatio      = 2.0f;
 	constexpr float releaseToFloorRatio    = 1.5f;
+	constexpr float strongerEdgeToPeakRatio = 2.0f;
 	constexpr unsigned int baselineFramesRequired = 3;
 	constexpr unsigned int releaseFramesRequired  = 5;
 	constexpr float releaseToSpeechPeakRatio = 0.25f;
@@ -974,7 +1006,24 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 			}
 		}
 	} else {
-		m_speechEdgePeakRms = std::max(m_speechEdgePeakRms, rms);
+		// A stationary-noise fluctuation or short handling transient can arm the
+		// state before speech begins and remain inside the five-frame release hold.
+		// Do not let that consume the one onset ramp for the whole utterance: a
+		// materially stronger edge relative to the immediately preceding frame
+		// restarts the bounded dry-aligned ramp. Keep the utterance peak separately
+		// for the quiet-room release guard.
+		const bool strongerEdge = rms > std::max(onsetThreshold,
+			m_speechEdgePreviousRms * strongerEdgeToPeakRatio);
+		if (strongerEdge) {
+			m_speechEdgeProtectionFrame    = 0;
+			m_speechEdgeBelowReleaseFrames = 0;
+			// Start a new release envelope for the new edge. Retaining the
+			// transient's historical peak would classify ordinary following speech
+			// as a weak tail and hold the dry path open indefinitely.
+			m_speechEdgePeakRms = rms;
+		} else {
+			m_speechEdgePeakRms = std::max(m_speechEdgePeakRms, rms);
+		}
 		const float lowEnergyThreshold = std::max(releaseThreshold,
 			m_speechEdgePeakRms * releaseToSpeechPeakRatio);
 		const bool quietRoom = learnedFloor <= std::max(absoluteNoiseFloorRms,
@@ -994,20 +1043,19 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 			m_speechEdgeBelowReleaseFrames = 0;
 		}
 	}
+	m_speechEdgePreviousRms = rms;
 
 	if (m_speechEdgeProtectionFrame < deepFilterOnsetRampFrames) {
-		if (balancedProfile) {
-			// RNNoise's causal output and its internal dry delay are already aligned
-			// here. One dry frame preserves the initial consonant without extending
-			// the declared 30 ms timeline or weakening the rest of the recipe.
-			m_speechEdgeProtectionFrame = deepFilterOnsetRampFrames;
-			return 0.0f;
-		}
+		// RNNoise and DeepFilterNet are already aligned to the delayed dry frame
+		// here. Use the complete bounded ramp for both: a single dry RNNoise frame
+		// was exhausted by very low pre-speech energy and allowed the following
+		// consonant to be suppressed. The ramp changes only the wet/dry mix and
+		// therefore adds no latency.
 		const float protectedMix = std::min(boundedMixFactor, onsetMixCaps[m_speechEdgeProtectionFrame]);
 		++m_speechEdgeProtectionFrame;
 		return protectedMix;
 	}
-	if (deepFilterProfile && protectRelease) {
+	if ((balancedProfile || deepFilterProfile) && protectRelease) {
 		return 0.0f;
 	}
 	return boundedMixFactor;
@@ -1024,6 +1072,7 @@ bool Pipeline::processFrame(std::array< float, frameSamples > &samples, float mi
 void Pipeline::resetClassicMix() noexcept {
 	m_classicPreviousSpeechProbability = 100;
 	m_classicPreviousNoisePsdSum       = 0;
+	m_classicPreviousSignalPsdSum      = 0;
 	m_classicRmsHistogram.fill(0);
 	m_classicSpeechProbabilityHistogram.fill(0);
 	m_classicRmsHistogramCount  = 0;
@@ -1034,14 +1083,15 @@ void Pipeline::resetClassicMix() noexcept {
 
 bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
 							   unsigned int sampleCount, int currentSpeechProbability,
-							   std::uint64_t currentNoisePsdSum) noexcept {
+							   std::uint64_t currentNoisePsdSum, std::uint64_t currentSignalPsdSum) noexcept {
 	return mixClassicFrame(processedSamples, currentDrySamples, sampleCount, currentSpeechProbability,
-					   currentNoisePsdSum, m_recipe ? m_recipe->mixFactor() : 0.0f);
+					   currentNoisePsdSum, currentSignalPsdSum, m_recipe ? m_recipe->mixFactor() : 0.0f);
 }
 
 bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_t *currentDrySamples,
 							   unsigned int sampleCount, int currentSpeechProbability,
-							   std::uint64_t currentNoisePsdSum, float mixFactor) noexcept {
+							   std::uint64_t currentNoisePsdSum, std::uint64_t currentSignalPsdSum,
+							   float mixFactor) noexcept {
 	if (!m_recipe || m_recipe->engine() != Engine::Speex || m_recipe->usesNeuralProcessor() || !processedSamples
 		|| !currentDrySamples || sampleCount != frameSamples || m_actualLatencySamples != frameSamples) {
 		failClosed(FallbackReason::InvalidFrame);
@@ -1057,8 +1107,10 @@ bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_
 
 	const int alignedSpeechProbability       = m_classicPreviousSpeechProbability;
 	const std::uint64_t alignedNoisePsdSum   = m_classicPreviousNoisePsdSum;
+	const std::uint64_t alignedSignalPsdSum  = m_classicPreviousSignalPsdSum;
 	m_classicPreviousSpeechProbability = std::clamp(currentSpeechProbability, 0, 100);
 	m_classicPreviousNoisePsdSum = currentNoisePsdSum;
+	m_classicPreviousSignalPsdSum = currentSignalPsdSum;
 
 	double dryEnergy = 0.0;
 	for (const float sample : m_alignedDryFrame) {
@@ -1126,7 +1178,12 @@ bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_
 	const unsigned int speechProbabilityP10 = speechProbabilityPercentile(10);
 	const unsigned int rmsDynamicRangeDb = rmsP90Bin >= rmsP10Bin ? rmsP90Bin - rmsP10Bin : 0;
 	constexpr std::uint32_t sceneWarmupFrames = 64;
-	constexpr unsigned int noisyDynamicRangeDb = 30;
+	// Clean speech in the locked diagnostic scene spans about 28 dB between its
+	// running P10/P90 RMS bins, while the matched noisy and severe scenes span
+	// about 16 dB and 15 dB. The old 30 dB boundary admitted clean speech and
+	// allowed Speex wet mix to damage it. Re-qualify this conservative boundary
+	// on the complete tuning/validation surface before freezing the recipe.
+	constexpr unsigned int noisyDynamicRangeDb = 20;
 	constexpr float noisyPsdSumThreshold = 8.0f;
 	const bool noisyScene = m_classicRmsHistogramFrames >= sceneWarmupFrames
 		&& rmsDynamicRangeDb <= noisyDynamicRangeDb && m_classicSmoothedNoisePsdSum >= noisyPsdSumThreshold;
@@ -1146,13 +1203,52 @@ bool Pipeline::mixClassicFrame(std::int16_t *processedSamples, const std::int16_
 	float targetWetMix = noisyScene
 		? maximumWetMix + (speechProtection * (protectedWetMix - maximumWetMix))
 		: 0.0f;
-	// In an attested noisy scene, retain enough suppression through persistent
-	// traffic or competing speech for the background estimate to remain useful.
-	// Quiet scenes stay exactly delayed-dry, independent of VAD mistakes.
+	// Speex already exposes causal noise and signal PSD estimates. Use their
+	// aligned ratio and speech level before retaining stronger suppression through
+	// a high-probability frame. This distinguishes materially noisy speech from a
+	// sustained clean vowel. Weak microphones receive only a bounded wet floor;
+	// louder noisy speech ramps towards the stronger severe-noise floor. That
+	// avoids the hum-related intelligibility losses found by the locked corpus.
 	if (noisyScene) {
-		const bool persistentHighProbability = speechProbabilityP10 >= 45U;
-		if (persistentHighProbability) {
-			targetWetMix = std::max(targetWetMix, maximumWetMix * 0.85f);
+		constexpr std::uint64_t persistentNoiseToSignalPpm = 10'000; // 1 percent
+		constexpr float weakSpeechRms = 0.001f; // -60 dBFS
+		// Natural -> Clear is also the bounded responsiveness control for
+		// materially noisy speech. Pre-register the complete curve so the three
+		// tuning anchors (0/50/100) can be compared in one hash-bound product
+		// binary instead of recompiling a hidden benchmark-only threshold.
+		constexpr float naturalStrongSpeechRms = 0.0065f; // -43.74 dBFS
+		constexpr float clearStrongSpeechRms   = 0.0045f; // -46.94 dBFS
+		const float character = std::clamp(
+			static_cast< float >(m_recipe->naturalCrisp()) / 100.0f, 0.0f, 1.0f);
+		const float strongSpeechRms = naturalStrongSpeechRms
+			- (character * (naturalStrongSpeechRms - clearStrongSpeechRms));
+		constexpr float weakSpeechWetFraction = 0.40f;
+		constexpr float strongSpeechWetFraction = 0.95f;
+		const bool materiallyNoisyPsd = alignedSignalPsdSum > 0
+			&& static_cast< long double >(alignedNoisePsdSum) * 1'000'000.0L
+				>= static_cast< long double >(alignedSignalPsdSum) * persistentNoiseToSignalPpm;
+		// A high current VAD alone cannot distinguish a vowel from a handling
+		// transient. Require persistent confidence across the rolling scene as
+		// well as the causal PSD ratio. The ratio keeps sustained clean speech dry;
+		// the P10 gate excludes transient-dominated scenes from the wet floor. The
+		// stronger persistent floor requires 1.8-2.0 seconds of history so a late
+		// handling transient cannot be misclassified from a short clean prefix.
+		// Natural keeps the full guard; Clear reaches the separately pre-registered
+		// aggressive endpoint without introducing a hidden benchmark-only knob.
+		constexpr std::uint32_t naturalPersistentSpeechWarmupFrames = 200;
+		constexpr std::uint32_t clearPersistentSpeechWarmupFrames   = 180;
+		const std::uint32_t persistentSpeechWarmupFrames = naturalPersistentSpeechWarmupFrames
+			- static_cast< std::uint32_t >(std::lround(character
+				* static_cast< float >(naturalPersistentSpeechWarmupFrames - clearPersistentSpeechWarmupFrames)));
+		const bool materiallyNoisySpeech = alignedSpeechProbability >= 45
+			&& speechProbabilityP10 >= 60 && materiallyNoisyPsd
+			&& m_classicRmsHistogramFrames >= persistentSpeechWarmupFrames;
+		if (materiallyNoisySpeech) {
+			const float speechLevel = std::clamp(
+				(dryRms - weakSpeechRms) / (strongSpeechRms - weakSpeechRms), 0.0f, 1.0f);
+			const float persistentWetFraction = weakSpeechWetFraction
+				+ speechLevel * (strongSpeechWetFraction - weakSpeechWetFraction);
+			targetWetMix = std::max(targetWetMix, maximumWetMix * persistentWetFraction);
 		} else if (dryRmsBin >= std::min< std::size_t >(120U, rmsP10Bin + 4U)) {
 			// In stationary HVAC/hum scenes the low RMS quantile is a useful
 			// background anchor even when classic VAD misses a consonant. Preserve

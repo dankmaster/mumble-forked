@@ -421,7 +421,8 @@ namespace {
 			if (!hasExactFields(recipe, recipeFields, optionalRecipeFields) || !validIdentifier(id)
 				|| seenRecipeIds.contains(id) || !profiles.contains(profile) || !engines.contains(engine)
 				|| !cpuClasses.contains(cpuClass)
-				|| !exactInteger(recipe.value(QStringLiteral("revision")), 1, 1, revision)
+				|| !exactInteger(recipe.value(QStringLiteral("revision")), RecipeCatalog::currentRevision,
+								 RecipeCatalog::currentRevision, revision)
 				|| !exactInteger(recipe.value(QStringLiteral("executionSemanticsVersion")),
 								 recipeExecutionSemanticsVersion, recipeExecutionSemanticsVersion, executionVersion)
 				|| !exactInteger(recipe.value(QStringLiteral("mixCurveVersion")), qualifiedMixCurveVersion,

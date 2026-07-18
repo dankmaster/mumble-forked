@@ -24,10 +24,14 @@ namespace {
 	struct DFState;
 	// DeepFilterNet is materially less speech-preserving when a quiet microphone
 	// reaches the model at roughly -50 dBFS or below (the downstream Mumble AGC
-	// intentionally runs after input enhancement). Normalize only the model
-	// domain, then undo the exact gain on the causally corresponding output. The
-	// user's PCM level and the delayed dry path therefore remain unchanged.
+	// intentionally runs after input enhancement). Normalize only weak inputs
+	// towards -24 dBFS in the model domain, then undo the exact gain on the
+	// causally corresponding output. Normal and noisy inputs must not be driven
+	// towards the clipping ceiling: that erases the model's useful level context
+	// and made competing speech materially worse in the locked diagnostic corpus.
+	// The user's PCM level and the delayed dry path remain unchanged.
 	constexpr float modelDomainNominalGain = 8.0f; // +18.06 dB
+	constexpr float modelDomainTargetPeak  = 0.0630957344f; // -24 dBFS
 	constexpr float modelDomainPeakLimit   = 0.95f;
 
 	using DfCreateFn            = DFState *(*)(const char *path, float attenLim, const char *logLevel);
@@ -346,8 +350,8 @@ private:
 			const float sample = std::isfinite(input[index]) ? std::clamp(input[index], -1.0f, 1.0f) : 0.0f;
 			peak               = std::max(peak, std::abs(sample));
 		}
-		const float headroomGain = peak > 0.0f ? modelDomainPeakLimit / peak : modelDomainNominalGain;
-		const float inputGain    = std::clamp(headroomGain, 1.0f, modelDomainNominalGain);
+		const float targetGain = peak > 0.0f ? modelDomainTargetPeak / peak : modelDomainNominalGain;
+		const float inputGain  = std::clamp(targetGain, 1.0f, modelDomainNominalGain);
 
 		for (std::size_t index = 0; index < m_frameLength; ++index) {
 			const float sample = std::isfinite(input[index]) ? std::clamp(input[index], -1.0f, 1.0f) : 0.0f;

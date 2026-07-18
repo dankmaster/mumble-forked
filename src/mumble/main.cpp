@@ -784,7 +784,7 @@ int main(int argc, char **argv) {
 	packageConfiguration.packageRoot        = QDir(QCoreApplication::applicationDirPath());
 	packageConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
 	packageConfiguration.currentBuild       = Version::getPatch(Version::get());
-	packageConfiguration.supportedCatalogRevision = QStringLiteral("input-recipes-v2");
+	packageConfiguration.supportedCatalogRevision = Mumble::InputEnhancement::productRecipeCatalogRevision();
 	Global::get().inputEnhancementPackageVerifier =
 		new Mumble::InputEnhancement::InputEnhancementPackageVerifier(std::move(packageConfiguration));
 	const Mumble::InputEnhancement::PackageVerificationReport packageReport =
@@ -805,7 +805,7 @@ int main(int argc, char **argv) {
 		QDir(Global::get().qdBasePath.filePath(QStringLiteral("input-enhancement-policy")));
 	policyConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
 	policyConfiguration.currentBuild       = Version::getPatch(Version::get());
-	policyConfiguration.recipeSetVersion   = QStringLiteral("input-recipes-v2");
+	policyConfiguration.recipeSetVersion   = Mumble::InputEnhancement::productRecipeCatalogRevision();
 	policyConfiguration.manifestUrl =
 		Mumble::InputEnhancement::InputEnhancementPolicyController::manifestUrlFromEnvironment();
 	policyConfiguration.remoteFetchEnabled = true;

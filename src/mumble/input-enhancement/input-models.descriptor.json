@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogRevision": "input-recipes-v2",
+  "catalogRevision": "input-recipes-v4",
   "models": [
     {
       "id": "rnnoise:embedded",

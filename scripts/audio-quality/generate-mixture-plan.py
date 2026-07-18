@@ -40,7 +40,7 @@ CONTROL_DIMENSIONS = ("noise_reduction", "natural_clear")
 # grid and stores the nearest canonical UI integer that round-trips exactly.
 PROFILE_RECIPE_CONTROL_RANGES = {
 	"Light": {"noise_reduction": (0, 100), "natural_clear": (0, 100)},
-	"Balanced": {"noise_reduction": (20, 90), "natural_clear": (10, 90)},
+	"Balanced": {"noise_reduction": (20, 55), "natural_clear": (10, 90)},
 	"Quality": {"noise_reduction": (25, 90), "natural_clear": (25, 100)},
 	"VoiceFocus": {"noise_reduction": (70, 100), "natural_clear": (40, 100)},
 }
@@ -57,7 +57,7 @@ CONTROL_SEMANTICS = {
 	"mapping": "minimum+((ui*(maximum-minimum)+50)//100)",
 	"inverse": "nearest-exact-round-trip-lower-tie-v1",
 }
-PLAN_REVISION = "quality-voicefocus-shared-scene-balanced-transport-v2"
+PLAN_REVISION = "quality-voicefocus-safe-balanced-range-v3"
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
 GAIN_DB = (-6, -3, 0, 3, 6)

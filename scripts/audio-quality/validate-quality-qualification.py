@@ -732,7 +732,7 @@ def _materialize_fixture(
 			control_ranges = {
 				"Original": ((0, 0), (0, 0)),
 				"Light": ((0, 100), (0, 100)),
-				"Balanced": ((20, 90), (10, 90)),
+				"Balanced": ((20, 55), (10, 90)),
 				"Quality": ((25, 90), (25, 100)),
 				"VoiceFocus": ((70, 100), (40, 100)),
 			}

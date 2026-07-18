@@ -96,6 +96,7 @@ private slots:
 	void settingsControllerReconcilesPluginRuntimeState();
 	void settingsControllerAutoProfileIsRuntimeGated();
 	void settingsControllerEnhancementFollowsDraftSelectedMicrophone();
+	void settingsControllerExplicitProfileSelectionUsesQualifiedPresetAtomically();
 	void settingsControllerRevalidatesEnhancementBeforeApply();
 	void settingsControllerPolicyBlockPreservesUnchangedEnhancement();
 	void settingsControllerNewDeviceInheritedEnhancementStartsProbation();
@@ -1132,6 +1133,63 @@ void TestModernDialogControllers::settingsControllerEnhancementFollowsDraftSelec
 			 static_cast< int >(Mumble::InputEnhancement::Profile::Original));
 }
 
+void TestModernDialogControllers::settingsControllerExplicitProfileSelectionUsesQualifiedPresetAtomically() {
+	using namespace Mumble::InputEnhancement;
+	DraftInputRegistrar registrar;
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
+	ScopedGlobalOverride globalOverride(global);
+	InputEnhancementPackageVerifier verifier(
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v4") });
+	QVERIFY(verifier.verify().unmanaged);
+	global.inputEnhancementPackageVerifier = &verifier;
+
+	::Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	DeviceProfileState state;
+	state.identity              = registrar.resolveDeviceIdentity(settings);
+	state.preference.profile    = Profile::Light;
+	state.preference.reduction  = 11;
+	state.preference.character  = 22;
+	state.pendingValidation     = true;
+	state.legacyOverride        = LegacyOverride{};
+	QVERIFY(upsertDeviceProfile(settings.inputEnhancement, state));
+
+	// QML emits this only for an explicit activation. Even selecting the already
+	// visible profile therefore means "use the qualified preset", while merely
+	// opening the dialog leaves the custom/migrated controls untouched.
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	const DeviceProfileState *opened = findDeviceProfile(controller.draft().inputEnhancement, state.identity);
+	QVERIFY(opened);
+	QCOMPARE(opened->preference.reduction, 11);
+	QCOMPARE(opened->preference.character, 22);
+	QVERIFY(opened->legacyOverride.has_value());
+	controller.updateField(QStringLiteral("audio.inputEnhancementProfile"), static_cast< int >(Profile::Light));
+	const DeviceProfileState *selected = findDeviceProfile(controller.draft().inputEnhancement, state.identity);
+	QVERIFY(selected);
+	const std::optional< ExplicitProfileControlPreset > preset = qualifiedExplicitSelectionPreset(Profile::Light);
+	QVERIFY(preset.has_value());
+	QCOMPARE(selected->preference.profile, Profile::Light);
+	QCOMPARE(selected->preference.reduction, preset->noiseReduction);
+	QCOMPARE(selected->preference.character, preset->naturalCrisp);
+	QVERIFY(!selected->preference.autoAdapt);
+	QVERIFY(!selected->pendingValidation);
+	QVERIFY(!selected->legacyOverride.has_value());
+
+	// A readiness failure must not partially disarm probation, clear legacy, or
+	// replace controls. The UI error is allowed to change; the complete draft
+	// enhancement state is not.
+	global.inputEnhancementPackageVerifier = nullptr;
+	ModernSettingsController blocked;
+	blocked.open(settings, QStringLiteral("AudioInput"));
+	const Mumble::InputEnhancement::Settings before = blocked.draft().inputEnhancement;
+	blocked.updateField(QStringLiteral("audio.inputEnhancementProfile"), static_cast< int >(Profile::Quality));
+	QVERIFY(blocked.draft().inputEnhancement == before);
+}
+
 void TestModernDialogControllers::settingsControllerRevalidatesEnhancementBeforeApply() {
 	using namespace Mumble::InputEnhancement;
 
@@ -1160,7 +1218,7 @@ void TestModernDialogControllers::settingsControllerRevalidatesEnhancementBefore
 	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
 	ScopedGlobalOverride globalOverride(global);
 	InputEnhancementPackageVerifier verifier(
-		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v2") });
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v4") });
 	QVERIFY(verifier.verify().unmanaged);
 	global.inputEnhancementPackageVerifier = &verifier;
 
@@ -1208,7 +1266,7 @@ void TestModernDialogControllers::settingsControllerPolicyBlockPreservesUnchange
 	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
 	ScopedGlobalOverride globalOverride(global);
 	InputEnhancementPackageVerifier verifier(
-		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v4") });
 	QVERIFY(verifier.verify().unmanaged);
 	global.inputEnhancementPackageVerifier  = &verifier;
 	global.bInputEnhancementRecoveryDisabled = true;
@@ -1326,7 +1384,7 @@ void TestModernDialogControllers::settingsControllerNewDeviceInheritedEnhancemen
 	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
 	ScopedGlobalOverride globalOverride(global);
 	InputEnhancementPackageVerifier verifier(
-		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v4") });
 	QVERIFY(verifier.verify().unmanaged);
 	global.inputEnhancementPackageVerifier = &verifier;
 	global.bInputEnhancementRecoveryDisabled = true;
@@ -1364,7 +1422,7 @@ void TestModernDialogControllers::settingsControllerRejectsStaleLastKnownGoodBin
 	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
 	ScopedGlobalOverride globalOverride(global);
 	InputEnhancementPackageVerifier verifier(
-		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v4") });
 	QVERIFY(verifier.verify().unmanaged);
 	global.inputEnhancementPackageVerifier = &verifier;
 

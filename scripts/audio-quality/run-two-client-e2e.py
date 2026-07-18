@@ -45,6 +45,9 @@ class E2EError(RuntimeError):
 HEX64 = re.compile(r"[0-9a-f]{64}")
 SAMPLE_RATE_HZ = 48_000
 FRAME_SAMPLES = 480
+REQUIRED_EXECUTION_SEMANTICS_VERSION = 8
+REQUIRED_MIX_CURVE_VERSION = 6
+REQUIRED_ADAPTATION_POLICY_VERSION = 1
 # The unchanged local Mumble route has a bounded startup buffer that is not
 # profile latency: four fixed 10 ms route frames plus the selected Opus packet
 # duration. Original parity is qualified separately against the frozen legacy
@@ -456,8 +459,22 @@ def _verify_product_catalog(
 		execution_semantics_version = _exact_integer(
 			recipe["executionSemanticsVersion"], 1, 2**31 - 1, f"{label}.executionSemanticsVersion"
 		)
-		for field in ("mixCurveVersion", "adaptationPolicyVersion"):
-			_exact_integer(recipe[field], 1, 2**31 - 1, f"{label}.{field}")
+		if execution_semantics_version != REQUIRED_EXECUTION_SEMANTICS_VERSION:
+			raise E2EError(
+				f"{label}.executionSemanticsVersion: expected current product semantics "
+				f"{REQUIRED_EXECUTION_SEMANTICS_VERSION}"
+			)
+		mix_curve_version = _exact_integer(recipe["mixCurveVersion"], 1, 2**31 - 1, f"{label}.mixCurveVersion")
+		if mix_curve_version != REQUIRED_MIX_CURVE_VERSION:
+			raise E2EError(f"{label}.mixCurveVersion: expected current product curve {REQUIRED_MIX_CURVE_VERSION}")
+		adaptation_policy_version = _exact_integer(
+			recipe["adaptationPolicyVersion"], 1, 2**31 - 1, f"{label}.adaptationPolicyVersion"
+		)
+		if adaptation_policy_version != REQUIRED_ADAPTATION_POLICY_VERSION:
+			raise E2EError(
+				f"{label}.adaptationPolicyVersion: expected current product policy "
+				f"{REQUIRED_ADAPTATION_POLICY_VERSION}"
+			)
 		recipe_models[recipe_id] = set(model_ids)
 		if not advanced_only:
 			expected_latency_samples_by_recipe_id[recipe_id] = _expected_recipe_latency_samples(
@@ -1574,8 +1591,10 @@ def run_self_test() -> None:
 				"id": recipe_id, "revision": 1, "profile": profile, "engine": engine,
 				"modelIds": model_ids, "noiseReductionRange": noise_range,
 				"naturalCrispRange": character_range, "latencyBudgetMs": latency_ms,
-				"minimumCpuClass": minimum_cpu, "executionSemanticsVersion": 5,
-				"mixCurveVersion": 4, "adaptationPolicyVersion": 1,
+				"minimumCpuClass": minimum_cpu,
+				"executionSemanticsVersion": REQUIRED_EXECUTION_SEMANTICS_VERSION,
+				"mixCurveVersion": REQUIRED_MIX_CURVE_VERSION,
+				"adaptationPolicyVersion": REQUIRED_ADAPTATION_POLICY_VERSION,
 			}
 
 		recipe_manifest = runtime / "input-recipes.json"
@@ -1593,7 +1612,7 @@ def run_self_test() -> None:
 				recipe("input.light.speex", "Light", "Speex", [], 10, "Low", [0, 100], [0, 100]),
 				recipe(
 					"input.balanced.rnnoise-embedded", "Balanced", "RNNoise", ["rnnoise:embedded"],
-					30, "Standard", [20, 90], [10, 90],
+					30, "Standard", [20, 55], [10, 90],
 				),
 				recipe(
 					"input.quality.deepfilternet-low-latency", "Quality", "DeepFilterNet",
@@ -1602,7 +1621,7 @@ def run_self_test() -> None:
 				recipe("input.auto.light.speex", "Auto", "Speex", [], 10, "Low", [0, 100], [0, 100]),
 				recipe(
 					"input.auto.balanced.rnnoise-embedded", "Auto", "RNNoise", ["rnnoise:embedded"],
-					30, "Standard", [20, 90], [10, 90],
+					30, "Standard", [20, 55], [10, 90],
 				),
 				recipe(
 					"input.auto.quality.deepfilternet-low-latency", "Auto", "DeepFilterNet",
@@ -1619,6 +1638,33 @@ def run_self_test() -> None:
 		verified_catalog = _verify_product_catalog(model_manifest, recipe_manifest, runtime)
 		if any(binding["recipe"]["id"] == "input.expert.dtln" for binding in verified_catalog["bindings"]):
 			raise AssertionError("Advanced DTLN recipe leaked into public product bindings")
+
+		def expect_catalog_version_rejection(field: str, stale_value: int, expected_error: str) -> None:
+			stale_catalog = json.loads(json.dumps(recipe_manifest_payload))
+			for stale_recipe in stale_catalog["recipes"]:
+				stale_recipe[field] = stale_value
+			_write_json(recipe_manifest, stale_catalog)
+			try:
+				_verify_product_catalog(model_manifest, recipe_manifest, runtime)
+			except E2EError as error:
+				if expected_error not in str(error):
+					raise AssertionError(f"stale {field} rejection returned the wrong error: {error}") from error
+			else:
+				raise AssertionError(f"stale recipe catalog {field}={stale_value} was accepted")
+
+		expect_catalog_version_rejection(
+			"executionSemanticsVersion", 5,
+			f"expected current product semantics {REQUIRED_EXECUTION_SEMANTICS_VERSION}",
+		)
+		expect_catalog_version_rejection(
+			"mixCurveVersion", 4,
+			f"expected current product curve {REQUIRED_MIX_CURVE_VERSION}",
+		)
+		expect_catalog_version_rejection(
+			"adaptationPolicyVersion", 2,
+			f"expected current product policy {REQUIRED_ADAPTATION_POLICY_VERSION}",
+		)
+		_write_json(recipe_manifest, recipe_manifest_payload)
 		bad_fixed_contract = json.loads(json.dumps(recipe_manifest_payload))
 		bad_fixed_contract["recipes"][3]["minimumCpuClass"] = "Standard"
 		_write_json(recipe_manifest, bad_fixed_contract)

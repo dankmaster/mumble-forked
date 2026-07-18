@@ -62,6 +62,7 @@ private slots:
 	void dtlnSanitizesNonFiniteInputWithoutPoisoningItsState();
 #endif
 	void deepFilterNetOutputIsIndependentOfInputChunking();
+	void deepFilterNetModelDomainNormalizationRemainsContinuousAcrossFrameGainChanges();
 	void deepFilterNetRealtimeTimelineMatchesReportedLatency();
 	void deepFilterNetDryWetMixUsesTheProcessedTimeline();
 	void deepFilterNetResetRestoresTheStreamingTimeline();
@@ -561,6 +562,61 @@ void TestSpeechCleanup::deepFilterNetOutputIsIndependentOfInputChunking() {
 	}
 #endif
 	verifyChunkInvariant(embeddedSelection(Settings::DeepFilterNetBackend));
+}
+
+void TestSpeechCleanup::deepFilterNetModelDomainNormalizationRemainsContinuousAcrossFrameGainChanges() {
+	constexpr std::size_t FRAME_SAMPLES = 480;
+	constexpr std::size_t FRAME_COUNT   = 80;
+	constexpr float PI                   = 3.14159265358979323846f;
+	constexpr float FREQUENCY_HZ         = 1000.0f;
+	constexpr float SAMPLE_RATE          = 48000.0f;
+
+	auto selection                     = embeddedSelection(Settings::DeepFilterNetBackend);
+	selection.modelId                  = QStringLiteral("deepfilternet:low-latency");
+	selection.modelDomainNormalization = true;
+	auto processor                      = createSpeechCleanupProcessor(selection);
+#ifdef TEST_EXPECT_DEEPFILTERNET
+	QVERIFY2(processor && processor->isReady(),
+			 "DeepFilterNet was enabled but its runtime/model test payload is unavailable");
+#else
+	if (!processor || !processor->isReady()) {
+		QSKIP("DeepFilterNet runtime/model is not available in this build");
+	}
+#endif
+
+	// One kilohertz completes exactly ten cycles per 10 ms processor frame, so
+	// the source crosses zero at every tested boundary. Alternating 0.006 and
+	// 0.0108 peaks moves the model-domain gain between the 8x cap and roughly
+	// 5.84x without introducing a source-value step. The isolated 0.05 transient
+	// forces one frame down to roughly 1.26x and exercises recovery on its end.
+	std::vector< float > input(FRAME_COUNT * FRAME_SAMPLES, 0.0f);
+	for (std::size_t frame = 0; frame < FRAME_COUNT; ++frame) {
+		const float amplitude = frame < 20 || frame >= 68 ? 0.002f
+							 : ((frame % 2) == 0 ? 0.006f : 0.0108f);
+		for (std::size_t offset = 0; offset < FRAME_SAMPLES; ++offset) {
+			const std::size_t index = frame * FRAME_SAMPLES + offset;
+			input[index] = amplitude * std::sin(
+				2.0f * PI * FREQUENCY_HZ * static_cast< float >(index) / SAMPLE_RATE);
+		}
+	}
+	input[50 * FRAME_SAMPLES + FRAME_SAMPLES / 2] = 0.05f;
+
+	const unsigned int latency = processor->latencySamples();
+	QVERIFY2(latency > 0, "DeepFilterNet normalization regression requires a causal processor latency");
+	const std::vector< float > output = processSignal(*processor, input, { 480 }, 1.0f);
+	QVERIFY(std::all_of(output.cbegin(), output.cend(), [](float sample) {
+		return std::isfinite(sample) && std::fabs(sample) < 1.0f;
+	}));
+
+	for (std::size_t frame = 30; frame <= 68; ++frame) {
+		const std::size_t boundary = frame * FRAME_SAMPLES + latency;
+		QVERIFY(boundary > 0 && boundary < output.size());
+		const float delta = std::fabs(output[boundary] - output[boundary - 1]);
+		QVERIFY2(delta < 1.0e-3f,
+				 qPrintable(QStringLiteral("DeepFilterNet normalized gain boundary discontinuity at frame %1: %2")
+							.arg(frame)
+							.arg(delta, 0, 'g', 9)));
+	}
 }
 
 void TestSpeechCleanup::deepFilterNetRealtimeTimelineMatchesReportedLatency() {

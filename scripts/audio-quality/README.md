@@ -248,7 +248,7 @@ The plan generator mirrors the client's exact integer mapping
 `minimum + ((ui * (maximum - minimum) + 50) // 100)` and selects the nearest
 canonical UI integer that round-trips to each qualified five-point recipe-grid
 value. The internal grids are Light 0–100 for both controls, Balanced
-20–90 / 10–90, Quality 25–90 / 25–100, and Voice Focus 70–100 / 40–100. Master and nightly
+20–55 / 10–90, Quality 25–90 / 25–100, and Voice Focus 70–100 / 40–100. Master and nightly
 tuning/validation plans must cover every value in each dimension; PR smoke and
 release plans must cover both endpoints. Release Quality/Voice Focus pairs keep
 identical persisted UI controls while mapping into their separate recipe ranges.
@@ -256,7 +256,7 @@ Schema-v3 plans that wrote internal Quality or Voice Focus values into UI fields
 are rejected rather than silently mapped a second time.
 
 Master/nightly tuning and validation plans use plan revision
-`quality-voicefocus-shared-scene-balanced-transport-v2`. Transport is selected
+`quality-voicefocus-safe-balanced-range-v3`. Transport is selected
 from each profile's own occurrence number, not from the global scene index. The
 same deterministic 45-member cycle covers every combination of five Opus
 bitrates (8/16/40/64/128 kbit/s), three packet sizes (1/2/4 frames), and three
@@ -265,6 +265,10 @@ per-tuple counts, with each dimension and tuple balanced to within one case;
 paired Quality/Voice Focus rows also remain transport-identical. The former v1
 revision, where profile identity was accidentally confounded with bitrate, is
 rejected and cannot be used as tuning, validation, or release evidence.
+The v3 revision also narrows Balanced's recipe-domain reduction interval to
+20–55. This keeps the persisted 0–100 UI control while preventing values above
+the clean-speech-safe RNNoise range; older v2 plans use a different UI-to-recipe
+mapping and are therefore not valid evidence for the current runtime.
 
 Migrate an old schema-v2 inventory only as an explicit draft. Migration never
 invents transcript hashes or response assets, so the result remains ineligible
@@ -707,7 +711,7 @@ top-level fields:
     "active_profile": "Quality",
     "active_engine": "DeepFilterNet",
     "active_recipe": {
-      "catalog_revision": "input-recipes-v3",
+      "catalog_revision": "input-recipes-v4",
       "id": "input.quality.deepfilternet-low-latency",
       "manifest_sha256": "<recipe-manifest SHA-256>",
       "revision": 1

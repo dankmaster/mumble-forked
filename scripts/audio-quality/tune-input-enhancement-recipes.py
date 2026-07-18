@@ -371,8 +371,9 @@ def _model_product_projection(
 	intrinsic_samples = _validate_direct_intrinsic_latency(model, direct_latency_samples)
 	execution_semantics_version = int(projection_recipe["executionSemanticsVersion"])
 	_expect(
-		execution_semantics_version >= OFFLINE.MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION,
-		"model comparison execution semantics", "predates the causal-tail contract",
+		execution_semantics_version == OFFLINE.REQUIRED_EXECUTION_SEMANTICS_VERSION,
+		"model comparison execution semantics",
+		f"expected current product semantics {OFFLINE.REQUIRED_EXECUTION_SEMANTICS_VERSION}",
 	)
 	worker_frames = 2 if execution_semantics_version >= 5 else 1
 	worker_samples = worker_frames * OFFLINE.FRAME_SAMPLES
@@ -1040,7 +1041,9 @@ def run_self_test() -> None:
 	)
 
 	quality_recipe = {
-		"id": "input.quality.self-test", "executionSemanticsVersion": 5, "latencyBudgetMs": 50,
+		"id": "input.quality.self-test",
+		"executionSemanticsVersion": OFFLINE.REQUIRED_EXECUTION_SEMANTICS_VERSION,
+		"latencyBudgetMs": 50,
 	}
 	standard_projection = _model_product_projection(
 		{"id": "deepfilternet:balanced", "algorithmicLatencyMs": 30}, quality_recipe, 1920,

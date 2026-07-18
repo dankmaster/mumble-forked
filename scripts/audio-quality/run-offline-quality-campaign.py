@@ -37,9 +37,11 @@ CAMPAIGN_ID = "mumble-offline-input-enhancement-v1"
 SCHEMA_VERSION = 1
 SAMPLE_RATE_HZ = 48_000
 FRAME_SAMPLES = 480
-MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION = 3
-SELF_TEST_EXECUTION_SEMANTICS_VERSION = 5
-SELF_TEST_MIX_CURVE_VERSION = 5
+REQUIRED_EXECUTION_SEMANTICS_VERSION = 8
+REQUIRED_MIX_CURVE_VERSION = 6
+REQUIRED_ADAPTATION_POLICY_VERSION = 1
+SELF_TEST_EXECUTION_SEMANTICS_VERSION = REQUIRED_EXECUTION_SEMANTICS_VERSION
+SELF_TEST_MIX_CURVE_VERSION = REQUIRED_MIX_CURVE_VERSION
 SUPPORTED_CORPUS_GENERATOR_VERSIONS = frozenset({"2", "3", "4"})
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -778,11 +780,22 @@ def _validate_package(
 			recipe["executionSemanticsVersion"], f"recipe {recipe_id}.executionSemanticsVersion", 1,
 		)
 		_expect(
-			execution_semantics_version >= MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION,
+			execution_semantics_version == REQUIRED_EXECUTION_SEMANTICS_VERSION,
 			f"recipe {recipe_id}.executionSemanticsVersion",
-			"predates the explicit causal-tail contract",
+			f"expected current product semantics {REQUIRED_EXECUTION_SEMANTICS_VERSION}",
 		)
-		_integer(recipe["mixCurveVersion"], f"recipe {recipe_id}.mixCurveVersion", 1)
+		_expect(
+			_integer(recipe["mixCurveVersion"], f"recipe {recipe_id}.mixCurveVersion", 1)
+			== REQUIRED_MIX_CURVE_VERSION,
+			f"recipe {recipe_id}.mixCurveVersion",
+			f"expected current product curve {REQUIRED_MIX_CURVE_VERSION}",
+		)
+		_expect(
+			_integer(recipe["adaptationPolicyVersion"], f"recipe {recipe_id}.adaptationPolicyVersion", 1)
+			== REQUIRED_ADAPTATION_POLICY_VERSION,
+			f"recipe {recipe_id}.adaptationPolicyVersion",
+			f"expected current product policy {REQUIRED_ADAPTATION_POLICY_VERSION}",
+		)
 		for range_name in ("noiseReductionRange", "naturalCrispRange"):
 			control_range = recipe[range_name]
 			_expect(isinstance(control_range, list) and len(control_range) == 2, f"recipe {recipe_id}.{range_name}", "expected [minimum, maximum]")
@@ -836,9 +849,9 @@ def _expected_latency_samples(recipe: Mapping[str, Any], model: Mapping[str, Any
 		recipe["executionSemanticsVersion"], f"recipe {recipe['id']}.executionSemanticsVersion", 1,
 	)
 	_expect(
-		execution_semantics_version >= MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION,
+		execution_semantics_version == REQUIRED_EXECUTION_SEMANTICS_VERSION,
 		f"recipe {recipe['id']}.executionSemanticsVersion",
-		"predates the explicit causal-tail contract",
+		f"expected current product semantics {REQUIRED_EXECUTION_SEMANTICS_VERSION}",
 	)
 	engine = str(recipe["engine"])
 	if engine == "None":
@@ -2726,7 +2739,7 @@ model={'Balanced':'rnnoise:embedded','Quality':'deepfilternet:fake','VoiceFocus'
 active_model_path='' if a.profile == 'Balanced' else (a.authorized_model_path or '')
 ranges={
  'Light':{'noise_reduction':(0,100),'natural_clear':(0,100)},
- 'Balanced':{'noise_reduction':(20,90),'natural_clear':(10,90)},
+ 'Balanced':{'noise_reduction':(20,55),'natural_clear':(10,90)},
  'Quality':{'noise_reduction':(25,90),'natural_clear':(25,100)},
  'VoiceFocus':{'noise_reduction':(70,100),'natural_clear':(40,100)},
 }
@@ -3066,6 +3079,37 @@ def run_self_test() -> None:
 			"recipes": recipes,
 		}
 		recipe_manifest_path = runtime / "input-recipes.json"
+		_write_json_atomic(recipe_manifest_path, recipe_manifest)
+		_validate_package(runtime, model_manifest_path, recipe_manifest_path)
+
+		def expect_package_version_rejection(field: str, stale_value: int, expected_error: str) -> None:
+			stale_manifest = json.loads(json.dumps(recipe_manifest))
+			for stale_recipe in stale_manifest["recipes"]:
+				stale_recipe[field] = stale_value
+			_write_json_atomic(recipe_manifest_path, stale_manifest)
+			try:
+				_validate_package(runtime, model_manifest_path, recipe_manifest_path)
+			except CampaignError as error:
+				_expect(
+					expected_error in str(error),
+					f"self-test stale {field}",
+					f"unexpected error: {error}",
+				)
+			else:
+				raise AssertionError(f"campaign accepted stale recipe catalog {field}={stale_value}")
+
+		expect_package_version_rejection(
+			"executionSemanticsVersion", 5,
+			f"expected current product semantics {REQUIRED_EXECUTION_SEMANTICS_VERSION}",
+		)
+		expect_package_version_rejection(
+			"mixCurveVersion", 4,
+			f"expected current product curve {REQUIRED_MIX_CURVE_VERSION}",
+		)
+		expect_package_version_rejection(
+			"adaptationPolicyVersion", 2,
+			f"expected current product policy {REQUIRED_ADAPTATION_POLICY_VERSION}",
+		)
 		_write_json_atomic(recipe_manifest_path, recipe_manifest)
 
 		benchmark = runtime / "fake-benchmark.py"

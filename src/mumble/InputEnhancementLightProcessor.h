@@ -41,6 +41,7 @@ public:
 	int suppressionDb() const noexcept { return m_suppressionDb; }
 	int lastSpeechProbability() const noexcept { return m_lastSpeechProbability; }
 	std::uint64_t lastNoisePsdSum() const noexcept { return m_lastNoisePsdSum; }
+	std::uint64_t lastSignalPsdSum() const noexcept { return m_lastSignalPsdSum; }
 	bool agcEnabled() const noexcept;
 	bool vadEnabled() const noexcept;
 	bool dereverbEnabled() const noexcept;
@@ -54,9 +55,12 @@ private:
 	Pipeline *m_pipeline = nullptr;
 	std::array< std::int16_t, frameSamples > m_dryFrame = {};
 	std::array< std::int32_t, frameSamples > m_noisePsd = {};
+	std::array< std::int32_t, frameSamples > m_signalPsd = {};
 	int m_suppressionDb                           = 0;
 	int m_lastSpeechProbability                   = 100;
 	std::uint64_t m_lastNoisePsdSum               = 0;
+	std::uint64_t m_lastSignalPsdSum              = 0;
+	bool m_signalPsdValid                         = false;
 	bool m_ready                                  = false;
 };
 

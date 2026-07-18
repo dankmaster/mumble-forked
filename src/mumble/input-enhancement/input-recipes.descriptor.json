@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "catalogRevision": "input-recipes-v2",
+  "catalogRevision": "input-recipes-v4",
   "recipes": [
     {
       "id": "input.original",
@@ -12,8 +12,8 @@
       "naturalCrispRange": [0, 0],
       "latencyBudgetMs": 0,
       "minimumCpuClass": "Low",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -26,8 +26,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 10,
       "minimumCpuClass": "Low",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -36,12 +36,12 @@
       "profile": "Balanced",
       "engine": "RNNoise",
       "modelIds": ["rnnoise:embedded"],
-      "noiseReductionRange": [20, 90],
+      "noiseReductionRange": [20, 55],
       "naturalCrispRange": [10, 90],
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -54,8 +54,8 @@
       "naturalCrispRange": [25, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -68,8 +68,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 10,
       "minimumCpuClass": "Low",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -78,12 +78,12 @@
       "profile": "Auto",
       "engine": "RNNoise",
       "modelIds": ["rnnoise:embedded"],
-      "noiseReductionRange": [20, 90],
+      "noiseReductionRange": [20, 55],
       "naturalCrispRange": [10, 90],
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -96,8 +96,8 @@
       "naturalCrispRange": [25, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -110,8 +110,8 @@
       "naturalCrispRange": [40, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1
     },
     {
@@ -124,8 +124,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -139,8 +139,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -154,8 +154,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -169,8 +169,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -184,8 +184,8 @@
       "naturalCrispRange": [0, 100],
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
-      "executionSemanticsVersion": 5,
-      "mixCurveVersion": 5,
+      "executionSemanticsVersion": 8,
+      "mixCurveVersion": 6,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     }

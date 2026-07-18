@@ -208,6 +208,7 @@ private slots:
 	void catalogDefinesStableProductRecipes();
 	void trackedDescriptorExactlyMatchesCompiledCatalog();
 	void catalogClampsControlsAndInterpolatesMix();
+	void qualifiedExplicitSelectionPresetsAreStable();
 	void profileValuesAndReadinessAreStable();
 	void autoPolicyUsesCpuAndBackendAvailability();
 	void explicitProfilesFallBackDeterministically();
@@ -216,6 +217,7 @@ private slots:
 	void originalAndLightNeverConstructNeuralProcessor();
 	void lightClassicMixAlignsAndProtectsSpeech();
 	void lightClassicSceneGateSeparatesCleanSpeechFromStationaryNoise();
+	void lightClassicSceneGatePreservesSustainedCleanSpeech();
 	void lightProcessorUsesExactProductConfigurationAndTail();
 	void neuralRecipeIsPreparedAndReported();
 	void neuralRecipeBindsAuthorizationToLoadedAsset();
@@ -226,6 +228,7 @@ private slots:
 	void neuralRecipeWarmupFailureFailsClosed();
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
 	void balancedUsesFullOnsetRampAfterWeakPreOnset();
+	void neuralOnsetRampRearmsAfterSeparatedTransient();
 	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
 	void runtimeUnhealthyProcessorFailsClosed();
@@ -284,10 +287,10 @@ void TestInputEnhancement::trackedDescriptorExactlyMatchesCompiledCatalog() {
 	QVERIFY(document.isObject());
 	const QJsonObject root = document.object();
 	QCOMPARE(root.value(QStringLiteral("schemaVersion")).toInt(-1), 2);
-	QCOMPARE(root.value(QStringLiteral("catalogRevision")).toString(), QStringLiteral("input-recipes-v3"));
+	QCOMPARE(root.value(QStringLiteral("catalogRevision")).toString(), QStringLiteral("input-recipes-v4"));
 	QCOMPARE(RecipeCatalog::currentRevision, 1U);
-	QCOMPARE(recipeExecutionSemanticsVersion, 6U);
-	QCOMPARE(qualifiedMixCurveVersion, 5U);
+	QCOMPARE(recipeExecutionSemanticsVersion, 8U);
+	QCOMPARE(qualifiedMixCurveVersion, 6U);
 	QCOMPARE(adaptationPolicyVersion, 1U);
 	QVERIFY(root.value(QStringLiteral("recipes")).isArray());
 
@@ -466,16 +469,16 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 
 	request.noiseReduction = 100;
 	const Recipe maximum   = RecipeCatalog::resolve(request);
-	QCOMPARE(maximum.noiseReduction(), 90);
+	QCOMPARE(maximum.noiseReduction(), 55);
 	QCOMPARE(maximum.naturalCrisp(), 90);
-	QVERIFY(std::abs(maximum.mixFactor() - 0.8775f) < 0.00001f);
+	QVERIFY(std::abs(maximum.mixFactor() - 0.53625f) < 0.00001f);
 
 	request.noiseReduction = 50;
 	request.naturalCrisp   = 0;
 	const Recipe natural   = RecipeCatalog::resolve(request);
-	QCOMPARE(natural.noiseReduction(), 55);
+	QCOMPARE(natural.noiseReduction(), 38);
 	QCOMPARE(natural.naturalCrisp(), 10);
-	QVERIFY(std::abs(natural.mixFactor() - 0.42625f) < 0.00001f);
+	QVERIFY(std::abs(natural.mixFactor() - 0.2945f) < 0.00001f);
 
 	const ValidatedControls qualityMinimum = validatedControlsForProfile(Profile::Quality, 0, 0);
 	QCOMPARE(qualityMinimum.noiseReduction, 25);
@@ -488,7 +491,7 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 	QCOMPARE(qualityDefault.naturalCrisp, 63);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 0, 0) - 0.70f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 30, 50) - 0.75f) < 0.00001f);
-	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 100, 100) - 0.90f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 100, 100) - 0.95f) < 0.00001f);
 	const ValidatedControls focusMinimum = validatedControlsForProfile(Profile::VoiceFocus, 0, 0);
 	QCOMPARE(focusMinimum.noiseReduction, 70);
 	QCOMPARE(focusMinimum.naturalCrisp, 40);
@@ -497,17 +500,51 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 	QCOMPARE(focusMaximum.naturalCrisp, 100);
 	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 0, 0) - 0.90f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 30, 50) - 0.90f) < 0.00001f);
-	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 100, 100) - 0.95f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 100, 100) - 1.0f) < 0.00001f);
 	QVERIFY(mixFactorForControls(Profile::Quality, 100, 100)
 			< mixFactorForControls(Profile::VoiceFocus, 100, 100));
 	QCOMPARE(mixFactorForControls(Profile::Original, 100, 100), 0.0f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 0, 0) - 0.50f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 40, 40) - 0.70f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 100, 0) - 0.90f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Light, 100, 100) - 1.0f) < 0.00001f);
 	QCOMPARE(lightSpeexSuppressionDb(-1), -5);
 	QCOMPARE(lightSpeexSuppressionDb(40), -15);
 	QCOMPARE(lightSpeexSuppressionDb(80), -25);
 	QCOMPARE(lightSpeexSuppressionDb(101), -30);
+}
+
+void TestInputEnhancement::qualifiedExplicitSelectionPresetsAreStable() {
+	QVERIFY(!qualifiedExplicitSelectionPreset(Profile::Original).has_value());
+	QVERIFY(!qualifiedExplicitSelectionPreset(Profile::Auto).has_value());
+
+	struct ExpectedPreset final {
+		Profile profile;
+		ExplicitProfileControlPreset publicControls;
+		ValidatedControls recipeControls;
+	};
+	const std::array< ExpectedPreset, 4 > expected = {
+		ExpectedPreset{ Profile::Light, { 100, 100 }, { 100, 100 } },
+		ExpectedPreset{ Profile::Balanced, { 57, 0 }, { 40, 10 } },
+		ExpectedPreset{ Profile::Quality, { 92, 80 }, { 85, 85 } },
+		ExpectedPreset{ Profile::VoiceFocus, { 67, 100 }, { 90, 100 } },
+	};
+	for (const ExpectedPreset &item : expected) {
+		const std::optional< ExplicitProfileControlPreset > preset =
+			qualifiedExplicitSelectionPreset(item.profile);
+		QVERIFY(preset.has_value());
+		QCOMPARE(preset->noiseReduction, item.publicControls.noiseReduction);
+		QCOMPARE(preset->naturalCrisp, item.publicControls.naturalCrisp);
+		ResolveRequest request = requestFor(item.profile);
+		request.noiseReduction = preset->noiseReduction;
+		request.naturalCrisp   = preset->naturalCrisp;
+		const Recipe recipe    = RecipeCatalog::resolve(request);
+		QCOMPARE(recipe.noiseReduction(), item.recipeControls.noiseReduction);
+		QCOMPARE(recipe.naturalCrisp(), item.recipeControls.naturalCrisp);
+		QVERIFY(std::abs(recipe.mixFactor()
+					 - mixFactorForControls(item.profile, preset->noiseReduction, preset->naturalCrisp))
+				< 0.00001f);
+	}
 }
 
 void TestInputEnhancement::profileValuesAndReadinessAreStable() {
@@ -714,14 +751,14 @@ void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
 	std::array< std::int16_t, frameSamples > wet = {};
 
 	// The first callback is the declared one-frame causal pre-roll.
-	QVERIFY(pipeline.mixClassicFrame(wet.data(), drySpeech.data(), frameSamples, 100, 0, 1.0f));
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), drySpeech.data(), frameSamples, 100, 0, 1'000, 1.0f));
 	QVERIFY(std::all_of(wet.cbegin(), wet.cend(), [](std::int16_t sample) { return sample == 0; }));
 	pipeline.recordClassicProcessingFrame(100'000);
 
 	// Speex's next wet frame is deliberately corrupt here. The previous frame's
 	// high speech probability must select the exactly aligned dry speech instead.
 	wet.fill(-12'000);
-	QVERIFY(pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1.0f));
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1'000, 1.0f));
 	QCOMPARE(std::memcmp(wet.data(), drySpeech.data(), sizeof(wet)), 0);
 	pipeline.recordClassicProcessingFrame(100'000);
 
@@ -732,7 +769,7 @@ void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
 	bool sawWetMix = false;
 	for (unsigned int frame = 0; frame < 80; ++frame) {
 		wet.fill(10'000);
-		QVERIFY(pipeline.mixClassicFrame(wet.data(), dryNoise.data(), frameSamples, 0, 100, 1.0f));
+		QVERIFY(pipeline.mixClassicFrame(wet.data(), dryNoise.data(), frameSamples, 0, 100, 1'000, 1.0f));
 		if (wet.front() > dryNoise.front()) {
 			sawWetMix = true;
 		}
@@ -744,7 +781,7 @@ void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
 	std::array< std::int16_t, frameSamples > dryTail = {};
 	dryTail.fill(5'000);
 	wet.fill(10'000);
-	QVERIFY(pipeline.mixClassicFrame(wet.data(), dryTail.data(), frameSamples, 0, 100, 1.0f));
+	QVERIFY(pipeline.mixClassicFrame(wet.data(), dryTail.data(), frameSamples, 0, 100, 1'000, 1.0f));
 	QVERIFY(wet.front() > dryNoise.front());
 	pipeline.recordClassicProcessingFrame(Pipeline::defaultFrameDeadlineNanoseconds + 1);
 	QVERIFY(pipeline.fallbackActive());
@@ -753,7 +790,7 @@ void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
 	// A deadline failure stays on Light's established 10 ms timeline and emits
 	// delayed dry tail instead of jumping to the current Original frame.
 	wet.fill(-20'000);
-	QVERIFY(!pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1.0f));
+	QVERIFY(!pipeline.mixClassicFrame(wet.data(), silence.data(), frameSamples, 0, 0, 1'000, 1.0f));
 	QCOMPARE(std::memcmp(wet.data(), dryTail.data(), sizeof(wet)), 0);
 }
 
@@ -769,7 +806,7 @@ void TestInputEnhancement::lightClassicSceneGateSeparatesCleanSpeechFromStationa
 		dry.fill(frameIndex % 2 == 0 ? 1'000 : 25'000);
 		std::array< std::int16_t, frameSamples > wet = {};
 		wet.fill(-12'000);
-		QVERIFY(cleanSpeech.mixClassicFrame(wet.data(), dry.data(), frameSamples, 50, 100, 1.0f));
+		QVERIFY(cleanSpeech.mixClassicFrame(wet.data(), dry.data(), frameSamples, 50, 100, 100'000, 1.0f));
 		QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
 		previousDry = dry;
 	}
@@ -785,8 +822,52 @@ void TestInputEnhancement::lightClassicSceneGateSeparatesCleanSpeechFromStationa
 		dry.fill(1'000);
 		std::array< std::int16_t, frameSamples > wet = {};
 		wet.fill(10'000);
-		QVERIFY(stationaryNoise.mixClassicFrame(wet.data(), dry.data(), frameSamples, 0, 100, 1.0f));
+		QVERIFY(stationaryNoise.mixClassicFrame(wet.data(), dry.data(), frameSamples, 0, 100, 1'000, 1.0f));
 		if (frameIndex < 63) {
+			QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
+		} else if (std::memcmp(wet.data(), previousDry.data(), sizeof(wet)) != 0) {
+			sawWetAfterWarmup = true;
+		}
+		previousDry = dry;
+	}
+	QVERIFY(sawWetAfterWarmup);
+}
+
+void TestInputEnhancement::lightClassicSceneGatePreservesSustainedCleanSpeech() {
+	// A sustained clean vowel has low RMS dynamic range and can expose a high
+	// backend PSD estimate, just like competing speech. Light is intentionally a
+	// stationary-noise profile, so persistent high speech confidence must win and
+	// keep the causally aligned dry signal bit-exact even after scene warmup.
+	Pipeline pipeline;
+	QVERIFY(pipeline.configure(RecipeCatalog::resolve(requestFor(Profile::Light))));
+	std::array< std::int16_t, frameSamples > previousDry = {};
+	for (unsigned int frameIndex = 0; frameIndex < 96; ++frameIndex) {
+		std::array< std::int16_t, frameSamples > dry = {};
+		dry.fill(12'000);
+		std::array< std::int16_t, frameSamples > wet = {};
+		wet.fill(-12'000);
+		QVERIFY(pipeline.mixClassicFrame(wet.data(), dry.data(), frameSamples, 90, 100, 100'000, 1.0f));
+		QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
+		previousDry = dry;
+	}
+
+	// With the same sustained speech confidence and level, a causal PSD ratio
+	// above one percent is materially different evidence. It must admit bounded
+	// wet output after warmup rather than disabling Light for every noisy vowel.
+	Pipeline noisySpeech;
+	ResolveRequest clearLightRequest = requestFor(Profile::Light);
+	clearLightRequest.noiseReduction = 100;
+	clearLightRequest.naturalCrisp   = 100;
+	QVERIFY(noisySpeech.configure(RecipeCatalog::resolve(clearLightRequest)));
+	previousDry.fill(0);
+	bool sawWetAfterWarmup = false;
+	for (unsigned int frameIndex = 0; frameIndex < 240; ++frameIndex) {
+		std::array< std::int16_t, frameSamples > dry = {};
+		dry.fill(12'000);
+		std::array< std::int16_t, frameSamples > wet = {};
+		wet.fill(-12'000);
+		QVERIFY(noisySpeech.mixClassicFrame(wet.data(), dry.data(), frameSamples, 90, 2'000, 100'000, 1.0f));
+		if (frameIndex < 179U) {
 			QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
 		} else if (std::memcmp(wet.data(), previousDry.data(), sizeof(wet)) != 0) {
 			sawWetAfterWarmup = true;
@@ -1055,11 +1136,66 @@ void TestInputEnhancement::balancedUsesFullOnsetRampAfterWeakPreOnset() {
 	QVERIFY(protectedBegin != state.observedMixes.cend());
 	constexpr std::array< float, 8 > onsetMixCaps = { 0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f };
 	QVERIFY(std::distance(protectedBegin, state.observedMixes.cend())
-			>= static_cast< std::ptrdiff_t >(onsetMixCaps.size() + 1));
+			>= static_cast< std::ptrdiff_t >(onsetMixCaps.size() + 2));
+	// The weak edge consumes one zero-mix frame. The much stronger consonant
+	// then has to re-arm a complete ramp instead of inheriting the weak edge's
+	// partially consumed protection.
+	QCOMPARE(protectedBegin[0], 0.0f);
 	for (std::size_t index = 0; index < onsetMixCaps.size(); ++index) {
-		QVERIFY(std::abs(protectedBegin[index] - std::min(recipe.mixFactor(), onsetMixCaps[index])) < 0.00001f);
+		QVERIFY(std::abs(protectedBegin[index + 1] - std::min(recipe.mixFactor(), onsetMixCaps[index])) < 0.00001f);
 	}
-	QVERIFY(std::abs(protectedBegin[onsetMixCaps.size()] - recipe.mixFactor()) < 0.00001f);
+	QVERIFY(std::abs(protectedBegin[onsetMixCaps.size() + 1] - recipe.mixFactor()) < 0.00001f);
+
+	// A weak clean-room tail must return to delayed dry before RNNoise can
+	// erase the final consonant or reverberant decay. This is causal and does not
+	// extend the recipe's declared 30 ms timeline.
+	const std::size_t releaseStart = state.observedMixes.size();
+	const unsigned int latencyFrames = state.latency / frameSamples;
+	for (unsigned int index = 0; index < latencyFrames + 6; ++index) {
+		frame.fill(0.0f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	QVERIFY(state.observedMixes.size() >= releaseStart + latencyFrames + 6);
+	for (unsigned int index = 0; index < 5; ++index) {
+		QCOMPARE(state.observedMixes[releaseStart + latencyFrames + index], 0.0f);
+	}
+	QVERIFY(std::abs(state.observedMixes[releaseStart + latencyFrames + 5] - recipe.mixFactor()) < 0.00001f);
+}
+
+void TestInputEnhancement::neuralOnsetRampRearmsAfterSeparatedTransient() {
+	FakeState state;
+	state.latency = balancedLatencyBudgetSamples;
+	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+	const Recipe recipe = RecipeCatalog::resolve(requestFor(Profile::Balanced));
+	QVERIFY(pipeline.configure(recipe));
+	state.observedMixes.clear();
+
+	std::array< float, frameSamples > frame = {};
+	for (unsigned int index = 0; index < 6; ++index) {
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	// A handling click consumes the first onset ramp, followed by only one quiet
+	// frame: that is intentionally shorter than the five-frame release hold.
+	frame.fill(0.8f);
+	QVERIFY(pipeline.processFrame(frame));
+	frame.fill(0.0f);
+	QVERIFY(pipeline.processFrame(frame));
+	const unsigned int latencyFrames = state.latency / frameSamples;
+	for (unsigned int index = 0; index < latencyFrames + 10; ++index) {
+		frame.fill(0.2f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+
+	// The weaker speech edge must still restart a complete eight-frame ramp. A
+	// monotonic utterance peak would incorrectly compare it against the click.
+	const std::size_t speechBegin = state.observedMixes.size() - 10;
+	constexpr std::array< float, 8 > onsetMixCaps = { 0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f };
+	for (std::size_t index = 0; index < onsetMixCaps.size(); ++index) {
+		QVERIFY(std::abs(state.observedMixes[speechBegin + index]
+					 - std::min(recipe.mixFactor(), onsetMixCaps[index]))
+				< 0.00001f);
+	}
+	QVERIFY(std::abs(state.observedMixes[speechBegin + onsetMixCaps.size()] - recipe.mixFactor()) < 0.00001f);
 }
 
 void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {
@@ -1098,12 +1234,16 @@ void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {
 		QVERIFY(std::abs(protectedBegin[protectedFrames] - recipe.mixFactor()) < 0.00001f);
 
 		const std::size_t releaseStart = state.observedMixes.size();
-		for (unsigned int index = 0; index < 7; ++index) {
+		const unsigned int latencyFrames = state.latency / frameSamples;
+		for (unsigned int index = 0; index < latencyFrames + 6; ++index) {
 			frame.fill(0.0f);
 			QVERIFY(pipeline.processFrame(frame));
 		}
-		QVERIFY(state.observedMixes.size() >= releaseStart + 7);
-		QCOMPARE(state.observedMixes[releaseStart + 5], 0.0f);
+		QVERIFY(state.observedMixes.size() >= releaseStart + latencyFrames + 6);
+		for (unsigned int index = 0; index < 5; ++index) {
+			QCOMPARE(state.observedMixes[releaseStart + latencyFrames + index], 0.0f);
+		}
+		QVERIFY(std::abs(state.observedMixes[releaseStart + latencyFrames + 5] - recipe.mixFactor()) < 0.00001f);
 	}
 }
 

@@ -27,7 +27,7 @@ const QByteArray PrivateSeed     = QByteArray::fromHex("9d61b19deffd5a60ba844af4
 														   "4449c5697b326919703bac031cae7f60");
 const QByteArray PublicKey       = QByteArray::fromHex("d75a980182b10ab7d54bfed3c964073a"
 															 "0ee172f3daa62325af021a68f707511a");
-const QString CatalogRevision    = QStringLiteral("input-recipes-v2");
+const QString CatalogRevision    = QStringLiteral("input-recipes-v4");
 const QByteArray RnnoiseAsset    = QByteArrayLiteral("signed-rnnoise-runtime");
 const QByteArray DeepFilterAsset = QByteArrayLiteral("signed-deepfilter-model");
 

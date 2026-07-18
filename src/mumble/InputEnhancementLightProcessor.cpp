@@ -38,9 +38,12 @@ void LightProcessor::reset() noexcept {
 	m_pipeline = nullptr;
 	m_dryFrame.fill(0);
 	m_noisePsd.fill(0);
+	m_signalPsd.fill(0);
 	m_suppressionDb         = 0;
 	m_lastSpeechProbability = 100;
 	m_lastNoisePsdSum       = 0;
+	m_lastSignalPsdSum      = 0;
+	m_signalPsdValid        = false;
 	m_ready                 = false;
 }
 
@@ -55,11 +58,11 @@ bool LightProcessor::processFrame(std::int16_t *samples, unsigned int sampleCoun
 
 	std::copy_n(samples, frameSamples, m_dryFrame.begin());
 	if (m_pipeline->fallbackActive()) {
-		return m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, 0, 0);
+		return m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, 0, 0, 0);
 	}
 	if (!m_ready) {
 		m_pipeline->markClassicProcessingFailure(FallbackReason::ProcessorUnavailable);
-		m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, 0, 0);
+		m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, 0, 0, 0);
 		return false;
 	}
 
@@ -67,24 +70,31 @@ bool LightProcessor::processFrame(std::int16_t *samples, unsigned int sampleCoun
 	m_preprocessor.run(*samples);
 	m_lastSpeechProbability = std::clamp(m_preprocessor.getSpeechProb(), 0, 100);
 	const bool noisePsdValid = m_preprocessor.getNoisePSD(m_noisePsd.data(), m_noisePsd.size());
+	m_signalPsdValid          = m_preprocessor.getPSD(m_signalPsd.data(), m_signalPsd.size());
 	m_lastNoisePsdSum        = 0;
+	m_lastSignalPsdSum       = 0;
 	if (noisePsdValid) {
 		for (const std::int32_t value : m_noisePsd) {
 			m_lastNoisePsdSum += static_cast< std::uint64_t >(std::max(value, std::int32_t { 0 }));
 		}
 	}
+	if (m_signalPsdValid) {
+		for (const std::int32_t value : m_signalPsd) {
+			m_lastSignalPsdSum += static_cast< std::uint64_t >(std::max(value, std::int32_t { 0 }));
+		}
+	}
 
-	if (!noisePsdValid) {
+	if (!noisePsdValid || !m_signalPsdValid) {
 		const auto finishedAt = std::chrono::steady_clock::now();
 		m_pipeline->recordClassicProcessingFrame(static_cast< std::uint64_t >(
 			std::chrono::duration_cast< std::chrono::nanoseconds >(finishedAt - startedAt).count()));
 		m_pipeline->markClassicProcessingFailure(FallbackReason::ProcessorNotReady);
-		m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, m_lastSpeechProbability, 0);
+		m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples, m_lastSpeechProbability, 0, 0);
 		return false;
 	}
 
 	const bool mixed = m_pipeline->mixClassicFrame(samples, m_dryFrame.data(), frameSamples,
-												 m_lastSpeechProbability, m_lastNoisePsdSum);
+											 m_lastSpeechProbability, m_lastNoisePsdSum, m_lastSignalPsdSum);
 	const auto finishedAt = std::chrono::steady_clock::now();
 	m_pipeline->recordClassicProcessingFrame(static_cast< std::uint64_t >(
 		std::chrono::duration_cast< std::chrono::nanoseconds >(finishedAt - startedAt).count()));
@@ -112,7 +122,11 @@ bool LightProcessor::denoiseEnabled() const noexcept {
 }
 
 bool LightProcessor::copySignalPsd(std::int32_t *values, std::size_t count) const noexcept {
-	return ready() && m_preprocessor.getPSD(values, count);
+	if (!ready() || !m_signalPsdValid || !values || count < m_signalPsd.size()) {
+		return false;
+	}
+	std::copy(m_signalPsd.cbegin(), m_signalPsd.cend(), values);
+	return true;
 }
 
 } // namespace Mumble::InputEnhancement

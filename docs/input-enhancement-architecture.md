@@ -26,7 +26,7 @@ Voice Focus uses the same verified full-band model as Quality with a separate
 
 `InputEnhancement::RecipeCatalog` maps the public 0–100 controls into bounded,
 qualified intervals. The packaged recipe manifest uses schema version 2 and
-the current catalog revision is `input-recipes-v2`. Signed
+the current catalog revision is `input-recipes-v4`. Signed
 `input-recipes.json` must authorize the compiled recipe revision, requested
 profile, concrete engine, model IDs, control ranges, latency, CPU class,
 execution-semantics revision, qualified-mix curve revision and
@@ -59,8 +59,23 @@ wet output, so user PCM level and dry timeline do not change. The buffers are
 allocated during preparation, never in the callback. This execution semantic
 is versioned in the recipe manifest. Legacy/Expert input selections and all
 receiver cleanup leave the opt-in flag false and call the historical model API
-directly. Voice Focus additionally caps its qualified wet mix at 0.99; the
-versioned cap preserves a dry safety component even at 100/100 controls.
+directly. Quality preserves its 0.70 minimum and 0.75 normal anchor while high
+controls can reach 0.95. Explicit-only Voice Focus can reach 1.00; it is never
+selected by Auto and the endpoint must still clear clean-speech, WER,
+catastrophe and blind-listening gates. These curves are versioned independently
+of the UI controls.
+
+The product-only DeepFilterNet path raises only weak input towards a -24 dBFS
+model-domain peak, capped at +18.06 dB. It never attenuates or raises an already
+louder input. The exact causal gain is removed from the corresponding model
+output before wet/dry mixing, so microphone level and the dry timeline stay
+unchanged. This avoids overdriving normal and noisy input while preserving the
+quiet-microphone protection that motivated model-domain normalization.
+
+Balanced and DeepFilterNet profiles share the same causal dry-aligned onset
+ramp and quiet-room release guard. The release guard follows the learned room
+floor and opens only for weak utterance tails, preserving final consonants and
+room decay without weakening suppression across noisy low-energy speech.
 
 The 5 ms Balanced and 8 ms Quality/Voice Focus values are p99 qualification
 limits. The hard runtime catastrophe threshold is 10 ms; a single scheduler
