@@ -11,57 +11,49 @@
 #include <QtCore/QObject>
 #include <mmdeviceapi.h>
 
-/// Coalesces endpoint notifications until the queued audio reset has actually
-/// rebuilt and re-enlisted a device. Unlike a wall-clock debounce, a second
-/// default-device change immediately after that lifecycle boundary is retained.
+/// Coalesces endpoint notifications against the actual queued/rebuilding audio
+/// lifecycle. Notifications received while a reset is merely queued are covered
+/// by that reset. A notification received after the rebuild starts is retained as
+/// exactly one follow-up reset, so the newest OS default cannot be lost.
 class WASAPIRestartDispatchGate final {
 public:
 	bool requestRestart() noexcept {
-		if (m_restartPending) {
-			return false;
+		switch (m_phase) {
+			case Phase::Idle:
+				m_phase = Phase::Queued;
+				return true;
+			case Phase::Queued:
+				return false;
+			case Phase::Rebuilding:
+				m_followupRequested = true;
+				return false;
 		}
-		m_restartPending          = true;
-		m_acceptingRebuildEnlists = false;
-		m_rebuildStartReturned    = false;
-		m_rebuildDeviceEnlisted   = false;
-		return true;
+		return false;
 	}
 	void beginRebuildAfterOldAudioStopped() noexcept {
-		if (!m_restartPending) {
-			return;
+		if (m_phase == Phase::Queued) {
+			m_phase = Phase::Rebuilding;
 		}
-		m_acceptingRebuildEnlists = true;
-		m_rebuildStartReturned    = false;
-		m_rebuildDeviceEnlisted   = false;
 	}
-	void finishRebuildStart() noexcept {
-		if (!m_restartPending || !m_acceptingRebuildEnlists) {
-			return;
+	bool finishRebuildStartAndTakeFollowup() noexcept {
+		if (m_phase != Phase::Rebuilding) {
+			return false;
 		}
-		m_rebuildStartReturned = true;
-		rearmIfRebuilt();
-	}
-	void rebuiltDeviceEnlisted() noexcept {
-		if (!m_restartPending || !m_acceptingRebuildEnlists) {
-			return;
+		if (m_followupRequested) {
+			m_followupRequested = false;
+			m_phase             = Phase::Queued;
+			return true;
 		}
-		m_rebuildDeviceEnlisted = true;
-		rearmIfRebuilt();
+		m_phase = Phase::Idle;
+		return false;
 	}
-	bool restartPending() const noexcept { return m_restartPending; }
+	bool restartPending() const noexcept { return m_phase != Phase::Idle; }
+	bool rebuildInProgress() const noexcept { return m_phase == Phase::Rebuilding; }
 
 private:
-	void rearmIfRebuilt() noexcept {
-		if (m_rebuildStartReturned && m_rebuildDeviceEnlisted) {
-			m_restartPending          = false;
-			m_acceptingRebuildEnlists = false;
-		}
-	}
-
-	bool m_restartPending          = false;
-	bool m_acceptingRebuildEnlists = false;
-	bool m_rebuildStartReturned    = false;
-	bool m_rebuildDeviceEnlisted   = false;
+	enum class Phase { Idle, Queued, Rebuilding };
+	Phase m_phase = Phase::Idle;
+	bool m_followupRequested = false;
 };
 
 /**
@@ -95,8 +87,8 @@ public:
 	void clearUsedDefaultDeviceList();
 	void clearUsedDeviceLists();
 	/// MainWindow brackets Audio::start with these calls after Audio::stop has
-	/// joined the old backends. Only enlistments from that rebuild generation
-	/// may rearm notification dispatch.
+	/// joined the old backends. A default-device event during that generation is
+	/// dispatched once the current Audio::start has returned.
 	void beginAudioResetRebuild();
 	void finishAudioResetRebuild();
 

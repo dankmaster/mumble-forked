@@ -127,26 +127,24 @@ void TestInputEnhancementSettings::wasapiDefaultDeviceRolesMatchExactly() {
 	QVERIFY(gate.restartPending());
 	// A burst before the queued reset rebuilds audio is coalesced.
 	QVERIFY(!gate.requestRestart());
-	// An enlist from an old/parallel backend cannot rearm the queued reset before
-	// MainWindow has stopped that generation.
-	gate.rebuiltDeviceEnlisted();
 	QVERIFY(gate.restartPending());
+	gate.beginRebuildAfterOldAudioStopped();
+	QVERIFY(gate.rebuildInProgress());
+	// A default change after rebuild begins must not be forgotten. It is retained
+	// as exactly one follow-up even if several endpoint callbacks arrive.
+	QVERIFY(!gate.requestRestart());
+	QVERIFY(!gate.requestRestart());
+	QVERIFY(gate.restartPending());
+	QVERIFY(gate.finishRebuildStartAndTakeFollowup());
+	QVERIFY(gate.restartPending());
+	QVERIFY(!gate.rebuildInProgress());
+	// The retained reset is already queued, so further pre-rebuild events coalesce.
 	QVERIFY(!gate.requestRestart());
 	gate.beginRebuildAfterOldAudioStopped();
-	gate.rebuiltDeviceEnlisted();
-	QVERIFY(gate.restartPending());
-	gate.finishRebuildStart();
-	QVERIFY(!gate.restartPending());
-	QVERIFY(gate.requestRestart());
-	// A stale enlist from the preceding generation must not rearm this second
-	// queued reset. Only the next bracketed rebuild can do that.
-	gate.rebuiltDeviceEnlisted();
-	QVERIFY(gate.restartPending());
-	QVERIFY(!gate.requestRestart());
-	gate.beginRebuildAfterOldAudioStopped();
-	gate.finishRebuildStart();
-	QVERIFY(gate.restartPending());
-	gate.rebuiltDeviceEnlisted();
+	QVERIFY(gate.rebuildInProgress());
+	// Finishing without an enlisted device must still rearm future notifications.
+	// Otherwise a failed/no-device Audio::start could suppress resets forever.
+	QVERIFY(!gate.finishRebuildStartAndTakeFollowup());
 	QVERIFY(!gate.restartPending());
 	QVERIFY(gate.requestRestart());
 #else

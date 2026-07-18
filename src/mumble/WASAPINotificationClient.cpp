@@ -134,7 +134,6 @@ void WASAPINotificationClient::_enlistDeviceAsUsed(const QString &device) {
 	if (!usedDevices.contains(device)) {
 		usedDevices.append(device);
 	}
-	restartDispatchGate.rebuiltDeviceEnlisted();
 }
 
 void WASAPINotificationClient::enlistDeviceAsUsed(const QString &device) {
@@ -180,8 +179,18 @@ void WASAPINotificationClient::beginAudioResetRebuild() {
 }
 
 void WASAPINotificationClient::finishAudioResetRebuild() {
-	QMutexLocker lock(&listsMutex);
-	restartDispatchGate.finishRebuildStart();
+	bool dispatchFollowup = false;
+	{
+		QMutexLocker lock(&listsMutex);
+		dispatchFollowup = restartDispatchGate.finishRebuildStartAndTakeFollowup();
+		if (dispatchFollowup) {
+			_clearUsedDeviceLists();
+		}
+	}
+	if (dispatchFollowup) {
+		qWarning("WASAPINotificationClient: Triggering follow-up audio reset");
+		emit doResetAudio();
+	}
 }
 
 void WASAPINotificationClient::doGetOnce() {
