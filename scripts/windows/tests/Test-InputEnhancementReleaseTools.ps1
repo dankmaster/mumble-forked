@@ -1451,7 +1451,23 @@ try {
 			@autoRolloutVerification -TargetStage auto-default
 	}
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble.exe'), [byte[]](11, 12, 13, 14, 15))
-	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'mumble-updater.exe'), [byte[]](21, 22, 23))
+	$testUpdaterSourcePath = (Get-Process -Id $PID -ErrorAction Stop).Path
+	if ([string]::IsNullOrWhiteSpace($testUpdaterSourcePath) -or
+		-not (Test-Path -LiteralPath $testUpdaterSourcePath -PathType Leaf) -or
+		[IO.Path]::GetExtension($testUpdaterSourcePath) -cne '.exe') {
+		throw "The executing PowerShell process is not a usable deterministic PE fixture: '$testUpdaterSourcePath'."
+	}
+	$testUpdaterSource = Get-Item -LiteralPath $testUpdaterSourcePath -ErrorAction Stop
+	if ($testUpdaterSource.PSIsContainer -or $testUpdaterSource.Length -le 0) {
+		throw "The executing PowerShell process is not a non-empty regular-file PE fixture: '$testUpdaterSourcePath'."
+	}
+	$testUpdaterSourceHash = Get-ReleaseFileSha256 -Path $testUpdaterSource.FullName
+	$testUpdaterPath = Join-Path $stageRoot 'mumble-updater.exe'
+	Copy-Item -LiteralPath $testUpdaterSource.FullName -Destination $testUpdaterPath -Force
+	if ((Get-ReleaseFileSha256 -Path $testUpdaterPath) -cne $testUpdaterSourceHash) {
+		throw 'The deterministic updater PE fixture changed while it was copied into the staged payload.'
+	}
+	& (Join-Path $scriptsRoot 'assert-mumble-updater-static-runtime.ps1') -UpdaterPath $testUpdaterPath
 	[System.IO.File]::WriteAllBytes((Join-Path $stageRoot 'zlib1.dll'), [byte[]](31, 32, 33))
 	Initialize-TestQtQuickPayload -Root $stageRoot
 	$updatePackagePath = Join-Path $tempRoot "mumble-forked-1.7.42.mumble-update"
