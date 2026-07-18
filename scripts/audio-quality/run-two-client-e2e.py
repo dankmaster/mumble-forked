@@ -30,6 +30,13 @@ import wave
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, MutableMapping, Sequence
 
+from payload_identity import (
+	PayloadIdentityError,
+	canonical_json_sha256 as canonical_payload_json_sha256,
+	payload_file_attestation,
+	payload_tree_attestation,
+)
+
 
 class E2EError(RuntimeError):
 	"""Raised when a run cannot produce trustworthy two-client evidence."""
@@ -107,24 +114,38 @@ def _load_json(path: Path) -> Any:
 				raise E2EError(f"duplicate JSON key in {path}: {key}")
 			result[key] = value
 		return result
+	def reject_constant(value: str) -> None:
+		raise E2EError(f"non-finite JSON number in {path}: {value}")
+	def finite_float(value: str) -> float:
+		result = float(value)
+		if not math.isfinite(result):
+			raise E2EError(f"non-finite JSON number in {path}: {value}")
+		return result
 	try:
-		return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+		return json.loads(
+			path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates,
+			parse_constant=reject_constant, parse_float=finite_float,
+		)
 	except (OSError, json.JSONDecodeError) as error:
 		raise E2EError(f"unable to read {path}: {error}") from error
 
 
 def _file_sha256(path: Path) -> str:
-	digest = hashlib.sha256()
-	with path.open("rb") as stream:
-		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-			digest.update(chunk)
-	return digest.hexdigest()
+	try:
+		return str(payload_file_attestation(path)["sha256"])
+	except PayloadIdentityError as error:
+		raise E2EError(str(error)) from error
 
 
 def _canonical_sha256(value: Any) -> str:
-	return hashlib.sha256(
-		json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-	).hexdigest()
+	try:
+		return canonical_payload_json_sha256(value)
+	except PayloadIdentityError as error:
+		raise E2EError(str(error)) from error
+
+
+def _lexical_absolute(path: Path) -> Path:
+	return Path(os.path.abspath(os.fspath(path)))
 
 
 def _safe_relative(value: Any, path: str) -> PurePosixPath:
@@ -137,8 +158,8 @@ def _safe_relative(value: Any, path: str) -> PurePosixPath:
 
 
 def _below(root: Path, relative: Any, label: str) -> Path:
-	root = root.resolve()
-	path = root.joinpath(*_safe_relative(relative, label).parts).resolve()
+	root = Path(os.path.abspath(os.fspath(root)))
+	path = Path(os.path.abspath(os.fspath(root.joinpath(*_safe_relative(relative, label).parts))))
 	try:
 		path.relative_to(root)
 	except ValueError as error:
@@ -147,11 +168,13 @@ def _below(root: Path, relative: Any, label: str) -> Path:
 
 
 def _verified_file(path: Path, expected_hash: str | None = None, expected_size: int | None = None) -> Mapping[str, Any]:
-	resolved = path.resolve()
-	if not resolved.is_file() or _is_reparse(resolved):
-		raise E2EError(f"required regular file is missing: {resolved}")
-	size = resolved.stat().st_size
-	actual = _file_sha256(resolved)
+	try:
+		attestation = payload_file_attestation(path)
+	except PayloadIdentityError as error:
+		raise E2EError(str(error)) from error
+	resolved = Path(str(attestation["path"]))
+	size = int(attestation["size_bytes"])
+	actual = str(attestation["sha256"])
 	if expected_hash is not None and (not HEX64.fullmatch(expected_hash) or actual != expected_hash):
 		raise E2EError(f"SHA-256 mismatch for {resolved}")
 	if expected_size is not None and size != expected_size:
@@ -171,33 +194,10 @@ def _assert_file_attestation(path: Path, attestation: Mapping[str, Any], label: 
 
 
 def _tree_attestation(root: Path) -> Mapping[str, Any]:
-	root = root.resolve()
-	if not root.is_dir() or _is_reparse(root):
-		raise E2EError(f"runtime root does not exist: {root}")
-	entries = []
-	files: list[Path] = []
-	for current, directories, names in os.walk(root, topdown=True):
-		current_path = Path(current)
-		for directory in directories:
-			candidate = current_path / directory
-			if _is_reparse(candidate):
-				raise E2EError(f"runtime payload contains a reparse directory: {candidate}")
-		for name in names:
-			candidate = current_path / name
-			if _is_reparse(candidate):
-				raise E2EError(f"runtime payload contains a reparse file: {candidate}")
-			files.append(candidate)
-	for path in sorted(files, key=lambda candidate: candidate.relative_to(root).as_posix().lower()):
-		if path.is_file():
-			info = _verified_file(path)
-			entries.append({
-				"relative_path": path.relative_to(root).as_posix(),
-				"sha256": info["sha256"],
-				"size_bytes": info["size_bytes"],
-			})
-	if not entries:
-		raise E2EError("runtime payload is empty")
-	return {"root": str(root), "file_count": len(entries), "sha256": _canonical_sha256(entries)}
+	try:
+		return payload_tree_attestation(root)
+	except PayloadIdentityError as error:
+		raise E2EError(str(error)) from error
 
 
 def _assert_packaged_runtime_root(root: Path) -> None:
@@ -509,7 +509,7 @@ def _execution_identity_from_paths(paths: Mapping[str, Any]) -> Mapping[str, str
 	for key, value in paths.items():
 		if not isinstance(value, str) or not value or not Path(value).is_absolute():
 			raise E2EError(f"adapter contract path {key} must be absolute")
-		resolved[key] = Path(value).resolve()
+		resolved[key] = _lexical_absolute(Path(value))
 	provenance = _load_json(resolved["run_provenance"])
 	if not isinstance(provenance, dict):
 		raise E2EError("run provenance must be a JSON object")
@@ -554,7 +554,11 @@ def _adapter_command(adapter: Path, contract: Path, result: Path, extra: Sequenc
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-	temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+	try:
+		encoded = json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+	except (TypeError, ValueError) as error:
+		raise E2EError(f"refusing to emit non-finite or non-JSON evidence: {error}") from error
+	temporary.write_text(encoded, encoding="utf-8")
 	os.replace(temporary, path)
 
 
@@ -896,12 +900,12 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 	_write_json(args.output_root / "run-provenance.json", provenance)
 	provenance_sha256 = _canonical_sha256(provenance)
 	paths = {
-		"run_provenance": str((args.output_root / "run-provenance.json").resolve()),
-		"runtime_root": str(args.runtime_root.resolve()),
-		"client_binary": str(args.client_binary.resolve()),
-		"server_binary": str(args.server_binary.resolve()),
-		"model_manifest": str(args.model_manifest.resolve()),
-		"recipe_manifest": str(args.recipe_manifest.resolve()),
+		"run_provenance": str(_lexical_absolute(args.output_root / "run-provenance.json")),
+		"runtime_root": str(_lexical_absolute(args.runtime_root)),
+		"client_binary": str(_lexical_absolute(args.client_binary)),
+		"server_binary": str(_lexical_absolute(args.server_binary)),
+		"model_manifest": str(_lexical_absolute(args.model_manifest)),
+		"recipe_manifest": str(_lexical_absolute(args.recipe_manifest)),
 	}
 	expected_execution_identity = _execution_identity_from_paths(paths)
 	provenance_identity = {
@@ -1297,8 +1301,8 @@ def run_self_test() -> None:
 			"def canonical(value): return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf8')).hexdigest()\n"
 			"def tree(root):\n"
 			" root=Path(root).resolve(); entries=[]\n"
-			" for path in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix().lower()):\n"
-			"  if path.is_file(): entries.append({'relative_path':path.relative_to(root).as_posix(),'sha256':fh(path),'size_bytes':path.stat().st_size})\n"
+			" for path in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix()):\n"
+			"  if path.is_file(): entries.append({'path':path.relative_to(root).as_posix(),'sha256':fh(path),'size_bytes':path.stat().st_size})\n"
 			" return canonical(entries)\n"
 			"def delayed(source,target,latency):\n"
 			" with wave.open(str(source),'rb') as r:\n"

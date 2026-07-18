@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import math
 import os
 import shutil
 import stat
@@ -13,12 +15,19 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, MutableMapping, Sequence
 
 from measurement_evidence import (
 	MeasurementEvidenceError,
 	canonical_json_bytes as canonical_measurement_json_bytes,
 	indexed_artifact_references,
+)
+from payload_identity import (
+	PayloadIdentityError,
+	canonical_json_sha256 as canonical_payload_json_sha256,
+	payload_file_attestation,
+	payload_sha256 as canonical_payload_sha256,
+	payload_tree_attestation,
 )
 
 
@@ -26,6 +35,8 @@ SUITES = ("master_quality", "nightly", "release")
 CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 QUALITY_QUALIFICATION = "qualification.json"
 ORIGINAL_QUALIFICATION = "original-voice-qualification.json"
+ORIGINAL_PROVENANCE = "original-voice-provenance.json"
+ORIGINAL_PROVENANCE_KIND = "mumble-original-voice-qualification-provenance-v1"
 UPLOAD_DIRECTORY = "upload"
 ARTIFACT_SUFFIXES = {
 	"case_evidence_jsonl": ".jsonl",
@@ -95,40 +106,37 @@ class GateError(RuntimeError):
 
 
 def canonical_json_sha256(value: Any) -> str:
-	payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-	return hashlib.sha256(payload).hexdigest()
+	try:
+		return canonical_payload_json_sha256(value)
+	except PayloadIdentityError as error:
+		raise GateError(str(error)) from error
 
 
 def file_sha256(path: Path) -> str:
-	digest = hashlib.sha256()
-	with path.open("rb") as stream:
-		for block in iter(lambda: stream.read(1024 * 1024), b""):
-			digest.update(block)
-	return digest.hexdigest()
+	try:
+		return str(payload_file_attestation(path)["sha256"])
+	except PayloadIdentityError as error:
+		raise GateError(str(error)) from error
 
 
 def payload_sha256(path: Path) -> str:
-	"""Hash a file directly or a directory as a canonical, path-sensitive file inventory."""
-	if path.is_file():
-		return file_sha256(path)
-	if not path.is_dir():
-		raise GateError(f"protected provenance path does not exist: {path}")
-	records: list[Mapping[str, Any]] = []
-	for candidate in sorted(path.rglob("*"), key=lambda value: value.relative_to(path).as_posix()):
-		if candidate.is_symlink():
-			raise GateError(f"protected provenance trees must not contain symlinks: {candidate}")
-		if not candidate.is_file():
-			continue
-		records.append(
-			{
-				"path": candidate.relative_to(path).as_posix(),
-				"sha256": file_sha256(candidate),
-				"size_bytes": candidate.stat().st_size,
-			}
-		)
-	if not records:
-		raise GateError(f"protected provenance directory contains no files: {path}")
-	return canonical_json_sha256(records)
+	"""Hash a file or tree with the shared gate-compatible payload contract."""
+	try:
+		return canonical_payload_sha256(path)
+	except PayloadIdentityError as error:
+		raise GateError(str(error)) from error
+
+
+def payload_tree_sha256(path: Path) -> str:
+	try:
+		return str(payload_tree_attestation(path)["sha256"])
+	except PayloadIdentityError as error:
+		raise GateError(str(error)) from error
+
+
+def lexical_absolute(path: Path) -> Path:
+	"""Make a path absolute without following a junction or symlink."""
+	return Path(os.path.abspath(os.fspath(path)))
 
 
 def lowercase_sha256(value: str, label: str) -> str:
@@ -137,10 +145,34 @@ def lowercase_sha256(value: str, label: str) -> str:
 	return value
 
 
+def _load_json_bytes(raw: bytes, label: str) -> Any:
+	def reject_duplicates(pairs: Sequence[tuple[str, Any]]) -> MutableMapping[str, Any]:
+		result: MutableMapping[str, Any] = {}
+		for key, value in pairs:
+			if key in result:
+				raise GateError(f"{label}: duplicate JSON key {key!r}")
+			result[key] = value
+		return result
+	def reject_constant(value: str) -> None:
+		raise GateError(f"{label}: non-finite JSON number {value!r} is forbidden")
+	def finite_float(value: str) -> float:
+		result = float(value)
+		if not math.isfinite(result):
+			raise GateError(f"{label}: non-finite JSON number {value!r} is forbidden")
+		return result
+	try:
+		return json.loads(
+			raw.decode("utf-8"), object_pairs_hook=reject_duplicates,
+			parse_constant=reject_constant, parse_float=finite_float,
+		)
+	except (UnicodeDecodeError, json.JSONDecodeError) as error:
+		raise GateError(f"{label}: invalid UTF-8 JSON: {error}") from error
+
+
 def load_json(path: Path) -> Mapping[str, Any]:
 	try:
-		value = json.loads(path.read_text(encoding="utf-8"))
-	except (OSError, json.JSONDecodeError) as error:
+		value = _load_json_bytes(path.read_bytes(), str(path))
+	except OSError as error:
 		raise GateError(f"unable to load {path}: {error}") from error
 	if not isinstance(value, dict):
 		raise GateError(f"{path}: expected a JSON object")
@@ -164,17 +196,17 @@ def git_head(source_root: Path) -> str:
 
 
 def protected_path_identity(path: Path, source_root: Path, expected_sha256: str, label: str) -> tuple[Path, str]:
-	resolved = path.resolve()
-	if not resolved.exists():
-		raise GateError(f"{label} does not exist: {resolved}")
+	resolved = lexical_absolute(path)
+	# Hash the lexical path first. The shared identity walker rejects every
+	# reparse component; resolving before this call would erase that evidence.
+	expected = lowercase_sha256(expected_sha256, f"expected {label} hash")
+	actual = payload_sha256(resolved)
 	try:
 		resolved.relative_to(source_root)
 	except ValueError:
 		pass
 	else:
 		raise GateError(f"{label} must live outside the checked-out repository")
-	expected = lowercase_sha256(expected_sha256, f"expected {label} hash")
-	actual = payload_sha256(resolved)
 	if actual != expected:
 		raise GateError(f"{label} hash {actual!r} does not match configured {expected!r}")
 	return resolved, actual
@@ -345,6 +377,8 @@ def validate_identity(
 				raise GateError(f"quality evidence does not attest the exact {field}")
 	if original.get("candidate_build_sha") != expected_sha:
 		raise GateError("Original voice evidence does not attest the checked-out Git SHA")
+	if original.get("corpus_sha256") != expected_corpus_sha:
+		raise GateError("Original voice evidence does not attest the checked-in corpus lock")
 	expected_binary_sha = expected_build.get("tested_binary_sha256") if expected_build is not None else None
 	expected_legacy_binary_sha = expected_build.get("legacy_binary_sha256") if expected_build is not None else None
 	if expected_binary_sha is not None and original.get("candidate_executable_sha256") != expected_binary_sha:
@@ -356,6 +390,133 @@ def validate_identity(
 	cases = original.get("cases")
 	if not isinstance(cases, list) or any(not isinstance(case, dict) or set(case) != ORIGINAL_CASE_KEYS for case in cases):
 		raise GateError("Original voice evidence contains missing or unexpected case fields")
+
+
+def validate_original_provenance(
+	provenance: Mapping[str, Any],
+	original: Mapping[str, Any],
+	qualification_snapshot: Mapping[str, Any],
+	expected_sha: str,
+	expected_build: Mapping[str, str] | None,
+	expected_assembler_sha256: str | None = None,
+	expected_scorer_sha256: str | None = None,
+) -> None:
+	required_root = {
+		"assembler", "campaign_bindings", "campaign_id", "candidate_revision_contract", "commits", "corpus",
+		"identities", "kind", "legacy_revision_contract", "matrix", "qualification", "schema_version",
+		"transport",
+	}
+	if set(provenance) != required_root or provenance.get("schema_version") != 1 or provenance.get("kind") != ORIGINAL_PROVENANCE_KIND:
+		raise GateError("Original voice provenance has an unsupported or incomplete root contract")
+
+	def mapping(value: Any, label: str) -> Mapping[str, Any]:
+		if not isinstance(value, dict):
+			raise GateError(f"Original voice provenance {label} must be an object")
+		return value
+
+	def reference(value: Any, label: str, *, expected_hash: str | None = None) -> Mapping[str, Any]:
+		item = mapping(value, label)
+		if set(item) != {"path", "sha256", "size_bytes"}:
+			raise GateError(f"Original voice provenance {label} is not an exact file reference")
+		if not isinstance(item.get("path"), str) or not item["path"]:
+			raise GateError(f"Original voice provenance {label} has no path")
+		sha = lowercase_sha256(str(item.get("sha256")), f"Original voice provenance {label}")
+		if not isinstance(item.get("size_bytes"), int) or isinstance(item["size_bytes"], bool) or item["size_bytes"] <= 0:
+			raise GateError(f"Original voice provenance {label} has an invalid size")
+		if expected_hash is not None and sha != expected_hash:
+			raise GateError(f"Original voice provenance {label} hash differs from the protected identity")
+		return item
+
+	qualification = reference(provenance["qualification"], "qualification", expected_hash=str(qualification_snapshot["sha256"]))
+	if qualification["path"] != ORIGINAL_QUALIFICATION or qualification["size_bytes"] != qualification_snapshot["size_bytes"]:
+		raise GateError("Original voice provenance does not bind the exact qualification bytes")
+	reference(provenance["campaign_bindings"], "campaign_bindings")
+	reference(provenance["assembler"], "assembler", expected_hash=expected_assembler_sha256)
+
+	commits = mapping(provenance["commits"], "commits")
+	if set(commits) != {"candidate", "legacy_build", "legacy_instrumentation_base", "server"}:
+		raise GateError("Original voice provenance commit set is incomplete")
+	if commits.get("candidate") != expected_sha or commits.get("candidate") != original.get("candidate_build_sha"):
+		raise GateError("Original voice provenance does not bind the checked-out candidate commit")
+	if commits.get("legacy_build") != original.get("legacy_build_sha"):
+		raise GateError("Original voice provenance legacy commit differs from the qualification")
+
+	legacy_revision = mapping(provenance["legacy_revision_contract"], "legacy_revision_contract")
+	if (
+		legacy_revision.get("build_commit") != commits["legacy_build"]
+		or legacy_revision.get("instrumentation_base_commit") != commits["legacy_instrumentation_base"]
+		or legacy_revision.get("two_step_parent_chain_verified") is not True
+		or legacy_revision.get("protected_voice_path_changes") != []
+		or not isinstance(legacy_revision.get("protected_source_regions"), list)
+		or len(legacy_revision["protected_source_regions"]) != 4
+	):
+		raise GateError("Original voice provenance legacy revision contract is incomplete")
+	candidate_revision = mapping(provenance["candidate_revision_contract"], "candidate_revision_contract")
+	if (
+		candidate_revision.get("legacy_build_commit") != commits["legacy_build"]
+		or candidate_revision.get("candidate_commit") != commits["candidate"]
+		or candidate_revision.get("protected_voice_path_changes") != []
+		or not isinstance(candidate_revision.get("protected_source_regions"), list)
+		or len(candidate_revision["protected_source_regions"]) != 4
+	):
+		raise GateError("Original voice provenance candidate protected-source contract is incomplete")
+
+	identities = mapping(provenance["identities"], "identities")
+	if set(identities) != {"candidate", "legacy", "server", "tools"}:
+		raise GateError("Original voice provenance identity set is incomplete")
+	for role, expected_hash in (
+		("legacy", str(original.get("legacy_executable_sha256"))),
+		("candidate", str(original.get("candidate_executable_sha256"))),
+	):
+		identity = mapping(identities[role], f"identities.{role}")
+		for field in ("build_executable", "stage_executable", "qualified_executable"):
+			reference(identity.get(field), f"identities.{role}.{field}", expected_hash=expected_hash)
+		if identity.get("commit") != commits["legacy_build" if role == "legacy" else "candidate"]:
+			raise GateError(f"Original voice provenance {role} commit mismatch")
+	stage_payload = mapping(mapping(identities["candidate"], "identities.candidate").get("stage_payload"), "identities.candidate.stage_payload")
+	if set(stage_payload) != {"file_count", "path", "sha256"}:
+		raise GateError("Original voice provenance candidate stage payload reference is incomplete")
+	lowercase_sha256(str(stage_payload.get("sha256")), "Original voice provenance candidate stage payload")
+	if expected_build is not None and stage_payload["sha256"] != expected_build.get("staged_payload_sha256"):
+		raise GateError("Original voice provenance candidate payload differs from the protected staged payload")
+	server = mapping(identities["server"], "identities.server")
+	server_expected = expected_build.get("server_binary_sha256") if expected_build is not None else None
+	reference(server.get("executable"), "identities.server.executable", expected_hash=server_expected)
+	tools = mapping(identities["tools"], "identities.tools")
+	if set(tools) != {"scorer", "wrapper"}:
+		raise GateError("Original voice provenance tool set is incomplete")
+	reference(tools["scorer"], "identities.tools.scorer", expected_hash=expected_scorer_sha256)
+	reference(tools["wrapper"], "identities.tools.wrapper")
+
+	corpus = mapping(provenance["corpus"], "corpus")
+	if corpus.get("corpus_lock_canonical_sha256") != original.get("corpus_sha256"):
+		raise GateError("Original voice provenance corpus lock differs from the qualification")
+	for field in ("corpus_lock", "corpus_inventory", "mixture_plan", "render_manifest", "fixture_attestation", "input_wav", "clean_reference_wav"):
+		reference(corpus.get(field), f"corpus.{field}")
+	if expected_build is not None:
+		if corpus["corpus_inventory"]["sha256"] != expected_build.get("corpus_inventory_sha256"):
+			raise GateError("Original voice provenance uses a different protected corpus inventory")
+		if corpus["mixture_plan"]["sha256"] != expected_build.get("mixture_plan_sha256"):
+			raise GateError("Original voice provenance uses a different protected mixture plan")
+
+	matrix = mapping(provenance["matrix"], "matrix")
+	manifests = matrix.get("manifests")
+	if matrix.get("required_pair_count") != 45 or matrix.get("completed_pair_count") != 45 or not isinstance(manifests, list) or len(manifests) != 45:
+		raise GateError("Original voice provenance does not contain the complete 45-pair campaign")
+	cases = original.get("cases")
+	assert isinstance(cases, list)
+	if len(cases) != 45:
+		raise GateError("Original voice provenance qualification does not contain exactly 45 cases")
+	required_matrix = [
+		{"bitrate_bps": case["bitrate_bps"], "frames_per_packet": case["frames_per_packet"], "transmit_mode": case["transmit_mode"]}
+		for case in cases
+	]
+	if matrix.get("required_matrix_sha256") != canonical_json_sha256(required_matrix):
+		raise GateError("Original voice provenance matrix differs from the qualification")
+	for index, manifest in enumerate(manifests):
+		entry = mapping(manifest, f"matrix.manifests[{index}]")
+		if entry.get("receiver_timeline") is None or entry.get("sender_pre_opus_timeline") is None:
+			raise GateError("Original voice provenance does not keep receiver and pre-Opus timelines separate")
 
 
 def validate_recipe_and_models(
@@ -512,8 +673,8 @@ def safe_artifact_paths(output_root: Path, quality: Mapping[str, Any]) -> list[s
 	measurement_file = _safe_existing_file(output_root, measurement_path, measurement_value)
 	try:
 		raw = measurement_file.read_bytes()
-		index = json.loads(raw.decode("utf-8"))
-	except (OSError, UnicodeError, json.JSONDecodeError) as error:
+		index = _load_json_bytes(raw, "measurement index")
+	except OSError as error:
 		raise GateError(f"unable to load measurement index: {error}") from error
 	if not isinstance(index, dict) or raw != canonical_measurement_json_bytes(index) + b"\n":
 		raise GateError("measurement index must be canonical sorted-key UTF-8 JSON with one LF")
@@ -579,8 +740,8 @@ def prepare_safe_upload(
 	measurement_file = _safe_existing_file(output_root, str(measurement_reference["path"]), measurement_reference)
 	try:
 		measurement_raw = measurement_file.read_bytes()
-		measurement_index = json.loads(measurement_raw.decode("utf-8"))
-	except (OSError, UnicodeError, json.JSONDecodeError) as error:
+		measurement_index = _load_json_bytes(measurement_raw, "measurement index snapshot")
+	except OSError as error:
 		raise GateError(f"unable to snapshot measurement index before upload: {error}") from error
 	if not isinstance(measurement_index, dict) or measurement_raw != canonical_measurement_json_bytes(measurement_index) + b"\n":
 		raise GateError("measurement index changed after validation")
@@ -594,7 +755,7 @@ def prepare_safe_upload(
 	except MeasurementEvidenceError as error:
 		raise GateError(f"measurement index upload allowlist changed after validation: {error}") from error
 	expected: dict[str, Mapping[str, Any]] = {str(measurement_reference["path"]): measurement_reference, **indexed}
-	for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION):
+	for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, ORIGINAL_PROVENANCE):
 		source = output_root.joinpath(*PurePosixPath(relative).parts)
 		if not source.is_file() or _is_reparse(source):
 			raise GateError(f"validated upload source is missing or unsafe: {relative}")
@@ -605,7 +766,7 @@ def prepare_safe_upload(
 			if not isinstance(reference, dict):
 				raise GateError(f"validated root evidence has no immutable pre-validation snapshot: {relative}")
 			expected[relative] = reference
-	paths = list(dict.fromkeys([QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, *validated_paths]))
+	paths = list(dict.fromkeys([QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, ORIGINAL_PROVENANCE, *validated_paths]))
 	upload_root.mkdir(parents=True)
 	for relative in paths:
 		reference = expected.get(relative)
@@ -672,6 +833,23 @@ def run_self_test() -> None:
 		raise AssertionError("self-declared release-owner key bypassed the external CI trust root")
 	with tempfile.TemporaryDirectory(prefix="mumble-safe-quality-upload-") as directory:
 		output = Path(directory)
+		protected_target = output / "protected-target.bin"
+		protected_target.write_bytes(b"protected")
+		protected_link = output / "protected-link.bin"
+		try:
+			protected_link.symlink_to(protected_target)
+		except OSError:
+			pass
+		else:
+			try:
+				protected_path_identity(
+					protected_link, output / "source", hashlib.sha256(b"protected").hexdigest(), "self-test protected link",
+				)
+			except GateError:
+				pass
+			else:
+				raise AssertionError("protected path identity resolved a symlink before rejecting it")
+			protected_link.unlink()
 		prefix = "artifacts/master_quality-low-performance"
 		artifact_root = output / prefix
 		artifact_root.mkdir(parents=True)
@@ -717,6 +895,7 @@ def run_self_test() -> None:
 		}
 		(output / QUALITY_QUALIFICATION).write_text("{}\n", encoding="utf-8")
 		(output / ORIGINAL_QUALIFICATION).write_text("{}\n", encoding="utf-8")
+		(output / ORIGINAL_PROVENANCE).write_text("{}\n", encoding="utf-8")
 		expected_paths = sorted((junit["path"], metrics_attestation["path"], objective["path"], measurement_index["path"]))
 		if safe_artifact_paths(output, quality_upload) != expected_paths:
 			raise AssertionError("measurement index did not produce the exact transitive upload closure")
@@ -754,6 +933,9 @@ def run_self_test() -> None:
 
 		prepare_safe_upload(output, quality_upload)
 		upload = output / UPLOAD_DIRECTORY
+		for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, ORIGINAL_PROVENANCE):
+			if (upload / relative).read_bytes() != (output / relative).read_bytes():
+				raise AssertionError(f"safe upload omitted or changed mandatory root evidence: {relative}")
 		for relative in expected_paths:
 			output.joinpath(*PurePosixPath(relative).parts).unlink()
 		if safe_artifact_paths(upload, quality_upload) != expected_paths:
@@ -840,6 +1022,7 @@ def run_self_test() -> None:
 		{
 			"candidate_build_sha": source_sha,
 			"candidate_executable_sha256": digest,
+			"corpus_sha256": digest,
 			"cases": [ { key: None for key in ORIGINAL_CASE_KEYS } ],
 		}
 	)
@@ -873,6 +1056,101 @@ def run_self_test() -> None:
 		pass
 	else:
 		raise AssertionError("Original evidence legacy executable was not bound to the trusted legacy client")
+
+	def provenance_ref(sha256: str = digest) -> Mapping[str, Any]:
+		return {"path": "pinned.bin", "sha256": sha256, "size_bytes": 1}
+
+	provenance_cases = [
+		{"bitrate_bps": 8_000 + index, "frames_per_packet": 1, "transmit_mode": "continuous"}
+		for index in range(45)
+	]
+	provenance_original = {
+		"candidate_build_sha": source_sha,
+		"legacy_build_sha": "f" * 40,
+		"candidate_executable_sha256": digest,
+		"legacy_executable_sha256": "d" * 64,
+		"corpus_sha256": digest,
+		"cases": provenance_cases,
+	}
+	client_identity = lambda commit, executable: {
+		"commit": commit,
+		"worktree_receipt": provenance_ref(),
+		"build_executable": provenance_ref(executable),
+		"stage_executable": provenance_ref(executable),
+		"qualified_executable": provenance_ref(executable),
+		"stage_payload": {"path": "stage", "sha256": "9" * 64, "file_count": 1},
+	}
+	provenance = {
+		"schema_version": 1,
+		"kind": ORIGINAL_PROVENANCE_KIND,
+		"campaign_id": "self-test",
+		"campaign_bindings": provenance_ref(),
+		"assembler": provenance_ref(),
+		"commits": {
+			"candidate": source_sha, "legacy_build": "f" * 40,
+			"legacy_instrumentation_base": "a" * 40, "server": "b" * 40,
+		},
+		"legacy_revision_contract": {
+			"build_commit": "f" * 40, "instrumentation_base_commit": "a" * 40,
+			"two_step_parent_chain_verified": True, "protected_voice_path_changes": [],
+			"protected_source_regions": [{"label": str(index), "sha256": digest} for index in range(4)],
+		},
+		"candidate_revision_contract": {
+			"legacy_build_commit": "f" * 40, "candidate_commit": source_sha,
+			"protected_voice_path_changes": [],
+			"protected_source_regions": [{"label": str(index), "sha256": digest} for index in range(4)],
+		},
+		"identities": {
+			"legacy": client_identity("f" * 40, "d" * 64),
+			"candidate": client_identity(source_sha, digest),
+			"server": {"commit": "b" * 40, "worktree_receipt": provenance_ref(), "executable": provenance_ref("8" * 64)},
+			"tools": {"scorer": provenance_ref("7" * 64), "wrapper": provenance_ref("6" * 64)},
+		},
+		"transport": {},
+		"corpus": {
+			"corpus_lock": provenance_ref(), "corpus_lock_canonical_sha256": digest,
+			"corpus_inventory": provenance_ref("5" * 64), "corpus_inventory_canonical_sha256": "4" * 64,
+			"mixture_plan": provenance_ref("3" * 64), "mixture_plan_canonical_sha256": "2" * 64,
+			"render_manifest": provenance_ref(), "render_entry_sha256": "1" * 64,
+			"selected_case_id": "case", "fixture_attestation": provenance_ref(),
+			"input_wav": provenance_ref(), "clean_reference_wav": provenance_ref(),
+		},
+		"matrix": {
+			"required_pair_count": 45, "completed_pair_count": 45,
+			"required_matrix_sha256": canonical_json_sha256(provenance_cases),
+			"case_bindings_sha256": digest,
+			"manifests": [
+				{"sender_pre_opus_timeline": {}, "receiver_timeline": {}} for _ in range(45)
+			],
+		},
+		"qualification": {"path": ORIGINAL_QUALIFICATION, "sha256": "0" * 64, "size_bytes": 123},
+	}
+	expected_provenance_build = {
+		"staged_payload_sha256": "9" * 64,
+		"server_binary_sha256": "8" * 64,
+		"corpus_inventory_sha256": "5" * 64,
+		"mixture_plan_sha256": "3" * 64,
+	}
+	validate_original_provenance(
+		provenance, provenance_original, {"sha256": "0" * 64, "size_bytes": 123},
+		source_sha, expected_provenance_build,
+	)
+	for label, mutate in (
+		("missing receiver timeline", lambda value: value["matrix"]["manifests"][0].pop("receiver_timeline")),
+		("candidate protected change", lambda value: value["candidate_revision_contract"].__setitem__("protected_voice_path_changes", ["src/Mumble.proto"])),
+		("qualification byte mismatch", lambda value: value["qualification"].__setitem__("sha256", "1" * 64)),
+	):
+		broken = copy.deepcopy(provenance)
+		mutate(broken)
+		try:
+			validate_original_provenance(
+				broken, provenance_original, {"sha256": "0" * 64, "size_bytes": 123},
+				source_sha, expected_provenance_build,
+			)
+		except GateError:
+			pass
+		else:
+			raise AssertionError(f"Original provenance validator accepted {label}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -974,22 +1252,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 		if any(value is not None for value in identity_inputs):
 			if any(value is None for value in identity_inputs):
 				raise GateError("staged binary/root and unsigned model/recipe manifests must be supplied together")
-			tested_binary = args.tested_binary.resolve()
-			staged_client_root = args.staged_client_root.resolve()
-			model_manifest_path = args.model_manifest.resolve()
-			recipe_manifest_path = args.recipe_manifest.resolve()
-			if not tested_binary.is_file() or not staged_client_root.is_dir():
-				raise GateError("the supplied staged client root or tested binary is missing")
-			if not model_manifest_path.is_file() or not recipe_manifest_path.is_file():
-				raise GateError("the supplied unsigned model or recipe manifest is missing")
+			tested_binary = lexical_absolute(args.tested_binary)
+			staged_client_root = lexical_absolute(args.staged_client_root)
+			model_manifest_path = lexical_absolute(args.model_manifest)
+			recipe_manifest_path = lexical_absolute(args.recipe_manifest)
+			# These calls both prove existence/type and reject lexical reparse roots.
+			tested_binary_sha = file_sha256(tested_binary)
+			staged_payload_sha = payload_tree_sha256(staged_client_root)
+			model_manifest_sha = file_sha256(model_manifest_path)
+			recipe_manifest_sha = file_sha256(recipe_manifest_path)
 			try:
 				tested_binary.relative_to(staged_client_root)
 			except ValueError as error:
 				raise GateError("the tested binary must live below the supplied staged client root") from error
-			tested_binary_sha = file_sha256(tested_binary)
-			staged_payload_sha = payload_sha256(staged_client_root)
-			model_manifest_sha = file_sha256(model_manifest_path)
-			recipe_manifest_sha = file_sha256(recipe_manifest_path)
 			model_manifest = load_json(model_manifest_path)
 			recipe_manifest = load_json(recipe_manifest_path)
 		if args.legacy_binary is not None:
@@ -998,16 +1273,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 					args.legacy_binary, source_root, args.expected_legacy_binary_sha256, "trusted legacy client"
 				)
 			else:
-				legacy_binary = args.legacy_binary.resolve()
-				if not legacy_binary.is_file():
-					raise GateError("the supplied legacy client binary is missing")
+				legacy_binary = lexical_absolute(args.legacy_binary)
+				legacy_binary_sha = file_sha256(legacy_binary)
 				try:
 					legacy_binary.relative_to(source_root)
 				except ValueError:
 					pass
 				else:
 					raise GateError("the trusted legacy binary must live outside the checked-out repository")
-				legacy_binary_sha = file_sha256(legacy_binary)
 
 		protected_specs = (
 			("server_binary_sha256", args.server_binary, args.expected_server_binary_sha256, "trusted OG server"),
@@ -1052,9 +1325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 		if not args.validate_only:
 			if not args.harness.is_absolute():
 				raise GateError("configured quality harness path must be absolute")
-			harness = args.harness.resolve()
-			if not harness.is_file():
-				raise GateError(f"configured quality harness does not exist: {harness}")
+			harness = lexical_absolute(args.harness)
 			try:
 				harness.relative_to(source_root)
 			except ValueError:
@@ -1071,7 +1342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 			assert args.runner_class is not None and hardware_fingerprint_sha is not None
 			command = harness_command(
 				harness, args.suite, source_root, output_root, source_sha, corpus_lock,
-				tested_binary, legacy_binary, staged_client_root, args.model_manifest.resolve(), args.recipe_manifest.resolve(),
+				tested_binary, legacy_binary, staged_client_root, model_manifest_path, recipe_manifest_path,
 				server_binary, corpus_inventory, case_set, mixture_plan, release_fixtures, metrics_runtime, args.runner_class,
 				hardware_fingerprint_sha, harness_sha,
 				expected_release_holdout_key_sha256,
@@ -1083,8 +1354,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 				"tested client": (tested_binary, tested_binary_sha),
 				"legacy client": (legacy_binary, legacy_binary_sha),
 				"staged payload": (staged_client_root, staged_payload_sha),
-				"model manifest": (args.model_manifest.resolve(), model_manifest_sha),
-				"recipe manifest": (args.recipe_manifest.resolve(), recipe_manifest_sha),
+				"model manifest": (model_manifest_path, model_manifest_sha),
+				"recipe manifest": (recipe_manifest_path, recipe_manifest_sha),
 			}
 			for label, (protected_path, before_sha256) in post_run_checks.items():
 				if before_sha256 is None or payload_sha256(protected_path) != before_sha256:
@@ -1097,16 +1368,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 		quality_path = output_root / QUALITY_QUALIFICATION
 		original_path = output_root / ORIGINAL_QUALIFICATION
-		if not quality_path.is_file() or not original_path.is_file():
+		original_provenance_path = output_root / ORIGINAL_PROVENANCE
+		if not quality_path.is_file() or not original_path.is_file() or not original_provenance_path.is_file():
 			raise GateError(
-				"harness did not produce qualification.json and original-voice-qualification.json; no gate can be claimed"
+				"harness did not produce qualification.json, original-voice-qualification.json, and "
+				"original-voice-provenance.json; no gate can be claimed"
 			)
 		root_evidence_snapshot = {
 			relative: {
 				"size_bytes": (output_root / relative).stat().st_size,
 				"sha256": file_sha256(output_root / relative),
 			}
-			for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION)
+			for relative in (QUALITY_QUALIFICATION, ORIGINAL_QUALIFICATION, ORIGINAL_PROVENANCE)
 		}
 		run_validator(
 			[
@@ -1131,6 +1404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 			_safe_existing_file(output_root, relative, reference)
 		quality = load_json(quality_path)
 		original = load_json(original_path)
+		original_provenance = load_json(original_provenance_path)
 		expected_build: dict[str, str] | None = None
 		if tested_binary_sha is not None:
 			assert staged_payload_sha is not None and legacy_binary_sha is not None
@@ -1152,6 +1426,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 			if hardware_fingerprint_sha is not None:
 				expected_build["hardware_fingerprint_sha256"] = hardware_fingerprint_sha
 		validate_identity(quality, original, args.suite, source_sha, corpus_sha, expected_build)
+		validate_original_provenance(
+			original_provenance, original, root_evidence_snapshot[ORIGINAL_QUALIFICATION], source_sha, expected_build,
+			file_sha256(source_root / "scripts" / "audio-quality" / "assemble-original-voice-qualification.py"),
+			file_sha256(source_root / "scripts" / "audio-quality" / "score-fixed-timeline.py"),
+		)
 		artifacts = quality.get("artifacts")
 		measurement_reference = artifacts.get("measurement_index_json") if isinstance(artifacts, dict) else None
 		if not isinstance(measurement_reference, dict) or not isinstance(measurement_reference.get("path"), str):
