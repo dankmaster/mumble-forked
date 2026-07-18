@@ -701,6 +701,32 @@ function Write-SharedRuntimeManifest {
 	& (Join-Path $PSScriptRoot "new-windows-runtime-manifest.ps1") -StageRoot $StageRoot
 }
 
+function Write-SharedInputEnhancementManifests {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$RepoRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$StageRoot
+	)
+
+	& (Join-Path $PSScriptRoot "new-input-enhancement-package-manifests.ps1") `
+		-StageRoot $StageRoot `
+		-ModelDescriptorPath (Join-Path $RepoRoot "src\mumble\input-enhancement\input-models.descriptor.json") `
+		-RecipeDescriptorPath (Join-Path $RepoRoot "src\mumble\input-enhancement\input-recipes.descriptor.json")
+
+	# The stage has just been rebuilt from local bytes. Any installed detached
+	# signatures necessarily refer to older manifests and must not survive as
+	# apparently valid release metadata. Managed release jobs sign the freshly
+	# generated manifests later and then regenerate the runtime manifest.
+	foreach ($signatureName in @("input-models.json.sig", "input-recipes.json.sig")) {
+		$signaturePath = Join-Path $StageRoot $signatureName
+		if (Test-Path -LiteralPath $signaturePath) {
+			Remove-Item -LiteralPath $signaturePath -Force
+		}
+	}
+}
+
 function Assert-SharedInstallerPrerequisites {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -802,6 +828,7 @@ function Invoke-SharedWindowsPackaging {
 	Copy-SharedQtQuickDialogsModule -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Write-SharedQtConf -StageRoot $stageRoot
 	Assert-QtQuickDesktopDeployment -StageRoot $stageRoot
+	Write-SharedInputEnhancementManifests -RepoRoot $RepoRoot -StageRoot $stageRoot
 	Write-SharedRuntimeManifest -StageRoot $stageRoot
 
 	if ($SkipInstaller) {
