@@ -38,6 +38,11 @@ endif()
 set_target_properties(zlibstatic PROPERTIES
 	OUTPUT_NAME "mumble-updater-zlib-static"
 	MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+	# zlib's C translation units intentionally share private identifiers and
+	# internal headers that are not safe to concatenate into one unity source.
+	# The top-level Windows build enables unity globally, so opt this pinned
+	# third-party target out explicitly.
+	UNITY_BUILD OFF
 )
 if(MSVC)
 	# The project enables /WX globally. Keep upstream zlib warnings isolated to
