@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <thread>
 
@@ -43,6 +44,7 @@ const QString ENV_INPUT_TAIL     = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_INP
 const QString ENV_INPUT_PREROLL  = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_INPUT_PREROLL_FRAMES");
 const QString ENV_HOLD_PTT       = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_HOLD_PTT");
 const QString ENV_VOICE_CONTRACT = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_VOICE_CONTRACT");
+const QString ENV_PRE_OPUS_WAV   = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_PRE_OPUS_WAV");
 const QString ENV_CAPTURE_WAV    = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_CAPTURE_WAV");
 const QString ENV_CAPTURE_SENDER = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_CAPTURE_SENDER");
 const QString ENV_STOP_GATE      = QStringLiteral("MUMBLE_SPEECH_CLEANUP_E2E_STOP_GATE");
@@ -283,6 +285,8 @@ SpeechCleanupTestAudioInit g_speechCleanupTestAudioInit;
 
 SpeechCleanupTestAudioInput::SpeechCleanupTestAudioInput()
 	: m_voiceContractEnabled(environmentValue(ENV_VOICE_CONTRACT) == QLatin1String("1")) {
+	connect(this, &AudioInput::audioInputEncountered, this, &SpeechCleanupTestAudioInput::observePreOpusPcm,
+			Qt::DirectConnection);
 }
 
 SpeechCleanupTestAudioInput::~SpeechCleanupTestAudioInput() {
@@ -310,6 +314,117 @@ void SpeechCleanupTestAudioInput::observeInputPcm(const float *samples, unsigned
 					   static_cast< qsizetype >(sampleCount) * static_cast< qsizetype >(sizeof(quint32))));
 }
 
+void SpeechCleanupTestAudioInput::submitInputFrame(float *samples, unsigned int sampleCount) {
+	m_currentInputFrameIndex = m_nextInputFrameIndex;
+	m_inputFrameArmed        = true;
+	addMic(samples, sampleCount);
+	m_inputFrameArmed = false;
+	++m_nextInputFrameIndex;
+}
+
+void SpeechCleanupTestAudioInput::observePreOpusPcm(short *samples, unsigned int sampleCount,
+												 unsigned int channelCount, unsigned int sampleRate, bool) {
+	if (!m_preOpusCaptureValid) {
+		return;
+	}
+	if (!samples || sampleCount != TEST_FRAME_SIZE || channelCount != 1 || sampleRate != TEST_SAMPLE_RATE) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Pre-Opus observation had unexpected PCM geometry");
+		return;
+	}
+
+	const std::uint64_t frameIndex = m_inputFrameArmed ? m_currentInputFrameIndex : m_nextInputFrameIndex++;
+	const std::uint64_t preRollFrames = static_cast< std::uint64_t >(configuredPreRollFrames());
+	if (frameIndex < preRollFrames) {
+		return;
+	}
+	const std::uint64_t relativeFrame = frameIndex - preRollFrames;
+	if (relativeFrame > (std::numeric_limits< std::size_t >::max() / TEST_FRAME_SIZE) - 1) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Pre-Opus observation exceeded the addressable timeline");
+		return;
+	}
+	const std::size_t offset = static_cast< std::size_t >(relativeFrame) * TEST_FRAME_SIZE;
+	if (m_preOpusPcm.size() < offset + sampleCount) {
+		m_preOpusPcm.resize(offset + sampleCount, 0);
+	}
+	std::copy_n(samples, sampleCount, m_preOpusPcm.begin() + static_cast< std::ptrdiff_t >(offset));
+	++m_preOpusCallbacks;
+}
+
+void SpeechCleanupTestAudioInput::completeVadPreOpusSourceTimeline(std::uint64_t submittedSamples) {
+	if (environmentValue(ENV_PRE_OPUS_WAV).isEmpty() || !m_preOpusCaptureValid
+		|| Global::get().s.atTransmit != Settings::VAD) {
+		return;
+	}
+
+	// audioInputEncountered is emitted only by the packet-producing path. VAD
+	// therefore has no callback after it closes on trailing room silence. Keep
+	// that intentionally non-transmitted source interval as zero PCM, but never
+	// synthesize causal drain output beyond the submitted source timeline.
+	const std::uint64_t preRollSamples =
+		static_cast< std::uint64_t >(configuredPreRollFrames()) * TEST_FRAME_SIZE;
+	if (submittedSamples < preRollSamples) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Submitted source timeline is shorter than its pre-roll");
+		return;
+	}
+	const std::uint64_t sourceTimelineSamples = submittedSamples - preRollSamples;
+	if (sourceTimelineSamples > static_cast< std::uint64_t >(std::numeric_limits< std::size_t >::max())) {
+		m_preOpusCaptureValid = false;
+		m_preOpusCaptureError = QStringLiteral("Submitted source timeline exceeds the addressable capture");
+		return;
+	}
+	if (m_preOpusPcm.size() < sourceTimelineSamples) {
+		m_preOpusPcm.resize(static_cast< std::size_t >(sourceTimelineSamples), 0);
+	}
+}
+
+bool SpeechCleanupTestAudioInput::writePreOpusCapture(QString *errorMessage) const {
+	const QString path = environmentValue(ENV_PRE_OPUS_WAV);
+	if (path.isEmpty()) {
+		return true;
+	}
+	if (!m_preOpusCaptureValid || m_preOpusPcm.empty() || (m_preOpusPcm.size() % TEST_FRAME_SIZE) != 0) {
+		if (errorMessage) {
+			*errorMessage = !m_preOpusCaptureError.isEmpty()
+							? m_preOpusCaptureError
+							: QStringLiteral("Pre-Opus observation produced no complete callback frames");
+		}
+		return false;
+	}
+	const QFileInfo info(path);
+	if (!QDir().mkpath(info.absolutePath())) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Could not create the pre-Opus capture directory: %1").arg(info.absolutePath());
+		}
+		return false;
+	}
+	SF_INFO fileInfo{};
+	fileInfo.samplerate = static_cast< int >(TEST_SAMPLE_RATE);
+	fileInfo.channels   = 1;
+	fileInfo.format     = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+	SNDFILE *file       = openSoundFile(path, SFM_WRITE, &fileInfo);
+	if (!file) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Could not open the pre-Opus capture WAV: %1")
+							.arg(QString::fromLocal8Bit(sf_strerror(nullptr)));
+		}
+		return false;
+	}
+	const sf_count_t expected = static_cast< sf_count_t >(m_preOpusPcm.size());
+	const sf_count_t written  = sf_writef_short(file, m_preOpusPcm.data(), expected);
+	sf_write_sync(file);
+	const int closeStatus = sf_close(file);
+	if (written != expected || closeStatus != 0) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Could not finalize the complete pre-Opus capture WAV");
+		}
+		return false;
+	}
+	return true;
+}
+
 void SpeechCleanupTestAudioInput::beginVoiceContractObservation() {
 	if (!m_voiceContractEnabled || m_voiceContractObservationStarted) {
 		return;
@@ -329,6 +444,16 @@ void SpeechCleanupTestAudioInput::finishVoiceContractObservation() {
 
 void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage, std::uint64_t sourceFrames,
 											std::uint64_t submittedFrames) {
+	QString finalError = errorMessage;
+	QString preOpusError;
+	completeVadPreOpusSourceTimeline(submittedFrames);
+	if (!writePreOpusCapture(&preOpusError)) {
+		ok = false;
+		if (!finalError.isEmpty()) {
+			finalError.append(QStringLiteral("; "));
+		}
+		finalError.append(preOpusError);
+	}
 	finishVoiceContractObservation();
 	const Mumble::SpeechCleanup::Selection &selection = speechCleanupSelectionForDiagnostics();
 	std::uint64_t deadlineMissCount                   = 0;
@@ -392,6 +517,13 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 		{ QStringLiteral("pre_roll_frames"), configuredPreRollFrames() },
 		{ QStringLiteral("terminator_submitted"), m_terminatorSubmitted },
 		{ QStringLiteral("drained_cleanup_samples"), static_cast< int >(m_drainedCleanupSamples) },
+		{ QStringLiteral("pre_opus_capture"),
+		  QJsonObject{ { QStringLiteral("enabled"), !environmentValue(ENV_PRE_OPUS_WAV).isEmpty() },
+					   { QStringLiteral("path"), environmentValue(ENV_PRE_OPUS_WAV) },
+					   { QStringLiteral("sample_frames"), QString::number(m_preOpusPcm.size()) },
+					   { QStringLiteral("callbacks"), QString::number(m_preOpusCallbacks) },
+					   { QStringLiteral("timeline_origin"), QStringLiteral("source-after-transmitted-preroll") },
+					   { QStringLiteral("encoding"), QStringLiteral("signed-s16le") } } },
 		{ QStringLiteral("effective_cleanup_mode"), noiseCancelModeName(noiseCancel) },
 		{ QStringLiteral("requested_backend"), Mumble::SpeechCleanup::backendDisplayName(selection.backend) },
 		{ QStringLiteral("requested_model_id"), selection.modelId },
@@ -401,7 +533,7 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 		{ QStringLiteral("used_fallback"), speechCleanupUsedFallbackForDiagnostics() },
 		{ QStringLiteral("reported_latency_samples"), static_cast< int >(speechCleanupLatencyForDiagnostics()) },
 		{ QStringLiteral("input_enhancement"), inputEnhancementDiagnostics },
-		{ QStringLiteral("error"), errorMessage }
+		{ QStringLiteral("error"), finalError }
 	};
 	if (m_voiceContractEnabled) {
 		const bool usesLegacy                                 = usesLegacyInputEnhancementForDiagnostics();
@@ -537,6 +669,7 @@ void SpeechCleanupTestAudioInput::run() {
 	std::array< float, TEST_FRAME_SIZE > frame{};
 	std::uint64_t sourceFrames    = 0;
 	std::uint64_t submittedFrames = 0;
+	bool enteredTransmitPath      = isTransmitting();
 	auto nextDeadline             = std::chrono::steady_clock::now();
 
 	// The tuning loop may request a transmitted silent pre-roll so the generic
@@ -546,7 +679,8 @@ void SpeechCleanupTestAudioInput::run() {
 	frame.fill(0.0f);
 	for (int index = 0; bRunning && index < configuredPreRollFrames(); ++index) {
 		observeInputPcm(frame.data(), static_cast< unsigned int >(frame.size()));
-		addMic(frame.data(), static_cast< unsigned int >(frame.size()));
+		submitInputFrame(frame.data(), static_cast< unsigned int >(frame.size()));
+		enteredTransmitPath = enteredTransmitPath || isTransmitting();
 		submittedFrames += frame.size();
 		paceRealtime(nextDeadline);
 	}
@@ -570,7 +704,8 @@ void SpeechCleanupTestAudioInput::run() {
 
 		sourceFrames += static_cast< std::uint64_t >(readFrames);
 		observeInputPcm(frame.data(), static_cast< unsigned int >(frame.size()));
-		addMic(frame.data(), static_cast< unsigned int >(frame.size()));
+		submitInputFrame(frame.data(), static_cast< unsigned int >(frame.size()));
+		enteredTransmitPath = enteredTransmitPath || isTransmitting();
 		submittedFrames += frame.size();
 		paceRealtime(nextDeadline);
 	}
@@ -580,11 +715,12 @@ void SpeechCleanupTestAudioInput::run() {
 	frame.fill(0.0f);
 	for (int index = 0; bRunning && index < configuredTailFrames(); ++index) {
 		observeInputPcm(frame.data(), static_cast< unsigned int >(frame.size()));
-		addMic(frame.data(), static_cast< unsigned int >(frame.size()));
+		submitInputFrame(frame.data(), static_cast< unsigned int >(frame.size()));
+		enteredTransmitPath = enteredTransmitPath || isTransmitting();
 		submittedFrames += frame.size();
 		paceRealtime(nextDeadline);
 	}
-	if (bRunning && !isTransmitting()) {
+	if (bRunning && !enteredTransmitPath) {
 		pttHold.release();
 		const QString error = QStringLiteral("Sender never entered the selected transmit-mode path");
 		qWarning("SpeechCleanupTestAudioInput: %s", qUtf8Printable(error));
