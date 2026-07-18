@@ -46,6 +46,9 @@ IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CORE_PROFILES = ("Original", "Light", "Balanced", "Quality", "VoiceFocus")
 CPU_CLASSES = ("Low", "Standard", "High")
 LANGUAGE_MAP = {"en-US": "en", "sv-SE": "sv"}
+NIGHTLY_EXPANSION_SOURCE_IDS = frozenset({
+	"fsd50k-eval-cc0-subset", "openslr12-librispeech-test-clean", "rixvox-v1-dev-0", "rixvox-v1-test-0",
+})
 CASE_ARTIFACT_FILENAMES = {
 	"original_wav": "original-sender-pre-opus.wav",
 	"original_report": "original-benchmark.json",
@@ -400,7 +403,7 @@ def _run(command: Sequence[str], cwd: Path, environment: Mapping[str, str], time
 
 
 def _validate_transformation_manifest(
-	path: Path, inventory: Mapping[str, Any], lock: Mapping[str, Any]
+	path: Path, inventory: Mapping[str, Any], lock: Mapping[str, Any], expected_corpus_suite: str
 ) -> Mapping[str, Any]:
 	path = _regular_file(path, "corpus transformation manifest")
 	manifest = _mapping(_load_json(path, "corpus transformation manifest"), "corpus transformation manifest")
@@ -409,8 +412,9 @@ def _validate_transformation_manifest(
 		{
 			"corpus_lock_sha256", "corpus_state_sha256", "demand_preparation", "ffmpeg",
 			"fleurs_swedish_selection", "generator", "generator_version", "mcgill_archive_observation",
-			"schema_version", "sources", "split_algorithm", "split_seed", "split_seed_selection_basis",
-			"transforms",
+			"nightly_materialized_splits", "nightly_sealed_splits", "nightly_selection_sha256",
+			"qualification_suite", "schema_version", "sources", "split_algorithm", "split_seed",
+			"split_seed_selection_basis", "transforms",
 		},
 		set(),
 		"corpus transformation manifest",
@@ -432,6 +436,16 @@ def _validate_transformation_manifest(
 		"corpus transformation manifest.split_seed",
 		"must be a stable identifier",
 	)
+	_expect(
+		expected_corpus_suite in ("master_quality", "nightly"),
+		"corpus qualification suite",
+		"unsupported by the corpus-builder contract",
+	)
+	_expect(
+		manifest["qualification_suite"] == expected_corpus_suite,
+		"corpus transformation manifest.qualification_suite",
+		"does not match the suite-compatible corpus family",
+	)
 	provenance = _mapping(inventory["provenance"], "inventory.provenance")
 	_expect(
 		_sha256(path) == provenance["transformation_manifest_sha256"],
@@ -448,6 +462,77 @@ def _validate_transformation_manifest(
 		"corpus transformation manifest.corpus_lock_sha256",
 		"does not bind the supplied corpus lock",
 	)
+	if expected_corpus_suite == "nightly":
+		_expect(
+			inventory.get("eligibility") == "nightly-partial",
+			"inventory.eligibility",
+			"nightly qualification requires a holdout-sealed nightly-partial inventory",
+		)
+		_expect(
+			manifest["nightly_materialized_splits"] == ["tuning", "validation"],
+			"corpus transformation manifest.nightly_materialized_splits",
+			"must contain exactly tuning and validation",
+		)
+		_expect(
+			manifest["nightly_sealed_splits"] == ["holdout"],
+			"corpus transformation manifest.nightly_sealed_splits",
+			"must seal holdout",
+		)
+		_expect(
+			inventory.get("sealed_splits") == manifest["nightly_sealed_splits"],
+			"inventory.sealed_splits",
+			"does not match the transformation manifest",
+		)
+		_expect(
+			inventory.get("selection_sha256") == manifest["nightly_selection_sha256"],
+			"inventory.selection_sha256",
+			"does not match the transformation manifest",
+		)
+		selection_path = _regular_file(SCRIPT_DIR / "nightly-corpus-selection-v1.json", "frozen nightly selection")
+		_expect(
+			_sha256(selection_path) == manifest["nightly_selection_sha256"],
+			"corpus transformation manifest.nightly_selection_sha256",
+			"does not bind the frozen nightly selection",
+		)
+		selection = _mapping(_load_json(selection_path, "frozen nightly selection"), "frozen nightly selection")
+		_expect(
+			selection.get("split_seed") == manifest["split_seed"],
+			"frozen nightly selection.split_seed",
+			"does not match the transformation manifest",
+		)
+		items = inventory.get("items")
+		_expect(isinstance(items, list), "inventory.items", "must be an array")
+		for index, item in enumerate(items):
+			_expect(isinstance(item, dict), f"inventory.items[{index}]", "must be an object")
+			if item.get("source_id") not in NIGHTLY_EXPANSION_SOURCE_IDS:
+				# The fully verified base corpus has mechanically prepared holdout
+				# members. The nightly seal applies to the frozen expansion only.
+				continue
+			assigned = INVENTORY.assigned_split(
+				manifest["split_seed"], str(item.get("kind")), str(item.get("group_id"))
+			)
+			_expect(
+				assigned in manifest["nightly_materialized_splits"],
+				f"inventory.items[{index}]",
+				"nightly-partial inventory contains material assigned to sealed holdout",
+			)
+	else:
+		_expect(
+			inventory.get("eligibility") == "release",
+			"inventory.eligibility",
+			"non-nightly qualification requires a release inventory",
+		)
+		for field in ("nightly_selection_sha256", "nightly_materialized_splits", "nightly_sealed_splits"):
+			_expect(
+				manifest[field] is None,
+				f"corpus transformation manifest.{field}",
+				"must be null outside the nightly suite",
+			)
+		_expect(
+			"sealed_splits" not in inventory and "selection_sha256" not in inventory,
+			"inventory",
+			"release inventory must not carry nightly seal metadata",
+		)
 	return manifest
 
 
@@ -462,13 +547,25 @@ def _validate_plan_inventory_lock(
 	inventory = _mapping(_load_json(_regular_file(inventory_path, "corpus inventory"), "corpus inventory"), "corpus inventory")
 	plan = _mapping(_load_json(_regular_file(plan_path, "mixture plan"), "mixture plan"), "mixture plan")
 	try:
-		items = INVENTORY.validate_inventory(inventory, lock, require_release=True)
 		PLAN.validate_plan(plan)
-		INVENTORY.validate_diversity(items, str(plan["suite"]), str(plan["seed"]))
+		plan_suite = str(plan["suite"])
+		items = PLAN.validate_inventory(
+			inventory, lock, LOCK.canonical_manifest_sha256(lock), plan_suite, str(plan["seed"]),
+			str(plan["split"]),
+		)
 	except Exception as error:
 		raise CampaignError(f"plan/inventory/lock validation failed: {error}") from error
 	_expect(plan["split"] in ("tuning", "validation"), "plan.split", "offline campaign forbids holdout and non-development splits")
-	transformation_manifest = _validate_transformation_manifest(transformation_manifest_path, inventory, lock)
+	expected_corpus_suite = "nightly" if plan_suite == "nightly" else "master_quality"
+	transformation_manifest = _validate_transformation_manifest(
+		transformation_manifest_path, inventory, lock, expected_corpus_suite
+	)
+	if plan_suite == "nightly":
+		_expect(
+			plan["split"] in transformation_manifest["nightly_materialized_splits"],
+			"plan.split",
+			"is not materialized by the holdout-sealed nightly corpus",
+		)
 	_expect(
 		plan["seed"] == transformation_manifest["split_seed"],
 		"plan.seed",
@@ -2622,6 +2719,10 @@ def run_self_test() -> None:
 			"split_seed": seed,
 			"split_algorithm": "sha256-v1 by kind/group: tuning=0..59, validation=60..79, holdout=80..99",
 			"split_seed_selection_basis": "self-test identifier-only split fixture",
+			"qualification_suite": "master_quality",
+			"nightly_selection_sha256": None,
+			"nightly_materialized_splits": None,
+			"nightly_sealed_splits": None,
 			"demand_preparation": {},
 			"ffmpeg": {},
 			"fleurs_swedish_selection": {},
@@ -2634,7 +2735,7 @@ def run_self_test() -> None:
 		# Generator v4 is the current hash-bound corpus builder. Unknown older or
 		# future versions remain rejected even if an attacker also rewrites the
 		# inventory's transformation-manifest hash.
-		_validate_transformation_manifest(transformation_manifest_path, inventory, lock)
+		_validate_transformation_manifest(transformation_manifest_path, inventory, lock, "master_quality")
 		for unsupported_version in ("1", "5"):
 			unsupported_path = root / f"unsupported-transformation-manifest-v{unsupported_version}.json"
 			unsupported = dict(transformation_manifest)
@@ -2643,7 +2744,7 @@ def run_self_test() -> None:
 			unsupported_inventory = json.loads(json.dumps(inventory))
 			unsupported_inventory["provenance"]["transformation_manifest_sha256"] = _sha256(unsupported_path)
 			try:
-				_validate_transformation_manifest(unsupported_path, unsupported_inventory, lock)
+				_validate_transformation_manifest(unsupported_path, unsupported_inventory, lock, "master_quality")
 			except CampaignError as error:
 				_expect(
 					"unsupported generator schema" in str(error),
@@ -2652,6 +2753,120 @@ def run_self_test() -> None:
 				)
 			else:
 				raise AssertionError(f"campaign accepted unsupported corpus generator v{unsupported_version}")
+
+		def expect_transformation_rejection(
+			label: str, candidate_manifest: Mapping[str, Any], candidate_inventory: Mapping[str, Any],
+			expected_corpus_suite: str, expected_error: str,
+		) -> None:
+			candidate_path = root / f"rejected-{label}.json"
+			_write_json_atomic(candidate_path, candidate_manifest)
+			bound_inventory = json.loads(json.dumps(candidate_inventory))
+			bound_inventory["provenance"]["transformation_manifest_sha256"] = _sha256(candidate_path)
+			try:
+				_validate_transformation_manifest(candidate_path, bound_inventory, lock, expected_corpus_suite)
+			except CampaignError as error:
+				_expect(expected_error in str(error), f"self-test {label}", f"unexpected error: {error}")
+			else:
+				raise AssertionError(f"campaign accepted invalid corpus transformation metadata: {label}")
+
+		wrong_suite = dict(transformation_manifest)
+		wrong_suite["qualification_suite"] = "nightly"
+		expect_transformation_rejection(
+			"suite-mismatch", wrong_suite, inventory, "master_quality",
+			"does not match the suite-compatible corpus family",
+		)
+		missing_suite = dict(transformation_manifest)
+		missing_suite.pop("qualification_suite")
+		expect_transformation_rejection(
+			"schema-missing-suite", missing_suite, inventory, "master_quality", "missing keys: qualification_suite",
+		)
+		unknown_seal_field = dict(transformation_manifest)
+		unknown_seal_field["nightly_holdout_materialized"] = False
+		expect_transformation_rejection(
+			"schema-unknown-seal-field", unknown_seal_field, inventory, "master_quality",
+			"unknown keys: nightly_holdout_materialized",
+		)
+		draft_master_inventory = json.loads(json.dumps(inventory))
+		draft_master_inventory["eligibility"] = "draft"
+		expect_transformation_rejection(
+			"master-draft-inventory", transformation_manifest, draft_master_inventory, "master_quality",
+			"non-nightly qualification requires a release inventory",
+		)
+		master_with_seal = dict(transformation_manifest)
+		master_with_seal["nightly_sealed_splits"] = ["holdout"]
+		expect_transformation_rejection(
+			"master-with-nightly-seal", master_with_seal, inventory, "master_quality",
+			"must be null outside the nightly suite",
+		)
+
+		frozen_nightly_selection = _mapping(
+			_load_json(SCRIPT_DIR / "nightly-corpus-selection-v1.json", "self-test frozen nightly selection"),
+			"self-test frozen nightly selection",
+		)
+		nightly_seed = str(frozen_nightly_selection["split_seed"])
+		selection_sha256 = INVENTORY.file_sha256(SCRIPT_DIR / "nightly-corpus-selection-v1.json")
+		nightly_inventory = json.loads(json.dumps(inventory))
+		holdout_items = [
+			item for item in nightly_inventory["items"]
+			if item["kind"] == "speech"
+			and INVENTORY.assigned_split(nightly_seed, str(item["kind"]), str(item["group_id"])) == "holdout"
+		]
+		_expect(bool(holdout_items), "self-test nightly seal", "fixture requires holdout-assigned material")
+		nightly_inventory["items"] = [
+			item for item in nightly_inventory["items"]
+			if INVENTORY.assigned_split(nightly_seed, str(item["kind"]), str(item["group_id"])) in ("tuning", "validation")
+		]
+		nightly_inventory["eligibility"] = "nightly-partial"
+		nightly_inventory["sealed_splits"] = ["holdout"]
+		nightly_inventory["selection_sha256"] = selection_sha256
+		nightly_manifest = dict(transformation_manifest)
+		nightly_manifest.update({
+			"qualification_suite": "nightly",
+			"split_seed": nightly_seed,
+			"nightly_selection_sha256": selection_sha256,
+			"nightly_materialized_splits": ["tuning", "validation"],
+			"nightly_sealed_splits": ["holdout"],
+		})
+		nightly_manifest_path = root / "nightly-transformation-manifest.json"
+		_write_json_atomic(nightly_manifest_path, nightly_manifest)
+		nightly_inventory["provenance"]["transformation_manifest_sha256"] = _sha256(nightly_manifest_path)
+		_validate_transformation_manifest(nightly_manifest_path, nightly_inventory, lock, "nightly")
+
+		nightly_bad_seal = dict(nightly_manifest)
+		nightly_bad_seal["nightly_sealed_splits"] = []
+		expect_transformation_rejection(
+			"nightly-missing-seal", nightly_bad_seal, nightly_inventory, "nightly", "must seal holdout"
+		)
+		nightly_inventory_bad_seal = json.loads(json.dumps(nightly_inventory))
+		nightly_inventory_bad_seal["sealed_splits"] = []
+		expect_transformation_rejection(
+			"nightly-inventory-missing-seal", nightly_manifest, nightly_inventory_bad_seal, "nightly",
+			"does not match the transformation manifest",
+		)
+		nightly_inventory_bad_selection = json.loads(json.dumps(nightly_inventory))
+		nightly_inventory_bad_selection["selection_sha256"] = "0" * 64
+		expect_transformation_rejection(
+			"nightly-inventory-selection-drift", nightly_manifest, nightly_inventory_bad_selection, "nightly",
+			"does not match the transformation manifest",
+		)
+		nightly_bad_materialization = dict(nightly_manifest)
+		nightly_bad_materialization["nightly_materialized_splits"] = ["tuning", "validation", "holdout"]
+		expect_transformation_rejection(
+			"nightly-materializes-holdout", nightly_bad_materialization, nightly_inventory, "nightly",
+			"must contain exactly tuning and validation",
+		)
+		nightly_inventory_with_holdout = json.loads(json.dumps(nightly_inventory))
+		forged_holdout_item = json.loads(json.dumps(holdout_items[0]))
+		forged_holdout_item["id"] = "speech-forged-nightly-holdout"
+		forged_holdout_item["source_id"] = "openslr12-librispeech-test-clean"
+		nightly_inventory_with_holdout["items"].append(forged_holdout_item)
+		nightly_inventory_with_holdout["items"] = sorted(
+			nightly_inventory_with_holdout["items"], key=lambda item: str(item["id"])
+		)
+		expect_transformation_rejection(
+			"nightly-inventory-contains-holdout", nightly_manifest, nightly_inventory_with_holdout, "nightly",
+			"contains material assigned to sealed holdout",
+		)
 		plan = PLAN.generate_plan(lock, inventory, "release", "validation", seed, 30, 1000)
 		_write_json_atomic(plan_path, plan)
 		_write_json_atomic(inventory_path, inventory)
