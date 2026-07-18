@@ -52,6 +52,18 @@ enum class EnhancedRuntimeBlockReason : std::uint8_t {
 EnhancedRuntimeBlockReason enhancedRuntimeBlockReason(const EffectivePolicyState &state,
 													  bool recoveryDisabled) noexcept;
 
+/// Describes how the processor that actually produced the E2E output relates
+/// to the saved request. Auto legitimately resolves to a concrete profile;
+/// every other mismatch is a runtime fallback and must remain visible in
+/// qualification evidence.
+enum class EffectiveProfileRelationship : std::uint8_t {
+	RequestedProfileActive,
+	AutoSelectedProfile,
+	RuntimeFallback
+};
+
+EffectiveProfileRelationship effectiveProfileRelationship(Profile requested, Profile effective) noexcept;
+
 /// Owns client-local signed input-enhancement channel policy state. It has no
 /// protobuf, Murmur, voice-packet or receiver dependencies. All policy bytes
 /// are verified before use and the effective audio-thread state is one atomic

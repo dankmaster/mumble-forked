@@ -129,6 +129,7 @@ private slots:
 	void policyRefreshCadenceIsBoundedBelowKillSwitchDeadline();
 	void startupReadinessRequiresAnExplicitOfflineDecision();
 	void enhancedRuntimeAvailabilityCombinesPolicyAndRecoverySwitch();
+	void effectiveProfileEvidenceDistinguishesAutoFromFallback();
 	void packagedBootstrapRequiresValidCurrentSignedPair();
 };
 
@@ -156,6 +157,21 @@ void TestInputEnhancementPolicyController::enhancedRuntimeAvailabilityCombinesPo
 	enabled.forceOriginal         = false;
 	QCOMPARE(enhancedRuntimeBlockReason(enabled, false), EnhancedRuntimeBlockReason::None);
 	QCOMPARE(enhancedRuntimeBlockReason(enabled, true), EnhancedRuntimeBlockReason::RecoveryDisabled);
+}
+
+void TestInputEnhancementPolicyController::effectiveProfileEvidenceDistinguishesAutoFromFallback() {
+	QCOMPARE(effectiveProfileRelationship(Profile::Balanced, Profile::Balanced),
+			 EffectiveProfileRelationship::RequestedProfileActive);
+	QCOMPARE(effectiveProfileRelationship(Profile::Quality, Profile::Original),
+			 EffectiveProfileRelationship::RuntimeFallback);
+	QCOMPARE(effectiveProfileRelationship(Profile::Auto, Profile::Balanced),
+			 EffectiveProfileRelationship::AutoSelectedProfile);
+	QCOMPARE(effectiveProfileRelationship(Profile::Auto, Profile::Original),
+			 EffectiveProfileRelationship::RuntimeFallback);
+	QCOMPARE(effectiveProfileRelationship(Profile::Auto, Profile::Auto),
+			 EffectiveProfileRelationship::RuntimeFallback);
+	QCOMPARE(effectiveProfileRelationship(Profile::Auto, Profile::VoiceFocus),
+			 EffectiveProfileRelationship::RuntimeFallback);
 }
 
 void TestInputEnhancementPolicyController::packagedBootstrapRequiresValidCurrentSignedPair() {

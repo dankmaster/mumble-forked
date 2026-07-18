@@ -31,6 +31,7 @@
 #include "ChatPerfTrace.h"
 #include "HostAddress.h"
 #include "InputEnhancementCalibrationPlayback.h"
+#include "InputEnhancementPolicyController.h"
 #include "License.h"
 #include "Markdown.h"
 #include "ModernTheme.h"
@@ -77,6 +78,7 @@
 #ifdef Q_OS_WIN
 #	include "win.h"
 #	include "TaskList.h"
+#	include "WASAPINotificationClient.h"
 #endif
 
 #ifdef Q_OS_MAC
@@ -11846,6 +11848,19 @@ MainWindow::MainWindow(QObject *p)
 	QObject::connect(this, &MainWindow::channelStateChanged, this, &MainWindow::on_channelStateChanged);
 
 	loadPendingUpdateResumeState();
+	if (auto *policyController = Global::get().inputEnhancementPolicyController) {
+		QObject::connect(
+			policyController,
+			&Mumble::InputEnhancement::InputEnhancementPolicyController::effectivePolicyChanged, this,
+			[this]() {
+				if (!m_modernDialogController
+					|| m_modernDialogController->activeDialogID() != QLatin1String("settings")) {
+					return;
+				}
+				publishModernDialogState(m_modernDialogController->state());
+			},
+			Qt::QueuedConnection);
+	}
 
 }
 
@@ -36073,7 +36088,13 @@ void MainWindow::onResetAudio() {
 	qWarning("MainWindow: Start audio reset");
 	stopInputEnhancementCalibrationPlayback();
 	Audio::stop();
+#ifdef Q_OS_WIN
+	WASAPINotificationClient::get().beginAudioResetRebuild();
+#endif
 	Audio::start();
+#ifdef Q_OS_WIN
+	WASAPINotificationClient::get().finishAudioResetRebuild();
+#endif
 	qWarning("MainWindow: Audio reset complete");
 }
 

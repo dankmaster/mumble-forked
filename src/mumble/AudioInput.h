@@ -226,6 +226,7 @@ private:
 		Mumble::InputEnhancement::Profile::Original;
 	bool m_inputEnhancementRuntimeRecoveryPending = false;
 	std::atomic_bool m_inputEnhancementHealthyForUpdate        = true;
+	std::atomic_bool m_inputEnhancementCaptureOpened           = false;
 	std::unique_ptr< Mumble::InputEnhancement::CalibrationRuntimeBridge >
 		m_inputEnhancementCalibrationRuntime;
 	Mumble::InputEnhancement::DefaultPreference m_inputEnhancementCalibrationBaselinePreference;
@@ -467,6 +468,17 @@ public:
 	/// healthy without a model; a requested neural recipe is unhealthy after
 	/// any initialization or runtime fallback.
 	bool inputEnhancementHealthyForUpdate() const noexcept;
+	static constexpr bool canAuthorizeInputEnhancementRollbackBinding(
+		const bool healthy, const bool captureFullyOpened, const bool captureThreadRunning) noexcept {
+		return healthy && captureFullyOpened && captureThreadRunning;
+	}
+	/// Returns the exact verified binding of the healthy fixed profile that is
+	/// currently active for the given physical microphone. This intentionally
+	/// exposes no synthesized or merely persisted binding: callers that need a
+	/// rollback target must fail safe to Original when it is unavailable.
+	std::optional< Mumble::InputEnhancement::RecipeBinding > healthyActiveInputEnhancementBinding(
+		const Mumble::InputEnhancement::DeviceIdentity &identity,
+		const Mumble::InputEnhancement::DefaultPreference &preference) const;
 	/// Starts a local-only capture session. Allocation and model/Opus setup are
 	/// completed here on the control thread before the bridge is published to
 	/// the audio callback. candidateControls only shape the recipes under test;

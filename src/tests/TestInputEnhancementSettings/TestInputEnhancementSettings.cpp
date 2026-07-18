@@ -121,6 +121,34 @@ void TestInputEnhancementSettings::wasapiDefaultDeviceRolesMatchExactly() {
 		eCapture, eConsole, eCapture, eCommunications));
 	QVERIFY(!WASAPINotificationClient::defaultDeviceNotificationMatches(
 		eRender, eConsole, eCapture, eConsole));
+
+	WASAPIRestartDispatchGate gate;
+	QVERIFY(gate.requestRestart());
+	QVERIFY(gate.restartPending());
+	// A burst before the queued reset rebuilds audio is coalesced.
+	QVERIFY(!gate.requestRestart());
+	// An enlist from an old/parallel backend cannot rearm the queued reset before
+	// MainWindow has stopped that generation.
+	gate.rebuiltDeviceEnlisted();
+	QVERIFY(gate.restartPending());
+	QVERIFY(!gate.requestRestart());
+	gate.beginRebuildAfterOldAudioStopped();
+	gate.rebuiltDeviceEnlisted();
+	QVERIFY(gate.restartPending());
+	gate.finishRebuildStart();
+	QVERIFY(!gate.restartPending());
+	QVERIFY(gate.requestRestart());
+	// A stale enlist from the preceding generation must not rearm this second
+	// queued reset. Only the next bracketed rebuild can do that.
+	gate.rebuiltDeviceEnlisted();
+	QVERIFY(gate.restartPending());
+	QVERIFY(!gate.requestRestart());
+	gate.beginRebuildAfterOldAudioStopped();
+	gate.finishRebuildStart();
+	QVERIFY(gate.restartPending());
+	gate.rebuiltDeviceEnlisted();
+	QVERIFY(!gate.restartPending());
+	QVERIFY(gate.requestRestart());
 #else
 	QSKIP("WASAPI role matching is Windows-only");
 #endif
@@ -776,14 +804,14 @@ void TestInputEnhancementSettings::exactRecipeBindingDetectsCatalogRecipeAndMode
 	QVERIFY(isValidRecipeBinding(binding));
 	QVERIFY(recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision), hash, path));
 	QVERIFY(!recipeBindingMatches(binding, recipe, QStringLiteral("input-recipes-v3"), hash, path));
-	QVERIFY(!recipeBindingMatches(binding, resolvedRecipe(Profile::Balanced, 63, 41),
+	QVERIFY(!recipeBindingMatches(binding, resolvedRecipe(Profile::Balanced, 65, 41),
 								  QString::fromLatin1(testCatalogRevision), hash, path));
 	QVERIFY(!recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision),
 								  QString(64, QLatin1Char('b')), path));
 	QVERIFY(!recipeBindingMatches(binding, recipe, QString::fromLatin1(testCatalogRevision), hash,
 								  QStringLiteral("rnnoise/replaced-model.bin")));
 	QCOMPARE(binding.executionFingerprint, recipeExecutionFingerprint(recipe));
-	QVERIFY(binding.executionFingerprint != recipeExecutionFingerprint(resolvedRecipe(Profile::Balanced, 63, 41)));
+	QVERIFY(binding.executionFingerprint != recipeExecutionFingerprint(resolvedRecipe(Profile::Balanced, 65, 41)));
 	RecipeBinding executionDrift = binding;
 	executionDrift.executionFingerprint[0] =
 		executionDrift.executionFingerprint[0] == QLatin1Char('0') ? QLatin1Char('1') : QLatin1Char('0');

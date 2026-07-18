@@ -73,6 +73,7 @@ namespace {
 
 	struct InputEnhancementSettingsReadiness final {
 		bool selectable = false;
+		bool processingSelectable = false;
 		bool productionQualified = false;
 		Mumble::InputEnhancement::ProfileReadinessReason reason =
 			Mumble::InputEnhancement::ProfileReadinessReason::Ready;
@@ -105,6 +106,9 @@ namespace {
 	}
 
 	QString inputEnhancementReadinessReasonText(const InputEnhancementSettingsReadiness &readiness) {
+		if (!readiness.processingSelectable) {
+			return inputEnhancementReadinessReasonText(readiness.reason);
+		}
 		using Reason = Mumble::InputEnhancement::EnhancedRuntimeBlockReason;
 		switch (readiness.runtimeBlockReason) {
 			case Reason::None:
@@ -124,6 +128,7 @@ namespace {
 		using namespace Mumble::InputEnhancement;
 		const InputEnhancementPackageVerifier *verifier =
 			Global::g_global_struct ? Global::get().inputEnhancementPackageVerifier : nullptr;
+		EnhancedRuntimeBlockReason runtimeBlockReason = EnhancedRuntimeBlockReason::None;
 		if (profile != Profile::Original && Global::g_global_struct) {
 			const InputEnhancementPolicyController *policyController =
 				Global::get().inputEnhancementPolicyController;
@@ -139,11 +144,7 @@ namespace {
 			}
 			const bool recoveryDisabled = Global::get().bInputEnhancementRecoveryDisabled
 				|| (!policyController && Global::get().bDisableInputEnhancement);
-			const EnhancedRuntimeBlockReason blockReason =
-				enhancedRuntimeBlockReason(policyState, recoveryDisabled);
-			if (blockReason != EnhancedRuntimeBlockReason::None) {
-				return { false, false, ProfileReadinessReason::Ready, blockReason };
-			}
+			runtimeBlockReason = enhancedRuntimeBlockReason(policyState, recoveryDisabled);
 		}
 		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(settings);
 		ResolveRequest request;
@@ -154,13 +155,13 @@ namespace {
 		request.backendAvailability = BackendAvailability::compiled();
 		request.captureDevice = CaptureDeviceContext::liveDevice(identity.backendId, identity.stable);
 		if (!verifier && profile != Profile::Original) {
-			return { false, false, ProfileReadinessReason::PackageUnavailable,
-					 EnhancedRuntimeBlockReason::None };
+			return { false, false, false, ProfileReadinessReason::PackageUnavailable, runtimeBlockReason };
 		}
 		const ProfileReadiness processingReadiness =
 			verifier ? verifier->readinessForProfile(request) : profileReadiness(request);
-		return { processingReadiness.selectable, processingReadiness.productionQualified, processingReadiness.reason,
-				 EnhancedRuntimeBlockReason::None };
+		return { processingReadiness.selectable && runtimeBlockReason == EnhancedRuntimeBlockReason::None,
+				 processingReadiness.selectable, processingReadiness.productionQualified, processingReadiness.reason,
+				 runtimeBlockReason };
 	}
 
 	QVariantMap optionItem(const QVariant &value, const QString &label, const bool enabled = true,
@@ -874,6 +875,46 @@ namespace {
 		}
 	}
 
+	bool inputEnhancementSelectionChanged(const Settings &draft, const Settings &original) {
+		const Mumble::InputEnhancement::DeviceIdentity draftIdentity =
+			draftInputEnhancementDeviceIdentity(draft);
+		const Mumble::InputEnhancement::DeviceIdentity originalIdentity =
+			draftInputEnhancementDeviceIdentity(original);
+		if (draftIdentity.backendId != originalIdentity.backendId
+			|| draftIdentity.physicalId != originalIdentity.physicalId) {
+			return true;
+		}
+		return currentInputEnhancementPreference(draft) != currentInputEnhancementPreference(original);
+	}
+
+	bool reconcileResolvedInputEnhancementProbation(Settings &draft, const Settings &original) {
+		using namespace Mumble::InputEnhancement;
+		if (!Global::g_global_struct) {
+			return false;
+		}
+		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(draft);
+		const DeviceProfileState *originalState = findDeviceProfile(original.inputEnhancement, identity);
+		const DeviceProfileState *runtimeState = findDeviceProfile(Global::get().s.inputEnhancement, identity);
+		const DeviceProfileState *draftState = findDeviceProfile(draft.inputEnhancement, identity);
+		if (!originalState || !draftState || !originalState->pendingValidation || !runtimeState
+			|| runtimeState->pendingValidation || draftState->preference != originalState->preference) {
+			return false;
+		}
+		DeviceProfileState *mutableDraftState = ensureDeviceProfile(draft.inputEnhancement, identity);
+		if (!mutableDraftState) {
+			return false;
+		}
+
+		// A dialog can remain open while the real audio probation finishes or
+		// rolls back. Merge that authoritative result before persisting unrelated
+		// settings so stale draft state cannot resurrect the candidate.
+		DeviceProfileState resolved = *runtimeState;
+		resolved.identity           = identity;
+		*mutableDraftState          = std::move(resolved);
+		projectInputEnhancementPreference(draft);
+		return true;
+	}
+
 	std::optional< Mumble::InputEnhancement::RecipeBinding > verifiedRecipeBindingForPreference(
 		const Mumble::InputEnhancement::DefaultPreference &preference,
 		const Mumble::InputEnhancement::DeviceIdentity &identity) {
@@ -937,36 +978,75 @@ namespace {
 			result.preference.autoAdapt = false;
 			return result;
 		};
+		const auto exactStoredFixedProfile = [&safeOriginal, &identity](
+			const DefaultPreference &preference, const std::optional< RecipeBinding > &storedBinding,
+			const std::optional< QString > &storedAutoFingerprint) -> std::optional< ExactManualLastKnownGood > {
+			if (preference.profile == Profile::Original) {
+				return safeOriginal();
+			}
+			if (preference.profile == Profile::Auto || storedAutoFingerprint || !storedBinding) {
+				return std::nullopt;
+			}
+			const std::optional< RecipeBinding > currentBinding =
+				verifiedRecipeBindingForPreference(preference, identity);
+			if (!currentBinding || *currentBinding != *storedBinding) {
+				return std::nullopt;
+			}
+			return ExactManualLastKnownGood { preference, *currentBinding };
+		};
 
-		const DeviceProfileState *state = findDeviceProfile(original.inputEnhancement, identity);
-		if (state && state->pendingValidation && state->lastKnownGood
-			&& state->lastKnownGood->profile != Profile::Auto
-			&& executionBindingMatchesPreference(*state->lastKnownGood, state->lastKnownGoodRecipeBinding,
-											 state->lastKnownGoodAutoRecipeSetFingerprint)) {
-			return { *state->lastKnownGood, state->lastKnownGoodRecipeBinding };
-		}
-		const bool legacyActive = state
-			? (state->legacyOverride && isValidLegacyOverride(*state->legacyOverride))
+		const DeviceProfileState *originalState = findDeviceProfile(original.inputEnhancement, identity);
+		const DeviceProfileState *runtimeState = Global::g_global_struct
+			? findDeviceProfile(Global::get().s.inputEnhancement, identity)
+			: nullptr;
+		const DeviceProfileState *stateForLegacyCheck = runtimeState ? runtimeState : originalState;
+		const bool legacyActive = stateForLegacyCheck
+			? (stateForLegacyCheck->legacyOverride && isValidLegacyOverride(*stateForLegacyCheck->legacyOverride))
 			: (original.inputEnhancement.legacyOverride
 			   && isValidLegacyOverride(*original.inputEnhancement.legacyOverride));
 		if (legacyActive) {
 			return safeOriginal();
 		}
 
-		const DefaultPreference &previous = preferenceForDevice(original.inputEnhancement, identity);
-		if (previous.profile == Profile::Original) {
-			return { previous, std::nullopt };
-		}
-		if (previous.profile == Profile::Auto) {
+		if (runtimeState) {
+			if (runtimeState->pendingValidation && runtimeState->lastKnownGood) {
+				if (const auto exact = exactStoredFixedProfile(
+						*runtimeState->lastKnownGood, runtimeState->lastKnownGoodRecipeBinding,
+						runtimeState->lastKnownGoodAutoRecipeSetFingerprint)) {
+					return *exact;
+				}
+				return safeOriginal();
+			}
+			if (!runtimeState->pendingValidation && runtimeState->preference.profile == Profile::Original) {
+				return safeOriginal();
+			}
+			if (!runtimeState->pendingValidation && runtimeState->lastKnownGood
+				&& *runtimeState->lastKnownGood == runtimeState->preference) {
+				const auto exact = exactStoredFixedProfile(
+					*runtimeState->lastKnownGood, runtimeState->lastKnownGoodRecipeBinding,
+					runtimeState->lastKnownGoodAutoRecipeSetFingerprint);
+				const AudioInputPtr input = currentAudioInput();
+				if (exact && input) {
+					const std::optional< RecipeBinding > active =
+						input->healthyActiveInputEnhancementBinding(identity, exact->preference);
+					if (active && exact->binding && *active == *exact->binding) {
+						return *exact;
+					}
+				}
+			}
 			return safeOriginal();
 		}
-		if (state && state->lastKnownGood && *state->lastKnownGood == previous
-			&& executionBindingMatchesPreference(previous, state->lastKnownGoodRecipeBinding,
-										 state->lastKnownGoodAutoRecipeSetFingerprint)) {
-			return { previous, state->lastKnownGoodRecipeBinding };
-		}
-		if (std::optional< RecipeBinding > binding = verifiedRecipeBindingForPreference(previous, identity)) {
-			return { previous, std::move(binding) };
+
+		// A pending candidate can carry a previously proven rollback target even
+		// when no AudioInput currently exists (for example while capture restarts).
+		// Non-pending persisted profiles are not promoted to LKG without matching
+		// healthy runtime evidence.
+		if (originalState && originalState->pendingValidation && originalState->lastKnownGood) {
+			if (const auto exact = exactStoredFixedProfile(
+					*originalState->lastKnownGood, originalState->lastKnownGoodRecipeBinding,
+					originalState->lastKnownGoodAutoRecipeSetFingerprint)) {
+				return *exact;
+			}
 		}
 		return safeOriginal();
 	}
@@ -986,31 +1066,15 @@ namespace {
 
 		const DeviceProfileState *originalState = findDeviceProfile(original.inputEnhancement, identity);
 		const DefaultPreference &previous = preferenceForDevice(original.inputEnhancement, identity);
-		const DeviceProfileState *runtimeState = Global::g_global_struct
-			? findDeviceProfile(Global::get().s.inputEnhancement, identity)
-			: nullptr;
-		if (originalState && originalState->pendingValidation && runtimeState
-			&& !runtimeState->pendingValidation && candidate == originalState->preference) {
-			// The dialog may stay open while probation finishes or rolls back. If
-			// the user did not edit the candidate, merge the authoritative runtime
-			// result instead of accidentally resurrecting stale pending state.
-			DeviceProfileState resolved = *runtimeState;
-			resolved.identity           = identity;
-			*draftState                 = std::move(resolved);
-			projectInputEnhancementPreference(draft);
-			return true;
-		}
 		const bool originalLegacyActive = originalState
 			? (originalState->legacyOverride && isValidLegacyOverride(*originalState->legacyOverride))
 			: (original.inputEnhancement.legacyOverride
 			   && isValidLegacyOverride(*original.inputEnhancement.legacyOverride));
-		if (candidate == previous && !originalLegacyActive) {
-			if (originalState) {
-				DeviceProfileState unchanged = *originalState;
-				unchanged.identity           = identity;
-				*draftState                  = std::move(unchanged);
-				projectInputEnhancementPreference(draft);
-			}
+		if (candidate == previous && !originalLegacyActive && originalState) {
+			DeviceProfileState unchanged = *originalState;
+			unchanged.identity           = identity;
+			*draftState                  = std::move(unchanged);
+			projectInputEnhancementPreference(draft);
 			return true;
 		}
 
@@ -3487,6 +3551,8 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("apply") || action == QLatin1String("ok")) {
+		const bool inputEnhancementChanged = inputEnhancementSelectionChanged(m_draft, m_original);
+		const bool probationReconciled = reconcileResolvedInputEnhancementProbation(m_draft, m_original);
 		const Mumble::InputEnhancement::DefaultPreference &preference =
 			currentInputEnhancementPreference(m_draft);
 		// A migration-preserved legacy tuple is the active runtime contract until
@@ -3495,14 +3561,19 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		if (!currentInputEnhancementUsesLegacyOverride(m_draft)) {
 			const InputEnhancementSettingsReadiness readiness = inputEnhancementReadinessForSettings(
 				m_draft, preference.profile, preference.reduction, preference.character);
-			if (!readiness.selectable) {
+			const bool onlyTemporarilyRuntimeBlocked =
+				readiness.processingSelectable
+				&& readiness.runtimeBlockReason
+					   != Mumble::InputEnhancement::EnhancedRuntimeBlockReason::None;
+			if (!readiness.selectable && (!onlyTemporarilyRuntimeBlocked || inputEnhancementChanged)) {
 				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement settings were not saved: %1")
 											 .arg(inputEnhancementReadinessReasonText(readiness));
 				result.accepted    = false;
 				result.closeDialog = false;
 				return result;
 			}
-			if (!prepareManualInputEnhancementProbation(
+			if (readiness.processingSelectable && !probationReconciled
+				&& !prepareManualInputEnhancementProbation(
 					m_draft, m_original, QDateTime::currentMSecsSinceEpoch())) {
 				m_inputEnhancementReadinessUiError = QObject::tr(
 					"Input enhancement settings were not saved: the selected profile could not be bound to the "

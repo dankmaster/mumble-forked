@@ -598,6 +598,23 @@ bool AudioInput::inputEnhancementHealthyForUpdate() const noexcept {
 	return m_inputEnhancementHealthyForUpdate.load(std::memory_order_relaxed);
 }
 
+std::optional< Mumble::InputEnhancement::RecipeBinding > AudioInput::healthyActiveInputEnhancementBinding(
+	const Mumble::InputEnhancement::DeviceIdentity &identity,
+	const Mumble::InputEnhancement::DefaultPreference &preference) const {
+	using namespace Mumble::InputEnhancement;
+	if (!canAuthorizeInputEnhancementRollbackBinding(
+			inputEnhancementHealthyForUpdate(),
+			m_inputEnhancementCaptureOpened.load(std::memory_order_acquire), isRunning())
+		|| preference.profile == Profile::Original
+		|| preference.profile == Profile::Auto || !deviceIdentitiesMatch(inputDeviceIdentity(), identity)
+		|| !m_inputEnhancementCalibrationBaselineAvailable
+		|| m_inputEnhancementCalibrationBaselinePreference != preference
+		|| !m_inputEnhancementCalibrationBaselineBinding) {
+		return std::nullopt;
+	}
+	return m_inputEnhancementCalibrationBaselineBinding;
+}
+
 bool AudioInput::startInputEnhancementCalibration(const Mumble::InputEnhancement::DefaultPreference &candidateControls,
 												  bool captureOptionalLocalNoise, std::uint64_t blindSeed,
 												  InputEnhancementCalibrationStartError *error) {
@@ -1346,6 +1363,7 @@ bool AudioInput::selectCodec() {
 
 void AudioInput::initializeInputEnhancement() {
 	m_inputEnhancementHealthyForUpdate.store(true, std::memory_order_relaxed);
+	m_inputEnhancementCaptureOpened.store(false, std::memory_order_relaxed);
 	m_inputEnhancementCalibrationBaselinePreference = {};
 	m_inputEnhancementCalibrationBaselineBinding.reset();
 	m_inputEnhancementCalibrationBaselineAvailable = false;
@@ -1801,6 +1819,9 @@ void AudioInput::confirmOpenedInputDeviceIdentity(Mumble::InputEnhancement::Devi
 }
 
 void AudioInput::markOpenedInputDeviceProfileUsed() noexcept {
+	// Backends call this only after the complete capture chain has opened and
+	// started. A prepared model/binding alone is not sufficient rollback proof.
+	m_inputEnhancementCaptureOpened.store(true, std::memory_order_release);
 	const Mumble::InputEnhancement::DeviceIdentity openedIdentity = inputDeviceIdentity();
 	if (!openedIdentity.stable) {
 		return;
@@ -2134,7 +2155,8 @@ bool AudioInput::usesLegacyInputEnhancementForDiagnostics() const noexcept {
 }
 
 Mumble::InputEnhancement::Profile AudioInput::inputEnhancementProfileForDiagnostics() const noexcept {
-	return m_inputEnhancementConcreteProfile;
+	const Mumble::InputEnhancement::Pipeline *pipeline = inputEnhancementPipelineForDiagnostics();
+	return pipeline ? pipeline->diagnostics().activeProfile() : m_inputEnhancementConcreteProfile;
 }
 
 std::uint64_t AudioInput::inputEnhancementModelInitializationAttemptsForDiagnostics() const noexcept {

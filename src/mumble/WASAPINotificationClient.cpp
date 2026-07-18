@@ -134,6 +134,7 @@ void WASAPINotificationClient::_enlistDeviceAsUsed(const QString &device) {
 	if (!usedDevices.contains(device)) {
 		usedDevices.append(device);
 	}
+	restartDispatchGate.rebuiltDeviceEnlisted();
 }
 
 void WASAPINotificationClient::enlistDeviceAsUsed(const QString &device) {
@@ -171,6 +172,16 @@ void WASAPINotificationClient::_clearUsedDeviceLists() {
 void WASAPINotificationClient::clearUsedDeviceLists() {
 	QMutexLocker lock(&listsMutex);
 	_clearUsedDeviceLists();
+}
+
+void WASAPINotificationClient::beginAudioResetRebuild() {
+	QMutexLocker lock(&listsMutex);
+	restartDispatchGate.beginRebuildAfterOldAudioStopped();
+}
+
+void WASAPINotificationClient::finishAudioResetRebuild() {
+	QMutexLocker lock(&listsMutex);
+	restartDispatchGate.finishRebuildStart();
 }
 
 void WASAPINotificationClient::doGetOnce() {
@@ -215,12 +226,9 @@ WASAPINotificationClient::~WASAPINotificationClient() {
 }
 
 void WASAPINotificationClient::restartAudioLocked() {
-	const auto now = std::chrono::steady_clock::now();
-	if (hasRestartTimestamp && now - lastRestartTimestamp < restartDebounceWindow) {
+	if (!restartDispatchGate.requestRestart()) {
 		return;
 	}
-	hasRestartTimestamp  = true;
-	lastRestartTimestamp = now;
 	qWarning("WASAPINotificationClient: Triggering audio reset");
 	_clearUsedDeviceLists();
 	emit doResetAudio();

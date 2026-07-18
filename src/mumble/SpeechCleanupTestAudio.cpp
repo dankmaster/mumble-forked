@@ -547,9 +547,18 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 		const Profile requestedProfile =
 			preferenceForDevice(Global::get().s.inputEnhancement, inputDeviceIdentity()).profile;
 		const Profile effectiveProfile = inputEnhancementProfileForDiagnostics();
-		QString effectiveReason = requestedProfile == effectiveProfile
-			? QStringLiteral("requested_profile_active")
-			: QStringLiteral("runtime_fallback");
+		QString effectiveReason;
+		switch (effectiveProfileRelationship(requestedProfile, effectiveProfile)) {
+			case EffectiveProfileRelationship::RequestedProfileActive:
+				effectiveReason = QStringLiteral("requested_profile_active");
+				break;
+			case EffectiveProfileRelationship::AutoSelectedProfile:
+				effectiveReason = QStringLiteral("auto_selected_profile");
+				break;
+			case EffectiveProfileRelationship::RuntimeFallback:
+				effectiveReason = QStringLiteral("runtime_fallback");
+				break;
+		}
 		if (requestedProfile != Profile::Original) {
 			if (const InputEnhancementPolicyController *controller =
 					Global::get().inputEnhancementPolicyController) {

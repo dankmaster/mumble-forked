@@ -65,6 +65,25 @@ EnhancedRuntimeBlockReason enhancedRuntimeBlockReason(const EffectivePolicyState
 	return EnhancedRuntimeBlockReason::None;
 }
 
+EffectiveProfileRelationship effectiveProfileRelationship(const Profile requested, const Profile effective) noexcept {
+	if (requested == Profile::Auto) {
+		switch (effective) {
+			case Profile::Light:
+			case Profile::Balanced:
+			case Profile::Quality:
+				return EffectiveProfileRelationship::AutoSelectedProfile;
+			case Profile::Original:
+			case Profile::VoiceFocus:
+			case Profile::Auto:
+				return EffectiveProfileRelationship::RuntimeFallback;
+		}
+	}
+	if (requested == effective) {
+		return EffectiveProfileRelationship::RequestedProfileActive;
+	}
+	return EffectiveProfileRelationship::RuntimeFallback;
+}
+
 InputEnhancementPolicyController::InputEnhancementPolicyController(Configuration configuration,
 																   QNetworkAccessManager *networkManager,
 																   QObject *parent)

@@ -11,7 +11,58 @@
 #include <QtCore/QObject>
 #include <mmdeviceapi.h>
 
-#include <chrono>
+/// Coalesces endpoint notifications until the queued audio reset has actually
+/// rebuilt and re-enlisted a device. Unlike a wall-clock debounce, a second
+/// default-device change immediately after that lifecycle boundary is retained.
+class WASAPIRestartDispatchGate final {
+public:
+	bool requestRestart() noexcept {
+		if (m_restartPending) {
+			return false;
+		}
+		m_restartPending          = true;
+		m_acceptingRebuildEnlists = false;
+		m_rebuildStartReturned    = false;
+		m_rebuildDeviceEnlisted   = false;
+		return true;
+	}
+	void beginRebuildAfterOldAudioStopped() noexcept {
+		if (!m_restartPending) {
+			return;
+		}
+		m_acceptingRebuildEnlists = true;
+		m_rebuildStartReturned    = false;
+		m_rebuildDeviceEnlisted   = false;
+	}
+	void finishRebuildStart() noexcept {
+		if (!m_restartPending || !m_acceptingRebuildEnlists) {
+			return;
+		}
+		m_rebuildStartReturned = true;
+		rearmIfRebuilt();
+	}
+	void rebuiltDeviceEnlisted() noexcept {
+		if (!m_restartPending || !m_acceptingRebuildEnlists) {
+			return;
+		}
+		m_rebuildDeviceEnlisted = true;
+		rearmIfRebuilt();
+	}
+	bool restartPending() const noexcept { return m_restartPending; }
+
+private:
+	void rearmIfRebuilt() noexcept {
+		if (m_rebuildStartReturned && m_rebuildDeviceEnlisted) {
+			m_restartPending          = false;
+			m_acceptingRebuildEnlists = false;
+		}
+	}
+
+	bool m_restartPending          = false;
+	bool m_acceptingRebuildEnlists = false;
+	bool m_rebuildStartReturned    = false;
+	bool m_rebuildDeviceEnlisted   = false;
+};
 
 /**
  * @brief Singleton for acting on WASAPINotification events for given devices.
@@ -43,6 +94,11 @@ public:
 
 	void clearUsedDefaultDeviceList();
 	void clearUsedDeviceLists();
+	/// MainWindow brackets Audio::start with these calls after Audio::stop has
+	/// joined the old backends. Only enlistments from that rebuild generation
+	/// may rearm notification dispatch.
+	void beginAudioResetRebuild();
+	void finishAudioResetRebuild();
 
 	/**
 	 * @return Singleton instance reference.
@@ -71,9 +127,7 @@ private:
 	QStringList usedDefaultDevices;
 	QStringList usedDevices;
 	QHash< quint32, QString > usedDefaultDevicesByFlowAndRole;
-	bool hasRestartTimestamp = false;
-	std::chrono::steady_clock::time_point lastRestartTimestamp;
-	static constexpr auto restartDebounceWindow = std::chrono::milliseconds(500);
+	WASAPIRestartDispatchGate restartDispatchGate;
 	IMMDeviceEnumerator *pEnumerator;
 	LONG _cRef;
 	QMutex listsMutex;

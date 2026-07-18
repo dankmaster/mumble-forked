@@ -97,10 +97,14 @@ private slots:
 	void settingsControllerAutoProfileIsRuntimeGated();
 	void settingsControllerEnhancementFollowsDraftSelectedMicrophone();
 	void settingsControllerRevalidatesEnhancementBeforeApply();
+	void settingsControllerPolicyBlockPreservesUnchangedEnhancement();
+	void settingsControllerNewDeviceInheritedEnhancementStartsProbation();
+	void settingsControllerRejectsStaleLastKnownGoodBinding();
 	void settingsControllerPreservedLegacyOverrideBypassesProductPreflight();
 	void settingsControllerStoresAdvancedLegacyOverrideOnCurrentMicrophone();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void audioInputVoiceActivitySnapshotIsBounded();
+	void audioInputRollbackBindingRequiresOpenedRunningCapture();
 	void nativeAutomationBoundariesRemainTypedAndDeterministic();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
@@ -1196,6 +1200,239 @@ void TestModernDialogControllers::settingsControllerRevalidatesEnhancementBefore
 			 Profile::Light);
 }
 
+void TestModernDialogControllers::settingsControllerPolicyBlockPreservesUnchangedEnhancement() {
+	using namespace Mumble::InputEnhancement;
+	DraftInputRegistrar registrar;
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
+	ScopedGlobalOverride globalOverride(global);
+	InputEnhancementPackageVerifier verifier(
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+	QVERIFY(verifier.verify().unmanaged);
+	global.inputEnhancementPackageVerifier  = &verifier;
+	global.bInputEnhancementRecoveryDisabled = true;
+	global.bDisableInputEnhancement           = true;
+
+	::Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	DeviceProfileState state;
+	state.identity           = registrar.resolveDeviceIdentity(settings);
+	state.preference.profile = Profile::Light;
+	state.preference.reduction = 44;
+	QVERIFY(upsertDeviceProfile(settings.inputEnhancement, state));
+
+	ModernSettingsController unrelatedController;
+	unrelatedController.open(settings, QStringLiteral("AudioInput"));
+	unrelatedController.updateField(QStringLiteral("audio.quality"), 80);
+	const ModernSettingsController::ActionResult unrelated =
+		unrelatedController.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(unrelated.accepted);
+	QVERIFY(unrelated.settingsToApply.has_value());
+	QCOMPARE(unrelated.settingsToApply->iQuality, 80000);
+	QVERIFY(preferenceForDevice(unrelated.settingsToApply->inputEnhancement, state.identity) == state.preference);
+
+	// A runtime block may be bypassed only when the underlying processor is
+	// still qualified. It must not hide a simultaneous package/model failure.
+	global.inputEnhancementPackageVerifier = nullptr;
+	ModernSettingsController missingPackageController;
+	missingPackageController.open(settings, QStringLiteral("AudioInput"));
+	const ModernSettingsController::ActionResult missingPackage =
+		missingPackageController.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(!missingPackage.accepted);
+	QVERIFY(!missingPackage.settingsToApply.has_value());
+	global.inputEnhancementPackageVerifier = &verifier;
+
+	ModernSettingsController enhancementController;
+	enhancementController.open(settings, QStringLiteral("AudioInput"));
+	enhancementController.updateField(QStringLiteral("audio.inputEnhancementReduction"), 45);
+	const ModernSettingsController::ActionResult enhancementEdit =
+		enhancementController.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(!enhancementEdit.accepted);
+	QVERIFY(!enhancementEdit.settingsToApply.has_value());
+
+	// Also prove that a probation result produced while the dialog was open is
+	// authoritative: an unrelated save must not resurrect the stale candidate.
+	const DefaultPreference originalPreference = state.preference;
+	ResolveRequest request;
+	request.profile             = originalPreference.profile;
+	request.noiseReduction      = originalPreference.reduction;
+	request.naturalCrisp        = originalPreference.character;
+	request.cpuClass            = CpuClass::Low;
+	request.backendAvailability = BackendAvailability::compiled();
+	request.captureDevice       = CaptureDeviceContext::liveDevice(registrar.name, true);
+	state.pendingRecipeBinding =
+		recipeBindingForRecipe(RecipeCatalog::resolve(request), QStringLiteral("unmanaged-build-zero"));
+	state.lastKnownGood     = DefaultPreference{};
+	state.pendingValidation = true;
+	::Settings pending = settings;
+	pending.inputEnhancement.deviceProfiles.clear();
+	QVERIFY(upsertDeviceProfile(pending.inputEnhancement, state));
+	global.s = pending;
+	DeviceProfileState *resolved = ensureDeviceProfile(global.s.inputEnhancement, state.identity);
+	QVERIFY(resolved);
+	resolved->preference   = DefaultPreference{};
+	resolved->lastKnownGood = resolved->preference;
+	resolved->lastKnownGoodRecipeBinding.reset();
+	resolved->pendingRecipeBinding.reset();
+	resolved->pendingValidation = false;
+
+	ModernSettingsController staleDialog;
+	staleDialog.open(pending, QStringLiteral("AudioInput"));
+	staleDialog.updateField(QStringLiteral("audio.quality"), 88);
+	const ModernSettingsController::ActionResult reconciled =
+		staleDialog.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(reconciled.accepted);
+	QVERIFY(reconciled.settingsToApply.has_value());
+	const DeviceProfileState *savedResolved =
+		findDeviceProfile(reconciled.settingsToApply->inputEnhancement, state.identity);
+	QVERIFY(savedResolved);
+	QCOMPARE(savedResolved->preference.profile, Profile::Original);
+	QVERIFY(!savedResolved->pendingValidation);
+
+	// Success can resolve to the same preference as the pending candidate. The
+	// reconciled non-pending runtime state must not be overwritten by the stale
+	// pending snapshot when Apply continues through product preflight.
+	global.bInputEnhancementRecoveryDisabled = false;
+	global.bDisableInputEnhancement           = false;
+	global.s = pending;
+	resolved = ensureDeviceProfile(global.s.inputEnhancement, state.identity);
+	QVERIFY(resolved);
+	resolved->lastKnownGood              = resolved->preference;
+	resolved->lastKnownGoodRecipeBinding = resolved->pendingRecipeBinding;
+	resolved->pendingRecipeBinding.reset();
+	resolved->pendingValidation = false;
+	ModernSettingsController successfulProbationDialog;
+	successfulProbationDialog.open(pending, QStringLiteral("AudioInput"));
+	successfulProbationDialog.updateField(QStringLiteral("audio.quality"), 92);
+	const ModernSettingsController::ActionResult successfulProbation =
+		successfulProbationDialog.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(successfulProbation.accepted);
+	QVERIFY(successfulProbation.settingsToApply.has_value());
+	const DeviceProfileState *savedSuccessful =
+		findDeviceProfile(successfulProbation.settingsToApply->inputEnhancement, state.identity);
+	QVERIFY(savedSuccessful);
+	QCOMPARE(savedSuccessful->preference.profile, Profile::Light);
+	QVERIFY(!savedSuccessful->pendingValidation);
+	QVERIFY(savedSuccessful->lastKnownGoodRecipeBinding.has_value());
+}
+
+void TestModernDialogControllers::settingsControllerNewDeviceInheritedEnhancementStartsProbation() {
+	using namespace Mumble::InputEnhancement;
+	DraftInputRegistrar registrar;
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
+	ScopedGlobalOverride globalOverride(global);
+	InputEnhancementPackageVerifier verifier(
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+	QVERIFY(verifier.verify().unmanaged);
+	global.inputEnhancementPackageVerifier = &verifier;
+	global.bInputEnhancementRecoveryDisabled = true;
+	global.bDisableInputEnhancement           = true;
+
+	::Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	settings.inputEnhancement.defaultPreference.profile   = Profile::Light;
+	settings.inputEnhancement.defaultPreference.reduction = 47;
+	const DeviceIdentity identity = registrar.resolveDeviceIdentity(settings);
+	QVERIFY(!findDeviceProfile(settings.inputEnhancement, identity));
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	const ModernSettingsController::ActionResult result =
+		controller.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(result.accepted);
+	QVERIFY(result.settingsToApply.has_value());
+	const DeviceProfileState *created = findDeviceProfile(result.settingsToApply->inputEnhancement, identity);
+	QVERIFY(created);
+	QCOMPARE(created->preference.profile, Profile::Light);
+	QVERIFY(created->pendingValidation);
+	QVERIFY(created->pendingRecipeBinding.has_value());
+	QVERIFY(created->lastKnownGood.has_value());
+	QCOMPARE(created->lastKnownGood->profile, Profile::Original);
+	QVERIFY(!created->lastKnownGoodRecipeBinding.has_value());
+}
+
+void TestModernDialogControllers::settingsControllerRejectsStaleLastKnownGoodBinding() {
+	using namespace Mumble::InputEnhancement;
+	DraftInputRegistrar registrar;
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
+	ScopedGlobalOverride globalOverride(global);
+	InputEnhancementPackageVerifier verifier(
+		{ QDir(root.path()), QByteArray(), 0, QStringLiteral("input-recipes-v3") });
+	QVERIFY(verifier.verify().unmanaged);
+	global.inputEnhancementPackageVerifier = &verifier;
+
+	::Settings settings;
+	settings.qsAudioInput = registrar.name;
+	settings.qsOSSInput   = QStringLiteral("mic-a");
+	const auto bindingFor = [&registrar](const DefaultPreference &preference, const QString &catalog) {
+		ResolveRequest request;
+		request.profile             = preference.profile;
+		request.noiseReduction      = preference.reduction;
+		request.naturalCrisp        = preference.character;
+		request.cpuClass            = CpuClass::Low;
+		request.backendAvailability = BackendAvailability::compiled();
+		request.captureDevice       = CaptureDeviceContext::liveDevice(registrar.name, true);
+		return recipeBindingForRecipe(RecipeCatalog::resolve(request), catalog);
+	};
+	DeviceProfileState state;
+	state.identity             = registrar.resolveDeviceIdentity(settings);
+	state.preference.profile   = Profile::Light;
+	state.preference.reduction = 40;
+	state.preference.character = 55;
+	state.pendingRecipeBinding = bindingFor(state.preference, QStringLiteral("unmanaged-build-zero"));
+	state.lastKnownGood        = state.preference;
+	state.lastKnownGood->reduction = 35;
+	state.lastKnownGoodRecipeBinding = bindingFor(*state.lastKnownGood, QStringLiteral("stale-catalog"));
+	state.pendingValidation = true;
+	QVERIFY(upsertDeviceProfile(settings.inputEnhancement, state));
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	controller.updateField(QStringLiteral("audio.inputEnhancementReduction"), 45);
+	const ModernSettingsController::ActionResult result =
+		controller.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(result.accepted);
+	QVERIFY(result.settingsToApply.has_value());
+	const DeviceProfileState *pending = findDeviceProfile(result.settingsToApply->inputEnhancement, state.identity);
+	QVERIFY(pending);
+	QVERIFY(pending->pendingValidation);
+	QCOMPARE(pending->preference.reduction, 45);
+	QVERIFY(pending->lastKnownGood.has_value());
+	QCOMPARE(pending->lastKnownGood->profile, Profile::Original);
+	QVERIFY(!pending->lastKnownGoodRecipeBinding.has_value());
+
+	// Even an exact persisted binding is not promoted to LKG from a non-pending
+	// profile when there is no matching healthy AudioInput runtime instance.
+	state.preference.reduction       = 40;
+	state.lastKnownGood              = state.preference;
+	state.lastKnownGoodRecipeBinding = bindingFor(state.preference, QStringLiteral("unmanaged-build-zero"));
+	state.pendingRecipeBinding.reset();
+	state.pendingValidation = false;
+	::Settings inactiveRuntime = settings;
+	inactiveRuntime.inputEnhancement.deviceProfiles.clear();
+	QVERIFY(upsertDeviceProfile(inactiveRuntime.inputEnhancement, state));
+	ModernSettingsController inactiveRuntimeController;
+	inactiveRuntimeController.open(inactiveRuntime, QStringLiteral("AudioInput"));
+	inactiveRuntimeController.updateField(QStringLiteral("audio.inputEnhancementReduction"), 46);
+	const ModernSettingsController::ActionResult inactiveResult =
+		inactiveRuntimeController.invokeAction(QStringLiteral("apply"), QVariantMap());
+	QVERIFY(inactiveResult.accepted);
+	QVERIFY(inactiveResult.settingsToApply.has_value());
+	const DeviceProfileState *inactivePending =
+		findDeviceProfile(inactiveResult.settingsToApply->inputEnhancement, state.identity);
+	QVERIFY(inactivePending);
+	QVERIFY(inactivePending->lastKnownGood.has_value());
+	QCOMPARE(inactivePending->lastKnownGood->profile, Profile::Original);
+	QVERIFY(!inactivePending->lastKnownGoodRecipeBinding.has_value());
+}
+
 void TestModernDialogControllers::settingsControllerPreservedLegacyOverrideBypassesProductPreflight() {
 	using namespace Mumble::InputEnhancement;
 	ScopedGlobalOverride noGlobal(nullptr);
@@ -1407,6 +1644,13 @@ void TestModernDialogControllers::audioInputVoiceActivitySnapshotIsBounded() {
 	QCOMPARE(snapshot.amplitudeLevel(), 1.0f);
 }
 
+void TestModernDialogControllers::audioInputRollbackBindingRequiresOpenedRunningCapture() {
+	QVERIFY(!AudioInput::canAuthorizeInputEnhancementRollbackBinding(false, false, false));
+	QVERIFY(!AudioInput::canAuthorizeInputEnhancementRollbackBinding(true, false, true));
+	QVERIFY(!AudioInput::canAuthorizeInputEnhancementRollbackBinding(true, true, false));
+	QVERIFY(AudioInput::canAuthorizeInputEnhancementRollbackBinding(true, true, true));
+}
+
 void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterministic() {
 	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
 	const QString audioInputPath = QFINDTESTDATA("../../mumble/AudioInput.h");
@@ -1427,6 +1671,14 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(!automationSource.isEmpty());
 
 	QVERIFY(mainWindowSource.contains(QStringLiteral("voiceActivitySnapshot()")));
+	const qsizetype policyRepublishStart =
+		mainWindowSource.indexOf(QStringLiteral("InputEnhancementPolicyController::effectivePolicyChanged"));
+	QVERIFY(policyRepublishStart >= 0);
+	const QString policyRepublish = mainWindowSource.mid(policyRepublishStart, 900);
+	QVERIFY(policyRepublish.contains(QStringLiteral("activeDialogID() != QLatin1String(\"settings\")")));
+	QVERIFY(policyRepublish.contains(
+		QStringLiteral("publishModernDialogState(m_modernDialogController->state())")));
+	QVERIFY(policyRepublish.contains(QStringLiteral("Qt::QueuedConnection")));
 	for (const QString &unsafeRead : { QStringLiteral("audioInput->dPeak"),
 								  QStringLiteral("audioInput->fSpeechProb"), QStringLiteral("audioInput->iBitrate"),
 								  QStringLiteral("audioInput->amplitudeVoiceActivityLevel"),
