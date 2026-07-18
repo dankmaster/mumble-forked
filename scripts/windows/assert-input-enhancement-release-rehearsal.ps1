@@ -20,7 +20,39 @@ param(
 
 	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
-	[string]$ExpectedExecutorSha256,
+	[string]$ExpectedPrepareExecutorSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedFinalizeExecutorSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedChallengeId,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedChallengeSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedCandidateBuildReceiptSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedUnsignedTestedBinarySha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedUnsignedStagedPayloadSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedSignedTestedBinarySha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedSignedStagedPayloadSha256,
 
 	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
@@ -64,6 +96,10 @@ param(
 
 	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedUpdaterVmHarnessSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
 	[string]$ExpectedUpdaterVmReceiptSha256,
 
 	[Parameter(Mandatory = $true)]
@@ -82,6 +118,8 @@ param(
 	[int]$ExpectedCommunitySize = 0,
 
 	[string]$OpenSslPath = '',
+
+	[string]$DumpbinPath = '',
 
 	[string]$PythonPath = 'python'
 )
@@ -126,10 +164,10 @@ $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
 $rehearsalPath = Join-Path $rootPath 'rehearsal.json'
 $rehearsal = Read-ReleaseJson -Path $rehearsalPath
 Assert-ExactProperties $rehearsal @(
-	'artifacts', 'binding', 'buildId', 'createdAtUtc', 'draft', 'ephemeralSigning', 'killSwitch', 'kind',
+	'artifacts', 'binding', 'buildId', 'challenge', 'createdAtUtc', 'draft', 'ephemeralSigning', 'killSwitch', 'kind',
 	'passed', 'releaseMatrix', 'schemaVersion', 'security', 'sequence', 'sourceSha'
 ) 'Release rehearsal'
-if ([int]$rehearsal.schemaVersion -ne 1 -or
+if ([int]$rehearsal.schemaVersion -ne 2 -or
 	[string]$rehearsal.kind -cne 'input-enhancement-pre-azure-release-rehearsal' -or
 	$rehearsal.passed -ne $true -or $rehearsal.draft -ne $true -or
 	[string]$rehearsal.sourceSha -cne $ExpectedSourceSha -or
@@ -140,6 +178,15 @@ $createdAt = [datetimeoffset]::MinValue
 if (-not [datetimeoffset]::TryParse([string]$rehearsal.createdAtUtc, [Globalization.CultureInfo]::InvariantCulture,
 	[Globalization.DateTimeStyles]::RoundtripKind, [ref]$createdAt)) {
 	throw 'Release rehearsal createdAtUtc is invalid.'
+}
+
+$challenge = $rehearsal.challenge
+Assert-ExactProperties $challenge @('challengeId', 'fileName', 'phase', 'sha256') 'Release rehearsal challenge binding'
+if ([string]$challenge.challengeId -cne $ExpectedChallengeId -or
+	[string]$challenge.phase -cne 'finalized' -or
+	[string]$challenge.fileName -cne 'rehearsal-challenge.json' -or
+	[string]$challenge.sha256 -cne $ExpectedChallengeSha256) {
+	throw 'Release rehearsal does not finalize the exact prepared challenge.'
 }
 
 $security = $rehearsal.security
@@ -166,31 +213,42 @@ if ($signing.testOnly -ne $true -or
 	$ed25519PublicKey -cne $expectedEd25519PublicKey -or
 	[string]$signing.certificateSubject -cnotmatch '^CN=Mumble Input Enhancement Rehearsal [A-Za-z0-9._-]+$' -or
 	[string]$signing.certificateThumbprint -cnotmatch '^[0-9A-Fa-f]{40}$' -or
-	[string]$signing.ed25519Provisioning -cne 'prebuilt-before-candidate-build' -or
+	[string]$signing.ed25519Provisioning -cne 'generated-during-prepare' -or
 	[string]$signing.timestampMode -cne 'test-rfc3161') {
 	throw 'Release rehearsal must use an ephemeral test certificate and the prebuilt test Ed25519 key.'
 }
 
 $binding = $rehearsal.binding
 Assert-ExactProperties $binding @(
-	'caseSetSha256', 'corpusInventorySha256', 'executorSha256', 'fixtureManifestSha256',
+	'candidateBuildReceiptSha256', 'caseSetSha256', 'challengeSha256', 'corpusInventorySha256',
+	'finalizeExecutorSha256', 'fixtureManifestSha256',
 	'embeddedKeyAttestationSha256', 'embeddedPublicKeySha256', 'listeningInputSha256',
 	'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
-	'recipeManifestSha256', 'recipeSetVersion', 'releaseSmokeHarnessSha256', 'serverExecutableSha256',
-	'stagedPayloadSha256', 'testedBinarySha256', 'unsignedHandoffSha256'
+	'prepareExecutorSha256', 'recipeManifestSha256', 'recipeSetVersion', 'releaseSmokeHarnessSha256',
+	'serverExecutableSha256', 'signedStagedPayloadSha256', 'signedTestedBinarySha256',
+	'unsignedHandoffSha256', 'unsignedStagedPayloadSha256', 'unsignedTestedBinarySha256'
 ) 'Release rehearsal binding'
 foreach ($name in @(
-	'caseSetSha256', 'corpusInventorySha256', 'executorSha256', 'fixtureManifestSha256',
+	'candidateBuildReceiptSha256', 'caseSetSha256', 'challengeSha256', 'corpusInventorySha256',
+	'finalizeExecutorSha256', 'fixtureManifestSha256',
 	'embeddedKeyAttestationSha256', 'embeddedPublicKeySha256', 'listeningInputSha256',
 	'measuredEvidenceArchiveSha256', 'mixturePlanSha256', 'modelManifestSha256',
-	'recipeManifestSha256', 'releaseSmokeHarnessSha256', 'serverExecutableSha256', 'stagedPayloadSha256',
-	'testedBinarySha256', 'unsignedHandoffSha256'
+	'prepareExecutorSha256', 'recipeManifestSha256', 'releaseSmokeHarnessSha256', 'serverExecutableSha256',
+	'signedStagedPayloadSha256', 'signedTestedBinarySha256', 'unsignedHandoffSha256',
+	'unsignedStagedPayloadSha256', 'unsignedTestedBinarySha256'
 )) { $null = Assert-Sha256 $binding.$name "Release rehearsal binding $name" }
 if ([string]$binding.embeddedPublicKeySha256 -cne (Get-RawPublicKeySha256 -PublicKeyHex $ed25519PublicKey)) {
 	throw 'Release rehearsal embedded-public-key binding does not match the protected test key.'
 }
 $expectedBinding = [ordered]@{
-	executorSha256                = $ExpectedExecutorSha256
+	prepareExecutorSha256         = $ExpectedPrepareExecutorSha256
+	finalizeExecutorSha256        = $ExpectedFinalizeExecutorSha256
+	challengeSha256               = $ExpectedChallengeSha256
+	candidateBuildReceiptSha256   = $ExpectedCandidateBuildReceiptSha256
+	unsignedTestedBinarySha256    = $ExpectedUnsignedTestedBinarySha256
+	unsignedStagedPayloadSha256   = $ExpectedUnsignedStagedPayloadSha256
+	signedTestedBinarySha256      = $ExpectedSignedTestedBinarySha256
+	signedStagedPayloadSha256     = $ExpectedSignedStagedPayloadSha256
 	unsignedHandoffSha256         = $ExpectedUnsignedHandoffSha256
 	measuredEvidenceArchiveSha256 = $ExpectedMeasuredEvidenceArchiveSha256
 	listeningInputSha256          = $ExpectedListeningQualificationSha256
@@ -209,11 +267,9 @@ if ([string]$binding.recipeSetVersion -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,6
 }
 
 $expectedSequence = @(
-	'verify-pre-azure-inputs', 'sign-pe-ephemeral', 'attest-positive-build-embedded-key',
-	'build-msi-from-signed-payload', 'sign-msi-ephemeral',
-	'assemble-immutable-artifacts', 'qualify-core', 'release-smoke-6-plus-24',
-	'simulate-updater-protocol-v4', 'verify-updater-vm-rollback-matrix', 'stage-local-draft',
-	'exercise-policy-kill-switch'
+	'verify-prepared-challenge', 'verify-unsigned-candidate-receipt', 'verify-declared-signing-transformation',
+	'verify-release-smoke-6-plus-24', 'verify-updater-protocol-v4', 'verify-updater-vm-rollback-matrix',
+	'verify-policy-kill-switch', 'assemble-immutable-draft'
 )
 $sequence = @($rehearsal.sequence)
 if ($sequence.Count -ne $expectedSequence.Count) { throw 'Release rehearsal sequence is incomplete.' }
@@ -247,7 +303,8 @@ if ($killSwitch.startupChecked -ne $true -or $killSwitch.passed -ne $true -or
 }
 
 $requiredAssetNames = @(
-	'auditArtifact', 'caseSet', 'channelPointer', 'channelPointerSignature', 'fixtureManifest', 'installer',
+	'auditArtifact', 'candidateBuildReceipt', 'caseSet', 'channelPointer', 'channelPointerSignature',
+	'fixtureManifest', 'installer', 'rehearsalChallenge',
 	'embeddedKeyAttestation',
 	'killSwitchObserverReceipt', 'killSwitchPolicy', 'killSwitchPolicySignature', 'killSwitchRuntimeTrace',
 	'killSwitchRuntimeTraceSignature',
@@ -274,7 +331,30 @@ foreach ($name in $requiredAssetNames) {
 	}
 	$resolvedAssets[$name] = $item.FullName
 }
+$challengeResult = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-challenge.ps1') `
+	-PreparedRoot $rootPath -ChallengePath $resolvedAssets.rehearsalChallenge `
+	-ExpectedSourceSha $ExpectedSourceSha -ExpectedBuildId $ExpectedBuildId `
+	-ExpectedPrepareExecutorSha256 $ExpectedPrepareExecutorSha256 `
+	-ExpectedUnsignedHandoffSha256 $ExpectedUnsignedHandoffSha256 `
+	-ExpectedMeasuredEvidenceSha256 $ExpectedMeasuredEvidenceArchiveSha256 `
+	-ExpectedListeningQualificationSha256 $ExpectedListeningQualificationSha256 `
+	-ExpectedReleaseSmokeHarnessSha256 $ExpectedReleaseSmokeHarnessSha256 `
+	-ExpectedFixtureManifestSha256 $ExpectedFixtureManifestSha256 `
+	-ExpectedCaseSetSha256 $ExpectedCaseSetSha256 `
+	-ExpectedServerExecutableSha256 $ExpectedServerExecutableSha256 `
+	-ExpectedChallengeId $ExpectedChallengeId `
+	-ExpectedCandidateBuildReceiptSha256 $ExpectedCandidateBuildReceiptSha256 `
+	-RequireCanonicalJson
+if ([string]$challengeResult.challengeSha256 -cne $ExpectedChallengeSha256 -or
+	[string]$challengeResult.unsignedTestedBinarySha256 -cne $ExpectedUnsignedTestedBinarySha256 -or
+	[string]$challengeResult.unsignedStagedPayloadSha256 -cne $ExpectedUnsignedStagedPayloadSha256 -or
+	[string]$challengeResult.signedTestedBinarySha256 -cne $ExpectedSignedTestedBinarySha256 -or
+	[string]$challengeResult.signedStagedPayloadSha256 -cne $ExpectedSignedStagedPayloadSha256) {
+	throw 'Release rehearsal challenge identity differs from the finalized binding.'
+}
 if ((Get-ReleaseFileSha256 -Path $resolvedAssets.listeningQualification) -cne $ExpectedListeningQualificationSha256 -or
+	(Get-ReleaseFileSha256 -Path $resolvedAssets.rehearsalChallenge) -cne $ExpectedChallengeSha256 -or
+	(Get-ReleaseFileSha256 -Path $resolvedAssets.candidateBuildReceipt) -cne $ExpectedCandidateBuildReceiptSha256 -or
 	(Get-ReleaseFileSha256 -Path $resolvedAssets.embeddedKeyAttestation) -cne
 		[string]$binding.embeddedKeyAttestationSha256 -or
 	(Get-ReleaseFileSha256 -Path $resolvedAssets.modelManifest) -cne [string]$binding.modelManifestSha256 -or
@@ -294,7 +374,8 @@ if ([int]$measured.schemaVersion -ne 2 -or [string]$measured.suite -cne 'core_re
 }
 $protectedIdentity = $measured.protectedBuildIdentity
 foreach ($pair in @(
-	@('tested_binary_sha256', 'testedBinarySha256'), @('staged_payload_sha256', 'stagedPayloadSha256'),
+	@('tested_binary_sha256', 'unsignedTestedBinarySha256'),
+	@('staged_payload_sha256', 'unsignedStagedPayloadSha256'),
 	@('server_binary_sha256', 'serverExecutableSha256'), @('corpus_inventory_sha256', 'corpusInventorySha256'),
 	@('model_manifest_sha256', 'modelManifestSha256'), @('recipe_manifest_sha256', 'recipeManifestSha256'),
 	@('recipe_set_version', 'recipeSetVersion')
@@ -325,8 +406,8 @@ $listeningInputIdentity = if ($listeningSuite -ceq 'master_quality') {
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-listening-qualification.ps1') `
 	-ListeningQualificationPath $resolvedAssets.listeningQualification `
 	-ExpectedSourceSha $ExpectedSourceSha `
-	-ExpectedTestedBinarySha256 ([string]$binding.testedBinarySha256) `
-	-ExpectedStagedPayloadSha256 ([string]$binding.stagedPayloadSha256) `
+	-ExpectedTestedBinarySha256 ([string]$binding.unsignedTestedBinarySha256) `
+	-ExpectedStagedPayloadSha256 ([string]$binding.unsignedStagedPayloadSha256) `
 	-ExpectedServerBinarySha256 ([string]$binding.serverExecutableSha256) `
 	-ExpectedCorpusInventorySha256 ([string]$binding.corpusInventorySha256) `
 	-ExpectedCorpusLockSha256 ([string]$measured.corpusLockSha256) `
@@ -362,6 +443,11 @@ $qualification = Read-ReleaseJson -Path $resolvedAssets.qualification
 if ([string]$qualification.buildId -cne $ExpectedBuildId -or [string]$qualification.source.sha -cne $ExpectedSourceSha) {
 	throw 'Release rehearsal qualification belongs to another build.'
 }
+if ([string]$qualification.installer.executableSha256 -cne $ExpectedSignedTestedBinarySha256 -or
+	[string]$qualification.installer.sha256 -cne [string]$challengeResult.installerSha256 -or
+	[string]$qualification.updatePackage.sha256 -cne [string]$challengeResult.updatePackageSha256) {
+	throw 'Release rehearsal qualification is not bound to the signed executable/MSI/update package from the prepared challenge.'
+}
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-embedded-key-attestation.ps1') `
 	-EvidencePath $resolvedAssets.embeddedKeyAttestation `
 	-ExpectedCandidateExecutableSha256 ([string]$qualification.installer.executableSha256) `
@@ -386,19 +472,20 @@ if ([string]$qualification.buildId -cne $ExpectedBuildId -or [string]$qualificat
 	-ExpectedSourceSha $ExpectedSourceSha `
 	-ExpectedBuildId $ExpectedBuildId `
 	-ExpectedSignerSubject ([string]$signing.certificateSubject) `
-	-OpenSslPath $OpenSslPath -PythonPath $PythonPath
+	-OpenSslPath $OpenSslPath -DumpbinPath $DumpbinPath -PythonPath $PythonPath
 
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-updater-protocol-evidence.ps1') `
 	-EvidencePath $resolvedAssets.updaterProtocolEvidence `
 	-ExpectedSourceSha $ExpectedSourceSha -ExpectedBuildId $ExpectedBuildId `
-	-ExpectedCandidatePayloadSha256 ([string]$binding.stagedPayloadSha256)
+	-ExpectedCandidatePayloadSha256 ([string]$binding.signedStagedPayloadSha256)
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-updater-vm-evidence.ps1') `
 	-EvidencePath $resolvedAssets.updaterVmEvidence `
 	-ExpectedSourceSha $ExpectedSourceSha -ExpectedBuildId $ExpectedBuildId `
-	-ExpectedCandidatePayloadSha256 ([string]$binding.stagedPayloadSha256) `
+	-ExpectedChallengeId $ExpectedChallengeId `
+	-ExpectedCandidatePayloadSha256 ([string]$binding.signedStagedPayloadSha256) `
 	-ExpectedCandidateInstallerSha256 ([string]$qualification.installer.sha256) `
 	-ExpectedCandidateExecutableSha256 ([string]$qualification.installer.executableSha256) `
-	-ExpectedHarnessSha256 $ExpectedExecutorSha256 `
+	-ExpectedHarnessSha256 $ExpectedUpdaterVmHarnessSha256 `
 	-ReceiptPath $resolvedAssets.updaterVmReceipt `
 	-ExpectedReceiptSha256 $ExpectedUpdaterVmReceiptSha256 `
 	-ExpectedVmExecutorSha256 $ExpectedUpdaterVmExecutorSha256 `
@@ -413,7 +500,8 @@ try {
 		-ExpectedCommit $ExpectedSourceSha `
 		-ExpectedBuild ([int]$qualification.buildNumber) `
 		-ExpectedVersion "1.7.$($qualification.buildNumber)" `
-		-RequireUpdaterRuntime -RequireGStreamerRuntime -ExpandedPayloadPath $expandedRoot
+		-RequireUpdaterRuntime -RequireGStreamerRuntime -ExpandedPayloadPath $expandedRoot `
+		-DumpbinPath $DumpbinPath
 	& (Join-Path $PSScriptRoot 'assert-input-enhancement-release-smoke.ps1') `
 		-ReleaseSmokePath $resolvedAssets.releaseSmoke `
 		-QualificationPath $resolvedAssets.qualification `
@@ -451,9 +539,10 @@ $trace = Read-ReleaseJson -Path $resolvedAssets.killSwitchRuntimeTrace
 	-ReceiptPath $resolvedAssets.killSwitchObserverReceipt `
 	-ExpectedReceiptSha256 $ExpectedKillSwitchObserverReceiptSha256 `
 	-ExpectedSourceSha $ExpectedSourceSha -ExpectedBuildId $ExpectedBuildId `
+	-ExpectedChallengeId $ExpectedChallengeId `
 	-ExpectedObserverSha256 $ExpectedKillSwitchObserverSha256 `
-	-ExpectedTestedBinarySha256 ([string]$binding.testedBinarySha256) `
-	-ExpectedStagedPayloadSha256 ([string]$binding.stagedPayloadSha256) `
+	-ExpectedTestedBinarySha256 ([string]$binding.signedTestedBinarySha256) `
+	-ExpectedStagedPayloadSha256 ([string]$binding.signedStagedPayloadSha256) `
 	-ExpectedPolicySha256 (Get-ReleaseFileSha256 -Path $resolvedAssets.killSwitchPolicy)
 $traceStarted = [datetimeoffset]::MinValue
 if (-not [datetimeoffset]::TryParse([string]$trace.startedAtUtc,

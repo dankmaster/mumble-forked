@@ -5,6 +5,7 @@ param(
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedReceiptSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{40}$')] [string]$ExpectedSourceSha,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$')] [string]$ExpectedBuildId,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedChallengeId,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedObserverSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedTestedBinarySha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedStagedPayloadSha256,
@@ -38,17 +39,18 @@ $traceSha256 = Get-ReleaseFileSha256 -Path $RuntimeTracePath
 $trace = Read-ReleaseJson -Path $RuntimeTracePath
 $receipt = Read-ReleaseJson -Path $ReceiptPath
 Assert-ExactProperties $receipt @(
-	'audioFree', 'buildId', 'clientProcess', 'kind', 'observationNonce', 'observerSha256', 'passed',
+	'audioFree', 'buildId', 'challengeId', 'clientProcess', 'kind', 'observationNonce', 'observerSha256', 'passed',
 	'policySha256', 'runtimeTraceSha256', 'schemaVersion', 'sourceSha', 'stagedPayloadSha256',
 	'testedBinarySha256'
 ) 'Kill-switch observer receipt'
 Assert-ExactProperties $receipt.clientProcess @(
 	'endedAtUtc', 'executableSha256', 'pid', 'startedAtUtc'
 ) 'Kill-switch observed client process'
-if ([int]$receipt.schemaVersion -ne 1 -or
+if ([int]$receipt.schemaVersion -ne 2 -or
 	[string]$receipt.kind -cne 'input-enhancement-policy-observer-receipt' -or
 	$receipt.passed -ne $true -or $receipt.audioFree -ne $true -or
 	[string]$receipt.sourceSha -cne $ExpectedSourceSha -or [string]$receipt.buildId -cne $ExpectedBuildId -or
+	[string]$receipt.challengeId -cne $ExpectedChallengeId -or
 	[string]$receipt.observerSha256 -cne $ExpectedObserverSha256 -or
 	[string]$receipt.runtimeTraceSha256 -cne $traceSha256 -or
 	[string]$receipt.testedBinarySha256 -cne $ExpectedTestedBinarySha256 -or
@@ -66,17 +68,18 @@ if ($clientEnded -lt $clientStarted -or ($clientEnded - $clientStarted).TotalMin
 }
 
 Assert-ExactProperties $trace @(
-	'audioFree', 'buildId', 'clientProcess', 'events', 'kind', 'observationNonce', 'passed',
+	'audioFree', 'buildId', 'challengeId', 'clientProcess', 'events', 'kind', 'observationNonce', 'passed',
 	'policySha256', 'schemaVersion', 'sourceSha', 'stagedPayloadSha256', 'startedAtUtc',
 	'testedBinarySha256'
 ) 'Kill-switch runtime trace'
 Assert-ExactProperties $trace.clientProcess @(
 	'endedAtUtc', 'executableSha256', 'pid', 'startedAtUtc'
 ) 'Kill-switch trace client process'
-if ([int]$trace.schemaVersion -ne 2 -or
+if ([int]$trace.schemaVersion -ne 3 -or
 	[string]$trace.kind -cne 'input-enhancement-policy-runtime-trace' -or
 	$trace.passed -ne $true -or $trace.audioFree -ne $true -or
 	[string]$trace.sourceSha -cne $ExpectedSourceSha -or [string]$trace.buildId -cne $ExpectedBuildId -or
+	[string]$trace.challengeId -cne $ExpectedChallengeId -or
 	[string]$trace.observationNonce -cne [string]$receipt.observationNonce -or
 	[string]$trace.testedBinarySha256 -cne $ExpectedTestedBinarySha256 -or
 	[string]$trace.stagedPayloadSha256 -cne $ExpectedStagedPayloadSha256 -or

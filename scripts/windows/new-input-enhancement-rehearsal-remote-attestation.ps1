@@ -16,6 +16,14 @@ param(
 	[string]$BuildId,
 
 	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ChallengeId,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ChallengeSha256,
+
+	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[1-9][0-9]*$')]
 	[string]$WorkflowRunId,
 
@@ -31,12 +39,23 @@ Import-Module (Join-Path $PSScriptRoot 'InputEnhancementReleaseTools.psm1') -For
 	-Root $DraftRoot -ExpectedArtifactName $ArtifactName
 $manifestPath = Join-Path $DraftRoot 'draft-manifest.json'
 $manifest = Read-ReleaseJson -Path $manifestPath
+$challengePath = Join-Path $DraftRoot 'rehearsal-challenge.json'
+if ((Get-ReleaseFileSha256 -Path $challengePath) -cne $ChallengeSha256) {
+	throw 'Remote attestation challenge bytes differ from the finalized challenge binding.'
+}
+$challenge = Read-ReleaseJson -Path $challengePath
+if ([string]$challenge.challengeId -cne $ChallengeId -or [string]$challenge.sourceSha -cne $SourceSha -or
+	[string]$challenge.buildId -cne $BuildId -or [string]$challenge.phase -cne 'prepared') {
+	throw 'Remote attestation challenge identity is invalid.'
+}
 $document = [ordered]@{
-	schemaVersion        = 1
+	schemaVersion        = 2
 	kind                 = 'input-enhancement-rehearsal-remote-reverification'
 	artifactName         = $ArtifactName
 	sourceSha            = $SourceSha
 	buildId              = $BuildId
+	challengeId          = $ChallengeId
+	challengeSha256      = $ChallengeSha256
 	workflowRunId        = $WorkflowRunId
 	draftManifestSha256  = Get-ReleaseFileSha256 -Path $manifestPath
 	draftManifestSize    = [int64](Get-Item -LiteralPath $manifestPath).Length

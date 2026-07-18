@@ -55,6 +55,8 @@ param(
 
 	[string]$OpenSslPath = "",
 
+	[string]$DumpbinPath = "",
+
 	[string]$PythonPath = "python"
 )
 
@@ -158,7 +160,7 @@ if ($updatePackageFile.Extension -cne ".mumble-update" -or
 	-ExpectedCommit $sourceSha `
 	-ExpectedBuild $buildNumber `
 	-ExpectedVersion "1.7.$buildNumber" `
-	-RequireUpdaterRuntime
+	-RequireUpdaterRuntime -DumpbinPath $DumpbinPath
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-msi-payload-verification.ps1') `
 	-VerificationPath $MsiPayloadVerificationPath `
 	-MsiPath $installerFile.FullName `

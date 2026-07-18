@@ -1,152 +1,156 @@
-# Input-enhancement release rehearsal
+# Input-enhancement pre-Azure release rehearsal
 
-The manual `Input Enhancement Pre-Azure Release Rehearsal` workflow exercises
-the release sequence without Azure, production credentials, a GitHub release,
-or write access to repository contents. It is a qualification tool, not a
-publication path.
+This rehearsal proves the complete release sequence without Azure Artifact
+Signing, production credentials, a GitHub Release, or a publishable channel
+pointer. It is deliberately split into two phases. A receipt produced before
+the signed candidate exists is invalid by construction.
 
-The first job runs only on the protected Windows mainstream runner and only
-from `master`. It consumes hash-pinned inputs outside the checkout, requires a
-test Ed25519 key that was created before the candidate was built, creates a
-one-day self-signed code-signing certificate after handoff, invokes the
-protected executor, destroys the ephemeral certificate key, validates the
-complete result, and uploads a seven-day draft Actions artifact. A separate
-GitHub-hosted Windows job downloads that artifact, recomputes every byte hash,
-reruns all evidence checks, and uploads only a small remote-reverification
-receipt. Workflow permissions are `actions: read` and `contents: read`; there
-is no OIDC permission or release environment.
+## Phase 1: Prepare
 
-## Protected runner inputs
+`prepare-input-enhancement-release-rehearsal.ps1` runs on the protected Windows
+build runner. It:
 
-Configure these repository variables only after installing and hashing the
-files outside `GITHUB_WORKSPACE`:
+1. verifies a clean checkout at the requested protected-master commit;
+2. verifies the hash-pinned unsigned handoff, measured qualification,
+   listening qualification, release-smoke harness, case set, fixture manifest,
+   OG server, and protected prepare executor;
+3. creates a one-day self-signed Authenticode certificate and a new test-only
+   Ed25519 key in a private temporary directory;
+4. asks the protected executor to build the unsigned stage with that test
+   public key, validate `candidate-build-receipt.json` live against the exact
+   build/stage roots, sign only the declared PE files, build/sign the MSI and
+   immutable update payload, and write the before/after inventories;
+5. deletes the certificate, PFX, Ed25519 private key, password environment
+   variable, and temporary directory; and
+6. emits canonical `rehearsal-challenge.json` and exits without creating a
+   draft.
+
+The challenge contains a 256-bit random `challengeId`, source/build identity,
+the test public key, complete sorted SHA-256/size inventories for `unsigned/`
+and `signed/`, the exact candidate-build receipt, qualification/smoke/policy
+bindings, and a record for every transformation:
+
+- `unchanged`: identical path, size, and hash;
+- `authenticode-pe`: the only permitted changed existing files, restricted to
+  `.exe` and `.dll`;
+- `packaged-output`: signed-only `.msi`, `.mumble-update`, `.zip`, `.json`, or
+  `.sig` outputs.
+
+Every union path must appear exactly once. Extra files, missing files,
+case/path ambiguity, reparse points, root escapes, private-key extensions,
+undeclared PE mutations, and non-canonical JSON fail closed. The tree hash is
+SHA-256 over the compact JSON object `{ "files": [...] }` using the sorted
+`path`, `sha256`, `size` records.
+
+The protected prepare executor contract is:
 
 ```text
-INPUT_ENHANCEMENT_REHEARSAL_EXECUTOR
-INPUT_ENHANCEMENT_REHEARSAL_EXECUTOR_SHA256
-INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PRIVATE_KEY
-INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PRIVATE_KEY_SHA256
-INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PUBLIC_KEY_HEX
-INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE
-INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256
-INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE
-INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256
-INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION
-INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256
-INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS
-INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256
-INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST
-INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256
-INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET
-INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256
-INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY
-INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256
-INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER
-INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256
-INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT
-INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256
-INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR
-INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256
-INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT
-INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256
-INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256
-INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256
-INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256
+-Operation Prepare
+-SourceRoot/-SourceSha/-BuildNumber
+-ChallengeId
+-UnsignedHandoffArchivePath
+-MeasuredEvidenceArchivePath
+-ListeningQualificationPath
+-ReleaseSmokeHarnessPath/-FixtureManifestPath/-CaseSetPath
+-ServerExecutablePath
+-EphemeralPfxPath/-EphemeralPfxPasswordEnvironmentVariable
+-EphemeralCertificateSubject/-EphemeralCertificateThumbprint
+-EphemeralEd25519PrivateKeyPath/-EphemeralEd25519PublicKeyHex
+-TimestampUrl
+-OutputRoot
 ```
 
-Generate the rehearsal Ed25519 key before configuring or building the
-candidate. Keep its private key as a regular hash-pinned file outside the
-checkout and pass its public key to CMake as
-`MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX` together with a positive
-`BUILD_NUMBER`. The public-key hash attested by the resulting `mumble.exe`
-must therefore be known before any quality or release evidence is produced.
-The rehearsal orchestrator derives the public key from the protected private
-key and rejects a mismatched repository variable. This is a test-only key; it
-is independent of the later production Ed25519 key and Azure signing.
+It must produce `prepare-build.json`, `rehearsal-challenge.json`, `unsigned/`,
+and `signed/`. `prepare-build.json` identifies the contained build/stage roots,
+candidate receipt, unsigned executable hash, and unsigned stage-payload hash.
+The wrapper independently runs `candidate_build_receipt.py --validate` before
+accepting the challenge.
 
-The measured-evidence archive must contain the schema-v2 `core_release`
-attestation and all four direct sibling results: master-quality and nightly for
-both low-performance and mainstream runners. The unsigned handoff and all
-evidence must identify the same payload. Listening input is a passing schema-v3
-aggregate produced from a schema-v3 source pack and must bind itself to exactly
-one of those protected runner results. Its sibling `<name>.evidence/` tree is an
-indivisible input: the protected executor must preserve the relative tree in the
-draft artifact so the release verifier can re-read every canonical source,
-answer-key and session file and reject missing, extra or changed evidence.
+## Independent observation
 
-The kill-switch receipt is produced independently of the rehearsal executor
-and binds the real launched client PID, start/end timestamps, executable hash,
-staged-payload hash, policy hash and runtime-trace hash. The updater VM receipt
-binds the exact evidence bytes to a separate hash-pinned VM executor and the
-protected image, snapshot and hardware fingerprints. The orchestrator copies
-the protected receipts over any executor output before validation.
+Only after the prepared artifact has been uploaded and downloaded may the
+hash-pinned observer and protected VM executor run. Both receive the exact
+challenge file and must copy its `challengeId`, source/build identity, signed
+executable hash, signed payload hash, installer hash, and policy hash into their
+evidence and receipts.
 
-## Executor contract
+- Kill-switch trace schema v3 and observer-receipt schema v2 prove the exact
+  launched client changed to `Original` within the policy refresh budget.
+- Updater VM evidence/receipt schema v2 proves all 26 N-2/N-1 native/MSI
+  rollback cases against the exact signed payload.
 
-The protected PowerShell executor is machine-specific but hash pinned. It
-receives the exact source/build identity, unsigned handoff, measured and
-listening evidence, release-smoke inputs, the prebuilt test Ed25519 key, the
-ephemeral PFX path, test signer identity, timestamp URL, draft name and output
-root. It must:
+These tools and outputs live outside both the source checkout and prepared
+artifact. Their hashes are passed independently to Finalize. A receipt with a
+different or missing challenge ID is rejected, even when all candidate hashes
+happen to match.
 
-1. sign the staged PE payload with the supplied ephemeral certificate;
-2. run `new-input-enhancement-embedded-key-attestation.ps1` against the exact
-   signed staged `mumble.exe`; build 0, unmanaged mode, a different build
-   number or a different embedded public-key hash must stop the rehearsal;
-3. build the MSI from those signed bytes, then sign that MSI;
-4. create the package, complete qualification and immutable audit artifact;
-5. run six Original controls plus 24 enhanced localhost transport cases;
-6. run the tracked updater-protocol-v4 simulator and the protected isolated
-   Windows VM rollback matrix for native/MSI N-2 and N-1 starts, including
-   update-health schema v3, exact candidate-executable binding and recovery MSI
-   reinstall;
-7. create normal and force-Original policies and exercise startup plus
-   15-minute refresh-with-jitter behavior;
-8. consume the independent observer/VM receipts, emit the signed protocol
-   evidence, VM evidence and schema-v2 policy runtime trace,
-   followed by `rehearsal.json` and the exact flat artifact set required by
-   `assert-input-enhancement-release-rehearsal.ps1`.
+## Phase 2: Finalize
 
-`rehearsal.json` must mark `ephemeralSigning.ed25519Provisioning` as
-`prebuilt-before-candidate-build`, include `embeddedKeyAttestation` in its
-artifact map, and bind both `embeddedKeyAttestationSha256` and the raw
-`embeddedPublicKeySha256`. The orchestrator and the independent remote job
-both compare that public key with the protected expected value.
+`finalize-input-enhancement-release-rehearsal.ps1`:
 
-The orchestrator rejects executors containing release-API, repository-write,
-Azure or production-signing capabilities. It also refuses Azure/OIDC/private
-production-key environment variables. Private key files and audio formats are
-forbidden in the draft manifest.
+1. rehashes and fully validates the unchanged prepared challenge and both
+   complete trees;
+2. rejects a challenge already present in the persistent replay ledger;
+3. validates the independent VM evidence/receipt and kill-switch trace/receipt
+   before invoking the hash-pinned finalize executor;
+4. assembles the local draft without rebuilding or resigning any product byte;
+5. runs schema-v2 release-rehearsal verification, including Original 6 plus
+   enhanced 24 release-smoke cases, qualification/listening gates, detached
+   signatures, updater protocol v4, the 26-case VM matrix, kill switch, exact
+   unsigned-to-signed transformation, and static updater-runtime inspection;
+6. creates and re-verifies `draft-manifest.json`; and
+7. atomically creates `<challengeId>.finalized.json` in the external replay
+   ledger.
 
-## Acceptance
+The protected finalize executor receives only `-Operation Finalize`, the
+unchanged prepared root/challenge, the independently produced evidence files,
+its own expected hash, draft name, and a new empty output root. It cannot
+receive signing private material. It must copy the prepared challenge and its
+`unsigned/` and `signed/` trees into the draft so remote verification can
+recompute the full transformation.
 
-The rehearsal fails closed unless it verifies:
+The replay ledger must be persistent and must not overlap the source,
+prepared, or draft parent. A second finalize attempt fails before invoking the
+executor. A concurrent race loses at atomic marker creation and is not an
+accepted draft.
 
-- the exact master commit and every protected input hash;
-- a positive managed build whose exact packaged `mumble.exe` reports the
-  expected compile-time Ed25519 public-key hash;
-- both 500-case master and 5,000-case nightly evidence sets;
-- blind-listening evidence bound to the same binary, payload, corpus, mixture,
-  model, recipe, protected runner and hardware identities;
-- qualification plus exactly 6 Original and 24 enhanced release-smoke cases;
-- the deterministic 26-case protocol simulation and the protected 26-case VM
-  rollback matrix, covering native/MSI install failure, pre-marker crash,
-  audio-init failure, process kill, power loss and both candidate/recovery
-  3010 behavior from N-2 and N-1;
-- channel-pointer schema v2 with the candidate MSI and exactly two earlier
-  recovery MSIs;
-- a separately signed force-Original policy plus a protected independent
-  observer receipt proving that the exact staged client process reaches
-  Original within 20 minutes;
-- byte-identical download from the Actions draft artifact store.
+## Workflow and remote attestation
 
-Azure/Authenticode production signing remains a later workflow. The qualified
-signing job is deliberately disabled until an additional verifier binds the
-same candidate to this rehearsal, protected listening/VM receipts and at least
-seven days plus 20 talk-hours of dogfood evidence.
+`.github/workflows/input-enhancement-release-rehearsal.yml` has four jobs:
 
-The machine-specific rehearsal executor, independent kill-switch observer and
-isolated Windows VM executor/receipt producer are protected external
-components. This repository defines and verifies their fail-closed contracts;
-it does not provide a portable implementation of those machine-specific
-executors.
+1. `prepare` creates and uploads the prepared challenge;
+2. `observe` downloads it and produces independent challenge-bound receipts;
+3. `finalize` downloads both artifacts and consumes the challenge once; and
+4. `remote-reverify` downloads the draft, reruns the full release verifier,
+   verifies every manifest byte, and emits schema-v2 remote attestation bound
+   to the challenge ID/hash and draft-manifest hash.
+
+The workflow grants only `actions: read` and `contents: read`. It must not gain
+`id-token: write`, `contents: write`, an environment, production secrets,
+Azure/Trusted Signing, or GitHub Release calls. Actions artifacts are temporary
+rehearsal transport, not a public release.
+
+## Static updater requirement
+
+`assert-windows-update-package.ps1 -RequireUpdaterRuntime` expands and verifies
+the package manifest and then runs
+`assert-mumble-updater-static-runtime.ps1` against the exact expanded
+`mumble-updater.exe`. `dumpbin /dependents` must succeed and must not list
+`zlib1.dll`. A missing updater or unavailable `dumpbin.exe` fails release
+qualification; the switch is not advisory.
+
+## External prerequisites
+
+The tracked code intentionally does not provide machine-specific signing,
+observer, VM, or MSI executors. Before a rehearsal can pass, operators must
+provision and hash-pin:
+
+- the prepare and finalize executors;
+- an independent kill-switch observer;
+- an isolated updater-VM executor/harness, image, snapshot, and hardware
+  fingerprint;
+- a persistent replay ledger outside the Actions checkout/temp draft roots;
+- the unsigned handoff and protected qualification/listening/smoke inputs.
+
+Azure/OIDC configuration remains out of scope until this exact two-phase
+rehearsal and community dogfood are green.

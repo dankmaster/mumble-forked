@@ -8,7 +8,8 @@ param(
 	[string]$ExpectedVersion = "",
 	[switch]$RequireUpdaterRuntime,
 	[switch]$RequireGStreamerRuntime,
-	[string]$ExpandedPayloadPath = ""
+	[string]$ExpandedPayloadPath = "",
+	[string]$DumpbinPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,6 +138,11 @@ try {
 		Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
 		New-Item -ItemType Directory -Force -Path $destination | Out-Null
 		Copy-Item -Path (Join-Path $payloadRoot '*') -Destination $destination -Recurse -Force
+	}
+	if ($RequireUpdaterRuntime) {
+		$runtimeRoot = if ([string]::IsNullOrWhiteSpace($ExpandedPayloadPath)) { $payloadRoot } else { $destination }
+		& (Join-Path $PSScriptRoot 'assert-mumble-updater-static-runtime.ps1') `
+			-UpdaterPath (Join-Path $runtimeRoot 'mumble-updater.exe') -DumpbinPath $DumpbinPath
 	}
 } finally {
 	Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue

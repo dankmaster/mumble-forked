@@ -440,8 +440,9 @@ try {
 	}
 	$vmEvidencePath = Join-Path $tempRoot 'updater-vm-evidence.json'
 	Write-ReleaseJson -Path $vmEvidencePath -Value ([ordered]@{
-		schemaVersion = 1; kind = 'updater-v4-vm-rollback-matrix'; passed = $true; audioFree = $true
+		schemaVersion = 2; kind = 'updater-v4-vm-rollback-matrix'; passed = $true; audioFree = $true
 		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		challengeId = ('0' * 64)
 		createdAtUtc = '2026-07-15T12:00:00Z'
 		candidate = [ordered]@{ payloadSha256 = ('a' * 64); installerSha256 = ('e' * 64); executableSha256 = ('f' * 64) }
 		recoveryTargets = @(
@@ -453,8 +454,9 @@ try {
 	})
 	$vmReceiptPath = Join-Path $tempRoot 'updater-vm-receipt.json'
 	Write-ReleaseJson -Path $vmReceiptPath -Value ([ordered]@{
-		schemaVersion = 1; kind = 'updater-v4-protected-vm-receipt'; passed = $true; audioFree = $true
+		schemaVersion = 2; kind = 'updater-v4-protected-vm-receipt'; passed = $true; audioFree = $true
 		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		challengeId = ('0' * 64)
 		createdAtUtc = '2026-07-15T12:01:00Z'; evidenceSha256 = Get-ReleaseFileSha256 -Path $vmEvidencePath
 		vmExecutorSha256 = ('6' * 64); imageSha256 = ('3' * 64); snapshotSha256 = ('4' * 64)
 		hardwareFingerprintSha256 = ('5' * 64)
@@ -462,6 +464,7 @@ try {
 	$vmAssert = @{
 		EvidencePath = $vmEvidencePath; ExpectedSourceSha = $sourceSha
 		ExpectedBuildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		ExpectedChallengeId = ('0' * 64)
 		ExpectedCandidatePayloadSha256 = ('a' * 64); ExpectedCandidateInstallerSha256 = ('e' * 64)
 		ExpectedCandidateExecutableSha256 = ('f' * 64); ExpectedHarnessSha256 = ('d' * 64)
 		ReceiptPath = $vmReceiptPath; ExpectedReceiptSha256 = Get-ReleaseFileSha256 -Path $vmReceiptPath
@@ -484,16 +487,18 @@ try {
 		startedAtUtc = '2026-07-15T12:00:00Z'; endedAtUtc = '2026-07-15T12:10:00Z'
 	}
 	Write-ReleaseJson -Path $killTracePath -Value ([ordered]@{
-		schemaVersion = 2; kind = 'input-enhancement-policy-runtime-trace'; passed = $true; audioFree = $true
+		schemaVersion = 3; kind = 'input-enhancement-policy-runtime-trace'; passed = $true; audioFree = $true
 		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		challengeId = ('0' * 64)
 		startedAtUtc = '2026-07-15T12:00:00Z'; observationNonce = ('9' * 64)
 		testedBinarySha256 = ('f' * 64); stagedPayloadSha256 = ('a' * 64); policySha256 = ('7' * 64)
 		clientProcess = $killClient; events = @()
 	})
 	$killReceiptPath = Join-Path $tempRoot 'kill-switch-observer-receipt.json'
 	Write-ReleaseJson -Path $killReceiptPath -Value ([ordered]@{
-		schemaVersion = 1; kind = 'input-enhancement-policy-observer-receipt'; passed = $true; audioFree = $true
+		schemaVersion = 2; kind = 'input-enhancement-policy-observer-receipt'; passed = $true; audioFree = $true
 		sourceSha = $sourceSha; buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		challengeId = ('0' * 64)
 		observationNonce = ('9' * 64); observerSha256 = ('8' * 64)
 		runtimeTraceSha256 = Get-ReleaseFileSha256 -Path $killTracePath
 		testedBinarySha256 = ('f' * 64); stagedPayloadSha256 = ('a' * 64); policySha256 = ('7' * 64)
@@ -503,6 +508,7 @@ try {
 		RuntimeTracePath = $killTracePath; ReceiptPath = $killReceiptPath
 		ExpectedReceiptSha256 = Get-ReleaseFileSha256 -Path $killReceiptPath
 		ExpectedSourceSha = $sourceSha; ExpectedBuildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		ExpectedChallengeId = ('0' * 64)
 		ExpectedObserverSha256 = ('8' * 64); ExpectedTestedBinarySha256 = ('f' * 64)
 		ExpectedStagedPayloadSha256 = ('a' * 64); ExpectedPolicySha256 = ('7' * 64)
 	}
@@ -665,14 +671,15 @@ try {
 	$rehearsalWorkflowPath = Join-Path $scriptsRoot '..\..\.github\workflows\input-enhancement-release-rehearsal.yml'
 	$rehearsalWorkflowSource = Get-Content -LiteralPath $rehearsalWorkflowPath -Raw
 	foreach ($requiredMarker in @(
-		'actions: read', 'contents: read', 'invoke-input-enhancement-release-rehearsal.ps1',
+		'actions: read', 'contents: read', 'prepare-input-enhancement-release-rehearsal.ps1',
+		'finalize-input-enhancement-release-rehearsal.ps1',
+		'prepare-immutable-signed-challenge', 'independently-observe-prepared-candidate',
+		'finalize-once-and-stage-local-draft',
 		'actions/upload-artifact@', 'actions/download-artifact@', 'remote-reverification.json',
-		'INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PRIVATE_KEY_SHA256',
-		'INPUT_ENHANCEMENT_REHEARSAL_TEST_ED25519_PUBLIC_KEY_HEX',
-		'-TestEd25519PrivateKeyPath $env:REHEARSAL_TEST_ED25519_PRIVATE_KEY',
-		'-ExpectedEd25519PublicKeyHex $env:REHEARSAL_TEST_ED25519_PUBLIC_KEY_HEX',
-		'INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_RECEIPT_SHA256',
-		'INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_RECEIPT_SHA256',
+		'INPUT_ENHANCEMENT_REHEARSAL_PREPARE_EXECUTOR_SHA256',
+		'INPUT_ENHANCEMENT_REHEARSAL_FINALIZE_EXECUTOR_SHA256',
+		'INPUT_ENHANCEMENT_REHEARSAL_REPLAY_LEDGER_ROOT',
+		'INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256', 'INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256',
 		'INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256',
 		'-AllowedOutputParent $env:RUNNER_TEMP'
@@ -681,20 +688,162 @@ try {
 			throw "Pre-Azure rehearsal workflow is missing '$requiredMarker'."
 		}
 	}
-	$rehearsalInvokeSource = Get-Content -LiteralPath (
-		Join-Path $scriptsRoot 'invoke-input-enhancement-release-rehearsal.ps1') -Raw
+	$rehearsalPrepareSource = Get-Content -LiteralPath (
+		Join-Path $scriptsRoot 'prepare-input-enhancement-release-rehearsal.ps1') -Raw
 	foreach ($requiredMarker in @(
-		'prebuilt test Ed25519 private key', 'PrebuiltTestEd25519PrivateKeyPath',
-		'PrebuiltTestEd25519PrivateKeySha256', 'PrebuiltTestEd25519PublicKeyHex',
-		'prebuilt-before-candidate-build'
+		'genpkey', 'EphemeralEd25519PrivateKeyPath', 'candidate_build_receipt.py',
+		'privateMaterialDeleted', 'rehearsal-challenge.json'
 	)) {
-		if (-not $rehearsalInvokeSource.Contains($requiredMarker)) {
-			throw "Pre-Azure rehearsal orchestrator is missing pre-build key marker '$requiredMarker'."
+		if (-not $rehearsalPrepareSource.Contains($requiredMarker)) {
+			throw "Pre-Azure rehearsal prepare phase is missing '$requiredMarker'."
 		}
 	}
-	if ($rehearsalInvokeSource.Contains('genpkey -algorithm Ed25519')) {
-		throw 'Pre-Azure rehearsal must not generate its manifest key after receiving the candidate handoff.'
+	$rehearsalFinalizeSource = Get-Content -LiteralPath (
+		Join-Path $scriptsRoot 'finalize-input-enhancement-release-rehearsal.ps1') -Raw
+	foreach ($requiredMarker in @(
+		'ReplayLedgerRoot', 'FileMode]::CreateNew', 'ExpectedChallengeId',
+		'assert-input-enhancement-updater-vm-evidence.ps1',
+		'assert-input-enhancement-kill-switch-observation.ps1'
+	)) {
+		if (-not $rehearsalFinalizeSource.Contains($requiredMarker)) {
+			throw "Pre-Azure rehearsal finalize phase is missing '$requiredMarker'."
+		}
 	}
+	$legacyInvokeSource = Get-Content -LiteralPath (
+		Join-Path $scriptsRoot 'invoke-input-enhancement-release-rehearsal.ps1') -Raw
+	if (-not $legacyInvokeSource.Contains('one-phase input-enhancement release rehearsal has been retired')) {
+		throw 'Legacy one-phase rehearsal entry point must fail closed.'
+	}
+
+	# Narrow, audio-free fixture for the prepare/finalize boundary. This proves
+	# that the challenge covers both complete trees, rejects a post-prepare byte
+	# mutation, rejects a different candidate receipt and rejects replay.
+	$challengeRoot = Join-Path $tempRoot 'rehearsal-challenge-fixture'
+	$unsignedRoot = Join-Path $challengeRoot 'unsigned'
+	$signedRoot = Join-Path $challengeRoot 'signed'
+	New-Item -ItemType Directory -Force -Path $unsignedRoot, $signedRoot | Out-Null
+	[IO.File]::WriteAllText((Join-Path $unsignedRoot 'mumble.exe'), 'unsigned-executable', [Text.UTF8Encoding]::new($false))
+	[IO.File]::WriteAllText((Join-Path $signedRoot 'mumble.exe'), 'signed-executable-longer', [Text.UTF8Encoding]::new($false))
+	Write-ReleaseJson -Path (Join-Path $unsignedRoot 'candidate-build-receipt.json') -Value ([ordered]@{ fixture = $true })
+	Write-ReleaseJson -Path (Join-Path $unsignedRoot 'measured-evidence.json') -Value ([ordered]@{ passed = $true })
+	Copy-Item -LiteralPath (Join-Path $unsignedRoot 'candidate-build-receipt.json') -Destination $signedRoot
+	Copy-Item -LiteralPath (Join-Path $unsignedRoot 'measured-evidence.json') -Destination $signedRoot
+	foreach ($name in @('candidate.msi', 'candidate.mumble-update', 'qualification.json', 'policy.json', 'release-smoke.json')) {
+		[IO.File]::WriteAllText((Join-Path $signedRoot $name), "fixture-$name", [Text.UTF8Encoding]::new($false))
+	}
+	$getChallengeInventory = {
+		param([string]$Root)
+		@(Get-ChildItem -LiteralPath $Root -Recurse -File | ForEach-Object {
+			[ordered]@{
+				path = $_.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+				sha256 = Get-ReleaseFileSha256 -Path $_.FullName
+				size = [int64]$_.Length
+			}
+		} | Sort-Object -Property @{ Expression = { $_.path }; Ascending = $true })
+	}
+	$unsignedFiles = @(& $getChallengeInventory $unsignedRoot)
+	$signedFiles = @(& $getChallengeInventory $signedRoot)
+	$unsignedTreeSha = Get-TestUtf8Sha256 -Value (([ordered]@{ files = $unsignedFiles } | ConvertTo-Json -Depth 4 -Compress))
+	$signedTreeSha = Get-TestUtf8Sha256 -Value (([ordered]@{ files = $signedFiles } | ConvertTo-Json -Depth 4 -Compress))
+	$unsignedByPath = @{}; foreach ($record in $unsignedFiles) { $unsignedByPath[$record.path] = $record }
+	$signedByPath = @{}; foreach ($record in $signedFiles) { $signedByPath[$record.path] = $record }
+	$transformations = New-Object System.Collections.Generic.List[object]
+	foreach ($path in @($unsignedByPath.Keys + $signedByPath.Keys | Sort-Object -Unique)) {
+		$before = if ($unsignedByPath.ContainsKey($path)) { $unsignedByPath[$path] } else { $null }
+		$after = if ($signedByPath.ContainsKey($path)) { $signedByPath[$path] } else { $null }
+		$mode = if ($null -eq $before) { 'packaged-output' } elseif ($path -ceq 'mumble.exe') { 'authenticode-pe' } else { 'unchanged' }
+		$transformations.Add([ordered]@{
+			mode = $mode; path = $path
+			unsignedSha256 = if ($before) { $before.sha256 } else { $null }
+			unsignedSize = if ($before) { [int64]$before.size } else { $null }
+			signedSha256 = if ($after) { $after.sha256 } else { $null }
+			signedSize = if ($after) { [int64]$after.size } else { $null }
+		})
+	}
+	$challengeId = ('4' * 64)
+	$challengePath = Join-Path $challengeRoot 'rehearsal-challenge.json'
+	$challengeDocument = [ordered]@{
+		schemaVersion = 1; kind = 'input-enhancement-pre-azure-rehearsal-challenge'; phase = 'prepared'
+		challengeId = $challengeId; createdAtUtc = '2026-07-18T12:00:00Z'; sourceSha = $sourceSha
+		buildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		unsigned = [ordered]@{
+			root = 'unsigned'; treeSha256 = $unsignedTreeSha; files = $unsignedFiles
+			testedBinaryPath = 'mumble.exe'; testedBinarySha256 = $unsignedByPath['mumble.exe'].sha256
+			stagedPayloadSha256 = $unsignedTreeSha
+			candidateBuildReceiptPath = 'candidate-build-receipt.json'
+			candidateBuildReceiptSha256 = $unsignedByPath['candidate-build-receipt.json'].sha256
+			measuredEvidencePath = 'measured-evidence.json'; measuredEvidenceSha256 = $unsignedByPath['measured-evidence.json'].sha256
+		}
+		signed = [ordered]@{
+			root = 'signed'; treeSha256 = $signedTreeSha; files = $signedFiles
+			testedBinaryPath = 'mumble.exe'; testedBinarySha256 = $signedByPath['mumble.exe'].sha256
+			stagedPayloadSha256 = $signedTreeSha
+			installerPath = 'candidate.msi'; installerSha256 = $signedByPath['candidate.msi'].sha256
+			updatePackagePath = 'candidate.mumble-update'; updatePackageSha256 = $signedByPath['candidate.mumble-update'].sha256
+			qualificationPath = 'qualification.json'; qualificationSha256 = $signedByPath['qualification.json'].sha256
+			policyPath = 'policy.json'; policySha256 = $signedByPath['policy.json'].sha256
+			releaseSmokePath = 'release-smoke.json'; releaseSmokeSha256 = $signedByPath['release-smoke.json'].sha256
+		}
+		transformation = [ordered]@{ kind = 'authenticode-sign-and-package-v1'; records = $transformations.ToArray() }
+		bindings = [ordered]@{
+			prepareExecutorSha256 = ('1' * 64); unsignedHandoffSha256 = ('2' * 64)
+			measuredEvidenceSha256 = ('3' * 64); listeningQualificationSha256 = ('5' * 64)
+			releaseSmokeHarnessSha256 = ('6' * 64); fixtureManifestSha256 = ('7' * 64)
+			caseSetSha256 = ('8' * 64); serverExecutableSha256 = ('9' * 64)
+		}
+		ephemeralSigning = [ordered]@{
+			testOnly = $true; certificateSubject = 'CN=Mumble Input Enhancement Rehearsal 1-0123456789ab'
+			certificateThumbprint = ('A' * 40); ed25519PublicKeyHex = ('a' * 64); privateMaterialDeleted = $true
+		}
+		security = [ordered]@{
+			azureUsed = $false; contentsWrite = $false; draftCreated = $false
+			privateMaterialIncluded = $false; productionCredentialsUsed = $false
+		}
+	}
+	Write-ReleaseJson -Path $challengePath -Value $challengeDocument
+	$challengeAssert = @{
+		PreparedRoot = $challengeRoot; ChallengePath = $challengePath; ExpectedSourceSha = $sourceSha
+		ExpectedBuildId = "mumble-forked-build-1-$($sourceSha.Substring(0, 12))"
+		ExpectedPrepareExecutorSha256 = ('1' * 64); ExpectedUnsignedHandoffSha256 = ('2' * 64)
+		ExpectedMeasuredEvidenceSha256 = ('3' * 64); ExpectedListeningQualificationSha256 = ('5' * 64)
+		ExpectedReleaseSmokeHarnessSha256 = ('6' * 64); ExpectedFixtureManifestSha256 = ('7' * 64)
+		ExpectedCaseSetSha256 = ('8' * 64); ExpectedServerExecutableSha256 = ('9' * 64)
+		ExpectedChallengeId = $challengeId
+		ExpectedCandidateBuildReceiptSha256 = $unsignedByPath['candidate-build-receipt.json'].sha256
+		RequireCanonicalJson = $true
+	}
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-challenge.ps1') @challengeAssert | Out-Null
+	[IO.File]::AppendAllText((Join-Path $signedRoot 'mumble.exe'), '-tampered', [Text.UTF8Encoding]::new($false))
+	Assert-Throws -Description 'signed candidate changed after prepare challenge' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-challenge.ps1') @challengeAssert | Out-Null
+	}
+	[IO.File]::WriteAllText((Join-Path $signedRoot 'mumble.exe'), 'signed-executable-longer', [Text.UTF8Encoding]::new($false))
+	Assert-Throws -Description 'candidate build receipt mismatch across phases' -Script {
+		$wrongReceipt = $challengeAssert.Clone(); $wrongReceipt.ExpectedCandidateBuildReceiptSha256 = ('f' * 64)
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-challenge.ps1') @wrongReceipt | Out-Null
+	}
+	$replayRoot = Join-Path $tempRoot 'rehearsal-replay-ledger'
+	New-Item -ItemType Directory -Path $replayRoot | Out-Null
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
+		-ReplayLedgerRoot $replayRoot -ChallengeId $challengeId | Out-Null
+	Write-ReleaseJson -Path (Join-Path $replayRoot "$challengeId.finalized.json") -Value ([ordered]@{ challengeId = $challengeId })
+	Assert-Throws -Description 'replayed rehearsal challenge' -Script {
+		& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
+			-ReplayLedgerRoot $replayRoot -ChallengeId $challengeId | Out-Null
+	}
+	$challengeDraftRoot = Join-Path $tempRoot 'rehearsal-challenge-draft-fixture'
+	New-Item -ItemType Directory -Path $challengeDraftRoot | Out-Null
+	Copy-Item -LiteralPath $challengePath -Destination $challengeDraftRoot
+	Copy-Item -LiteralPath $unsignedRoot, $signedRoot -Destination $challengeDraftRoot -Recurse
+	Write-ReleaseJson -Path (Join-Path $challengeDraftRoot 'rehearsal.json') -Value ([ordered]@{
+		artifacts = [ordered]@{
+			rehearsalChallenge = [ordered]@{ fileName = 'rehearsal-challenge.json' }
+		}
+	})
+	& (Join-Path $scriptsRoot 'new-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $challengeDraftRoot -ArtifactName 'self-test-two-phase-draft'
+	& (Join-Path $scriptsRoot 'assert-input-enhancement-rehearsal-draft-manifest.ps1') `
+		-Root $challengeDraftRoot -ExpectedArtifactName 'self-test-two-phase-draft'
 	foreach ($forbiddenPattern in @(
 		'(?im)^\s*contents:\s*write\s*$', '(?im)^\s*id-token:\s*write\s*$',
 		'(?im)^\s*environment\s*:', '(?i)\bgh\s+release\b', '(?i)api\.github\.com/.*/releases',
@@ -1309,6 +1458,20 @@ try {
 	& (Join-Path $scriptsRoot 'create-windows-update-package.ps1') `
 		-StageRoot $stageRoot -OutputPath $updatePackagePath -Version '1.7.42' `
 		-Build $buildNumber -Commit $sourceSha -RequireUpdaterRuntime -Validate
+	$dumpbinPassPath = Join-Path $tempRoot 'dumpbin-static-pass.cmd'
+	[IO.File]::WriteAllText($dumpbinPassPath, "@echo off`r`necho KERNEL32.dll`r`nexit /b 0`r`n",
+		[Text.ASCIIEncoding]::new())
+	$dumpbinDynamicPath = Join-Path $tempRoot 'dumpbin-static-missing.cmd'
+	[IO.File]::WriteAllText($dumpbinDynamicPath, "@echo off`r`necho     zlib1.dll`r`nexit /b 0`r`n",
+		[Text.ASCIIEncoding]::new())
+	Assert-Throws -Description 'update package whose updater is not statically linked' -Script {
+		& (Join-Path $scriptsRoot 'assert-windows-update-package.ps1') `
+			-PackagePath $updatePackagePath -ExpectedCommit $sourceSha -ExpectedBuild $buildNumber `
+			-ExpectedVersion '1.7.42' -RequireUpdaterRuntime -DumpbinPath $dumpbinDynamicPath
+	}
+	& (Join-Path $scriptsRoot 'assert-windows-update-package.ps1') `
+		-PackagePath $updatePackagePath -ExpectedCommit $sourceSha -ExpectedBuild $buildNumber `
+		-ExpectedVersion '1.7.42' -RequireUpdaterRuntime -DumpbinPath $dumpbinPassPath
 	$administrativeImageRoot = Join-Path $tempRoot 'administrative-image'
 	$administrativePayloadRoot = Join-Path $administrativeImageRoot 'Program Files\Mumble\client'
 	New-Item -ItemType Directory -Force -Path $administrativePayloadRoot | Out-Null
@@ -2519,6 +2682,7 @@ raise SystemExit(1)
 		ExpectedSourceSha = $sourceSha
 		ExpectedBuildId = $buildId
 		ExpectedSignerSubject = $signerSubject
+		DumpbinPath = $dumpbinPassPath
 	}
 	& (Join-Path $scriptsRoot "assert-input-enhancement-qualification.ps1") @assertArguments
 
@@ -2553,7 +2717,8 @@ raise SystemExit(1)
 	$expandedArtifactRoot = Join-Path $tempRoot "qualified-expanded"
 	& (Join-Path $scriptsRoot 'assert-windows-update-package.ps1') `
 		-PackagePath $updatePackagePath -ExpectedCommit $sourceSha -ExpectedBuild $buildNumber `
-		-ExpectedVersion '1.7.42' -RequireUpdaterRuntime -ExpandedPayloadPath $expandedArtifactRoot
+		-ExpectedVersion '1.7.42' -RequireUpdaterRuntime -ExpandedPayloadPath $expandedArtifactRoot `
+		-DumpbinPath $dumpbinPassPath
 	$packagedClientPath = Join-Path $expandedArtifactRoot "mumble.exe"
 	$artifactHash = Get-ReleaseFileSha256 -Path $updatePackagePath
 	$packagedClientHash = Get-ReleaseFileSha256 -Path $packagedClientPath

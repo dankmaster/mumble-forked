@@ -3,6 +3,7 @@ param(
 	[Parameter(Mandatory = $true)] [string]$EvidencePath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{40}$')] [string]$ExpectedSourceSha,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$')] [string]$ExpectedBuildId,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedChallengeId,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedCandidatePayloadSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedCandidateInstallerSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedCandidateExecutableSha256,
@@ -34,12 +35,13 @@ if ($actualReceiptSha256 -cne $ExpectedReceiptSha256) {
 }
 $receipt = Read-ReleaseJson -Path $ReceiptPath
 Assert-ExactProperties $receipt @(
-	'audioFree', 'buildId', 'createdAtUtc', 'evidenceSha256', 'hardwareFingerprintSha256', 'imageSha256',
+	'audioFree', 'buildId', 'challengeId', 'createdAtUtc', 'evidenceSha256', 'hardwareFingerprintSha256', 'imageSha256',
 	'kind', 'passed', 'schemaVersion', 'snapshotSha256', 'sourceSha', 'vmExecutorSha256'
 ) 'Updater VM protected receipt'
-if ([int]$receipt.schemaVersion -ne 1 -or [string]$receipt.kind -cne 'updater-v4-protected-vm-receipt' -or
+if ([int]$receipt.schemaVersion -ne 2 -or [string]$receipt.kind -cne 'updater-v4-protected-vm-receipt' -or
 	$receipt.passed -ne $true -or $receipt.audioFree -ne $true -or
 	[string]$receipt.sourceSha -cne $ExpectedSourceSha -or [string]$receipt.buildId -cne $ExpectedBuildId -or
+	[string]$receipt.challengeId -cne $ExpectedChallengeId -or
 	[string]$receipt.evidenceSha256 -cne $actualEvidenceSha256 -or
 	[string]$receipt.vmExecutorSha256 -cne $ExpectedVmExecutorSha256 -or
 	[string]$receipt.imageSha256 -cne $ExpectedImageSha256 -or
@@ -53,12 +55,13 @@ if (-not [datetimeoffset]::TryParse([string]$receipt.createdAtUtc,
 	[ref]$receiptCreatedAt)) { throw 'Updater VM receipt timestamp is invalid.' }
 
 Assert-ExactProperties $evidence @(
-	'audioFree', 'buildId', 'candidate', 'cases', 'createdAtUtc', 'kind', 'passed', 'recoveryTargets',
+	'audioFree', 'buildId', 'candidate', 'cases', 'challengeId', 'createdAtUtc', 'kind', 'passed', 'recoveryTargets',
 	'runner', 'schemaVersion', 'sourceSha'
 ) 'Updater VM evidence'
-if ([int]$evidence.schemaVersion -ne 1 -or [string]$evidence.kind -cne 'updater-v4-vm-rollback-matrix' -or
+if ([int]$evidence.schemaVersion -ne 2 -or [string]$evidence.kind -cne 'updater-v4-vm-rollback-matrix' -or
 	$evidence.passed -ne $true -or $evidence.audioFree -ne $true -or
-	[string]$evidence.sourceSha -cne $ExpectedSourceSha -or [string]$evidence.buildId -cne $ExpectedBuildId) {
+	[string]$evidence.sourceSha -cne $ExpectedSourceSha -or [string]$evidence.buildId -cne $ExpectedBuildId -or
+	[string]$evidence.challengeId -cne $ExpectedChallengeId) {
 	throw 'Updater VM evidence identity/status is invalid.'
 }
 $createdAt = [datetimeoffset]::MinValue

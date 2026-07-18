@@ -421,6 +421,41 @@ function Get-ValidatedInputEnhancementRehearsalDraftFiles {
 		}
 	}
 
+	# Schema-v2 release rehearsals carry the complete prepared unsigned/signed
+	# trees so a remote verifier can recompute the declared transformation. The
+	# canonical challenge is itself a direct artifact and is the sole allowlist
+	# for those two subtrees.
+	$challengeProperty = $artifacts.PSObject.Properties['rehearsalChallenge']
+	if ($null -ne $challengeProperty) {
+		$challengeFileName = Assert-SafeRelativeReleasePath `
+			-Path ([string](Assert-ObjectProperty -Object $challengeProperty.Value -Name 'fileName' `
+				-Context 'Release rehearsal challenge')) `
+			-Context 'Release rehearsal challenge'
+		$challengePath = Join-Path $rootPath $challengeFileName
+		$challenge = Read-ReleaseJson -Path $challengePath
+		if ([int](Assert-ObjectProperty $challenge 'schemaVersion' 'Rehearsal challenge') -ne 1 -or
+			[string](Assert-ObjectProperty $challenge 'kind' 'Rehearsal challenge') -cne
+				'input-enhancement-pre-azure-rehearsal-challenge') {
+			throw 'Release rehearsal challenge artifact has an unsupported schema.'
+		}
+		foreach ($treeName in @('unsigned', 'signed')) {
+			$tree = Assert-ObjectProperty $challenge $treeName "Rehearsal challenge $treeName tree"
+			$treeRoot = Assert-SafeRelativeReleasePath `
+				-Path ([string](Assert-ObjectProperty $tree 'root' "Rehearsal challenge $treeName tree")) `
+				-Context "Rehearsal challenge $treeName root"
+			if ($treeRoot.Contains('/')) { throw 'Rehearsal challenge tree roots must be direct children.' }
+			foreach ($record in @(Assert-ObjectProperty $tree 'files' "Rehearsal challenge $treeName tree")) {
+				$relative = Assert-SafeRelativeReleasePath `
+					-Path ([string](Assert-ObjectProperty $record 'path' "Rehearsal challenge $treeName file")) `
+					-Context "Rehearsal challenge $treeName file"
+				$path = "$treeRoot/$relative"
+				if (-not $allowedFiles.Add($path)) {
+					throw "Rehearsal challenge allowlist contains duplicate file '$path'."
+				}
+			}
+		}
+	}
+
 	$listeningProperty = $artifacts.PSObject.Properties['listeningQualification']
 	if ($null -ne $listeningProperty) {
 		$listeningFileName = Assert-SafeRelativeReleasePath `
@@ -943,6 +978,7 @@ Export-ModuleMember -Function @(
 	"Assert-SigningResults",
 	"Assert-SafeRelativeReleasePath",
 	"Initialize-InputEnhancementRehearsalOutputRoot",
+	"Assert-InputEnhancementRehearsalDraftFileSafety",
 	"Get-ValidatedInputEnhancementRehearsalDraftFiles",
 	"Assert-Ed25519PublicKeyHex",
 	"Assert-CanonicalInputEnhancementPolicy",
