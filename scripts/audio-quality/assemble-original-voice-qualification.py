@@ -41,6 +41,7 @@ from payload_identity import (
 	payload_tree_attestation,
 	payload_tree_records,
 )
+from candidate_build_receipt import BuildReceiptError, validate_receipt as validate_candidate_build_receipt
 
 
 LEGACY_INSTRUMENTATION_BASE_COMMIT = "ada2a85f6b551a2f3d8c6b23649edcd3c0b9a8f8"
@@ -51,6 +52,8 @@ LEGACY_EXECUTABLE_SHA256 = "eb062ee53356e8223eb1264f9be5f8276a5562963ef6cf932410
 # identity. It deliberately does not refer to the instrumentation base.
 LEGACY_COMMIT = LEGACY_BUILD_COMMIT
 SERVER_COMMIT = "edd13692174b81554726b58cd2fa27135d45b0df"
+SERVER_EXECUTABLE_SHA256 = "d78f6d2889a3140fd87a68db84d8aebcfe9712848d6fc2cd257d452b68be1b5e"
+SERVER_RUNTIME_PAYLOAD_SHA256 = "fe4e365ebd9c42b993852e4f44f184dad9b08a9f5bdcd8c76fb96e5b09e9f035"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 SAMPLE_RATE_HZ = 48_000
 FRAME_SAMPLES = 480
@@ -73,10 +76,11 @@ CLIENT_IDENTITY_KEYS = {
 	"build_executable", "commit", "qualified_executable", "stage_executable", "stage_payload", "worktree_receipt",
 }
 LEGACY_CLIENT_IDENTITY_KEYS = CLIENT_IDENTITY_KEYS | {"instrumentation_base_commit"}
-SERVER_IDENTITY_KEYS = {"commit", "executable", "worktree_receipt"}
+CANDIDATE_CLIENT_IDENTITY_KEYS = CLIENT_IDENTITY_KEYS | {"build_receipt"}
+SERVER_IDENTITY_KEYS = {"build_cache", "commit", "executable", "runtime_payload", "worktree_receipt"}
 IDENTITY_KEYS = {"candidate", "legacy", "server", "tools"}
-TOOLS_KEYS = {"scorer", "wrapper"}
-RUN_PROVENANCE_KEYS = {"fixed_timeline_scorer", "wrapper"}
+TOOLS_KEYS = {"policy_manifest", "policy_signature", "scorer", "wrapper"}
+RUN_PROVENANCE_KEYS = {"fixed_timeline_scorer", "input_enhancement_policy", "wrapper"}
 FILE_REFERENCE_KEYS = {"path", "sha256", "size_bytes"}
 TREE_REFERENCE_KEYS = {"file_count", "path", "sha256"}
 TRANSPORT_KEYS = {
@@ -809,6 +813,9 @@ class ClientIdentity:
 	stage_executable: AttestedFile
 	qualified_executable: AttestedFile
 	stage_payload: AttestedTree
+	build_receipt: AttestedFile | None
+	policy_manifest: AttestedFile | None
+	policy_signature: AttestedFile | None
 
 	@property
 	def executable_sha256(self) -> str:
@@ -817,10 +824,11 @@ class ClientIdentity:
 
 def _validate_client_identity(
 	value: Any, base: Path, role: str, expected_commit: str, verify_live_git: bool,
+	expected_public_key_hex: str | None = None,
 ) -> ClientIdentity:
 	identity = _mapping(value, f"bindings.identities.{role}")
 	_exact_keys(
-		identity, LEGACY_CLIENT_IDENTITY_KEYS if role == "legacy" else CLIENT_IDENTITY_KEYS,
+		identity, LEGACY_CLIENT_IDENTITY_KEYS if role == "legacy" else CANDIDATE_CLIENT_IDENTITY_KEYS,
 		f"bindings.identities.{role}",
 	)
 	commit = _commit(identity["commit"], f"bindings.identities.{role}.commit")
@@ -850,13 +858,35 @@ def _validate_client_identity(
 			build.sha256 == LEGACY_EXECUTABLE_SHA256,
 			"bindings.identities.legacy", "legacy executable differs from the frozen buildable reference",
 		)
-	return ClientIdentity(role, commit, worktree, build, stage, qualified, payload)
+	build_receipt: AttestedFile | None = None
+	policy_manifest: AttestedFile | None = None
+	policy_signature: AttestedFile | None = None
+	if role == "candidate":
+		build_receipt = _file_reference(identity["build_receipt"], base, "bindings.identities.candidate.build_receipt")
+		if verify_live_git:
+			try:
+				receipt_document = validate_candidate_build_receipt(
+					build_receipt.path,
+					expected_source_root=worktree.source_root,
+					expected_commit=commit,
+					expected_build_root=build.path.parent,
+					expected_executable_sha256=build.sha256,
+					expected_stage_payload_sha256=payload.sha256,
+					expected_public_key_hex=expected_public_key_hex,
+				)
+			except BuildReceiptError as error:
+				raise AssemblyError(f"bindings.identities.candidate.build_receipt: {error}") from error
+			policy_manifest = _file_reference(receipt_document["package"]["channel_policy"], base, "candidate build receipt channel policy")
+			policy_signature = _file_reference(receipt_document["package"]["channel_policy_signature"], base, "candidate build receipt channel policy signature")
+	return ClientIdentity(role, commit, worktree, build, stage, qualified, payload, build_receipt, policy_manifest, policy_signature)
 
 
 @dataclass(frozen=True)
 class ServerIdentity:
 	commit: str
 	worktree: WorktreeReceipt
+	build_cache: AttestedFile
+	runtime_payload: AttestedTree
 	executable: AttestedFile
 
 
@@ -866,15 +896,36 @@ def _validate_server_identity(value: Any, base: Path, verify_live_git: bool) -> 
 	commit = _commit(identity["commit"], "bindings.identities.server.commit")
 	_expect(commit == SERVER_COMMIT, "bindings.identities.server.commit", "unexpected frozen OG server commit")
 	worktree = _validate_worktree_receipt(identity["worktree_receipt"], base, "server", commit, verify_live_git)
+	build_cache = _file_reference(identity["build_cache"], base, "bindings.identities.server.build_cache")
+	_expect(build_cache.path.name == "CMakeCache.txt", "bindings.identities.server.build_cache", "expected CMakeCache.txt")
+	runtime_payload = _tree_reference(identity["runtime_payload"], base, "bindings.identities.server.runtime_payload")
 	executable = _file_reference(identity["executable"], base, "bindings.identities.server.executable")
 	_expect(executable.path.name.lower() == "mumble-server.exe", "bindings.identities.server.executable", "expected mumble-server.exe")
-	return ServerIdentity(commit, worktree, executable)
+	_expect(executable.path.parent == runtime_payload.path, "bindings.identities.server.executable", "server must be launched from the sealed runtime root")
+	if verify_live_git:
+		_expect(executable.sha256 == SERVER_EXECUTABLE_SHA256, "bindings.identities.server.executable", "frozen OG server executable changed")
+		_expect(runtime_payload.sha256 == SERVER_RUNTIME_PAYLOAD_SHA256, "bindings.identities.server.runtime_payload", "frozen OG server runtime changed")
+		try:
+			cache_lines = build_cache.path.read_text(encoding="utf-8", errors="strict").splitlines()
+		except (OSError, UnicodeError) as error:
+			raise AssemblyError(f"bindings.identities.server.build_cache: unable to read cache: {error}") from error
+		cache: dict[str, str] = {}
+		for line in cache_lines:
+			if line and not line.startswith(("#", "//")) and "=" in line and ":" in line.split("=", 1)[0]:
+				left, value = line.split("=", 1)
+				name = left.split(":", 1)[0]
+				cache[name] = value
+		_expect(Path(os.path.abspath(cache.get("CMAKE_HOME_DIRECTORY", ""))) == worktree.source_root, "bindings.identities.server.build_cache", "source root mismatch")
+		_expect(cache.get("server") == "ON" and cache.get("client") == "OFF", "bindings.identities.server.build_cache", "not an isolated server-only build")
+	return ServerIdentity(commit, worktree, build_cache, runtime_payload, executable)
 
 
 @dataclass(frozen=True)
 class ToolIdentity:
 	wrapper: AttestedFile
 	scorer: AttestedFile
+	policy_manifest: AttestedFile
+	policy_signature: AttestedFile
 
 
 def _validate_tools(value: Any, base: Path) -> ToolIdentity:
@@ -883,6 +934,8 @@ def _validate_tools(value: Any, base: Path) -> ToolIdentity:
 	return ToolIdentity(
 		_file_reference(tools["wrapper"], base, "bindings.identities.tools.wrapper"),
 		_file_reference(tools["scorer"], base, "bindings.identities.tools.scorer"),
+		_file_reference(tools["policy_manifest"], base, "bindings.identities.tools.policy_manifest"),
+		_file_reference(tools["policy_signature"], base, "bindings.identities.tools.policy_signature"),
 	)
 
 
@@ -1058,6 +1111,12 @@ def _validate_run_manifest(
 		reported_tool = _file_reference(run_provenance[field], base, f"{label}.qualification_provenance.{field}")
 		_same_path(reported_tool.path, expected_tool.path, f"{label}.qualification_provenance.{field}.path")
 		_expect(reported_tool.sha256 == expected_tool.sha256 and reported_tool.size_bytes == expected_tool.size_bytes, f"{label}.qualification_provenance.{field}", "run used a different pinned tool")
+	policy = _mapping(run_provenance["input_enhancement_policy"], f"{label}.qualification_provenance.input_enhancement_policy")
+	_exact_keys(policy, {"manifest", "signature"}, f"{label}.qualification_provenance.input_enhancement_policy")
+	for field, expected_policy in (("manifest", tools.policy_manifest), ("signature", tools.policy_signature)):
+		reported_policy = _file_reference(policy[field], base, f"{label}.qualification_provenance.input_enhancement_policy.{field}")
+		_same_path(reported_policy.path, expected_policy.path, f"{label}.qualification_provenance.input_enhancement_policy.{field}.path")
+		_expect(reported_policy.sha256 == expected_policy.sha256 and reported_policy.size_bytes == expected_policy.size_bytes, f"{label}.qualification_provenance.input_enhancement_policy.{field}", "run used a different signed qualification policy")
 	run_root = _directory(Path(_text(manifest["run_root"], f"{label}.run_root")), f"{label}.run_root")
 	_same_path(manifest_ref.path, run_root / "manifest.json", f"{label}.run_root")
 	launched_payload = _validate_launched_payload(run_root / "app", client.stage_payload, f"{label}.launched_payload")
@@ -1100,7 +1159,7 @@ def _validate_run_manifest(
 	_same_path(build["client_build_dir"], client.build_executable.path.parent, f"{label}.build.client_build_dir")
 	_same_path(build["client_stage_dir"], client.stage_payload.path, f"{label}.build.client_stage_dir")
 	_same_path(build["server_exe"], server.executable.path, f"{label}.build.server_exe")
-	_same_path(build["server_build_dir"], server.executable.path.parent, f"{label}.build.server_build_dir")
+	_same_path(build["server_build_dir"], server.build_cache.path.parent, f"{label}.build.server_build_dir")
 	_same_path(build["source_root"], client.worktree.source_root, f"{label}.build.source_root")
 	_same_path(build["server_source_root"], server.worktree.source_root, f"{label}.build.server_source_root")
 
@@ -1500,6 +1559,9 @@ def _identity_receipt(client: ClientIdentity) -> Mapping[str, Any]:
 	}
 	if client.role == "legacy":
 		receipt["instrumentation_base_commit"] = LEGACY_INSTRUMENTATION_BASE_COMMIT
+	else:
+		_expect(client.build_receipt is not None, "candidate identity", "build receipt was not validated")
+		receipt["build_receipt"] = client.build_receipt.receipt()
 	return receipt
 
 
@@ -1511,6 +1573,7 @@ def assemble(
 	legacy_instrumentation_base: str,
 	legacy_executable_sha256: str,
 	*,
+	candidate_public_key_hex: str | None = None,
 	verify_live_git: bool = True,
 ) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
 	bindings_file = _regular_file(bindings_path, "campaign bindings")
@@ -1532,6 +1595,9 @@ def assemble(
 	expected_legacy_build = _commit(legacy_build_commit, "--legacy-build-commit")
 	expected_legacy_base = _commit(legacy_instrumentation_base, "--legacy-instrumentation-base")
 	expected_legacy_executable = _sha256(legacy_executable_sha256, "--legacy-executable-sha256")
+	expected_candidate_public_key: str | None = None
+	if verify_live_git:
+		expected_candidate_public_key = _sha256(candidate_public_key_hex, "--candidate-public-key-hex")
 	_expect(expected_legacy_build == LEGACY_BUILD_COMMIT, "--legacy-build-commit", "does not match the frozen buildable legacy reference")
 	_expect(expected_legacy_base == LEGACY_INSTRUMENTATION_BASE_COMMIT, "--legacy-instrumentation-base", "does not match the frozen instrumentation base")
 	_expect(expected_legacy_executable == LEGACY_EXECUTABLE_SHA256, "--legacy-executable-sha256", "does not match the frozen staged legacy client")
@@ -1543,9 +1609,16 @@ def assemble(
 	identities = _mapping(bindings["identities"], "campaign bindings.identities")
 	_exact_keys(identities, IDENTITY_KEYS, "campaign bindings.identities")
 	legacy_identity = _validate_client_identity(identities["legacy"], base, "legacy", LEGACY_COMMIT, verify_live_git)
-	candidate_identity = _validate_client_identity(identities["candidate"], base, "candidate", expected_candidate_commit, verify_live_git)
+	candidate_identity = _validate_client_identity(
+		identities["candidate"], base, "candidate", expected_candidate_commit, verify_live_git,
+		expected_candidate_public_key,
+	)
 	server_identity = _validate_server_identity(identities["server"], base, verify_live_git)
 	tools = _validate_tools(identities["tools"], base)
+	if verify_live_git:
+		_expect(candidate_identity.policy_manifest is not None and candidate_identity.policy_signature is not None, "candidate build receipt", "qualification policy binding is absent")
+		_expect(candidate_identity.policy_manifest.receipt() == tools.policy_manifest.receipt(), "candidate build receipt", "policy manifest differs from campaign tools binding")
+		_expect(candidate_identity.policy_signature.receipt() == tools.policy_signature.receipt(), "candidate build receipt", "policy signature differs from campaign tools binding")
 	client_snapshot_paths = [
 		legacy_identity.build_executable.path, legacy_identity.stage_executable.path,
 		legacy_identity.qualified_executable.path, candidate_identity.build_executable.path,
@@ -1660,9 +1733,15 @@ def assemble(
 			"server": {
 				"commit": server_identity.commit,
 				"worktree_receipt": server_identity.worktree.file.receipt(),
+				"build_cache": server_identity.build_cache.receipt(),
+				"runtime_payload": server_identity.runtime_payload.receipt(),
 				"executable": server_identity.executable.receipt(),
 			},
-			"tools": {"wrapper": tools.wrapper.receipt(), "scorer": tools.scorer.receipt()},
+			"tools": {
+				"wrapper": tools.wrapper.receipt(), "scorer": tools.scorer.receipt(),
+				"policy_manifest": tools.policy_manifest.receipt(),
+				"policy_signature": tools.policy_signature.receipt(),
+			},
 		},
 		"transport": dict(transport),
 		"corpus": {
@@ -1884,9 +1963,14 @@ def _test_client_identity(root: Path, role: str, commit: str, executable_bytes: 
 	}
 	if role == "legacy":
 		identity["instrumentation_base_commit"] = LEGACY_INSTRUMENTATION_BASE_COMMIT
+	else:
+		build_receipt = client_root / "candidate-build-receipt.json"
+		_test_write_json(build_receipt, {"schema_version": 1, "kind": "self-test-build-receipt"})
+		identity["build_receipt"] = _test_file_reference(build_receipt)
 	return identity, {
 		f"{role}_source": source_root, f"{role}_build": build, f"{role}_stage": stage,
 		f"{role}_qualified": qualified, f"{role}_receipt": receipt_path,
+		**({f"{role}_build_receipt": build_receipt} if role != "legacy" else {}),
 	}
 
 
@@ -1942,14 +2026,24 @@ def _build_self_test_campaign(root: Path) -> _SelfTestCampaign:
 
 	server_source = root / "server" / "source"
 	server_build = root / "server" / "build"
+	server_runtime = root / "server" / "runtime"
 	server_source.mkdir(parents=True)
 	server_build.mkdir(parents=True)
-	server_exe = server_build / "mumble-server.exe"
+	server_runtime.mkdir(parents=True)
+	server_cache = server_build / "CMakeCache.txt"
+	server_cache.write_text(
+		f"CMAKE_HOME_DIRECTORY:INTERNAL={server_source.resolve()}\nserver:BOOL=ON\nclient:BOOL=OFF\n",
+		encoding="utf-8",
+	)
+	server_exe = server_runtime / "mumble-server.exe"
 	server_exe.write_bytes(b"og-server-v1")
+	(server_runtime / "Qt6Core.dll").write_bytes(b"self-test-runtime")
 	server_receipt = root / "server" / "clean-worktree.json"
 	server_identity = {
 		"commit": SERVER_COMMIT,
 		"worktree_receipt": _test_worktree_receipt(server_receipt, "server", SERVER_COMMIT, server_source),
+		"build_cache": _test_file_reference(server_cache),
+		"runtime_payload": _test_tree_reference(server_runtime),
 		"executable": _test_file_reference(server_exe),
 	}
 
@@ -1957,8 +2051,12 @@ def _build_self_test_campaign(root: Path) -> _SelfTestCampaign:
 	tools_root.mkdir()
 	wrapper = tools_root / "invoke-speech-cleanup-e2e.ps1"
 	scorer = tools_root / "score-fixed-timeline.py"
+	policy_manifest = tools_root / "input-enhancement-policy.json"
+	policy_signature = tools_root / "input-enhancement-policy.json.sig"
 	wrapper.write_bytes(b"pinned-wrapper-v1")
 	scorer.write_bytes(Path(__file__).with_name("score-fixed-timeline.py").read_bytes())
+	policy_manifest.write_bytes(b'{"available":true}')
+	policy_signature.write_bytes(b"p" * 64)
 
 	corpus_root = root / "corpus"
 	corpus_root.mkdir()
@@ -2091,7 +2189,11 @@ def _build_self_test_campaign(root: Path) -> _SelfTestCampaign:
 			"legacy": legacy_identity,
 			"candidate": candidate_identity,
 			"server": server_identity,
-			"tools": {"wrapper": _test_file_reference(wrapper), "scorer": _test_file_reference(scorer)},
+			"tools": {
+				"wrapper": _test_file_reference(wrapper), "scorer": _test_file_reference(scorer),
+				"policy_manifest": _test_file_reference(policy_manifest),
+				"policy_signature": _test_file_reference(policy_signature),
+			},
 		},
 		"transport": transport,
 		"corpus": {
@@ -2211,6 +2313,10 @@ def _build_self_test_campaign(root: Path) -> _SelfTestCampaign:
 				"preflight_only": False, "skip_build": True, "attested_stage_only": True,
 				"qualification_provenance": {
 					"wrapper": _test_file_reference(wrapper), "fixed_timeline_scorer": _test_file_reference(scorer),
+					"input_enhancement_policy": {
+						"manifest": _test_file_reference(policy_manifest),
+						"signature": _test_file_reference(policy_signature),
+					},
 				},
 				"repo_root": str(identity_paths[f"{role_prefix}_source"].resolve()), "run_root": str(run_root.resolve()),
 				"cleanup": {
@@ -2270,7 +2376,8 @@ def _build_self_test_campaign(root: Path) -> _SelfTestCampaign:
 	_test_write_json(bindings_path, bindings)
 	paths = {
 		**legacy_paths, **candidate_paths, "server_exe": server_exe, "server_receipt": server_receipt,
-		"wrapper": wrapper, "scorer": scorer,
+		"wrapper": wrapper, "scorer": scorer, "policy_manifest": policy_manifest,
+		"policy_signature": policy_signature,
 	}
 	return _SelfTestCampaign(root, bindings_path, bindings, candidate_commit, manifests, paths)
 
@@ -2650,6 +2757,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--legacy-build-commit", help="exact frozen buildable legacy client commit")
 	parser.add_argument("--legacy-instrumentation-base", help="exact frozen legacy E2E instrumentation base commit")
 	parser.add_argument("--legacy-executable-sha256", help="exact frozen staged legacy mumble.exe SHA-256")
+	parser.add_argument("--candidate-public-key-hex", help="external 32-byte Ed25519 qualification trust root")
 	parser.add_argument("--output", type=Path, help="new original-voice-qualification.json path")
 	parser.add_argument("--provenance-output", type=Path, help="new sibling provenance receipt path")
 	parser.add_argument("--self-test", action="store_true")
@@ -2667,6 +2775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 				("--legacy-build-commit", args.legacy_build_commit),
 				("--legacy-instrumentation-base", args.legacy_instrumentation_base),
 				("--legacy-executable-sha256", args.legacy_executable_sha256),
+				("--candidate-public-key-hex", args.candidate_public_key_hex),
 				("--provenance-output", args.provenance_output), ("--output", args.output),
 			) if value is None
 		]
@@ -2675,6 +2784,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 		qualification, provenance = assemble(
 			args.bindings, args.bindings_sha256, args.candidate_commit,
 			args.legacy_build_commit, args.legacy_instrumentation_base, args.legacy_executable_sha256,
+			candidate_public_key_hex=args.candidate_public_key_hex,
 		)
 		_write_outputs(qualification, provenance, args.output, args.provenance_output)
 		print(f"Original voice qualification assembled: {args.output} (45 paired cases)")

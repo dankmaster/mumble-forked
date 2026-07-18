@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/candidate-build-invocation-v1.json",
+  "title": "Windows input-enhancement candidate clean-build invocation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "source_commit",
+    "source_tree",
+    "build_root",
+    "stage_root",
+    "clean_build",
+    "command",
+    "configuration_options",
+    "targets",
+    "started_at_utc",
+    "finished_at_utc",
+    "exit_code"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "mumble-windows-candidate-build-invocation-v1" },
+    "source_commit": { "$ref": "#/$defs/gitObject" },
+    "source_tree": { "$ref": "#/$defs/gitObject" },
+    "build_root": { "$ref": "#/$defs/nonEmpty" },
+    "stage_root": { "$ref": "#/$defs/nonEmpty" },
+    "clean_build": { "const": true },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmpty" }
+    },
+    "configuration_options": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string" }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "contains": { "const": "mumble" },
+      "items": { "$ref": "#/$defs/nonEmpty" }
+    },
+    "started_at_utc": { "$ref": "#/$defs/utc" },
+    "finished_at_utc": { "$ref": "#/$defs/utc" },
+    "exit_code": { "const": 0 }
+  },
+  "$defs": {
+    "gitObject": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]+)?Z$"
+    }
+  }
+}

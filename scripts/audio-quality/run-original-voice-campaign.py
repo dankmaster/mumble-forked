@@ -37,6 +37,7 @@ from payload_identity import (
 	payload_tree_attestation,
 	payload_tree_records,
 )
+from candidate_build_receipt import BuildReceiptError, validate_receipt as validate_candidate_build_receipt
 
 
 LEGACY_INSTRUMENTATION_BASE_COMMIT = "ada2a85f6b551a2f3d8c6b23649edcd3c0b9a8f8"
@@ -45,6 +46,7 @@ LEGACY_EXECUTABLE_SHA256 = "eb062ee53356e8223eb1264f9be5f8276a5562963ef6cf932410
 LEGACY_STAGE_PAYLOAD_SHA256 = "970ceaa1bc3e1fc9ab25ff8f1c8ce8fd5854445b4660c22be227ff0a806a96a1"
 SERVER_COMMIT = "edd13692174b81554726b58cd2fa27135d45b0df"
 SERVER_EXECUTABLE_SHA256 = "d78f6d2889a3140fd87a68db84d8aebcfe9712848d6fc2cd257d452b68be1b5e"
+SERVER_RUNTIME_PAYLOAD_SHA256 = "fe4e365ebd9c42b993852e4f44f184dad9b08a9f5bdcd8c76fb96e5b09e9f035"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 CASE_ID = "master_quality-validation-00081"
 RENDERED_SAMPLES = 288_000
@@ -449,7 +451,8 @@ def identity_role(implementation: str) -> str:
 def command_for_case(
 	powershell: Path, wrapper: Path, output: Path, campaign_id: str, case: Mapping[str, Any], role: str,
 	input_wav: Path, clean_wav: Path, build_root: Path, stage_root: Path,
-	server_build_root: Path, server_exe: Path, scorer: Path, timeout: int,
+	server_build_root: Path, server_exe: Path, scorer: Path, policy_manifest: Path,
+	policy_signature: Path, timeout: int,
 ) -> list[str]:
 	profile = "Legacy" if role == "legacy" else "Original"
 	label = f"original-contract-{campaign_id}-{role}-{case_key(case)}"
@@ -467,6 +470,8 @@ def command_for_case(
 		"-SenderCleanupMode", "Off", "-DisableSenderAutoAdapt",
 		"-PreRollFrames", "0", "-TailFrames", "0", "-DrainMilliseconds", "1500",
 		"-FixedTimelineScorerPath", str(scorer),
+		"-InputEnhancementPolicyManifestPath", str(policy_manifest),
+		"-InputEnhancementPolicySignaturePath", str(policy_signature),
 		"-RequireVoiceContractEvidence", "-UnbaselinedVoiceContractControl",
 		"-SkipBuild", "-AttestedStageOnly", "-TimeoutSeconds", str(timeout),
 	]
@@ -490,8 +495,9 @@ def validate_manifest_minimal(path: Path, case: Mapping[str, Any], role: str, st
 	provenance = manifest.get("qualification_provenance")
 	if not isinstance(provenance, dict) or provenance != {
 		"wrapper": spec["wrapper"], "fixed_timeline_scorer": spec["scorer"],
+		"input_enhancement_policy": spec["qualification_policy"],
 	}:
-		raise CampaignError(f"{path}: wrapper/scorer provenance differs from the sealed tools")
+		raise CampaignError(f"{path}: wrapper/scorer/policy provenance differs from the sealed inputs")
 	cleanup = manifest.get("cleanup")
 	transport = manifest.get("transport")
 	build = manifest.get("build")
@@ -527,7 +533,7 @@ def validate_manifest_minimal(path: Path, case: Mapping[str, Any], role: str, st
 		or build.get("server_git_head") != server["commit"] or build.get("server_git_dirty") is not False
 		or build.get("server_executable_sha256") != server["executable"]["sha256"]
 		or absolute(Path(str(build.get("server_exe", "")))) != Path(server["executable"]["path"])
-		or absolute(Path(str(build.get("server_build_dir", "")))) != Path(server["executable"]["path"]).parent
+		or absolute(Path(str(build.get("server_build_dir", "")))) != Path(server["build_cache"]["path"]).parent
 		or absolute(Path(str(build.get("server_source_root", "")))) != Path(str(server_receipt.get("source_root", "")))
 	):
 		raise CampaignError(f"{path}: build identity mismatch")
@@ -624,6 +630,30 @@ def run_one(state: MutableMapping[str, Any], state_path: Path, case: Mapping[str
 		reference = state["spec"]["corpus"][field]
 		if file_reference(Path(reference["path"])) != reference:
 			raise CampaignError(f"corpus {field} changed after the campaign was sealed")
+	for identity_role_name in ("candidate", "legacy", "server"):
+		identity = state["sealed"][identity_role_name]
+		payload = identity["runtime_payload"] if identity_role_name == "server" else identity["stage_payload"]
+		if tree_reference(Path(payload["path"])) != payload:
+			raise CampaignError(f"sealed {identity_role_name} runtime payload changed")
+	candidate = state["sealed"]["candidate"]
+	receipt_reference = candidate["build_receipt"]
+	if file_reference(Path(receipt_reference["path"])) != receipt_reference:
+		raise CampaignError("sealed candidate build receipt changed")
+	receipt_document = validate_candidate_build_receipt(
+		Path(receipt_reference["path"]),
+		expected_source_root=Path(state["spec"]["origins"]["candidate_source_root"]),
+		expected_commit=state["spec"]["candidate_commit"],
+		expected_build_root=Path(state["spec"]["origins"]["candidate_build_dir"]),
+		expected_stage_root=Path(state["spec"]["origins"]["candidate_stage_dir"]),
+		expected_executable_sha256=state["spec"]["external_expected_hashes"]["candidate_executable_sha256"],
+		expected_stage_payload_sha256=state["spec"]["external_expected_hashes"]["candidate_stage_payload_sha256"],
+		expected_public_key_hex=state["spec"]["external_expected_hashes"]["candidate_public_key_hex"],
+	)
+	if {
+		"manifest": receipt_document["package"]["channel_policy"],
+		"signature": receipt_document["package"]["channel_policy_signature"],
+	} != state["spec"]["qualification_policy"]:
+		raise CampaignError("candidate receipt qualification policy differs from sealed campaign state")
 	key = case_key(case)
 	completed = state.setdefault("completed", {})
 	case_state = completed.setdefault(key, {})
@@ -646,8 +676,9 @@ def run_one(state: MutableMapping[str, Any], state_path: Path, case: Mapping[str
 		state["campaign_id"], case, role, Path(state["spec"]["corpus"]["input_wav"]["path"]),
 		Path(state["spec"]["corpus"]["clean_reference_wav"]["path"]),
 		Path(client["build_executable"]["path"]).parent, Path(client["stage_payload"]["path"]),
-		Path(server["executable"]["path"]).parent, Path(server["executable"]["path"]),
-		Path(state["spec"]["scorer"]["path"]), int(state["spec"]["timeout_seconds"]),
+		Path(server["build_cache"]["path"]).parent, Path(server["executable"]["path"]),
+		Path(state["spec"]["scorer"]["path"]), Path(state["spec"]["qualification_policy"]["manifest"]["path"]),
+		Path(state["spec"]["qualification_policy"]["signature"]["path"]), int(state["spec"]["timeout_seconds"]),
 	)
 	logs = Path(state["logs_root"])
 	logs.mkdir(parents=True, exist_ok=True)
@@ -684,6 +715,9 @@ def initial_state(args: argparse.Namespace, output: Path) -> MutableMapping[str,
 	expected_candidate_payload = sha256_argument(
 		args.expected_candidate_stage_payload_sha256, "--expected-candidate-stage-payload-sha256",
 	)
+	expected_candidate_public_key = sha256_argument(
+		args.expected_candidate_public_key_hex, "--expected-candidate-public-key-hex",
+	)
 	sources = {
 		"candidate": directory(args.candidate_source_root, "candidate source root"),
 		"legacy": directory(args.legacy_source_root, "legacy source root"),
@@ -707,11 +741,28 @@ def initial_state(args: argparse.Namespace, output: Path) -> MutableMapping[str,
 		raise CampaignError("OG server build root must be external to its clean source worktree")
 	for role in ("candidate", "legacy", "server"):
 		verify_build_root(builds[role], sources[role], role)
+	server_runtime_source = directory(args.server_runtime_dir, "OG server runtime payload")
+	server_runtime_identity = tree_reference(server_runtime_source)
+	if server_runtime_identity["sha256"] != SERVER_RUNTIME_PAYLOAD_SHA256:
+		raise CampaignError("OG server runtime payload differs from the frozen 170-file reference")
 	server_exe = regular_file(args.server_binary, "OG server executable")
-	if server_exe.parent != builds["server"] or server_exe.name.lower() != "mumble-server.exe":
-		raise CampaignError("server binary must be mumble-server.exe at the external server build root")
+	if server_exe != server_runtime_source / "mumble-server.exe":
+		raise CampaignError("server binary must be mumble-server.exe inside the frozen runtime payload")
 	if file_sha256(server_exe) != SERVER_EXECUTABLE_SHA256:
 		raise CampaignError("OG server executable differs from the frozen external server binary")
+	candidate_build_receipt = regular_file(args.candidate_build_receipt, "candidate build receipt")
+	candidate_receipt_document = validate_candidate_build_receipt(
+		candidate_build_receipt,
+		expected_source_root=sources["candidate"], expected_commit=candidate_commit,
+		expected_build_root=builds["candidate"], expected_stage_root=args.candidate_stage_dir,
+		expected_executable_sha256=expected_candidate_executable,
+		expected_stage_payload_sha256=expected_candidate_payload,
+		expected_public_key_hex=expected_candidate_public_key,
+	)
+	qualification_policy = {
+		"manifest": dict(candidate_receipt_document["package"]["channel_policy"]),
+		"signature": dict(candidate_receipt_document["package"]["channel_policy_signature"]),
+	}
 	paths = {
 		"wrapper": regular_file(args.wrapper, "two-client wrapper"),
 		"scorer": regular_file(args.scorer, "fixed-timeline scorer"),
@@ -733,6 +784,12 @@ def initial_state(args: argparse.Namespace, output: Path) -> MutableMapping[str,
 	receipt_root = sealed_root / "worktrees"
 	for role, receipt in receipts.items():
 		write_new(receipt_root / f"{role}.json", json_bytes(receipt))
+	build_receipt_snapshot = sealed_root / "candidate" / "build-receipt.json"
+	build_receipt_before = file_reference(candidate_build_receipt)
+	build_receipt_bytes = candidate_build_receipt.read_bytes()
+	if file_reference(candidate_build_receipt) != build_receipt_before:
+		raise CampaignError("candidate build receipt changed while its independent snapshot was created")
+	write_new(build_receipt_snapshot, build_receipt_bytes)
 	fixture_path = output / "fixture-attestation.json"
 	write_new(fixture_path, json_bytes(fixture))
 	corpus["fixture_attestation"] = file_reference(fixture_path)
@@ -764,33 +821,43 @@ def initial_state(args: argparse.Namespace, output: Path) -> MutableMapping[str,
 			"qualified_executable": file_reference(qualified),
 			"stage_payload": stage_ref,
 		}
+		if role == "candidate":
+			identity["build_receipt"] = file_reference(build_receipt_snapshot)
 		if role == "legacy":
 			identity["instrumentation_base_commit"] = LEGACY_INSTRUMENTATION_BASE_COMMIT
 		sealed[role] = identity
+	server_runtime = sealed_root / "server" / "runtime"
+	server_runtime_ref = copy_payload_snapshot(server_runtime_source, server_runtime)
 	sealed["server"] = {
 		"commit": SERVER_COMMIT,
 		"worktree_receipt": file_reference(receipt_root / "server.json"),
-		"executable": file_reference(server_exe),
+		"build_cache": file_reference(builds["server"] / "CMakeCache.txt"),
+		"runtime_payload": server_runtime_ref,
+		"executable": file_reference(server_runtime / "mumble-server.exe"),
 	}
 	spec = {
 		"candidate_commit": candidate_commit,
 		"external_expected_hashes": {
 			"candidate_executable_sha256": expected_candidate_executable,
 			"candidate_stage_payload_sha256": expected_candidate_payload,
+			"candidate_public_key_hex": expected_candidate_public_key,
 			"legacy_executable_sha256": LEGACY_EXECUTABLE_SHA256,
 			"legacy_stage_payload_sha256": LEGACY_STAGE_PAYLOAD_SHA256,
 			"server_executable_sha256": SERVER_EXECUTABLE_SHA256,
+			"server_runtime_payload_sha256": SERVER_RUNTIME_PAYLOAD_SHA256,
 		},
 		"origins": {
 			"candidate_source_root": str(sources["candidate"]),
 			"candidate_build_dir": str(builds["candidate"]),
 			"candidate_stage_dir": str(directory(args.candidate_stage_dir, "candidate source stage")),
+			"candidate_build_receipt": str(candidate_build_receipt),
 			"legacy_source_root": str(sources["legacy"]),
 			"legacy_build_dir": str(builds["legacy"]),
 			"legacy_stage_dir": str(directory(args.legacy_stage_dir, "legacy source stage")),
 			"server_source_root": str(sources["server"]),
 			"server_build_dir": str(builds["server"]),
 			"server_binary": str(server_exe),
+			"server_runtime_dir": str(server_runtime_source),
 		},
 		"powershell": str(paths["powershell"]),
 		"build_caches": {
@@ -800,6 +867,7 @@ def initial_state(args: argparse.Namespace, output: Path) -> MutableMapping[str,
 		"scorer": file_reference(paths["scorer"]),
 		"assembler": file_reference(paths["assembler"]),
 		"checker": file_reference(paths["checker"]),
+		"qualification_policy": qualification_policy,
 		"timeout_seconds": args.timeout_seconds,
 		"corpus": corpus,
 		"required_matrix_sha256": canonical_json_sha256(list(REQUIRED_MATRIX)),
@@ -833,9 +901,13 @@ def validate_resumed_state(args: argparse.Namespace, output: Path, state: Mutabl
 		"candidate_stage_payload_sha256": sha256_argument(
 			args.expected_candidate_stage_payload_sha256, "--expected-candidate-stage-payload-sha256",
 		),
+		"candidate_public_key_hex": sha256_argument(
+			args.expected_candidate_public_key_hex, "--expected-candidate-public-key-hex",
+		),
 		"legacy_executable_sha256": LEGACY_EXECUTABLE_SHA256,
 		"legacy_stage_payload_sha256": LEGACY_STAGE_PAYLOAD_SHA256,
 		"server_executable_sha256": SERVER_EXECUTABLE_SHA256,
+		"server_runtime_payload_sha256": SERVER_RUNTIME_PAYLOAD_SHA256,
 	}:
 		raise CampaignError("resumed campaign external binary/payload pins differ")
 	origins = spec.get("origins")
@@ -845,12 +917,14 @@ def validate_resumed_state(args: argparse.Namespace, output: Path, state: Mutabl
 		("candidate_source_root", args.candidate_source_root),
 		("candidate_build_dir", args.candidate_build_dir),
 		("candidate_stage_dir", args.candidate_stage_dir),
+		("candidate_build_receipt", args.candidate_build_receipt),
 		("legacy_source_root", args.legacy_source_root),
 		("legacy_build_dir", args.legacy_build_dir),
 		("legacy_stage_dir", args.legacy_stage_dir),
 		("server_source_root", args.server_source_root),
 		("server_build_dir", args.server_build_dir),
 		("server_binary", args.server_binary),
+		("server_runtime_dir", args.server_runtime_dir),
 	):
 		if absolute(Path(str(origins.get(field, "")))) != absolute(requested):
 			raise CampaignError(f"resumed campaign origin {field} differs")
@@ -917,13 +991,32 @@ def validate_resumed_state(args: argparse.Namespace, output: Path, state: Mutabl
 			stage = tree_reference(Path(identity["stage_payload"]["path"]))
 			if stage != identity["stage_payload"]:
 				raise CampaignError(f"resumed {role} stage snapshot changed")
-			for field in ("build_executable", "stage_executable", "qualified_executable", "worktree_receipt"):
+			fields = ["build_executable", "stage_executable", "qualified_executable", "worktree_receipt"]
+			if role == "candidate":
+				fields.append("build_receipt")
+			for field in fields:
 				if file_reference(Path(identity[field]["path"])) != identity[field]:
 					raise CampaignError(f"resumed {role} {field} changed")
 		else:
-			for field in ("executable", "worktree_receipt"):
+			if tree_reference(Path(identity["runtime_payload"]["path"])) != identity["runtime_payload"]:
+				raise CampaignError("resumed server runtime payload changed")
+			for field in ("executable", "build_cache", "worktree_receipt"):
 				if file_reference(Path(identity[field]["path"])) != identity[field]:
 					raise CampaignError(f"resumed server {field} changed")
+	receipt_reference = sealed["candidate"]["build_receipt"]
+	resumed_receipt = validate_candidate_build_receipt(
+		Path(receipt_reference["path"]),
+		expected_source_root=args.candidate_source_root, expected_commit=args.candidate_commit.lower(),
+		expected_build_root=args.candidate_build_dir, expected_stage_root=args.candidate_stage_dir,
+		expected_executable_sha256=args.expected_candidate_executable_sha256.lower(),
+		expected_stage_payload_sha256=args.expected_candidate_stage_payload_sha256.lower(),
+		expected_public_key_hex=args.expected_candidate_public_key_hex.lower(),
+	)
+	if {
+		"manifest": resumed_receipt["package"]["channel_policy"],
+		"signature": resumed_receipt["package"]["channel_policy_signature"],
+	} != spec.get("qualification_policy"):
+		raise CampaignError("resumed candidate receipt qualification policy differs")
 
 
 def make_bindings(state: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -948,7 +1041,11 @@ def make_bindings(state: Mapping[str, Any]) -> Mapping[str, Any]:
 			"legacy": sealed["legacy"],
 			"candidate": sealed["candidate"],
 			"server": sealed["server"],
-			"tools": {"wrapper": spec["wrapper"], "scorer": spec["scorer"]},
+			"tools": {
+				"wrapper": spec["wrapper"], "scorer": spec["scorer"],
+				"policy_manifest": spec["qualification_policy"]["manifest"],
+				"policy_signature": spec["qualification_policy"]["signature"],
+			},
 		},
 		"transport": {
 			"transport_path": "client1-opus-server-client2",
@@ -1000,6 +1097,7 @@ def assemble(state: Mapping[str, Any], bindings_path: Path, bindings_sha: str, p
 		"--legacy-build-commit", LEGACY_BUILD_COMMIT,
 		"--legacy-instrumentation-base", LEGACY_INSTRUMENTATION_BASE_COMMIT,
 		"--legacy-executable-sha256", legacy_sha,
+		"--candidate-public-key-hex", state["spec"]["external_expected_hashes"]["candidate_public_key_hex"],
 		"--output", str(qualification), "--provenance-output", str(provenance),
 	]
 	result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
@@ -1045,11 +1143,13 @@ def run_self_test() -> None:
 		command = command_for_case(
 			Path("pwsh.exe"), Path("wrapper.ps1"), root / "runs", "selftest", REQUIRED_MATRIX[0], "legacy",
 			Path("input.wav"), Path("clean.wav"), Path("build"), snapshot,
-			Path("server-build"), Path("server-build/mumble-server.exe"), Path("scorer.py"), 180,
+			Path("server-build"), Path("server-runtime/mumble-server.exe"), Path("scorer.py"),
+			Path("input-enhancement-policy.json"), Path("input-enhancement-policy.json.sig"), 180,
 		)
 		for required in (
 			"-AttestedStageOnly", "-UnbaselinedVoiceContractControl", "-RequireVoiceContractEvidence",
-			"-DisableSenderAutoAdapt", "-SkipBuild",
+			"-DisableSenderAutoAdapt", "-SkipBuild", "-InputEnhancementPolicyManifestPath",
+			"-InputEnhancementPolicySignaturePath",
 		):
 			if required not in command:
 				raise AssertionError(f"case command omitted {required}")
@@ -1085,6 +1185,8 @@ def parser() -> argparse.ArgumentParser:
 	result.add_argument("--candidate-commit")
 	result.add_argument("--expected-candidate-executable-sha256")
 	result.add_argument("--expected-candidate-stage-payload-sha256")
+	result.add_argument("--expected-candidate-public-key-hex")
+	result.add_argument("--candidate-build-receipt", type=Path)
 	result.add_argument("--candidate-source-root", type=Path)
 	result.add_argument("--candidate-build-dir", type=Path)
 	result.add_argument("--candidate-stage-dir", type=Path)
@@ -1094,6 +1196,7 @@ def parser() -> argparse.ArgumentParser:
 	result.add_argument("--server-source-root", type=Path)
 	result.add_argument("--server-build-dir", type=Path)
 	result.add_argument("--server-binary", type=Path)
+	result.add_argument("--server-runtime-dir", type=Path)
 	result.add_argument("--wrapper", type=Path)
 	result.add_argument("--powershell", type=Path)
 	result.add_argument("--scorer", type=Path, default=Path(__file__).with_name("score-fixed-timeline.py"))
@@ -1121,8 +1224,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 		required = (
 			"campaign_id", "output_root", "candidate_commit", "candidate_source_root", "candidate_build_dir",
 			"expected_candidate_executable_sha256", "expected_candidate_stage_payload_sha256",
+			"expected_candidate_public_key_hex", "candidate_build_receipt",
 			"candidate_stage_dir", "legacy_source_root", "legacy_build_dir", "legacy_stage_dir",
-			"server_source_root", "server_build_dir", "server_binary", "wrapper", "powershell",
+			"server_source_root", "server_build_dir", "server_binary", "server_runtime_dir", "wrapper", "powershell",
 			"corpus_lock", "corpus_inventory", "mixture_plan", "render_manifest", "input_wav",
 			"clean_reference_wav",
 		)
@@ -1160,7 +1264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 		print(f"Original campaign bindings SHA-256: {bindings_sha}")
 		print(f"Original campaign publication: {publication}")
 		return 0
-	except (AssertionError, CampaignError, PayloadIdentityError, OSError, CHECKER.ContractError) as error:
+	except (AssertionError, BuildReceiptError, CampaignError, PayloadIdentityError, OSError, CHECKER.ContractError) as error:
 		print(f"Original voice campaign error: {error}", file=sys.stderr)
 		return 1
 
