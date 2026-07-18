@@ -39,7 +39,9 @@ class TestSpeechCleanup : public QObject {
 
 private slots:
 	void windowsDelayLoadsNeuralRuntimesOnFirstUse();
+	void modelDomainNormalizationIsExplicitAndPartOfSelectionIdentity();
 	void transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame();
+	void transmitDrainCanAppendUncountedTerminalFlushFrame();
 	void transmitDrainCanBeCancelledForFreshSpeech();
 	void processorOwnershipFollowsNoiseCancelModeWithoutModelInitialization();
 #ifdef TEST_EXPECT_RNNOISE
@@ -66,6 +68,8 @@ private slots:
 	void dtlnSanitizesNonFiniteInputWithoutPoisoningItsState();
 #endif
 	void deepFilterNetOutputIsIndependentOfInputChunking();
+	void deepFilterNetModelDomainNormalizationRemainsContinuousAcrossFrameGainChanges();
+	void deepFilterNetRealtimeTimelineMatchesReportedLatency();
 	void deepFilterNetDryWetMixUsesTheProcessedTimeline();
 	void deepFilterNetResetRestoresTheStreamingTimeline();
 	void deepFilterNetSanitizesNonFiniteInputWithoutPoisoningItsState();
@@ -87,12 +91,12 @@ private:
 };
 
 namespace {
-	class TestSpeechCleanupProcessor final : public SpeechCleanupProcessor {
-	public:
-		bool isReady() const override { return true; }
-		void reset() override {}
-		void processInPlace(float *, unsigned int, float) override {}
-	};
+class TestSpeechCleanupProcessor final : public SpeechCleanupProcessor {
+public:
+	bool isReady() const override { return true; }
+	void reset() override {}
+	void processInPlace(float *, unsigned int, float) override {}
+};
 }
 
 void TestSpeechCleanup::windowsDelayLoadsNeuralRuntimesOnFirstUse() {
@@ -120,6 +124,19 @@ void TestSpeechCleanup::windowsDelayLoadsNeuralRuntimesOnFirstUse() {
 #endif
 }
 
+void TestSpeechCleanup::modelDomainNormalizationIsExplicitAndPartOfSelectionIdentity() {
+	Mumble::SpeechCleanup::Selection legacy;
+	legacy.backend = Settings::DeepFilterNetBackend;
+	legacy.modelId = QStringLiteral("deepfilternet:balanced");
+	QVERIFY(!legacy.modelDomainNormalization);
+	QVERIFY(!Mumble::SpeechCleanup::normalizeSelection(legacy).modelDomainNormalization);
+
+	Mumble::SpeechCleanup::Selection product = legacy;
+	product.modelDomainNormalization         = true;
+	QVERIFY(product != legacy);
+	QVERIFY(Mumble::SpeechCleanup::normalizeSelection(product).modelDomainNormalization);
+}
+
 void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame() {
 	Mumble::SpeechCleanup::TransmitDrain drain;
 	drain.begin(1776);
@@ -129,20 +146,26 @@ void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFra
 		const auto frame = drain.takeFrame(480);
 		QVERIFY(frame.draining);
 		drainedSamples.push_back(frame.zeroInputSamples);
+		QCOMPARE(frame.causalDrainSamples, frame.zeroInputSamples);
 		QCOMPARE(frame.terminator, !drain.active());
 	}
 
 	QCOMPARE(drainedSamples, (std::vector< unsigned int >{ 480, 480, 480, 336 }));
 	QCOMPARE(std::accumulate(drainedSamples.cbegin(), drainedSamples.cend(), 0u), 1776u);
+	QCOMPARE(drain.requestedSamples(), 1776u);
 	QCOMPARE(drain.remainingSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 1776u);
 
 	const auto exhaustedFrame = drain.takeFrame(480);
 	QVERIFY(!exhaustedFrame.draining);
 	QVERIFY(!exhaustedFrame.terminator);
 	QCOMPARE(exhaustedFrame.zeroInputSamples, 0u);
+	QCOMPARE(exhaustedFrame.causalDrainSamples, 0u);
 
 	drain.begin(0);
 	QVERIFY(!drain.active());
+	QCOMPARE(drain.requestedSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
 }
 
 void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
@@ -153,13 +176,16 @@ void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
 	QVERIFY(firstFrame.draining);
 	QVERIFY(!firstFrame.terminator);
 	QCOMPARE(drain.remainingSamples(), 960u);
+	QCOMPARE(drain.drainedSamples(), 480u);
 
 	// AudioInput invokes this on either a fresh VAD activation or PTT press. No
 	// cleanup reset is coupled to cancellation, so the live processor timeline
 	// can continue immediately with the new microphone frame.
 	drain.cancel();
 	QVERIFY(!drain.active());
+	QCOMPARE(drain.requestedSamples(), 0u);
 	QCOMPARE(drain.remainingSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
 	QVERIFY(!drain.takeFrame(480).draining);
 }
 
@@ -194,6 +220,51 @@ void TestSpeechCleanup::processorOwnershipFollowsNoiseCancelModeWithoutModelInit
 	QVERIFY(!processor);
 }
 
+void TestSpeechCleanup::transmitDrainCanAppendUncountedTerminalFlushFrame() {
+	Mumble::SpeechCleanup::TransmitDrain drain;
+	drain.begin(960, 1);
+
+	const auto first = drain.takeFrame(480);
+	QVERIFY(first.draining);
+	QVERIFY(!first.terminalFlush);
+	QVERIFY(!first.terminator);
+	QCOMPARE(first.zeroInputSamples, 480u);
+	QCOMPARE(first.causalDrainSamples, 480u);
+
+	const auto second = drain.takeFrame(480);
+	QVERIFY(second.draining);
+	QVERIFY(!second.terminalFlush);
+	QVERIFY(!second.terminator);
+	QCOMPARE(second.zeroInputSamples, 480u);
+	QCOMPARE(second.causalDrainSamples, 480u);
+	QCOMPARE(drain.drainedSamples(), 960u);
+	QCOMPARE(drain.remainingTerminalFlushFrames(), 1u);
+
+	const auto flush = drain.takeFrame(480);
+	QVERIFY(flush.draining);
+	QVERIFY(flush.terminalFlush);
+	QVERIFY(flush.terminator);
+	QCOMPARE(flush.zeroInputSamples, 480u);
+	QCOMPARE(flush.causalDrainSamples, 0u);
+	QCOMPARE(drain.requestedSamples(), 960u);
+	QCOMPARE(drain.drainedSamples(), 960u);
+	QCOMPARE(drain.remainingTerminalFlushFrames(), 0u);
+	QVERIFY(!drain.active());
+
+	// A zero-latency Original E2E release still needs one callback to flush the
+	// unchanged common preprocessor and carry a real terminator.
+	drain.begin(0, 1);
+	QVERIFY(drain.active());
+	const auto originalFlush = drain.takeFrame(480);
+	QVERIFY(originalFlush.draining);
+	QVERIFY(originalFlush.terminalFlush);
+	QVERIFY(originalFlush.terminator);
+	QCOMPARE(originalFlush.zeroInputSamples, 480u);
+	QCOMPARE(originalFlush.causalDrainSamples, 0u);
+	QCOMPARE(drain.requestedSamples(), 0u);
+	QCOMPARE(drain.drainedSamples(), 0u);
+}
+
 Mumble::SpeechCleanup::Selection TestSpeechCleanup::customSelection(const QString &path) {
 	Mumble::SpeechCleanup::Selection selection;
 	selection.backend         = Settings::RNNoiseBackend;
@@ -207,7 +278,12 @@ void TestSpeechCleanup::verifyEmbeddedFallback(const QString &path) {
 	QVERIFY(cleanup.isReady());
 	QVERIFY(cleanup.usedFallback());
 	QCOMPARE(cleanup.activeModelId(), QStringLiteral("rnnoise:embedded"));
+#ifdef Q_OS_WIN
+	QVERIFY(QFileInfo(cleanup.activeModelPath()).isFile());
+	QCOMPARE(QFileInfo(cleanup.activeModelPath()).fileName().toLower(), QStringLiteral("rnnoise.dll"));
+#else
 	QVERIFY(cleanup.activeModelPath().isEmpty());
+#endif
 
 	std::array< float, 480 > silence = {};
 	cleanup.processInPlace(silence.data(), static_cast< unsigned int >(silence.size()));
@@ -422,6 +498,13 @@ void TestSpeechCleanup::rnnoiseAdapterReportsAndPreservesTheRawApiLatency() {
 	auto processor = createSpeechCleanupProcessor(embeddedSelection(Settings::RNNoiseBackend));
 	QVERIFY(processor);
 	QVERIFY(processor->isReady());
+#ifdef Q_OS_WIN
+	// Embedded weights live in the loader-resolved RNNoise module. Reporting
+	// this exact path lets the product pipeline bind its signed hash to the DLL
+	// that actually supplied those weights.
+	QVERIFY(QFileInfo(processor->activeModelPath()).isFile());
+	QCOMPARE(QFileInfo(processor->activeModelPath()).fileName().toLower(), QStringLiteral("rnnoise.dll"));
+#endif
 	// This value is intentionally independent of the implementation constant: it
 	// protects the two-frame RNNoise transform delay plus the adapter's one-frame
 	// collection delay from being collapsed into the same mistaken expectation.
@@ -550,6 +633,122 @@ void TestSpeechCleanup::deepFilterNetOutputIsIndependentOfInputChunking() {
 	}
 #endif
 	verifyChunkInvariant(embeddedSelection(Settings::DeepFilterNetBackend));
+}
+
+void TestSpeechCleanup::deepFilterNetModelDomainNormalizationRemainsContinuousAcrossFrameGainChanges() {
+	constexpr std::size_t FRAME_SAMPLES = 480;
+	constexpr std::size_t FRAME_COUNT   = 80;
+	constexpr float PI                   = 3.14159265358979323846f;
+	constexpr float FREQUENCY_HZ         = 1000.0f;
+	constexpr float SAMPLE_RATE          = 48000.0f;
+
+	auto selection                     = embeddedSelection(Settings::DeepFilterNetBackend);
+	selection.modelId                  = QStringLiteral("deepfilternet:low-latency");
+	selection.modelDomainNormalization = true;
+	auto processor                      = createSpeechCleanupProcessor(selection);
+#ifdef TEST_EXPECT_DEEPFILTERNET
+	QVERIFY2(processor && processor->isReady(),
+			 "DeepFilterNet was enabled but its runtime/model test payload is unavailable");
+#else
+	if (!processor || !processor->isReady()) {
+		QSKIP("DeepFilterNet runtime/model is not available in this build");
+	}
+#endif
+
+	// One kilohertz completes exactly ten cycles per 10 ms processor frame, so
+	// the source crosses zero at every tested boundary. Alternating 0.006 and
+	// 0.0108 peaks moves the model-domain gain between the 8x cap and roughly
+	// 5.84x without introducing a source-value step. The isolated 0.05 transient
+	// forces one frame down to roughly 1.26x and exercises recovery on its end.
+	std::vector< float > input(FRAME_COUNT * FRAME_SAMPLES, 0.0f);
+	for (std::size_t frame = 0; frame < FRAME_COUNT; ++frame) {
+		const float amplitude = frame < 20 || frame >= 68 ? 0.002f
+							 : ((frame % 2) == 0 ? 0.006f : 0.0108f);
+		for (std::size_t offset = 0; offset < FRAME_SAMPLES; ++offset) {
+			const std::size_t index = frame * FRAME_SAMPLES + offset;
+			input[index] = amplitude * std::sin(
+				2.0f * PI * FREQUENCY_HZ * static_cast< float >(index) / SAMPLE_RATE);
+		}
+	}
+	input[50 * FRAME_SAMPLES + FRAME_SAMPLES / 2] = 0.05f;
+
+	const unsigned int latency = processor->latencySamples();
+	QVERIFY2(latency > 0, "DeepFilterNet normalization regression requires a causal processor latency");
+	const std::vector< float > output = processSignal(*processor, input, { 480 }, 1.0f);
+	QVERIFY(std::all_of(output.cbegin(), output.cend(), [](float sample) {
+		return std::isfinite(sample) && std::fabs(sample) < 1.0f;
+	}));
+
+	for (std::size_t frame = 30; frame <= 68; ++frame) {
+		const std::size_t boundary = frame * FRAME_SAMPLES + latency;
+		QVERIFY(boundary > 0 && boundary < output.size());
+		const float delta = std::fabs(output[boundary] - output[boundary - 1]);
+		QVERIFY2(delta < 1.0e-3f,
+				 qPrintable(QStringLiteral("DeepFilterNet normalized gain boundary discontinuity at frame %1: %2")
+							.arg(frame)
+							.arg(delta, 0, 'g', 9)));
+	}
+}
+
+void TestSpeechCleanup::deepFilterNetRealtimeTimelineMatchesReportedLatency() {
+	auto processor = createSpeechCleanupProcessor(embeddedSelection(Settings::DeepFilterNetBackend));
+#ifdef TEST_EXPECT_DEEPFILTERNET
+	QVERIFY2(processor && processor->isReady(),
+			 "DeepFilterNet was enabled but its runtime/model test payload is unavailable");
+#else
+	if (!processor || !processor->isReady()) {
+		QSKIP("DeepFilterNet runtime/model is not available in this build");
+	}
+#endif
+	QVERIFY(processor->prepareRealtime());
+	QVERIFY(processor->isReady());
+	QCOMPARE(processor->workerSchedulingDelayFrames(), 2u);
+
+	constexpr unsigned int FRAME_SAMPLES = 480;
+	constexpr std::size_t IMPULSE_INDEX  = FRAME_SAMPLES * 4;
+	const unsigned int reportedLatency   = processor->latencySamples();
+	QVERIFY2(reportedLatency > 0, "The real-time DeepFilterNet adapter must report its causal latency");
+
+	std::vector< float > signal(IMPULSE_INDEX + reportedLatency + FRAME_SAMPLES * 4, 0.0f);
+	signal[IMPULSE_INDEX] = 0.5f;
+	for (std::size_t offset = 0; offset < signal.size(); offset += FRAME_SAMPLES) {
+		QVERIFY2(processor->prepareOfflineFrame(), "The real-time worker did not complete before its deadline");
+		processor->processInPlace(signal.data() + offset, FRAME_SAMPLES, 0.0f);
+		QVERIFY(processor->isReady());
+	}
+	QVERIFY(processor->finishOfflineProcessing());
+
+	for (std::size_t index = 0; index < signal.size(); ++index) {
+		const float expected = index == IMPULSE_INDEX + reportedLatency ? 0.5f : 0.0f;
+		QVERIFY2(std::fabs(signal[index] - expected) <= 1.0e-8f,
+				 qPrintable(QStringLiteral("DeepFilterNet real-time dry latency mismatch at sample %1; reported=%2")
+							.arg(index)
+							.arg(reportedLatency)));
+	}
+
+	auto wetProcessor = createSpeechCleanupProcessor(embeddedSelection(Settings::DeepFilterNetBackend));
+	QVERIFY(wetProcessor && wetProcessor->isReady());
+	QVERIFY(wetProcessor->prepareRealtime());
+	QCOMPARE(wetProcessor->latencySamples(), reportedLatency);
+	std::vector< float > wetSignal(signal.size(), 0.0f);
+	wetSignal[IMPULSE_INDEX] = 0.5f;
+	for (std::size_t offset = 0; offset < wetSignal.size(); offset += FRAME_SAMPLES) {
+		QVERIFY(wetProcessor->prepareOfflineFrame());
+		wetProcessor->processInPlace(wetSignal.data() + offset, FRAME_SAMPLES, 1.0f);
+		QVERIFY(wetProcessor->isReady());
+	}
+	QVERIFY(wetProcessor->finishOfflineProcessing());
+	const auto wetPeak = std::max_element(wetSignal.cbegin(), wetSignal.cend(), [](float left, float right) {
+		return std::fabs(left) < std::fabs(right);
+	});
+	QVERIFY(wetPeak != wetSignal.cend());
+	QVERIFY2(std::fabs(*wetPeak) > 1.0e-4f, "The real-time DeepFilterNet impulse probe was unexpectedly silent");
+	const std::size_t wetPeakIndex = static_cast< std::size_t >(std::distance(wetSignal.cbegin(), wetPeak));
+	const std::size_t expectedWetPeak = IMPULSE_INDEX + reportedLatency;
+	QVERIFY2(wetPeakIndex >= expectedWetPeak - 1 && wetPeakIndex <= expectedWetPeak + 1,
+			 qPrintable(QStringLiteral("DeepFilterNet real-time wet peak mismatch: actual=%1 expected=%2")
+						.arg(wetPeakIndex)
+						.arg(expectedWetPeak)));
 }
 
 void TestSpeechCleanup::deepFilterNetDryWetMixUsesTheProcessedTimeline() {

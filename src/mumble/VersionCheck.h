@@ -21,10 +21,12 @@ private:
 	Q_OBJECT
 	Q_DISABLE_COPY(VersionCheck)
 
-	enum class RequestKind { Release, Manifest };
+	enum class RequestKind { Release, Manifest, ChannelPointer, ChannelPointerSignature };
 
 	QUrl m_requestURL;
 	QNetworkReply *m_reply = nullptr;
+	QUrl m_channelPointerSignatureURL;
+	QByteArray m_channelPointerBytes;
 	RequestKind m_requestKind = RequestKind::Release;
 	bool m_autocheck         = false;
 	bool m_emitResultsOnly   = false;
@@ -46,6 +48,9 @@ public:
 	VersionCheck(bool autocheck, QObject *parent = nullptr, bool focus = false, bool emitResultsOnly = false);
 	static QString updateModeForInfo(const QJsonObject &info);
 	static QString expectedUpdateSha256ForInfo(const QJsonObject &info);
+	static QString expectedInstallerSha256ForInfo(const QJsonObject &info);
+	static QString expectedRecoveryInstallerSha256ForInfo(const QJsonObject &info);
+	static QString expectedCandidateExecutableSha256ForInfo(const QJsonObject &info);
 	static bool canInstallUpdate(const QJsonObject &info);
 	static void installUpdateFromInfo(const QJsonObject &info, QObject *parent = nullptr);
 	static void downloadUpdateFromInfo(const QJsonObject &info, QObject *parent, bool showProgress,
@@ -56,11 +61,16 @@ public:
 	static QJsonObject describeUpdateHandoff(const QJsonObject &info,
 											 const QString &preparedInstallerPath = QString());
 	static QString preparedFallbackInstallerPathForInfo(const QJsonObject &info);
+	static QString preparedRecoveryInstallerPathForInfo(const QJsonObject &info);
 	static bool canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString());
 	static bool launchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString(),
 									 bool passive = true, bool restartAfterInstall = true,
 									 const QString &fallbackInstallerPath = QString(),
-									 const QString &expectedUpdateSha256 = QString());
+									 const QString &expectedUpdateSha256 = QString(),
+									 const QString &expectedFallbackInstallerSha256 = QString(),
+									 const QString &recoveryInstallerPath = QString(),
+									 const QString &expectedRecoveryInstallerSha256 = QString(),
+									 const QString &expectedCandidateExecutableSha256 = QString());
 };
 
 #endif

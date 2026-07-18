@@ -5,6 +5,8 @@
 
 #include "EnumStringConversions.h"
 
+#include "InputEnhancement.h"
+
 #define AUDIO_TRANSMIT_VALUES                                  \
 	PROCESS(Settings::AudioTransmit, Continuous, "Continuous") \
 	PROCESS(Settings::AudioTransmit, VAD, "VAD")               \
@@ -67,6 +69,15 @@
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Light, "Light")   \
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Normal, "Normal") \
 	PROCESS(Settings::RemoteSpeechCleanupPreset, Aggressive, "Aggressive")
+
+#define INPUT_ENHANCEMENT_PROFILE_VALUES                                      \
+	PROCESS(Mumble::InputEnhancement::Profile, Original, "Original")           \
+	PROCESS(Mumble::InputEnhancement::Profile, Light, "Light")                 \
+	PROCESS(Mumble::InputEnhancement::Profile, Balanced, "Balanced")           \
+	PROCESS(Mumble::InputEnhancement::Profile, Quality, "Quality")             \
+	PROCESS_ALIAS(Mumble::InputEnhancement::Profile, Quality, "Crisp")         \
+	PROCESS(Mumble::InputEnhancement::Profile, Auto, "Auto")                   \
+	PROCESS(Mumble::InputEnhancement::Profile, VoiceFocus, "VoiceFocus")
 
 #define ECHO_CANCEL_VALUES                                                \
 	PROCESS(EchoCancelOptionID, DISABLED, "Disabled")                     \
@@ -194,6 +205,9 @@
 	BEFORE_CODE(Settings::RemoteSpeechCleanupPreset)   \
 	REMOTE_SPEECH_CLEANUP_PRESET_VALUES                \
 	AFTER_CODE                                         \
+	BEFORE_CODE(Mumble::InputEnhancement::Profile)     \
+	INPUT_ENHANCEMENT_PROFILE_VALUES                   \
+	AFTER_CODE                                         \
 	BEFORE_CODE(EchoCancelOptionID)                    \
 	ECHO_CANCEL_VALUES                                 \
 	AFTER_CODE                                         \
@@ -239,12 +253,14 @@
 #define PROCESS(enumType, enumValue, stringValue) \
 	case enumType::enumValue:                     \
 		return stringValue;
+#define PROCESS_ALIAS(enumType, enumValue, stringValue)
 
 PROCESS_ALL_ENUMS
 
 #undef BEFORE_CODE
 #undef AFTER_CODE
 #undef PROCESS
+#undef PROCESS_ALIAS
 
 #define BEFORE_CODE(enumType) void stringToEnum(const std::string &str, enumType &e) {
 #define AFTER_CODE                                           \
@@ -254,6 +270,7 @@ PROCESS_ALL_ENUMS
 	if (str == stringValue) {                     \
 		e = enumType::enumValue;                  \
 	} else
+#define PROCESS_ALIAS(enumType, enumValue, stringValue) PROCESS(enumType, enumValue, stringValue)
 
 namespace details {
 
@@ -262,6 +279,7 @@ PROCESS_ALL_ENUMS
 }
 
 #undef PROCESS
+#undef PROCESS_ALIAS
 #undef AFTER_CODE
 #undef BEFORE_CODE
 #undef PROCESS_ALL_ENUMS
@@ -276,6 +294,7 @@ PROCESS_ALL_ENUMS
 #undef QUIT_VALUES
 #undef PROXY_TYPE_VALUES
 #undef ECHO_CANCEL_VALUES
+#undef INPUT_ENHANCEMENT_PROFILE_VALUES
 #undef SPEECH_CLEANUP_BACKEND_VALUES
 #undef NOISE_CANCEL_VALUES
 #undef IDLE_ACTION_VALUES

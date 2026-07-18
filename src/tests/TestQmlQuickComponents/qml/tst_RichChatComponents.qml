@@ -216,6 +216,8 @@ TestCase {
 		]
 		bodyLoader.item.accessibilitySuppressed = false
 		bodyLoader.item.resourceActive = true
+		bodyLoader.item.animationsEnabled = true
+		bodyLoader.item.hoverEffectsEnabled = true
 		previewLoader.width = testCase.width
 		previewLoader.height = 180
 		attachmentLoader.width = testCase.width
@@ -343,8 +345,13 @@ TestCase {
 		} ]
 		wait(0)
 		const imageCard = findChild(body, "richMessageImageCard_0")
+		const imagePointer = findChild(body, "richMessageImagePointer_0")
 		verify(imageCard !== null)
+		verify(imagePointer !== null)
 		compare(imageCard.Accessible.ignored, true)
+		body.animationsEnabled = false
+		body.hoverEffectsEnabled = false
+		compare(imagePointer.hoverEnabled, false)
 
 		body.accessibilitySuppressed = false
 	}

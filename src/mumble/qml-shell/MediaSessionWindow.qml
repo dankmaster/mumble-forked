@@ -1573,6 +1573,7 @@ ApplicationWindow {
 					text: qsTr("Retry")
 					tone: "accent"
 					highlighted: true
+					hoverEnabled: mediaWindow.normalizedVisualFixtureMode.length === 0
 					enabled: !mediaProfileFactory || !mediaProfileFactory.runtimePreparing
 					Accessible.description: qsTr("Restart provider playback")
 					onClicked: mediaWindow.retryMediaRenderer()
@@ -1581,11 +1582,13 @@ ApplicationWindow {
 					objectName: "mediaSessionFailureExternalButton"
 					visible: mediaWindow.externalMediaUrl().length > 0
 					text: qsTr("Open externally")
+					hoverEnabled: mediaWindow.normalizedVisualFixtureMode.length === 0
 					onClicked: Qt.openUrlExternally(mediaWindow.externalMediaUrl())
 				}
 				ModernButton {
 					objectName: "mediaSessionFailureCloseButton"
 					text: qsTr("Close")
+					hoverEnabled: mediaWindow.normalizedVisualFixtureMode.length === 0
 					onClicked: controls.requestClose()
 				}
             }

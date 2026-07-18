@@ -283,34 +283,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 255,
-                                "x": 684,
-                                "y": 624
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 231,
-                                "x": 696,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Add ban",
                           "rect": {
@@ -325,34 +298,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 50,
-                                "x": 944,
-                                "y": 624
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 26,
-                                "x": 956,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Clear",
                           "rect": {

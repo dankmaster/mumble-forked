@@ -29,6 +29,9 @@
 #include "ClientUser.h"
 #include "CrashReporter.h"
 #include "EnvUtils.h"
+#include "InputEnhancementPackageVerifier.h"
+#include "InputEnhancementPolicy.h"
+#include "InputEnhancementPolicyController.h"
 #include "License.h"
 #include "MumbleApplication.h"
 #include "NetworkConfig.h"
@@ -38,6 +41,7 @@
 #include "SSL.h"
 #include "SocketRPC.h"
 #include "Translations.h"
+#include "UpdateHealthMonitor.h"
 #include "UserLockFile.h"
 #include "Version.h"
 #include "VersionCheck.h"
@@ -55,12 +59,16 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QList>
 #include <QtCore/QProcess>
+#include <QtCore/QSaveFile>
+#include <QtGui/QAccessible>
 #include <QtGui/QDesktopServices>
 #if defined(Q_OS_WIN) && defined(MUMBLE_DELAYLOAD_WEBENGINE_QUICK)
 #	include <QtQuick/QQuickWindow>
 #else
 #	include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #endif
+
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -202,6 +210,12 @@ void configureLazyQtWebEngineQuickGraphics() {
 }
 #endif
 #endif
+
+bool inputEnhancementDisabledByEnvironment() {
+	const QByteArray value = qgetenv("MUMBLE_DISABLE_INPUT_ENHANCEMENT").trimmed().toLower();
+	return value == QByteArrayLiteral("1") || value == QByteArrayLiteral("true")
+		   || value == QByteArrayLiteral("yes") || value == QByteArrayLiteral("on");
+}
 } // namespace
 
 void initLog() {
@@ -261,9 +275,11 @@ struct CLIOptions {
 	bool showLicense              = false;
 	bool showAuthors              = false;
 	bool showThirdPartyLicenses   = false;
-	bool dumpInputStreams         = false;
-	bool printEchoCancelQueue     = false;
-	bool skipSettingsBackupPrompt = false;
+	bool dumpInputStreams                    = false;
+	bool printEchoCancelQueue                = false;
+	bool disableInputEnhancement             = false;
+	bool writeInputEnhancementBuildIdentity = false;
+	bool skipSettingsBackupPrompt            = false;
 
 	std::optional< std::string > configFile;
 	std::optional< std::string > jackClientName;
@@ -332,9 +348,13 @@ CLIOptions parseCLI(int argc, char **argv) {
 	app.add_flag("--skip-settings-backup-prompt", options.skipSettingsBackupPrompt,
 				 "Don't show the settings recovery dialog on startup after a crash.")
 		->group(CLIOptions::CLI_GENERAL_SECTION);
-
-
-
+	app.add_flag("--disable-input-enhancement", options.disableInputEnhancement,
+				 "Use the untouched Original microphone path for this session, regardless of saved input-enhancement settings.")
+		->group(CLIOptions::CLI_GENERAL_SECTION);
+	app.add_flag("--write-input-enhancement-build-identity", options.writeInputEnhancementBuildIdentity,
+				 "Write the compiled input-enhancement verifier identity to the path in "
+				 "MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT, then exit.")
+		->group(CLIOptions::CLI_DEBUG_SECTION);
 	app.add_flag("--hidden", options.startHiddenInTray, "Start Mumble hidden in the system tray.")
 		->group(CLIOptions::CLI_GENERAL_SECTION);
 
@@ -444,6 +464,14 @@ int main(int argc, char **argv) {
 	a.setOrganizationName(QLatin1String("Mumble"));
 	a.setOrganizationDomain(QLatin1String("mumble.info"));
 	a.setQuitOnLastWindowClosed(false);
+	// The visual/automation lane queries the Qt Quick accessibility tree directly.
+	// Activate accessibility before the QML scene is constructed so attached
+	// Accessible.ignored properties define the hierarchy deterministically. If
+	// activation happens only on the first snapshot, Qt may temporarily expose
+	// every technical layout item as a generic Client node.
+	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_PORT")) {
+		QAccessible::setActive(true);
+	}
 
 	a.setDesktopFileName("info.mumble.Mumble");
 
@@ -456,6 +484,23 @@ int main(int argc, char **argv) {
 
 	if (options.quit) {
 		return options.exitCode;
+	}
+	if (options.writeInputEnhancementBuildIdentity) {
+		const QString outputPath = qEnvironmentVariable("MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT");
+		if (outputPath.isEmpty()) {
+			qWarning("MUMBLE_INPUT_ENHANCEMENT_IDENTITY_OUTPUT is required for the build-identity diagnostic");
+			return 2;
+		}
+		QSaveFile output(outputPath);
+		const QByteArray identity = Mumble::InputEnhancement::configuredPolicyBuildIdentity(
+			static_cast< std::uint64_t >(Version::getPatch(Version::get())));
+		if (!output.open(QIODevice::WriteOnly) || output.write(identity) != identity.size()
+			|| !output.commit()) {
+			output.cancelWriting();
+			qWarning("Unable to write input-enhancement build identity");
+			return 3;
+		}
+		return 0;
 	}
 
 	// This argument has to be parsed first, since it's value is needed to create the global struct,
@@ -682,6 +727,13 @@ int main(int argc, char **argv) {
 	} else {
 		Global::get().s.load(settingsFile, options.skipSettingsBackupPrompt);
 	}
+	const bool inputEnhancementRecoveryDisabled =
+		options.disableInputEnhancement || inputEnhancementDisabledByEnvironment();
+	Global::get().bInputEnhancementRecoveryDisabled = inputEnhancementRecoveryDisabled;
+	Global::get().bDisableInputEnhancement = inputEnhancementRecoveryDisabled;
+	if (Global::get().bDisableInputEnhancement) {
+		qWarning("Input enhancement is disabled for this session; using Original");
+	}
 	if (!Global::get().migratedDBPath.isEmpty()) {
 		// We have migrated the DB to a new location. Make sure that the settings hold the correct (new) path and that
 		// this path is written to disk immediately in order to minimize the risk of losing this information due to a
@@ -768,6 +820,57 @@ int main(int argc, char **argv) {
 	NetworkConfig::ApplyStartWithPCRegistration(Global::get().s.bStartWithPC);
 
 	Global::get().nam = new QNetworkAccessManager();
+
+	Mumble::InputEnhancement::InputEnhancementPackageVerifier::Configuration packageConfiguration;
+	packageConfiguration.packageRoot        = QDir(QCoreApplication::applicationDirPath());
+	packageConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
+	packageConfiguration.currentBuild       = Version::getPatch(Version::get());
+	packageConfiguration.supportedCatalogRevision = Mumble::InputEnhancement::productRecipeCatalogRevision();
+	Global::get().inputEnhancementPackageVerifier =
+		new Mumble::InputEnhancement::InputEnhancementPackageVerifier(std::move(packageConfiguration));
+	const Mumble::InputEnhancement::PackageVerificationReport packageReport =
+		Global::get().inputEnhancementPackageVerifier->verify();
+	if (packageReport.unmanaged) {
+		qInfo("Input enhancement package manifests are unmanaged for this build-0 developer client");
+	} else if (!packageReport.verified) {
+		qWarning("Input enhancement package verification failed (reason=%d, detail=\"%s\"); new product profiles "
+				 "will use Original",
+				 static_cast< int >(packageReport.error), qUtf8Printable(packageReport.detail));
+	} else {
+		qInfo("Verified signed input enhancement package catalog %s",
+			  qUtf8Printable(Global::get().inputEnhancementPackageVerifier->catalogRevision()));
+	}
+
+	Mumble::InputEnhancement::InputEnhancementPolicyController::Configuration policyConfiguration;
+	policyConfiguration.cacheRoot =
+		QDir(Global::get().qdBasePath.filePath(QStringLiteral("input-enhancement-policy")));
+	policyConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
+	policyConfiguration.currentBuild       = Version::getPatch(Version::get());
+	policyConfiguration.recipeSetVersion   = Mumble::InputEnhancement::productRecipeCatalogRevision();
+	policyConfiguration.manifestUrl =
+		Mumble::InputEnhancement::InputEnhancementPolicyController::manifestUrlFromEnvironment();
+	policyConfiguration.remoteFetchEnabled = true;
+	Global::get().inputEnhancementPolicyController =
+		new Mumble::InputEnhancement::InputEnhancementPolicyController(
+			std::move(policyConfiguration), Global::get().nam, &a);
+	const auto applyInputEnhancementPolicy = [inputEnhancementRecoveryDisabled](bool policyForcesOriginal) {
+		const bool disable = inputEnhancementRecoveryDisabled || policyForcesOriginal;
+		if (Global::get().bDisableInputEnhancement == disable) {
+			return;
+		}
+		Global::get().bDisableInputEnhancement = disable;
+		qWarning("Signed input enhancement policy changed; capture will restart in %s",
+				 disable ? "Original" : "the saved profile");
+		if (Global::get().ai) {
+			Audio::restartInput();
+		}
+	};
+	QObject::connect(
+		Global::get().inputEnhancementPolicyController,
+		&Mumble::InputEnhancement::InputEnhancementPolicyController::forceOriginalChanged, &a,
+		[applyInputEnhancementPolicy](bool forceOriginal) { applyInputEnhancementPolicy(forceOriginal); });
+	Global::get().inputEnhancementPolicyController->start();
+	applyInputEnhancementPolicy(Global::get().inputEnhancementPolicyController->forceOriginal());
 
 #ifndef NO_CRASH_REPORT
 	CrashReporter *cr = new CrashReporter();
@@ -871,6 +974,30 @@ int main(int argc, char **argv) {
 	Global::get().l->log(Log::Information, MainWindow::tr("Welcome to Mumble."));
 
 	Audio::start();
+
+#ifdef Q_OS_WIN
+	// A package update is not considered healthy merely because the process
+	// launched. Settings have loaded above, and this monitor now requires both
+	// audio directions, the signed channel decision, and the immutable package
+	// catalogs to remain healthy for a continuous ten seconds before it writes
+	// the marker consumed by mumble-updater.
+	UpdateHealthMonitor::startIfPending(
+		&a,
+		std::filesystem::path(
+			Global::get().qdBasePath.filePath(QStringLiteral("Updates")).toStdWString()),
+		std::filesystem::path(QCoreApplication::applicationFilePath().toStdWString()),
+		[]() {
+			return Global::get().ai && Global::get().ai->isRunning() && Global::get().ao
+				   && Global::get().ao->isRunning() && Global::get().ai->inputEnhancementHealthyForUpdate()
+				   && Global::get().inputEnhancementPolicyController
+				   && Global::get().inputEnhancementPolicyController->readyForHealthMarker()
+				   && Global::get().inputEnhancementPolicyController->policyDecisionHealthy()
+				   && Global::get().inputEnhancementPackageVerifier
+				   && Global::get().inputEnhancementPackageVerifier->readyForHealthMarker()
+				   && Global::get().inputEnhancementPackageVerifier->verificationHealthy()
+				   && !Global::get().bQuit;
+		});
+#endif
 
 	a.setQuitOnLastWindowClosed(false);
 
@@ -992,6 +1119,10 @@ int main(int argc, char **argv) {
 	// Only start deleting items once all pending events have been processed (Audio::stop deletes the audio
 	// input and output)
 	Audio::stop();
+	delete Global::get().inputEnhancementPolicyController;
+	Global::get().inputEnhancementPolicyController = nullptr;
+	delete Global::get().inputEnhancementPackageVerifier;
+	Global::get().inputEnhancementPackageVerifier = nullptr;
 
 	delete srpc;
 

@@ -1,0 +1,437 @@
+name: Input Enhancement Pre-Azure Release Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected master commit to rehearse
+        required: true
+        type: string
+      build_number:
+        description: Positive immutable build number
+        required: true
+        type: number
+      community_size:
+        description: Listening community size (0 means require at least three listeners)
+        required: false
+        default: 0
+        type: number
+
+# No OIDC, deployment environment, production secret, release publication, or
+# contents write is available to any pre-Azure phase.
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: input-enhancement-pre-azure-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare-immutable-signed-challenge
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-prepare]
+    timeout-minutes: 360
+    outputs:
+      prepared_artifact: ${{ steps.identity.outputs.prepared_artifact }}
+      build_id: ${{ steps.identity.outputs.build_id }}
+      challenge_id: ${{ steps.challenge.outputs.challenge_id }}
+      challenge_sha256: ${{ steps.challenge.outputs.challenge_sha256 }}
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
+      PREPARE_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_PREPARE_EXECUTOR }}
+      PREPARE_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_PREPARE_EXECUTOR_SHA256 }}
+      UNSIGNED_HANDOFF_ARCHIVE: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE }}
+      UNSIGNED_HANDOFF_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256 }}
+      MEASURED_EVIDENCE_ARCHIVE: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE }}
+      MEASURED_EVIDENCE_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256 }}
+      LISTENING_QUALIFICATION: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION }}
+      LISTENING_QUALIFICATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256 }}
+      RELEASE_SMOKE_HARNESS: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS }}
+      RELEASE_SMOKE_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256 }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 }}
+      RELEASE_SMOKE_CASE_SET: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET }}
+      RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
+      RELEASE_SMOKE_SERVER_BINARY: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY }}
+      RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Establish immutable identity
+        id: identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase SHA.' }
+          $build = 0
+          if (-not [int]::TryParse($env:REQUESTED_BUILD_NUMBER, [ref]$build) -or $build -le 0) { throw 'build_number must be positive.' }
+          if ((git rev-parse HEAD).Trim() -cne $env:REQUESTED_SOURCE_SHA) { throw 'Checkout differs from requested source_sha.' }
+          git merge-base --is-ancestor $env:REQUESTED_SOURCE_SHA origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'Rehearsal commit is not on protected master.' }
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          $buildId = Get-InputEnhancementBuildId -BuildNumber $build -SourceSha $env:REQUESTED_SOURCE_SHA
+          $artifact = "input-enhancement-rehearsal-prepared-$buildId-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+          "prepared_artifact=$artifact" >> $env:GITHUB_OUTPUT
+          "PREPARED_ROOT=$env:RUNNER_TEMP\mumble-rehearsal-prepared-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_ENV
+
+      - name: Prepare challenge without creating a draft
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            'PREPARE_EXECUTOR', 'PREPARE_EXECUTOR_SHA256',
+            'UNSIGNED_HANDOFF_ARCHIVE', 'UNSIGNED_HANDOFF_ARCHIVE_SHA256',
+            'MEASURED_EVIDENCE_ARCHIVE', 'MEASURED_EVIDENCE_ARCHIVE_SHA256',
+            'LISTENING_QUALIFICATION', 'LISTENING_QUALIFICATION_SHA256',
+            'RELEASE_SMOKE_HARNESS', 'RELEASE_SMOKE_HARNESS_SHA256',
+            'RELEASE_SMOKE_FIXTURE_MANIFEST', 'RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256',
+            'RELEASE_SMOKE_CASE_SET', 'RELEASE_SMOKE_CASE_SET_SHA256',
+            'RELEASE_SMOKE_SERVER_BINARY', 'RELEASE_SMOKE_SERVER_BINARY_SHA256'
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing protected prepare input '$name'." }
+          }
+          .\scripts\windows\prepare-input-enhancement-release-rehearsal.ps1 `
+            -SourceRoot $env:GITHUB_WORKSPACE -SourceSha $env:REQUESTED_SOURCE_SHA `
+            -BuildNumber ([int]$env:REQUESTED_BUILD_NUMBER) `
+            -PrepareExecutorPath $env:PREPARE_EXECUTOR -PrepareExecutorSha256 $env:PREPARE_EXECUTOR_SHA256 `
+            -UnsignedHandoffArchivePath $env:UNSIGNED_HANDOFF_ARCHIVE -UnsignedHandoffArchiveSha256 $env:UNSIGNED_HANDOFF_ARCHIVE_SHA256 `
+            -MeasuredEvidenceArchivePath $env:MEASURED_EVIDENCE_ARCHIVE -MeasuredEvidenceArchiveSha256 $env:MEASURED_EVIDENCE_ARCHIVE_SHA256 `
+            -ListeningQualificationPath $env:LISTENING_QUALIFICATION -ListeningQualificationSha256 $env:LISTENING_QUALIFICATION_SHA256 `
+            -ReleaseSmokeHarnessPath $env:RELEASE_SMOKE_HARNESS -ReleaseSmokeHarnessSha256 $env:RELEASE_SMOKE_HARNESS_SHA256 `
+            -FixtureManifestPath $env:RELEASE_SMOKE_FIXTURE_MANIFEST -FixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 `
+            -CaseSetPath $env:RELEASE_SMOKE_CASE_SET -CaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 `
+            -ServerExecutablePath $env:RELEASE_SMOKE_SERVER_BINARY -ServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
+            -AllowedOutputParent $env:RUNNER_TEMP -OutputRoot $env:PREPARED_ROOT
+          if (Test-Path -LiteralPath (Join-Path $env:PREPARED_ROOT 'draft-manifest.json')) { throw 'Prepare phase must not create a draft.' }
+
+      - name: Export immutable challenge identity
+        id: challenge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          $path = Join-Path $env:PREPARED_ROOT 'rehearsal-challenge.json'
+          $challenge = Read-ReleaseJson -Path $path
+          "challenge_id=$($challenge.challengeId)" >> $env:GITHUB_OUTPUT
+          "challenge_sha256=$(Get-ReleaseFileSha256 -Path $path)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.identity.outputs.prepared_artifact }}
+          path: ${{ env.PREPARED_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  observe:
+    name: independently-observe-prepared-candidate
+    needs: prepare
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-observe]
+    timeout-minutes: 360
+    outputs:
+      observation_artifact: ${{ steps.identity.outputs.observation_artifact }}
+      kill_trace_sha256: ${{ steps.receipts.outputs.kill_trace_sha256 }}
+      kill_receipt_sha256: ${{ steps.receipts.outputs.kill_receipt_sha256 }}
+      vm_evidence_sha256: ${{ steps.receipts.outputs.vm_evidence_sha256 }}
+      vm_receipt_sha256: ${{ steps.receipts.outputs.vm_receipt_sha256 }}
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      EXPECTED_BUILD_ID: ${{ needs.prepare.outputs.build_id }}
+      EXPECTED_CHALLENGE_ID: ${{ needs.prepare.outputs.challenge_id }}
+      EXPECTED_CHALLENGE_SHA256: ${{ needs.prepare.outputs.challenge_sha256 }}
+      PREPARED_ARTIFACT: ${{ needs.prepare.outputs.prepared_artifact }}
+      KILL_SWITCH_OBSERVER: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER }}
+      KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR }}
+      UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
+      UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
+      UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
+      UPDATER_VM_HARDWARE_FINGERPRINT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.prepare.outputs.prepared_artifact }}
+          path: ${{ runner.temp }}/rehearsal-prepared
+
+      - name: Run hash-pinned independent observers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          foreach ($pair in @(
+            @($env:KILL_SWITCH_OBSERVER, $env:KILL_SWITCH_OBSERVER_SHA256, 'kill-switch observer'),
+            @($env:UPDATER_VM_EXECUTOR, $env:UPDATER_VM_EXECUTOR_SHA256, 'updater VM executor')
+          )) {
+            if ((Get-ReleaseFileSha256 -Path $pair[0]) -cne $pair[1]) { throw "Protected $($pair[2]) hash mismatch." }
+          }
+          if ($env:KILL_SWITCH_OBSERVER_IDENTITY -ceq $env:UPDATER_VM_OBSERVER_IDENTITY -or
+              $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX -ceq $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX) {
+            throw 'Observers must use distinct protected identities and observer-held Ed25519 keys.'
+          }
+          $prepared = Join-Path $env:RUNNER_TEMP 'rehearsal-prepared'
+          $challenge = Join-Path $prepared 'rehearsal-challenge.json'
+          if ((Get-ReleaseFileSha256 -Path $challenge) -cne $env:EXPECTED_CHALLENGE_SHA256) { throw 'Prepared challenge changed after upload/download.' }
+          $out = Join-Path $env:RUNNER_TEMP "mumble-rehearsal-observation-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Path $out | Out-Null
+          & $env:KILL_SWITCH_OBSERVER -ChallengePath $challenge -PreparedRoot $prepared `
+            -ExpectedChallengeId $env:EXPECTED_CHALLENGE_ID `
+            -ObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -ObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
+            -OutputRuntimeTracePath (Join-Path $out 'kill-switch-runtime-trace.json') `
+            -OutputReceiptPath (Join-Path $out 'kill-switch-observer-receipt.json')
+          if (-not $?) { throw 'Independent kill-switch observer failed.' }
+          & $env:UPDATER_VM_EXECUTOR -ChallengePath $challenge -PreparedRoot $prepared `
+            -ExpectedChallengeId $env:EXPECTED_CHALLENGE_ID `
+            -ObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -ObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
+            -OutputEvidencePath (Join-Path $out 'updater-vm-evidence.json') `
+            -OutputReceiptPath (Join-Path $out 'updater-vm-receipt.json')
+          if (-not $?) { throw 'Independent updater VM executor failed.' }
+          "OBSERVATION_ROOT=$out" >> $env:GITHUB_ENV
+
+      - name: Export independent receipt hashes
+        id: receipts
+        shell: pwsh
+        run: |
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          "kill_trace_sha256=$(Get-ReleaseFileSha256 -Path (Join-Path $env:OBSERVATION_ROOT 'kill-switch-runtime-trace.json'))" >> $env:GITHUB_OUTPUT
+          "kill_receipt_sha256=$(Get-ReleaseFileSha256 -Path (Join-Path $env:OBSERVATION_ROOT 'kill-switch-observer-receipt.json'))" >> $env:GITHUB_OUTPUT
+          "vm_evidence_sha256=$(Get-ReleaseFileSha256 -Path (Join-Path $env:OBSERVATION_ROOT 'updater-vm-evidence.json'))" >> $env:GITHUB_OUTPUT
+          "vm_receipt_sha256=$(Get-ReleaseFileSha256 -Path (Join-Path $env:OBSERVATION_ROOT 'updater-vm-receipt.json'))" >> $env:GITHUB_OUTPUT
+      - name: Establish observation artifact identity
+        id: identity
+        shell: pwsh
+        run: |
+          "observation_artifact=input-enhancement-rehearsal-observation-${{ needs.prepare.outputs.build_id }}-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.identity.outputs.observation_artifact }}
+          path: ${{ env.OBSERVATION_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  finalize:
+    name: finalize-once-and-stage-local-draft
+    needs: [prepare, observe]
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-finalize]
+    timeout-minutes: 180
+    outputs:
+      draft_artifact: ${{ steps.identity.outputs.draft_artifact }}
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
+      REQUESTED_COMMUNITY_SIZE: ${{ inputs.community_size }}
+      EXPECTED_BUILD_ID: ${{ needs.prepare.outputs.build_id }}
+      EXPECTED_CHALLENGE_ID: ${{ needs.prepare.outputs.challenge_id }}
+      EXPECTED_CHALLENGE_SHA256: ${{ needs.prepare.outputs.challenge_sha256 }}
+      FINALIZE_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_FINALIZE_EXECUTOR }}
+      FINALIZE_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_FINALIZE_EXECUTOR_SHA256 }}
+      PREPARE_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_PREPARE_EXECUTOR_SHA256 }}
+      REPLAY_LEDGER_ROOT: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_REPLAY_LEDGER_ROOT }}
+      UNSIGNED_HANDOFF_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256 }}
+      MEASURED_EVIDENCE_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256 }}
+      LISTENING_QUALIFICATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256 }}
+      RELEASE_SMOKE_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256 }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 }}
+      RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
+      RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
+      KILL_SWITCH_OBSERVER: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER }}
+      KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR }}
+      UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
+      UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
+      UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
+      UPDATER_VM_HARDWARE_FINGERPRINT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.prepare.outputs.prepared_artifact }}
+          path: ${{ runner.temp }}/rehearsal-prepared
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.observe.outputs.observation_artifact }}
+          path: ${{ runner.temp }}/rehearsal-observation
+      - name: Establish draft artifact identity
+        id: identity
+        shell: pwsh
+        run: |
+          $artifact = "input-enhancement-rehearsal-draft-${{ needs.prepare.outputs.build_id }}-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "draft_artifact=$artifact" >> $env:GITHUB_OUTPUT
+          "DRAFT_ARTIFACT=$artifact" >> $env:GITHUB_ENV
+          "DRAFT_ROOT=$env:RUNNER_TEMP\mumble-rehearsal-final-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_ENV
+      - name: Finalize exact challenge once
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\windows\finalize-input-enhancement-release-rehearsal.ps1 `
+            -SourceRoot $env:GITHUB_WORKSPACE -SourceSha $env:REQUESTED_SOURCE_SHA -BuildNumber ([int]$env:REQUESTED_BUILD_NUMBER) `
+            -PreparedRoot (Join-Path $env:RUNNER_TEMP 'rehearsal-prepared') `
+            -ChallengePath (Join-Path $env:RUNNER_TEMP 'rehearsal-prepared\rehearsal-challenge.json') `
+            -ChallengeSha256 $env:EXPECTED_CHALLENGE_SHA256 `
+            -FinalizeExecutorPath $env:FINALIZE_EXECUTOR -FinalizeExecutorSha256 $env:FINALIZE_EXECUTOR_SHA256 `
+            -PrepareExecutorSha256 $env:PREPARE_EXECUTOR_SHA256 `
+            -UnsignedHandoffArchiveSha256 $env:UNSIGNED_HANDOFF_ARCHIVE_SHA256 `
+            -MeasuredEvidenceArchiveSha256 $env:MEASURED_EVIDENCE_ARCHIVE_SHA256 `
+            -ListeningQualificationSha256 $env:LISTENING_QUALIFICATION_SHA256 `
+            -ReleaseSmokeHarnessSha256 $env:RELEASE_SMOKE_HARNESS_SHA256 `
+            -FixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 -CaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 `
+            -ServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
+            -KillSwitchObserverPath $env:KILL_SWITCH_OBSERVER -KillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
+            -KillSwitchObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -KillSwitchObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
+            -KillSwitchRuntimeTracePath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\kill-switch-runtime-trace.json') `
+            -KillSwitchRuntimeTraceSha256 '${{ needs.observe.outputs.kill_trace_sha256 }}' `
+            -KillSwitchObserverReceiptPath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\kill-switch-observer-receipt.json') `
+            -KillSwitchObserverReceiptSha256 '${{ needs.observe.outputs.kill_receipt_sha256 }}' `
+            -UpdaterVmExecutorPath $env:UPDATER_VM_EXECUTOR -UpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 `
+            -UpdaterVmObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -UpdaterVmObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
+            -UpdaterVmHarnessSha256 $env:UPDATER_VM_HARNESS_SHA256 `
+            -UpdaterVmEvidencePath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\updater-vm-evidence.json') `
+            -UpdaterVmEvidenceSha256 '${{ needs.observe.outputs.vm_evidence_sha256 }}' `
+            -UpdaterVmReceiptPath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\updater-vm-receipt.json') `
+            -UpdaterVmReceiptSha256 '${{ needs.observe.outputs.vm_receipt_sha256 }}' `
+            -UpdaterVmImageSha256 $env:UPDATER_VM_IMAGE_SHA256 -UpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
+            -UpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `
+            -DraftArtifactName $env:DRAFT_ARTIFACT -AllowedOutputParent $env:RUNNER_TEMP -OutputRoot $env:DRAFT_ROOT `
+            -ReplayLedgerRoot $env:REPLAY_LEDGER_ROOT -CommunitySize ([int]$env:REQUESTED_COMMUNITY_SIZE)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.identity.outputs.draft_artifact }}
+          path: ${{ env.DRAFT_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  remote-reverify:
+    name: remote-byte-reverification-and-attestation
+    needs: [prepare, observe, finalize]
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_COMMUNITY_SIZE: ${{ inputs.community_size }}
+      EXPECTED_BUILD_ID: ${{ needs.prepare.outputs.build_id }}
+      EXPECTED_CHALLENGE_ID: ${{ needs.prepare.outputs.challenge_id }}
+      EXPECTED_CHALLENGE_SHA256: ${{ needs.prepare.outputs.challenge_sha256 }}
+      DRAFT_ARTIFACT: ${{ needs.finalize.outputs.draft_artifact }}
+      PREPARE_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_PREPARE_EXECUTOR_SHA256 }}
+      FINALIZE_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_FINALIZE_EXECUTOR_SHA256 }}
+      UNSIGNED_HANDOFF_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_UNSIGNED_HANDOFF_ARCHIVE_SHA256 }}
+      MEASURED_EVIDENCE_ARCHIVE_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_MEASURED_EVIDENCE_ARCHIVE_SHA256 }}
+      LISTENING_QUALIFICATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_REHEARSAL_LISTENING_QUALIFICATION_SHA256 }}
+      RELEASE_SMOKE_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_HARNESS_SHA256 }}
+      RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 }}
+      RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
+      RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
+      KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
+      UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
+      UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
+      UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
+      UPDATER_VM_HARDWARE_FINGERPRINT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.finalize.outputs.draft_artifact }}
+          path: rehearsal-remote
+      - name: Reverify downloaded draft bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\windows\assert-input-enhancement-rehearsal-draft-manifest.ps1 `
+            -Root .\rehearsal-remote -ExpectedArtifactName $env:DRAFT_ARTIFACT
+          if ((Get-FileHash .\rehearsal-remote\rehearsal-challenge.json -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:EXPECTED_CHALLENGE_SHA256) {
+            throw 'Remote draft contains a different prepared challenge.'
+          }
+          Import-Module .\scripts\windows\InputEnhancementReleaseTools.psm1 -Force
+          $challenge = Read-ReleaseJson -Path .\rehearsal-remote\rehearsal-challenge.json
+          $rehearsal = Read-ReleaseJson -Path .\rehearsal-remote\rehearsal.json
+          .\scripts\windows\assert-input-enhancement-release-rehearsal.ps1 `
+            -Root .\rehearsal-remote -ExpectedSourceSha $env:REQUESTED_SOURCE_SHA -ExpectedBuildId $env:EXPECTED_BUILD_ID `
+            -ExpectedDraftArtifactName $env:DRAFT_ARTIFACT `
+            -ExpectedEd25519PublicKeyHex ([string]$challenge.ephemeralSigning.ed25519PublicKeyHex) `
+            -ExpectedPrepareExecutorSha256 $env:PREPARE_EXECUTOR_SHA256 -ExpectedFinalizeExecutorSha256 $env:FINALIZE_EXECUTOR_SHA256 `
+            -ExpectedChallengeId $env:EXPECTED_CHALLENGE_ID -ExpectedChallengeSha256 $env:EXPECTED_CHALLENGE_SHA256 `
+            -ExpectedCandidateBuildReceiptSha256 ([string]$challenge.unsigned.candidateBuildReceiptSha256) `
+            -ExpectedUnsignedTestedBinarySha256 ([string]$challenge.unsigned.testedBinarySha256) `
+            -ExpectedUnsignedStagedPayloadSha256 ([string]$challenge.unsigned.stagedPayloadSha256) `
+            -ExpectedSignedTestedBinarySha256 ([string]$challenge.signed.testedBinarySha256) `
+            -ExpectedSignedStagedPayloadSha256 ([string]$challenge.signed.stagedPayloadSha256) `
+            -ExpectedUnsignedHandoffSha256 $env:UNSIGNED_HANDOFF_ARCHIVE_SHA256 `
+            -ExpectedMeasuredEvidenceArchiveSha256 $env:MEASURED_EVIDENCE_ARCHIVE_SHA256 `
+            -ExpectedListeningQualificationSha256 $env:LISTENING_QUALIFICATION_SHA256 `
+            -ExpectedReleaseSmokeHarnessSha256 $env:RELEASE_SMOKE_HARNESS_SHA256 `
+            -ExpectedFixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 `
+            -ExpectedCaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 -ExpectedServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
+            -ExpectedKillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
+            -ExpectedKillSwitchObserverReceiptSha256 '${{ needs.observe.outputs.kill_receipt_sha256 }}' `
+            -ExpectedKillSwitchObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -ExpectedKillSwitchObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
+            -ExpectedUpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 -ExpectedUpdaterVmHarnessSha256 $env:UPDATER_VM_HARNESS_SHA256 `
+            -ExpectedUpdaterVmObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -ExpectedUpdaterVmObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
+            -ExpectedUpdaterVmReceiptSha256 '${{ needs.observe.outputs.vm_receipt_sha256 }}' `
+            -ExpectedUpdaterVmImageSha256 $env:UPDATER_VM_IMAGE_SHA256 -ExpectedUpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
+            -ExpectedUpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `
+            -ExpectedCommunitySize ([int]$env:REQUESTED_COMMUNITY_SIZE)
+          New-Item -ItemType Directory -Force -Path .\remote-reverification | Out-Null
+          .\scripts\windows\new-input-enhancement-rehearsal-remote-attestation.ps1 `
+            -DraftRoot .\rehearsal-remote -ArtifactName $env:DRAFT_ARTIFACT `
+            -SourceSha $env:REQUESTED_SOURCE_SHA -BuildId $env:EXPECTED_BUILD_ID `
+            -ChallengeId $env:EXPECTED_CHALLENGE_ID -ChallengeSha256 $env:EXPECTED_CHALLENGE_SHA256 `
+            -WorkflowRunId $env:GITHUB_RUN_ID `
+            -OutputPath .\remote-reverification\remote-reverification.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: input-enhancement-rehearsal-reverification-${{ needs.prepare.outputs.build_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: remote-reverification/remote-reverification.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

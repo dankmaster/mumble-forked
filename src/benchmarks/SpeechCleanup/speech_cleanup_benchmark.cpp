@@ -4,6 +4,8 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "Audio.h"
+#include "InputEnhancement.h"
+#include "InputEnhancementLightProcessor.h"
 #include "SpeechCleanup.h"
 #include "SpeechCleanupProcessor.h"
 
@@ -11,15 +13,23 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QFileInfo>
+#include <QLibrary>
+#include <QSaveFile>
 #include <QTextStream>
+
+#ifdef Q_OS_WIN
+#	include <qt_windows.h>
+#endif
 
 #include <sndfile.h>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -28,6 +38,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -55,6 +66,8 @@ namespace {
 		double audioMs          = 0.0;
 		double processedAudioMs = 0.0;
 		double realTimeFactor   = 0.0;
+		double realtimeWallMs   = 0.0;
+		double realtimeCallbackProcessingTotalMs = 0.0;
 		float mixFactor         = 1.0f;
 		std::size_t inputSampleCount = 0;
 		std::size_t outputSampleCount = 0;
@@ -72,6 +85,49 @@ namespace {
 		float rms               = 0.0f;
 		QString activeModelId;
 		QString activeModelPath;
+		QString activeModelSha256;
+		QString requestedRecipeId;
+		QString requestedProfile;
+		QString activeProfile;
+		QString activeEngine;
+		QString fallbackReason;
+		int requestedUiNoiseReduction     = -1;
+		int requestedUiNaturalClear       = -1;
+		int validatedRecipeNoiseReduction = -1;
+		int validatedRecipeNaturalClear   = -1;
+		std::uint32_t recipeRevision = 0;
+		std::uint64_t processedFrames = 0;
+		std::uint64_t neuralFrames = 0;
+		std::uint64_t deadlineMisses = 0;
+		std::uint64_t fallbackCount = 0;
+		std::uint64_t maximumProcessingNanoseconds = 0;
+		std::uint64_t workerProcessingFrames = 0;
+		std::uint64_t workerTotalProcessingNanoseconds = 0;
+		std::uint64_t workerMaximumProcessingNanoseconds = 0;
+		std::uint64_t workerProcessingP99Nanoseconds = 0;
+		std::uint64_t callbackP50Nanoseconds = 0;
+		std::uint64_t callbackP95Nanoseconds = 0;
+		std::uint64_t callbackP99Nanoseconds = 0;
+		std::uint64_t lightSpeechProbabilityP10 = 0;
+		std::uint64_t lightSpeechProbabilityP50 = 0;
+		std::uint64_t lightSpeechProbabilityP90 = 0;
+		std::uint64_t lightNoisePsdSumP10 = 0;
+		std::uint64_t lightNoisePsdSumP50 = 0;
+		std::uint64_t lightNoisePsdSumP90 = 0;
+		std::uint64_t lightNoiseToSignalPpmP10 = 0;
+		std::uint64_t lightNoiseToSignalPpmP50 = 0;
+		std::uint64_t lightNoiseToSignalPpmP90 = 0;
+		std::uint64_t lightDryRmsPpbP10 = 0;
+		std::uint64_t lightDryRmsPpbP50 = 0;
+		std::uint64_t lightDryRmsPpbP90 = 0;
+		std::uint64_t pacingFrameCount = 0;
+		std::uint64_t pacingDeadlineMisses = 0;
+		std::uint64_t pacingLateStartCount = 0;
+		std::uint64_t pacingMaximumLateStartNanoseconds = 0;
+		std::uint64_t pacingMaximumDeadlineOverrunNanoseconds = 0;
+		std::uint32_t realtimeRequestedDurationSeconds = 0;
+		bool realtimeStreaming = false;
+		bool realtimePacing = false;
 		bool usedFallback       = false;
 		unsigned int reportedLatencySamples = 0;
 		int alignmentLagSamples = 0;
@@ -79,12 +135,235 @@ namespace {
 		std::optional< double > segmentalSnr;
 	};
 
+	std::uint64_t nearestRankPercentile(std::vector< std::uint64_t > values, double percentile) {
+		if (values.empty()) {
+			return 0;
+		}
+		std::sort(values.begin(), values.end());
+		const double rank = std::ceil(std::clamp(percentile, 0.0, 1.0) * static_cast< double >(values.size()));
+		const std::size_t index = static_cast< std::size_t >(std::max(1.0, rank)) - 1;
+		return values[std::min(index, values.size() - 1)];
+	}
+
+	QString profileName(Mumble::InputEnhancement::Profile profile) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		switch (profile) {
+			case Profile::Original:
+				return QStringLiteral("Original");
+			case Profile::Light:
+				return QStringLiteral("Light");
+			case Profile::Balanced:
+				return QStringLiteral("Balanced");
+			case Profile::Quality:
+				return QStringLiteral("Quality");
+			case Profile::Auto:
+				return QStringLiteral("Auto");
+			case Profile::VoiceFocus:
+				return QStringLiteral("VoiceFocus");
+		}
+		return QStringLiteral("Original");
+	}
+
+	Mumble::InputEnhancement::Profile parseProfile(const QString &value) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		const QString normalized = value.trimmed();
+		if (normalized.compare(QLatin1String("Crisp"), Qt::CaseInsensitive) == 0) {
+			return Profile::Quality;
+		}
+		for (const Profile profile : { Profile::Original, Profile::Light, Profile::Balanced, Profile::Quality,
+									   Profile::Auto, Profile::VoiceFocus }) {
+			if (profileName(profile).compare(normalized, Qt::CaseInsensitive) == 0) {
+				return profile;
+			}
+		}
+		throw std::runtime_error(QStringLiteral("Unsupported input enhancement profile: %1").arg(value).toStdString());
+	}
+
+	QString engineName(Mumble::InputEnhancement::Engine engine) {
+		using Engine = Mumble::InputEnhancement::Engine;
+		switch (engine) {
+			case Engine::None:
+				return QStringLiteral("None");
+			case Engine::Speex:
+				return QStringLiteral("Speex");
+			case Engine::RNNoise:
+				return QStringLiteral("RNNoise");
+			case Engine::DeepFilterNet:
+				return QStringLiteral("DeepFilterNet");
+			case Engine::DTLN:
+				return QStringLiteral("DTLN");
+		}
+		return QStringLiteral("None");
+	}
+
+	QString fallbackReasonName(Mumble::InputEnhancement::FallbackReason reason) {
+		using Reason = Mumble::InputEnhancement::FallbackReason;
+		switch (reason) {
+			case Reason::None:
+				return QStringLiteral("None");
+			case Reason::ProcessorUnavailable:
+				return QStringLiteral("ProcessorUnavailable");
+			case Reason::ProcessorNotReady:
+				return QStringLiteral("ProcessorNotReady");
+			case Reason::ProcessorFallback:
+				return QStringLiteral("ProcessorFallback");
+			case Reason::UnexpectedModel:
+				return QStringLiteral("UnexpectedModel");
+			case Reason::LatencyBudgetExceeded:
+				return QStringLiteral("LatencyBudgetExceeded");
+			case Reason::InvalidFrame:
+				return QStringLiteral("InvalidFrame");
+			case Reason::InvalidOutput:
+				return QStringLiteral("InvalidOutput");
+			case Reason::DeadlineExceeded:
+				return QStringLiteral("DeadlineExceeded");
+			case Reason::ProcessorException:
+				return QStringLiteral("ProcessorException");
+		}
+		return QStringLiteral("Unknown");
+	}
+
+	QString attestedProductModelPath(const Mumble::InputEnhancement::Recipe &recipe,
+								 const QString &authorizedModelPath) {
+		// The embedded RNNoise model deliberately keeps the historical empty-path
+		// diagnostic. Every externally packaged model must, however, publish the
+		// same canonical path that Pipeline::configure() has already verified
+		// against the processor and the authorized SHA-256.
+		if (!recipe.usesNeuralProcessor() || recipe.modelId() == QLatin1String("rnnoise:embedded")
+			|| authorizedModelPath.isEmpty()) {
+			return {};
+		}
+
+		const QString canonicalPath = QFileInfo(authorizedModelPath).canonicalFilePath();
+		if (canonicalPath.isEmpty()) {
+			throw std::runtime_error("Authorized product model path no longer resolves after pipeline configuration");
+		}
+		return canonicalPath;
+	}
+
+	Mumble::InputEnhancement::CpuClass parseCpuClass(const QString &value) {
+		using CpuClass = Mumble::InputEnhancement::CpuClass;
+		if (value.compare(QLatin1String("low"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::Low;
+		}
+		if (value.compare(QLatin1String("standard"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::Standard;
+		}
+		if (value.compare(QLatin1String("high"), Qt::CaseInsensitive) == 0) {
+			return CpuClass::High;
+		}
+		throw std::runtime_error(QStringLiteral("Unsupported CPU class: %1").arg(value).toStdString());
+	}
+
 	struct SignalMetrics {
 		std::size_t saturatedSampleCount = 0;
 		std::size_t outOfRangeSampleCount = 0;
 		std::size_t nonFiniteSampleCount = 0;
 		float peak = 0.0f;
 		float rms  = 0.0f;
+	};
+
+#ifdef Q_OS_WIN
+	class WindowsTimerResolution final {
+	public:
+		WindowsTimerResolution() {
+			m_library.setFileName(QStringLiteral("winmm"));
+			if (!m_library.load()) {
+				return;
+			}
+			m_begin = reinterpret_cast< TimePeriodFunction >(m_library.resolve("timeBeginPeriod"));
+			m_end   = reinterpret_cast< TimePeriodFunction >(m_library.resolve("timeEndPeriod"));
+			m_active = m_begin && m_end && m_begin(1) == 0;
+		}
+
+		~WindowsTimerResolution() {
+			if (m_active) {
+				m_end(1);
+			}
+		}
+
+		WindowsTimerResolution(const WindowsTimerResolution &)            = delete;
+		WindowsTimerResolution &operator=(const WindowsTimerResolution &) = delete;
+
+		bool active() const noexcept {
+			return m_active;
+		}
+
+	private:
+		using TimePeriodFunction = UINT(WINAPI *)(UINT);
+
+		QLibrary m_library;
+		TimePeriodFunction m_begin = nullptr;
+		TimePeriodFunction m_end   = nullptr;
+		bool m_active               = false;
+	};
+#endif
+
+	bool validRealtimeReadyNonce(const QString &nonce) noexcept {
+		if (nonce.size() != 64) {
+			return false;
+		}
+		for (const QChar character : nonce) {
+			if (!((character >= QLatin1Char('0') && character <= QLatin1Char('9'))
+				  || (character >= QLatin1Char('a') && character <= QLatin1Char('f')))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void publishRealtimeReadyMarker(const QString &path, const QString &nonce) {
+		if (path.isEmpty() || !validRealtimeReadyNonce(nonce)) {
+			throw std::runtime_error("Realtime soak ready marker path/nonce is invalid");
+		}
+		if (QFileInfo::exists(path)) {
+			throw std::runtime_error("Realtime soak ready marker already exists");
+		}
+
+		const nlohmann::json document = {
+			{ "kind", "mumble-input-enhancement-realtime-ready-v1" },
+			{ "nonce", nonce.toStdString() },
+			{ "process_id", static_cast< std::int64_t >(QCoreApplication::applicationPid()) },
+		};
+		const QByteArray payload = QByteArray::fromStdString(document.dump()) + '\n';
+		QSaveFile marker(path);
+		marker.setDirectWriteFallback(false);
+		if (!marker.open(QIODevice::WriteOnly) || marker.write(payload) != payload.size() || !marker.commit()) {
+			throw std::runtime_error("Realtime soak ready marker could not be committed atomically");
+		}
+	}
+
+	class StreamingSignalMetrics {
+	public:
+		void observe(float sample) noexcept {
+			if (!std::isfinite(sample)) {
+				++m_metrics.nonFiniteSampleCount;
+				return;
+			}
+			const float absolute = std::fabs(sample);
+			if (absolute >= 1.0f) {
+				++m_metrics.saturatedSampleCount;
+			}
+			if (absolute > 1.0f) {
+				++m_metrics.outOfRangeSampleCount;
+			}
+			m_metrics.peak = std::max(m_metrics.peak, absolute);
+			m_sumSquares += static_cast< double >(sample) * static_cast< double >(sample);
+			++m_finiteSamples;
+		}
+
+		SignalMetrics finish() const noexcept {
+			SignalMetrics result = m_metrics;
+			result.rms = m_finiteSamples == 0
+				? 0.0f
+				: static_cast< float >(std::sqrt(m_sumSquares / static_cast< double >(m_finiteSamples)));
+			return result;
+		}
+
+	private:
+		SignalMetrics m_metrics;
+		double m_sumSquares = 0.0;
+		std::uint64_t m_finiteSamples = 0;
 	};
 
 	struct AlignedAudio {
@@ -541,12 +820,18 @@ namespace {
 		std::copy(samples.begin(), samples.end(), framedInput.begin());
 		std::vector< float > processed(metrics.outputSampleCount, 0.0f);
 		const auto startTime = std::chrono::steady_clock::now();
+		std::vector< std::uint64_t > callbackDurations;
+		callbackDurations.reserve(framedInput.size() / kFrameSize);
 
 		std::vector< float > frameBuffer(kFrameSize, 0.0f);
 		for (std::size_t offset = 0; offset < framedInput.size(); offset += kFrameSize) {
 			std::copy_n(framedInput.data() + offset, frameBuffer.size(), frameBuffer.data());
+			const auto callbackStartedAt = std::chrono::steady_clock::now();
 			processor.processInPlace(frameBuffer.data(), static_cast< unsigned int >(frameBuffer.size()),
 									 metrics.mixFactor);
+			const auto callbackFinishedAt = std::chrono::steady_clock::now();
+			callbackDurations.push_back(static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count()));
 			for (std::size_t frameIndex = 0; frameIndex < frameBuffer.size(); ++frameIndex) {
 				if (!std::isfinite(frameBuffer[frameIndex])) {
 					throw std::runtime_error(
@@ -567,6 +852,9 @@ namespace {
 		metrics.audioMs = static_cast< double >(metrics.inputSampleCount) * 1000.0 / SAMPLE_RATE;
 		metrics.processedAudioMs = static_cast< double >(framedSampleCount) * 1000.0 / SAMPLE_RATE;
 		metrics.realTimeFactor = (metrics.audioMs > 0.0) ? (metrics.cpuMs / metrics.audioMs) : 0.0;
+		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
+		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
+		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
 
 		const SignalMetrics outputMetrics = measureSignal(processed);
 		metrics.saturatedSampleCount = outputMetrics.saturatedSampleCount;
@@ -600,6 +888,418 @@ namespace {
 		BenchmarkMetrics metrics = processPreparedProcessor(*processor, samples, mixFactor);
 		metrics.initializationMs =
 			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
+		return metrics;
+	}
+
+	BenchmarkMetrics processProductProfile(const Mumble::InputEnhancement::ResolveRequest &request,
+										std::vector< float > &samples, const QString &authorizedModelSha256,
+										const QString &authorizedModelPath) {
+		using namespace Mumble::InputEnhancement;
+		if (samples.empty()) {
+			throw std::runtime_error("Input contains no audio samples");
+		}
+		requireFiniteSignal(samples, QStringLiteral("Input audio"));
+
+		const Recipe recipe = RecipeCatalog::resolve(request);
+		// Product fallback uses the 10 ms catastrophe limit. Balanced/Quality
+		// p99 targets (5/8 ms) are evaluated from benchmark diagnostics instead
+		// of turning one scheduling outlier into an audible profile rollback.
+		constexpr std::uint64_t deadline = 10'000'000;
+		const auto initializationStart = std::chrono::steady_clock::now();
+		Pipeline pipeline(Pipeline::ProcessorFactory {}, Pipeline::NanosecondClock {}, deadline);
+		LightProcessor lightProcessor;
+		const bool lightProfile = recipe.effectiveProfile() == Profile::Light;
+		const bool configured = lightProfile ? lightProcessor.configure(recipe, pipeline)
+															 : pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath);
+		if (!configured) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Product recipe %1 failed to initialize: %2")
+					.arg(recipe.id(), fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+
+		const auto initializationEnd = std::chrono::steady_clock::now();
+
+		BenchmarkMetrics metrics;
+		metrics.initializationMs =
+			std::chrono::duration< double, std::milli >(initializationEnd - initializationStart).count();
+		metrics.mixFactor        = recipe.mixFactor();
+		metrics.activeModelPath  = attestedProductModelPath(recipe, authorizedModelPath);
+		metrics.requestedUiNoiseReduction     = request.noiseReduction;
+		metrics.requestedUiNaturalClear       = request.naturalCrisp;
+		metrics.validatedRecipeNoiseReduction = recipe.noiseReduction();
+		metrics.validatedRecipeNaturalClear   = recipe.naturalCrisp();
+		metrics.inputSampleCount = samples.size();
+		metrics.reportedLatencySamples = pipeline.latencySamples();
+		const SignalMetrics inputMetrics = measureSignal(samples);
+		metrics.inputSaturatedSampleCount = inputMetrics.saturatedSampleCount;
+		metrics.inputOutOfRangeSampleCount = inputMetrics.outOfRangeSampleCount;
+
+		if (metrics.inputSampleCount
+			> std::numeric_limits< std::size_t >::max() - metrics.reportedLatencySamples) {
+			throw std::runtime_error("Input plus product-pipeline latency exceeds the supported sample count");
+		}
+		metrics.outputSampleCount = metrics.inputSampleCount + metrics.reportedLatencySamples;
+		metrics.drainSampleCount  = metrics.reportedLatencySamples;
+		const std::size_t framedSampleCount = roundUpToFrameSize(metrics.outputSampleCount);
+		metrics.processingPaddingSampleCount = framedSampleCount - metrics.outputSampleCount;
+
+		std::vector< float > framedInput(framedSampleCount, 0.0f);
+		std::copy(samples.begin(), samples.end(), framedInput.begin());
+		std::vector< float > processed(metrics.outputSampleCount, 0.0f);
+		std::array< float, frameSamples > frame = {};
+		std::array< std::int16_t, frameSamples > lightFrame = {};
+		std::array< std::int32_t, frameSamples > lightSignalPsd = {};
+		std::vector< std::uint64_t > callbackDurations;
+		callbackDurations.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightSpeechProbabilities;
+		lightSpeechProbabilities.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightNoisePsdSums;
+		lightNoisePsdSums.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightNoiseToSignalPpm;
+		lightNoiseToSignalPpm.reserve(framedInput.size() / frameSamples);
+		std::vector< std::uint64_t > lightDryRmsPpb;
+		lightDryRmsPpb.reserve(framedInput.size() / frameSamples);
+		const auto startedAt = std::chrono::steady_clock::now();
+		for (std::size_t offset = 0; offset < framedInput.size(); offset += frameSamples) {
+			std::copy_n(framedInput.data() + offset, frame.size(), frame.data());
+			// Offline playback has no hardware callback interval in which an
+			// asynchronous processor can advance. Pace it before starting the
+			// callback timer so latency/RTF remain causal while callback timing
+			// still measures only the real-time processFrame() path.
+			if (!pipeline.prepareOfflineFrame()) {
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				throw std::runtime_error(
+					QStringLiteral("Product pipeline offline drain failed at frame %1: %2")
+						.arg(static_cast< quint64 >(offset / frameSamples))
+						.arg(fallbackReasonName(diagnostics.fallbackReason()))
+						.toStdString());
+			}
+			const auto callbackStartedAt = std::chrono::steady_clock::now();
+			bool neuralProcessed = false;
+			if (recipe.usesNeuralProcessor()) {
+				neuralProcessed = pipeline.processFrame(frame);
+			}
+			if (recipe.usesNeuralProcessor() && !neuralProcessed) {
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				throw std::runtime_error(
+					QStringLiteral("Product pipeline failed at frame %1: %2")
+						.arg(static_cast< quint64 >(offset / frameSamples))
+						.arg(fallbackReasonName(diagnostics.fallbackReason()))
+						.toStdString());
+			}
+			if (lightProfile) {
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					const float scaled = std::clamp(frame[index] * 32768.0f, -32768.0f, 32767.0f);
+					lightFrame[index] = static_cast< std::int16_t >(std::lrint(scaled));
+				}
+				double dryEnergy = 0.0;
+				for (const std::int16_t sample : lightFrame) {
+					const double normalized = static_cast< double >(sample) / 32768.0;
+					dryEnergy += normalized * normalized;
+				}
+				lightDryRmsPpb.push_back(static_cast< std::uint64_t >(std::llround(
+					std::sqrt(dryEnergy / static_cast< double >(lightFrame.size())) * 1'000'000'000.0)));
+				if (!lightProcessor.processFrame(lightFrame.data(), frameSamples)) {
+					const Diagnostics diagnostics = pipeline.diagnostics();
+					throw std::runtime_error(
+						QStringLiteral("Product Light pipeline failed at frame %1: %2")
+							.arg(static_cast< quint64 >(offset / frameSamples))
+							.arg(fallbackReasonName(diagnostics.fallbackReason()))
+							.toStdString());
+				}
+				const int speechProbability = lightProcessor.lastSpeechProbability();
+				lightSpeechProbabilities.push_back(static_cast< std::uint64_t >(speechProbability));
+				const std::uint64_t noiseSum = lightProcessor.lastNoisePsdSum();
+				lightNoisePsdSums.push_back(noiseSum);
+				if (lightProcessor.copySignalPsd(lightSignalPsd.data(), lightSignalPsd.size())) {
+					const std::uint64_t signalSum = std::accumulate(
+						lightSignalPsd.cbegin(), lightSignalPsd.cend(), std::uint64_t { 0 },
+						[](std::uint64_t total, std::int32_t value) {
+							return total + static_cast< std::uint64_t >(std::max(value, std::int32_t { 0 }));
+						});
+					const double ratio = signalSum == 0
+						? 0.0
+						: (static_cast< double >(noiseSum) * 1'000'000.0) / static_cast< double >(signalSum);
+					lightNoiseToSignalPpm.push_back(static_cast< std::uint64_t >(std::llround(ratio)));
+				}
+				for (std::size_t index = 0; index < frame.size(); ++index) {
+					frame[index] = static_cast< float >(lightFrame[index]) / 32768.0f;
+				}
+			}
+			const auto callbackFinishedAt = std::chrono::steady_clock::now();
+			const std::uint64_t callbackDuration = static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(callbackFinishedAt - callbackStartedAt).count());
+			callbackDurations.push_back(callbackDuration);
+			if (offset < processed.size()) {
+				const std::size_t count = std::min< std::size_t >(frame.size(), processed.size() - offset);
+				std::copy_n(frame.data(), count, processed.data() + offset);
+			}
+		}
+		// Observe the two jobs still in flight at the fixed scheduling horizon.
+		// This emits no extra audio and therefore leaves the 2400-sample timeline
+		// and tail unchanged.
+		if (!pipeline.finishOfflineProcessing()) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Product pipeline final offline drain failed: %1")
+					.arg(fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+		const auto finishedAt = std::chrono::steady_clock::now();
+		metrics.cpuMs = std::chrono::duration< double, std::milli >(finishedAt - startedAt).count();
+		metrics.audioMs = static_cast< double >(metrics.inputSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.processedAudioMs = static_cast< double >(framedSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.realTimeFactor = metrics.audioMs > 0.0 ? metrics.cpuMs / metrics.audioMs : 0.0;
+		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
+		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
+		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
+		metrics.lightSpeechProbabilityP10 = nearestRankPercentile(lightSpeechProbabilities, 0.10);
+		metrics.lightSpeechProbabilityP50 = nearestRankPercentile(lightSpeechProbabilities, 0.50);
+		metrics.lightSpeechProbabilityP90 = nearestRankPercentile(lightSpeechProbabilities, 0.90);
+		metrics.lightNoisePsdSumP10 = nearestRankPercentile(lightNoisePsdSums, 0.10);
+		metrics.lightNoisePsdSumP50 = nearestRankPercentile(lightNoisePsdSums, 0.50);
+		metrics.lightNoisePsdSumP90 = nearestRankPercentile(lightNoisePsdSums, 0.90);
+		metrics.lightNoiseToSignalPpmP10 = nearestRankPercentile(lightNoiseToSignalPpm, 0.10);
+		metrics.lightNoiseToSignalPpmP50 = nearestRankPercentile(lightNoiseToSignalPpm, 0.50);
+		metrics.lightNoiseToSignalPpmP90 = nearestRankPercentile(lightNoiseToSignalPpm, 0.90);
+		metrics.lightDryRmsPpbP10 = nearestRankPercentile(lightDryRmsPpb, 0.10);
+		metrics.lightDryRmsPpbP50 = nearestRankPercentile(lightDryRmsPpb, 0.50);
+		metrics.lightDryRmsPpbP90 = nearestRankPercentile(lightDryRmsPpb, 0.90);
+
+		const Diagnostics diagnostics = pipeline.diagnostics();
+		metrics.requestedRecipeId = diagnostics.requestedRecipeId();
+		metrics.recipeRevision    = diagnostics.recipeRevision();
+		metrics.requestedProfile  = profileName(diagnostics.requestedProfile());
+		metrics.activeProfile     = profileName(diagnostics.activeProfile());
+		metrics.activeEngine      = engineName(diagnostics.activeEngine());
+		metrics.activeModelId     = diagnostics.activeModelId();
+		metrics.activeModelSha256 = diagnostics.activeModelSha256();
+		metrics.processedFrames   = diagnostics.processedFrames();
+		metrics.neuralFrames      = diagnostics.neuralFrames();
+		metrics.deadlineMisses    = diagnostics.deadlineMisses();
+		metrics.fallbackCount     = diagnostics.fallbackCount();
+		metrics.maximumProcessingNanoseconds = diagnostics.maximumProcessingNanoseconds();
+		metrics.workerProcessingFrames = diagnostics.workerProcessingFrames();
+		metrics.workerTotalProcessingNanoseconds = diagnostics.workerTotalProcessingNanoseconds();
+		metrics.workerMaximumProcessingNanoseconds = diagnostics.workerMaximumProcessingNanoseconds();
+		metrics.workerProcessingP99Nanoseconds = diagnostics.workerProcessingP99Nanoseconds();
+		metrics.usedFallback      = diagnostics.fallbackActive();
+		metrics.fallbackReason    = fallbackReasonName(diagnostics.fallbackReason());
+
+		const SignalMetrics outputMetrics = measureSignal(processed);
+		metrics.saturatedSampleCount = outputMetrics.saturatedSampleCount;
+		metrics.outOfRangeSampleCount = outputMetrics.outOfRangeSampleCount;
+		metrics.nonFiniteSampleCount = outputMetrics.nonFiniteSampleCount;
+		metrics.clippingCount = outputMetrics.saturatedSampleCount;
+		metrics.peak = outputMetrics.peak;
+		metrics.rms  = outputMetrics.rms;
+		samples = std::move(processed);
+		return metrics;
+	}
+
+	BenchmarkMetrics processProductProfileRealtimeSoak(
+		const Mumble::InputEnhancement::ResolveRequest &request, const std::vector< float > &sourceSamples,
+		std::uint32_t durationSeconds, const QString &authorizedModelSha256, const QString &authorizedModelPath,
+		const QString &readyMarkerPath, const QString &readyMarkerNonce) {
+		using namespace Mumble::InputEnhancement;
+		if (sourceSamples.empty()) {
+			throw std::runtime_error("Realtime soak input contains no audio samples");
+		}
+		requireFiniteSignal(sourceSamples, QStringLiteral("Realtime soak input audio"));
+		if (durationSeconds == 0 || durationSeconds > 14'400) {
+			throw std::runtime_error("--soak-duration-seconds must be from 1 to 14400");
+		}
+
+		const Recipe recipe = RecipeCatalog::resolve(request);
+		if (!recipe.usesNeuralProcessor()
+			|| (recipe.effectiveProfile() != Profile::Balanced && recipe.effectiveProfile() != Profile::Quality
+				&& recipe.effectiveProfile() != Profile::VoiceFocus)) {
+			throw std::runtime_error(
+				"--realtime-pace is restricted to the Balanced, Quality, and VoiceFocus product recipes");
+		}
+
+		constexpr std::uint64_t deadlineNanoseconds = 10'000'000;
+		const auto initializationStartedAt = std::chrono::steady_clock::now();
+		Pipeline pipeline(Pipeline::ProcessorFactory {}, Pipeline::NanosecondClock {}, deadlineNanoseconds);
+		if (!pipeline.configure(recipe, authorizedModelSha256, authorizedModelPath)) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Realtime soak recipe %1 failed to initialize: %2")
+					.arg(recipe.id(), fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+		const auto initializationFinishedAt = std::chrono::steady_clock::now();
+
+		BenchmarkMetrics metrics;
+		metrics.initializationMs = std::chrono::duration< double, std::milli >(
+			initializationFinishedAt - initializationStartedAt).count();
+		metrics.mixFactor = recipe.mixFactor();
+		metrics.activeModelPath = attestedProductModelPath(recipe, authorizedModelPath);
+		metrics.requestedUiNoiseReduction = request.noiseReduction;
+		metrics.requestedUiNaturalClear = request.naturalCrisp;
+		metrics.validatedRecipeNoiseReduction = recipe.noiseReduction();
+		metrics.validatedRecipeNaturalClear = recipe.naturalCrisp();
+		metrics.realtimeRequestedDurationSeconds = durationSeconds;
+		metrics.realtimeStreaming = true;
+		metrics.realtimePacing = true;
+
+		const std::uint64_t inputSampleCount64 =
+			static_cast< std::uint64_t >(durationSeconds) * static_cast< std::uint64_t >(SAMPLE_RATE);
+		if (inputSampleCount64 > std::numeric_limits< std::size_t >::max()) {
+			throw std::runtime_error("Realtime soak duration exceeds the platform sample counter");
+		}
+		metrics.inputSampleCount = static_cast< std::size_t >(inputSampleCount64);
+		metrics.reportedLatencySamples = pipeline.latencySamples();
+		if ((metrics.reportedLatencySamples % frameSamples) != 0) {
+			throw std::runtime_error("Realtime soak requires frame-aligned product latency");
+		}
+		if (metrics.inputSampleCount
+			> std::numeric_limits< std::size_t >::max() - metrics.reportedLatencySamples) {
+			throw std::runtime_error("Realtime soak input plus latency overflows the sample counter");
+		}
+		metrics.outputSampleCount = metrics.inputSampleCount + metrics.reportedLatencySamples;
+		metrics.drainSampleCount = metrics.reportedLatencySamples;
+		metrics.processingPaddingSampleCount = 0;
+		const std::uint64_t inputFrameCount = inputSampleCount64 / frameSamples;
+		const std::uint64_t drainFrameCount = metrics.reportedLatencySamples / frameSamples;
+		const std::uint64_t totalFrameCount = inputFrameCount + drainFrameCount;
+		metrics.pacingFrameCount = totalFrameCount;
+
+		std::vector< std::uint64_t > callbackDurations;
+		callbackDurations.reserve(static_cast< std::size_t >(totalFrameCount));
+		StreamingSignalMetrics inputSignal;
+		StreamingSignalMetrics outputSignal;
+		std::array< float, frameSamples > frame = {};
+		std::size_t sourcePosition = 0;
+		std::uint64_t callbackTotalNanoseconds = 0;
+		constexpr auto framePeriod = std::chrono::milliseconds(10);
+		constexpr auto lateStartTolerance = std::chrono::milliseconds(1);
+#ifdef Q_OS_WIN
+		// Windows normally coalesces ordinary sleeps around its default timer
+		// quantum (commonly about 15.6 ms), which cannot represent a 10 ms audio
+		// callback cadence. Scope the 1 ms multimedia timer request to the soak so
+		// pacing failures reflect the candidate rather than the harness clock.
+		WindowsTimerResolution timerResolution;
+		if (!timerResolution.active()) {
+			throw std::runtime_error("Realtime soak could not acquire the Windows 1 ms timer resolution");
+		}
+#endif
+		publishRealtimeReadyMarker(readyMarkerPath, readyMarkerNonce);
+		const auto realtimeStartedAt = std::chrono::steady_clock::now();
+
+		for (std::uint64_t frameIndex = 0; frameIndex < totalFrameCount; ++frameIndex) {
+			const auto scheduledAt = realtimeStartedAt + framePeriod * frameIndex;
+			if (frameIndex != 0) {
+				std::this_thread::sleep_until(scheduledAt);
+			}
+			const auto callbackStartedAt = std::chrono::steady_clock::now();
+			if (callbackStartedAt > scheduledAt) {
+				const std::uint64_t lateNanoseconds = static_cast< std::uint64_t >(
+					std::chrono::duration_cast< std::chrono::nanoseconds >(callbackStartedAt - scheduledAt).count());
+				metrics.pacingMaximumLateStartNanoseconds =
+					std::max(metrics.pacingMaximumLateStartNanoseconds, lateNanoseconds);
+				if (callbackStartedAt - scheduledAt > lateStartTolerance) {
+					++metrics.pacingLateStartCount;
+				}
+			}
+
+			if (frameIndex < inputFrameCount) {
+				for (float &sample : frame) {
+					sample = sourceSamples[sourcePosition];
+					sourcePosition = (sourcePosition + 1) % sourceSamples.size();
+					inputSignal.observe(sample);
+				}
+			} else {
+				frame.fill(0.0f);
+			}
+
+			if (!pipeline.processFrame(frame)) {
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				throw std::runtime_error(
+					QStringLiteral("Realtime product pipeline failed at frame %1: %2")
+						.arg(static_cast< quint64 >(frameIndex))
+						.arg(fallbackReasonName(diagnostics.fallbackReason()))
+						.toStdString());
+			}
+			const auto callbackFinishedAt = std::chrono::steady_clock::now();
+			const std::uint64_t callbackNanoseconds = static_cast< std::uint64_t >(
+				std::chrono::duration_cast< std::chrono::nanoseconds >(
+					callbackFinishedAt - callbackStartedAt).count());
+			callbackDurations.push_back(callbackNanoseconds);
+			callbackTotalNanoseconds += callbackNanoseconds;
+			for (float sample : frame) {
+				outputSignal.observe(sample);
+			}
+
+			const auto pacingDeadline = scheduledAt + framePeriod;
+			if (callbackFinishedAt > pacingDeadline) {
+				++metrics.pacingDeadlineMisses;
+				metrics.pacingMaximumDeadlineOverrunNanoseconds = std::max(
+					metrics.pacingMaximumDeadlineOverrunNanoseconds,
+					static_cast< std::uint64_t >(std::chrono::duration_cast< std::chrono::nanoseconds >(
+						callbackFinishedAt - pacingDeadline).count()));
+			}
+		}
+
+		// The declared causal tail has already been emitted by paced zero-input
+		// callbacks. This only joins any remaining worker jobs and emits no audio.
+		if (!pipeline.finishOfflineProcessing()) {
+			const Diagnostics diagnostics = pipeline.diagnostics();
+			throw std::runtime_error(
+				QStringLiteral("Realtime product pipeline finalization failed: %1")
+					.arg(fallbackReasonName(diagnostics.fallbackReason()))
+					.toStdString());
+		}
+		const auto realtimeFinishedAt = std::chrono::steady_clock::now();
+		metrics.realtimeWallMs = std::chrono::duration< double, std::milli >(
+			realtimeFinishedAt - realtimeStartedAt).count();
+		metrics.audioMs = static_cast< double >(metrics.inputSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.processedAudioMs = static_cast< double >(metrics.outputSampleCount) * 1000.0 / SAMPLE_RATE;
+		metrics.callbackP50Nanoseconds = nearestRankPercentile(callbackDurations, 0.50);
+		metrics.callbackP95Nanoseconds = nearestRankPercentile(callbackDurations, 0.95);
+		metrics.callbackP99Nanoseconds = nearestRankPercentile(callbackDurations, 0.99);
+
+		const Diagnostics diagnostics = pipeline.diagnostics();
+		metrics.requestedRecipeId = diagnostics.requestedRecipeId();
+		metrics.recipeRevision = diagnostics.recipeRevision();
+		metrics.requestedProfile = profileName(diagnostics.requestedProfile());
+		metrics.activeProfile = profileName(diagnostics.activeProfile());
+		metrics.activeEngine = engineName(diagnostics.activeEngine());
+		metrics.activeModelId = diagnostics.activeModelId();
+		metrics.activeModelSha256 = diagnostics.activeModelSha256();
+		metrics.processedFrames = diagnostics.processedFrames();
+		metrics.neuralFrames = diagnostics.neuralFrames();
+		metrics.deadlineMisses = diagnostics.deadlineMisses();
+		metrics.fallbackCount = diagnostics.fallbackCount();
+		metrics.maximumProcessingNanoseconds = diagnostics.maximumProcessingNanoseconds();
+		metrics.workerProcessingFrames = diagnostics.workerProcessingFrames();
+		metrics.workerTotalProcessingNanoseconds = diagnostics.workerTotalProcessingNanoseconds();
+		metrics.workerMaximumProcessingNanoseconds = diagnostics.workerMaximumProcessingNanoseconds();
+		metrics.workerProcessingP99Nanoseconds = diagnostics.workerProcessingP99Nanoseconds();
+		// DeepFilterNet inference runs on a dedicated worker and is not part of
+		// the callback execution interval. Include both disjoint costs so the
+		// soak RTF cannot under-report the asynchronous neural workload.
+		const std::uint64_t totalProcessingNanoseconds =
+			callbackTotalNanoseconds + metrics.workerTotalProcessingNanoseconds;
+		metrics.realtimeCallbackProcessingTotalMs =
+			static_cast< double >(callbackTotalNanoseconds) / 1'000'000.0;
+		metrics.cpuMs = static_cast< double >(totalProcessingNanoseconds) / 1'000'000.0;
+		metrics.realTimeFactor = metrics.audioMs > 0.0 ? metrics.cpuMs / metrics.audioMs : 0.0;
+		metrics.usedFallback = diagnostics.fallbackActive();
+		metrics.fallbackReason = fallbackReasonName(diagnostics.fallbackReason());
+
+		const SignalMetrics inputMetrics = inputSignal.finish();
+		metrics.inputSaturatedSampleCount = inputMetrics.saturatedSampleCount;
+		metrics.inputOutOfRangeSampleCount = inputMetrics.outOfRangeSampleCount;
+		const SignalMetrics outputMetrics = outputSignal.finish();
+		metrics.saturatedSampleCount = outputMetrics.saturatedSampleCount;
+		metrics.outOfRangeSampleCount = outputMetrics.outOfRangeSampleCount;
+		metrics.nonFiniteSampleCount = outputMetrics.nonFiniteSampleCount;
+		metrics.clippingCount = outputMetrics.saturatedSampleCount;
+		metrics.peak = outputMetrics.peak;
+		metrics.rms = outputMetrics.rms;
 		return metrics;
 	}
 
@@ -647,6 +1347,9 @@ namespace {
 				throw std::runtime_error(message);
 			}
 		};
+		require(validRealtimeReadyNonce(QString(64, QLatin1Char('a'))), "Ready-marker nonce self-test failed");
+		require(!validRealtimeReadyNonce(QString(63, QLatin1Char('a'))), "Short ready-marker nonce was accepted");
+		require(!validRealtimeReadyNonce(QString(64, QLatin1Char('A'))), "Uppercase ready-marker nonce was accepted");
 
 		const SignalMetrics railMetrics = measureSignal({ 0.0f, 1.0f, -1.0f, 1.25f, -0.25f });
 		require(railMetrics.saturatedSampleCount == 3, "Saturation self-test failed");
@@ -690,6 +1393,64 @@ namespace {
 		for (std::size_t index = 0; index < original.size(); ++index) {
 			require(input[index + delay] == original[index], "Drain self-test tail recovery failed");
 		}
+
+		Mumble::InputEnhancement::ResolveRequest originalRequest;
+		originalRequest.profile = Mumble::InputEnhancement::Profile::Original;
+		originalRequest.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+		std::vector< float > productOriginal(kFrameSize + 13, 0.0f);
+		for (std::size_t index = 0; index < productOriginal.size(); ++index) {
+			productOriginal[index] = static_cast< float >(static_cast< int >(index % 101) - 50) / 100.0f;
+		}
+		const std::vector< float > productOriginalReference = productOriginal;
+		const BenchmarkMetrics productMetrics = processProductProfile(originalRequest, productOriginal, {}, {});
+		require(productOriginal == productOriginalReference,
+				"Product Original benchmark path changed PCM samples");
+		require(productMetrics.reportedLatencySamples == 0 && productMetrics.drainSampleCount == 0,
+				"Product Original benchmark path added latency");
+		require(productMetrics.requestedProfile == QLatin1String("Original")
+				&& productMetrics.activeProfile == QLatin1String("Original")
+				&& productMetrics.activeEngine == QLatin1String("None") && !productMetrics.usedFallback,
+				"Product Original benchmark diagnostics failed");
+		require(productMetrics.requestedUiNoiseReduction == 50 && productMetrics.requestedUiNaturalClear == 50
+				&& productMetrics.validatedRecipeNoiseReduction == 0
+				&& productMetrics.validatedRecipeNaturalClear == 0,
+				"Product Original control-coordinate diagnostics failed");
+
+		Mumble::InputEnhancement::ResolveRequest balancedRequest;
+		balancedRequest.profile = Mumble::InputEnhancement::Profile::Balanced;
+		balancedRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe balancedRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(balancedRequest);
+		require(attestedProductModelPath(balancedRecipe, QCoreApplication::applicationFilePath()).isEmpty(),
+				"Embedded RNNoise benchmark path exception failed");
+
+		Mumble::InputEnhancement::ResolveRequest qualityRequest;
+		qualityRequest.profile = Mumble::InputEnhancement::Profile::Quality;
+		qualityRequest.noiseReduction = 8;
+		qualityRequest.naturalCrisp = 33;
+		qualityRequest.cpuClass = Mumble::InputEnhancement::CpuClass::High;
+		qualityRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe qualityRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(qualityRequest);
+		require(qualityRecipe.noiseReduction() == 30 && qualityRecipe.naturalCrisp() == 50,
+				"Quality persisted-UI to validated-recipe control mapping failed");
+		const QString benchmarkPath = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
+		require(!benchmarkPath.isEmpty()
+				&& attestedProductModelPath(qualityRecipe, QCoreApplication::applicationFilePath()) == benchmarkPath,
+				"External product model benchmark path attestation failed");
+		require(attestedProductModelPath(qualityRecipe, {}).isEmpty(),
+				"Unmanaged development model path must remain unpublished");
+
+		Mumble::InputEnhancement::ResolveRequest voiceFocusRequest;
+		voiceFocusRequest.profile = Mumble::InputEnhancement::Profile::VoiceFocus;
+		voiceFocusRequest.noiseReduction = 17;
+		voiceFocusRequest.naturalCrisp = 25;
+		voiceFocusRequest.cpuClass = Mumble::InputEnhancement::CpuClass::High;
+		voiceFocusRequest.backendAvailability = { true, true, true };
+		const Mumble::InputEnhancement::Recipe voiceFocusRecipe =
+			Mumble::InputEnhancement::RecipeCatalog::resolve(voiceFocusRequest);
+		require(voiceFocusRecipe.noiseReduction() == 75 && voiceFocusRecipe.naturalCrisp() == 55,
+				"Voice Focus persisted-UI to validated-recipe control mapping failed");
 	}
 } // namespace
 
@@ -711,12 +1472,51 @@ int main(int argc, char **argv) {
 	const QCommandLineOption mixFactorOption(QStringList() << QStringLiteral("mix-factor"),
 											 QStringLiteral("Dry/wet cleanup mix factor from 0.0 to 1.0"),
 											 QStringLiteral("factor"), QStringLiteral("1.0"));
+	const QCommandLineOption profileOption(
+		QStringList() << QStringLiteral("profile"),
+		QStringLiteral("Run an input-enhancement recipe: Original, Light, Balanced, Quality, VoiceFocus, or Auto"),
+		QStringLiteral("profile"));
+	const QCommandLineOption noiseReductionOption(
+		QStringList() << QStringLiteral("noise-reduction"),
+		QStringLiteral("Product noise-reduction control from 0 to 100"), QStringLiteral("value"),
+		QStringLiteral("50"));
+	const QCommandLineOption naturalCrispOption(
+		QStringList() << QStringLiteral("natural-clear") << QStringLiteral("natural-crisp"),
+		QStringLiteral("Product Natural-to-Clear control from 0 to 100"), QStringLiteral("value"),
+		QStringLiteral("50"));
+	const QCommandLineOption cpuClassOption(
+		QStringList() << QStringLiteral("cpu-class"),
+		QStringLiteral("CPU capability used by Auto: Low, Standard, or High"), QStringLiteral("class"),
+		QStringLiteral("Standard"));
+	const QCommandLineOption authorizedModelSha256Option(
+		QStringList() << QStringLiteral("authorized-model-sha256"),
+		QStringLiteral("Verified lowercase SHA-256 to attest in product-pipeline diagnostics"),
+		QStringLiteral("sha256"));
+	const QCommandLineOption authorizedModelPathOption(
+		QStringList() << QStringLiteral("authorized-model-path"),
+		QStringLiteral("Canonical model asset path bound to --authorized-model-sha256"),
+		QStringLiteral("path"));
 	const QCommandLineOption analysisOnlyOption(
 		QStringList() << QStringLiteral("analysis-only"),
 		QStringLiteral("Measure the input against --clean-reference without running a cleanup processor"));
 	const QCommandLineOption selfTestOption(
 		QStringList() << QStringLiteral("self-test"),
 		QStringLiteral("Run deterministic benchmark metric and drain self-tests"));
+	const QCommandLineOption realtimePaceOption(
+		QStringList() << QStringLiteral("realtime-pace"),
+		QStringLiteral("Run a streaming, monotonic 10 ms product-profile soak without retaining full input/output"));
+	const QCommandLineOption soakDurationOption(
+		QStringList() << QStringLiteral("soak-duration-seconds"),
+		QStringLiteral("Realtime soak audio/wall duration from 1 to 14400 seconds"),
+		QStringLiteral("seconds"));
+	const QCommandLineOption realtimeReadyFileOption(
+		QStringList() << QStringLiteral("realtime-ready-file"),
+		QStringLiteral("Atomically publish the post-initialization realtime soak marker"),
+		QStringLiteral("path"));
+	const QCommandLineOption realtimeReadyNonceOption(
+		QStringList() << QStringLiteral("realtime-ready-nonce"),
+		QStringLiteral("Unique 64-character lowercase hexadecimal nonce bound into the ready marker"),
+		QStringLiteral("hex"));
 	const QCommandLineOption inputOption(QStringList() << QStringLiteral("input"),
 										 QStringLiteral("Input WAV or raw file"), QStringLiteral("path"));
 	const QCommandLineOption inputFormatOption(QStringList() << QStringLiteral("input-format"),
@@ -749,8 +1549,18 @@ int main(int argc, char **argv) {
 	parser.addOption(modelIdOption);
 	parser.addOption(customModelPathOption);
 	parser.addOption(mixFactorOption);
+	parser.addOption(profileOption);
+	parser.addOption(noiseReductionOption);
+	parser.addOption(naturalCrispOption);
+	parser.addOption(cpuClassOption);
+	parser.addOption(authorizedModelSha256Option);
+	parser.addOption(authorizedModelPathOption);
 	parser.addOption(analysisOnlyOption);
 	parser.addOption(selfTestOption);
+	parser.addOption(realtimePaceOption);
+	parser.addOption(soakDurationOption);
+	parser.addOption(realtimeReadyFileOption);
+	parser.addOption(realtimeReadyNonceOption);
 	parser.addOption(inputOption);
 	parser.addOption(inputFormatOption);
 	parser.addOption(inputSampleRateOption);
@@ -776,18 +1586,60 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 
-		const bool analysisOnly = parser.isSet(analysisOnlyOption);
-		if (!parser.isSet(inputOption) || !parser.isSet(outputOption) || !parser.isSet(reportOption)
-			|| (!analysisOnly && (!parser.isSet(backendOption) || !parser.isSet(modelIdOption)))) {
+		const bool analysisOnly  = parser.isSet(analysisOnlyOption);
+		const bool productProfileMode = parser.isSet(profileOption);
+		const bool realtimePacedMode = parser.isSet(realtimePaceOption);
+		const bool directBackendMode  = parser.isSet(backendOption) || parser.isSet(modelIdOption)
+									|| parser.isSet(customModelPathOption);
+		if (!parser.isSet(inputOption) || !parser.isSet(reportOption)
+			|| (!realtimePacedMode && !parser.isSet(outputOption))
+			|| (!analysisOnly && !productProfileMode
+				&& (!parser.isSet(backendOption) || !parser.isSet(modelIdOption)))) {
 			throw std::runtime_error(
-				"Required options: --input, --output, --report and, unless --analysis-only is used, --backend and --model-id");
+				"Required options: --input, --report, --output outside realtime soak, and either --profile or --backend plus --model-id");
 		}
 		if (analysisOnly && !parser.isSet(cleanReferenceOption)) {
 			throw std::runtime_error("--analysis-only requires --clean-reference");
 		}
+		if (analysisOnly && (productProfileMode || directBackendMode)) {
+			throw std::runtime_error("--analysis-only cannot be combined with --profile or backend selection");
+		}
+		if (productProfileMode && directBackendMode) {
+			throw std::runtime_error("--profile cannot be combined with --backend, --model-id, or --custom-model-path");
+		}
+		if (productProfileMode && parser.isSet(mixFactorOption)) {
+			throw std::runtime_error("--mix-factor is Expert-only; product profiles use their versioned safe recipe");
+		}
+		if (!productProfileMode
+			&& (parser.isSet(authorizedModelSha256Option) || parser.isSet(authorizedModelPathOption))) {
+			throw std::runtime_error("Model authorization requires --profile");
+		}
+		if (parser.isSet(authorizedModelSha256Option) != parser.isSet(authorizedModelPathOption)) {
+			throw std::runtime_error(
+				"--authorized-model-sha256 and --authorized-model-path must be supplied together");
+		}
+		if (realtimePacedMode != parser.isSet(soakDurationOption)
+			|| realtimePacedMode != parser.isSet(realtimeReadyFileOption)
+			|| realtimePacedMode != parser.isSet(realtimeReadyNonceOption)) {
+			throw std::runtime_error(
+				"--realtime-pace, --soak-duration-seconds, --realtime-ready-file, and --realtime-ready-nonce must be supplied together");
+		}
+		if (realtimePacedMode && (!productProfileMode || analysisOnly || directBackendMode
+				|| parser.isSet(cleanReferenceOption) || parser.isSet(outputOption))) {
+			throw std::runtime_error(
+				"--realtime-pace requires --profile, forbids analysis/backend/clean-reference modes, and does not write --output");
+		}
+		if (realtimePacedMode) {
+			if (!validRealtimeReadyNonce(parser.value(realtimeReadyNonceOption))) {
+				throw std::runtime_error("--realtime-ready-nonce must be 64 lowercase hexadecimal characters");
+			}
+			if (QFileInfo::exists(parser.value(realtimeReadyFileOption))) {
+				throw std::runtime_error("--realtime-ready-file must not already exist");
+			}
+		}
 
 		Mumble::SpeechCleanup::Selection selection;
-		if (!analysisOnly) {
+		if (!analysisOnly && !productProfileMode) {
 			selection = Mumble::SpeechCleanup::normalizeSelection({
 				parseBackend(parser.value(backendOption)),
 				parser.value(modelIdOption),
@@ -800,6 +1652,34 @@ int main(int argc, char **argv) {
 			throw std::runtime_error("--mix-factor must be a finite number");
 		}
 		const float mixFactor = std::clamp(parsedMixFactor, 0.0f, 1.0f);
+
+		Mumble::InputEnhancement::ResolveRequest productRequest;
+		std::uint32_t realtimeDurationSeconds = 0;
+		if (productProfileMode) {
+			bool noiseReductionValid = false;
+			bool naturalCrispValid    = false;
+			const int noiseReduction = parser.value(noiseReductionOption).toInt(&noiseReductionValid);
+			const int naturalCrisp    = parser.value(naturalCrispOption).toInt(&naturalCrispValid);
+			if (!noiseReductionValid || noiseReduction < 0 || noiseReduction > 100) {
+				throw std::runtime_error("--noise-reduction must be an integer from 0 to 100");
+			}
+			if (!naturalCrispValid || naturalCrisp < 0 || naturalCrisp > 100) {
+				throw std::runtime_error("--natural-clear must be an integer from 0 to 100");
+			}
+			productRequest.profile             = parseProfile(parser.value(profileOption));
+			productRequest.noiseReduction      = noiseReduction;
+			productRequest.naturalCrisp        = naturalCrisp;
+			productRequest.cpuClass            = parseCpuClass(parser.value(cpuClassOption));
+			productRequest.backendAvailability = Mumble::InputEnhancement::BackendAvailability::compiled();
+			if (realtimePacedMode) {
+				bool durationValid = false;
+				const qulonglong duration = parser.value(soakDurationOption).toULongLong(&durationValid);
+				if (!durationValid || duration == 0 || duration > 14'400) {
+					throw std::runtime_error("--soak-duration-seconds must be an integer from 1 to 14400");
+				}
+				realtimeDurationSeconds = static_cast< std::uint32_t >(duration);
+			}
+		}
 
 		const LoadedAudio input = loadAudio(parser.value(inputOption), parseInputFormat(parser.value(inputFormatOption)),
 											parser.value(inputSampleRateOption).toInt(),
@@ -831,6 +1711,15 @@ int main(int argc, char **argv) {
 			metrics.rms  = signalMetrics.rms;
 			metrics.audioMs = static_cast< double >(processed.size()) * 1000.0 / SAMPLE_RATE;
 			metrics.processedAudioMs = metrics.audioMs;
+		} else if (productProfileMode) {
+			metrics = realtimePacedMode
+				? processProductProfileRealtimeSoak(
+					productRequest, processed, realtimeDurationSeconds,
+					parser.value(authorizedModelSha256Option), parser.value(authorizedModelPathOption),
+					parser.value(realtimeReadyFileOption), parser.value(realtimeReadyNonceOption))
+				: processProductProfile(
+					productRequest, processed, parser.value(authorizedModelSha256Option),
+					parser.value(authorizedModelPathOption));
 		} else {
 			metrics = processSamples(selection, processed, mixFactor);
 		}
@@ -857,26 +1746,79 @@ int main(int argc, char **argv) {
 			metrics.segmentalSnr        = computeSegmentalSnr(aligned.reference, aligned.estimate);
 		}
 
-		writeOutputWav(parser.value(outputOption), processed, input.sampleRate);
+		if (!realtimePacedMode) {
+			writeOutputWav(parser.value(outputOption), processed, input.sampleRate);
+		}
 
 		nlohmann::json report = {
 			{ "analysis_only", analysisOnly },
-			{ "backend", analysisOnly ? "AnalysisOnly" : Mumble::SpeechCleanup::backendDisplayName(selection.backend) },
-			{ "model_id", analysisOnly ? std::string() : selection.modelId.toStdString() },
-			{ "custom_model_path", analysisOnly ? std::string() : selection.customModelPath.toStdString() },
+			{ "processing_mode", analysisOnly ? "analysis-only"
+				: (realtimePacedMode ? "product-profile-realtime-soak"
+					: (productProfileMode ? "product-profile" : "expert-backend")) },
+			{ "backend", analysisOnly ? "AnalysisOnly" : (productProfileMode ? metrics.activeEngine.toStdString() : Mumble::SpeechCleanup::backendDisplayName(selection.backend)) },
+			{ "model_id", analysisOnly ? std::string() : (productProfileMode ? metrics.activeModelId.toStdString() : selection.modelId.toStdString()) },
+			{ "custom_model_path", (!analysisOnly && !productProfileMode) ? selection.customModelPath.toStdString() : std::string() },
+			{ "requested_profile", metrics.requestedProfile.toStdString() },
+			{ "active_profile", metrics.activeProfile.toStdString() },
+			{ "active_engine", metrics.activeEngine.toStdString() },
+			{ "requested_recipe_id", metrics.requestedRecipeId.toStdString() },
+			{ "recipe_revision", metrics.recipeRevision },
+			{ "requested_ui_noise_reduction", metrics.requestedUiNoiseReduction },
+			{ "requested_ui_natural_clear", metrics.requestedUiNaturalClear },
+			{ "validated_recipe_noise_reduction", metrics.validatedRecipeNoiseReduction },
+			{ "validated_recipe_natural_clear", metrics.validatedRecipeNaturalClear },
 			{ "active_model_id", metrics.activeModelId.toStdString() },
 			{ "active_model_path", metrics.activeModelPath.toStdString() },
+			{ "active_model_sha256", metrics.activeModelSha256.toStdString() },
 			{ "used_fallback", metrics.usedFallback },
+			{ "fallback_reason", metrics.fallbackReason.toStdString() },
+			{ "fallback_count", metrics.fallbackCount },
+			{ "deadline_misses", metrics.deadlineMisses },
+			{ "processed_frames", metrics.processedFrames },
+			{ "neural_frames", metrics.neuralFrames },
+			{ "maximum_processing_ns", metrics.maximumProcessingNanoseconds },
+			{ "maximum_processing_ms", static_cast< double >(metrics.maximumProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_frames", metrics.workerProcessingFrames },
+			{ "worker_processing_total_ms",
+			  static_cast< double >(metrics.workerTotalProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_average_ms",
+			  metrics.workerProcessingFrames > 0
+				  ? static_cast< double >(metrics.workerTotalProcessingNanoseconds)
+						/ static_cast< double >(metrics.workerProcessingFrames) / 1'000'000.0
+				  : 0.0 },
+			{ "worker_processing_maximum_ms",
+			  static_cast< double >(metrics.workerMaximumProcessingNanoseconds) / 1'000'000.0 },
+			{ "worker_processing_p99_ms",
+			  static_cast< double >(metrics.workerProcessingP99Nanoseconds) / 1'000'000.0 },
+			{ "worker_rtf",
+			  metrics.audioMs > 0.0
+				  ? static_cast< double >(metrics.workerTotalProcessingNanoseconds) / 1'000'000.0 / metrics.audioMs
+				  : 0.0 },
+			{ "callback_p50_ms", static_cast< double >(metrics.callbackP50Nanoseconds) / 1'000'000.0 },
+			{ "callback_p95_ms", static_cast< double >(metrics.callbackP95Nanoseconds) / 1'000'000.0 },
+			{ "callback_p99_ms", static_cast< double >(metrics.callbackP99Nanoseconds) / 1'000'000.0 },
+			{ "light_speech_probability_p10", metrics.lightSpeechProbabilityP10 },
+			{ "light_speech_probability_p50", metrics.lightSpeechProbabilityP50 },
+			{ "light_speech_probability_p90", metrics.lightSpeechProbabilityP90 },
+			{ "light_noise_psd_sum_p10", metrics.lightNoisePsdSumP10 },
+			{ "light_noise_psd_sum_p50", metrics.lightNoisePsdSumP50 },
+			{ "light_noise_psd_sum_p90", metrics.lightNoisePsdSumP90 },
+			{ "light_noise_to_signal_ppm_p10", metrics.lightNoiseToSignalPpmP10 },
+			{ "light_noise_to_signal_ppm_p50", metrics.lightNoiseToSignalPpmP50 },
+			{ "light_noise_to_signal_ppm_p90", metrics.lightNoiseToSignalPpmP90 },
+			{ "light_dry_rms_ppb_p10", metrics.lightDryRmsPpbP10 },
+			{ "light_dry_rms_ppb_p50", metrics.lightDryRmsPpbP50 },
+			{ "light_dry_rms_ppb_p90", metrics.lightDryRmsPpbP90 },
 			{ "reported_latency_samples", metrics.reportedLatencySamples },
 			{ "reported_latency_ms",
 			  static_cast< double >(metrics.reportedLatencySamples) * 1000.0 / SAMPLE_RATE },
 			{ "mix_factor", metrics.mixFactor },
 			{ "input_path", parser.value(inputOption).toStdString() },
 			{ "input_format", input.resolvedFormat.toStdString() },
-			{ "output_path", parser.value(outputOption).toStdString() },
+			{ "output_path", realtimePacedMode ? std::string() : parser.value(outputOption).toStdString() },
 			{ "report_path", parser.value(reportOption).toStdString() },
 			{ "sample_rate", input.sampleRate },
-			{ "sample_count", processed.size() },
+			{ "sample_count", realtimePacedMode ? metrics.outputSampleCount : processed.size() },
 			{ "input_sample_count", metrics.inputSampleCount },
 			{ "output_sample_count", metrics.outputSampleCount },
 			{ "drain_sample_count", metrics.drainSampleCount },
@@ -884,10 +1826,25 @@ int main(int argc, char **argv) {
 			{ "initialization_ms", metrics.initializationMs },
 			{ "cold_start_ms", metrics.initializationMs },
 			{ "cpu_ms", metrics.cpuMs },
+			// Kept alongside the historical cpu_ms key: the benchmark uses elapsed
+			// wall time so asynchronous inference and bounded waits are included.
+			{ "processing_wall_ms", metrics.cpuMs },
 			{ "total_cpu_ms", metrics.initializationMs + metrics.cpuMs },
 			{ "audio_ms", metrics.audioMs },
 			{ "processed_audio_ms", metrics.processedAudioMs },
 			{ "rtf", metrics.realTimeFactor },
+			{ "realtime_streaming", metrics.realtimeStreaming },
+			{ "realtime_pacing", metrics.realtimePacing },
+			{ "realtime_requested_duration_seconds", metrics.realtimeRequestedDurationSeconds },
+			{ "realtime_wall_ms", metrics.realtimeWallMs },
+			{ "realtime_callback_processing_total_ms", metrics.realtimeCallbackProcessingTotalMs },
+			{ "pacing_frame_count", metrics.pacingFrameCount },
+			{ "pacing_deadline_miss_count", metrics.pacingDeadlineMisses },
+			{ "pacing_late_start_count", metrics.pacingLateStartCount },
+			{ "pacing_max_late_start_ms",
+			  static_cast< double >(metrics.pacingMaximumLateStartNanoseconds) / 1'000'000.0 },
+			{ "pacing_max_deadline_overrun_ms",
+			  static_cast< double >(metrics.pacingMaximumDeadlineOverrunNanoseconds) / 1'000'000.0 },
 			{ "clipping_count", metrics.clippingCount },
 			{ "clipping_definition", "absolute output sample >= 1.0" },
 			{ "input_saturated_sample_count", metrics.inputSaturatedSampleCount },
@@ -919,7 +1876,11 @@ int main(int argc, char **argv) {
 		reportStream.close();
 		return 0;
 	} catch (const std::exception &e) {
-		qCritical("speech_cleanup_benchmark: %s", e.what());
+		// Qt logging can be compiled out or redirected by the client object
+		// library. This executable is a CI tool, so failures must always reach the
+		// invoking harness through stderr.
+		std::fprintf(stderr, "speech_cleanup_benchmark: %s\n", e.what());
+		std::fflush(stderr);
 		return 1;
 	}
 }

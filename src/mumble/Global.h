@@ -34,6 +34,11 @@ class TrayIcon;
 
 class QNetworkAccessManager;
 
+namespace Mumble::InputEnhancement {
+class InputEnhancementPackageVerifier;
+class InputEnhancementPolicyController;
+} // namespace Mumble::InputEnhancement
+
 struct MigratedPath {
 	QString oldPath;
 	QString newPath;
@@ -65,6 +70,8 @@ public:
 	PluginManager *pluginManager;
 	Zeroconf *zeroconf;
 	QNetworkAccessManager *nam;
+	Mumble::InputEnhancement::InputEnhancementPackageVerifier *inputEnhancementPackageVerifier;
+	Mumble::InputEnhancement::InputEnhancementPolicyController *inputEnhancementPolicyController;
 	int iPushToTalk;
 	Timer tDoublePush;
 	quint64 uiDoublePush;
@@ -125,6 +132,8 @@ public:
 	QString windowTitlePostfix;
 	bool bDebugDumpInput;
 	bool bDebugPrintQueue;
+	bool bDisableInputEnhancement;
+	bool bInputEnhancementRecoveryDisabled;
 	std::unique_ptr< ChannelListenerManager > channelListenerManager;
 
 	bool bHappyEaster;

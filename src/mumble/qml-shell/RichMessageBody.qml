@@ -19,6 +19,8 @@ Item {
 	// Preserve metadata-derived image geometry while pooled, but release the
 	// decoded image/texture until the delegate becomes active again.
 	property bool resourceActive: true
+	property bool animationsEnabled: true
+	property bool hoverEffectsEnabled: true
 	// Modal parents keep the product surface visible behind drawers/dialogs, but
 	// their promoted semantic children must leave the accessibility tree.
 	property bool accessibilitySuppressed: false
@@ -443,20 +445,21 @@ Item {
 						anchors.fill: parent
 						anchors.margins: root.imageBorderWidth
 						radius: Math.max(0, imageCard.radius - root.imageBorderWidth)
-						color: imagePointer.pressed ? Theme.accentSubtle
-							: imagePointer.containsMouse
+					color: root.hoverEffectsEnabled && imagePointer.pressed ? Theme.accentSubtle
+							: root.hoverEffectsEnabled && imagePointer.containsMouse
 								? Qt.rgba(Theme.surfaceHover.r, Theme.surfaceHover.g, Theme.surfaceHover.b, 0.32)
 								: "transparent"
 						border.color: imageCard.activeFocus ? Theme.focus : "transparent"
 						border.width: imageCard.activeFocus ? Theme.focusRingWidth : 0
-						Behavior on color { ColorAnimation { duration: Theme.motionFast } }
-					}
+					Behavior on color { ColorAnimation { duration: root.animationsEnabled ? Theme.motionFast : 0 } }
+				}
 
-					MouseArea {
-						id: imagePointer
+				MouseArea {
+					id: imagePointer
+					objectName: "richMessageImagePointer_" + index
 						anchors.fill: parent
 						enabled: imageCard.safeHref.length > 0
-						hoverEnabled: true
+					hoverEnabled: root.hoverEffectsEnabled
 						acceptedButtons: Qt.LeftButton
 						cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
 						Accessible.ignored: true

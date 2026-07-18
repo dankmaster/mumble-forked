@@ -155,6 +155,8 @@ set(MUMBLE_SOURCES
 	"Database.h"
 	"DeepFilterNetSpeechCleanup.cpp"
 	"DeepFilterNetSpeechCleanup.h"
+	"DeepFilterNetRealtimeWorker.cpp"
+	"DeepFilterNetRealtimeWorker.h"
 	"DTLNSpeechCleanup.cpp"
 	"DTLNSpeechCleanup.h"
 	"EchoCancelOption.cpp"
@@ -171,6 +173,36 @@ set(MUMBLE_SOURCES
 	"GlobalShortcut.cpp"
 	"GlobalShortcut.h"
 	"GlobalShortcutTypes.h"
+	"InputEnhancement.cpp"
+	"InputEnhancement.h"
+	"InputEnhancementLightProcessor.cpp"
+	"InputEnhancementLightProcessor.h"
+	"InputEnhancementAuto.cpp"
+	"InputEnhancementAuto.h"
+	"InputEnhancementAutoV2.cpp"
+	"InputEnhancementAutoV2.h"
+	"InputEnhancementChannelPointer.cpp"
+	"InputEnhancementChannelPointer.h"
+	"InputEnhancementCalibration.cpp"
+	"InputEnhancementCalibration.h"
+	"InputEnhancementCalibrationPlayback.cpp"
+	"InputEnhancementCalibrationPlayback.h"
+	"InputEnhancementCalibrationRuntime.cpp"
+	"InputEnhancementCalibrationRuntime.h"
+	"InputEnhancementCalibrationWorker.cpp"
+	"InputEnhancementCalibrationWorker.h"
+	"InputEnhancementPolicy.cpp"
+	"InputEnhancementPolicy.h"
+	"InputEnhancementPolicyController.cpp"
+	"InputEnhancementPolicyController.h"
+	"InputEnhancementPackageVerifier.cpp"
+	"InputEnhancementPackageVerifier.h"
+	"InputEnhancementSettings.cpp"
+	"InputEnhancementSettings.h"
+	"../UpdateHealth.cpp"
+	"../UpdateHealth.h"
+	"UpdateHealthMonitor.cpp"
+	"UpdateHealthMonitor.h"
 	"JSONSerialization.cpp"
 	"JSONSerialization.h"
 	"LegacyPlugin.cpp"
@@ -354,6 +386,8 @@ if(speech-cleanup-e2e)
 	list(APPEND MUMBLE_SOURCES
 		"SpeechCleanupTestAudio.cpp"
 		"SpeechCleanupTestAudio.h"
+		"SpeechCleanupTestOpusObserver.cpp"
+		"SpeechCleanupTestOpusObserver.h"
 	)
 endif()
 
@@ -371,6 +405,10 @@ list(APPEND MUMBLE_SOURCES "${CMAKE_BINARY_DIR}/mumble_flags.qrc")
 
 add_library(mumble_client_object_lib OBJECT ${MUMBLE_SOURCES})
 target_link_libraries(mumble_client_object_lib PUBLIC smallft)
+
+if(speech-cleanup-e2e)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_SPEECH_CLEANUP_E2E)
+endif()
 
 if(WIN32)
 	# The Windows client pulls in a large, macro-heavy source set (WinSDK).
@@ -421,6 +459,8 @@ target_compile_definitions(mumble_client_object_lib
 	"MUMBLE_LIBRARY_PATH=${MUMBLE_INSTALL_ABS_LIBDIR}"
 	"MUMBLE_PLUGIN_PATH=${MUMBLE_INSTALL_ABS_PLUGINDIR}"
 )
+target_compile_definitions(mumble_client_object_lib PRIVATE
+	"MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX=\"${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}\"")
 
 set_target_properties(mumble PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -1266,7 +1306,7 @@ if(wasapi)
 	)
 
 	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_WASAPI")
-	target_link_libraries(mumble_client_object_lib PUBLIC avrt.lib)
+	target_link_libraries(mumble_client_object_lib PUBLIC avrt.lib ole32.lib)
 	if(MINGW)
 		target_link_libraries(mumble_client_object_lib PUBLIC ksuser.lib)
 	endif()

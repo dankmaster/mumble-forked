@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-quality-qualification-v3.json",
+  "title": "Mumble input-enhancement quality qualification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifacts",
+    "auto_transitions",
+    "build",
+    "coverage",
+    "generated_at_utc",
+    "profiles",
+    "qualification_scope",
+    "schema_version",
+    "status",
+    "suite",
+    "violations"
+  ],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "qualification_scope": { "enum": ["core", "auto"] },
+    "suite": { "enum": ["pr_smoke", "master_quality", "nightly", "release"] },
+    "status": { "enum": ["passed", "failed"] },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_set_sha256",
+        "corpus_lock_sha256",
+        "corpus_inventory_sha256",
+        "git_sha",
+        "hardware_fingerprint_sha256",
+        "harness_sha256",
+        "legacy_binary_sha256",
+        "metrics_runtime_sha256",
+        "mixture_plan_sha256",
+        "model_manifest_sha256",
+        "model_hashes",
+        "recipe_manifest_sha256",
+        "recipe_set_version",
+        "release_fixtures_sha256",
+        "runner_class",
+        "server_binary_sha256",
+        "staged_payload_sha256",
+        "tested_binary_sha256"
+      ],
+      "properties": {
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tested_binary_sha256": { "$ref": "#/$defs/sha256" },
+        "staged_payload_sha256": { "$ref": "#/$defs/sha256" },
+        "legacy_binary_sha256": { "$ref": "#/$defs/sha256" },
+        "server_binary_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_sha256": { "$ref": "#/$defs/sha256" },
+        "hardware_fingerprint_sha256": { "$ref": "#/$defs/sha256" },
+        "runner_class": { "enum": ["low-performance", "mainstream", "local-development"] },
+        "corpus_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+        "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "case_set_sha256": { "$ref": "#/$defs/sha256" },
+        "release_fixtures_sha256": { "$ref": "#/$defs/sha256" },
+        "metrics_runtime_sha256": { "$ref": "#/$defs/sha256" },
+        "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "recipe_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "recipe_set_version": { "type": "string", "minLength": 1 },
+        "release_holdout_approval_public_key_sha256": { "$ref": "#/$defs/sha256" },
+        "model_hashes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sha256" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "cold_start_cases",
+        "failed_case_count",
+        "fixed_timeline_cases",
+        "languages",
+        "objective_signal_stages",
+        "receiver_cleanup_cases",
+        "source_diversity",
+        "wer_reference_kinds",
+        "warm_start_cases"
+      ],
+      "properties": {
+        "case_count": { "type": "integer", "minimum": 1 },
+        "failed_case_count": { "type": "integer", "minimum": 0 },
+        "cold_start_cases": { "type": "integer", "minimum": 0 },
+        "warm_start_cases": { "type": "integer", "minimum": 0 },
+        "fixed_timeline_cases": { "type": "integer", "minimum": 0 },
+        "receiver_cleanup_cases": { "type": "integer", "minimum": 0 },
+        "languages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "objective_signal_stages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["sender-pre-opus", "receiver-capture"] }
+        },
+        "wer_reference_kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["clean-asr-consistency", "segment-ground-truth"] }
+        },
+        "source_diversity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device_groups", "languages", "noise_classes", "noise_groups", "rir_groups", "speaker_groups"],
+          "properties": {
+            "speaker_groups": { "type": "integer", "minimum": 1 },
+            "languages": { "type": "integer", "minimum": 1 },
+            "noise_groups": { "type": "integer", "minimum": 1 },
+            "noise_classes": { "type": "integer", "minimum": 1 },
+            "rir_groups": { "type": "integer", "minimum": 1 },
+            "device_groups": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/profile" }
+    },
+    "auto_transitions": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/autoTransitions" }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_evidence_jsonl",
+        "failure_spectrogram_index",
+        "junit",
+        "measurement_index_json",
+        "per_case_csv",
+        "per_case_parquet",
+        "summary_html",
+        "summary_json"
+      ],
+      "properties": {
+        "case_evidence_jsonl": { "$ref": "#/$defs/artifact" },
+        "failure_spectrogram_index": { "$ref": "#/$defs/artifact" },
+        "junit": { "$ref": "#/$defs/artifact" },
+        "measurement_index_json": { "$ref": "#/$defs/artifact" },
+        "per_case_csv": { "$ref": "#/$defs/artifact" },
+        "per_case_parquet": { "$ref": "#/$defs/artifact" },
+        "summary_html": { "$ref": "#/$defs/artifact" },
+        "summary_json": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "qualification_scope": { "const": "core" } } },
+      "then": {
+        "properties": {
+          "profiles": { "minItems": 5, "maxItems": 5 },
+          "auto_transitions": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "profiles": { "minItems": 1, "maxItems": 1 },
+          "auto_transitions": { "$ref": "#/$defs/autoTransitions" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "suite": { "const": "release" } }, "required": ["suite"] },
+      "then": {
+        "properties": {
+          "build": { "required": ["release_holdout_approval_public_key_sha256"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contains_audio_samples", "path", "sha256", "size_bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "contains_audio_samples": { "const": false }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithmic_latency_ms_max",
+        "catastrophe_rate_percent",
+        "worst_language_clean_dnsmos_sig_loss_median",
+        "worst_language_clean_estoi_loss_median",
+        "deadline_misses",
+        "latency_attestation_failures",
+        "max_speech_edge_loss_ms",
+        "model_hash_errors",
+        "nan_or_inf_count",
+        "new_clipping_cases",
+        "noisy_dnsmos_bak_improvement_median",
+        "noisy_dnsmos_ovrl_improvement_median",
+        "severe_noise_bak_improvement_over_quality_median",
+        "unexplained_fallbacks",
+        "tail_drain_failures",
+        "worst_cohort_ovrl_loss_median",
+        "worst_language_wer_loss_percentage_points"
+      ],
+      "properties": {
+        "algorithmic_latency_ms_max": { "type": "number", "minimum": 0 },
+        "worst_language_clean_estoi_loss_median": { "type": "number" },
+        "worst_language_clean_dnsmos_sig_loss_median": { "type": "number" },
+        "worst_language_wer_loss_percentage_points": { "type": "number" },
+        "noisy_dnsmos_ovrl_improvement_median": { "type": "number" },
+        "noisy_dnsmos_bak_improvement_median": { "type": "number" },
+        "severe_noise_bak_improvement_over_quality_median": { "type": "number" },
+        "worst_cohort_ovrl_loss_median": { "type": "number" },
+        "catastrophe_rate_percent": { "type": "number", "minimum": 0 },
+        "max_speech_edge_loss_ms": { "type": "number", "minimum": 0 },
+        "nan_or_inf_count": { "type": "integer", "minimum": 0 },
+        "new_clipping_cases": { "type": "integer", "minimum": 0 },
+        "unexplained_fallbacks": { "type": "integer", "minimum": 0 },
+        "model_hash_errors": { "type": "integer", "minimum": 0 },
+        "deadline_misses": { "type": "integer", "minimum": 0 },
+        "latency_attestation_failures": { "type": "integer", "minimum": 0 },
+        "tail_drain_failures": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "average_rtf",
+        "max_internal_processing_ms",
+        "memory_growth_bytes",
+        "p99_callback_ms",
+        "p99_worker_ms",
+        "soak_duration_seconds"
+      ],
+      "properties": {
+        "average_rtf": { "type": "number", "minimum": 0 },
+        "p99_callback_ms": { "type": "number", "minimum": 0 },
+        "p99_worker_ms": { "type": "number", "minimum": 0 },
+        "max_internal_processing_ms": { "type": "number", "minimum": 0 },
+        "memory_growth_bytes": { "type": "integer" },
+        "soak_duration_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_count", "metrics", "passed", "performance", "profile"],
+      "properties": {
+        "profile": { "enum": ["Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto"] },
+        "case_count": { "type": "integer", "minimum": 1 },
+        "passed": { "type": "boolean" },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "performance": { "$ref": "#/$defs/performance" }
+      }
+    },
+    "autoTransitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "cold_start_cases",
+        "deadline_misses",
+        "directed_pairs",
+        "max_speech_edge_loss_ms",
+        "max_transition_processing_ms",
+        "memory_growth_bytes",
+        "nan_or_inf_count",
+        "new_clipping_cases",
+        "passed",
+        "soak_duration_seconds",
+        "unexplained_fallbacks",
+        "warm_start_cases"
+      ],
+      "properties": {
+        "case_count": { "type": "integer", "minimum": 1 },
+        "cold_start_cases": { "type": "integer", "minimum": 0 },
+        "warm_start_cases": { "type": "integer", "minimum": 0 },
+        "directed_pairs": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "Light->Balanced",
+              "Balanced->Light",
+              "Light->Quality",
+              "Quality->Light",
+              "Balanced->Quality",
+              "Quality->Balanced"
+            ]
+          }
+        },
+        "deadline_misses": { "type": "integer", "minimum": 0 },
+        "nan_or_inf_count": { "type": "integer", "minimum": 0 },
+        "new_clipping_cases": { "type": "integer", "minimum": 0 },
+        "unexplained_fallbacks": { "type": "integer", "minimum": 0 },
+        "max_speech_edge_loss_ms": { "type": "number", "minimum": 0 },
+        "max_transition_processing_ms": { "type": "number", "minimum": 0 },
+        "memory_growth_bytes": { "type": "integer" },
+        "soak_duration_seconds": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  }
+}

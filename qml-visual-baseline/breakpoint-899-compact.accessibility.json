@@ -3,262 +3,472 @@
     {
       "children": [
         {
-          "children": [],
-          "description": "",
-          "name": "Lobby",
-          "rect": {
-            "height": 27,
-            "width": 703,
-            "x": 24,
-            "y": 20
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Open rooms and participants",
-          "rect": {
-            "height": 32,
-            "width": 32,
-            "x": 733,
-            "y": 28
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "Search message text, senders, replies, and attachments",
-          "name": "Search this conversation",
-          "rect": {
-            "height": 32,
-            "width": 32,
-            "x": 771,
-            "y": 28
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Direct messages",
-          "rect": {
-            "height": 32,
-            "width": 32,
-            "x": 809,
-            "y": 28
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Application menu",
-          "rect": {
-            "height": 32,
-            "width": 32,
-            "x": 847,
-            "y": 28
-          },
-          "role": "Button",
-          "states": [
-            "focusable",
-            "focused"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Voice room",
-          "rect": {
-            "height": 16,
-            "width": 703,
-            "x": 24,
-            "y": 51
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
           "children": [
             {
               "children": [
                 {
-                  "children": [],
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Lobby",
+                          "rect": {
+                            "height": 27,
+                            "width": 703,
+                            "x": 24,
+                            "y": 20
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Voice room",
+                          "rect": {
+                            "height": 16,
+                            "width": 703,
+                            "x": 24,
+                            "y": 51
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 47,
+                        "width": 703,
+                        "x": 24,
+                        "y": 20
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Open rooms and participants",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 733,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "Search message text, senders, replies, and attachments",
+                          "name": "Search this conversation",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 771,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Direct messages",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 809,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Application menu",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 847,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable",
+                            "focused"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 146,
+                        "x": 733,
+                        "y": 28
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 883,
+                        "x": 8,
+                        "y": 79
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
                   "description": "",
-                  "name": "Alex",
+                  "name": "",
                   "rect": {
-                    "height": 15,
-                    "width": 323,
-                    "x": 74,
-                    "y": 104
+                    "height": 72,
+                    "width": 883,
+                    "x": 8,
+                    "y": 8
                   },
-                  "role": "StaticText",
+                  "role": "Client",
                   "states": []
                 },
                 {
-                  "children": [],
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Alex",
+                          "rect": {
+                            "height": 15,
+                            "width": 323,
+                            "x": 74,
+                            "y": 104
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:24",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 400,
+                            "y": 104
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Welcome to the deterministic visual fixture.",
+                          "rect": {
+                            "height": 20,
+                            "width": 332,
+                            "x": 84,
+                            "y": 129
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Message actions",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 386,
+                            "y": 153
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 94,
+                        "width": 839,
+                        "x": 36,
+                        "y": 96
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Qt Quick is ready for review.",
+                          "rect": {
+                            "height": 20,
+                            "width": 219,
+                            "x": 646,
+                            "y": 205
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:25",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 839,
+                            "y": 229
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 61,
+                        "width": 839,
+                        "x": 36,
+                        "y": 190
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 16,
+                        "width": 883,
+                        "x": 36,
+                        "y": 251
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
                   "description": "",
-                  "name": "10:24",
+                  "name": "Conversation messages",
                   "rect": {
-                    "height": 15,
-                    "width": 26,
-                    "x": 400,
-                    "y": 104
+                    "height": 540,
+                    "width": 883,
+                    "x": 8,
+                    "y": 80
                   },
-                  "role": "StaticText",
+                  "role": "List",
                   "states": []
                 },
                 {
-                  "children": [],
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 883,
+                        "x": 8,
+                        "y": 620
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 72,
+                        "width": 883,
+                        "x": 8,
+                        "y": 620
+                      },
+                      "role": "Client",
+                      "states": [
+                        "disabled"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 20,
+                                            "width": 744,
+                                            "x": 80,
+                                            "y": 646
+                                          },
+                                          "role": "StaticText",
+                                          "states": [
+                                            "disabled"
+                                          ]
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Message Lobby",
+                                      "rect": {
+                                        "height": 32,
+                                        "width": 760,
+                                        "x": 70,
+                                        "y": 640
+                                      },
+                                      "role": "EditableText",
+                                      "states": [
+                                        "disabled"
+                                      ]
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Attach images",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 36,
+                                        "y": 642
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "focusable"
+                                      ]
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Send",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 834,
+                                        "y": 642
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "disabled"
+                                      ]
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 32,
+                                    "width": 828,
+                                    "x": 36,
+                                    "y": 640
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 828,
+                                "x": 36,
+                                "y": 640
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 44,
+                            "width": 840,
+                            "x": 30,
+                            "y": 634
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 44,
+                        "width": 840,
+                        "x": 30,
+                        "y": 634
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
                   "description": "",
-                  "name": "Welcome to the deterministic visual fixture.",
+                  "name": "",
                   "rect": {
-                    "height": 20,
-                    "width": 332,
-                    "x": 84,
-                    "y": 129
+                    "height": 72,
+                    "width": 883,
+                    "x": 8,
+                    "y": 620
                   },
-                  "role": "StaticText",
-                  "states": [
-                    "readOnly"
-                  ]
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Message actions",
-                  "rect": {
-                    "height": 30,
-                    "width": 30,
-                    "x": 386,
-                    "y": 161
-                  },
-                  "role": "Button",
-                  "states": [
-                    "focusable"
-                  ]
+                  "role": "Client",
+                  "states": []
                 }
               ],
               "description": "",
               "name": "",
               "rect": {
-                "height": 102,
-                "width": 839,
-                "x": 36,
-                "y": 96
-              },
-              "role": "Client",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Qt Quick is ready for review.",
-                  "rect": {
-                    "height": 20,
-                    "width": 219,
-                    "x": 646,
-                    "y": 213
-                  },
-                  "role": "StaticText",
-                  "states": [
-                    "readOnly"
-                  ]
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "10:25",
-                  "rect": {
-                    "height": 15,
-                    "width": 26,
-                    "x": 839,
-                    "y": 245
-                  },
-                  "role": "StaticText",
-                  "states": []
-                }
-              ],
-              "description": "",
-              "name": "",
-              "rect": {
-                "height": 69,
-                "width": 839,
-                "x": 36,
-                "y": 198
+                "height": 684,
+                "width": 883,
+                "x": 8,
+                "y": 8
               },
               "role": "Client",
               "states": []
             }
           ],
           "description": "",
-          "name": "Conversation messages",
+          "name": "",
           "rect": {
-            "height": 540,
+            "height": 684,
             "width": 883,
             "x": 8,
-            "y": 80
+            "y": 8
           },
-          "role": "List",
+          "role": "Client",
           "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Message Lobby",
-          "rect": {
-            "height": 32,
-            "width": 760,
-            "x": 70,
-            "y": 640
-          },
-          "role": "EditableText",
-          "states": [
-            "disabled"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Attach images",
-          "rect": {
-            "height": 30,
-            "width": 30,
-            "x": 36,
-            "y": 642
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Send",
-          "rect": {
-            "height": 30,
-            "width": 30,
-            "x": 834,
-            "y": 642
-          },
-          "role": "Button",
-          "states": [
-            "disabled"
-          ]
         }
       ],
       "description": "",

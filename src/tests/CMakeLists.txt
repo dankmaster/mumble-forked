@@ -10,6 +10,12 @@ if(client)
 	# Shared-Qt GUI tests need the imported offscreen platform target in the
 	# parent directory so every client-test subdirectory can resolve it.
 	find_pkg(Qt6 COMPONENTS Gui REQUIRED)
+	if(NOT TARGET Qt6::QOffscreenIntegrationPlugin AND DEFINED Qt6Gui_DIR)
+		# Shared Qt does not import platform-plugin targets automatically. Import the
+		# offscreen target explicitly so CTest can locate qoffscreen.dll without a
+		# machine-specific plugin path (and without triggering a modal qFatal dialog).
+		find_package(Qt6QOffscreenIntegrationPlugin CONFIG QUIET PATHS "${Qt6Gui_DIR}" NO_DEFAULT_PATH)
+	endif()
 endif()
 
 option(online-tests "Whether or not tests that need a working internet connection should be included" OFF)
@@ -29,12 +35,19 @@ function(configure_client_test_runtime TEST_NAME TARGET_NAME)
 		)
 	endif()
 
+	set(client_test_environment "QT_QPA_PLATFORM=offscreen")
+	if(TARGET Qt6::QOffscreenIntegrationPlugin)
+		list(APPEND client_test_environment
+			"QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+			"QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+		)
+	endif()
+
 	set_tests_properties(
 		${TEST_NAME}
 		PROPERTIES
 			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-			ENVIRONMENT
-				"QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+			ENVIRONMENT "${client_test_environment}"
 			# Client tests can directly import in-tree runtime libraries such as
 			# rnnoise and speexdsp, which are emitted next to the client executable.
 			ENVIRONMENT_MODIFICATION
@@ -55,6 +68,16 @@ if (static AND client)
 endif()
 
 if(client)
+	add_subdirectory("TestInputEnhancement")
+	add_subdirectory("TestInputEnhancementAuto")
+	add_subdirectory("TestInputEnhancementCalibration")
+	add_subdirectory("TestInputEnhancementCalibrationRuntime")
+	add_subdirectory("TestInputEnhancementPolicy")
+	add_subdirectory("TestInputEnhancementPolicyController")
+	add_subdirectory("TestInputEnhancementPackageVerifier")
+	add_subdirectory("TestInputEnhancementSettings")
+	add_subdirectory("TestUpdateHealth")
+	add_subdirectory("TestInputEnhancementCalibrationPlayback")
 	add_subdirectory("TestModernDialogControllers")
 	add_subdirectory("TestModernRecorderController")
 	add_subdirectory("TestModernServerAdminController")

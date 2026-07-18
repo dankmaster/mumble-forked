@@ -595,11 +595,17 @@ TestCase {
 		const failureSurface = findChild(window.contentItem, "mediaSessionFailureSurface")
 		const failureMark = findChild(window.contentItem, "mediaSessionFailureProviderMark")
 		const failureHeading = findChild(window.contentItem, "mediaSessionFailureHeading")
+		const failureRetry = findChild(window.contentItem, "mediaSessionRetryButton")
+		const failureExternal = findChild(window.contentItem, "mediaSessionFailureExternalButton")
+		const failureClose = findChild(window.contentItem, "mediaSessionFailureCloseButton")
 		verify(failureSurface !== null && failureBadge !== null && failureBadge.visible)
 		compare(failureSurface.Accessible.name, "YouTube playback failed")
 		compare(String(failureBadge.color), String(window.providerAccent))
 		compare(failureMark.text, "YT")
 		compare(failureHeading.text, "YouTube playback failed")
+		verify(failureRetry !== null && !failureRetry.hoverEnabled)
+		verify(failureExternal !== null && !failureExternal.hoverEnabled)
+		verify(failureClose !== null && !failureClose.hoverEnabled)
 
 		session.provider = "Acme Video"
 		wait(0)

@@ -130,6 +130,17 @@ AudioPreprocessor::psd_t AudioPreprocessor::getPSD() const {
 	return ret;
 }
 
+bool AudioPreprocessor::getPSD(std::int32_t *values, std::size_t count) const {
+	if (!values || !m_handle) {
+		return false;
+	}
+	const std::int32_t size = getInt32(SPEEX_PREPROCESS_GET_PSD_SIZE);
+	if (size <= 0 || static_cast< std::size_t >(size) != count) {
+		return false;
+	}
+	return speex_preprocess_ctl(m_handle, SPEEX_PREPROCESS_GET_PSD, values) == 0;
+}
+
 AudioPreprocessor::psd_t AudioPreprocessor::getNoisePSD() const {
 	const auto size = getInt32(SPEEX_PREPROCESS_GET_PSD_SIZE);
 	if (!size) {
@@ -142,6 +153,17 @@ AudioPreprocessor::psd_t AudioPreprocessor::getNoisePSD() const {
 	}
 
 	return ret;
+}
+
+bool AudioPreprocessor::getNoisePSD(std::int32_t *values, std::size_t count) const {
+	if (!values || !m_handle) {
+		return false;
+	}
+	const std::int32_t size = getInt32(SPEEX_PREPROCESS_GET_NOISE_PSD_SIZE);
+	if (size <= 0 || static_cast< std::size_t >(size) != count) {
+		return false;
+	}
+	return speex_preprocess_ctl(m_handle, SPEEX_PREPROCESS_GET_NOISE_PSD, values) == 0;
 }
 
 std::int32_t AudioPreprocessor::getSpeechProb() const {

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-blind-listening-session-v2.json",
+  "title": "Mumble offline blind-listening response session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer_key_sha256",
+    "listener_id",
+    "loudness_algorithm",
+    "offline_only",
+    "pack_id",
+    "pairs",
+    "qualification_binding_sha256",
+    "responses",
+    "schema_version",
+    "session",
+    "session_id",
+    "session_instance_id"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "session": { "const": "mumble-blind-listening-v2" },
+    "session_id": { "$ref": "#/$defs/id" },
+    "pack_id": { "$ref": "#/$defs/sha256" },
+    "answer_key_sha256": { "$ref": "#/$defs/sha256" },
+    "qualification_binding_sha256": { "$ref": "#/$defs/sha256" },
+    "loudness_algorithm": { "const": "integrated-rms-attenuate-to-quieter-v1" },
+    "offline_only": { "const": true },
+    "listener_id": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+    "session_instance_id": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+    "pairs": {
+      "type": "array",
+      "minItems": 26,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["audio_a", "audio_b", "loudness_match", "ordinal", "pair_id"],
+        "properties": {
+          "pair_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+          "ordinal": { "type": "integer", "minimum": 1 },
+          "audio_a": { "$ref": "#/$defs/audio" },
+          "audio_b": { "$ref": "#/$defs/audio" },
+          "loudness_match": { "$ref": "#/$defs/loudness" }
+        }
+      }
+    },
+    "responses": {
+      "type": "object",
+      "minProperties": 26,
+      "propertyNames": { "pattern": "^[0-9a-f]{16}$" },
+      "additionalProperties": { "$ref": "#/$defs/response" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "score": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "sha256"],
+      "properties": {
+        "relative_path": { "type": "string", "pattern": "^audio/[0-9a-f]{16}/[ab]\\.wav$" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "loudness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "gain_db", "matched_rms_dbfs", "source_rms_dbfs"],
+      "properties": {
+        "algorithm": { "const": "integrated-rms-attenuate-to-quieter-v1" },
+        "gain_db": { "$ref": "#/$defs/number_pair" },
+        "matched_rms_dbfs": { "type": "number" },
+        "source_rms_dbfs": { "$ref": "#/$defs/number_pair" }
+      }
+    },
+    "number_pair": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number" }
+    },
+    "tag_list": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+      "uniqueItems": true
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_tags_a", "artifact_tags_b", "artifacts_a", "artifacts_b", "intelligibility_a",
+        "intelligibility_b", "noise_control_a", "noise_control_b", "overall_preference", "quality_a",
+        "quality_b"
+      ],
+      "properties": {
+        "overall_preference": { "enum": ["A", "B", "Tie"] },
+        "quality_a": { "$ref": "#/$defs/score" },
+        "quality_b": { "$ref": "#/$defs/score" },
+        "noise_control_a": { "$ref": "#/$defs/score" },
+        "noise_control_b": { "$ref": "#/$defs/score" },
+        "intelligibility_a": { "$ref": "#/$defs/score" },
+        "intelligibility_b": { "$ref": "#/$defs/score" },
+        "artifacts_a": { "$ref": "#/$defs/score" },
+        "artifacts_b": { "$ref": "#/$defs/score" },
+        "artifact_tags_a": { "$ref": "#/$defs/tag_list" },
+        "artifact_tags_b": { "$ref": "#/$defs/tag_list" }
+      }
+    }
+  },
+  "description": "The semantic validator recomputes pack_id, enforces exact opaque paths, ordinals and a response for every pair, then joins the session only to its exact private answer key and qualification binding. Qualification v3 rewrites each completed export as canonical sorted-key UTF-8/LF JSON before hashing it into the evidence tree."
+}

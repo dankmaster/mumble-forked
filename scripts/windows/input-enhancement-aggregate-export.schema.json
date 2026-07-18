@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-telemetry-aggregate-export-v2.json",
+  "title": "Mumble input-enhancement telemetry aggregate export",
+  "description": "A separately signed, audio-free telemetry aggregate. windowSha256 is SHA-256 over UTF-8 without BOM and fixed LF lines: input-enhancement-rollout-window-v2, querySha256, sourceSnapshotSha256, canonical UTC start/end, observationDays, sourceChannel, rolloutAudience, recipeSetVersion and the one testedBuildId, with a final LF.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "generatedAtUtc",
+    "kind",
+    "population",
+    "preference",
+    "privacy",
+    "query",
+    "recipeSetVersion",
+    "reliability",
+    "rolloutAudience",
+    "schemaVersion",
+    "sourceChannel",
+    "testedBuildIds",
+    "window"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "kind": { "const": "input-enhancement-telemetry-aggregate-export" },
+    "generatedAtUtc": { "$ref": "#/$defs/utc" },
+    "sourceChannel": { "enum": ["preview", "stable"] },
+    "rolloutAudience": { "enum": ["private-community", "public"] },
+    "testedBuildIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^mumble-forked-build-[1-9][0-9]*-[0-9a-f]{12}$" }
+    },
+    "recipeSetVersion": { "$ref": "#/$defs/id" },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endUtc", "observationDays", "startUtc"],
+      "properties": {
+        "startUtc": { "$ref": "#/$defs/utc" },
+        "endUtc": { "$ref": "#/$defs/utc" },
+        "observationDays": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256", "sourceEventCount", "sourceSnapshotSha256", "windowSha256"],
+      "properties": {
+        "id": { "const": "input-enhancement-rollout-v2" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "sourceEventCount": { "type": "integer", "minimum": 0 },
+        "sourceSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "windowSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "population": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distinctDevices", "distinctUsers", "intendedCommunityDevices", "talkHours"],
+      "properties": {
+        "distinctUsers": { "type": "integer", "minimum": 0 },
+        "distinctDevices": { "type": "integer", "minimum": 0 },
+        "intendedCommunityDevices": { "type": "integer", "minimum": 1 },
+        "talkHours": { "type": "number", "minimum": 0 }
+      }
+    },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callbackOverrunFrameRate",
+        "crashFreeSessionRate",
+        "fallbackSessionRate",
+        "manualRollbackOrOptOutRate",
+        "modelHashMismatchCount",
+        "p0Count",
+        "p1Count",
+        "recurrentCallbackRegressionCount"
+      ],
+      "properties": {
+        "p0Count": { "type": "integer", "minimum": 0 },
+        "p1Count": { "type": "integer", "minimum": 0 },
+        "modelHashMismatchCount": { "type": "integer", "minimum": 0 },
+        "recurrentCallbackRegressionCount": { "type": "integer", "minimum": 0 },
+        "crashFreeSessionRate": { "$ref": "#/$defs/rate" },
+        "fallbackSessionRate": { "$ref": "#/$defs/rate" },
+        "callbackOverrunFrameRate": { "$ref": "#/$defs/rate" },
+        "manualRollbackOrOptOutRate": { "$ref": "#/$defs/rate" }
+      }
+    },
+    "preference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blindAbResponses", "selectedOverOriginalRate"],
+      "properties": {
+        "blindAbResponses": { "type": "integer", "minimum": 0 },
+        "selectedOverOriginalRate": { "$ref": "#/$defs/rate" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "optInOnly",
+        "rawAudioIncluded",
+        "rawDeviceIdsIncluded",
+        "retentionDays",
+        "transcriptsIncluded",
+        "voiceprintsIncluded"
+      ],
+      "properties": {
+        "optInOnly": { "const": true },
+        "rawAudioIncluded": { "const": false },
+        "transcriptsIncluded": { "const": false },
+        "voiceprintsIncluded": { "const": false },
+        "rawDeviceIdsIncluded": { "const": false },
+        "retentionDays": { "type": "integer", "minimum": 1, "maximum": 30 }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "rate": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

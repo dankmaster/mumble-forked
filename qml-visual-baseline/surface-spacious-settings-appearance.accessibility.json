@@ -2319,34 +2319,7 @@
                 {
                   "children": [
                     {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 40,
-                            "width": 103,
-                            "x": 1297,
-                            "y": 880
-                          },
-                          "role": "Client",
-                          "states": []
-                        },
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 28,
-                            "width": 71,
-                            "x": 1313,
-                            "y": 886
-                          },
-                          "role": "StaticText",
-                          "states": []
-                        }
-                      ],
+                      "children": [],
                       "description": "",
                       "name": "Open folder",
                       "rect": {

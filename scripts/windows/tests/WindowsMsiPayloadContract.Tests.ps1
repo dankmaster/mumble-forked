@@ -4,6 +4,7 @@ $verifierPath = Join-Path $repoRoot 'scripts\windows\verify-windows-msi-payload.
 $artifactPath = Join-Path $repoRoot 'scripts\windows\assert-windows-build-artifacts.ps1'
 $sharedWorkflowPath = Join-Path $repoRoot '.github\workflows\windows-shared-client.yml'
 $forkedWorkflowPath = Join-Path $repoRoot '.github\workflows\mumble-forked.yml'
+$qualifiedWorkflowPath = Join-Path $repoRoot '.github\workflows\input-enhancement-qualified-build.yml'
 
 Describe 'Windows candidate MSI payload hash preflight' {
 	BeforeAll {
@@ -99,11 +100,19 @@ Describe 'Windows candidate MSI payload hash preflight' {
 		}
 	}
 
-	It 'enables the payload preflight in both tracked Windows client packaging workflows' {
-		foreach ($path in @($sharedWorkflowPath, $forkedWorkflowPath)) {
-			$source = Get-Content -LiteralPath $path -Raw
-			$source | Should Match 'CandidateExecutablePath .*shared-webengine-stage\\mumble\.exe'
-			$source | Should Match 'MsiPayloadEvidencePath .*windows-msi-payload-evidence\.json'
-		}
+	It 'enables payload preflight in both active Windows packaging workflows and disables the legacy publisher' {
+		$sharedSource = Get-Content -LiteralPath $sharedWorkflowPath -Raw
+		$sharedSource | Should Match 'CandidateExecutablePath .*shared-webengine-stage\\mumble\.exe'
+		$sharedSource | Should Match 'MsiPayloadEvidencePath .*windows-msi-payload-evidence\.json'
+
+		$qualifiedSource = Get-Content -LiteralPath $qualifiedWorkflowPath -Raw
+		$qualifiedSource | Should Match 'assert-input-enhancement-msi-payload\.ps1'
+		$qualifiedSource | Should Match 'QualifiedPayloadRoot .*shared-webengine-stage'
+		$qualifiedSource | Should Match 'msi-payload-verification\.json'
+
+		$legacySource = Get-Content -LiteralPath $forkedWorkflowPath -Raw
+		$legacySource | Should Match 'Deprecated mumble-forked release guard'
+		$legacySource | Should Match 'Legacy publisher disabled'
+		$legacySource | Should Match 'exit 1'
 	}
 }

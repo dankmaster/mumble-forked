@@ -8,7 +8,9 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
+#include "SpeechCleanupTestOpusObserver.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QString>
 
 #include <sndfile.h>
@@ -32,9 +34,30 @@ public:
 
 private:
 	void writeDone(bool ok, const QString &errorMessage, std::uint64_t sourceFrames,
-				   std::uint64_t submittedFrames) const;
+				   std::uint64_t submittedFrames);
+	void observeInputPcm(const float *samples, unsigned int sampleCount);
+	void submitInputFrame(float *samples, unsigned int sampleCount);
+	void observePreOpusPcm(short *samples, unsigned int sampleCount, unsigned int channelCount,
+						 unsigned int sampleRate, bool isSpeech);
+	void completeVadPreOpusSourceTimeline(std::uint64_t submittedSamples);
+	bool writePreOpusCapture(QString *errorMessage) const;
+	void beginVoiceContractObservation();
+	void finishVoiceContractObservation();
+	bool m_voiceContractEnabled = false;
+	bool m_voiceContractObservationStarted = false;
+	bool m_voiceContractObservationFinished = false;
+	bool m_pttHoldActivated = false;
+	QCryptographicHash m_inputPcmHash { QCryptographicHash::Sha256 };
+	Mumble::SpeechCleanupE2E::OpusObservation m_opusObservation;
 	bool m_terminatorSubmitted = false;
 	unsigned int m_drainedCleanupSamples = 0;
+	std::vector< short > m_preOpusPcm;
+	std::uint64_t m_nextInputFrameIndex = 0;
+	std::uint64_t m_currentInputFrameIndex = 0;
+	std::uint64_t m_preOpusCallbacks = 0;
+	bool m_inputFrameArmed = false;
+	bool m_preOpusCaptureValid = true;
+	QString m_preOpusCaptureError;
 };
 
 class SpeechCleanupTestAudioOutput final : public AudioOutput {
@@ -45,27 +68,6 @@ public:
 	void run() override;
 
 private:
-	struct RemoteCleanupDiagnostics {
-		bool captured         = false;
-		bool requestedEnabled = false;
-		QString requestedBackend;
-		QString requestedModelId;
-		QString effectiveBackend;
-		QString effectiveModelId;
-		bool processorReady = false;
-		QString activeModelId;
-		QString activeModelPath;
-		bool usedFallback = false;
-		int reportedLatencySamples = 0;
-		bool active     = false;
-		bool wasApplied = false;
-		int drainedSamples = 0;
-		bool drainCompleted = false;
-		QString preset;
-		double mixFactor = 0.0;
-	};
-
-	void observeSpeechCleanupSourceForE2E(const AudioOutputSpeech *speech) override;
 	bool openCapture(QString *errorMessage);
 	void closeCapture();
 	void captureSource(float *outputPCM, unsigned int sampleCount, unsigned int channelCount,
@@ -80,7 +82,6 @@ private:
 	std::uint64_t m_captureCallbacks = 0;
 	std::uint64_t m_captureFramesToSkip = 0;
 	std::uint64_t m_discardedPreRollFrames = 0;
-	RemoteCleanupDiagnostics m_remoteCleanupDiagnostics;
 };
 
 #endif // MUMBLE_MUMBLE_SPEECHCLEANUPTESTAUDIO_H_

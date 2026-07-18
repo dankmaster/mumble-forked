@@ -2153,6 +2153,12 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 					.arg(requestedFocusName);
 				return {};
 			}
+			// A separate QQuickWindow cannot acquire an active-focus item until the
+			// platform has activated that window. Windows may expose the scene before
+			// activation completes, so perform the same bounded handoff used by the
+			// capture-time focus restoration contract before forcing item focus.
+			presentationWindow->requestActivate();
+			QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
 			requestedFocusItem->forceActiveFocus(Qt::TabFocusReason);
 			focusTarget = requestedFocusName;
 		}
@@ -2956,6 +2962,7 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 	AsyncOperationModel *operations = m_host->operationModel();
 	DialogStateController *dialog = m_host->dialogController();
 	ComposerController *composer = m_host->composerController();
+	DirectMessageController *directMessages = m_host->directMessageController();
 	rooms->replaceDirectMessageStates({});
 	navigation->replaceDirectMessageStates({});
 	participants->replaceParticipantStates({});
@@ -2976,8 +2983,22 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 	session->setSelfDeafened(false);
 	session->setSelfMenu({});
 	session->setAppMenus({});
+	directMessages->applyState({
+		{ QStringLiteral("available"), false },
+		{ QStringLiteral("title"), QStringLiteral("Direct messages") },
+		{ QStringLiteral("trayOpen"), false },
+		{ QStringLiteral("conversations"), QVariantList() }
+	});
 
 	if (state == QLatin1String("connected")) {
+		directMessages->applyState({
+			{ QStringLiteral("available"), true },
+			{ QStringLiteral("title"), QStringLiteral("Direct messages") },
+			{ QStringLiteral("description"),
+			  QStringLiteral("Private conversations stay separate from room chat.") },
+			{ QStringLiteral("trayOpen"), false },
+			{ QStringLiteral("conversations"), QVariantList() }
+		});
 		session->setConnected(true);
 		session->setServerName(QStringLiteral("Mumble Visual Fixture"));
 		session->setConnectionLabel(QStringLiteral("Connected"));

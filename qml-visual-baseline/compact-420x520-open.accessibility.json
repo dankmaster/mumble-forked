@@ -5,118 +5,7 @@
         {
           "children": [
             {
-              "children": [],
-              "description": "",
-              "name": "Connected",
-              "rect": {
-                "height": 22,
-                "width": 85,
-                "x": 127,
-                "y": 67
-              },
-              "role": "StaticText",
-              "states": [
-                "readOnly"
-              ]
-            }
-          ],
-          "description": "Connected",
-          "name": "Mumble Visual Fixture",
-          "rect": {
-            "height": 98,
-            "width": 339,
-            "x": 0,
-            "y": 0
-          },
-          "role": "Grouping",
-          "states": []
-        },
-        {
-          "children": [
-            {
-              "children": [],
-              "description": "Type to filter the room navigator",
-              "name": "Search rooms or people",
-              "rect": {
-                "height": 30,
-                "width": 315,
-                "x": 12,
-                "y": 108
-              },
-              "role": "EditableText",
-              "states": [
-                "editable",
-                "focusable"
-              ]
-            }
-          ],
-          "description": "",
-          "name": "Filter rooms and people",
-          "rect": {
-            "height": 50,
-            "width": 339,
-            "x": 0,
-            "y": 98
-          },
-          "role": "Grouping",
-          "states": []
-        },
-        {
-          "children": [
-            {
               "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 148
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "VOICE ROOMS · 2",
-                  "rect": {
-                    "height": 34,
-                    "width": 319,
-                    "x": 10,
-                    "y": 148
-                  },
-                  "role": "Heading",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 182
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 182
-                  },
-                  "role": "Client",
-                  "states": []
-                },
                 {
                   "children": [
                     {
@@ -124,10 +13,10 @@
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 24,
-                        "width": 24,
-                        "x": 47,
-                        "y": 190
+                        "height": 34,
+                        "width": 34,
+                        "x": 153,
+                        "y": 8
                       },
                       "role": "Client",
                       "states": []
@@ -135,57 +24,238 @@
                     {
                       "children": [
                         {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 15,
+                            "width": 69,
+                            "x": 135,
+                            "y": 70
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Connected",
+                      "rect": {
+                        "height": 22,
+                        "width": 85,
+                        "x": 127,
+                        "y": 67
+                      },
+                      "role": "StaticText",
+                      "states": [
+                        "readOnly"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 81,
+                    "width": 303,
+                    "x": 18,
+                    "y": 8
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 1,
+                    "width": 339,
+                    "x": 0,
+                    "y": 97
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "Connected",
+              "name": "Mumble Visual Fixture",
+              "rect": {
+                "height": 98,
+                "width": 339,
+                "x": 0,
+                "y": 0
+              },
+              "role": "Grouping",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 30,
+                        "width": 315,
+                        "x": 12,
+                        "y": 108
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 18,
+                        "width": 273,
+                        "x": 46,
+                        "y": 114
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "Type to filter the room navigator",
+                  "name": "Search rooms or people",
+                  "rect": {
+                    "height": 30,
+                    "width": 315,
+                    "x": 12,
+                    "y": 108
+                  },
+                  "role": "EditableText",
+                  "states": [
+                    "editable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Filter rooms and people",
+              "rect": {
+                "height": 50,
+                "width": 339,
+                "x": 0,
+                "y": 98
+              },
+              "role": "Grouping",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 74,
+                        "width": 319,
+                        "x": 10,
+                        "y": 148
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 148
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "VOICE ROOMS · 2",
+                          "rect": {
+                            "height": 34,
+                            "width": 319,
+                            "x": 10,
+                            "y": 148
+                          },
+                          "role": "Heading",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 182
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 182
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
                           "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 24,
+                                "width": 24,
+                                "x": 47,
+                                "y": 190
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
                             {
                               "children": [
                                 {
                                   "children": [],
                                   "description": "",
-                                  "name": "",
+                                  "name": "Room actions for Lobby",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 305,
-                                    "y": 201
+                                    "height": 24,
+                                    "width": 24,
+                                    "x": 299,
+                                    "y": 190
                                   },
-                                  "role": "Client",
-                                  "states": []
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
                                 },
                                 {
                                   "children": [],
                                   "description": "",
                                   "name": "",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 305,
-                                    "y": 201
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 310,
-                                    "y": 201
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 315,
-                                    "y": 201
+                                    "height": 18,
+                                    "width": 22,
+                                    "x": 273,
+                                    "y": 193
                                   },
                                   "role": "Client",
                                   "states": []
@@ -195,8 +265,8 @@
                               "name": "",
                               "rect": {
                                 "height": 24,
-                                "width": 24,
-                                "x": 299,
+                                "width": 50,
+                                "x": 273,
                                 "y": 190
                               },
                               "role": "Client",
@@ -204,29 +274,113 @@
                             },
                             {
                               "children": [],
+                              "description": "2 participants",
+                              "name": "Collapse Lobby",
+                              "rect": {
+                                "height": 22,
+                                "width": 22,
+                                "x": 18,
+                                "y": 191
+                              },
+                              "role": "Button",
+                              "states": [
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [],
                               "description": "",
                               "name": "",
                               "rect": {
-                                "height": 24,
-                                "width": 24,
-                                "x": 299,
-                                "y": 190
+                                "height": 16,
+                                "width": 188,
+                                "x": 78,
+                                "y": 194
                               },
                               "role": "Client",
                               "states": []
                             }
                           ],
                           "description": "",
-                          "name": "Room actions for Lobby",
+                          "name": "",
                           "rect": {
-                            "height": 24,
-                            "width": 24,
-                            "x": 299,
-                            "y": 190
+                            "height": 40,
+                            "width": 305,
+                            "x": 18,
+                            "y": 182
                           },
-                          "role": "Button",
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Text room. You are here. 2 participants. 1 person speaking. Expanded",
+                      "name": "Lobby",
+                      "rect": {
+                        "height": 74,
+                        "width": 319,
+                        "x": 10,
+                        "y": 148
+                      },
+                      "role": "ListItem",
+                      "states": [
+                        "focused",
+                        "selected"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 224
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 224
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 31,
+                            "width": 319,
+                            "x": 10,
+                            "y": 224
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 224
+                          },
+                          "role": "Client",
                           "states": [
-                            "focusable"
+                            "disabled"
                           ]
                         },
                         {
@@ -234,420 +388,10 @@
                           "description": "",
                           "name": "",
                           "rect": {
-                            "height": 18,
-                            "width": 22,
-                            "x": 273,
-                            "y": 193
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 24,
-                        "width": 50,
-                        "x": 273,
-                        "y": 190
-                      },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 22,
-                            "width": 22,
-                            "x": 18,
-                            "y": 191
-                          },
-                          "role": "Client",
-                          "states": []
-                        },
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 22,
-                            "width": 22,
-                            "x": 18,
-                            "y": 191
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "2 participants",
-                      "name": "Collapse Lobby",
-                      "rect": {
-                        "height": 22,
-                        "width": 22,
-                        "x": 18,
-                        "y": 191
-                      },
-                      "role": "Button",
-                      "states": [
-                        "focusable"
-                      ]
-                    },
-                    {
-                      "children": [],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 16,
-                        "width": 188,
-                        "x": 78,
-                        "y": 194
-                      },
-                      "role": "Client",
-                      "states": []
-                    }
-                  ],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 305,
-                    "x": 18,
-                    "y": 182
-                  },
-                  "role": "Client",
-                  "states": []
-                }
-              ],
-              "description": "Text room. You are here. 2 participants. 1 person speaking. Expanded",
-              "name": "Lobby",
-              "rect": {
-                "height": 74,
-                "width": 319,
-                "x": 10,
-                "y": 148
-              },
-              "role": "ListItem",
-              "states": [
-                "focused",
-                "selected"
-              ]
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 31,
-                    "width": 319,
-                    "x": 10,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": [
-                    "disabled"
-                  ]
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 16,
-                            "width": 255,
-                            "x": 63,
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
                             "y": 224
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 32,
-                        "width": 255,
-                        "x": 63,
-                        "y": 224
-                      },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 32,
-                            "width": 2,
-                            "x": 323,
-                            "y": 224
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 32,
-                        "width": 2,
-                        "x": 323,
-                        "y": 224
-                      },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 9,
-                            "width": 9,
-                            "x": 49,
-                            "y": 244
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 26,
-                        "width": 26,
-                        "x": 32,
-                        "y": 227
-                      },
-                      "role": "Client",
-                      "states": []
-                    }
-                  ],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 31,
-                    "width": 293,
-                    "x": 32,
-                    "y": 224
-                  },
-                  "role": "Client",
-                  "states": []
-                }
-              ],
-              "description": "You. Listening",
-              "name": "Demo User",
-              "rect": {
-                "height": 31,
-                "width": 319,
-                "x": 10,
-                "y": 224
-              },
-              "role": "ListItem",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 31,
-                    "width": 319,
-                    "x": 10,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": [
-                    "disabled"
-                  ]
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 16,
-                            "width": 233,
-                            "x": 63,
-                            "y": 257
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 32,
-                        "width": 233,
-                        "x": 63,
-                        "y": 257
-                      },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 9,
-                            "width": 9,
-                            "x": 49,
-                            "y": 277
-                          },
-                          "role": "Client",
-                          "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 26,
-                        "width": 26,
-                        "x": 32,
-                        "y": 260
-                      },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [
-                        {
-                          "children": [],
-                          "description": "",
-                          "name": "",
-                          "rect": {
-                            "height": 24,
-                            "width": 24,
-                            "x": 301,
-                            "y": 261
                           },
                           "role": "Client",
                           "states": []
@@ -661,13 +405,258 @@
                                   "description": "",
                                   "name": "",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 307,
-                                    "y": 272
+                                    "height": 16,
+                                    "width": 255,
+                                    "x": 63,
+                                    "y": 224
                                   },
                                   "role": "Client",
                                   "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 255,
+                                "x": 63,
+                                "y": 224
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 32,
+                                    "width": 2,
+                                    "x": 323,
+                                    "y": 224
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 2,
+                                "x": 323,
+                                "y": 224
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 9,
+                                    "width": 9,
+                                    "x": 49,
+                                    "y": 244
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 26,
+                                "width": 26,
+                                "x": 32,
+                                "y": 227
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 31,
+                            "width": 293,
+                            "x": 32,
+                            "y": 224
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "You. Listening",
+                      "name": "Demo User",
+                      "rect": {
+                        "height": 31,
+                        "width": 319,
+                        "x": 10,
+                        "y": 224
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 257
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 257
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 31,
+                            "width": 319,
+                            "x": 10,
+                            "y": 257
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 257
+                          },
+                          "role": "Client",
+                          "states": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 257
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 233,
+                                    "x": 63,
+                                    "y": 257
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 233,
+                                "x": 63,
+                                "y": 257
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 9,
+                                    "width": 9,
+                                    "x": 49,
+                                    "y": 277
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 26,
+                                "width": 26,
+                                "x": 32,
+                                "y": 260
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 24,
+                                    "x": 301,
+                                    "y": 261
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Participant actions for Alex",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 24,
+                                    "x": 301,
+                                    "y": 261
+                                  },
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
                                 }
                               ],
                               "description": "",
@@ -683,112 +672,69 @@
                             }
                           ],
                           "description": "",
-                          "name": "Participant actions for Alex",
+                          "name": "",
                           "rect": {
-                            "height": 24,
-                            "width": 24,
-                            "x": 301,
-                            "y": 261
+                            "height": 31,
+                            "width": 293,
+                            "x": 32,
+                            "y": 257
                           },
-                          "role": "Button",
-                          "states": [
-                            "focusable"
-                          ]
+                          "role": "Client",
+                          "states": []
                         }
                       ],
-                      "description": "",
-                      "name": "",
+                      "description": "Talking",
+                      "name": "Alex",
                       "rect": {
-                        "height": 24,
-                        "width": 24,
-                        "x": 301,
-                        "y": 261
+                        "height": 31,
+                        "width": 319,
+                        "x": 10,
+                        "y": 257
                       },
-                      "role": "Client",
-                      "states": []
-                    }
-                  ],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 31,
-                    "width": 293,
-                    "x": 32,
-                    "y": 257
-                  },
-                  "role": "Client",
-                  "states": []
-                }
-              ],
-              "description": "Talking",
-              "name": "Alex",
-              "rect": {
-                "height": 31,
-                "width": 319,
-                "x": 10,
-                "y": 257
-              },
-              "role": "ListItem",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 290
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 290
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 290
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [
-                    {
-                      "children": [],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 24,
-                        "width": 24,
-                        "x": 18,
-                        "y": 298
-                      },
-                      "role": "Client",
+                      "role": "ListItem",
                       "states": []
                     },
                     {
                       "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 290
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 290
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 290
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
                         {
                           "children": [
                             {
@@ -797,88 +743,50 @@
                               "name": "",
                               "rect": {
                                 "height": 24,
-                                "width": 40,
-                                "x": 255,
+                                "width": 24,
+                                "x": 18,
                                 "y": 298
                               },
                               "role": "Client",
                               "states": []
-                            }
-                          ],
-                          "description": "",
-                          "name": "Join",
-                          "rect": {
-                            "height": 24,
-                            "width": 40,
-                            "x": 255,
-                            "y": 298
-                          },
-                          "role": "Button",
-                          "states": []
-                        },
-                        {
-                          "children": [
+                            },
                             {
                               "children": [
                                 {
                                   "children": [],
                                   "description": "",
-                                  "name": "",
+                                  "name": "Join",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 305,
-                                    "y": 309
+                                    "height": 24,
+                                    "width": 40,
+                                    "x": 255,
+                                    "y": 298
                                   },
-                                  "role": "Client",
+                                  "role": "Button",
                                   "states": []
                                 },
                                 {
                                   "children": [],
                                   "description": "",
-                                  "name": "",
+                                  "name": "Room actions for Studio",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 305,
-                                    "y": 309
+                                    "height": 24,
+                                    "width": 24,
+                                    "x": 299,
+                                    "y": 298
                                   },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 310,
-                                    "y": 309
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 315,
-                                    "y": 309
-                                  },
-                                  "role": "Client",
-                                  "states": []
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
                                 }
                               ],
                               "description": "",
                               "name": "",
                               "rect": {
                                 "height": 24,
-                                "width": 24,
-                                "x": 299,
+                                "width": 68,
+                                "x": 255,
                                 "y": 298
                               },
                               "role": "Client",
@@ -889,166 +797,125 @@
                               "description": "",
                               "name": "",
                               "rect": {
-                                "height": 24,
-                                "width": 24,
-                                "x": 299,
-                                "y": 298
+                                "height": 16,
+                                "width": 199,
+                                "x": 49,
+                                "y": 302
                               },
                               "role": "Client",
                               "states": []
                             }
                           ],
                           "description": "",
-                          "name": "Room actions for Studio",
+                          "name": "",
                           "rect": {
-                            "height": 24,
-                            "width": 24,
-                            "x": 299,
-                            "y": 298
+                            "height": 40,
+                            "width": 305,
+                            "x": 18,
+                            "y": 290
                           },
-                          "role": "Button",
-                          "states": [
-                            "focusable"
-                          ]
+                          "role": "Client",
+                          "states": []
                         }
                       ],
-                      "description": "",
-                      "name": "",
+                      "description": "Listening",
+                      "name": "Studio",
                       "rect": {
-                        "height": 24,
-                        "width": 68,
-                        "x": 255,
-                        "y": 298
+                        "height": 40,
+                        "width": 319,
+                        "x": 10,
+                        "y": 290
                       },
-                      "role": "Client",
-                      "states": []
-                    },
-                    {
-                      "children": [],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 16,
-                        "width": 199,
-                        "x": 49,
-                        "y": 302
-                      },
-                      "role": "Client",
-                      "states": []
-                    }
-                  ],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 305,
-                    "x": 18,
-                    "y": 290
-                  },
-                  "role": "Client",
-                  "states": []
-                }
-              ],
-              "description": "Listening",
-              "name": "Studio",
-              "rect": {
-                "height": 40,
-                "width": 319,
-                "x": 10,
-                "y": 290
-              },
-              "role": "ListItem",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 1,
-                    "width": 1,
-                    "x": 10,
-                    "y": 332
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "TEXT ROOMS · 1",
-                  "rect": {
-                    "height": 34,
-                    "width": 319,
-                    "x": 10,
-                    "y": 332
-                  },
-                  "role": "Heading",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 366
-                  },
-                  "role": "Client",
-                  "states": [
-                    "disabled"
-                  ]
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "",
-                  "rect": {
-                    "height": 40,
-                    "width": 319,
-                    "x": 10,
-                    "y": 366
-                  },
-                  "role": "Client",
-                  "states": []
-                },
-                {
-                  "children": [
-                    {
-                      "children": [],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 24,
-                        "width": 24,
-                        "x": 18,
-                        "y": 374
-                      },
-                      "role": "Client",
+                      "role": "ListItem",
                       "states": []
                     },
                     {
                       "children": [
                         {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 1,
+                            "width": 1,
+                            "x": 10,
+                            "y": 332
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "TEXT ROOMS · 1",
+                          "rect": {
+                            "height": 34,
+                            "width": 319,
+                            "x": 10,
+                            "y": 332
+                          },
+                          "role": "Heading",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 366
+                          },
+                          "role": "Client",
+                          "states": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 319,
+                            "x": 10,
+                            "y": 366
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
                           "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 24,
+                                "width": 24,
+                                "x": 18,
+                                "y": 374
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
                             {
                               "children": [
                                 {
                                   "children": [],
                                   "description": "",
-                                  "name": "",
+                                  "name": "Room actions for #general",
                                   "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 305,
-                                    "y": 385
+                                    "height": 24,
+                                    "width": 24,
+                                    "x": 299,
+                                    "y": 374
                                   },
-                                  "role": "Client",
-                                  "states": []
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
                                 }
                               ],
                               "description": "",
@@ -1061,29 +928,97 @@
                               },
                               "role": "Client",
                               "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 243,
+                                "x": 49,
+                                "y": 378
+                              },
+                              "role": "Client",
+                              "states": []
                             }
                           ],
                           "description": "",
-                          "name": "Room actions for #general",
+                          "name": "",
                           "rect": {
-                            "height": 24,
-                            "width": 24,
-                            "x": 299,
-                            "y": 374
+                            "height": 40,
+                            "width": 305,
+                            "x": 18,
+                            "y": 366
                           },
-                          "role": "Button",
-                          "states": [
-                            "focusable"
-                          ]
+                          "role": "Client",
+                          "states": []
                         }
                       ],
+                      "description": "Text room",
+                      "name": "#general",
+                      "rect": {
+                        "height": 74,
+                        "width": 319,
+                        "x": 10,
+                        "y": 332
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 258,
+                    "width": 319,
+                    "x": 10,
+                    "y": 148
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Rooms and participants",
+              "rect": {
+                "height": 308,
+                "width": 339,
+                "x": 0,
+                "y": 148
+              },
+              "role": "List",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 1,
+                    "width": 339,
+                    "x": 0,
+                    "y": 456
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 24,
-                        "width": 24,
-                        "x": 299,
-                        "y": 374
+                        "height": 34,
+                        "width": 34,
+                        "x": 12,
+                        "y": 471
                       },
                       "role": "Client",
                       "states": []
@@ -1093,125 +1028,108 @@
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 16,
-                        "width": 243,
-                        "x": 49,
-                        "y": 378
+                        "height": 32,
+                        "width": 123,
+                        "x": 54,
+                        "y": 472
                       },
                       "role": "Client",
                       "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Mute microphone",
+                      "rect": {
+                        "height": 30,
+                        "width": 30,
+                        "x": 185,
+                        "y": 473
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Deafen",
+                      "rect": {
+                        "height": 30,
+                        "width": 30,
+                        "x": 223,
+                        "y": 473
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "Audio, appearance, notifications, plugins, and more",
+                      "name": "Settings",
+                      "rect": {
+                        "height": 30,
+                        "width": 30,
+                        "x": 261,
+                        "y": 473
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Profile menu",
+                      "rect": {
+                        "height": 30,
+                        "width": 30,
+                        "x": 299,
+                        "y": 473
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
                     }
                   ],
                   "description": "",
                   "name": "",
                   "rect": {
-                    "height": 40,
-                    "width": 305,
-                    "x": 18,
-                    "y": 366
+                    "height": 48,
+                    "width": 317,
+                    "x": 12,
+                    "y": 464
                   },
                   "role": "Client",
                   "states": []
                 }
               ],
-              "description": "Text room",
-              "name": "#general",
+              "description": "Online",
+              "name": "Demo User profile and audio controls",
               "rect": {
-                "height": 74,
-                "width": 319,
-                "x": 10,
-                "y": 332
+                "height": 64,
+                "width": 339,
+                "x": 0,
+                "y": 456
               },
-              "role": "ListItem",
+              "role": "Grouping",
               "states": []
             }
           ],
           "description": "",
-          "name": "Rooms and participants",
+          "name": "",
           "rect": {
-            "height": 308,
+            "height": 520,
             "width": 339,
             "x": 0,
-            "y": 148
+            "y": 0
           },
-          "role": "List",
-          "states": [
-            "focusable",
-            "focused"
-          ]
-        },
-        {
-          "children": [
-            {
-              "children": [],
-              "description": "",
-              "name": "Mute microphone",
-              "rect": {
-                "height": 30,
-                "width": 30,
-                "x": 185,
-                "y": 473
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Deafen",
-              "rect": {
-                "height": 30,
-                "width": 30,
-                "x": 223,
-                "y": 473
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "Audio, appearance, notifications, plugins, and more",
-              "name": "Settings",
-              "rect": {
-                "height": 30,
-                "width": 30,
-                "x": 261,
-                "y": 473
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Profile menu",
-              "rect": {
-                "height": 30,
-                "width": 30,
-                "x": 299,
-                "y": 473
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            }
-          ],
-          "description": "Online",
-          "name": "Demo User profile and audio controls",
-          "rect": {
-            "height": 64,
-            "width": 339,
-            "x": 0,
-            "y": 456
-          },
-          "role": "Grouping",
+          "role": "Client",
           "states": []
         }
       ],

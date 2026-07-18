@@ -36,6 +36,8 @@ public:
 	static const QHash< QString, QString > getDevices(EDataFlow dataflow);
 	static const QHash< QString, QString > getInputDevices();
 	static const QHash< QString, QString > getOutputDevices();
+	static Mumble::InputEnhancement::DeviceIdentity resolveInputDeviceIdentity(const QString &configuredDevice,
+																			 ERole role);
 };
 
 class WASAPIInput : public AudioInput {

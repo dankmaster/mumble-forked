@@ -970,6 +970,8 @@ Window {
 											visible: !messageDelegate.deleted
 											segments: root.normalizedSegments(messageDelegate.bodySegments)
 											resourceActive: !messageDelegate.accessibilityPooled
+											animationsEnabled: !root.visualFixtureMode
+											hoverEffectsEnabled: !root.visualFixtureMode
 											accessibilitySuppressed: !messageDelegate.itemIntersectsViewport(messageBody)
 											textColor: Theme.textMain
 											pixelSize: Theme.fontBody

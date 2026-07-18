@@ -224,35 +224,7 @@
                                     {
                                       "children": [
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 223
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 212
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for Lobby",
                                           "rect": {
@@ -292,21 +264,7 @@
                                       "states": []
                                     },
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 22,
-                                            "width": 22,
-                                            "x": 26,
-                                            "y": 213
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "2 participants",
                                       "name": "Collapse Lobby",
                                       "rect": {
@@ -676,35 +634,7 @@
                                           "states": []
                                         },
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 286,
-                                                    "y": 301
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 280,
-                                                "y": 290
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Participant actions for Alex",
                                           "rect": {
@@ -826,35 +756,7 @@
                                           "states": []
                                         },
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 341
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 330
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for Studio",
                                           "rect": {
@@ -991,35 +893,7 @@
                                     {
                                       "children": [
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 417
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 406
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for #general",
                                           "rect": {
@@ -1152,34 +1026,7 @@
                               "states": []
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 164,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 164,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Mute microphone",
                               "rect": {
@@ -1194,34 +1041,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 202,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 202,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Deafen",
                               "rect": {
@@ -1236,34 +1056,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 240,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 240,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "Audio, appearance, notifications, plugins, and more",
                               "name": "Settings",
                               "rect": {
@@ -1278,87 +1071,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 278,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 287,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 12,
-                                        "x": 287,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 292,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 297,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    }
-                                  ],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 278,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Profile menu",
                               "rect": {
@@ -1480,34 +1193,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1136,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1136,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "Search message text, senders, replies, and attachments",
                           "name": "Search this conversation",
                           "rect": {
@@ -1522,34 +1208,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1178,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1178,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Direct messages",
                           "rect": {
@@ -1564,87 +1223,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1220,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1232,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 1232,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1237,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1242,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1220,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Application menu",
                           "rect": {
@@ -1703,271 +1282,67 @@
                         {
                           "children": [],
                           "description": "",
-                          "name": "",
+                          "name": "Alex",
                           "rect": {
-                            "height": 700,
-                            "width": 12,
-                            "x": 1260,
-                            "y": 120
+                            "height": 15,
+                            "width": 326,
+                            "x": 411,
+                            "y": 156
                           },
-                          "role": "Client",
+                          "role": "StaticText",
                           "states": []
                         },
                         {
                           "children": [],
                           "description": "",
-                          "name": "",
+                          "name": "10:24",
                           "rect": {
-                            "height": 687,
-                            "width": 6,
-                            "x": 1263,
-                            "y": 130
+                            "height": 15,
+                            "width": 26,
+                            "x": 741,
+                            "y": 156
                           },
-                          "role": "Client",
+                          "role": "StaticText",
                           "states": []
-                        }
-                      ],
-                      "description": "",
-                      "name": "",
-                      "rect": {
-                        "height": 700,
-                        "width": 12,
-                        "x": 1260,
-                        "y": 120
-                      },
-                      "role": "ScrollBar",
-                      "states": []
-                    },
-                    {
-                      "children": [
+                        },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 367,
-                                "y": 149
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [
-                                {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "Alex",
-                                      "rect": {
-                                        "height": 15,
-                                        "width": 326,
-                                        "x": 411,
-                                        "y": 149
-                                      },
-                                      "role": "StaticText",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "10:24",
-                                      "rect": {
-                                        "height": 15,
-                                        "width": 26,
-                                        "x": 741,
-                                        "y": 149
-                                      },
-                                      "role": "StaticText",
-                                      "states": []
-                                    }
-                                  ],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 15,
-                                    "width": 356,
-                                    "x": 411,
-                                    "y": 149
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [
-                                    {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "Welcome to the deterministic visual fixture.",
-                                          "rect": {
-                                            "height": 21,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 176
-                                          },
-                                          "role": "StaticText",
-                                          "states": [
-                                            "readOnly"
-                                          ]
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 69,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 203
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 69,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 209
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 2,
-                                                        "width": 12,
-                                                        "x": 734,
-                                                        "y": 229
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    }
-                                                  ],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 30,
-                                                    "width": 30,
-                                                    "x": 725,
-                                                    "y": 215
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "Message actions",
-                                              "rect": {
-                                                "height": 30,
-                                                "width": 30,
-                                                "x": 725,
-                                                "y": 215
-                                              },
-                                              "role": "Button",
-                                              "states": [
-                                                "focusable"
-                                              ]
-                                            },
-                                            {
-                                              "children": [],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 30,
-                                                "width": 332,
-                                                "x": 423,
-                                                "y": 230
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 215
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 69,
-                                        "width": 332,
-                                        "x": 423,
-                                        "y": 176
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    }
-                                  ],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 85,
-                                    "width": 356,
-                                    "x": 411,
-                                    "y": 168
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 104,
-                                "width": 356,
-                                "x": 411,
-                                "y": 149
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
-                          "name": "",
+                          "name": "Welcome to the deterministic visual fixture.",
                           "rect": {
-                            "height": 104,
-                            "width": 400,
-                            "x": 367,
-                            "y": 149
+                            "height": 21,
+                            "width": 332,
+                            "x": 423,
+                            "y": 183
                           },
-                          "role": "Client",
-                          "states": []
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Message actions",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 725,
+                            "y": 210
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
                         }
                       ],
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 116,
+                        "height": 104,
                         "width": 882,
                         "x": 346,
-                        "y": 137
+                        "y": 144
                       },
                       "role": "Client",
                       "states": []
@@ -1975,249 +1350,139 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [
-                                {
-                                  "children": [
-                                    {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "Qt Quick is ready for review.",
-                                          "rect": {
-                                            "height": 21,
-                                            "width": 580,
-                                            "x": 615,
-                                            "y": 273
-                                          },
-                                          "role": "StaticText",
-                                          "states": [
-                                            "readOnly"
-                                          ]
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 515,
-                                            "width": 580,
-                                            "x": 615,
-                                            "y": 300
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "Loads the provider player in this preview",
-                                                  "name": "Play Qt Quick animation showcase here",
-                                                  "rect": {
-                                                    "height": 60,
-                                                    "width": 60,
-                                                    "x": 875,
-                                                    "y": 439
-                                                  },
-                                                  "role": "Button",
-                                                  "states": [
-                                                    "focusable"
-                                                  ]
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "Qt Quick animation showcase",
-                                                  "rect": {
-                                                    "height": 20,
-                                                    "width": 548,
-                                                    "x": 631,
-                                                    "y": 645
-                                                  },
-                                                  "role": "StaticText",
-                                                  "states": []
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "Vimeo · Mumble Design",
-                                                  "rect": {
-                                                    "height": 15,
-                                                    "width": 548,
-                                                    "x": 631,
-                                                    "y": 669
-                                                  },
-                                                  "role": "StaticText",
-                                                  "states": []
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "A lazy provider player with native card chrome and deterministic poster art.",
-                                                  "rect": {
-                                                    "height": 19,
-                                                    "width": 548,
-                                                    "x": 631,
-                                                    "y": 688
-                                                  },
-                                                  "role": "StaticText",
-                                                  "states": []
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "Open the original provider page for more details",
-                                                  "name": "Open on Vimeo: Qt Quick animation showcase",
-                                                  "rect": {
-                                                    "height": 32,
-                                                    "width": 98,
-                                                    "x": 631,
-                                                    "y": 719
-                                                  },
-                                                  "role": "Link",
-                                                  "states": [
-                                                    "focusable"
-                                                  ]
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "Open secondary playback and preview actions",
-                                                  "name": "Preview actions",
-                                                  "rect": {
-                                                    "height": 30,
-                                                    "width": 30,
-                                                    "x": 1149,
-                                                    "y": 720
-                                                  },
-                                                  "role": "Button",
-                                                  "states": [
-                                                    "focusable"
-                                                  ]
-                                                }
-                                              ],
-                                              "description": "A lazy provider player with native card chrome and deterministic poster art.",
-                                              "name": "Qt Quick animation showcase: Vimeo · Mumble Design",
-                                              "rect": {
-                                                "height": 461,
-                                                "width": 580,
-                                                "x": 615,
-                                                "y": 306
-                                              },
-                                              "role": "Grouping",
-                                              "states": []
-                                            }
-                                          ],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 461,
-                                            "width": 580,
-                                            "x": 615,
-                                            "y": 306
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [
-                                            {
-                                              "children": [],
-                                              "description": "",
-                                              "name": "10:25",
-                                              "rect": {
-                                                "height": 15,
-                                                "width": 26,
-                                                "x": 1169,
-                                                "y": 773
-                                              },
-                                              "role": "StaticText",
-                                              "states": []
-                                            },
-                                            {
-                                              "children": [],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 15,
-                                                "width": 580,
-                                                "x": 615,
-                                                "y": 781
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 15,
-                                            "width": 580,
-                                            "x": 615,
-                                            "y": 773
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 515,
-                                        "width": 580,
-                                        "x": 615,
-                                        "y": 273
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    }
-                                  ],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 515,
-                                    "width": 580,
-                                    "x": 615,
-                                    "y": 273
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 515,
-                                "width": 580,
-                                "x": 615,
-                                "y": 273
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
-                          "name": "",
+                          "name": "Qt Quick is ready for review.",
                           "rect": {
-                            "height": 515,
+                            "height": 21,
                             "width": 580,
                             "x": 615,
-                            "y": 273
+                            "y": 268
                           },
-                          "role": "Client",
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "Loads the provider player in this preview",
+                              "name": "Play Qt Quick animation showcase here",
+                              "rect": {
+                                "height": 60,
+                                "width": 60,
+                                "x": 875,
+                                "y": 428
+                              },
+                              "role": "Button",
+                              "states": [
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "Qt Quick animation showcase",
+                              "rect": {
+                                "height": 20,
+                                "width": 548,
+                                "x": 631,
+                                "y": 634
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "Vimeo · Mumble Design",
+                              "rect": {
+                                "height": 15,
+                                "width": 548,
+                                "x": 631,
+                                "y": 658
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "A lazy provider player with native card chrome and deterministic poster art.",
+                              "rect": {
+                                "height": 19,
+                                "width": 548,
+                                "x": 631,
+                                "y": 677
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "Open the original provider page for more details",
+                              "name": "Open on Vimeo: Qt Quick animation showcase",
+                              "rect": {
+                                "height": 32,
+                                "width": 98,
+                                "x": 631,
+                                "y": 708
+                              },
+                              "role": "Link",
+                              "states": [
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "Open secondary playback and preview actions",
+                              "name": "Preview actions",
+                              "rect": {
+                                "height": 30,
+                                "width": 30,
+                                "x": 1149,
+                                "y": 709
+                              },
+                              "role": "Button",
+                              "states": [
+                                "focusable"
+                              ]
+                            }
+                          ],
+                          "description": "A lazy provider player with native card chrome and deterministic poster art.",
+                          "name": "Qt Quick animation showcase: Vimeo · Mumble Design",
+                          "rect": {
+                            "height": 461,
+                            "width": 580,
+                            "x": 615,
+                            "y": 295
+                          },
+                          "role": "Grouping",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:25",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 1169,
+                            "y": 762
+                          },
+                          "role": "StaticText",
                           "states": []
                         }
                       ],
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 543,
+                        "height": 537,
                         "width": 882,
                         "x": 346,
-                        "y": 253
+                        "y": 248
                       },
                       "role": "Client",
                       "states": []
@@ -2230,7 +1495,7 @@
                         "height": 24,
                         "width": 954,
                         "x": 346,
-                        "y": 796
+                        "y": 785
                       },
                       "role": "Client",
                       "states": []
@@ -2286,34 +1551,7 @@
                                 {
                                   "children": [
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 383,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 383,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "",
                                       "name": "Attach images",
                                       "rect": {
@@ -2359,38 +1597,7 @@
                                       ]
                                     },
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 1177,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": [
-                                            "disabled"
-                                          ]
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 1177,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": [
-                                            "disabled"
-                                          ]
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "",
                                       "name": "Send",
                                       "rect": {

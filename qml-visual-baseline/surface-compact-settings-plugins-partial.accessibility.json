@@ -980,34 +980,7 @@
                             {
                               "children": [
                                 {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 28,
-                                        "width": 64,
-                                        "x": 250,
-                                        "y": 777
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 20,
-                                        "width": 52,
-                                        "x": 256,
-                                        "y": 781
-                                      },
-                                      "role": "StaticText",
-                                      "states": []
-                                    }
-                                  ],
+                                  "children": [],
                                   "description": "",
                                   "name": "Configure",
                                   "rect": {
@@ -1022,34 +995,7 @@
                                   ]
                                 },
                                 {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 28,
-                                        "width": 45,
-                                        "x": 320,
-                                        "y": 777
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 20,
-                                        "width": 33,
-                                        "x": 326,
-                                        "y": 781
-                                      },
-                                      "role": "StaticText",
-                                      "states": []
-                                    }
-                                  ],
+                                  "children": [],
                                   "description": "",
                                   "name": "About",
                                   "rect": {

@@ -10,6 +10,7 @@ Rectangle {
     property real maximumBodyHeight: 260
 	property real maximumImageHeight: compactLayout ? 72 : 82
 	property bool hiddenForHistory: false
+	property bool visualFixtureMode: false
     signal actionRequested(string actionId, var payload)
     signal linkRequested(url link)
 
@@ -255,6 +256,8 @@ Rectangle {
 				imageBorderWidth: 0
 				segments: root.session && root.session.motdSegments
 					? root.session.motdSegments : []
+				animationsEnabled: !root.visualFixtureMode
+				hoverEffectsEnabled: !root.visualFixtureMode
 				textColor: Theme.textMain
 				onLinkRequested: function(link) {
 					const safeLink = root.safeExternalUrl(link)

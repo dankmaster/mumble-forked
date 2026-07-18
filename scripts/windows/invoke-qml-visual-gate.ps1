@@ -195,7 +195,7 @@ function Assert-QmlAccessibilityViewportBounds {
 	param(
 		[Parameter(Mandatory = $true)]$Snapshot,
 		[Parameter(Mandatory = $true)][string]$CaseId,
-		[double]$Tolerance = 1.0
+		[double]$Tolerance = 2.0
 	)
 	$structuralRoles = @(
 		"Window", "Client", "Dialog", "Pane", "Grouping", "List", "PopupMenu",

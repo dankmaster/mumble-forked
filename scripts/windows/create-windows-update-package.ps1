@@ -18,7 +18,7 @@ Param(
 
 	[string] $Format = "mumble-update-v1",
 
-	[int] $MinUpdaterVersion = 2,
+	[int] $MinUpdaterVersion = 4,
 
 	[string] $ApplyMode = "replace-staged-payload",
 
@@ -301,15 +301,14 @@ function Test-PackageArchive {
 		if ($manifest.format -ne $Format) {
 			throw "Unexpected package format '$($manifest.format)'"
 		}
-
+		if ($null -eq $manifest.healthCheck -or $manifest.healthCheck.required -ne $true -or
+			[int64] $manifest.healthCheck.minimumStableRuntimeMilliseconds -ne 10000 -or
+			[int64] $manifest.healthCheck.timeoutMilliseconds -ne 45000) {
+			throw "Package archive does not require the production health-marker contract"
+		}
 		Assert-QtQuickPayload -Root $payloadRoot
 
 		$required = @(Get-RequiredQtQuickPayloadPaths) + @('runtime-manifest.json')
-		if ($RequireUpdaterRuntime) {
-			$required += @(
-				'zlib1.dll'
-			)
-		}
 		if ($RequireGStreamerRuntime) {
 			$required += @(
 				'gstreamer/bin/gst-launch-1.0.exe',
@@ -431,12 +430,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble.exe') -Pa
 if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble-updater.exe') -PathType Leaf)) {
 	throw "StageRoot is missing mumble-updater.exe: $stageRootResolved"
 }
-
 Assert-QtQuickPayload -Root $stageRootResolved
-
-if ($RequireUpdaterRuntime -and -not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'zlib1.dll') -PathType Leaf)) {
-	throw "StageRoot is missing updater runtime file zlib1.dll: $stageRootResolved"
-}
 
 if ($RequireGStreamerRuntime) {
 	Assert-GStreamerPayload -Root $stageRootResolved
@@ -475,6 +469,11 @@ try {
 		minUpdaterVersion = $MinUpdaterVersion
 		applyMode = $ApplyMode
 		createdAt = (Get-Date).ToUniversalTime().ToString("o")
+		healthCheck = [ordered] @{
+			required = $true
+			minimumStableRuntimeMilliseconds = 10000
+			timeoutMilliseconds = 45000
+		}
 		files = @($files)
 	}
 

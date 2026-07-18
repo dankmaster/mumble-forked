@@ -17,6 +17,7 @@
 	<file alias="ModernSlider.qml">qml-shell/ModernSlider.qml</file>
 	<file alias="ModernTextArea.qml">qml-shell/ModernTextArea.qml</file>
 	<file alias="ModernSpinBox.qml">qml-shell/ModernSpinBox.qml</file>
+	<file alias="InputEnhancementCalibration.qml">qml-shell/InputEnhancementCalibration.qml</file>
 	<file alias="AsyncOperationCard.qml">qml-shell/AsyncOperationCard.qml</file>
 	<file alias="ToastPill.qml">qml-shell/ToastPill.qml</file>
 	<file alias="ModernMenu.qml">qml-shell/ModernMenu.qml</file>

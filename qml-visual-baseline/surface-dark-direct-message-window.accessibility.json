@@ -356,21 +356,7 @@
                                             {
                                               "children": [
                                                 {
-                                                  "children": [
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 148,
-                                                        "width": 224,
-                                                        "x": 150,
-                                                        "y": 268
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    }
-                                                  ],
+                                                  "children": [],
                                                   "description": "Attachment 1 of 1",
                                                   "name": "Release checklist attachment",
                                                   "rect": {

@@ -2487,6 +2487,7 @@ ApplicationWindow {
 						? (root.activeScopeHasScreenShare ? 38 : root.compactNavigation ? 36 : 48)
 						: root.compactNavigation ? 72 : 82
 					hiddenForHistory: root.motdHiddenForHistory
+					visualFixtureMode: root.visualFixtureOverrideActive
 					session: clientSession
 					onActionRequested: (actionId, payload) => root.handleMotdAction(actionId, payload)
 					onLinkRequested: link => Qt.openUrlExternally(link)
@@ -3224,6 +3225,8 @@ ApplicationWindow {
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
 									resourceActive: !messageDelegate.accessibilityPooled
+									animationsEnabled: !root.visualFixtureOverrideActive
+									hoverEffectsEnabled: !root.visualFixtureOverrideActive
                                     textColor: Theme.textMain
                                     pixelSize: Theme.fontBody
 									onLinkRequested: link => Qt.openUrlExternally(link)
@@ -3262,10 +3265,12 @@ ApplicationWindow {
                                     font.pixelSize: Theme.fontBody
                                     font.italic: true
                                 }
-                                Loader {
+								Loader {
 									id: messageAttachmentLoader
 									active: messageDelegate.hasAttachmentContent
+									visible: active
 									Layout.fillWidth: true
+									Layout.preferredHeight: active && item ? item.implicitHeight : 0
 									onLoaded: if (root.visualFixtureOverrideActive)
 										++root.performanceChatAttachmentLoadedCount
 									sourceComponent: Component {
@@ -3286,7 +3291,13 @@ ApplicationWindow {
 								Loader {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
+									visible: active
 									Layout.fillWidth: false
+									// Loader retains its previous implicitHeight briefly while a
+									// pooled delegate drops rich content. Bind the layout height to
+									// active content explicitly so a plain reused message cannot keep
+									// a stale card-sized gap.
+									Layout.preferredHeight: active && item ? item.implicitHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, parent.width))

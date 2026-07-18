@@ -881,23 +881,7 @@
                             {
                               "children": [
                                 {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 24,
-                                        "width": 52,
-                                        "x": 270,
-                                        "y": 692
-                                      },
-                                      "role": "StaticText",
-                                      "states": [
-                                        "disabled"
-                                      ]
-                                    }
-                                  ],
+                                  "children": [],
                                   "description": "",
                                   "name": "Configure",
                                   "rect": {
@@ -912,23 +896,7 @@
                                   ]
                                 },
                                 {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 24,
-                                        "width": 33,
-                                        "x": 346,
-                                        "y": 692
-                                      },
-                                      "role": "StaticText",
-                                      "states": [
-                                        "disabled"
-                                      ]
-                                    }
-                                  ],
+                                  "children": [],
                                   "description": "",
                                   "name": "About",
                                   "rect": {

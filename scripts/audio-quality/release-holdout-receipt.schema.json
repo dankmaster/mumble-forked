@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-release-holdout-receipt-v1.json",
+  "title": "Immutable one-shot release holdout opening receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval_public_key",
+    "attestation",
+    "consumed_at_utc",
+    "corpus_inventory_sha256",
+    "detached_signature",
+    "mixture_plan_sha256",
+    "purpose",
+    "receipt",
+    "release_build",
+    "run_id",
+    "schema_version",
+    "status"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "receipt": { "const": "mumble-input-enhancement-release-holdout-receipt-v1" },
+    "status": { "const": "opening-consumed-before-audio-read" },
+    "run_id": { "$ref": "#/$defs/uuid4" },
+    "purpose": { "const": "input-enhancement-community-release-final-qualification" },
+    "consumed_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+    "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+    "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+    "release_build": { "$ref": "#/$defs/file" },
+    "attestation": { "$ref": "#/$defs/file" },
+    "detached_signature": { "$ref": "#/$defs/file" },
+    "approval_public_key": { "$ref": "#/$defs/file" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "uuid4": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "utcTimestamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

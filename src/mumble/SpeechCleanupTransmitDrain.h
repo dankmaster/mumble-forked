@@ -16,15 +16,33 @@ class TransmitDrain {
 public:
 	struct Frame {
 		unsigned int zeroInputSamples = 0;
+		unsigned int causalDrainSamples = 0;
 		bool draining                 = false;
+		bool terminalFlush            = false;
 		bool terminator               = false;
 	};
 
-	void begin(unsigned int latencySamples) noexcept { m_remainingSamples = latencySamples; }
-	void cancel() noexcept { m_remainingSamples = 0; }
+	/// Begins a causal processor drain and optionally appends callback-only
+	/// frames that flush downstream state. Terminal flush frames deliberately do
+	/// not contribute to requestedSamples()/drainedSamples(): they recover audio
+	/// already produced by the cleanup processor, rather than adding cleanup
+	/// latency.
+	void begin(unsigned int latencySamples, unsigned int terminalFlushFrames = 0) noexcept {
+		m_requestedSamples            = latencySamples;
+		m_remainingSamples            = latencySamples;
+		m_remainingTerminalFlushFrames = terminalFlushFrames;
+	}
+	void cancel() noexcept {
+		m_requestedSamples             = 0;
+		m_remainingSamples             = 0;
+		m_remainingTerminalFlushFrames = 0;
+	}
 
-	bool active() const noexcept { return m_remainingSamples > 0; }
+	bool active() const noexcept { return m_remainingSamples > 0 || m_remainingTerminalFlushFrames > 0; }
+	unsigned int requestedSamples() const noexcept { return m_requestedSamples; }
 	unsigned int remainingSamples() const noexcept { return m_remainingSamples; }
+	unsigned int remainingTerminalFlushFrames() const noexcept { return m_remainingTerminalFlushFrames; }
+	unsigned int drainedSamples() const noexcept { return m_requestedSamples - m_remainingSamples; }
 
 	Frame takeFrame(unsigned int frameSize) noexcept {
 		if (!active() || frameSize == 0) {
@@ -32,15 +50,27 @@ public:
 		}
 
 		Frame frame;
-		frame.draining         = true;
-		frame.zeroInputSamples = std::min(m_remainingSamples, frameSize);
-		m_remainingSamples -= frame.zeroInputSamples;
+		frame.draining = true;
+		if (m_remainingSamples > 0) {
+			frame.zeroInputSamples = std::min(m_remainingSamples, frameSize);
+			frame.causalDrainSamples = frame.zeroInputSamples;
+			m_remainingSamples -= frame.causalDrainSamples;
+		} else {
+			// A terminal flush is still a real, full zero-input callback through
+			// the cleanup processor. It advances no causal cleanup latency; its
+			// only purpose is to release output buffered by a downstream stage.
+			frame.zeroInputSamples = frameSize;
+			frame.terminalFlush    = true;
+			--m_remainingTerminalFlushFrames;
+		}
 		frame.terminator = !active();
 		return frame;
 	}
 
 private:
+	unsigned int m_requestedSamples = 0;
 	unsigned int m_remainingSamples = 0;
+	unsigned int m_remainingTerminalFlushFrames = 0;
 };
 
 } // namespace Mumble::SpeechCleanup

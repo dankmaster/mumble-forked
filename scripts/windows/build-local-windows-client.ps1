@@ -761,22 +761,32 @@ function Write-SharedRuntimeManifest {
 		[string]$StageRoot
 	)
 
-	$resolvedRoot = (Resolve-Path -LiteralPath $StageRoot).Path.TrimEnd('\')
-	$manifestPath = Join-Path $resolvedRoot "runtime-manifest.json"
-	$files = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File |
-		Where-Object { $_.FullName -ne $manifestPath } |
-		Sort-Object FullName |
-		ForEach-Object {
-			[ordered]@{
-				path = $_.FullName.Substring($resolvedRoot.Length + 1).Replace('\', '/')
-				size = $_.Length
-				sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-			}
-		})
-	[ordered]@{ schema_version = 1; files = $files } |
-		ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-	if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or (Get-Item -LiteralPath $manifestPath).Length -eq 0) {
-		throw "Failed to create the staged runtime manifest."
+	& (Join-Path $PSScriptRoot "new-windows-runtime-manifest.ps1") -StageRoot $StageRoot
+}
+
+function Write-SharedInputEnhancementManifests {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$RepoRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$StageRoot
+	)
+
+	& (Join-Path $PSScriptRoot "new-input-enhancement-package-manifests.ps1") `
+		-StageRoot $StageRoot `
+		-ModelDescriptorPath (Join-Path $RepoRoot "src\mumble\input-enhancement\input-models.descriptor.json") `
+		-RecipeDescriptorPath (Join-Path $RepoRoot "src\mumble\input-enhancement\input-recipes.descriptor.json")
+
+	# The stage has just been rebuilt from local bytes. Any installed detached
+	# signatures necessarily refer to older manifests and must not survive as
+	# apparently valid release metadata. Managed release jobs sign the freshly
+	# generated manifests later and then regenerate the runtime manifest.
+	foreach ($signatureName in @("input-models.json.sig", "input-recipes.json.sig")) {
+		$signaturePath = Join-Path $StageRoot $signatureName
+		if (Test-Path -LiteralPath $signaturePath) {
+			Remove-Item -LiteralPath $signaturePath -Force
+		}
 	}
 }
 
@@ -881,6 +891,7 @@ function Invoke-SharedWindowsPackaging {
 	Copy-SharedQtQuickDialogsModule -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Write-SharedQtConf -StageRoot $stageRoot
 	Assert-QtQuickDesktopDeployment -StageRoot $stageRoot
+	Write-SharedInputEnhancementManifests -RepoRoot $RepoRoot -StageRoot $stageRoot
 	Write-SharedRuntimeManifest -StageRoot $stageRoot
 
 	if ($SkipInstaller) {

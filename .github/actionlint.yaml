@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - input-enhancement-low
+    - input-enhancement-mainstream
+    - input-enhancement-rehearsal-prepare
+    - input-enhancement-rehearsal-observe
+    - input-enhancement-rehearsal-finalize
+    - input-enhancement-community-package

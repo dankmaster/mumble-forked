@@ -1,5 +1,6 @@
 use std::boxed::Box;
-use std::ffi::{c_char, c_float, c_uint, CStr, CString};
+use std::ffi::{c_char, c_float, c_int, c_uint, CStr, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -12,6 +13,38 @@ use crate::tract::*;
 pub struct DFState {
     m: crate::tract::DfTract,
     logger: Option<DfLogReceiver>,
+}
+
+pub const DF_PROCESS_STATUS_OK: c_int = 0;
+pub const DF_PROCESS_STATUS_INVALID_ARGUMENT: c_int = 1;
+pub const DF_PROCESS_STATUS_PROCESS_ERROR: c_int = 2;
+pub const DF_PROCESS_STATUS_PANIC: c_int = 3;
+
+unsafe fn process_frame_with_status<E, F>(
+    output: *mut c_float,
+    output_len: usize,
+    local_snr: *mut c_float,
+    process: F,
+) -> c_int
+where
+    F: FnOnce() -> Result<c_float, E>,
+{
+    match catch_unwind(AssertUnwindSafe(process)) {
+        Ok(Ok(value)) => {
+            *local_snr = value;
+            DF_PROCESS_STATUS_OK
+        }
+        Ok(Err(_)) => {
+            std::ptr::write_bytes(output, 0, output_len);
+            *local_snr = f32::NAN;
+            DF_PROCESS_STATUS_PROCESS_ERROR
+        }
+        Err(_) => {
+            std::ptr::write_bytes(output, 0, output_len);
+            *local_snr = f32::NAN;
+            DF_PROCESS_STATUS_PANIC
+        }
+    }
 }
 
 impl DFState {
@@ -38,12 +71,12 @@ impl DFState {
         };
         let mut r_params = RuntimeParams::default_with_ch(channels); //channel
         r_params = r_params.with_atten_lim(atten_lim).with_thresholds(
-            -15.0f32,  //min_db_thresh
-            35.0f32,   //max_db_erb_thresh
-            35.0f32,   //max_db_df_thresh
+            -15.0f32, //min_db_thresh
+            35.0f32,  //max_db_erb_thresh
+            35.0f32,  //max_db_df_thresh
         );
-        r_params = r_params.with_post_filter(0.0f32);  //post_filter_beta
-        r_params = r_params.with_mask_reduce(ReduceMask::MAX);  //reduce_mask
+        r_params = r_params.with_post_filter(0.0f32); //post_filter_beta
+        r_params = r_params.with_mask_reduce(ReduceMask::MAX); //reduce_mask
         let df_params = DfParams::new(PathBuf::from(model_path))
             .map_err(|e| format!("Could not load model from path '{}': {}", model_path, e))?;
         let m = DfTract::new(df_params, &r_params)
@@ -202,11 +235,49 @@ pub unsafe extern "C" fn df_process_frame(
     input: *mut c_float,
     output: *mut c_float,
 ) -> c_float {
-    let state = st.as_mut().expect("Invalid pointer");
-    let input = ArrayView2::from_shape_ptr((1, state.m.hop_size), input);
-    let output = ArrayViewMut2::from_shape_ptr((1, state.m.hop_size), output);
+    let mut local_snr = f32::NAN;
+    if df_process_frame_v2(st, input as *const c_float, output, &mut local_snr)
+        == DF_PROCESS_STATUS_OK
+    {
+        local_snr
+    } else {
+        f32::NAN
+    }
+}
 
-    state.m.process(input, output).expect("Failed to process DF frame")
+/// Processes one complete DeepFilterNet frame without unwinding across the C
+/// ABI. The output is zero-filled on a model error or panic.
+///
+/// Args:
+///     - df_state: Created via df_create().
+///     - input: Input buffer of length df_get_frame_length().
+///     - output: Output buffer of length df_get_frame_length().
+///     - local_snr: Receives the local SNR, or NaN on failure.
+///
+/// Returns:
+///     - DF_PROCESS_STATUS_OK on success.
+///     - DF_PROCESS_STATUS_INVALID_ARGUMENT for a null pointer.
+///     - DF_PROCESS_STATUS_PROCESS_ERROR when inference returns an error.
+///     - DF_PROCESS_STATUS_PANIC when inference panics.
+#[no_mangle]
+pub unsafe extern "C" fn df_process_frame_v2(
+    st: *mut DFState,
+    input: *const c_float,
+    output: *mut c_float,
+    local_snr: *mut c_float,
+) -> c_int {
+    if st.is_null() || input.is_null() || output.is_null() || local_snr.is_null() {
+        return DF_PROCESS_STATUS_INVALID_ARGUMENT;
+    }
+
+    let state = &mut *st;
+    let frame_len = state.m.hop_size;
+    process_frame_with_status(output, frame_len, local_snr, || {
+        let input = ArrayView2::from_shape_ptr((1, frame_len), input);
+        let output = ArrayViewMut2::from_shape_ptr((1, frame_len), output);
+
+        state.m.process(input, output)
+    })
 }
 
 /// Processes a filter bank sample and return raw gains and DF coefs.
@@ -232,8 +303,14 @@ pub unsafe extern "C" fn df_process_frame_raw(
 ) -> c_float {
     let state = st.as_mut().expect("Invalid pointer");
     let input = ArrayView2::from_shape_ptr((1, state.m.n_freqs), input);
-    state.m.set_spec_buffer(input).expect("Failed to set input spectrum");
-    let (lsnr, gains, coefs) = state.m.process_raw().expect("Failed to process DF spectral frame");
+    state
+        .m
+        .set_spec_buffer(input)
+        .expect("Failed to set input spectrum");
+    let (lsnr, gains, coefs) = state
+        .m
+        .process_raw()
+        .expect("Failed to process DF spectral frame");
     let mut out_gains = ArrayViewMut2::from_shape_ptr((1, state.m.nb_erb), *out_gains_p);
     let mut out_coefs =
         ArrayViewMut4::from_shape_ptr((1, state.m.df_order, state.m.nb_df, 2), *out_coefs_p);
@@ -289,4 +366,75 @@ pub unsafe extern "C" fn df_gain_size(st: *const DFState) -> DynArray {
 #[no_mangle]
 pub unsafe extern "C" fn df_free(model: *mut DFState) {
     let _ = Box::from_raw(model);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut, NonNull};
+
+    #[test]
+    fn process_frame_v2_rejects_null_arguments() {
+        let fake_state = NonNull::<DFState>::dangling().as_ptr();
+        let input = [0.0f32; 1];
+        let mut output = [0.0f32; 1];
+        let mut local_snr = 0.0f32;
+
+        unsafe {
+            assert_eq!(
+                df_process_frame_v2(
+                    null_mut(),
+                    input.as_ptr(),
+                    output.as_mut_ptr(),
+                    &mut local_snr,
+                ),
+                DF_PROCESS_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                df_process_frame_v2(fake_state, null(), output.as_mut_ptr(), &mut local_snr,),
+                DF_PROCESS_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                df_process_frame_v2(fake_state, input.as_ptr(), null_mut(), &mut local_snr,),
+                DF_PROCESS_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                df_process_frame_v2(fake_state, input.as_ptr(), output.as_mut_ptr(), null_mut(),),
+                DF_PROCESS_STATUS_INVALID_ARGUMENT
+            );
+        }
+    }
+
+    #[test]
+    fn process_frame_v2_maps_processing_errors_to_zero_output() {
+        let mut output = [1.0f32; 8];
+        let mut local_snr = 42.0f32;
+        let status = unsafe {
+            process_frame_with_status(output.as_mut_ptr(), output.len(), &mut local_snr, || {
+                Err::<c_float, &'static str>("forced processing error")
+            })
+        };
+
+        assert_eq!(status, DF_PROCESS_STATUS_PROCESS_ERROR);
+        assert!(output.iter().all(|sample| *sample == 0.0));
+        assert!(local_snr.is_nan());
+    }
+
+    #[test]
+    fn process_frame_v2_catches_panics_and_zeroes_output() {
+        let mut output = [1.0f32; 8];
+        let mut local_snr = 42.0f32;
+        let status = unsafe {
+            process_frame_with_status(
+                output.as_mut_ptr(),
+                output.len(),
+                &mut local_snr,
+                || -> Result<c_float, &'static str> { panic!("forced inference panic") },
+            )
+        };
+
+        assert_eq!(status, DF_PROCESS_STATUS_PANIC);
+        assert!(output.iter().all(|sample| *sample == 0.0));
+        assert!(local_snr.is_nan());
+    }
 }

@@ -232,21 +232,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 203,
-                                "x": 696,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Rename",
                           "rect": {
@@ -261,21 +247,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 54,
-                                "x": 928,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Unregister",
                           "rect": {

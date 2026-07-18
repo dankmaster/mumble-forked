@@ -58,6 +58,7 @@ private slots:
 	void serializesDeterministicallyAndBoundsStrings();
 	void omitsInvisibleAndOffscreenChildren();
 	void omitsNonMaterializedChildrenWithNullBounds();
+	void serializesButtonsAsSemanticLeaves();
 	void normalizesScreenCoordinatesToRootWindow();
 	void guardsCyclesAndBudgets();
 	void queriesWindowAccessibilityWhenAvailable();
@@ -138,6 +139,30 @@ void TestQmlAccessibilitySnapshot::omitsNonMaterializedChildrenWithNullBounds() 
 	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
 	QCOMPARE(children.size(), 1);
 	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(), QStringLiteral("materialized"));
+#else
+	QSKIP("Qt was built without accessibility support.");
+#endif
+}
+
+void TestQmlAccessibilitySnapshot::serializesButtonsAsSemanticLeaves() {
+#if QT_CONFIG(accessibility)
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
+	TestAccessible button(QStringLiteral("Open settings"), QRect(10, 10, 120, 32), QAccessible::PushButton);
+	TestAccessible decorativeBackground(QString(), QRect(10, 10, 120, 32), QAccessible::Client);
+	TestAccessible decorativeIcon(QString(), QRect(20, 18, 16, 16), QAccessible::Client);
+	button.mutableState().focusable = true;
+	button.addChild(&decorativeBackground);
+	button.addChild(&decorativeIcon);
+	root.addChild(&button);
+
+	const QVariantMap result = QmlAccessibilitySnapshot::serialize(&root);
+	QVERIFY(result.value(QStringLiteral("ok")).toBool());
+	const QVariantMap serializedButton = result.value(QStringLiteral("tree")).toMap()
+		.value(QStringLiteral("children")).toList().front().toMap();
+	QCOMPARE(serializedButton.value(QStringLiteral("name")).toString(), QStringLiteral("Open settings"));
+	QCOMPARE(serializedButton.value(QStringLiteral("role")).toString(), QStringLiteral("Button"));
+	QVERIFY(serializedButton.value(QStringLiteral("states")).toList().contains(QStringLiteral("focusable")));
+	QVERIFY(serializedButton.value(QStringLiteral("children")).toList().isEmpty());
 #else
 	QSKIP("Qt was built without accessibility support.");
 #endif

@@ -7,6 +7,24 @@
 cmake_minimum_required(VERSION 3.23...4.2)
 
 set(BUILD_NUMBER CACHE STRING "The build number of the current build. Will be used in Mumble's version to make sure newer builds upgrade older installations properly.")
+
+set(MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX "" CACHE STRING
+	"Raw 32-byte Ed25519 public key, encoded as 64 hexadecimal characters, for signed input-enhancement policy verification.")
+option(input-enhancement-signed-policy-required
+	"Fail configuration unless a valid input-enhancement Ed25519 policy public key is embedded." OFF)
+if(NOT "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" STREQUAL "")
+	string(LENGTH "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX_LENGTH)
+	if(NOT MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX_LENGTH EQUAL 64 OR
+		NOT "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" MATCHES "^[0-9A-Fa-f]+$")
+		message(FATAL_ERROR
+			"MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX must be exactly 32 bytes encoded as 64 hexadecimal characters")
+	endif()
+	string(TOLOWER "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}"
+		MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX)
+elseif(input-enhancement-signed-policy-required)
+	message(FATAL_ERROR
+		"A release requiring signed input-enhancement policy was configured without MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX")
+endif()
 set(BUILD_RELEASE_DATE CACHE STRING "The release date to be used in the generated appstream metadata.")
 
 if ("${BUILD_NUMBER}" STREQUAL "")

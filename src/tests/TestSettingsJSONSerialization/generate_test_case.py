@@ -37,7 +37,7 @@ def extractFields(classDefinition):
     for currentLine in classDefinition.split("\n"):
         currentLine = currentLine.strip()
 
-        if currentLine.startswith("//") or currentLine in ["private:", "public:"]:
+        if currentLine.startswith("//") or currentLine.startswith("#") or currentLine in ["private:", "public:", "}"]:
             continue
 
         words = currentLine.split()
@@ -202,6 +202,8 @@ def getDefaultValueForType(dataType):
     elif dataType in ["KeyPair"]:
         # We can't really create a certificate here, so we have to use a default-constructed value
         return "{}"
+    elif dataType in ["Mumble::InputEnhancement::Settings"]:
+        return "[] { Mumble::InputEnhancement::Settings value; value.defaultPreference.reduction = 42; return value; }()"
 
     if dataType in defaultValues:
         return defaultValues[dataType]

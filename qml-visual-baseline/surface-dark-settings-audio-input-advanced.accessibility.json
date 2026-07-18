@@ -3,6 +3,50 @@
     {
       "children": [
         {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Use exclusive input mode",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 180
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 1162,
+                "x": 246,
+                "y": 180
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Input device",
+          "rect": {
+            "height": 223,
+            "width": 1190,
+            "x": 232,
+            "y": 7
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
           "children": [],
           "description": "",
           "name": "Settings",
@@ -357,147 +401,6 @@
           ]
         },
         {
-          "children": [
-            {
-              "children": [],
-              "description": "",
-              "name": "Input device",
-              "rect": {
-                "height": 17,
-                "width": 1162,
-                "x": 246,
-                "y": 152
-              },
-              "role": "Heading",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Input system",
-                  "rect": {
-                    "height": 15,
-                    "width": 62,
-                    "x": 246,
-                    "y": 179
-                  },
-                  "role": "StaticText",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Input system",
-                  "rect": {
-                    "height": 36,
-                    "width": 1162,
-                    "x": 246,
-                    "y": 199
-                  },
-                  "role": "ComboBox",
-                  "states": [
-                    "focusable"
-                  ]
-                }
-              ],
-              "description": "",
-              "name": "",
-              "rect": {
-                "height": 56,
-                "width": 1162,
-                "x": 246,
-                "y": 179
-              },
-              "role": "Client",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Input device",
-                  "rect": {
-                    "height": 15,
-                    "width": 59,
-                    "x": 246,
-                    "y": 245
-                  },
-                  "role": "StaticText",
-                  "states": []
-                },
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Input device",
-                  "rect": {
-                    "height": 36,
-                    "width": 1162,
-                    "x": 246,
-                    "y": 265
-                  },
-                  "role": "ComboBox",
-                  "states": [
-                    "focusable"
-                  ]
-                }
-              ],
-              "description": "",
-              "name": "",
-              "rect": {
-                "height": 56,
-                "width": 1162,
-                "x": 246,
-                "y": 245
-              },
-              "role": "Client",
-              "states": []
-            },
-            {
-              "children": [
-                {
-                  "children": [],
-                  "description": "",
-                  "name": "Use exclusive input mode",
-                  "rect": {
-                    "height": 36,
-                    "width": 1162,
-                    "x": 246,
-                    "y": 311
-                  },
-                  "role": "CheckBox",
-                  "states": [
-                    "checkable",
-                    "focusable"
-                  ]
-                }
-              ],
-              "description": "",
-              "name": "",
-              "rect": {
-                "height": 36,
-                "width": 1162,
-                "x": 246,
-                "y": 311
-              },
-              "role": "Client",
-              "states": []
-            }
-          ],
-          "description": "form",
-          "name": "Input device",
-          "rect": {
-            "height": 223,
-            "width": 1190,
-            "x": 232,
-            "y": 138
-          },
-          "role": "Pane",
-          "states": []
-        },
-        {
           "children": [],
           "description": "",
           "name": "Voice activation",
@@ -505,7 +408,7 @@
             "height": 17,
             "width": 1162,
             "x": 246,
-            "y": 391
+            "y": 260
           },
           "role": "Heading",
           "states": []
@@ -520,7 +423,7 @@
                 "height": 15,
                 "width": 72,
                 "x": 246,
-                "y": 418
+                "y": 287
               },
               "role": "StaticText",
               "states": []
@@ -533,7 +436,7 @@
                 "height": 36,
                 "width": 1162,
                 "x": 246,
-                "y": 438
+                "y": 307
               },
               "role": "ComboBox",
               "states": [
@@ -547,7 +450,7 @@
             "height": 56,
             "width": 1162,
             "x": 246,
-            "y": 418
+            "y": 287
           },
           "role": "Client",
           "states": []
@@ -562,7 +465,7 @@
                 "height": 15,
                 "width": 88,
                 "x": 246,
-                "y": 484
+                "y": 353
               },
               "role": "StaticText",
               "states": []
@@ -575,7 +478,7 @@
                 "height": 36,
                 "width": 1162,
                 "x": 246,
-                "y": 504
+                "y": 373
               },
               "role": "ComboBox",
               "states": [
@@ -590,7 +493,7 @@
                 "height": 14,
                 "width": 1162,
                 "x": 246,
-                "y": 545
+                "y": 414
               },
               "role": "StaticText",
               "states": []
@@ -602,7 +505,7 @@
             "height": 75,
             "width": 1162,
             "x": 246,
-            "y": 484
+            "y": 353
           },
           "role": "Client",
           "states": []
@@ -617,7 +520,7 @@
                 "height": 15,
                 "width": 50,
                 "x": 246,
-                "y": 569
+                "y": 438
               },
               "role": "StaticText",
               "states": []
@@ -630,7 +533,7 @@
                 "height": 36,
                 "width": 1162,
                 "x": 246,
-                "y": 589
+                "y": 458
               },
               "role": "ComboBox",
               "states": [
@@ -645,7 +548,7 @@
                 "height": 14,
                 "width": 1162,
                 "x": 246,
-                "y": 630
+                "y": 499
               },
               "role": "StaticText",
               "states": []
@@ -657,7 +560,7 @@
             "height": 75,
             "width": 1162,
             "x": 246,
-            "y": 569
+            "y": 438
           },
           "role": "Client",
           "states": []
@@ -665,147 +568,421 @@
         {
           "children": [
             {
-              "children": [],
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Current voice input",
+                          "rect": {
+                            "height": 16,
+                            "width": 105,
+                            "x": 246,
+                            "y": 523
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Volume level",
+                          "rect": {
+                            "height": 15,
+                            "width": 1061,
+                            "x": 246,
+                            "y": 540
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 1061,
+                        "x": 246,
+                        "y": 523
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Waiting for input",
+                      "rect": {
+                        "height": 15,
+                        "width": 82,
+                        "x": 1326,
+                        "y": 532
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 9,
+                        "width": 9,
+                        "x": 1312,
+                        "y": 535
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 523
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 22,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 564
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 22,
+                        "width": 2,
+                        "x": 1176,
+                        "y": 564
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 22,
+                        "width": 2,
+                        "x": 1385,
+                        "y": 564
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "0 percent",
+                  "name": "Current voice input",
+                  "rect": {
+                    "height": 22,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 564
+                  },
+                  "role": "ProgressBar",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Quiet 80%",
+                      "rect": {
+                        "height": 14,
+                        "width": 45,
+                        "x": 246,
+                        "y": 595
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "0%",
+                      "rect": {
+                        "height": 14,
+                        "width": 13,
+                        "x": 821,
+                        "y": 595
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Voice 98%",
+                      "rect": {
+                        "height": 14,
+                        "width": 45,
+                        "x": 1363,
+                        "y": 595
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 14,
+                        "width": 1162,
+                        "x": 296,
+                        "y": 602
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 14,
+                        "width": 1162,
+                        "x": 839,
+                        "y": 602
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 14,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 595
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Ready to tune voice input.",
+                  "rect": {
+                    "height": 15,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 618
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Tune input enhancement",
+                      "rect": {
+                        "height": 16,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 642
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "A short local recording is used to compare profiles for this microphone.",
+                      "rect": {
+                        "height": 15,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 667
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Calibration audio stays in memory on this device, is never sent to the server, and is erased when calibration ends.",
+                      "rect": {
+                        "height": 14,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 691
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 24,
+                            "width": 1150,
+                            "x": 252,
+                            "y": 720
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 252,
+                            "y": 723
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Also capture 8 seconds of keyboard, fan, or other nearby noise",
+                      "rect": {
+                        "height": 36,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 714
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Start calibration",
+                          "rect": {
+                            "height": 36,
+                            "width": 108,
+                            "x": 246,
+                            "y": 759
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 36,
+                        "width": 1162,
+                        "x": 246,
+                        "y": 759
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 153,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 642
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Use recommended settings",
+                      "rect": {
+                        "height": 36,
+                        "width": 166,
+                        "x": 246,
+                        "y": 804
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Replay",
+                      "rect": {
+                        "height": 36,
+                        "width": 59,
+                        "x": 418,
+                        "y": 804
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 804
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
               "description": "",
-              "name": "Current voice input",
+              "name": "",
               "rect": {
-                "height": 16,
-                "width": 105,
-                "x": 246,
-                "y": 654
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Waiting for input",
-              "rect": {
-                "height": 15,
-                "width": 82,
-                "x": 1326,
-                "y": 663
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Volume level",
-              "rect": {
-                "height": 15,
-                "width": 1061,
-                "x": 246,
-                "y": 671
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "0 percent",
-              "name": "Current voice input",
-              "rect": {
-                "height": 22,
+                "height": 317,
                 "width": 1162,
                 "x": 246,
-                "y": 695
+                "y": 523
               },
-              "role": "ProgressBar",
+              "role": "Client",
               "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Quiet 80%",
-              "rect": {
-                "height": 14,
-                "width": 45,
-                "x": 246,
-                "y": 726
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "0%",
-              "rect": {
-                "height": 14,
-                "width": 13,
-                "x": 821,
-                "y": 726
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Voice 98%",
-              "rect": {
-                "height": 14,
-                "width": 45,
-                "x": 1363,
-                "y": 726
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Ready to tune voice input.",
-              "rect": {
-                "height": 15,
-                "width": 1162,
-                "x": 246,
-                "y": 749
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Use recommended settings",
-              "rect": {
-                "height": 36,
-                "width": 166,
-                "x": 246,
-                "y": 773
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Replay",
-              "rect": {
-                "height": 36,
-                "width": 59,
-                "x": 418,
-                "y": 773
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
             }
           ],
           "description": "",
           "name": "",
           "rect": {
-            "height": 155,
+            "height": 317,
             "width": 1162,
             "x": 246,
-            "y": 654
+            "y": 523
           },
           "role": "Client",
           "states": []
@@ -824,7 +1001,7 @@
                         "height": 15,
                         "width": 1133,
                         "x": 246,
-                        "y": 820
+                        "y": 851
                       },
                       "role": "StaticText",
                       "states": []
@@ -836,7 +1013,7 @@
                     "height": 16,
                     "width": 1162,
                     "x": 246,
-                    "y": 819
+                    "y": 850
                   },
                   "role": "Client",
                   "states": []
@@ -851,7 +1028,7 @@
                         "height": 16,
                         "width": 16,
                         "x": 1159,
-                        "y": 849
+                        "y": 880
                       },
                       "role": "Client",
                       "states": []
@@ -866,7 +1043,7 @@
                             "height": 5,
                             "width": 920,
                             "x": 252,
-                            "y": 855
+                            "y": 886
                           },
                           "role": "Client",
                           "states": []
@@ -878,7 +1055,7 @@
                         "height": 5,
                         "width": 1150,
                         "x": 252,
-                        "y": 855
+                        "y": 886
                       },
                       "role": "Client",
                       "states": []
@@ -890,7 +1067,7 @@
                     "height": 36,
                     "width": 1162,
                     "x": 246,
-                    "y": 839
+                    "y": 870
                   },
                   "role": "Slider",
                   "states": [
@@ -905,7 +1082,7 @@
                 "height": 74,
                 "width": 1162,
                 "x": 246,
-                "y": 819
+                "y": 850
               },
               "role": "Client",
               "states": []
@@ -917,7 +1094,7 @@
             "height": 74,
             "width": 1162,
             "x": 246,
-            "y": 819
+            "y": 850
           },
           "role": "Client",
           "states": [

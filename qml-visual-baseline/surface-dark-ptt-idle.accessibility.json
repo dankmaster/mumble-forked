@@ -27,34 +27,7 @@
       "states": []
     },
     {
-      "children": [
-        {
-          "children": [],
-          "description": "",
-          "name": "HOLD TO TALK",
-          "rect": {
-            "height": 16,
-            "width": 286,
-            "x": 94,
-            "y": 259
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Space",
-          "rect": {
-            "height": 15,
-            "width": 286,
-            "x": 94,
-            "y": 276
-          },
-          "role": "StaticText",
-          "states": []
-        }
-      ],
+      "children": [],
       "description": "Hold with the pointer or Space key to transmit. Transmission stops if this window loses focus or closes.",
       "name": "Hold to push to talk",
       "rect": {

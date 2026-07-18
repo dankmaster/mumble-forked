@@ -66,6 +66,52 @@ function Wait-AutomationPort {
 	throw "Timed out waiting for automation port $Port."
 }
 
+function Set-JsonObjectProperty {
+	param(
+		[Parameter(Mandatory = $true)][object]$Object,
+		[Parameter(Mandatory = $true)][string]$Name,
+		[Parameter(Mandatory = $true)]$Value
+	)
+	$property = $Object.PSObject.Properties[$Name]
+	if ($null -eq $property) {
+		$Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+	} else {
+		$property.Value = $Value
+	}
+}
+
+function New-IsolatedVisualConfig {
+	param(
+		[Parameter(Mandatory = $true)][string]$SourcePath,
+		[Parameter(Mandatory = $true)][string]$DestinationPath
+	)
+	$config = Get-Content -Raw -LiteralPath $SourcePath | ConvertFrom-Json
+	if ($null -eq $config -or $config -isnot [pscustomobject]) {
+		throw "Visual-matrix source config must contain a JSON object."
+	}
+
+	$network = $config.PSObject.Properties['network']
+	if ($null -eq $network -or $null -eq $network.Value) {
+		$networkValue = [pscustomobject]@{}
+		Set-JsonObjectProperty -Object $config -Name 'network' -Value $networkValue
+	} elseif ($network.Value -is [pscustomobject]) {
+		$networkValue = $network.Value
+	} else {
+		throw "Visual-matrix source config has a non-object network section."
+	}
+	# A visual fixture must never race a real saved-server connection. Besides
+	# leaking live rooms into evidence, a background connection changes which
+	# technical Qt Quick accessibility containers are materialized. Keep the
+	# source file untouched and make every per-DPR process explicitly offline.
+	Set-JsonObjectProperty -Object $networkValue -Name 'auto_connect_to_last_server' -Value $false
+
+	[IO.File]::WriteAllText(
+		$DestinationPath,
+		($config | ConvertTo-Json -Depth 100),
+		[Text.UTF8Encoding]::new($false)
+	)
+}
+
 $root = [IO.Path]::GetFullPath($OutputDirectory)
 $rootParent = Split-Path -Parent $root
 $rootLeaf = Split-Path -Leaf $root
@@ -147,7 +193,7 @@ try {
 		$groupDirectory = Join-Path $workingRoot $groupId
 		New-Item -ItemType Directory -Force -Path $groupDirectory | Out-Null
 		$configCopy = Join-Path $groupDirectory "mumble_settings.json"
-		Copy-Item -LiteralPath $sourceConfig -Destination $configCopy -Force
+		New-IsolatedVisualConfig -SourcePath $sourceConfig -DestinationPath $configCopy
 		$sourceDprIndex = [Array]::IndexOf([string[]]$sourceDprKeys, [string]$group.Name)
 		if ($sourceDprIndex -lt 0) { throw "Visual matrix DPR group '$($group.Name)' is absent from the source matrix." }
 		$port = if ($AutomationPortBase -gt 0) {

@@ -1,0 +1,888 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-17",
+  "description": "Pinned seed corpus metadata for input-enhancement evaluation. Audio remains outside Git and is never packaged with Mumble.",
+  "policy": {
+    "allowed_roles": [
+      "fullband_quality",
+      "local_eval",
+      "local_mixture_generation",
+      "multilingual_regression",
+      "narrowband_regression",
+      "training_candidate"
+    ],
+    "derived_audio_tracked_in_git": false,
+    "downloaded_audio_tracked_in_git": false,
+    "personal_audio_default": "local_only_delete_after_calibration",
+    "unknown_or_ambiguous_license": "blocked"
+  },
+  "sources": [
+    {
+      "id": "aid-anechoic-interferer-v1-0",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 6974033; DOI 10.5281/zenodo.6974033)",
+      "source_url": "https://zenodo.org/api/records/6974033/files/AID.zip/content",
+      "landing_page": "https://zenodo.org/records/6974033",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/aid/AID-v1.0.zip",
+        "digest": "cc69345e3d778a179446032e984e26c1840c65257ace36e6d352f83a83049b5b",
+        "size_bytes": 283052162
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://zenodo.org/api/records/6974033",
+        "notes": "Version-specific Zenodo metadata assigns CC BY 4.0 to the author-recorded dataset."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 762,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Official MD5 e55212120175759e9f14f08975eced33. Group the three microphone captures of each physical event together before splitting. Raw or derived audio stays outside Git and release artifacts."
+    },
+    {
+      "id": "common-voice-swedish-26-0",
+      "kind": "clean_speech",
+      "version": "26.0 (cv-corpus-26.0-2026-06-12; sv-SE)",
+      "source_url": "https://raw.githubusercontent.com/common-voice/cv-dataset/f99d8239d2796131b73ac99f92ee7cb4443bf3ba/datasets/scripted-speech/cv-corpus-26.0-2026-06-12.json",
+      "landing_page": "https://mozilladatacollective.com/datasets/cmqintw0q00xwnr07mjjzpe61",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "fc6e3a1c28e05f361badf51b0b8e1770db0d3012b02087b382b22ccd92bb0051",
+        "size_bytes": 1281634603
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "status": "verified",
+        "evidence_url": "https://mozilladatacollective.com/datasets/cmqintw0q00xwnr07mjjzpe61",
+        "notes": "MDC permits training and evaluation but forbids attempting to identify speakers and forbids re-hosting or re-sharing the dataset."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 50259,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "multilingual_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The pinned Common Voice release metadata records this SHA-256 and byte size for sv-SE. No artifact_path is present: MDC access requires its own terms/API flow, so the repository fetcher must fail closed and must never mirror the archive."
+    },
+    {
+      "id": "demand-dkitchen-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; DKITCHEN_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/DKITCHEN_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/DKITCHEN_16k.zip",
+        "digest": "9d68e46d2709847c59580770e2f8aa160607ebff7475788174aa1080332cc845", "size_bytes": 110501049
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 7ffbf52d7f4699f96927846103dc8788; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-dliving-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; DLIVING_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/DLIVING_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/DLIVING_16k.zip",
+        "digest": "2b1726fe06e41551ce2397f2aaf3e4fb692c912d81914b04708df0bbb5252338", "size_bytes": 80170627
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 46741384d9e434a0bd8b3ec1830b6052; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-dwashing-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; DWASHING_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/DWASHING_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/demand/DWASHING_16k.zip",
+        "digest": "f687c0806b0e9731b71a9c01c6134a21330efc5fa4aa7ee97cf4df276ad1dae1",
+        "size_bytes": 102343250
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0",
+        "status": "verified",
+        "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 7e5ee9437ce9409c5f9a779b6212a240; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-nfield-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; NFIELD_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/NFIELD_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/demand/NFIELD_16k.zip",
+        "digest": "b7ef25d2af0d9ff0b8b1e359aba3f928f59b966b87009c2aed53df93e57856e3",
+        "size_bytes": 86536782
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 a740046c6f4e174e16f5d568aaec5024; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-npark-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; NPARK_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/NPARK_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/NPARK_16k.zip",
+        "digest": "80e12fa245eb7c035efc9add749620aa4efbf79ab4a8c0ead76d734cc7bc3f1b", "size_bytes": 86029332
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 80f1385a34d7f1705758926b57f138ce; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-nriver-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; NRIVER_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/NRIVER_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/NRIVER_16k.zip",
+        "digest": "98e3a3f05a7234ea07619d965bafeea68a100bbce5c9269b7487393e3b559660", "size_bytes": 98689565
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 54264db61d3fe073fb81f2e40e0d19b5; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-ohallway-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; OHALLWAY_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/OHALLWAY_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/OHALLWAY_16k.zip",
+        "digest": "4d5ef858a05954f03340048131f60a2004b7b28afc65f7bd2301636a7002d6cb", "size_bytes": 77941854
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 fe918bbb0e63e73d09ba7f4843ef33f1; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-omeeting-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; OMEETING_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/OMEETING_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/OMEETING_16k.zip",
+        "digest": "512016cad3a42511a0fb7e3c74d6924e6efde4921a6101361f1306bf90bf2e5a", "size_bytes": 82703355
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 62f7cfe7fe6d30b7d8a215fe37c2dfd2; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-ooffice-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; OOFFICE_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/OOFFICE_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/OOFFICE_16k.zip",
+        "digest": "7570c952f621990d0d71b8398107d9a78066254f883a5569abec9c233ffda358", "size_bytes": 88995191
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 7b61cc2d182d5a654cb9c3101ddd4041; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-pcafeter-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; PCAFETER_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/PCAFETER_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/PCAFETER_16k.zip",
+        "digest": "89be7194b83cd583c4b12f4bf7c19e9cf0e612b95312e9f4aedc968cd811bcd5", "size_bytes": 107431494
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 99927d148128254141a9417d051510bb; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-presto-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; PRESTO_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/PRESTO_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/PRESTO_16k.zip",
+        "digest": "cfd2e13998fac36aa5628070e08261deb7993dada302dc00a76aaf4e02ee4166", "size_bytes": 111292815
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 b98d2e6854eeebb397f29a8ad7457092; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-pstation-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; PSTATION_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/PSTATION_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/PSTATION_16k.zip",
+        "digest": "f19565b7b1d089bd89cb0d7178af77b052b59a15502229424fe36ddc9d379f1b", "size_bytes": 119441094
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 d7448009f6c2aeb6ba570375df1750a3; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-scafe-48k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; SCAFE_48k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/SCAFE_48k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/SCAFE_48k.zip",
+        "digest": "600f3b5b93af2b949f96e4d3fa488d678d4b14c381030a84bfcbb05d7b2d236d", "size_bytes": 325884186
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 48000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 1a4ee387f1900f4b15ba219481c76556; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-spsquare-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; SPSQUARE_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/SPSQUARE_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/SPSQUARE_16k.zip",
+        "digest": "82e90754aff6720d3d0dfb5ad076b972750b5e79c797f945e242aaa1de259eec", "size_bytes": 110928528
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 205d0e7b8fe74504a2f8d252fc414b9e; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-straffic-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; STRAFFIC_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/STRAFFIC_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/STRAFFIC_16k.zip",
+        "digest": "2df9b444afb3b789df92d96cb6f58a50653cdbbbe7e7e74fcd9de2af6385fbea", "size_bytes": 118572691
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 2efa87262f272bbf9ba578088e81939c; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-tbus-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; TBUS_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/TBUS_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/TBUS_16k.zip",
+        "digest": "82e79983c91c69acbabf76d56b3fc75ab06e0f1c539eadaaf21d297987a97a5a", "size_bytes": 128916709
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 706b11b0d8504f9f3b3f3211e91b3863; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-tcar-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; TCAR_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/TCAR_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/TCAR_16k.zip",
+        "digest": "6b48e45f273ea8d401b5ec97d22c864169684b0ad231bef4a1758922aa5daedc", "size_bytes": 130045975
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 4d930012796bd298932245a26189f973; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "demand-tmetro-16k",
+      "kind": "environmental_noise",
+      "version": "1.0 (Zenodo record 1227121; TMETRO_16k)",
+      "source_url": "https://zenodo.org/api/records/1227121/files/TMETRO_16k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256", "artifact_path": "downloads/demand/TMETRO_16k.zip",
+        "digest": "62deb6b1fbc412139c6b1f021869988aa9fae81b2861c4b2a4f87baa5addb49a", "size_bytes": 126589090
+      },
+      "license": {
+        "spdx": "CC-BY-SA-3.0", "status": "verified", "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The record description explicitly licenses the work, audio data and document under CC-BY-SA-3.0. This conservative term governs local use despite less restrictive record metadata."
+      },
+      "audio": { "channels": 1, "file_count": 16, "sample_rate_hz": 16000 },
+      "roles": [ "local_eval", "local_mixture_generation" ],
+      "training_status": "blocked_evaluation_only", "redistribution_status": "blocked_evaluation_only",
+      "notes": "Private local evaluation only. Official archive MD5 95daf4df678e13b120e14211e6d89571; this lock additionally pins SHA-256 and byte size."
+    },
+    {
+      "id": "dpdfnet-eval-starter",
+      "kind": "paired_clean_noisy_speech",
+      "version": "24866d8ae065f0518aef0f5f0c6200f31166af98",
+      "source_url": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet",
+      "landing_page": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet/tree/24866d8ae065f0518aef0f5f0c6200f31166af98",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "24866d8ae065f0518aef0f5f0c6200f31166af98"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet/blob/24866d8ae065f0518aef0f5f0c6200f31166af98/README.md"
+      },
+      "audio": {
+        "channels": 1,
+        "pair_count": 6,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only"
+    },
+    {
+      "id": "fsd50k-eval-cc0-subset",
+      "kind": "environmental_noise",
+      "version": "FSD50K evaluation set; Zenodo record 4060432; tracked selection is clip-level CC0 only",
+      "source_url": "https://zenodo.org/record/4060432/files/FSD50K.eval_audio.zip?download=1",
+      "landing_page": "https://doi.org/10.5281/zenodo.4060432",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/fsd50k/FSD50K.eval_audio.zip",
+        "digest": "e3d78e77115ff8d8df1ff3dae7ca5cd5864924c054561f61ba836764254bf50e",
+        "size_bytes": 3037675767
+      },
+      "sidecars": [
+        {
+          "id": "eval-audio-first-volume",
+          "kind": "archive_part",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.eval_audio.z01?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.eval_audio.z01",
+            "digest": "a1b776a5a9466a0cf17d0cb9a2a98f641454084f0292f511718aacb48e6c401d",
+            "size_bytes": 3221225472
+          }
+        },
+        {
+          "id": "eval-clip-metadata",
+          "kind": "license_metadata",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.metadata.zip?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.metadata.zip",
+            "digest": "9a738e032546f9a2c6e3d04566928d04a65fb79b422cc9d78bb781723537bd19",
+            "size_bytes": 6700838
+          }
+        },
+        {
+          "id": "eval-ground-truth",
+          "kind": "label_metadata",
+          "source_url": "https://zenodo.org/record/4060432/files/FSD50K.ground_truth.zip?download=1",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/fsd50k/FSD50K.ground_truth.zip",
+            "digest": "db2396260a7b1fb06feb6ccac71685794fc89917d71c3a8d64a1de85c2cc0ebf",
+            "size_bytes": 334701
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://zenodo.org/records/4060432",
+        "notes": "The dataset is CC BY 4.0 at collection level, while Freesound clips retain per-clip terms. The builder accepts only the tracked 21 clips whose exact metadata license URI is CC0-1.0 and fails closed on any mismatch."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 10231,
+        "sample_rate_hz": 44100
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The two official split-ZIP volumes, license metadata and ground truth are independently SHA-256 pinned. Uploader identifiers are used transiently only to construct one-way hashed disjoint groups and are never written to an inventory. No FSD50K holdout clip was decoded, listened to, rendered or scored while selecting this metadata-only subset."
+    },
+    {
+      "id": "google-fleurs-sv-se-train-v2",
+      "kind": "clean_speech",
+      "version": "2.0.0 (google/fleurs revision d7c758a6dceecd54a98cac43404d3d576e721f07; sv_se train)",
+      "source_url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/sv_se/audio/train.tar.gz",
+      "landing_page": "https://huggingface.co/datasets/google/fleurs/tree/d7c758a6dceecd54a98cac43404d3d576e721f07/data/sv_se",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/google-fleurs/sv_se/train.tar.gz",
+        "digest": "04a18cb93720cfed1ed992abebe977ac3880cab17ec7cf9cb5afe77d439988d3",
+        "size_bytes": 1459456451
+      },
+      "sidecars": [
+        {
+          "id": "train-transcripts",
+          "kind": "transcript_metadata",
+          "source_url": "https://huggingface.co/datasets/google/fleurs/resolve/d7c758a6dceecd54a98cac43404d3d576e721f07/data/sv_se/train.tsv",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/google-fleurs/sv_se/train.tsv",
+            "digest": "e379de2d6d9ba18d5e75a2e83c75b9cf59aa3760524cd49c468e4c87c9a1e6bf",
+            "size_bytes": 1313805
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/google/fleurs/blob/d7c758a6dceecd54a98cac43404d3d576e721f07/README.md",
+        "notes": "The pinned dataset card declares cc-by-4.0 and requests citation of the FLEURS paper. Audio and metadata remain local and are not redistributed by Mumble."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 2385,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "The primary archive is pinned by its Git LFS SHA-256 and byte size. The exact-revision TSV is a separately hash-pinned sidecar. Release materialization selects only the three valid recordings of one sentence: FLEURS states that a sentence's three recordings are made by three different native speakers. Identifier-only hashing assigns those three recordings one each to tuning, validation and holdout; no audio score or model output participates."
+    },
+    {
+      "id": "mcgill-tsp-speech-v2-48k",
+      "kind": "clean_speech",
+      "version": "2 (2018-11)",
+      "source_url": "https://www.mmsp.ece.mcgill.ca/Documents/Data/TSP-Speech-Database/48k.zip",
+      "landing_page": "https://www.mmsp.ece.mcgill.ca/Documents/Data/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/mcgill-tsp/48k.zip",
+        "digest": "9cfb3a3a13014c8ff90770a5d1923f376da73ac927b9100f09826f60cf06cf43",
+        "size_bytes": 253816919
+      },
+      "license": {
+        "spdx": "BSD-2-Clause",
+        "status": "verified",
+        "evidence_url": "https://www.mmsp.ece.mcgill.ca/Documents/Data/"
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 1444,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required"
+    },
+    {
+      "id": "openslr12-librispeech-test-clean",
+      "kind": "clean_speech",
+      "version": "LibriSpeech ASR corpus; SLR12 test-clean",
+      "source_url": "https://www.openslr.org/resources/12/test-clean.tar.gz",
+      "landing_page": "https://www.openslr.org/12/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr12/test-clean.tar.gz",
+        "digest": "39fde525e59672dc6d1551919b1478f724438a95aa55f874b576be21967e6c23",
+        "size_bytes": 346663984
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/12/",
+        "notes": "OpenSLR publishes LibriSpeech under CC BY 4.0. The test-clean subset remains evaluation-only in this project to preserve benchmark separation."
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 2620,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "Nightly selection adds exactly two identifier-selected, transcripted speakers per frozen split. Speaker IDs are disjoint from the existing SLR31 mini LibriSpeech dev-clean source; no audio or model score participates."
+    },
+    {
+      "id": "openslr28-rirs-noises",
+      "kind": "environmental_noise_and_rir",
+      "version": "SLR28 (archive published 2017-10-03)",
+      "source_url": "https://www.openslr.org/resources/28/rirs_noises.zip",
+      "landing_page": "https://www.openslr.org/28/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr28/rirs_noises.zip",
+        "digest": "3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7",
+        "size_bytes": 1311166223
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/resources/28/info.txt",
+        "notes": "OpenSLR's primary SLR28 metadata explicitly assigns Apache-2.0 to the downloadable database. The official archive MD5 is e6f48e257286e05de56413b4779d8ffb; this lock additionally pins a locally verified SHA-256 and byte size."
+      },
+      "audio": {
+        "channel_counts": [
+          1,
+          2,
+          8,
+          16,
+          30
+        ],
+        "file_count": 61260,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "notes": "The archive includes 843 point-source noise WAVs, 92 real isotropic-noise WAVs and real/simulated RIRs. This project approves it for private local evaluation only; extracted files and derived mixtures remain outside Git and release artifacts."
+    },
+    {
+      "id": "openslr31-mini-librispeech-dev-clean-2",
+      "kind": "clean_speech",
+      "version": "SLR31",
+      "source_url": "https://openslr.trmal.net/resources/31/dev-clean-2.tar.gz",
+      "landing_page": "https://www.openslr.org/31/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr31/dev-clean-2.tar.gz",
+        "digest": "176ec501490eced2d6c1f89f4f0ddc7dfe799e649e5322f8ba49fe3ff50c8012",
+        "size_bytes": 126046265
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/31/"
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 1089,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only"
+    },
+    {
+      "id": "rixvox-v1-dev-0",
+      "kind": "clean_speech",
+      "version": "RixVox v1; KBLab/rixvox revision 9b2b6066ee184faf436363ff0823f2e465ccfb31; dev shard 0",
+      "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/dev/dev_0.tar.gz",
+      "landing_page": "https://huggingface.co/datasets/KBLab/rixvox/tree/9b2b6066ee184faf436363ff0823f2e465ccfb31",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/rixvox/v1/dev/dev_0.tar.gz",
+        "digest": "6c885473594ac2f81ab8cb790103803181eb998dc32cbbb63cee51b93a84c9ab",
+        "size_bytes": 4042055183
+      },
+      "sidecars": [
+        {
+          "id": "split-metadata",
+          "kind": "transcript_metadata",
+          "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/dev_metadata.parquet",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/rixvox/v1/dev_metadata.parquet",
+            "digest": "0e27149421ea68dbaafc6f7635828e3debcadfbae4bf8568f29ff3cf5beccff9",
+            "size_bytes": 1708010
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/KBLab/rixvox/blob/9b2b6066ee184faf436363ff0823f2e465ccfb31/README.md",
+        "notes": "The exact-revision dataset card declares CC BY 4.0 and attributes the Swedish Parliament."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Only identifier-selected utterances in the tracked nightly selection are used. Raw intressent_id, names, party, gender, birth year and other demographic fields are never persisted; speaker groups contain only a salted one-way SHA-256 pseudonym."
+    },
+    {
+      "id": "rixvox-v1-test-0",
+      "kind": "clean_speech",
+      "version": "RixVox v1; KBLab/rixvox revision 9b2b6066ee184faf436363ff0823f2e465ccfb31; test shard 0",
+      "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/test/test_0.tar.gz",
+      "landing_page": "https://huggingface.co/datasets/KBLab/rixvox/tree/9b2b6066ee184faf436363ff0823f2e465ccfb31",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/rixvox/v1/test/test_0.tar.gz",
+        "digest": "7c75945e820a8f8f5dea2b24183c6c97faa7df0028908935f3f4171d82f07f3c",
+        "size_bytes": 4011846841
+      },
+      "sidecars": [
+        {
+          "id": "split-metadata",
+          "kind": "transcript_metadata",
+          "source_url": "https://huggingface.co/datasets/KBLab/rixvox/resolve/9b2b6066ee184faf436363ff0823f2e465ccfb31/data/test_metadata.parquet",
+          "integrity": {
+            "algorithm": "sha256",
+            "artifact_path": "downloads/rixvox/v1/test_metadata.parquet",
+            "digest": "0d609e6264954fa990b466ca79f7cb36818d65380dc3939bb17a74affdd4feba",
+            "size_bytes": 2028178
+          }
+        }
+      ],
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/KBLab/rixvox/blob/9b2b6066ee184faf436363ff0823f2e465ccfb31/README.md",
+        "notes": "The exact-revision dataset card declares CC BY 4.0 and attributes the Swedish Parliament."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Only identifier-selected utterances in the tracked nightly selection are used. Raw intressent_id, names, party, gender, birth year and other demographic fields are never persisted; speaker groups contain only a salted one-way SHA-256 pseudonym."
+    },
+    {
+      "id": "vctk-0-92-48k",
+      "kind": "clean_speech",
+      "version": "0.92 (DataShare DOI 10.7488/ds/2645)",
+      "source_url": "https://datashare.ed.ac.uk/server/api/core/bitstreams/535f4286-e54c-4038-838c-a02285e32cb2",
+      "landing_page": "https://datashare.ed.ac.uk/items/30e7453c-9ea8-48b4-8e18-f96d0dc62928",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "468ed794251d6662cb1b4666c6163516b6bdf8bb14eb09daf3e82aeba2014174",
+        "size_bytes": 1829
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://datashare.ed.ac.uk/server/api/core/bitstreams/956a1688-0b59-428c-8a2f-10837433dde3/content",
+        "notes": "The current University of Edinburgh DataShare record includes the full Creative Commons Attribution 4.0 license text."
+      },
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required",
+      "notes": "Integrity pins the 1,829-byte official bitstream metadata response, not the 11,747,302,977-byte ZIP. DataShare publishes only MD5 8a6ba2946b36fcbef0212cad601f4bfa for the archive; without an independently verified SHA-256 and artifact_path, automated fetching remains fail closed."
+    }
+  ],
+  "excluded_sources": [
+    {
+      "id": "deepfilternet-clean-freesound-33711",
+      "kind": "clean_speech",
+      "source_url": "https://github.com/Rikorose/DeepFilterNet/blob/d375b2d8309e0935d165700c91da9de862a99c31/assets/clean_freesound_33711.wav",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "2d885e9f45c0f9381aee09a397ecd160aff1875ffb75ebe2217d21c3511b0d5d",
+        "size_bytes": 1017226
+      },
+      "license": {
+        "spdx": "CC-BY-NC-3.0",
+        "status": "restricted",
+        "evidence_url": "https://github.com/Rikorose/DeepFilterNet/blob/d375b2d8309e0935d165700c91da9de862a99c31/assets/README.md"
+      },
+      "roles": [
+        "local_eval"
+      ],
+      "training_status": "blocked_noncommercial",
+      "redistribution_status": "blocked_noncommercial",
+      "reason": "Non-commercial material is excluded from product training and redistributable fixtures."
+    },
+    {
+      "id": "dns-challenge-5-composite",
+      "kind": "composite_clean_noise_rir_corpus",
+      "source_url": "https://github.com/microsoft/DNS-Challenge/tree/591184a9fcb2cbdec02520fed81a32bbbf9d73ff",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "591184a9fcb2cbdec02520fed81a32bbbf9d73ff"
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "ambiguous",
+        "evidence_url": "https://github.com/microsoft/DNS-Challenge/blob/591184a9fcb2cbdec02520fed81a32bbbf9d73ff/README.md#dataset-licenses",
+        "notes": "CC-BY-4.0 covers repository documentation, not the aggregate audio bundle. DNS5 retains the original, heterogeneous terms of every clean-speech, noise, and RIR source."
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_ambiguous_license",
+      "redistribution_status": "blocked_ambiguous_license",
+      "reason": "The repository revision is pinned, but the roughly 550 GB archived DNS5 bundle has composite per-source licenses and no reviewed SHA-256 lock for every selected archive. Split and approve components individually before any product training or evaluation use."
+    },
+    {
+      "id": "voxpopuli-swedish-speaker-expansion",
+      "kind": "unlabelled_speech_metadata",
+      "source_url": "https://github.com/facebookresearch/voxpopuli/tree/f7a3bb98d664e1d031763ec4f7639c4a530c64e9",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "f7a3bb98d664e1d031763ec4f7639c4a530c64e9"
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "status": "verified",
+        "evidence_url": "https://github.com/facebookresearch/voxpopuli/blob/f7a3bb98d664e1d031763ec4f7639c4a530c64e9/README.md",
+        "notes": "VoxPopuli data is CC0, while raw European Parliament material remains subject to the linked Parliament legal notice."
+      },
+      "roles": [
+        "local_eval"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only",
+      "reason": "Rejected for the nightly Swedish transcripted-speaker expansion: official ASR languages omit Swedish; unlabelled_v2 has neither transcript nor speaker_id; s2s_sv has no human Swedish target transcript and src_speaker_id identifies the source-language speaker, not a Swedish interpreter. It cannot prove disjoint sv-SE speaker groups or support Swedish WER."
+    }
+  ]
+}

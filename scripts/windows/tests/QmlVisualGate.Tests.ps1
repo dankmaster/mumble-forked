@@ -895,6 +895,23 @@ Describe "Qt Quick visual runner modes" {
 			Should Be $true
 		($matrixRunner -match 'source_git_sha\s*=\s*\$gitSha') | Should Be $true
 	}
+
+	It "forces each visual process offline without mutating the source config" {
+		$matrixRunner = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-matrix.ps1"
+		$matrixRunner.Contains('New-IsolatedVisualConfig -SourcePath $sourceConfig -DestinationPath $configCopy') |
+			Should Be $true
+		$matrixRunner.Contains("Set-JsonObjectProperty -Object `$networkValue -Name 'auto_connect_to_last_server' -Value `$false") |
+			Should Be $true
+		$matrixRunner.Contains('[IO.File]::WriteAllText(') | Should Be $true
+	}
+
+	It "activates accessibility before the automation QML scene is constructed" {
+		$main = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\main.cpp"
+		$activation = $main.IndexOf('QAccessible::setActive(true)', [StringComparison]::Ordinal)
+		$mainWindow = $main.IndexOf('new MainWindow(nullptr)', [StringComparison]::Ordinal)
+		$activation | Should BeGreaterThan -1
+		$mainWindow | Should BeGreaterThan $activation
+	}
 }
 
 Describe "Qt Quick connected fixture contract" {
@@ -904,6 +921,14 @@ Describe "Qt Quick connected fixture contract" {
 		($controller -match 'setConnectionState\(state\s*==\s*QLatin1String\("loading"\)\s*\?\s*QStringLiteral\("connecting"\)') |
 			Should Be $true
 		($controller -match 'startOperation\(QStringLiteral\("visual:loading"\)') | Should Be $false
+	}
+
+	It "publishes the Direct Messages header action without a live server connection" {
+		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		($controller -match 'DirectMessageController \*directMessages\s*=\s*m_host->directMessageController\(\)') |
+			Should Be $true
+		($controller -match 'directMessages->applyState\(\{[\s\S]*?QStringLiteral\("available"\), true') |
+			Should Be $true
 	}
 
 	It "requires a runtime-observable timeline count" {
@@ -1914,6 +1939,17 @@ Describe "Qt Quick accessibility geometry and modal subtree contracts" {
 
 		$threw = $false
 		try { Assert-QmlAccessibilityViewportBounds $root "compact-timestamp-contained" }
+		catch { $threw = $true }
+		$threw | Should Be $false
+	}
+
+	It "accepts a semantic control extending two pixels beyond its layout wrapper" {
+		$button = New-QmlAccessibilityTestNode "Button" "Attach images" 20 20 30 30
+		$wrapper = New-QmlAccessibilityTestNode "Client" "" 20 20 100 28 @($button)
+		$root = New-QmlAccessibilityTestNode "Window" "Mumble" 0 0 160 80 @($wrapper)
+
+		$threw = $false
+		try { Assert-QmlAccessibilityViewportBounds $root "control-layout-overscan" }
 		catch { $threw = $true }
 		$threw | Should Be $false
 	}

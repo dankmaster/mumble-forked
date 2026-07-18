@@ -488,34 +488,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 140,
-                                "x": 788,
-                                "y": 270
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 116,
-                                "x": 800,
-                                "y": 274
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Open About Mumble",
                           "rect": {
@@ -720,34 +693,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 106,
-                                "x": 822,
-                                "y": 468
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 82,
-                                "x": 834,
-                                "y": 472
-                              },
-                              "role": "StaticText",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Open About Qt",
                           "rect": {

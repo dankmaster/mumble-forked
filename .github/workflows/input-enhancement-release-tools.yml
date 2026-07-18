@@ -1,0 +1,68 @@
+name: Input Enhancement Release Tools
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - scripts/windows/*input-enhancement*
+      - scripts/windows/InputEnhancementReleaseTools.psm1
+      - scripts/windows/tests/Test-InputEnhancementReleaseTools.ps1
+      - scripts/windows/tests/Test-InputEnhancementPrivateCommunityPackage.ps1
+      - scripts/audio-quality/private_community_package.py
+      - scripts/windows/create-windows-update-package.ps1
+      - scripts/windows/assert-windows-update-package.ps1
+      - .github/workflows/input-enhancement-*.yml
+  pull_request:
+    branches:
+      - master
+    paths:
+      - scripts/windows/*input-enhancement*
+      - scripts/windows/InputEnhancementReleaseTools.psm1
+      - scripts/windows/tests/Test-InputEnhancementReleaseTools.ps1
+      - scripts/windows/tests/Test-InputEnhancementPrivateCommunityPackage.ps1
+      - scripts/audio-quality/private_community_package.py
+      - scripts/windows/create-windows-update-package.ps1
+      - scripts/windows/assert-windows-update-package.ps1
+      - .github/workflows/input-enhancement-*.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-self-tests:
+    name: powershell-release-tool-self-tests
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Parse release PowerShell files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(Get-ChildItem .\scripts\windows -File | Where-Object {
+            $_.Name -match 'input-enhancement|InputEnhancement'
+          }) + @(
+            Get-Item .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
+            Get-Item .\scripts\windows\tests\Test-InputEnhancementPrivateCommunityPackage.ps1
+            Get-Item .\scripts\windows\create-windows-update-package.ps1
+            Get-Item .\scripts\windows\assert-windows-update-package.ps1
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "PowerShell parse errors in '$($file.FullName)': $($errors.Message -join '; ')"
+            }
+          }
+      - name: Run fail-closed release tooling self-tests
+        shell: powershell
+        run: .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
+      - name: Run unsigned private-community packaging self-tests
+        shell: powershell
+        run: .\scripts\windows\tests\Test-InputEnhancementPrivateCommunityPackage.ps1

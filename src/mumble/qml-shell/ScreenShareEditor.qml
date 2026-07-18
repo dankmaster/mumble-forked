@@ -157,8 +157,9 @@ ColumnLayout {
 			}
 
 			ModernIcon {
-				Layout.preferredWidth: Theme.iconSize
-				Layout.preferredHeight: Theme.iconSize
+				Layout.preferredWidth: 18
+				Layout.preferredHeight: 18
+				size: 18
 				visible: root.runtimeError.length > 0
 				name: "warning"
 				color: Theme.danger

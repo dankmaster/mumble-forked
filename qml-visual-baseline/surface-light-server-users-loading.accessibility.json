@@ -165,38 +165,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 227,
-                                "x": 684,
-                                "y": 624
-                              },
-                              "role": "Client",
-                              "states": [
-                                "disabled"
-                              ]
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 203,
-                                "x": 696,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": [
-                                "disabled"
-                              ]
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Rename",
                           "rect": {
@@ -211,38 +180,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 78,
-                                "x": 916,
-                                "y": 624
-                              },
-                              "role": "Client",
-                              "states": [
-                                "disabled"
-                              ]
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 28,
-                                "width": 54,
-                                "x": 928,
-                                "y": 628
-                              },
-                              "role": "StaticText",
-                              "states": [
-                                "disabled"
-                              ]
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Unregister",
                           "rect": {

@@ -224,35 +224,7 @@
                                     {
                                       "children": [
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 223
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 212
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for Lobby",
                                           "rect": {
@@ -292,21 +264,7 @@
                                       "states": []
                                     },
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 22,
-                                            "width": 22,
-                                            "x": 26,
-                                            "y": 213
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "2 participants",
                                       "name": "Collapse Lobby",
                                       "rect": {
@@ -676,35 +634,7 @@
                                           "states": []
                                         },
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 286,
-                                                    "y": 301
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 280,
-                                                "y": 290
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Participant actions for Alex",
                                           "rect": {
@@ -826,35 +756,7 @@
                                           "states": []
                                         },
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 341
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 330
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for Studio",
                                           "rect": {
@@ -991,35 +893,7 @@
                                     {
                                       "children": [
                                         {
-                                          "children": [
-                                            {
-                                              "children": [
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 2,
-                                                    "width": 12,
-                                                    "x": 284,
-                                                    "y": 417
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
-                                              "description": "",
-                                              "name": "",
-                                              "rect": {
-                                                "height": 24,
-                                                "width": 24,
-                                                "x": 278,
-                                                "y": 406
-                                              },
-                                              "role": "Client",
-                                              "states": []
-                                            }
-                                          ],
+                                          "children": [],
                                           "description": "",
                                           "name": "Room actions for #general",
                                           "rect": {
@@ -1152,34 +1026,7 @@
                               "states": []
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 164,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 164,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Mute microphone",
                               "rect": {
@@ -1194,34 +1041,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 202,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 202,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Deafen",
                               "rect": {
@@ -1236,34 +1056,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 240,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 240,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "Audio, appearance, notifications, plugins, and more",
                               "name": "Settings",
                               "rect": {
@@ -1278,87 +1071,7 @@
                               ]
                             },
                             {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 278,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 287,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 12,
-                                        "x": 287,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 292,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    },
-                                    {
-                                      "children": [],
-                                      "description": "",
-                                      "name": "",
-                                      "rect": {
-                                        "height": 2,
-                                        "width": 2,
-                                        "x": 297,
-                                        "y": 855
-                                      },
-                                      "role": "Client",
-                                      "states": []
-                                    }
-                                  ],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 30,
-                                    "width": 30,
-                                    "x": 278,
-                                    "y": 841
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
+                              "children": [],
                               "description": "",
                               "name": "Profile menu",
                               "rect": {
@@ -1480,34 +1193,7 @@
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1136,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1136,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "Search message text, senders, replies, and attachments",
                           "name": "Search this conversation",
                           "rect": {
@@ -1522,34 +1208,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1178,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1178,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Direct messages",
                           "rect": {
@@ -1564,87 +1223,7 @@
                           ]
                         },
                         {
-                          "children": [
-                            {
-                              "children": [],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1220,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            },
-                            {
-                              "children": [
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1232,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 12,
-                                    "x": 1232,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1237,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                },
-                                {
-                                  "children": [],
-                                  "description": "",
-                                  "name": "",
-                                  "rect": {
-                                    "height": 2,
-                                    "width": 2,
-                                    "x": 1242,
-                                    "y": 63
-                                  },
-                                  "role": "Client",
-                                  "states": []
-                                }
-                              ],
-                              "description": "",
-                              "name": "",
-                              "rect": {
-                                "height": 36,
-                                "width": 36,
-                                "x": 1220,
-                                "y": 46
-                              },
-                              "role": "Client",
-                              "states": []
-                            }
-                          ],
+                          "children": [],
                           "description": "",
                           "name": "Application menu",
                           "rect": {
@@ -1777,122 +1356,16 @@
                                           ]
                                         },
                                         {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 208,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 210
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 139,
-                                            "width": 332,
-                                            "x": 423,
-                                            "y": 216
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
                                           "children": [
                                             {
-                                              "children": [
-                                                {
-                                                  "children": [
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 2,
-                                                        "width": 2,
-                                                        "x": 734,
-                                                        "y": 375
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    },
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 2,
-                                                        "width": 12,
-                                                        "x": 734,
-                                                        "y": 375
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    },
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 2,
-                                                        "width": 2,
-                                                        "x": 739,
-                                                        "y": 375
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    },
-                                                    {
-                                                      "children": [],
-                                                      "description": "",
-                                                      "name": "",
-                                                      "rect": {
-                                                        "height": 2,
-                                                        "width": 2,
-                                                        "x": 744,
-                                                        "y": 375
-                                                      },
-                                                      "role": "Client",
-                                                      "states": []
-                                                    }
-                                                  ],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 30,
-                                                    "width": 30,
-                                                    "x": 725,
-                                                    "y": 361
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                },
-                                                {
-                                                  "children": [],
-                                                  "description": "",
-                                                  "name": "",
-                                                  "rect": {
-                                                    "height": 30,
-                                                    "width": 30,
-                                                    "x": 725,
-                                                    "y": 361
-                                                  },
-                                                  "role": "Client",
-                                                  "states": []
-                                                }
-                                              ],
+                                              "children": [],
                                               "description": "",
                                               "name": "Message actions",
                                               "rect": {
                                                 "height": 30,
                                                 "width": 30,
                                                 "x": 725,
-                                                "y": 361
+                                                "y": 210
                                               },
                                               "role": "Button",
                                               "states": [
@@ -1907,7 +1380,7 @@
                                                 "height": 30,
                                                 "width": 332,
                                                 "x": 423,
-                                                "y": 376
+                                                "y": 225
                                               },
                                               "role": "Client",
                                               "states": []
@@ -1919,7 +1392,7 @@
                                             "height": 30,
                                             "width": 332,
                                             "x": 423,
-                                            "y": 361
+                                            "y": 210
                                           },
                                           "role": "Client",
                                           "states": []
@@ -1928,7 +1401,7 @@
                                       "description": "",
                                       "name": "",
                                       "rect": {
-                                        "height": 208,
+                                        "height": 57,
                                         "width": 332,
                                         "x": 423,
                                         "y": 183
@@ -1940,7 +1413,7 @@
                                   "description": "",
                                   "name": "",
                                   "rect": {
-                                    "height": 224,
+                                    "height": 73,
                                     "width": 356,
                                     "x": 411,
                                     "y": 175
@@ -1952,7 +1425,7 @@
                               "description": "",
                               "name": "",
                               "rect": {
-                                "height": 243,
+                                "height": 92,
                                 "width": 356,
                                 "x": 411,
                                 "y": 156
@@ -1964,7 +1437,7 @@
                           "description": "",
                           "name": "",
                           "rect": {
-                            "height": 243,
+                            "height": 92,
                             "width": 400,
                             "x": 367,
                             "y": 156
@@ -1976,7 +1449,7 @@
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 255,
+                        "height": 104,
                         "width": 882,
                         "x": 346,
                         "y": 144
@@ -2002,25 +1475,12 @@
                                             "height": 21,
                                             "width": 580,
                                             "x": 615,
-                                            "y": 419
+                                            "y": 268
                                           },
                                           "role": "StaticText",
                                           "states": [
                                             "readOnly"
                                           ]
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 363,
-                                            "width": 580,
-                                            "x": 615,
-                                            "y": 446
-                                          },
-                                          "role": "Client",
-                                          "states": []
                                         },
                                         {
                                           "children": [
@@ -2034,7 +1494,7 @@
                                                     "height": 309,
                                                     "width": 2,
                                                     "x": 615,
-                                                    "y": 452
+                                                    "y": 295
                                                   },
                                                   "role": "Client",
                                                   "states": []
@@ -2047,7 +1507,7 @@
                                                     "height": 309,
                                                     "width": 580,
                                                     "x": 615,
-                                                    "y": 452
+                                                    "y": 295
                                                   },
                                                   "role": "Client",
                                                   "states": []
@@ -2064,7 +1524,7 @@
                                                             "height": 20,
                                                             "width": 444,
                                                             "x": 735,
-                                                            "y": 496
+                                                            "y": 339
                                                           },
                                                           "role": "StaticText",
                                                           "states": []
@@ -2077,7 +1537,7 @@
                                                             "height": 15,
                                                             "width": 444,
                                                             "x": 735,
-                                                            "y": 520
+                                                            "y": 363
                                                           },
                                                           "role": "StaticText",
                                                           "states": []
@@ -2090,7 +1550,7 @@
                                                             "height": 19,
                                                             "width": 444,
                                                             "x": 735,
-                                                            "y": 539
+                                                            "y": 382
                                                           },
                                                           "role": "StaticText",
                                                           "states": []
@@ -2102,7 +1562,7 @@
                                                         "height": 90,
                                                         "width": 444,
                                                         "x": 735,
-                                                        "y": 468
+                                                        "y": 311
                                                       },
                                                       "role": "Client",
                                                       "states": []
@@ -2117,7 +1577,7 @@
                                                             "height": 64,
                                                             "width": 92,
                                                             "x": 631,
-                                                            "y": 481
+                                                            "y": 324
                                                           },
                                                           "role": "Client",
                                                           "states": []
@@ -2130,7 +1590,7 @@
                                                             "height": 64,
                                                             "width": 92,
                                                             "x": 631,
-                                                            "y": 481
+                                                            "y": 324
                                                           },
                                                           "role": "Client",
                                                           "states": [
@@ -2145,7 +1605,7 @@
                                                             "height": 52,
                                                             "width": 76,
                                                             "x": 639,
-                                                            "y": 487
+                                                            "y": 330
                                                           },
                                                           "role": "Client",
                                                           "states": [
@@ -2159,7 +1619,7 @@
                                                         "height": 64,
                                                         "width": 92,
                                                         "x": 631,
-                                                        "y": 481
+                                                        "y": 324
                                                       },
                                                       "role": "Client",
                                                       "states": []
@@ -2171,7 +1631,7 @@
                                                     "height": 90,
                                                     "width": 548,
                                                     "x": 631,
-                                                    "y": 468
+                                                    "y": 311
                                                   },
                                                   "role": "Client",
                                                   "states": []
@@ -2188,7 +1648,7 @@
                                                             "height": 131,
                                                             "width": 548,
                                                             "x": 631,
-                                                            "y": 570
+                                                            "y": 413
                                                           },
                                                           "role": "Client",
                                                           "states": []
@@ -2205,7 +1665,7 @@
                                                                     "height": 49,
                                                                     "width": 548,
                                                                     "x": 631,
-                                                                    "y": 601
+                                                                    "y": 444
                                                                   },
                                                                   "role": "Client",
                                                                   "states": []
@@ -2217,7 +1677,7 @@
                                                                 "height": 49,
                                                                 "width": 548,
                                                                 "x": 631,
-                                                                "y": 601
+                                                                "y": 444
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2229,7 +1689,7 @@
                                                             "height": 72,
                                                             "width": 548,
                                                             "x": 631,
-                                                            "y": 578
+                                                            "y": 421
                                                           },
                                                           "role": "Client",
                                                           "states": []
@@ -2244,7 +1704,7 @@
                                                                 "height": 43,
                                                                 "width": 548,
                                                                 "x": 631,
-                                                                "y": 658
+                                                                "y": 501
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2257,7 +1717,7 @@
                                                                 "height": 35,
                                                                 "width": 262,
                                                                 "x": 635,
-                                                                "y": 662
+                                                                "y": 505
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2270,7 +1730,7 @@
                                                                 "height": 35,
                                                                 "width": 262,
                                                                 "x": 913,
-                                                                "y": 662
+                                                                "y": 505
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2283,7 +1743,7 @@
                                                                 "height": 1,
                                                                 "width": 270,
                                                                 "x": 631,
-                                                                "y": 700
+                                                                "y": 543
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2296,7 +1756,7 @@
                                                                 "height": 1,
                                                                 "width": 270,
                                                                 "x": 909,
-                                                                "y": 700
+                                                                "y": 543
                                                               },
                                                               "role": "Client",
                                                               "states": []
@@ -2308,7 +1768,7 @@
                                                             "height": 43,
                                                             "width": 548,
                                                             "x": 631,
-                                                            "y": 658
+                                                            "y": 501
                                                           },
                                                           "role": "Client",
                                                           "states": []
@@ -2320,7 +1780,7 @@
                                                         "height": 131,
                                                         "width": 548,
                                                         "x": 631,
-                                                        "y": 570
+                                                        "y": 413
                                                       },
                                                       "role": "Client",
                                                       "states": []
@@ -2332,7 +1792,7 @@
                                                     "height": 131,
                                                     "width": 548,
                                                     "x": 631,
-                                                    "y": 570
+                                                    "y": 413
                                                   },
                                                   "role": "Grouping",
                                                   "states": []
@@ -2349,7 +1809,7 @@
                                                             "height": 32,
                                                             "width": 85,
                                                             "x": 631,
-                                                            "y": 713
+                                                            "y": 556
                                                           },
                                                           "role": "Client",
                                                           "states": []
@@ -2362,7 +1822,7 @@
                                                             "height": 24,
                                                             "width": 69,
                                                             "x": 639,
-                                                            "y": 717
+                                                            "y": 560
                                                           },
                                                           "role": "StaticText",
                                                           "states": []
@@ -2374,7 +1834,7 @@
                                                         "height": 32,
                                                         "width": 85,
                                                         "x": 631,
-                                                        "y": 713
+                                                        "y": 556
                                                       },
                                                       "role": "Link",
                                                       "states": [
@@ -2382,94 +1842,14 @@
                                                       ]
                                                     },
                                                     {
-                                                      "children": [
-                                                        {
-                                                          "children": [],
-                                                          "description": "",
-                                                          "name": "",
-                                                          "rect": {
-                                                            "height": 30,
-                                                            "width": 30,
-                                                            "x": 1149,
-                                                            "y": 714
-                                                          },
-                                                          "role": "Client",
-                                                          "states": []
-                                                        },
-                                                        {
-                                                          "children": [
-                                                            {
-                                                              "children": [],
-                                                              "description": "",
-                                                              "name": "",
-                                                              "rect": {
-                                                                "height": 2,
-                                                                "width": 2,
-                                                                "x": 1158,
-                                                                "y": 728
-                                                              },
-                                                              "role": "Client",
-                                                              "states": []
-                                                            },
-                                                            {
-                                                              "children": [],
-                                                              "description": "",
-                                                              "name": "",
-                                                              "rect": {
-                                                                "height": 2,
-                                                                "width": 12,
-                                                                "x": 1158,
-                                                                "y": 728
-                                                              },
-                                                              "role": "Client",
-                                                              "states": []
-                                                            },
-                                                            {
-                                                              "children": [],
-                                                              "description": "",
-                                                              "name": "",
-                                                              "rect": {
-                                                                "height": 2,
-                                                                "width": 2,
-                                                                "x": 1163,
-                                                                "y": 728
-                                                              },
-                                                              "role": "Client",
-                                                              "states": []
-                                                            },
-                                                            {
-                                                              "children": [],
-                                                              "description": "",
-                                                              "name": "",
-                                                              "rect": {
-                                                                "height": 2,
-                                                                "width": 2,
-                                                                "x": 1168,
-                                                                "y": 728
-                                                              },
-                                                              "role": "Client",
-                                                              "states": []
-                                                            }
-                                                          ],
-                                                          "description": "",
-                                                          "name": "",
-                                                          "rect": {
-                                                            "height": 30,
-                                                            "width": 30,
-                                                            "x": 1149,
-                                                            "y": 714
-                                                          },
-                                                          "role": "Client",
-                                                          "states": []
-                                                        }
-                                                      ],
+                                                      "children": [],
                                                       "description": "Open secondary playback and preview actions",
                                                       "name": "Preview actions",
                                                       "rect": {
                                                         "height": 30,
                                                         "width": 30,
                                                         "x": 1149,
-                                                        "y": 714
+                                                        "y": 557
                                                       },
                                                       "role": "Button",
                                                       "states": [
@@ -2484,7 +1864,7 @@
                                                         "height": 32,
                                                         "width": 548,
                                                         "x": 724,
-                                                        "y": 729
+                                                        "y": 572
                                                       },
                                                       "role": "Client",
                                                       "states": []
@@ -2496,7 +1876,7 @@
                                                     "height": 32,
                                                     "width": 548,
                                                     "x": 631,
-                                                    "y": 713
+                                                    "y": 556
                                                   },
                                                   "role": "Client",
                                                   "states": []
@@ -2508,7 +1888,7 @@
                                                 "height": 309,
                                                 "width": 580,
                                                 "x": 615,
-                                                "y": 452
+                                                "y": 295
                                               },
                                               "role": "Grouping",
                                               "states": []
@@ -2520,7 +1900,7 @@
                                             "height": 309,
                                             "width": 580,
                                             "x": 615,
-                                            "y": 452
+                                            "y": 295
                                           },
                                           "role": "Client",
                                           "states": []
@@ -2535,7 +1915,7 @@
                                                 "height": 15,
                                                 "width": 26,
                                                 "x": 1169,
-                                                "y": 767
+                                                "y": 610
                                               },
                                               "role": "StaticText",
                                               "states": []
@@ -2548,7 +1928,7 @@
                                                 "height": 15,
                                                 "width": 580,
                                                 "x": 615,
-                                                "y": 775
+                                                "y": 618
                                               },
                                               "role": "Client",
                                               "states": []
@@ -2560,7 +1940,7 @@
                                             "height": 15,
                                             "width": 580,
                                             "x": 615,
-                                            "y": 767
+                                            "y": 610
                                           },
                                           "role": "Client",
                                           "states": []
@@ -2569,10 +1949,10 @@
                                       "description": "",
                                       "name": "",
                                       "rect": {
-                                        "height": 363,
+                                        "height": 357,
                                         "width": 580,
                                         "x": 615,
-                                        "y": 419
+                                        "y": 268
                                       },
                                       "role": "Client",
                                       "states": []
@@ -2581,10 +1961,10 @@
                                   "description": "",
                                   "name": "",
                                   "rect": {
-                                    "height": 363,
+                                    "height": 357,
                                     "width": 580,
                                     "x": 615,
-                                    "y": 419
+                                    "y": 268
                                   },
                                   "role": "Client",
                                   "states": []
@@ -2593,10 +1973,10 @@
                               "description": "",
                               "name": "",
                               "rect": {
-                                "height": 363,
+                                "height": 357,
                                 "width": 580,
                                 "x": 615,
-                                "y": 419
+                                "y": 268
                               },
                               "role": "Client",
                               "states": []
@@ -2605,10 +1985,10 @@
                           "description": "",
                           "name": "",
                           "rect": {
-                            "height": 363,
+                            "height": 357,
                             "width": 580,
                             "x": 615,
-                            "y": 419
+                            "y": 268
                           },
                           "role": "Client",
                           "states": []
@@ -2617,10 +1997,10 @@
                       "description": "",
                       "name": "",
                       "rect": {
-                        "height": 391,
+                        "height": 385,
                         "width": 882,
                         "x": 346,
-                        "y": 399
+                        "y": 248
                       },
                       "role": "Client",
                       "states": []
@@ -2633,7 +2013,7 @@
                         "height": 24,
                         "width": 954,
                         "x": 346,
-                        "y": 790
+                        "y": 633
                       },
                       "role": "Client",
                       "states": []
@@ -2689,34 +2069,7 @@
                                 {
                                   "children": [
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 383,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 383,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": []
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "",
                                       "name": "Attach images",
                                       "rect": {
@@ -2762,38 +2115,7 @@
                                       ]
                                     },
                                     {
-                                      "children": [
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 1177,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": [
-                                            "disabled"
-                                          ]
-                                        },
-                                        {
-                                          "children": [],
-                                          "description": "",
-                                          "name": "",
-                                          "rect": {
-                                            "height": 30,
-                                            "width": 30,
-                                            "x": 1177,
-                                            "y": 842
-                                          },
-                                          "role": "Client",
-                                          "states": [
-                                            "disabled"
-                                          ]
-                                        }
-                                      ],
+                                      "children": [],
                                       "description": "",
                                       "name": "Send",
                                       "rect": {

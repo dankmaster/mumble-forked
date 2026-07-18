@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mumble.info/schemas/input-enhancement-objective-quality-score-v2.json",
+  "title": "Hash-attested fixed-timeline input-enhancement objective score",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "alignment",
+    "candidate_minus_original",
+    "case_id",
+    "condition",
+    "dataset_split",
+    "inputs",
+    "metrics",
+    "profile",
+    "runtime",
+    "schema_version",
+    "scorer",
+    "scorer_files",
+    "status",
+    "wer_reference"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "scorer": { "const": "mumble-objective-quality-v2" },
+    "status": { "const": "passed" },
+    "case_id": { "$ref": "#/$defs/identifier" },
+    "profile": { "enum": ["Original", "Light", "Balanced", "Quality", "VoiceFocus", "Auto"] },
+    "condition": { "enum": ["clean", "noisy", "severe"] },
+    "dataset_split": { "enum": ["tuning", "validation", "pr-smoke", "release-fixture", "release-holdout"] },
+    "release_holdout_opening": { "$ref": "#/$defs/releaseHoldoutOpening" },
+    "alignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_latency_samples",
+        "candidate_window_start_samples",
+        "correlation_search_used",
+        "method",
+        "original_latency_samples",
+        "original_window_start_samples",
+        "qualified_route_binding",
+        "reference_samples",
+        "sample_rate_hz",
+        "signal_stage"
+      ],
+      "properties": {
+        "method": { "const": "caller-declared-fixed-latency" },
+        "correlation_search_used": { "const": false },
+        "signal_stage": { "enum": ["sender-pre-opus", "receiver-capture"] },
+        "sample_rate_hz": { "const": 48000 },
+        "reference_samples": { "type": "integer", "minimum": 1 },
+        "original_latency_samples": { "type": "integer", "minimum": 0 },
+        "candidate_latency_samples": { "type": "integer", "minimum": 0 },
+        "original_window_start_samples": { "type": "integer", "minimum": 0 },
+        "candidate_window_start_samples": { "type": "integer", "minimum": 0 },
+        "qualified_route_binding": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/routeBinding" }
+          ]
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "clean_reference", "noisy_original"],
+      "properties": {
+        "clean_reference": { "$ref": "#/$defs/audioFile" },
+        "noisy_original": { "$ref": "#/$defs/audioFile" },
+        "candidate": { "$ref": "#/$defs/audioFile" }
+      }
+    },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "scorer_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cli", "implementation"],
+      "properties": {
+        "cli": { "$ref": "#/$defs/namedFile" },
+        "implementation": { "$ref": "#/$defs/namedFile" }
+      }
+    },
+    "wer_reference": { "$ref": "#/$defs/werReference" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "original"],
+      "properties": {
+        "original": { "$ref": "#/$defs/metrics" },
+        "candidate": { "$ref": "#/$defs/metrics" }
+      }
+    },
+    "candidate_minus_original": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dnsmos_bak",
+        "dnsmos_ovrl",
+        "dnsmos_sig",
+        "estoi",
+        "wer_delta_kind",
+        "wer_delta_percentage_points"
+      ],
+      "properties": {
+        "dnsmos_bak": { "type": "number" },
+        "dnsmos_ovrl": { "type": "number" },
+        "dnsmos_sig": { "type": "number" },
+        "estoi": { "type": "number" },
+        "wer_delta_kind": { "enum": ["clean-asr-consistency", "segment-ground-truth"] },
+        "wer_delta_percentage_points": { "type": "number" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "dataset_split": { "const": "release-holdout" } },
+        "required": ["dataset_split"]
+      },
+      "then": { "required": ["release_holdout_opening"] },
+      "else": { "not": { "required": ["release_holdout_opening"] } }
+    }
+  ],
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "nonEmptyFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "releaseHoldoutOpening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_public_key",
+        "attestation",
+        "authorized_at_utc",
+        "corpus_inventory_sha256",
+        "detached_signature",
+        "mixture_plan_sha256",
+        "opening_report",
+        "purpose",
+        "receipt",
+        "release_build",
+        "run_id",
+        "valid_until_utc"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+        "purpose": { "const": "input-enhancement-community-release-final-qualification" },
+        "authorized_at_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+        "valid_until_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+        "corpus_inventory_sha256": { "$ref": "#/$defs/sha256" },
+        "mixture_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "release_build": { "$ref": "#/$defs/nonEmptyFile" },
+        "attestation": { "$ref": "#/$defs/nonEmptyFile" },
+        "detached_signature": { "$ref": "#/$defs/nonEmptyFile" },
+        "approval_public_key": { "$ref": "#/$defs/nonEmptyFile" },
+        "receipt": { "$ref": "#/$defs/nonEmptyFile" },
+        "opening_report": { "$ref": "#/$defs/nonEmptyFile" }
+      }
+    },
+    "relativeFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "sha256", "size_bytes"],
+      "properties": {
+        "relative_path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "namedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "audioFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channels", "frames", "sample_rate_hz", "sha256", "size_bytes"],
+      "properties": {
+        "channels": { "const": 1 },
+        "frames": { "type": "integer", "minimum": 1 },
+        "sample_rate_hz": { "const": 48000 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "relative_path", "sha256", "size_bytes"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "relative_path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assets_tree_sha256",
+        "distributions_tree_sha256",
+        "id",
+        "inventory",
+        "legacy_local_scorer_pin",
+        "lock",
+        "manifest",
+        "models",
+        "sources",
+        "version",
+        "whisper_tree_sha256"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "manifest": { "$ref": "#/$defs/relativeFile" },
+        "lock": { "$ref": "#/$defs/relativeFile" },
+        "inventory": { "$ref": "#/$defs/relativeFile" },
+        "sources": { "type": "object" },
+        "assets_tree_sha256": { "$ref": "#/$defs/sha256" },
+        "distributions_tree_sha256": { "$ref": "#/$defs/sha256" },
+        "whisper_tree_sha256": { "$ref": "#/$defs/sha256" },
+        "legacy_local_scorer_pin": { "$ref": "#/$defs/relativeFile" },
+        "models": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dnsmos", "estoi", "wer-en", "wer-sv"],
+          "properties": {
+            "dnsmos": { "$ref": "#/$defs/model" },
+            "estoi": { "$ref": "#/$defs/model" },
+            "wer-en": { "$ref": "#/$defs/model" },
+            "wer-sv": { "$ref": "#/$defs/model" }
+          }
+        }
+      }
+    },
+    "routeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_fixed_timeline_score",
+        "control_fixed_timeline_score",
+        "control_wav",
+        "e2e_manifest",
+        "edge_tail_gate",
+        "route_offset_samples",
+        "stable_execution_identity"
+      ],
+      "properties": {
+        "route_offset_samples": { "type": "integer", "minimum": 0, "multipleOf": 480 },
+        "control_wav": { "$ref": "#/$defs/file" },
+        "control_fixed_timeline_score": { "$ref": "#/$defs/file" },
+        "candidate_fixed_timeline_score": { "$ref": "#/$defs/file" },
+        "e2e_manifest": { "$ref": "#/$defs/file" },
+        "stable_execution_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["client_binary_sha256", "model_manifest_sha256", "recipe_manifest_sha256", "run_provenance_sha256", "runtime_payload_sha256", "server_binary_sha256"],
+          "properties": {
+            "client_binary_sha256": { "$ref": "#/$defs/sha256" },
+            "model_manifest_sha256": { "$ref": "#/$defs/sha256" },
+            "recipe_manifest_sha256": { "$ref": "#/$defs/sha256" },
+            "run_provenance_sha256": { "$ref": "#/$defs/sha256" },
+            "runtime_payload_sha256": { "$ref": "#/$defs/sha256" },
+            "server_binary_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "edge_tail_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_passed", "control_passed", "pre_opus_complete_tail_required", "pre_opus_max_end_loss_samples", "pre_opus_max_onset_loss_samples"],
+          "properties": {
+            "candidate_passed": { "const": true },
+            "control_passed": { "const": true },
+            "pre_opus_complete_tail_required": { "const": true },
+            "pre_opus_max_end_loss_samples": { "type": "integer", "minimum": 0, "maximum": 480 },
+            "pre_opus_max_onset_loss_samples": { "type": "integer", "minimum": 0, "maximum": 480 }
+          }
+        }
+      }
+    },
+    "werReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "attestation", "kind", "label", "language", "normalization", "text_sha256", "word_count"],
+      "properties": {
+        "kind": { "enum": ["clean-asr-consistency", "segment-ground-truth"] },
+        "label": { "enum": ["clean-ASR-consistency WER", "segment-ground-truth WER"] },
+        "language": { "enum": ["en", "sv"] },
+        "normalization": { "const": "unicode-nfkc-casefold-alnum-v1" },
+        "text_sha256": { "$ref": "#/$defs/sha256" },
+        "word_count": { "type": "integer", "minimum": 1 },
+        "artifact": { "$ref": "#/$defs/file" },
+        "attestation": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/file" }
+          ]
+        }
+      }
+    },
+    "wer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["errors", "hypothesis_sha256", "rate", "reference_words"],
+      "properties": {
+        "errors": { "type": "integer", "minimum": 0 },
+        "reference_words": { "type": "integer", "minimum": 1 },
+        "rate": { "type": "number", "minimum": 0 },
+        "hypothesis_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dnsmos_bak", "dnsmos_ovrl", "dnsmos_sig", "estoi", "wer"],
+      "properties": {
+        "dnsmos_bak": { "type": "number" },
+        "dnsmos_ovrl": { "type": "number" },
+        "dnsmos_sig": { "type": "number" },
+        "estoi": { "type": "number" },
+        "wer": { "$ref": "#/$defs/wer" }
+      }
+    }
+  }
+}

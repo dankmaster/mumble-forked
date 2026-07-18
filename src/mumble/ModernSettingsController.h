@@ -12,7 +12,12 @@
 #include <QtCore/QString>
 #include <QtCore/QVariant>
 
+#include <memory>
 #include <optional>
+
+namespace Mumble::InputEnhancement {
+class CalibrationEvaluationWorker;
+}
 
 class ModernSettingsController {
 public:
@@ -23,6 +28,9 @@ public:
 		QString customAccent;
 		int customAccentStrength = 50;
 	};
+
+	ModernSettingsController();
+	~ModernSettingsController();
 
 	struct ActionResult {
 		bool stateChanged = true;
@@ -59,6 +67,14 @@ private:
 	std::optional< float > m_voiceReplayPreviousMaxPacketDelay;
 	bool m_runtimePreviewDiffersFromOriginal = false;
 	bool m_appearancePreviewActive = false;
+	std::unique_ptr< Mumble::InputEnhancement::CalibrationEvaluationWorker >
+		m_inputEnhancementCalibrationWorker;
+	std::optional< Mumble::InputEnhancement::DefaultPreference >
+		m_inputEnhancementCalibrationControls;
+	std::optional< Mumble::InputEnhancement::DefaultPreference >
+		m_inputEnhancementPreAutoPreference;
+	QString m_inputEnhancementCalibrationUiError;
+	QString m_inputEnhancementReadinessUiError;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;
@@ -67,6 +83,7 @@ private:
 	void forceModernLayout();
 	void refreshShortcutRestartFlag();
 	void restoreVoiceReplayDraft();
+	void cancelInputEnhancementCalibration();
 };
 
 #endif // MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_

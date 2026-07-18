@@ -41,6 +41,7 @@
 #include <atomic>
 #include <functional>
 #include <optional>
+#include <span>
 #include <stack>
 #include <vector>
 
@@ -87,6 +88,10 @@ class QUrl;
 
 namespace Search {
 class SearchDialog;
+}
+
+namespace Mumble::InputEnhancement {
+class CalibrationPlayback;
 }
 
 class ListenerVolumeController;
@@ -1068,6 +1073,7 @@ protected:
 	};
 	QHash< QString, PendingPluginLoadedTransition > m_pendingPluginLoadedTransitions;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
+	std::unique_ptr< Mumble::InputEnhancement::CalibrationPlayback > m_inputEnhancementCalibrationPlayback;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;
@@ -1246,6 +1252,8 @@ protected:
 								const QString &placement, bool confirmIfNeeded);
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
+	bool startInputEnhancementCalibrationPlayback(std::span< const float > monoPcm);
+	void stopInputEnhancementCalibrationPlayback();
 	void beginAsyncPluginInstall(const QString &path);
 	bool cancelPendingPluginInstallConfirmation(const QString &operationID);
 	void commitAsyncPluginInstall(const QString &operationID, PluginInstallService::PreparedPackage package,

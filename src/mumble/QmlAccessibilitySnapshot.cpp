@@ -145,6 +145,16 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 		{ QStringLiteral("states"), stateNames(interface->state(), role) },
 		{ QStringLiteral("rect"), rectMap(normalizedRect(interface->rect(), context)) },
 	};
+	// A button is the semantic control. Qt Quick may expose its decorative
+	// contentItem/background as generic Client descendants depending on pointer
+	// position and style incubation order. Those nodes carry no independent
+	// action or label and made otherwise identical visual-gate captures differ.
+	// Serialize buttons as leaves while retaining their complete role, state,
+	// label, description and bounds.
+	if (role == QAccessible::PushButton) {
+		node.insert(QStringLiteral("children"), QVariantList());
+		return node;
+	}
 
 	if (depth >= context.limits.maximumDepth) {
 		if (interface->childCount() > 0) {
