@@ -17,6 +17,7 @@ import math
 import os
 import re
 import sys
+from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, MutableMapping, Sequence
 
@@ -56,7 +57,7 @@ CONTROL_SEMANTICS = {
 	"mapping": "minimum+((ui*(maximum-minimum)+50)//100)",
 	"inverse": "nearest-exact-round-trip-lower-tie-v1",
 }
-QUALITY_VOICEFOCUS_PAIRING_REVISION = "quality-voicefocus-shared-scene-v1"
+PLAN_REVISION = "quality-voicefocus-shared-scene-balanced-transport-v2"
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
 GAIN_DB = (-6, -3, 0, 3, 6)
@@ -65,6 +66,18 @@ RT60_MS = (0, 150, 300, 600)
 BITRATES = (8000, 16000, 40000, 64000, 128000)
 PACKET_FRAMES = (1, 2, 4)
 TRANSMIT_MODES = ("Continuous", "PTT", "VAD")
+# One cycle visits the full 5 x 3 x 3 product while keeping every prefix as
+# balanced as possible across each individual dimension.  Bitrate identifies
+# the position modulo 5, while packet size and transmit mode together identify
+# it modulo 9; because 5 and 9 are coprime all 45 tuples are unique.
+TRANSPORT_GRID = tuple(
+	(
+		BITRATES[position % len(BITRATES)],
+		PACKET_FRAMES[position % len(PACKET_FRAMES)],
+		TRANSMIT_MODES[(position // len(PACKET_FRAMES)) % len(TRANSMIT_MODES)],
+	)
+	for position in range(len(BITRATES) * len(PACKET_FRAMES) * len(TRANSMIT_MODES))
+)
 NOISE_BEHAVIOR = {
 	"fan": "stationary",
 	"hvac": "stationary",
@@ -260,6 +273,18 @@ def _profile_for_case(suite: str, case_count: int, index: int) -> str:
 	return PROFILES[index % len(PROFILES)]
 
 
+def _transport_for_profile_occurrence(occurrence: int) -> dict[str, Any]:
+	"""Return one member of the shared, balanced core-profile transport cycle."""
+	_expect(occurrence >= 0, "transport occurrence", "must be non-negative")
+	bitrate, packet_frames, transmit_mode = TRANSPORT_GRID[occurrence % len(TRANSPORT_GRID)]
+	return {
+		"opus_bitrate_bps": bitrate,
+		"frames_per_packet": packet_frames,
+		"transmit_mode": transmit_mode,
+		"receiver_cleanup": False,
+	}
+
+
 def _planned_ui_controls(
 	suite: str, split: str, seed: str, profile: str, occurrence: int, occurrence_count: int,
 ) -> dict[str, int]:
@@ -447,6 +472,16 @@ def generate_plan(
 			selected_noise = _group_choice(noise, seed, noise_choice_index, "noise")
 		profile_occurrence = profile_occurrences[profile]
 		profile_occurrences[profile] += 1
+		full_grid_transport = suite in ("master_quality", "nightly") and split in ("tuning", "validation")
+		transport = (
+			_transport_for_profile_occurrence(profile_occurrence)
+			if full_grid_transport else {
+				"opus_bitrate_bps": BITRATES[scene_index % len(BITRATES)],
+				"frames_per_packet": PACKET_FRAMES[scene_index % len(PACKET_FRAMES)],
+				"transmit_mode": TRANSMIT_MODES[scene_index % len(TRANSMIT_MODES)],
+				"receiver_cleanup": False,
+			}
+		)
 		case = {
 			"case_id": f"{suite}-{split}-{index + 1:05d}",
 			"profile": profile,
@@ -495,12 +530,7 @@ def generate_plan(
 					**microphone_response["microphone_response"],
 				},
 			},
-			"transport": {
-				"opus_bitrate_bps": BITRATES[scene_index % len(BITRATES)],
-				"frames_per_packet": PACKET_FRAMES[scene_index % len(PACKET_FRAMES)],
-				"transmit_mode": TRANSMIT_MODES[scene_index % len(TRANSMIT_MODES)],
-				"receiver_cleanup": False,
-			},
+			"transport": transport,
 			"startup": { "preroll_ms": preroll_ms },
 		}
 		if comparison_scene_id is not None:
@@ -540,8 +570,9 @@ def generate_plan(
 	if suite in ("master_quality", "nightly") and split in ("tuning", "validation"):
 		# This explicit revision makes regeneration intentional: previously
 		# frozen schema-v4 plans keep their old hash and cannot silently acquire
-		# paired scenes.  Protected holdout plans are deliberately untouched.
-		plan["plan_revision"] = QUALITY_VOICEFOCUS_PAIRING_REVISION
+		# paired scenes or balanced per-profile transport.  Protected holdout
+		# plans are deliberately untouched.
+		plan["plan_revision"] = PLAN_REVISION
 	validate_plan(plan)
 	return plan
 
@@ -563,9 +594,9 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	revision_required = value["suite"] in ("master_quality", "nightly") and value["split"] in ("tuning", "validation")
 	if revision_required:
 		_expect(
-			value.get("plan_revision") == QUALITY_VOICEFOCUS_PAIRING_REVISION,
+			value.get("plan_revision") == PLAN_REVISION,
 			"plan.plan_revision",
-			"master/nightly tuning and validation plans must be explicitly regenerated with shared Quality/VoiceFocus scenes",
+			"master/nightly tuning and validation plans must be explicitly regenerated with shared Quality/VoiceFocus scenes and balanced per-profile transport",
 		)
 	else:
 		_expect("plan_revision" not in value, "plan.plan_revision", "is not defined for this protected split/suite")
@@ -670,6 +701,62 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	_expect(case_ids == sorted(set(case_ids)), "plan.cases", "case ids must be unique and sorted")
 	_expect(startup_modes == { 0, 300 } or len(value["cases"]) == 1, "plan.cases", "must cover cold and warm start")
 	full_grid_required = value["suite"] in ("master_quality", "nightly") and value["split"] in ("tuning", "validation")
+	if full_grid_required:
+		# Every core profile must see the same transport distribution.  Checking
+		# only global coverage would allow profile identity to remain confounded
+		# with bitrate or packetization, which invalidates cross-profile results.
+		profile_transport_counts: dict[str, Counter[tuple[int, int, str]]] = {}
+		profile_dimension_counts: dict[str, dict[str, Counter[Any]]] = {}
+		for profile in PROFILES:
+			rows = [case for case in value["cases"] if case["profile"] == profile]
+			label = f"plan.transport_coverage.{profile}"
+			_expect(bool(rows), label, "profile has no cases")
+			tuples = Counter(
+				(
+					case["transport"]["opus_bitrate_bps"],
+					case["transport"]["frames_per_packet"],
+					case["transport"]["transmit_mode"],
+				)
+				for case in rows
+			)
+			dimensions = {
+				"opus_bitrate_bps": Counter(case["transport"]["opus_bitrate_bps"] for case in rows),
+				"frames_per_packet": Counter(case["transport"]["frames_per_packet"] for case in rows),
+				"transmit_mode": Counter(case["transport"]["transmit_mode"] for case in rows),
+			}
+			for dimension, expected_values in (
+				("opus_bitrate_bps", BITRATES),
+				("frames_per_packet", PACKET_FRAMES),
+				("transmit_mode", TRANSMIT_MODES),
+			):
+				counts = dimensions[dimension]
+				_expect(set(counts) == set(expected_values), f"{label}.{dimension}", "does not cover every supported value")
+				_expect(
+					max(counts.values()) - min(counts.values()) <= 1,
+					f"{label}.{dimension}",
+					"is not balanced to within one case",
+				)
+			_expect(set(tuples) == set(TRANSPORT_GRID), f"{label}.tuples", "does not cover the complete 45-tuple transport grid")
+			_expect(
+				max(tuples.values()) - min(tuples.values()) <= 1,
+				f"{label}.tuples",
+				"is not balanced to within one case",
+			)
+			profile_transport_counts[profile] = tuples
+			profile_dimension_counts[profile] = dimensions
+
+		reference_profile = PROFILES[0]
+		for profile in PROFILES[1:]:
+			_expect(
+				profile_transport_counts[profile] == profile_transport_counts[reference_profile],
+				f"plan.transport_coverage.{profile}",
+				f"transport tuple counts differ from {reference_profile}",
+			)
+			_expect(
+				profile_dimension_counts[profile] == profile_dimension_counts[reference_profile],
+				f"plan.transport_coverage.{profile}",
+				f"transport dimension counts differ from {reference_profile}",
+			)
 	endpoint_coverage_required = value["suite"] in ("pr_smoke", "release")
 	for profile, dimensions in PROFILE_RECIPE_CONTROL_GRID.items():
 		for control_name, expected_grid in dimensions.items():
@@ -884,8 +971,8 @@ def run_self_test() -> None:
 	if canonical_sha256(first) != canonical_sha256(second):
 		raise AssertionError("identical inputs did not produce an identical plan")
 	master = generate_plan(manifest, inventory, "master_quality", "validation", seed, 500, 6000)
-	if master.get("plan_revision") != QUALITY_VOICEFOCUS_PAIRING_REVISION:
-		raise AssertionError("master plan did not publish the explicit paired-scene revision")
+	if master.get("plan_revision") != PLAN_REVISION:
+		raise AssertionError("master plan did not publish the explicit paired-scene/balanced-transport revision")
 	master_pairs: dict[str, list[Mapping[str, Any]]] = {}
 	for case in master["cases"]:
 		if case.get("comparison_scene_id") is not None:
@@ -907,16 +994,41 @@ def run_self_test() -> None:
 			raise
 	else:
 		raise AssertionError("pre-revision master plan remained qualification-eligible")
+	old_revision_master = copy.deepcopy(master)
+	old_revision_master["plan_revision"] = "quality-voicefocus-shared-scene-v1"
+	try:
+		validate_plan(old_revision_master)
+	except PlanError as error:
+		if "balanced per-profile transport" not in str(error):
+			raise
+	else:
+		raise AssertionError("v1 confounded-transport plan revision remained qualification-eligible")
+	legacy_confounded_master = copy.deepcopy(master)
+	for index, case in enumerate(legacy_confounded_master["cases"]):
+		scene_index = index - 1 if case["profile"] == "VoiceFocus" else index
+		case["transport"] = {
+			"opus_bitrate_bps": BITRATES[scene_index % len(BITRATES)],
+			"frames_per_packet": PACKET_FRAMES[scene_index % len(PACKET_FRAMES)],
+			"transmit_mode": TRANSMIT_MODES[scene_index % len(TRANSMIT_MODES)],
+			"receiver_cleanup": False,
+		}
+	try:
+		validate_plan(legacy_confounded_master)
+	except PlanError as error:
+		if "transport_coverage" not in str(error):
+			raise
+	else:
+		raise AssertionError("master plan accepted the legacy profile-confounded transport schedule")
 	tampered_master = copy.deepcopy(master)
 	tampered_voice = next(case for case in tampered_master["cases"] if case["profile"] == "VoiceFocus")
 	tampered_voice["transport"]["frames_per_packet"] = 2 if tampered_voice["transport"]["frames_per_packet"] == 1 else 1
 	try:
 		validate_plan(tampered_master)
 	except PlanError as error:
-		if "quality_voicefocus_pairs" not in str(error):
+		if "transport_coverage" not in str(error):
 			raise
 	else:
-		raise AssertionError("master plan accepted a mismatched paired route")
+		raise AssertionError("master plan accepted a mismatched paired-profile route")
 	short_sources = copy.deepcopy(inventory)
 	short_ids = set()
 	for kind in ("speech", "noise"):
@@ -1031,6 +1143,22 @@ def run_self_test() -> None:
 			raise
 	else:
 		raise AssertionError("master plan accepted incomplete qualified recipe-grid coverage")
+	nightly = generate_plan(manifest, inventory, "nightly", "validation", seed, 5000, 6000)
+	for label, plan in (("master", master), ("nightly", nightly)):
+		distributions = {}
+		for profile in PROFILES:
+			distributions[profile] = Counter(
+				(
+					case["transport"]["opus_bitrate_bps"],
+					case["transport"]["frames_per_packet"],
+					case["transport"]["transmit_mode"],
+				)
+				for case in plan["cases"] if case["profile"] == profile
+			)
+		if any(set(distribution) != set(TRANSPORT_GRID) for distribution in distributions.values()):
+			raise AssertionError(f"{label} plan did not cover the complete per-profile transport grid")
+		if any(distributions[profile] != distributions["Original"] for profile in PROFILES[1:]):
+			raise AssertionError(f"{label} plan did not use identical per-profile transport counts")
 	room_ids = {
 		split: { case["mix"]["rir"]["item_id"] for case in plan["cases"] }
 		for split, plan in plans.items()
