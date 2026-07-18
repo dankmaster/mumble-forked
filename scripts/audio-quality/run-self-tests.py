@@ -110,6 +110,7 @@ def main() -> int:
 		"score-fixed-timeline.py",
 		"score-objective-quality.py",
 		"run-offline-quality-campaign.py",
+		"tune-input-enhancement-recipes.py",
 		"run-two-client-e2e.py",
 		"write-quality-parquet.py",
 		"run-e2e-quality-campaign.py",
