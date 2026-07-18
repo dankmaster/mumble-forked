@@ -433,7 +433,7 @@ function Get-ValidatedInputEnhancementRehearsalDraftFiles {
 			-Context 'Release rehearsal challenge'
 		$challengePath = Join-Path $rootPath $challengeFileName
 		$challenge = Read-ReleaseJson -Path $challengePath
-		if ([int](Assert-ObjectProperty $challenge 'schemaVersion' 'Rehearsal challenge') -ne 1 -or
+		if ([int](Assert-ObjectProperty $challenge 'schemaVersion' 'Rehearsal challenge') -ne 2 -or
 			[string](Assert-ObjectProperty $challenge 'kind' 'Rehearsal challenge') -cne
 				'input-enhancement-pre-azure-rehearsal-challenge') {
 			throw 'Release rehearsal challenge artifact has an unsupported schema.'

@@ -11,9 +11,12 @@ param(
 	[Parameter(Mandatory = $true)] [string]$ReceiptPath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedReceiptSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedVmExecutorSha256,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')] [string]$ExpectedObserverIdentity,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedObserverPublicKeyHex,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedImageSha256,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedSnapshotSha256,
-	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedHardwareFingerprintSha256
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ExpectedHardwareFingerprintSha256,
+	[string]$OpenSslPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,6 +30,41 @@ function Assert-ExactProperties([object]$Object, [string[]]$Names, [string]$Cont
 	}
 }
 
+function Assert-ObserverAttestation([object]$Receipt) {
+	$createdAtUtc = ([datetimeoffset]$Receipt.createdAtUtc).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+	$payload = [ordered]@{
+		schemaVersion = [int]$Receipt.schemaVersion; kind = [string]$Receipt.kind; passed = [bool]$Receipt.passed
+		audioFree = [bool]$Receipt.audioFree; sourceSha = [string]$Receipt.sourceSha; buildId = [string]$Receipt.buildId
+		challengeId = [string]$Receipt.challengeId; createdAtUtc = $createdAtUtc
+		evidenceSha256 = [string]$Receipt.evidenceSha256; vmExecutorSha256 = [string]$Receipt.vmExecutorSha256
+		imageSha256 = [string]$Receipt.imageSha256; snapshotSha256 = [string]$Receipt.snapshotSha256
+		hardwareFingerprintSha256 = [string]$Receipt.hardwareFingerprintSha256
+		observerIdentity = [string]$Receipt.observerIdentity; observerPublicKeyHex = [string]$Receipt.observerPublicKeyHex
+	}
+	$payloadText = $payload | ConvertTo-Json -Depth 4 -Compress
+	$sha = [Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($payloadText))
+	$payloadSha256 = ([BitConverter]::ToString($sha)).Replace('-', '').ToLowerInvariant()
+	if ([string]$Receipt.attestation.algorithm -cne 'Ed25519' -or
+		[string]$Receipt.attestation.payloadSha256 -cne $payloadSha256) {
+		throw "Updater VM observer attestation payload binding is invalid (declared '$($Receipt.attestation.payloadSha256)', derived '$payloadSha256')."
+	}
+	try { [byte[]]$signature = [Convert]::FromBase64String([string]$Receipt.attestation.signatureBase64) } catch {
+		throw 'Updater VM observer attestation signature is not valid base64.'
+	}
+	if ($signature.Length -ne 64) { throw 'Updater VM observer attestation signature must be 64 bytes.' }
+	$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('mumble-vm-observer-attestation-' + [guid]::NewGuid().ToString('N'))
+	New-Item -ItemType Directory -Path $tempRoot -ErrorAction Stop | Out-Null
+	try {
+		$payloadPath = Join-Path $tempRoot 'payload.json'; $signaturePath = Join-Path $tempRoot 'signature.raw'
+		[IO.File]::WriteAllText($payloadPath, $payloadText, [Text.UTF8Encoding]::new($false))
+		[IO.File]::WriteAllBytes($signaturePath, $signature)
+		if (-not (Test-Ed25519DetachedSignature -InputPath $payloadPath -SignaturePath $signaturePath `
+			-PublicKeyHex $ExpectedObserverPublicKeyHex -OpenSslPath $OpenSslPath)) {
+			throw 'Updater VM observer-held signature did not verify.'
+		}
+	} finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 $evidence = Read-ReleaseJson -Path $EvidencePath
 $actualEvidenceSha256 = Get-ReleaseFileSha256 -Path $EvidencePath
 $actualReceiptSha256 = Get-ReleaseFileSha256 -Path $ReceiptPath
@@ -35,20 +73,25 @@ if ($actualReceiptSha256 -cne $ExpectedReceiptSha256) {
 }
 $receipt = Read-ReleaseJson -Path $ReceiptPath
 Assert-ExactProperties $receipt @(
-	'audioFree', 'buildId', 'challengeId', 'createdAtUtc', 'evidenceSha256', 'hardwareFingerprintSha256', 'imageSha256',
-	'kind', 'passed', 'schemaVersion', 'snapshotSha256', 'sourceSha', 'vmExecutorSha256'
+	'attestation', 'audioFree', 'buildId', 'challengeId', 'createdAtUtc', 'evidenceSha256', 'hardwareFingerprintSha256',
+	'imageSha256', 'kind', 'observerIdentity', 'observerPublicKeyHex', 'passed', 'schemaVersion', 'snapshotSha256',
+	'sourceSha', 'vmExecutorSha256'
 ) 'Updater VM protected receipt'
-if ([int]$receipt.schemaVersion -ne 2 -or [string]$receipt.kind -cne 'updater-v4-protected-vm-receipt' -or
+Assert-ExactProperties $receipt.attestation @('algorithm', 'payloadSha256', 'signatureBase64') 'Updater VM observer attestation'
+if ([int]$receipt.schemaVersion -ne 3 -or [string]$receipt.kind -cne 'updater-v4-protected-vm-receipt' -or
 	$receipt.passed -ne $true -or $receipt.audioFree -ne $true -or
 	[string]$receipt.sourceSha -cne $ExpectedSourceSha -or [string]$receipt.buildId -cne $ExpectedBuildId -or
 	[string]$receipt.challengeId -cne $ExpectedChallengeId -or
 	[string]$receipt.evidenceSha256 -cne $actualEvidenceSha256 -or
 	[string]$receipt.vmExecutorSha256 -cne $ExpectedVmExecutorSha256 -or
+	[string]$receipt.observerIdentity -cne $ExpectedObserverIdentity -or
+	[string]$receipt.observerPublicKeyHex -cne $ExpectedObserverPublicKeyHex -or
 	[string]$receipt.imageSha256 -cne $ExpectedImageSha256 -or
 	[string]$receipt.snapshotSha256 -cne $ExpectedSnapshotSha256 -or
 	[string]$receipt.hardwareFingerprintSha256 -cne $ExpectedHardwareFingerprintSha256) {
 	throw 'Updater VM receipt is invalid or does not bind the protected executor/image/snapshot/hardware and evidence bytes.'
 }
+Assert-ObserverAttestation -Receipt $receipt
 $receiptCreatedAt = [datetimeoffset]::MinValue
 if (-not [datetimeoffset]::TryParse([string]$receipt.createdAtUtc,
 	[Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind,

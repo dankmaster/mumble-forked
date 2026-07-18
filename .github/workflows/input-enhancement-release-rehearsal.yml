@@ -31,7 +31,7 @@ jobs:
   prepare:
     name: prepare-immutable-signed-challenge
     if: github.ref == 'refs/heads/master'
-    runs-on: [self-hosted, windows, x64, input-enhancement-mainstream]
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-prepare]
     timeout-minutes: 360
     outputs:
       prepared_artifact: ${{ steps.identity.outputs.prepared_artifact }}
@@ -137,7 +137,7 @@ jobs:
   observe:
     name: independently-observe-prepared-candidate
     needs: prepare
-    runs-on: [self-hosted, windows, x64, input-enhancement-mainstream]
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-observe]
     timeout-minutes: 360
     outputs:
       observation_artifact: ${{ steps.identity.outputs.observation_artifact }}
@@ -153,8 +153,12 @@ jobs:
       PREPARED_ARTIFACT: ${{ needs.prepare.outputs.prepared_artifact }}
       KILL_SWITCH_OBSERVER: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER }}
       KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR }}
       UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
       UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
       UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
@@ -183,6 +187,10 @@ jobs:
           )) {
             if ((Get-ReleaseFileSha256 -Path $pair[0]) -cne $pair[1]) { throw "Protected $($pair[2]) hash mismatch." }
           }
+          if ($env:KILL_SWITCH_OBSERVER_IDENTITY -ceq $env:UPDATER_VM_OBSERVER_IDENTITY -or
+              $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX -ceq $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX) {
+            throw 'Observers must use distinct protected identities and observer-held Ed25519 keys.'
+          }
           $prepared = Join-Path $env:RUNNER_TEMP 'rehearsal-prepared'
           $challenge = Join-Path $prepared 'rehearsal-challenge.json'
           if ((Get-ReleaseFileSha256 -Path $challenge) -cne $env:EXPECTED_CHALLENGE_SHA256) { throw 'Prepared challenge changed after upload/download.' }
@@ -190,11 +198,15 @@ jobs:
           New-Item -ItemType Directory -Path $out | Out-Null
           & $env:KILL_SWITCH_OBSERVER -ChallengePath $challenge -PreparedRoot $prepared `
             -ExpectedChallengeId $env:EXPECTED_CHALLENGE_ID `
+            -ObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -ObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
             -OutputRuntimeTracePath (Join-Path $out 'kill-switch-runtime-trace.json') `
             -OutputReceiptPath (Join-Path $out 'kill-switch-observer-receipt.json')
           if (-not $?) { throw 'Independent kill-switch observer failed.' }
           & $env:UPDATER_VM_EXECUTOR -ChallengePath $challenge -PreparedRoot $prepared `
             -ExpectedChallengeId $env:EXPECTED_CHALLENGE_ID `
+            -ObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -ObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
             -OutputEvidencePath (Join-Path $out 'updater-vm-evidence.json') `
             -OutputReceiptPath (Join-Path $out 'updater-vm-receipt.json')
           if (-not $?) { throw 'Independent updater VM executor failed.' }
@@ -225,7 +237,7 @@ jobs:
   finalize:
     name: finalize-once-and-stage-local-draft
     needs: [prepare, observe]
-    runs-on: [self-hosted, windows, x64, input-enhancement-mainstream]
+    runs-on: [self-hosted, windows, x64, input-enhancement-rehearsal-finalize]
     timeout-minutes: 180
     outputs:
       draft_artifact: ${{ steps.identity.outputs.draft_artifact }}
@@ -249,8 +261,12 @@ jobs:
       RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
       KILL_SWITCH_OBSERVER: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER }}
       KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_EXECUTOR: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR }}
       UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
       UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
       UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
@@ -297,11 +313,15 @@ jobs:
             -FixtureManifestSha256 $env:RELEASE_SMOKE_FIXTURE_MANIFEST_SHA256 -CaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 `
             -ServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
             -KillSwitchObserverPath $env:KILL_SWITCH_OBSERVER -KillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
+            -KillSwitchObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -KillSwitchObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
             -KillSwitchRuntimeTracePath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\kill-switch-runtime-trace.json') `
             -KillSwitchRuntimeTraceSha256 '${{ needs.observe.outputs.kill_trace_sha256 }}' `
             -KillSwitchObserverReceiptPath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\kill-switch-observer-receipt.json') `
             -KillSwitchObserverReceiptSha256 '${{ needs.observe.outputs.kill_receipt_sha256 }}' `
             -UpdaterVmExecutorPath $env:UPDATER_VM_EXECUTOR -UpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 `
+            -UpdaterVmObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -UpdaterVmObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
             -UpdaterVmHarnessSha256 $env:UPDATER_VM_HARNESS_SHA256 `
             -UpdaterVmEvidencePath (Join-Path $env:RUNNER_TEMP 'rehearsal-observation\updater-vm-evidence.json') `
             -UpdaterVmEvidenceSha256 '${{ needs.observe.outputs.vm_evidence_sha256 }}' `
@@ -341,7 +361,11 @@ jobs:
       RELEASE_SMOKE_CASE_SET_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_CASE_SET_SHA256 }}
       RELEASE_SMOKE_SERVER_BINARY_SHA256: ${{ vars.INPUT_ENHANCEMENT_RELEASE_SMOKE_SERVER_BINARY_SHA256 }}
       KILL_SWITCH_OBSERVER_SHA256: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_SHA256 }}
+      KILL_SWITCH_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_IDENTITY }}
+      KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_EXECUTOR_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_EXECUTOR_SHA256 }}
+      UPDATER_VM_OBSERVER_IDENTITY: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_IDENTITY }}
+      UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX }}
       UPDATER_VM_HARNESS_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_HARNESS_SHA256 }}
       UPDATER_VM_IMAGE_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_IMAGE_SHA256 }}
       UPDATER_VM_SNAPSHOT_SHA256: ${{ vars.INPUT_ENHANCEMENT_UPDATER_VM_SNAPSHOT_SHA256 }}
@@ -388,7 +412,11 @@ jobs:
             -ExpectedCaseSetSha256 $env:RELEASE_SMOKE_CASE_SET_SHA256 -ExpectedServerExecutableSha256 $env:RELEASE_SMOKE_SERVER_BINARY_SHA256 `
             -ExpectedKillSwitchObserverSha256 $env:KILL_SWITCH_OBSERVER_SHA256 `
             -ExpectedKillSwitchObserverReceiptSha256 '${{ needs.observe.outputs.kill_receipt_sha256 }}' `
+            -ExpectedKillSwitchObserverIdentity $env:KILL_SWITCH_OBSERVER_IDENTITY `
+            -ExpectedKillSwitchObserverPublicKeyHex $env:KILL_SWITCH_OBSERVER_PUBLIC_KEY_HEX `
             -ExpectedUpdaterVmExecutorSha256 $env:UPDATER_VM_EXECUTOR_SHA256 -ExpectedUpdaterVmHarnessSha256 $env:UPDATER_VM_HARNESS_SHA256 `
+            -ExpectedUpdaterVmObserverIdentity $env:UPDATER_VM_OBSERVER_IDENTITY `
+            -ExpectedUpdaterVmObserverPublicKeyHex $env:UPDATER_VM_OBSERVER_PUBLIC_KEY_HEX `
             -ExpectedUpdaterVmReceiptSha256 '${{ needs.observe.outputs.vm_receipt_sha256 }}' `
             -ExpectedUpdaterVmImageSha256 $env:UPDATER_VM_IMAGE_SHA256 -ExpectedUpdaterVmSnapshotSha256 $env:UPDATER_VM_SNAPSHOT_SHA256 `
             -ExpectedUpdaterVmHardwareFingerprintSha256 $env:UPDATER_VM_HARDWARE_FINGERPRINT_SHA256 `

@@ -18,12 +18,16 @@ param(
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ServerExecutableSha256,
 	[Parameter(Mandatory = $true)] [string]$KillSwitchObserverPath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$KillSwitchObserverSha256,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')] [string]$KillSwitchObserverIdentity,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$KillSwitchObserverPublicKeyHex,
 	[Parameter(Mandatory = $true)] [string]$KillSwitchRuntimeTracePath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$KillSwitchRuntimeTraceSha256,
 	[Parameter(Mandatory = $true)] [string]$KillSwitchObserverReceiptPath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$KillSwitchObserverReceiptSha256,
 	[Parameter(Mandatory = $true)] [string]$UpdaterVmExecutorPath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmExecutorSha256,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')] [string]$UpdaterVmObserverIdentity,
+	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmObserverPublicKeyHex,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmHarnessSha256,
 	[Parameter(Mandatory = $true)] [string]$UpdaterVmEvidencePath,
 	[Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$UpdaterVmEvidenceSha256,
@@ -103,6 +107,10 @@ foreach ($forbiddenPattern in @(
 }
 
 $buildId = Get-InputEnhancementBuildId -BuildNumber $BuildNumber -SourceSha $SourceSha
+if ($KillSwitchObserverIdentity -ceq $UpdaterVmObserverIdentity -or
+	$KillSwitchObserverPublicKeyHex -ceq $UpdaterVmObserverPublicKeyHex) {
+	throw 'Kill-switch and updater-VM observers must use distinct identities and observer-held keys.'
+}
 $challengeResult = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-challenge.ps1') `
 	-PreparedRoot $preparedRootPath -ChallengePath $challengeItem.FullName `
 	-ExpectedSourceSha $SourceSha -ExpectedBuildId $buildId `
@@ -128,8 +136,8 @@ foreach ($forbiddenRoot in @($sourceRootPath, $preparedRootPath, [IO.Path]::GetF
 		throw 'Replay ledger must not overlap source, prepared, or draft roots.'
 	}
 }
-$ledgerPath = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
-	-ReplayLedgerRoot $ledgerRootPath -ChallengeId $challengeId
+$null = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
+	-ReplayLedgerRoot $ledgerRootPath -ChallengeId $challengeId -Operation Check
 
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-updater-vm-evidence.ps1') `
 	-EvidencePath $inputs.vmEvidence -ReceiptPath $inputs.vmReceipt `
@@ -140,8 +148,10 @@ $ledgerPath = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-rep
 	-ExpectedCandidateExecutableSha256 ([string]$challengeResult.signedTestedBinarySha256) `
 	-ExpectedHarnessSha256 $UpdaterVmHarnessSha256 `
 	-ExpectedVmExecutorSha256 $UpdaterVmExecutorSha256 `
+	-ExpectedObserverIdentity $UpdaterVmObserverIdentity `
+	-ExpectedObserverPublicKeyHex $UpdaterVmObserverPublicKeyHex `
 	-ExpectedImageSha256 $UpdaterVmImageSha256 -ExpectedSnapshotSha256 $UpdaterVmSnapshotSha256 `
-	-ExpectedHardwareFingerprintSha256 $UpdaterVmHardwareFingerprintSha256
+	-ExpectedHardwareFingerprintSha256 $UpdaterVmHardwareFingerprintSha256 -OpenSslPath $OpenSslPath
 
 $challengeDocument = Read-ReleaseJson -Path $challengeItem.FullName
 & (Join-Path $PSScriptRoot 'assert-input-enhancement-kill-switch-observation.ps1') `
@@ -149,9 +159,18 @@ $challengeDocument = Read-ReleaseJson -Path $challengeItem.FullName
 	-ExpectedReceiptSha256 $KillSwitchObserverReceiptSha256 `
 	-ExpectedSourceSha $SourceSha -ExpectedBuildId $buildId -ExpectedChallengeId $challengeId `
 	-ExpectedObserverSha256 $KillSwitchObserverSha256 `
+	-ExpectedObserverIdentity $KillSwitchObserverIdentity `
+	-ExpectedObserverPublicKeyHex $KillSwitchObserverPublicKeyHex `
 	-ExpectedTestedBinarySha256 ([string]$challengeResult.signedTestedBinarySha256) `
 	-ExpectedStagedPayloadSha256 ([string]$challengeResult.signedStagedPayloadSha256) `
-	-ExpectedPolicySha256 ([string]$challengeDocument.signed.policySha256)
+	-ExpectedPolicySha256 ([string]$challengeDocument.signed.policySha256) -OpenSslPath $OpenSslPath
+
+# Atomically and durably acquire ownership before creating an output tree or
+# invoking the finalize executor. Any crash from here leaves a pending marker
+# that blocks retries until an operator audits the abandoned attempt.
+$reservation = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
+	-ReplayLedgerRoot $ledgerRootPath -ChallengeId $challengeId -Operation Reserve `
+	-ChallengeSha256 $ChallengeSha256 -SourceSha $SourceSha -BuildId $buildId
 
 $outputRootPath = Initialize-InputEnhancementRehearsalOutputRoot `
 	-OutputRoot $OutputRoot -AllowedOutputParent $AllowedOutputParent -SourceRoot $sourceRootPath
@@ -189,7 +208,11 @@ if ((Get-ReleaseFileSha256 -Path $challengeItem.FullName) -cne $ChallengeSha256)
 	-ExpectedCaseSetSha256 $CaseSetSha256 -ExpectedServerExecutableSha256 $ServerExecutableSha256 `
 	-ExpectedKillSwitchObserverSha256 $KillSwitchObserverSha256 `
 	-ExpectedKillSwitchObserverReceiptSha256 $KillSwitchObserverReceiptSha256 `
+	-ExpectedKillSwitchObserverIdentity $KillSwitchObserverIdentity `
+	-ExpectedKillSwitchObserverPublicKeyHex $KillSwitchObserverPublicKeyHex `
 	-ExpectedUpdaterVmExecutorSha256 $UpdaterVmExecutorSha256 `
+	-ExpectedUpdaterVmObserverIdentity $UpdaterVmObserverIdentity `
+	-ExpectedUpdaterVmObserverPublicKeyHex $UpdaterVmObserverPublicKeyHex `
 	-ExpectedUpdaterVmHarnessSha256 $UpdaterVmHarnessSha256 `
 	-ExpectedUpdaterVmReceiptSha256 $UpdaterVmReceiptSha256 `
 	-ExpectedUpdaterVmImageSha256 $UpdaterVmImageSha256 `
@@ -204,23 +227,10 @@ if ((Get-ReleaseFileSha256 -Path $challengeItem.FullName) -cne $ChallengeSha256)
 	-Root $outputRootPath -ExpectedArtifactName $DraftArtifactName
 
 $draftManifestPath = Join-Path $outputRootPath 'draft-manifest.json'
-$ledgerDocument = [ordered]@{
-	schemaVersion = 1
-	kind = 'input-enhancement-rehearsal-challenge-consumption'
-	challengeId = $challengeId
-	challengeSha256 = $ChallengeSha256
-	sourceSha = $SourceSha
-	buildId = $buildId
-	draftManifestSha256 = Get-ReleaseFileSha256 -Path $draftManifestPath
-	consumedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
-}
-$ledgerBytes = [Text.UTF8Encoding]::new($false).GetBytes(($ledgerDocument | ConvertTo-Json -Depth 4) + "`n")
-$stream = $null
-try {
-	$stream = [IO.File]::Open($ledgerPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-	$stream.Write($ledgerBytes, 0, $ledgerBytes.Length)
-} finally {
-	if ($stream) { $stream.Dispose() }
-}
+$null = & (Join-Path $PSScriptRoot 'assert-input-enhancement-rehearsal-replay.ps1') `
+	-ReplayLedgerRoot $ledgerRootPath -ChallengeId $challengeId -Operation Commit `
+	-ChallengeSha256 $ChallengeSha256 -SourceSha $SourceSha -BuildId $buildId `
+	-ReservationId ([string]$reservation.reservationId) `
+	-DraftManifestSha256 (Get-ReleaseFileSha256 -Path $draftManifestPath)
 
 Write-Host "Finalized challenge '$challengeId' as local draft '$DraftArtifactName'; replay marker committed."

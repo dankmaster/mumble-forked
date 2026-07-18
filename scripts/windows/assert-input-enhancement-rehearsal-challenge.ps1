@@ -78,6 +78,18 @@ function Get-CanonicalTreeSha256 {
 	}
 }
 
+function Get-PayloadIdentityTreeSha256 {
+	param([object[]]$Records)
+	# Must match scripts/audio-quality/payload_identity.py:
+	# canonical_json_sha256(payload_tree_records(root)).
+	$payload = ConvertTo-Json -InputObject ([object[]]$Records) -Depth 4 -Compress
+	[byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes($payload)
+	$sha = [Security.Cryptography.SHA256]::Create()
+	try {
+		return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+	} finally { $sha.Dispose() }
+}
+
 function Assert-Tree {
 	param([string]$PreparedRootPath, [object]$Descriptor, [string]$Context)
 	$relativeRoot = Assert-SafeRelativeReleasePath -Path ([string]$Descriptor.root) -Context "$Context root"
@@ -125,6 +137,157 @@ function Get-RecordMap {
 	return $map
 }
 
+function Get-PeAuthenticodeLayout {
+	param([string]$Path, [switch]$RequireCertificate)
+	[byte[]]$bytes = [IO.File]::ReadAllBytes($Path)
+	if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+		throw "Authenticode input '$Path' is not a PE image."
+	}
+	$peOffset = [BitConverter]::ToUInt32($bytes, 0x3c)
+	if ($peOffset -gt ($bytes.Length - 128) -or
+		[BitConverter]::ToUInt32($bytes, [int]$peOffset) -ne 0x00004550) {
+		throw "Authenticode input '$Path' has an invalid PE header."
+	}
+	$optionalOffset = [int]$peOffset + 24
+	$optionalSize = [BitConverter]::ToUInt16($bytes, [int]$peOffset + 20)
+	$magic = [BitConverter]::ToUInt16($bytes, $optionalOffset)
+	$dataDirectoryOffset = if ($magic -eq 0x10b) { $optionalOffset + 96 } elseif ($magic -eq 0x20b) {
+		$optionalOffset + 112
+	} else { throw "Authenticode input '$Path' has an unsupported optional-header format." }
+	$checksumOffset = $optionalOffset + 64
+	$securityDirectoryOffset = $dataDirectoryOffset + 32
+	$numberOfDirectoriesOffset = if ($magic -eq 0x10b) { $optionalOffset + 92 } else { $optionalOffset + 108 }
+	if ($optionalSize -lt ($securityDirectoryOffset + 8 - $optionalOffset) -or
+		$securityDirectoryOffset + 8 -gt $bytes.Length -or
+		[BitConverter]::ToUInt32($bytes, $numberOfDirectoriesOffset) -lt 5) {
+		throw "Authenticode input '$Path' has a truncated security directory."
+	}
+	$certificateOffset = [BitConverter]::ToUInt32($bytes, $securityDirectoryOffset)
+	$certificateSize = [BitConverter]::ToUInt32($bytes, $securityDirectoryOffset + 4)
+	if (($certificateOffset -eq 0) -ne ($certificateSize -eq 0)) {
+		throw "Authenticode input '$Path' has an inconsistent certificate directory."
+	}
+	if ($RequireCertificate -and $certificateSize -eq 0) {
+		throw "Authenticode output '$Path' is not signed."
+	}
+	if ($certificateSize -gt 0 -and
+		($certificateOffset -gt $bytes.Length -or $certificateSize -gt ($bytes.Length - $certificateOffset) -or
+			($certificateOffset + $certificateSize) -ne $bytes.Length)) {
+		throw "Authenticode input '$Path' has a non-terminal or out-of-range certificate table."
+	}
+	[pscustomobject]@{
+		Bytes = $bytes
+		ChecksumOffset = $checksumOffset
+		SecurityDirectoryOffset = $securityDirectoryOffset
+		CertificateOffset = [int]$certificateOffset
+		CertificateSize = [int]$certificateSize
+	}
+}
+
+function Get-AuthenticodeNormalizedBytes {
+	param([string]$Path)
+	$layout = Get-PeAuthenticodeLayout -Path $Path
+	[byte[]]$normalized = $layout.Bytes.Clone()
+	[Array]::Clear($normalized, $layout.ChecksumOffset, 4)
+	[Array]::Clear($normalized, $layout.SecurityDirectoryOffset, 8)
+	if ($layout.CertificateSize -eq 0) { return $normalized }
+	$result = [byte[]]::new($normalized.Length - $layout.CertificateSize)
+	[Array]::Copy($normalized, 0, $result, 0, $layout.CertificateOffset)
+	if (($layout.CertificateOffset + $layout.CertificateSize) -lt $normalized.Length) {
+		[Array]::Copy($normalized, $layout.CertificateOffset + $layout.CertificateSize, $result,
+			$layout.CertificateOffset, $normalized.Length - $layout.CertificateOffset - $layout.CertificateSize)
+	}
+	return $result
+}
+
+function Test-NormalizedPeIdentity {
+	param([byte[]]$UnsignedBytes, [byte[]]$SignedBytes)
+	if ($UnsignedBytes.Length -eq $SignedBytes.Length) {
+		return [Linq.Enumerable]::SequenceEqual([byte[]]$UnsignedBytes, [byte[]]$SignedBytes)
+	}
+	# Authenticode may add at most seven zero alignment bytes immediately before
+	# the terminal WIN_CERTIFICATE. No other append-only mutation is accepted.
+	if ($SignedBytes.Length -lt $UnsignedBytes.Length -or
+		($SignedBytes.Length - $UnsignedBytes.Length) -gt 7) { return $false }
+	for ($index = 0; $index -lt $UnsignedBytes.Length; ++$index) {
+		if ($UnsignedBytes[$index] -ne $SignedBytes[$index]) { return $false }
+	}
+	for ($index = $UnsignedBytes.Length; $index -lt $SignedBytes.Length; ++$index) {
+		if ($SignedBytes[$index] -ne 0) { return $false }
+	}
+	return $true
+}
+
+function Assert-AuthenticodePeTransformation {
+	param([string]$UnsignedPath, [string]$SignedPath, [string]$ExpectedThumbprint, [string]$Context)
+	$layout = Get-PeAuthenticodeLayout -Path $SignedPath -RequireCertificate
+	if ($layout.CertificateSize -lt 8) { throw "$Context has a truncated WIN_CERTIFICATE." }
+	$declaredLength = [BitConverter]::ToUInt32($layout.Bytes, $layout.CertificateOffset)
+	$revision = [BitConverter]::ToUInt16($layout.Bytes, $layout.CertificateOffset + 4)
+	$certificateType = [BitConverter]::ToUInt16($layout.Bytes, $layout.CertificateOffset + 6)
+	$alignedLength = ([int64]$declaredLength + 7) -band (-bnot 7)
+	if ($declaredLength -lt 9 -or $declaredLength -gt $layout.CertificateSize -or
+		$alignedLength -ne $layout.CertificateSize -or $revision -ne 0x0200 -or $certificateType -ne 0x0002) {
+		throw "$Context has an invalid Authenticode certificate table."
+	}
+	[byte[]]$pkcs7 = [byte[]]::new([int]$declaredLength - 8)
+	[Array]::Copy($layout.Bytes, $layout.CertificateOffset + 8, $pkcs7, 0, $pkcs7.Length)
+	try {
+		$cms = [Security.Cryptography.Pkcs.SignedCms]::new()
+		$cms.Decode($pkcs7)
+		$cms.CheckSignature($true)
+	} catch {
+		throw "$Context does not contain a cryptographically valid Authenticode CMS signature: $($_.Exception.Message)"
+	}
+	$signature = Get-AuthenticodeSignature -LiteralPath $SignedPath
+	if ($null -eq $signature.SignerCertificate -or
+		$signature.SignerCertificate.Thumbprint -ine $ExpectedThumbprint -or
+		$signature.Status -in @('NotSigned', 'HashMismatch', 'NotSupportedFileFormat', 'Incompatible')) {
+		throw "$Context signer or Authenticode status is invalid ('$($signature.Status)')."
+	}
+	$cmsThumbprints = @($cms.Certificates | ForEach-Object { $_.Thumbprint })
+	if ($ExpectedThumbprint -cnotin $cmsThumbprints) {
+		throw "$Context CMS signer certificate differs from the prepared ephemeral certificate."
+	}
+	$unsignedNormalized = Get-AuthenticodeNormalizedBytes -Path $UnsignedPath
+	$signedNormalized = Get-AuthenticodeNormalizedBytes -Path $SignedPath
+	if (-not (Test-NormalizedPeIdentity -UnsignedBytes $unsignedNormalized -SignedBytes $signedNormalized)) {
+		throw "$Context changed PE bytes outside the checksum/security-directory/certificate-table envelope."
+	}
+}
+
+function Assert-StagedPayload {
+	param([string]$TreeRoot, [object]$Descriptor, [string]$Context)
+	Assert-ExactProperties $Descriptor @('files', 'root', 'treeSha256') $Context
+	$relativeRoot = Assert-SafeRelativeReleasePath -Path ([string]$Descriptor.root) -Context "$Context root"
+	$payloadRoot = [IO.Path]::GetFullPath((Join-Path $TreeRoot $relativeRoot.Replace('/', '\')))
+	$treePrefix = $TreeRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+	if (-not $payloadRoot.StartsWith($treePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+		throw "$Context root escapes its challenge tree."
+	}
+	$item = Get-Item -LiteralPath $payloadRoot -Force -ErrorAction Stop
+	if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+		throw "$Context root must be a regular directory."
+	}
+	$actual = @(Get-ChildItem -LiteralPath $payloadRoot -Force -Recurse -File | ForEach-Object {
+		$relative = [IO.Path]::GetRelativePath($payloadRoot, $_.FullName).Replace('\', '/')
+		[ordered]@{ path = $relative; sha256 = Get-ReleaseFileSha256 -Path $_.FullName; size_bytes = [int64]$_.Length }
+	} | Sort-Object -Property @{ Expression = { $_.path }; Ascending = $true })
+	$declared = @($Descriptor.files)
+	if ($declared.Count -eq 0 -or $declared.Count -ne $actual.Count) { throw "$Context inventory is incomplete." }
+	for ($index = 0; $index -lt $declared.Count; ++$index) {
+		Assert-ExactProperties $declared[$index] @('path', 'sha256', 'size_bytes') "$Context file[$index]"
+		if ([string]$declared[$index].path -cne [string]$actual[$index].path -or
+			[string]$declared[$index].sha256 -cne [string]$actual[$index].sha256 -or
+			[int64]$declared[$index].size_bytes -ne [int64]$actual[$index].size_bytes) {
+			throw "$Context inventory differs from the captured payload subtree."
+		}
+	}
+	$treeSha = Get-PayloadIdentityTreeSha256 -Records $actual
+	if ([string]$Descriptor.treeSha256 -cne $treeSha) { throw "$Context tree hash is invalid." }
+	return [ordered]@{ root = $payloadRoot; files = $actual; treeSha256 = $treeSha }
+}
+
 function Assert-LowerSha256 {
 	param([object]$Value, [string]$Context)
 	if ([string]$Value -cnotmatch '^[0-9a-f]{64}$') { throw "$Context is not a lowercase SHA-256." }
@@ -147,7 +310,7 @@ Assert-ExactProperties $challenge @(
 	'bindings', 'buildId', 'challengeId', 'createdAtUtc', 'ephemeralSigning', 'kind', 'phase', 'schemaVersion',
 	'security', 'signed', 'sourceSha', 'transformation', 'unsigned'
 ) 'Rehearsal challenge'
-if ([int]$challenge.schemaVersion -ne 1 -or
+if ([int]$challenge.schemaVersion -ne 2 -or
 	[string]$challenge.kind -cne 'input-enhancement-pre-azure-rehearsal-challenge' -or
 	[string]$challenge.phase -cne 'prepared' -or
 	[string]$challenge.sourceSha -cne $ExpectedSourceSha -or
@@ -174,13 +337,20 @@ if ($security.azureUsed -ne $false -or $security.contentsWrite -ne $false -or
 
 $signing = $challenge.ephemeralSigning
 Assert-ExactProperties $signing @(
-	'certificateSubject', 'certificateThumbprint', 'ed25519PublicKeyHex', 'privateMaterialDeleted', 'testOnly'
+	'certificateSubject', 'certificateThumbprint', 'cleanupVerification', 'ed25519PublicKeyHex', 'privateMaterialDeleted', 'testOnly'
 ) 'Rehearsal challenge signing'
 $publicKeyHex = Assert-Ed25519PublicKeyHex -PublicKeyHex ([string]$signing.ed25519PublicKeyHex)
 if ($signing.testOnly -ne $true -or $signing.privateMaterialDeleted -ne $true -or
 	[string]$signing.certificateSubject -cnotmatch '^CN=Mumble Input Enhancement Rehearsal [A-Za-z0-9._-]+$' -or
 	[string]$signing.certificateThumbprint -cnotmatch '^[0-9A-Fa-f]{40}$') {
 	throw 'Prepare phase did not attest deletion of ephemeral test signing material.'
+}
+$cleanup = $signing.cleanupVerification
+Assert-ExactProperties $cleanup @(
+	'certificateStoreAbsent', 'ed25519PrivateKeyAbsent', 'passwordEnvironmentAbsent', 'pfxAbsent', 'privateRootAbsent'
+) 'Rehearsal challenge private-material cleanup'
+foreach ($name in $cleanup.PSObject.Properties.Name) {
+	if ($cleanup.$name -ne $true) { throw "Prepare phase did not prove cleanup invariant '$name'." }
 }
 
 $bindings = $challenge.bindings
@@ -208,15 +378,23 @@ $unsignedDescriptor = $challenge.unsigned
 $signedDescriptor = $challenge.signed
 Assert-ExactProperties $unsignedDescriptor @(
 	'candidateBuildReceiptPath', 'candidateBuildReceiptSha256', 'files', 'measuredEvidencePath', 'measuredEvidenceSha256',
-	'root', 'stagedPayloadSha256', 'testedBinaryPath', 'testedBinarySha256', 'treeSha256'
+	'root', 'stagedPayload', 'stagedPayloadSha256', 'testedBinaryPath', 'testedBinarySha256', 'treeSha256'
 ) 'Unsigned challenge payload'
 Assert-ExactProperties $signedDescriptor @(
 	'files', 'installerPath', 'installerSha256', 'policyPath', 'policySha256', 'qualificationPath',
-	'qualificationSha256', 'releaseSmokePath', 'releaseSmokeSha256', 'root', 'stagedPayloadSha256',
+	'qualificationSha256', 'releaseSmokePath', 'releaseSmokeSha256', 'root', 'stagedPayload', 'stagedPayloadSha256',
 	'testedBinaryPath', 'testedBinarySha256', 'treeSha256', 'updatePackagePath', 'updatePackageSha256'
 ) 'Signed challenge payload'
 $unsignedTree = Assert-Tree -PreparedRootPath $preparedRootPath -Descriptor $unsignedDescriptor -Context 'Unsigned challenge payload'
 $signedTree = Assert-Tree -PreparedRootPath $preparedRootPath -Descriptor $signedDescriptor -Context 'Signed challenge payload'
+$unsignedStage = Assert-StagedPayload -TreeRoot $unsignedTree.root -Descriptor $unsignedDescriptor.stagedPayload `
+	-Context 'Unsigned captured staged payload'
+$signedStage = Assert-StagedPayload -TreeRoot $signedTree.root -Descriptor $signedDescriptor.stagedPayload `
+	-Context 'Signed captured staged payload'
+if ([string]$unsignedDescriptor.stagedPayloadSha256 -cne [string]$unsignedStage.treeSha256 -or
+	[string]$signedDescriptor.stagedPayloadSha256 -cne [string]$signedStage.treeSha256) {
+	throw 'Declared staged payload hash was not derived from its captured subtree inventory.'
+}
 $null = Assert-LowerSha256 $unsignedDescriptor.stagedPayloadSha256 'Unsigned staged payload hash'
 $null = Assert-LowerSha256 $unsignedDescriptor.testedBinarySha256 'Unsigned tested executable hash'
 $null = Assert-LowerSha256 $unsignedDescriptor.candidateBuildReceiptSha256 'Candidate build receipt hash'
@@ -251,7 +429,7 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedCandidateBuildReceiptSha256) -and
 
 $transformation = $challenge.transformation
 Assert-ExactProperties $transformation @('kind', 'records') 'Rehearsal transformation'
-if ([string]$transformation.kind -cne 'authenticode-sign-and-package-v1') {
+if ([string]$transformation.kind -cne 'authenticode-sign-and-package-v2') {
 	throw 'Unsupported rehearsal transformation contract.'
 }
 $records = @($transformation.records)
@@ -277,10 +455,13 @@ for ($index = 0; $index -lt $records.Count; ++$index) {
 		'authenticode-pe' {
 			if ($null -eq $unsignedRecord -or $null -eq $signedRecord -or
 				[IO.Path]::GetExtension($path) -cnotin @('.exe', '.dll') -or
-				[string]$unsignedRecord.sha256 -ceq [string]$signedRecord.sha256 -or
-				[int64]$signedRecord.size -lt [int64]$unsignedRecord.size) {
+				[string]$unsignedRecord.sha256 -ceq [string]$signedRecord.sha256) {
 				throw "Authenticode transformation '$path' is not a declared PE-only mutation."
 			}
+			$unsignedPePath = Join-Path $unsignedTree.root $path.Replace('/', '\')
+			$signedPePath = Join-Path $signedTree.root $path.Replace('/', '\')
+			Assert-AuthenticodePeTransformation -UnsignedPath $unsignedPePath -SignedPath $signedPePath `
+				-ExpectedThumbprint ([string]$signing.certificateThumbprint) -Context "Authenticode transformation '$path'"
 		}
 		'packaged-output' {
 			if ($null -ne $unsignedRecord -or $null -eq $signedRecord -or

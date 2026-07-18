@@ -91,8 +91,24 @@ param(
 	[string]$ExpectedKillSwitchObserverReceiptSha256,
 
 	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')]
+	[string]$ExpectedKillSwitchObserverIdentity,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedKillSwitchObserverPublicKeyHex,
+
+	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
 	[string]$ExpectedUpdaterVmExecutorSha256,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')]
+	[string]$ExpectedUpdaterVmObserverIdentity,
+
+	[Parameter(Mandatory = $true)]
+	[ValidatePattern('^[0-9a-f]{64}$')]
+	[string]$ExpectedUpdaterVmObserverPublicKeyHex,
 
 	[Parameter(Mandatory = $true)]
 	[ValidatePattern('^[0-9a-f]{64}$')]
@@ -128,6 +144,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'InputEnhancementReleaseTools.psm1') -Force
+if ($ExpectedKillSwitchObserverIdentity -ceq $ExpectedUpdaterVmObserverIdentity -or
+	$ExpectedKillSwitchObserverPublicKeyHex -ceq $ExpectedUpdaterVmObserverPublicKeyHex) {
+	throw 'Release rehearsal observers must have distinct identities and observer-held keys.'
+}
 
 function Assert-ExactProperties {
 	param([object]$Object, [string[]]$Names, [string]$Context)
@@ -489,9 +509,11 @@ if ([string]$qualification.installer.executableSha256 -cne $ExpectedSignedTested
 	-ReceiptPath $resolvedAssets.updaterVmReceipt `
 	-ExpectedReceiptSha256 $ExpectedUpdaterVmReceiptSha256 `
 	-ExpectedVmExecutorSha256 $ExpectedUpdaterVmExecutorSha256 `
+	-ExpectedObserverIdentity $ExpectedUpdaterVmObserverIdentity `
+	-ExpectedObserverPublicKeyHex $ExpectedUpdaterVmObserverPublicKeyHex `
 	-ExpectedImageSha256 $ExpectedUpdaterVmImageSha256 `
 	-ExpectedSnapshotSha256 $ExpectedUpdaterVmSnapshotSha256 `
-	-ExpectedHardwareFingerprintSha256 $ExpectedUpdaterVmHardwareFingerprintSha256
+	-ExpectedHardwareFingerprintSha256 $ExpectedUpdaterVmHardwareFingerprintSha256 -OpenSslPath $OpenSslPath
 
 $expandedRoot = Join-Path ([IO.Path]::GetTempPath()) ('mumble-rehearsal-expanded-' + [guid]::NewGuid().ToString('N'))
 try {
@@ -541,9 +563,11 @@ $trace = Read-ReleaseJson -Path $resolvedAssets.killSwitchRuntimeTrace
 	-ExpectedSourceSha $ExpectedSourceSha -ExpectedBuildId $ExpectedBuildId `
 	-ExpectedChallengeId $ExpectedChallengeId `
 	-ExpectedObserverSha256 $ExpectedKillSwitchObserverSha256 `
+	-ExpectedObserverIdentity $ExpectedKillSwitchObserverIdentity `
+	-ExpectedObserverPublicKeyHex $ExpectedKillSwitchObserverPublicKeyHex `
 	-ExpectedTestedBinarySha256 ([string]$binding.signedTestedBinarySha256) `
 	-ExpectedStagedPayloadSha256 ([string]$binding.signedStagedPayloadSha256) `
-	-ExpectedPolicySha256 (Get-ReleaseFileSha256 -Path $resolvedAssets.killSwitchPolicy)
+	-ExpectedPolicySha256 (Get-ReleaseFileSha256 -Path $resolvedAssets.killSwitchPolicy) -OpenSslPath $OpenSslPath
 $traceStarted = [datetimeoffset]::MinValue
 if (-not [datetimeoffset]::TryParse([string]$trace.startedAtUtc,
 	[Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind,

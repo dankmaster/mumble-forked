@@ -96,6 +96,10 @@ New-Item -ItemType Directory -Path $privateRoot -ErrorAction Stop | Out-Null
 $pfxPath = Join-Path $privateRoot 'ephemeral-authenticode.pfx'
 $ed25519PrivatePath = Join-Path $privateRoot 'ephemeral-ed25519.pem'
 $certificate = $null
+$baseCertificate = $null
+$rsa = $null
+$pfxBytes = $null
+$certificateThumbprint = ''
 $passwordText = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $securePassword = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
 $subject = "CN=Mumble Input Enhancement Rehearsal $BuildNumber-$($SourceSha.Substring(0, 12))"
@@ -109,10 +113,26 @@ try {
 	$publicKeyHex = Get-Ed25519PublicKeyHexFromPrivateKey `
 		-PrivateKeyBase64 ([Convert]::ToBase64String([IO.File]::ReadAllBytes($ed25519PrivatePath))) `
 		-OpenSslPath $openssl
-	$certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject `
-		-CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable `
-		-HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(1)
-	Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
+	# Build an in-memory certificate whose private key is imported with
+	# EphemeralKeySet. It never enters a persistent Windows certificate store.
+	$rsa = [Security.Cryptography.RSA]::Create(3072)
+	$request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+		[Security.Cryptography.X509Certificates.X500DistinguishedName]::new($subject), $rsa,
+		[Security.Cryptography.HashAlgorithmName]::SHA256,
+		[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+	$usages = [Security.Cryptography.OidCollection]::new()
+	$null = $usages.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+	$null = $request.CertificateExtensions.Add(
+		[Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($usages, $false))
+	$baseCertificate = $request.CreateSelfSigned([datetimeoffset]::UtcNow.AddMinutes(-5), [datetimeoffset]::UtcNow.AddDays(1))
+	$pfxBytes = $baseCertificate.Export(
+		[Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText)
+	[IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+	$certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+		$pfxBytes, $passwordText,
+		[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet -bor
+		[Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
+	$certificateThumbprint = $certificate.Thumbprint
 	$env:MUMBLE_REHEARSAL_PFX_PASSWORD = $passwordText
 	& $inputs.prepareExecutor `
 		-Operation Prepare `
@@ -127,7 +147,7 @@ try {
 		-EphemeralPfxPath $pfxPath `
 		-EphemeralPfxPasswordEnvironmentVariable MUMBLE_REHEARSAL_PFX_PASSWORD `
 		-EphemeralCertificateSubject $subject `
-		-EphemeralCertificateThumbprint $certificate.Thumbprint `
+		-EphemeralCertificateThumbprint $certificateThumbprint `
 		-EphemeralEd25519PrivateKeyPath $ed25519PrivatePath `
 		-EphemeralEd25519PublicKeyHex $publicKeyHex `
 		-TimestampUrl $TimestampUrl -OutputRoot $outputRootPath
@@ -173,13 +193,30 @@ try {
 	}
 	$executorSucceeded = $true
 } finally {
-	Remove-Item Env:MUMBLE_REHEARSAL_PFX_PASSWORD -ErrorAction SilentlyContinue
+	if (Test-Path Env:MUMBLE_REHEARSAL_PFX_PASSWORD) {
+		Remove-Item Env:MUMBLE_REHEARSAL_PFX_PASSWORD -ErrorAction Stop
+	}
 	$passwordText = $null
 	$securePassword = $null
-	if ($certificate) {
-		Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue
+	if ($certificate) { $certificate.Dispose(); $certificate = $null }
+	if ($baseCertificate) { $baseCertificate.Dispose(); $baseCertificate = $null }
+	if ($rsa) { $rsa.Dispose(); $rsa = $null }
+	if ($pfxBytes) { [Array]::Clear($pfxBytes, 0, $pfxBytes.Length); $pfxBytes = $null }
+	foreach ($privatePath in @($pfxPath, $ed25519PrivatePath)) {
+		if (Test-Path -LiteralPath $privatePath) {
+			Remove-Item -LiteralPath $privatePath -Force -ErrorAction Stop
+		}
 	}
-	Remove-Item -LiteralPath $privateRoot -Recurse -Force -ErrorAction SilentlyContinue
+	if (Test-Path -LiteralPath $privateRoot) {
+		Remove-Item -LiteralPath $privateRoot -Recurse -Force -ErrorAction Stop
+	}
+	if ((Test-Path Env:MUMBLE_REHEARSAL_PFX_PASSWORD) -or
+		(Test-Path -LiteralPath $privateRoot) -or (Test-Path -LiteralPath $pfxPath) -or
+		(Test-Path -LiteralPath $ed25519PrivatePath) -or
+		(-not [string]::IsNullOrWhiteSpace($certificateThumbprint) -and
+			(Test-Path -LiteralPath ("Cert:\CurrentUser\My\" + $certificateThumbprint)))) {
+		throw 'Ephemeral rehearsal signing material cleanup could not be proven.'
+	}
 }
 if (-not $executorSucceeded) { throw 'Release rehearsal prepare did not complete.' }
 
@@ -188,10 +225,22 @@ $challenge = Read-ReleaseJson -Path $challengePath
 if ([string]$challenge.challengeId -cne $challengeId -or
 	[string]$challenge.ephemeralSigning.ed25519PublicKeyHex -cne $publicKeyHex -or
 	[string]$challenge.ephemeralSigning.certificateSubject -cne $subject -or
-	[string]$challenge.ephemeralSigning.certificateThumbprint -cne [string]$certificate.Thumbprint) {
+	[string]$challenge.ephemeralSigning.certificateThumbprint -cne $certificateThumbprint) {
 	throw 'Prepared challenge does not identify the exact ephemeral keys and challenge nonce.'
 }
 $challenge.ephemeralSigning.privateMaterialDeleted = $true
+$cleanupVerification = [ordered]@{
+	certificateStoreAbsent = $true
+	ed25519PrivateKeyAbsent = $true
+	passwordEnvironmentAbsent = $true
+	pfxAbsent = $true
+	privateRootAbsent = $true
+}
+if ($null -eq $challenge.ephemeralSigning.PSObject.Properties['cleanupVerification']) {
+	$challenge.ephemeralSigning | Add-Member -NotePropertyName cleanupVerification -NotePropertyValue $cleanupVerification
+} else {
+	$challenge.ephemeralSigning.cleanupVerification = $cleanupVerification
+}
 $challenge.security.privateMaterialIncluded = $false
 Write-ReleaseJson -Path $challengePath -Value $challenge
 Remove-Item -LiteralPath (Join-Path $outputRootPath 'prepare-build.json') -Force
