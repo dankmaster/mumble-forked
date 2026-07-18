@@ -1919,6 +1919,9 @@ quality_path = Path(sys.argv[1])
 records_path = Path(sys.argv[2])
 artifact_root = Path(sys.argv[3])
 audio_quality_root = Path(sys.argv[4])
+alias_mode = sys.argv[5] if len(sys.argv) > 5 else 'none'
+if alias_mode not in ('none', 'original-candidate', 'enhanced-edge-control'):
+    raise RuntimeError(f'unsupported role-alias fixture mode: {alias_mode}')
 sys.path.insert(0, str(audio_quality_root))
 
 from measurement_evidence import (  # noqa: E402
@@ -2138,12 +2141,35 @@ control_pre_opus_reference = write_json(
 profile_reports = {}
 for profile in profiles:
     if profile == 'Original':
-        candidate_document = original_document
-        edge_document = control_document
-        candidate_reference = original_reference
-        edge_reference = control_reference
-        route_reference = control_fixed_reference
-        edge_fixed_reference = control_pre_opus_reference
+        candidate_document = adapter_document(
+            'candidate', 'Original', source_sha256, source_sha256,
+            sha256_text('Original-candidate-sender'),
+        )
+        edge_document = adapter_document(
+            'candidate_edge', 'Original', clean_sha256, clean_sha256,
+            sha256_text('Original-edge-sender'),
+        )
+        if alias_mode == 'original-candidate':
+            candidate_document = original_document
+        candidate_reference = write_json(
+            shared_root + 'Original-candidate-adapter-result.json', candidate_document,
+        )
+        edge_reference = write_json(
+            shared_root + 'Original-edge-adapter-result.json', edge_document,
+        )
+        route_reference = write_json(
+            shared_root + 'Original-route-fixed-timeline-score.json',
+            fixed_score(
+                candidate_document['capture']['sha256'], 0,
+                'fixed-paired-original-route', False, 2880,
+            ),
+        )
+        edge_fixed_reference = write_json(
+            shared_root + 'Original-edge-fixed-timeline-score.json',
+            fixed_score(
+                edge_document['sender_pre_opus']['sha256'], 0, 'fixed', True, 480,
+            ),
+        )
     else:
         profile_scores = [score for (candidate_profile, _), score in objective_by_key.items() if candidate_profile == profile]
         candidate_hashes = {score['inputs']['candidate']['sha256'] for score in profile_scores}
@@ -2152,6 +2178,8 @@ for profile in profiles:
         candidate_sha256 = next(iter(candidate_hashes))
         candidate_document = adapter_document('candidate', profile, source_sha256, candidate_sha256, sha256_text(f'{profile}-candidate-sender'))
         edge_document = adapter_document('candidate_edge', profile, clean_sha256, clean_sha256, sha256_text(f'{profile}-edge-sender'))
+        if alias_mode == 'enhanced-edge-control' and profile == 'Light':
+            edge_document = control_document
         candidate_reference = write_json(shared_root + f'{profile}-candidate-adapter-result.json', candidate_document)
         edge_reference = write_json(shared_root + f'{profile}-edge-adapter-result.json', edge_document)
         route_reference = write_json(
@@ -2170,6 +2198,23 @@ for profile in profiles:
         'route_reference': route_reference,
         'edge_fixed_reference': edge_fixed_reference,
     }
+
+if alias_mode == 'none':
+    for profile, reports in profile_reports.items():
+        candidate = reports['candidate_document']
+        edge = reports['edge_document']
+        if (candidate['role'], candidate['profile']) != ('candidate', profile):
+            raise RuntimeError(f'{profile} candidate role/profile alias regression')
+        if (edge['role'], edge['profile']) != ('candidate_edge', profile):
+            raise RuntimeError(f'{profile} candidate-edge role/profile alias regression')
+        if reports['candidate_reference']['sha256'] == original_reference['sha256']:
+            raise RuntimeError(f'{profile} candidate reference aliases original-comparison bytes')
+        if reports['edge_reference']['sha256'] == control_reference['sha256']:
+            raise RuntimeError(f'{profile} candidate-edge reference aliases control bytes')
+    if (original_document['role'], original_document['profile']) != ('original_comparison', 'Original'):
+        raise RuntimeError('original-comparison role/profile fixture is invalid')
+    if (control_document['role'], control_document['profile']) != ('control', 'Original'):
+        raise RuntimeError('control role/profile fixture is invalid')
 
 
 def manifest_result(role: str, document, reference, route_reference, edge_reference):
@@ -2211,13 +2256,12 @@ for case in cases:
     render_manifest_sha256 = sha256_text(f'{suite}:render-manifest')
     original_result = manifest_result('original_comparison', original_document, original_reference, control_fixed_reference, control_pre_opus_reference)
     control_result = manifest_result('control', control_document, control_reference, control_fixed_reference, control_pre_opus_reference)
-    results = {'original_comparison': original_result, 'control': control_result}
-    if profile != 'Original':
-        results = {
-            'candidate': manifest_result('candidate', reports['candidate_document'], reports['candidate_reference'], reports['route_reference'], reports['edge_fixed_reference']),
-            'candidate_edge': manifest_result('candidate_edge', reports['edge_document'], reports['edge_reference'], reports['route_reference'], reports['edge_fixed_reference']),
-            **results,
-        }
+    results = {
+        'candidate': manifest_result('candidate', reports['candidate_document'], reports['candidate_reference'], reports['route_reference'], reports['edge_fixed_reference']),
+        'candidate_edge': manifest_result('candidate_edge', reports['edge_document'], reports['edge_reference'], reports['route_reference'], reports['edge_fixed_reference']),
+        'original_comparison': original_result,
+        'control': control_result,
+    }
     manifest = {
         'schema_version': 3,
         'status': 'passed',
@@ -2238,11 +2282,17 @@ for case in cases:
             'render_entry_sha256': render_entry_sha256,
             'source_input_sha256': source_sha256,
             'clean_reference_sha256': clean_sha256,
+            'input_enhancement_policy_manifest_sha256': (
+                None if profile == 'Original' else sha256_text(f'{suite}:qualification-policy-manifest')
+            ),
+            'input_enhancement_policy_signature_sha256': (
+                None if profile == 'Original' else sha256_text(f'{suite}:qualification-policy-signature')
+            ),
         },
         'input_timeline_gate': {
             'artifact': 'sender_pre_opus',
             'alignment': 'fixed-declared-latency',
-            'roles': ['control'] if profile == 'Original' else ['control', 'candidate_edge'],
+            'roles': ['control', 'candidate_edge'],
             'max_onset_loss_samples': 480,
             'max_end_loss_samples': 480,
             'complete_tail_required': True,
@@ -2452,6 +2502,7 @@ quality_path.write_text(json.dumps(quality, sort_keys=True, separators=(',', ':'
 	[System.IO.File]::WriteAllText($fakePythonPath, "@exit /b 0`r`n", [System.Text.Encoding]::ASCII)
 	$measuredRunnerRoots = @{}
 	$artifactRootRegressionCovered = $false
+	$roleAliasRegressionCovered = $false
 	foreach ($suite in @('master_quality', 'nightly')) {
 		foreach ($runnerClass in @('low-performance', 'mainstream')) {
 		$runnerKey = "$suite|$runnerClass"
@@ -2486,13 +2537,41 @@ quality_path.write_text(json.dumps(quality, sort_keys=True, separators=(',', ':'
 		if ($LASTEXITCODE -ne 0) {
 			throw "Unable to materialize transitive measurement evidence for '$suite/$runnerClass'."
 		}
-		Remove-Item -LiteralPath $caseRecordsPath -Force
 		$qualityValidator = Join-Path (Split-Path -Parent $scriptsRoot) `
 			'audio-quality\validate-quality-qualification.py'
 		$null = & python $qualityValidator $qualityPath --artifact-root $runnerRoot
 		if ($LASTEXITCODE -ne 0) {
 			throw "Schema-v3 quality fixture failed semantic validation for '$suite/$runnerClass'."
 		}
+		if (-not $roleAliasRegressionCovered) {
+			foreach ($aliasCase in @(
+				[ordered]@{ mode = 'original-candidate'; expected = 'candidate_adapter_result: role/profile mismatch' },
+				[ordered]@{ mode = 'enhanced-edge-control'; expected = 'edge_adapter_result: role/profile mismatch' }
+			)) {
+				$null = & python $measurementFixtureGeneratorPath `
+					$qualityPath $caseRecordsPath $runnerRoot $audioQualityRoot $aliasCase.mode
+				if ($LASTEXITCODE -ne 0) {
+					throw "Unable to materialize role-alias regression fixture '$($aliasCase.mode)'."
+				}
+				$aliasValidation = @(& python $qualityValidator $qualityPath --artifact-root $runnerRoot 2>&1)
+				if ($LASTEXITCODE -eq 0 -or
+					-not (($aliasValidation -join "`n").Contains([string]$aliasCase.expected))) {
+					throw "Schema-v3 validator did not reject role alias '$($aliasCase.mode)' with '$($aliasCase.expected)'."
+				}
+				Write-Host "Expected rejection (schema-v3 $($aliasCase.mode) role alias): $($aliasValidation -join ' ')"
+			}
+			$null = & python $measurementFixtureGeneratorPath `
+				$qualityPath $caseRecordsPath $runnerRoot $audioQualityRoot
+			if ($LASTEXITCODE -ne 0) {
+				throw 'Unable to restore the valid schema-v3 role fixture after negative checks.'
+			}
+			$null = & python $qualityValidator $qualityPath --artifact-root $runnerRoot
+			if ($LASTEXITCODE -ne 0) {
+				throw 'Valid schema-v3 role fixture did not recover after role-alias negative checks.'
+			}
+			$roleAliasRegressionCovered = $true
+		}
+		Remove-Item -LiteralPath $caseRecordsPath -Force
 		if (-not $artifactRootRegressionCovered) {
 			$artifactRootProbe = @'
 import json
