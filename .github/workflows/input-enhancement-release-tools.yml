@@ -8,6 +8,8 @@ on:
       - scripts/windows/*input-enhancement*
       - scripts/windows/InputEnhancementReleaseTools.psm1
       - scripts/windows/tests/Test-InputEnhancementReleaseTools.ps1
+      - scripts/windows/tests/Test-InputEnhancementPrivateCommunityPackage.ps1
+      - scripts/audio-quality/private_community_package.py
       - scripts/windows/create-windows-update-package.ps1
       - scripts/windows/assert-windows-update-package.ps1
       - .github/workflows/input-enhancement-*.yml
@@ -18,6 +20,8 @@ on:
       - scripts/windows/*input-enhancement*
       - scripts/windows/InputEnhancementReleaseTools.psm1
       - scripts/windows/tests/Test-InputEnhancementReleaseTools.ps1
+      - scripts/windows/tests/Test-InputEnhancementPrivateCommunityPackage.ps1
+      - scripts/audio-quality/private_community_package.py
       - scripts/windows/create-windows-update-package.ps1
       - scripts/windows/assert-windows-update-package.ps1
       - .github/workflows/input-enhancement-*.yml
@@ -40,6 +44,7 @@ jobs:
             $_.Name -match 'input-enhancement|InputEnhancement'
           }) + @(
             Get-Item .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
+            Get-Item .\scripts\windows\tests\Test-InputEnhancementPrivateCommunityPackage.ps1
             Get-Item .\scripts\windows\create-windows-update-package.ps1
             Get-Item .\scripts\windows\assert-windows-update-package.ps1
           )
@@ -58,3 +63,6 @@ jobs:
       - name: Run fail-closed release tooling self-tests
         shell: powershell
         run: .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
+      - name: Run unsigned private-community packaging self-tests
+        shell: powershell
+        run: .\scripts\windows\tests\Test-InputEnhancementPrivateCommunityPackage.ps1

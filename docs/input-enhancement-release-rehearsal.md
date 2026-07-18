@@ -187,3 +187,8 @@ provision and hash-pin:
 
 Azure/OIDC configuration remains out of scope until this exact two-phase
 rehearsal and community dogfood are green.
+
+The separate [unsigned private-community package](input-enhancement-private-community-package.md)
+turns the already qualified, Ed25519-bound Windows stage into a portable,
+clearly labelled internal ZIP. It does not weaken this rehearsal, emit an MSI,
+or introduce Azure/publication authority.

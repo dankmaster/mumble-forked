@@ -1,0 +1,147 @@
+name: Input Enhancement Unsigned Private Community Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected master commit already qualified by core audio gates
+        required: true
+        type: string
+      build_number:
+        description: Positive build number embedded in the qualified client and policy
+        required: true
+        type: number
+
+# This is an internal artifact handoff, never a GitHub Release. It has no OIDC,
+# deployment environment, write permission, production secret, or signing key.
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: input-enhancement-unsigned-private-community
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: package-exact-qualified-unsigned-payload
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, windows, x64, input-enhancement-community-package]
+    timeout-minutes: 60
+    outputs:
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
+      QUALIFIED_SOURCE_ROOT: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_SOURCE_ROOT }}
+      QUALIFIED_BUILD_ROOT: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_BUILD_ROOT }}
+      QUALIFIED_STAGE_ROOT: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_STAGE_ROOT }}
+      CANDIDATE_RECEIPT: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_CANDIDATE_RECEIPT }}
+      CANDIDATE_RECEIPT_SHA256: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_CANDIDATE_RECEIPT_SHA256 }}
+      CORE_ATTESTATION: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_CORE_ATTESTATION }}
+      CORE_ATTESTATION_SHA256: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_CORE_ATTESTATION_SHA256 }}
+      COMMUNITY_ED25519_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_ED25519_PUBLIC_KEY_HEX }}
+      COMMUNITY_OPENSSL: ${{ vars.INPUT_ENHANCEMENT_COMMUNITY_OPENSSL }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Establish immutable private-community identity
+        id: identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$') { throw 'source_sha must be a full lowercase SHA.' }
+          $build = 0
+          if (-not [int]::TryParse($env:REQUESTED_BUILD_NUMBER, [ref]$build) -or $build -le 0) { throw 'build_number must be positive.' }
+          $required = @(
+            'QUALIFIED_SOURCE_ROOT', 'QUALIFIED_BUILD_ROOT', 'QUALIFIED_STAGE_ROOT',
+            'CANDIDATE_RECEIPT', 'CANDIDATE_RECEIPT_SHA256',
+            'CORE_ATTESTATION', 'CORE_ATTESTATION_SHA256', 'COMMUNITY_ED25519_PUBLIC_KEY_HEX'
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing protected private-community runner variable '$name'."
+            }
+          }
+          if ((git rev-parse HEAD).Trim() -cne $env:REQUESTED_SOURCE_SHA) { throw 'Workflow checkout differs from source_sha.' }
+          git merge-base --is-ancestor $env:REQUESTED_SOURCE_SHA origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'Private-community source is not on protected master.' }
+          if ((git -C $env:QUALIFIED_SOURCE_ROOT rev-parse HEAD).Trim() -cne $env:REQUESTED_SOURCE_SHA) {
+            throw 'Protected live candidate source root differs from source_sha.'
+          }
+          $artifact = "mumble-input-enhancement-UNSIGNED-PRIVATE-COMMUNITY-1.7.$build-$($env:REQUESTED_SOURCE_SHA.Substring(0, 12))"
+          "artifact_name=$artifact" >> $env:GITHUB_OUTPUT
+          "PACKAGE_ROOT=$env:RUNNER_TEMP\$artifact" >> $env:GITHUB_ENV
+
+      - name: Run package fail-closed self-test
+        shell: pwsh
+        run: python .\scripts\audio-quality\private_community_package.py --self-test
+
+      - name: Package the exact qualified stage without signing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arguments = @{
+            SourceRoot = $env:QUALIFIED_SOURCE_ROOT
+            SourceSha = $env:REQUESTED_SOURCE_SHA
+            BuildNumber = [int]$env:REQUESTED_BUILD_NUMBER
+            BuildRoot = $env:QUALIFIED_BUILD_ROOT
+            StageRoot = $env:QUALIFIED_STAGE_ROOT
+            CandidateBuildReceiptPath = $env:CANDIDATE_RECEIPT
+            CandidateBuildReceiptSha256 = $env:CANDIDATE_RECEIPT_SHA256
+            CoreMeasuredAttestationPath = $env:CORE_ATTESTATION
+            CoreMeasuredAttestationSha256 = $env:CORE_ATTESTATION_SHA256
+            Ed25519PublicKeyHex = $env:COMMUNITY_ED25519_PUBLIC_KEY_HEX
+            AllowedOutputParent = $env:RUNNER_TEMP
+            OutputRoot = $env:PACKAGE_ROOT
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:COMMUNITY_OPENSSL)) {
+            $arguments.OpenSslPath = $env:COMMUNITY_OPENSSL
+          }
+          .\scripts\windows\new-input-enhancement-private-community-package.ps1 @arguments
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.identity.outputs.artifact_name }}
+          path: ${{ env.PACKAGE_ROOT }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  remote-reverify:
+    name: reverify-downloaded-community-zip
+    needs: package
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.package.outputs.artifact_name }}
+          path: community-download
+      - name: Reverify exact downloaded ZIP bytes and inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem .\community-download -Force -File)
+          $zip = @($files | Where-Object Extension -ceq '.zip')
+          $receipt = @($files | Where-Object Name -Like '*.receipt.json')
+          $checksum = @($files | Where-Object Extension -ceq '.sha256')
+          if ($files.Count -ne 3 -or $zip.Count -ne 1 -or $receipt.Count -ne 1 -or $checksum.Count -ne 1 -or
+              @(Get-ChildItem .\community-download -Force -Directory).Count -ne 0) {
+            throw 'Downloaded private-community artifact does not contain exactly ZIP, receipt, and checksum.'
+          }
+          python .\scripts\audio-quality\private_community_package.py --validate `
+            --output-zip $zip[0].FullName --output-receipt $receipt[0].FullName --output-sha256 $checksum[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Downloaded private-community ZIP failed exact remote reverification.' }
