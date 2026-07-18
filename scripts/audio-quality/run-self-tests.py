@@ -111,7 +111,11 @@ def main() -> int:
 		"score-objective-quality.py",
 		"run-offline-quality-campaign.py",
 		"run-two-client-e2e.py",
+		"write-quality-parquet.py",
+		"run-e2e-quality-campaign.py",
+		"candidate_build_receipt.py",
 		"assemble-original-voice-qualification.py",
+		"run-original-voice-campaign.py",
 		"blind-listening.py",
 		"measurement_evidence.py",
 		"run-ci-quality-gate.py",
@@ -136,6 +140,7 @@ def main() -> int:
 			"blind-listening-source.schema.json",
 			"blind-listening-session.schema.json",
 			"blind-listening-qualification.schema.json",
+			"candidate-build-invocation.schema.json",
 		):
 			json.loads((root / schema_name).read_text(encoding="utf-8"))
 	except (OSError, json.JSONDecodeError) as error:

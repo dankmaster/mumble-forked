@@ -823,6 +823,216 @@ both received sample counts and `receiver_jitter_delta_samples` (Original minus
 legacy) so this live timing variation remains visible rather than being hidden
 by correlation alignment.
 
+`run-original-voice-campaign.py` is the tracked owner of the complete campaign.
+It seals independent Legacy and candidate stage snapshots, requires clean live
+source worktrees (including untracked files), creates the rendered-fixture and
+worktree receipts, invokes the 90 two-client runs sequentially, writes the exact
+v1 campaign bindings, and calls the qualification assembler. It requires a
+validated `candidate_build_receipt.py` receipt and the expected embedded
+Ed25519 public key. Create that receipt from an external clean-build invocation
+record conforming to `candidate-build-invocation.schema.json`; creation also
+requires the exact signed channel-policy manifest/signature used by enhanced
+E2E. The campaign reopens those receipt-bound policy bytes and passes them to
+every candidate run, including Original, so the result cannot depend on an
+ambient policy cache.
+
+The OG server's build/cache directory and launch payload are intentionally
+different inputs. `--server-build-dir` identifies the external CMake/Ninja
+build root. `--server-runtime-dir` identifies the immutable runtime snapshot,
+and `--server-binary` must be exactly
+`<server-runtime-dir>/mumble-server.exe`. Do not assume the executable is at
+the build root or place either directory inside the clean OG source worktree.
+
+Prepare and inspect the sealed campaign with `--prepare-only`, passing the
+candidate receipt/key, candidate and Legacy source/build/stage roots, separate
+server source/build/runtime roots, the pinned wrapper, corpus bindings and one
+rendered clean/noisy fixture. Continue the exact sealed campaign with
+`--execute --resume`. A failed case may be retried with the same command: only
+an explicitly hash-bound passing
+manifest is retained in campaign state. After all 90 runs pass, the runner
+publishes `campaign-bindings.json`, its separate SHA-256 pin,
+`original-voice-qualification.json`, and `original-voice-provenance.json`.
+Never delete the per-run `app/` snapshots or WAV evidence before assembly; the
+assembler reopens and rehashes the complete launched payload for every case.
+
+`run-e2e-quality-campaign.py` is the resumable 500-case master-quality runner.
+It renders the frozen validation plan privately, runs the tracked production
+pipeline through client 1, the pinned localhost server, and client 2, then
+scores the receiver capture on the fixed timeline. Every Quality/VoiceFocus
+comparison is one transaction over a shared Original route anchor; incomplete
+pairs are never mixed across retries. Enhanced runs require the explicit
+64-byte signed policy pair pinned by
+`release-fixtures/quality-campaign-config.json`.
+
+The same protected config pins the exact machine adapter, its structured
+arguments, the orchestrator and metrics Python executables, metrics manifest,
+render parallelism, case timeout and corpus-root relationship. Arbitrary host
+paths are not accepted as adapter arguments. A successful case is resumable
+only after all ten audio-free schema-v3 reports have been copied, reopened,
+rehash-checked and independently derived. Only then may the private per-run WAV
+and copied app snapshot be removed. Failed attempts stay private for diagnosis.
+The final campaign writes canonical JSONL, JUnit, CSV, real Parquet, HTML/JSON,
+failure-locator index, measurement index and `qualification.json`, and validates
+the complete graph before returning success. Install `pyarrow` in the pinned
+metrics runtime; the Parquet writer fails closed rather than emitting a renamed
+CSV or JSON file.
+
+The following PowerShell creates the exact protected config. Copy the already
+receipt-bound policy, local adapter, and pinned wrapper into a new fixture root
+first. `relative_path`, SHA-256, and size are computed from the bytes that will
+actually run. The adapter arguments deliberately contain no policy switches;
+the tracked campaign owns and appends those from the two pinned policy records.
+
+```powershell
+$Repo = 'D:\Coding\Mumble-input-enhancement'
+$ClientBuildRelative = 'build-shared-webengine'
+$Stage = "$Repo\$ClientBuildRelative\shared-webengine-stage"
+$ServerBuild = 'D:\AudioQualification\og-server-build'
+$ReleaseFixtures = 'D:\AudioQualification\protected\release-fixtures'
+$MetricsRuntime = 'D:\AudioQualification\protected\metrics-runtime'
+$ReceiptPolicy = 'D:\AudioQualification\candidate-receipt\input-enhancement-policy.json'
+$ReceiptPolicySignature = 'D:\AudioQualification\candidate-receipt\input-enhancement-policy.json.sig'
+$LocalAdapter = 'D:\Coding\Mumble\scripts\local\run-two-client-e2e-adapter.py'
+$LocalWrapper = 'D:\Coding\Mumble\scripts\local\invoke-speech-cleanup-e2e.ps1'
+
+New-Item -ItemType Directory -Force $ReleaseFixtures | Out-Null
+Copy-Item -LiteralPath $ReceiptPolicy -Destination "$ReleaseFixtures\input-enhancement-policy.json"
+Copy-Item -LiteralPath $ReceiptPolicySignature -Destination "$ReleaseFixtures\input-enhancement-policy.json.sig"
+Copy-Item -LiteralPath $LocalAdapter -Destination "$ReleaseFixtures\run-two-client-e2e-adapter.py"
+Copy-Item -LiteralPath $LocalWrapper -Destination "$ReleaseFixtures\invoke-speech-cleanup-e2e.ps1"
+if ((Get-Item "$ReleaseFixtures\input-enhancement-policy.json.sig").Length -ne 64) {
+  throw 'Policy signature must be a raw 64-byte Ed25519 signature'
+}
+& "$MetricsRuntime\python.exe" "$ReleaseFixtures\run-two-client-e2e-adapter.py" --self-test
+if ($LASTEXITCODE -ne 0) { throw 'Pinned machine adapter/wrapper self-test failed' }
+
+function Get-CampaignPin([string] $Root, [string] $Path) {
+  $rootPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Root).Path)
+  $filePath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $Path).Path)
+  $relative = [IO.Path]::GetRelativePath($rootPath, $filePath).Replace('\', '/')
+  if ($relative -eq '..' -or $relative.StartsWith('../') -or [IO.Path]::IsPathRooted($relative)) {
+    throw "Pinned file escapes root: $filePath"
+  }
+  [ordered]@{
+    relative_path = $relative
+    sha256 = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    size_bytes = (Get-Item -LiteralPath $filePath).Length
+  }
+}
+
+$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+$os = Get-CimInstance Win32_OperatingSystem
+$HardwareFingerprint = "$ReleaseFixtures\hardware-fingerprint.json"
+[ordered]@{
+  schema_version = 1
+  kind = 'mumble-audio-quality-runner-fingerprint-v1'
+  cpu_name = $cpu.Name
+  physical_cores = $cpu.NumberOfCores
+  logical_processors = $cpu.NumberOfLogicalProcessors
+  memory_bytes = [int64]$os.TotalVisibleMemorySize * 1024
+  os_version = $os.Version
+  os_build = $os.BuildNumber
+  power_plan = (powercfg /getactivescheme)
+} | ConvertTo-Json -Depth 4 |
+  Set-Content -LiteralPath $HardwareFingerprint -Encoding utf8NoBOM
+
+$adapter = Get-CampaignPin $ReleaseFixtures "$ReleaseFixtures\run-two-client-e2e-adapter.py"
+$adapter['arguments'] = @(
+  [ordered]@{ kind = 'literal'; value = '--client-build-dir' },
+  [ordered]@{ kind = 'protected_path'; root = 'source_root'; relative_path = $ClientBuildRelative },
+  [ordered]@{ kind = 'literal'; value = '--client-stage-dir' },
+  [ordered]@{ kind = 'protected_path'; root = 'staged_client_root'; relative_path = '.' },
+  [ordered]@{ kind = 'literal'; value = '--server-build-dir' },
+  [ordered]@{ kind = 'protected_path'; root = 'server_binary_parent'; relative_path = '.' },
+  [ordered]@{ kind = 'literal'; value = '--wrapper' },
+  [ordered]@{ kind = 'protected_path'; root = 'release_fixtures'; relative_path = 'invoke-speech-cleanup-e2e.ps1' },
+  [ordered]@{ kind = 'literal'; value = '--timeout-seconds' },
+  [ordered]@{ kind = 'literal'; value = '900' }
+)
+$config = [ordered]@{
+  schema_version = 1
+  kind = 'mumble-input-enhancement-e2e-campaign-config-v1'
+  render_jobs = 4
+  case_timeout_seconds = 900
+  corpus_root_relative_path = '.'
+  orchestrator_python = (Get-CampaignPin $MetricsRuntime "$MetricsRuntime\python.exe")
+  metrics_python = (Get-CampaignPin $MetricsRuntime "$MetricsRuntime\python.exe")
+  metrics_manifest = (Get-CampaignPin $MetricsRuntime "$MetricsRuntime\metrics-manifest.json")
+  input_enhancement_policy_manifest = (Get-CampaignPin $ReleaseFixtures "$ReleaseFixtures\input-enhancement-policy.json")
+  input_enhancement_policy_signature = (Get-CampaignPin $ReleaseFixtures "$ReleaseFixtures\input-enhancement-policy.json.sig")
+  adapter = $adapter
+}
+$config | ConvertTo-Json -Depth 12 |
+  Set-Content -LiteralPath "$ReleaseFixtures\quality-campaign-config.json" -Encoding utf8NoBOM
+$FixturePayloadSha = (& "$MetricsRuntime\python.exe" -c `
+  "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from payload_identity import payload_sha256; print(payload_sha256(Path(sys.argv[2])))" `
+  "$Repo\scripts\audio-quality" $ReleaseFixtures).Trim()
+if ($LASTEXITCODE -ne 0 -or $FixturePayloadSha -notmatch '^[0-9a-f]{64}$') {
+  throw 'Unable to attest the completed release-fixture payload'
+}
+Write-Host "INPUT_ENHANCEMENT_QUALITY_RELEASE_FIXTURES_SHA256=$FixturePayloadSha"
+```
+
+The server example intentionally places `CMakeCache.txt` and the exact pinned
+`mumble-server.exe` in `$ServerBuild`, as required by this machine adapter.
+Freeze the fixture directory only after writing the config, then configure the
+CI-side expected fixture SHA-256 over the complete directory payload.
+
+Generate a fresh paired validation plan and launch the real 500-case run with
+the pinned Python from the metrics runtime. Using the exact plan as the
+protected case-set is supported; a separately curated case-set may be supplied
+only if its frozen hash is configured by the caller.
+
+```powershell
+$MetricsPython = "$MetricsRuntime\python.exe"
+$Inventory = 'D:\AudioQualification\corpus\master-quality\inventory-v3.json'
+$CorpusLock = "$Repo\scripts\audio-quality\corpus-lock.json"
+$Plan = 'D:\AudioQualification\protected\master-quality-validation-500-paired.json'
+& $MetricsPython "$Repo\scripts\audio-quality\generate-mixture-plan.py" `
+  --manifest $CorpusLock --inventory $Inventory --output $Plan `
+  --suite master_quality --split validation `
+  --seed mumble-community-master-v2-00909005 --cases 500 --duration-ms 6000
+if ($LASTEXITCODE -ne 0) { throw 'Unable to generate the frozen 500-case validation plan' }
+& $MetricsPython "$Repo\scripts\audio-quality\generate-mixture-plan.py" --validate-plan $Plan
+if ($LASTEXITCODE -ne 0) { throw 'Frozen validation plan failed strict validation' }
+
+$Campaign = "$Repo\scripts\audio-quality\run-e2e-quality-campaign.py"
+$Output = 'D:\AudioQualification\runs\community-master-500'
+$SourceSha = (& git -C $Repo rev-parse HEAD).Trim()
+$common = @(
+  '--suite', 'master_quality',
+  '--source-root', $Repo,
+  '--output-root', $Output,
+  '--source-sha', $SourceSha,
+  '--corpus-lock', $CorpusLock,
+  '--tested-binary', "$Stage\mumble.exe",
+  '--legacy-binary', 'D:\AudioQualification\protected\legacy\mumble.exe',
+  '--staged-client-root', $Stage,
+  '--model-manifest', "$Stage\input-models.json",
+  '--recipe-manifest', "$Stage\input-recipes.json",
+  '--server-binary', "$ServerBuild\mumble-server.exe",
+  '--corpus-inventory', $Inventory,
+  '--case-set', $Plan,
+  '--mixture-plan', $Plan,
+  '--release-fixtures', $ReleaseFixtures,
+  '--metrics-runtime', $MetricsRuntime,
+  '--runner-class', 'low-performance',
+  '--hardware-fingerprint-sha256', (Get-FileHash $HardwareFingerprint -Algorithm SHA256).Hash.ToLowerInvariant(),
+  '--harness-sha256', (Get-FileHash $Campaign -Algorithm SHA256).Hash.ToLowerInvariant()
+)
+& $MetricsPython $Campaign --validate-only @common
+if ($LASTEXITCODE -ne 0) { throw 'Campaign/config validation failed before client launch' }
+& $MetricsPython $Campaign @common
+if ($LASTEXITCODE -ne 0) { throw "500-case campaign did not qualify (exit $LASTEXITCODE)" }
+```
+
+`--validate-only` seals and reports the complete run-binding without rendering
+or starting clients. Re-running the second command resumes only hash-identical,
+independently revalidated case receipts. Exit code 0 means the final semantic
+qualification passed; 2 means the evidence is structurally valid but at least
+one locked quality/performance gate failed; 1 means execution or trust
+validation failed.
+
 ## Qualification contract
 
 `quality-qualification.schema.json` describes the schema-v3 portable result

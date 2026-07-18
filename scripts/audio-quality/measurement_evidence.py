@@ -941,6 +941,7 @@ def _derive_e2e_case(
 	qualification_binding = _mapping(manifest["qualification_binding"], f"{path}.reports.e2e_manifest.qualification_binding")
 	_exact_keys(qualification_binding, {
 		"case_id", "case_set_sha256", "clean_reference_sha256", "corpus_inventory_sha256",
+		"input_enhancement_policy_manifest_sha256", "input_enhancement_policy_signature_sha256",
 		"corpus_lock_sha256", "dataset_split", "mixture_plan_sha256", "plan_case_sha256",
 		"profile", "render_entry_sha256", "render_manifest_sha256", "source_input_sha256",
 	}, f"{path}.reports.e2e_manifest.qualification_binding")
@@ -949,6 +950,19 @@ def _derive_e2e_case(
 		_expect(qualification_binding[field] == build[field], f"{path}.reports.e2e_manifest.qualification_binding.{field}", f"does not match qualification.build.{field}")
 	for field in ("plan_case_sha256", "render_entry_sha256", "render_manifest_sha256", "source_input_sha256", "clean_reference_sha256"):
 		_hash(qualification_binding[field], f"{path}.reports.e2e_manifest.qualification_binding.{field}")
+	policy_manifest_sha256 = qualification_binding["input_enhancement_policy_manifest_sha256"]
+	policy_signature_sha256 = qualification_binding["input_enhancement_policy_signature_sha256"]
+	_expect(
+		(policy_manifest_sha256 is None) == (policy_signature_sha256 is None),
+		f"{path}.reports.e2e_manifest.qualification_binding.input_enhancement_policy",
+		"manifest and signature hashes must be present together",
+	)
+	if profile != "Original":
+		_hash(policy_manifest_sha256, f"{path}.reports.e2e_manifest.qualification_binding.input_enhancement_policy_manifest_sha256")
+		_hash(policy_signature_sha256, f"{path}.reports.e2e_manifest.qualification_binding.input_enhancement_policy_signature_sha256")
+	elif policy_manifest_sha256 is not None:
+		_hash(policy_manifest_sha256, f"{path}.reports.e2e_manifest.qualification_binding.input_enhancement_policy_manifest_sha256")
+		_hash(policy_signature_sha256, f"{path}.reports.e2e_manifest.qualification_binding.input_enhancement_policy_signature_sha256")
 	_expect(qualification_binding["source_input_sha256"] == source_sha, f"{path}.reports.e2e_manifest.qualification_binding.source_input_sha256", "does not bind the adapter source input")
 	_expect(qualification_binding["clean_reference_sha256"] == clean_sha, f"{path}.reports.e2e_manifest.qualification_binding.clean_reference_sha256", "does not bind the objective clean reference")
 	_expect(
@@ -1760,6 +1774,8 @@ def run_self_test() -> None:
 				"plan_case_sha256": "a" * 64, "render_manifest_sha256": "b" * 64,
 				"render_entry_sha256": "c" * 64, "source_input_sha256": source_sha256,
 				"clean_reference_sha256": clean_sha256,
+				"input_enhancement_policy_manifest_sha256": "d" * 64,
+				"input_enhancement_policy_signature_sha256": "e" * 64,
 			},
 			"input_timeline_gate": {
 				"artifact": "sender_pre_opus", "alignment": "fixed-declared-latency",

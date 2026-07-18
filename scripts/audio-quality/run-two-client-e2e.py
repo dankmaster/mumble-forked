@@ -503,7 +503,8 @@ def _execution_identity_from_paths(paths: Mapping[str, Any]) -> Mapping[str, str
 	required_paths = {
 		"run_provenance", "runtime_root", "client_binary", "server_binary", "model_manifest", "recipe_manifest",
 	}
-	if not isinstance(paths, dict) or set(paths) != required_paths:
+	policy_paths = {"input_enhancement_policy_manifest", "input_enhancement_policy_signature"}
+	if not isinstance(paths, dict) or set(paths) not in (required_paths, required_paths | policy_paths):
 		raise E2EError("adapter contract paths are incomplete")
 	resolved: dict[str, Path] = {}
 	for key, value in paths.items():
@@ -513,6 +514,21 @@ def _execution_identity_from_paths(paths: Mapping[str, Any]) -> Mapping[str, str
 	provenance = _load_json(resolved["run_provenance"])
 	if not isinstance(provenance, dict):
 		raise E2EError("run provenance must be a JSON object")
+	policy = provenance.get("input_enhancement_policy")
+	if set(paths) == required_paths:
+		if policy is not None:
+			raise E2EError("run provenance binds a policy but adapter contract paths omit it")
+	else:
+		if not isinstance(policy, dict) or set(policy) != {"manifest", "signature"}:
+			raise E2EError("adapter policy paths are not bound by run provenance")
+		for key, record_name in (
+			("input_enhancement_policy_manifest", "manifest"),
+			("input_enhancement_policy_signature", "signature"),
+		):
+			record = policy[record_name]
+			verified = _verified_file(resolved[key])
+			if not isinstance(record, dict) or verified["sha256"] != record.get("sha256") or verified["size_bytes"] != record.get("size_bytes"):
+				raise E2EError(f"adapter {record_name} policy bytes differ from run provenance")
 	return {
 		"run_provenance_sha256": _canonical_sha256(provenance),
 		"runtime_payload_sha256": str(_tree_attestation(resolved["runtime_root"])["sha256"]),
@@ -836,7 +852,361 @@ def _score(
 	return _load_json(output)
 
 
+def _paired_cases(plan: Mapping[str, Any], first_id: str, second_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+	selected = [case for case in plan["cases"] if case["case_id"] in {first_id, second_id}]
+	if len(selected) != 2 or len({str(case["case_id"]) for case in selected}) != 2:
+		raise E2EError("paired E2E requires two distinct case IDs present exactly once in the plan")
+	if {str(case["profile"]) for case in selected} != {"Quality", "VoiceFocus"}:
+		raise E2EError("paired E2E is restricted to one Quality and one VoiceFocus case")
+	comparison_ids = {case.get("comparison_scene_id") for case in selected}
+	if len(comparison_ids) != 1 or None in comparison_ids or "" in comparison_ids:
+		raise E2EError("paired E2E cases must share one explicit comparison_scene_id")
+	normalized = []
+	for case in selected:
+		copy_case = json.loads(json.dumps(case))
+		for key in ("case_id", "profile", "controls", "comparison_scene_id"):
+			copy_case.pop(key)
+		normalized.append(copy_case)
+	if normalized[0] != normalized[1]:
+		raise E2EError("paired E2E cases do not share byte-identical scene, startup, and transport contracts")
+	selected.sort(key=lambda case: (0 if case["profile"] == "Quality" else 1, str(case["case_id"])))
+	return selected[0], selected[1]
+
+
+def _input_enhancement_policy(args: argparse.Namespace, *, required: bool) -> Mapping[str, Any] | None:
+	manifest_path = getattr(args, "input_enhancement_policy_manifest", None)
+	signature_path = getattr(args, "input_enhancement_policy_signature", None)
+	if (manifest_path is None) != (signature_path is None):
+		raise E2EError("input-enhancement policy manifest and signature must be supplied together")
+	if manifest_path is None:
+		if required:
+			raise E2EError("enhanced schema-v3 E2E runs require an explicit signed input-enhancement policy")
+		return None
+	manifest = _verified_file(manifest_path)
+	signature = _verified_file(signature_path)
+	if signature["size_bytes"] != 64:
+		raise E2EError("input-enhancement policy signature must be a raw 64-byte Ed25519 signature")
+	document = _load_json(manifest_path)
+	if not isinstance(document, dict):
+		raise E2EError("input-enhancement policy manifest must be a JSON object")
+	return {"manifest": manifest, "signature": signature}
+
+
+def _policy_paths_and_adapter_args(
+	policy: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, str], list[str]]:
+	if policy is None:
+		return {}, []
+	manifest = str(policy["manifest"]["path"])
+	signature = str(policy["signature"]["path"])
+	return (
+		{
+			"input_enhancement_policy_manifest": manifest,
+			"input_enhancement_policy_signature": signature,
+		},
+		[
+			"--input-enhancement-policy-manifest", manifest,
+			"--input-enhancement-policy-signature", signature,
+		],
+	)
+
+
+def _run_paired(args: argparse.Namespace) -> Mapping[str, Any]:
+	"""Run Quality and VoiceFocus against one shared Original route anchor.
+
+	Each emitted case manifest still exposes the exact four logical roles expected
+	by schema-v3 measurement evidence.  The clean control and noisy Original role
+	are executed once under the same provenance as both candidate/edge pairs, so
+	the severe VoiceFocus-vs-Quality comparison has a genuinely shared route
+	anchor rather than two independently jittered post-hoc baselines.
+	"""
+
+	plan = PLAN.validate_plan(_load_json(args.plan))
+	quality_case, voice_case = _paired_cases(plan, str(args.case_id), str(args.paired_case_id))
+	cases = (quality_case, voice_case)
+	if any(case["transport"]["receiver_cleanup"] is not False for case in cases):
+		raise E2EError("receiver cleanup must remain disabled")
+	manifest = LOCK.load_validated_manifest(args.corpus_lock)
+	inventory = _load_json(args.inventory)
+	INVENTORY.validate_inventory(inventory, manifest, require_release=True)
+	if INVENTORY.canonical_sha256(inventory) != plan["corpus_inventory_sha256"]:
+		raise E2EError("plan does not bind the supplied inventory")
+	if LOCK.canonical_manifest_sha256(manifest) != plan["corpus_lock_sha256"]:
+		raise E2EError("plan does not bind the supplied corpus lock")
+	_assert_packaged_runtime_root(args.runtime_root)
+	if args.output_root.exists() and any(args.output_root.iterdir()):
+		raise E2EError(f"output root must be empty: {args.output_root}")
+	args.output_root.mkdir(parents=True, exist_ok=True)
+
+	runtime = _tree_attestation(args.runtime_root)
+	client = _verified_file(args.client_binary)
+	server = _verified_file(args.server_binary)
+	try:
+		args.client_binary.resolve().relative_to(args.runtime_root.resolve())
+	except ValueError as error:
+		raise E2EError("client binary must be inside the attested runtime root") from error
+	for label, manifest_path in (("model", args.model_manifest), ("recipe", args.recipe_manifest)):
+		try:
+			manifest_path.resolve().relative_to(args.runtime_root.resolve())
+		except ValueError as error:
+			raise E2EError(f"{label} manifest must be inside the attested runtime root") from error
+	adapter = _verified_file(args.adapter)
+	rendered_by_id = {
+		str(case["case_id"]): _rendered_case(plan, case, args.render_manifest, args.render_root)
+		for case in cases
+	}
+	if len({rendered_by_id[str(case["case_id"])]["input"]["sha256"] for case in cases}) != 1:
+		raise E2EError("paired E2E inputs are not byte-identical")
+	if len({rendered_by_id[str(case["case_id"])]["clean_reference"]["sha256"] for case in cases}) != 1:
+		raise E2EError("paired E2E clean references are not byte-identical")
+	metrics = _verify_metric_models(args.metrics_manifest)
+	product_catalog = _verify_product_catalog(args.model_manifest, args.recipe_manifest, args.runtime_root)
+	policy = _input_enhancement_policy(args, required=True)
+	policy_paths, policy_adapter_args = _policy_paths_and_adapter_args(policy)
+	if any(
+		item in ("--input-enhancement-policy-manifest", "--input-enhancement-policy-signature")
+		for item in args.adapter_arg
+	):
+		raise E2EError("policy adapter arguments are owned by the tracked orchestrator and may not be overridden")
+	provenance = {
+		"schema_version": 2,
+		"comparison_scene_id": quality_case["comparison_scene_id"],
+		"paired_cases": [
+			{
+				"case_id": case["case_id"], "profile": case["profile"],
+				"rendered": rendered_by_id[str(case["case_id"])],
+			}
+			for case in cases
+		],
+		"plan": _verified_file(args.plan),
+		"corpus_lock": _verified_file(args.corpus_lock),
+		"corpus_inventory": _verified_file(args.inventory),
+		"qualification_case_set": (
+			_verified_file(args.qualification_case_set)
+			if getattr(args, "qualification_case_set", None) is not None else None
+		),
+		"runtime_payload": runtime,
+		"client_binary": client,
+		"server_binary": server,
+		"model_manifest": product_catalog["model_manifest"],
+		"recipe_manifest": product_catalog["recipe_manifest"],
+		"product_catalog": {
+			"catalog_revision": product_catalog["catalog_revision"],
+			"bindings_sha256": _canonical_sha256(product_catalog["bindings"]),
+		},
+		"metrics": metrics,
+		"input_enhancement_policy": policy,
+		"orchestrator": _verified_file(Path(__file__)),
+		"fixed_timeline_scorer": _verified_file(Path(__file__).with_name("score-fixed-timeline.py")),
+		"machine_adapter": adapter,
+	}
+	provenance_path = args.output_root / "run-provenance.json"
+	_write_json(provenance_path, provenance)
+	provenance_sha256 = _canonical_sha256(provenance)
+	paths = {
+		"run_provenance": str(_lexical_absolute(provenance_path)),
+		"runtime_root": str(_lexical_absolute(args.runtime_root)),
+		"client_binary": str(_lexical_absolute(args.client_binary)),
+		"server_binary": str(_lexical_absolute(args.server_binary)),
+		"model_manifest": str(_lexical_absolute(args.model_manifest)),
+		"recipe_manifest": str(_lexical_absolute(args.recipe_manifest)),
+		**policy_paths,
+	}
+	expected_execution_identity = _execution_identity_from_paths(paths)
+	if expected_execution_identity != {
+		"run_provenance_sha256": provenance_sha256,
+		"runtime_payload_sha256": runtime["sha256"],
+		"client_binary_sha256": client["sha256"],
+		"server_binary_sha256": server["sha256"],
+		"model_manifest_sha256": product_catalog["model_manifest"]["sha256"],
+		"recipe_manifest_sha256": product_catalog["recipe_manifest"]["sha256"],
+	}:
+		raise E2EError("runtime identity changed while paired provenance was being sealed")
+
+	primary_rendered = rendered_by_id[str(quality_case["case_id"])]
+	specifications: list[tuple[str, str, Mapping[str, Any], Mapping[str, Any], Path]] = [
+		("shared", "control", quality_case, primary_rendered, args.output_root / "shared" / "control"),
+		("shared", "original_comparison", quality_case, primary_rendered, args.output_root / "shared" / "original_comparison"),
+	]
+	for case in cases:
+		case_id = str(case["case_id"])
+		rendered = rendered_by_id[case_id]
+		specifications.extend([
+			(case_id, "candidate", case, rendered, args.output_root / "cases" / case_id / "candidate"),
+			(case_id, "candidate_edge", case, rendered, args.output_root / "cases" / case_id / "candidate_edge"),
+		])
+	contracts: list[tuple[str, str, Mapping[str, Any], Mapping[str, Any], Path, Path, str, Path]] = []
+	for owner, role, case, rendered, role_root in specifications:
+		profile = "Original" if role in ("control", "original_comparison") else str(case["profile"])
+		contract_path = role_root / "adapter-contract.json"
+		result_path = role_root / "adapter-result.json"
+		contract = _build_contract(
+			role, profile, case, rendered, paths, provenance_sha256, expected_execution_identity,
+			product_catalog["bindings"], role_root,
+		)
+		_write_json(contract_path, contract)
+		contracts.append((owner, role, case, rendered, role_root, contract_path, _file_sha256(contract_path), result_path))
+	if args.emit_contracts_only:
+		result = {
+			"schema_version": 1, "kind": "mumble-two-client-paired-e2e-v1", "status": "contracts_emitted",
+			"comparison_scene_id": quality_case["comparison_scene_id"], "run_provenance_sha256": provenance_sha256,
+			"contracts": [
+				{"owner": owner, "role": role, "relative_path": contract_path.relative_to(args.output_root).as_posix(), "sha256": digest}
+				for owner, role, _, _, _, contract_path, digest, _ in contracts
+			],
+			"private_audio_do_not_upload": True,
+		}
+		_write_json(args.output_root / "paired-e2e-manifest.json", result)
+		return result
+
+	results: dict[tuple[str, str], Mapping[str, Any]] = {}
+	captures: dict[tuple[str, str], Path] = {}
+	pre_opus: dict[tuple[str, str], Path] = {}
+	role_roots: dict[tuple[str, str], Path] = {}
+	_assert_file_attestation(Path(__file__), provenance["orchestrator"], "two-client orchestrator")
+	_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
+	for owner, role, _, _, role_root, contract_path, contract_sha256, result_path in contracts:
+		contract = _load_json(contract_path)
+		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
+		completed = subprocess.run(
+			_adapter_command(
+				args.adapter.resolve(), contract_path.resolve(), result_path.resolve(),
+				[*args.adapter_arg, *policy_adapter_args],
+			),
+			check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+		)
+		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
+		if completed.returncode != 0:
+			raise E2EError(f"machine adapter failed for {owner}/{role} ({completed.returncode}): {completed.stdout.strip()}")
+		binding = contract["authorized_product_bindings"][0]
+		expected_latency = product_catalog["expected_latency_samples_by_recipe_id"][str(binding["recipe"]["id"])]
+		validated, capture, sender_pre_opus = _validate_adapter_result(
+			result_path, contract, contract_path, contract_sha256, role_root, expected_latency,
+		)
+		key = (owner, role)
+		results[key] = validated; captures[key] = capture; pre_opus[key] = sender_pre_opus; role_roots[key] = role_root
+
+	clean_path = Path(primary_rendered["clean_reference"]["path"])
+	control_key = ("shared", "control")
+	original_key = ("shared", "original_comparison")
+	control_pre_score_path = role_roots[control_key] / "pre-opus-fixed-timeline-score.json"
+	_score(
+		clean_path, pre_opus[control_key], int(results[control_key]["diagnostics"]["declared_latency_samples"]),
+		control_pre_score_path, require_complete_tail=True,
+		max_onset_loss_samples=FRAME_SAMPLES, max_end_loss_samples=FRAME_SAMPLES,
+		scorer_attestation=provenance["fixed_timeline_scorer"],
+	)
+	transport = quality_case["transport"]
+	require_complete_capture_tail = transport["transmit_mode"] != "VAD"
+	route_budget = (ORIGINAL_ROUTE_FIXED_STARTUP_FRAMES + int(transport["frames_per_packet"])) * FRAME_SAMPLES
+	control_score_path = role_roots[control_key] / "fixed-timeline-score.json"
+	_score(
+		clean_path, captures[control_key], 0, control_score_path,
+		require_complete_tail=require_complete_capture_tail,
+		max_onset_loss_samples=route_budget, max_end_loss_samples=route_budget,
+		scorer_attestation=provenance["fixed_timeline_scorer"],
+	)
+
+	case_manifest_records = []
+	for case in cases:
+		case_id = str(case["case_id"])
+		candidate_key = (case_id, "candidate")
+		edge_key = (case_id, "candidate_edge")
+		edge_score_path = role_roots[edge_key] / "pre-opus-fixed-timeline-score.json"
+		_score(
+			clean_path, pre_opus[edge_key], int(results[edge_key]["diagnostics"]["declared_latency_samples"]),
+			edge_score_path, require_complete_tail=True,
+			max_onset_loss_samples=FRAME_SAMPLES, max_end_loss_samples=FRAME_SAMPLES,
+			scorer_attestation=provenance["fixed_timeline_scorer"],
+		)
+		candidate_score_path = role_roots[candidate_key] / "fixed-timeline-score.json"
+		_score(
+			clean_path, captures[candidate_key], int(results[candidate_key]["diagnostics"]["declared_latency_samples"]),
+			candidate_score_path, captures[control_key],
+			require_complete_tail=require_complete_capture_tail,
+			max_onset_loss_samples=route_budget, max_end_loss_samples=route_budget,
+			scorer_attestation=provenance["fixed_timeline_scorer"],
+		)
+		logical = {
+			"control": (control_key, control_score_path, control_pre_score_path, "clean-original-route-control"),
+			"original_comparison": (original_key, None, None, "noisy-original-quality-comparison"),
+			"candidate": (candidate_key, candidate_score_path, None, "noisy-enhanced-candidate"),
+			"candidate_edge": (edge_key, None, edge_score_path, "clean-enhanced-input-edge-probe"),
+		}
+		manifest_results = {}
+		for role, (key, fixed_path, pre_path, purpose) in logical.items():
+			result = results[key]
+			diagnostics = result["diagnostics"]
+			manifest_results[role] = {
+				"adapter_contract_sha256": result["execution_identity"]["contract_file_sha256"],
+				"adapter_result_sha256": _file_sha256(role_roots[key] / "adapter-result.json"),
+				"capture_sha256": result["capture"]["sha256"],
+				"sender_pre_opus_sha256": result["sender_pre_opus"]["sha256"],
+				"execution_identity": result["execution_identity"],
+				"active_recipe": diagnostics["active_recipe"], "active_models": diagnostics["active_models"],
+				"performance": {
+					"callback_frame_count": diagnostics["callback_frame_count"],
+					"callback_p99_ms": diagnostics["callback_p99_ms"],
+					"model_initialization_attempts": diagnostics["model_initialization_attempts"],
+					"worker_frame_count": diagnostics["worker_frame_count"], "worker_p99_ms": diagnostics["worker_p99_ms"],
+					"mean_rtf": diagnostics["mean_rtf"],
+				},
+				"fixed_timeline_score_sha256": _file_sha256(fixed_path) if fixed_path is not None else None,
+				"pre_opus_fixed_timeline_score_sha256": _file_sha256(pre_path) if pre_path is not None else None,
+				"qualification_purpose": purpose,
+			}
+		rendered = rendered_by_id[case_id]
+		case_manifest = {
+			"schema_version": 3, "status": "passed", "case_id": case_id, "profile": case["profile"],
+			"run_provenance_sha256": provenance_sha256, "receiver_cleanup": False,
+			"qualification_binding": {
+				"mixture_plan_sha256": provenance["plan"]["sha256"],
+				"case_set_sha256": provenance["qualification_case_set"]["sha256"] if provenance["qualification_case_set"] is not None else None,
+				"corpus_inventory_sha256": provenance["corpus_inventory"]["sha256"],
+				"corpus_lock_sha256": plan["corpus_lock_sha256"], "case_id": case_id,
+				"profile": case["profile"], "dataset_split": plan["split"],
+				"plan_case_sha256": _canonical_sha256(case), "render_manifest_sha256": rendered["manifest"]["sha256"],
+				"render_entry_sha256": rendered["entry_sha256"], "source_input_sha256": rendered["input"]["sha256"],
+				"clean_reference_sha256": rendered["clean_reference"]["sha256"],
+				"input_enhancement_policy_manifest_sha256": policy["manifest"]["sha256"],
+				"input_enhancement_policy_signature_sha256": policy["signature"]["sha256"],
+			},
+			"input_timeline_gate": {
+				"artifact": "sender_pre_opus", "alignment": "fixed-declared-latency",
+				"roles": ["control", "candidate_edge"], "max_onset_loss_samples": FRAME_SAMPLES,
+				"max_end_loss_samples": FRAME_SAMPLES, "complete_tail_required": True,
+			},
+			"route_control": {
+				"onset_budget_samples": route_budget, "end_loss_budget_samples": route_budget,
+				"receiver_edge_gate": "route-bounded-not-input-latency",
+				"capture_tail_rule": "complete" if require_complete_capture_tail else "vad-speech-edge",
+				"causal_tail_drain_required": True, "legacy_original_parity_required": True,
+			},
+			"results": manifest_results, "private_audio_do_not_upload": True,
+		}
+		case_manifest_path = args.output_root / "cases" / case_id / "e2e-manifest.json"
+		_write_json(case_manifest_path, case_manifest)
+		case_manifest_records.append({
+			"case_id": case_id, "profile": case["profile"],
+			"relative_path": case_manifest_path.relative_to(args.output_root).as_posix(),
+			"sha256": _file_sha256(case_manifest_path),
+		})
+
+	_assert_file_attestation(Path(__file__), provenance["orchestrator"], "two-client orchestrator")
+	_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
+	result = {
+		"schema_version": 1, "kind": "mumble-two-client-paired-e2e-v1", "status": "passed",
+		"comparison_scene_id": quality_case["comparison_scene_id"], "run_provenance_sha256": provenance_sha256,
+		"cases": case_manifest_records, "shared_roles": ["control", "original_comparison"],
+		"private_audio_do_not_upload": True,
+	}
+	_write_json(args.output_root / "paired-e2e-manifest.json", result)
+	return result
+
+
 def run(args: argparse.Namespace) -> Mapping[str, Any]:
+	if getattr(args, "paired_case_id", None) is not None:
+		return _run_paired(args)
 	plan = PLAN.validate_plan(_load_json(args.plan))
 	cases = [case for case in plan["cases"] if case["case_id"] == args.case_id]
 	if len(cases) != 1:
@@ -872,6 +1242,13 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 	rendered = _rendered_case(plan, case, args.render_manifest, args.render_root)
 	metrics = _verify_metric_models(args.metrics_manifest)
 	product_catalog = _verify_product_catalog(args.model_manifest, args.recipe_manifest, args.runtime_root)
+	policy = _input_enhancement_policy(args, required=case["profile"] != "Original")
+	policy_paths, policy_adapter_args = _policy_paths_and_adapter_args(policy)
+	if any(
+		item in ("--input-enhancement-policy-manifest", "--input-enhancement-policy-signature")
+		for item in args.adapter_arg
+	):
+		raise E2EError("policy adapter arguments are owned by the tracked orchestrator and may not be overridden")
 	provenance = {
 		"schema_version": 1,
 		"case_id": case["case_id"],
@@ -893,6 +1270,7 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 			"bindings_sha256": _canonical_sha256(product_catalog["bindings"]),
 		},
 		"metrics": metrics,
+		"input_enhancement_policy": policy,
 		"orchestrator": _verified_file(Path(__file__)),
 		"fixed_timeline_scorer": _verified_file(Path(__file__).with_name("score-fixed-timeline.py")),
 		"machine_adapter": adapter,
@@ -906,6 +1284,7 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 		"server_binary": str(_lexical_absolute(args.server_binary)),
 		"model_manifest": str(_lexical_absolute(args.model_manifest)),
 		"recipe_manifest": str(_lexical_absolute(args.recipe_manifest)),
+		**policy_paths,
 	}
 	expected_execution_identity = _execution_identity_from_paths(paths)
 	provenance_identity = {
@@ -968,7 +1347,10 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 	_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 	for role, contract, contract_path, contract_sha256, result_path in contracts:
 		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
-		command = _adapter_command(args.adapter.resolve(), contract_path.resolve(), result_path.resolve(), args.adapter_arg)
+		command = _adapter_command(
+			args.adapter.resolve(), contract_path.resolve(), result_path.resolve(),
+			[*args.adapter_arg, *policy_adapter_args],
+		)
 		completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		_assert_file_attestation(args.adapter, provenance["machine_adapter"], "machine adapter")
 		if completed.returncode != 0:
@@ -1059,6 +1441,12 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 			"render_entry_sha256": rendered["entry_sha256"],
 			"source_input_sha256": rendered["input"]["sha256"],
 			"clean_reference_sha256": rendered["clean_reference"]["sha256"],
+			"input_enhancement_policy_manifest_sha256": (
+				policy["manifest"]["sha256"] if policy is not None else None
+			),
+			"input_enhancement_policy_signature_sha256": (
+				policy["signature"]["sha256"] if policy is not None else None
+			),
 		},
 		"input_timeline_gate": {
 			"artifact": "sender_pre_opus",
@@ -1268,6 +1656,10 @@ def run_self_test() -> None:
 			},
 			"models": metric_models,
 		}), encoding="utf-8")
+		policy_manifest = root / "input-enhancement-policy.json"
+		policy_manifest.write_text('{"inputEnhancement":{"available":true,"forceOriginal":false}}\n', encoding="utf-8")
+		policy_signature = root / "input-enhancement-policy.sig"
+		policy_signature.write_bytes(bytes(range(64)))
 		# The self-test adapter emulates the protected machine adapter while still
 		# independently hashing every path named by the contract.
 		manifest_path = Path(__file__).with_name("corpus-lock.json")
@@ -1329,7 +1721,7 @@ def run_self_test() -> None:
 			"  params=r.getparams(); frames=r.readframes(r.getnframes())\n"
 			" with wave.open(str(target),'wb') as w:\n"
 			"  w.setparams(params); w.writeframes(b'\\0\\0'*latency+frames)\n"
-			"p=argparse.ArgumentParser();p.add_argument('--contract');p.add_argument('--result');a=p.parse_args()\n"
+			"p=argparse.ArgumentParser();p.add_argument('--contract');p.add_argument('--result');p.add_argument('--input-enhancement-policy-manifest');p.add_argument('--input-enhancement-policy-signature');a=p.parse_args()\n"
 			"c=json.load(open(a.contract,encoding='utf8')); out=c['output_root']+'/capture.wav'; pre=c['output_root']+'/sender-pre-opus.wav'\n"
 			"paths=c['paths']; binding=c['authorized_product_bindings'][0]; engine=binding['engine']\n"
 			"latency={'Original':0,'Light':480,'Balanced':1440,'Quality':1440,'VoiceFocus':1440}[c['profile']]\n"
@@ -1351,6 +1743,8 @@ def run_self_test() -> None:
 			render_root=audio, runtime_root=runtime, client_binary=client, server_binary=server,
 			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
 			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
+			input_enhancement_policy_manifest=policy_manifest,
+			input_enhancement_policy_signature=policy_signature,
 			qualification_case_set=plan_path, adapter_arg=[], output_root=root / "output", emit_contracts_only=False,
 		)
 		result = run(args)
@@ -1427,6 +1821,7 @@ def run_self_test() -> None:
 			render_root=audio, runtime_root=runtime, client_binary=client, server_binary=server,
 			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
 			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
+			input_enhancement_policy_manifest=None, input_enhancement_policy_signature=None,
 			qualification_case_set=plan_path, adapter_arg=[], output_root=root / "original-output",
 			emit_contracts_only=False,
 		)
@@ -1489,6 +1884,102 @@ def run_self_test() -> None:
 		)
 		if route_offset < 0 or route_binding["edge_tail_gate"]["candidate_passed"] is not True:
 			raise AssertionError("Original paired route is not accepted by the objective receiver scorer")
+
+		paired_plan = PLAN.generate_plan(
+			manifest, inventory, "release", "validation", "mumble-plan-self-test", 30, 1000,
+		)
+		paired_groups: dict[str, list[Mapping[str, Any]]] = {}
+		for paired_case in paired_plan["cases"]:
+			if paired_case.get("comparison_scene_id") is not None:
+				paired_groups.setdefault(str(paired_case["comparison_scene_id"]), []).append(paired_case)
+		paired_cases = next(
+			rows for rows in paired_groups.values()
+			if rows[0]["noise"] is not None and rows[0]["mix"]["snr_db"] <= 0
+		)
+		paired_plan_path = root / "paired-plan.json"; _write_json(paired_plan_path, paired_plan)
+		paired_audio = root / "paired-audio"
+		shared_input = paired_audio / "shared-input.wav"; _write_sine(shared_input, frequency_hz=275)
+		shared_clean = paired_audio / "shared-clean.wav"; _write_sine(shared_clean, frequency_hz=375)
+		paired_render_cases = []
+		for paired_case in paired_cases:
+			paired_render_cases.append({
+				"case_id": paired_case["case_id"],
+				"input": {"path": shared_input.relative_to(paired_audio).as_posix(), "sha256": _file_sha256(shared_input)},
+				"clean_reference": {"path": shared_clean.relative_to(paired_audio).as_posix(), "sha256": _file_sha256(shared_clean)},
+			})
+		paired_render_manifest = {
+			"schema_version": 2, "renderer": "mumble-audio-mixture-renderer-v2",
+			"plan_sha256": PLAN.canonical_sha256(paired_plan),
+			"corpus_lock_sha256": paired_plan["corpus_lock_sha256"],
+			"corpus_inventory_sha256": paired_plan["corpus_inventory_sha256"],
+			"private_audio_do_not_upload": True, "cases": paired_render_cases,
+		}
+		paired_render_path = root / "paired-render.json"; _write_json(paired_render_path, paired_render_manifest)
+		paired_args = argparse.Namespace(
+			plan=paired_plan_path, case_id=paired_cases[0]["case_id"], paired_case_id=paired_cases[1]["case_id"],
+			render_manifest=paired_render_path, render_root=paired_audio,
+			runtime_root=runtime, client_binary=client, server_binary=server,
+			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
+			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
+			input_enhancement_policy_manifest=policy_manifest,
+			input_enhancement_policy_signature=policy_signature,
+			qualification_case_set=paired_plan_path, adapter_arg=[], output_root=root / "paired-output",
+			emit_contracts_only=False,
+		)
+		paired_result = run(paired_args)
+		if paired_result.get("kind") != "mumble-two-client-paired-e2e-v1" or len(paired_result.get("cases", [])) != 2:
+			raise AssertionError("paired orchestration did not emit two logical case manifests")
+		logical_manifests = {
+			case["profile"]: _load_json(
+				root / "paired-output" / next(
+					record["relative_path"] for record in paired_result["cases"] if record["profile"] == case["profile"]
+				)
+			)
+			for case in paired_cases
+		}
+		for shared_role in ("control", "original_comparison"):
+			quality_shared = logical_manifests["Quality"]["results"][shared_role]
+			voice_shared = logical_manifests["VoiceFocus"]["results"][shared_role]
+			if quality_shared != voice_shared:
+				raise AssertionError(f"paired {shared_role} evidence was not shared byte-for-byte")
+		paired_route_bindings = {}
+		for paired_case in paired_cases:
+			case_id = paired_case["case_id"]
+			paired_case_root = root / "paired-output" / "cases" / case_id
+			candidate_result = _load_json(paired_case_root / "candidate" / "adapter-result.json")
+			original_result = _load_json(root / "paired-output" / "shared" / "original_comparison" / "adapter-result.json")
+			_, binding = objective._receiver_route_alignment(
+				argparse.Namespace(
+					case_id=case_id, profile=paired_case["profile"], original_latency_samples=0,
+					candidate_latency_samples=candidate_result["diagnostics"]["declared_latency_samples"],
+					route_control_wav=root / "paired-output" / "shared" / "control" / "capture.wav",
+					route_control_score=root / "paired-output" / "shared" / "control" / "fixed-timeline-score.json",
+					candidate_fixed_timeline_score=paired_case_root / "candidate" / "fixed-timeline-score.json",
+					route_e2e_manifest=paired_case_root / "e2e-manifest.json",
+				),
+				objective.file_record(shared_clean),
+				{
+					"noisy_original": objective.file_record(
+						root / "paired-output" / "shared" / "original_comparison" / original_result["capture"]["relative_path"]
+					),
+					"candidate": objective.file_record(paired_case_root / "candidate" / candidate_result["capture"]["relative_path"]),
+				},
+			)
+			paired_route_bindings[paired_case["profile"]] = binding
+		for field in ("control_wav", "control_fixed_timeline_score", "route_offset_samples", "stable_execution_identity"):
+			if paired_route_bindings["Quality"][field] != paired_route_bindings["VoiceFocus"][field]:
+				raise AssertionError(f"paired objective route binding did not share {field}")
+		tampered_pair_plan = json.loads(json.dumps(paired_plan))
+		tampered_voice = next(case for case in tampered_pair_plan["cases"] if case["case_id"] == paired_cases[1]["case_id"])
+		tampered_voice["startup"]["preroll_ms"] = 300 if tampered_voice["startup"]["preroll_ms"] == 0 else 0
+		tampered_pair_path = root / "tampered-paired-plan.json"; _write_json(tampered_pair_path, tampered_pair_plan)
+		tampered_args = argparse.Namespace(**{**vars(paired_args), "plan": tampered_pair_path, "output_root": root / "tampered-pair-output"})
+		try:
+			run(tampered_args)
+		except (E2EError, PLAN.PlanError):
+			pass
+		else:
+			raise AssertionError("paired E2E accepted mismatched startup contracts")
 
 		candidate_root = root / "output" / "candidate"
 		candidate_contract_path = candidate_root / "adapter-contract.json"
@@ -1628,6 +2119,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--plan", type=Path)
 	parser.add_argument("--case-id")
+	parser.add_argument(
+		"--paired-case-id",
+		help="run one Quality/VoiceFocus comparison pair with shared control and Original roles",
+	)
 	parser.add_argument("--render-manifest", type=Path)
 	parser.add_argument("--render-root", type=Path)
 	parser.add_argument("--runtime-root", type=Path)
@@ -1642,6 +2137,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 	)
 	parser.add_argument("--corpus-lock", type=Path, default=Path(__file__).with_name("corpus-lock.json"))
 	parser.add_argument("--metrics-manifest", type=Path)
+	parser.add_argument(
+		"--input-enhancement-policy-manifest", type=Path,
+		help="explicit signed channel policy; required for every enhanced schema-v3 run",
+	)
+	parser.add_argument(
+		"--input-enhancement-policy-signature", type=Path,
+		help="raw 64-byte Ed25519 signature paired with --input-enhancement-policy-manifest",
+	)
 	parser.add_argument("--adapter", type=Path)
 	parser.add_argument("--adapter-arg", action="append", default=[])
 	parser.add_argument("--output-root", type=Path)

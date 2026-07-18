@@ -56,6 +56,7 @@ CONTROL_SEMANTICS = {
 	"mapping": "minimum+((ui*(maximum-minimum)+50)//100)",
 	"inverse": "nearest-exact-round-trip-lower-tie-v1",
 }
+QUALITY_VOICEFOCUS_PAIRING_REVISION = "quality-voicefocus-shared-scene-v1"
 SNR_DB = (-5, 0, 5, 10, 20, None)
 MICROPHONES = ("headset", "laptop", "usb", "phone")
 GAIN_DB = (-6, -3, 0, 3, 6)
@@ -375,6 +376,7 @@ def generate_plan(
 	_expect(noise, "inventory", f"no noise groups assigned to {split}")
 	_expect(rirs, "inventory", f"no RIR groups assigned to {split}")
 	_expect(microphone_responses, "inventory", f"no microphone-response groups assigned to {split}")
+	noise_classes = sorted({str(item["noise_class"]) for item in noise})
 
 	profile_schedule = [_profile_for_case(suite, case_count, index) for index in range(case_count)]
 	profile_totals = {profile: profile_schedule.count(profile) for profile in PROFILES}
@@ -403,14 +405,46 @@ def generate_plan(
 			preroll_ms = 0 if variant != 1 else 300
 		else:
 			profile = profile_schedule[index]
-			scene_index = index
+			pair_quality_voicefocus = (
+				suite in ("master_quality", "nightly")
+				and split in ("tuning", "validation")
+				and profile in ("Quality", "VoiceFocus")
+			)
+			# A severe Voice Focus result is only meaningful against Quality when
+			# both candidates see byte-identical source windows, transforms,
+			# startup, and transport.  Keep the two adjacent profile slots but use
+			# the Quality slot as their shared scene coordinate.  Controls remain
+			# profile-specific so the complete qualified recipe grids stay covered.
+			scene_index = index - 1 if pair_quality_voicefocus and profile == "VoiceFocus" else index
+			if pair_quality_voicefocus:
+				comparison_scene_id = f"{suite}-{split}-quality-voicefocus-{index // len(PROFILES):05d}"
 			clean = _group_choice(speech, seed, scene_index, "speech")
-			snr = SNR_DB[index % len(SNR_DB)]
-			noise_choice_index = index
-			preroll_ms = 0 if index % 2 == 0 else 300
+			snr = SNR_DB[scene_index % len(SNR_DB)]
+			noise_choice_index = scene_index
+			preroll_ms = 0 if scene_index % 2 == 0 else 300
 		rir = _group_choice(rirs, seed, scene_index, "rir")
 		microphone_response = _group_choice(microphone_responses, seed, scene_index, "microphone-response")
-		selected_noise = None if snr is None else _group_choice(noise, seed, noise_choice_index, "noise")
+		if snr is None:
+			selected_noise = None
+		elif (
+			suite in ("master_quality", "nightly")
+			and split in ("tuning", "validation")
+		):
+			# Pairing removes each VoiceFocus slot as an independent scene.  A
+			# hash-only selection over the remaining indices can consequently
+			# lose an entire class on a legitimate frozen split (the master-v2
+			# seed did exactly that).  Stratify by profile occurrence first, then
+			# keep the existing stable group choice within the selected class.
+			# Quality and VoiceFocus share scene_index, so they still receive the
+			# identical noise source/window required by the comparison contract.
+			class_index = scene_index // len(PROFILES)
+			noise_class = noise_classes[class_index % len(noise_classes)]
+			class_candidates = [item for item in noise if item["noise_class"] == noise_class]
+			selected_noise = _group_choice(
+				class_candidates, seed, noise_choice_index, f"noise:{noise_class}"
+			)
+		else:
+			selected_noise = _group_choice(noise, seed, noise_choice_index, "noise")
 		profile_occurrence = profile_occurrences[profile]
 		profile_occurrences[profile] += 1
 		case = {
@@ -503,6 +537,11 @@ def generate_plan(
 		"timeline_alignment": "fixed",
 		"cases": cases,
 	}
+	if suite in ("master_quality", "nightly") and split in ("tuning", "validation"):
+		# This explicit revision makes regeneration intentional: previously
+		# frozen schema-v4 plans keep their old hash and cannot silently acquire
+		# paired scenes.  Protected holdout plans are deliberately untouched.
+		plan["plan_revision"] = QUALITY_VOICEFOCUS_PAIRING_REVISION
 	validate_plan(plan)
 	return plan
 
@@ -515,12 +554,21 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 			"cases", "control_semantics", "corpus_inventory_sha256", "corpus_lock_sha256", "format", "generator",
 			"schema_version", "seed", "split", "split_algorithm", "suite", "timeline_alignment",
 		},
-		set(),
+		{"plan_revision"},
 		"plan",
 	)
 	_expect(value["schema_version"] == 4, "plan.schema_version", "unsupported version")
 	_expect(value["generator"] == "mumble-audio-mixture-plan-v4", "plan.generator", "unknown generator")
 	_expect(value["control_semantics"] == CONTROL_SEMANTICS, "plan.control_semantics", "unknown UI-to-recipe mapping")
+	revision_required = value["suite"] in ("master_quality", "nightly") and value["split"] in ("tuning", "validation")
+	if revision_required:
+		_expect(
+			value.get("plan_revision") == QUALITY_VOICEFOCUS_PAIRING_REVISION,
+			"plan.plan_revision",
+			"master/nightly tuning and validation plans must be explicitly regenerated with shared Quality/VoiceFocus scenes",
+		)
+	else:
+		_expect("plan_revision" not in value, "plan.plan_revision", "is not defined for this protected split/suite")
 	_expect(value["split"] in SPLITS, "plan.split", "unknown split")
 	_expect(value["suite"] in SUITE_CASES, "plan.suite", "unknown suite")
 	_expect(value["timeline_alignment"] == "fixed", "plan.timeline_alignment", "release plans require fixed alignment")
@@ -645,6 +693,41 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 	}
 	for key, minimum in requirements.items():
 		_expect(diversity[key] >= minimum, f"plan.diversity.{key}", f"requires at least {minimum}; found {diversity[key]}")
+	pairing_required = revision_required or (
+		value["suite"] == "release" and len(value["cases"]) == SUITE_CASES["release"]
+	)
+	if pairing_required:
+		paired: dict[str, list[Mapping[str, Any]]] = {}
+		for case in value["cases"]:
+			comparison_scene_id = case.get("comparison_scene_id")
+			if comparison_scene_id is not None:
+				_expect(isinstance(comparison_scene_id, str) and bool(comparison_scene_id), "plan.comparison_scene_id", "must be non-empty")
+				paired.setdefault(comparison_scene_id, []).append(case)
+		expected_pairs = (
+			len([case for case in value["cases"] if case["profile"] == "Quality"])
+			if revision_required else 6
+		)
+		_expect(len(paired) == expected_pairs, "plan.quality_voicefocus_pairs", f"requires {expected_pairs} paired scenes; found {len(paired)}")
+		for comparison_scene_id, rows in paired.items():
+			label = f"plan.quality_voicefocus_pairs.{comparison_scene_id}"
+			_expect({row["profile"] for row in rows} == {"Quality", "VoiceFocus"}, label, "requires one Quality and one VoiceFocus case")
+			_expect(len(rows) == 2, label, f"requires exactly two cases; found {len(rows)}")
+			normalized = []
+			for row in rows:
+				copy_row = copy.deepcopy(row)
+				copy_row.pop("case_id")
+				copy_row.pop("profile")
+				copy_row.pop("comparison_scene_id")
+				if revision_required:
+					copy_row.pop("controls")
+				normalized.append(copy_row)
+			_expect(normalized[0] == normalized[1], label, "paired profiles do not share an identical rendered scene and transport")
+			if rows[0]["noise"] is not None and value["suite"] == "release":
+				_expect(rows[0]["mix"]["snr_db"] in (-5, 0), label, "paired noisy comparator must be severe")
+		for row in value["cases"]:
+			if row["profile"] == "VoiceFocus" and row["noise"] is not None and row["mix"]["snr_db"] <= 0:
+				_expect(row.get("comparison_scene_id") in paired, "plan.quality_voicefocus_pairs", "every severe VoiceFocus case requires a paired Quality scene")
+
 	if value["suite"] == "release" and len(value["cases"]) == SUITE_CASES["release"]:
 		for profile in PROFILES:
 			for language in ("en-US", "sv-SE"):
@@ -665,27 +748,6 @@ def validate_plan(value: Any) -> Mapping[str, Any]:
 					for case in rows
 				}
 				_expect(len(transport) == 3, label, "requires three distinct transport recipes")
-		paired: dict[str, list[Mapping[str, Any]]] = {}
-		for case in value["cases"]:
-			comparison_scene_id = case.get("comparison_scene_id")
-			if comparison_scene_id is not None:
-				_expect(isinstance(comparison_scene_id, str) and bool(comparison_scene_id), "plan.comparison_scene_id", "must be non-empty")
-				paired.setdefault(comparison_scene_id, []).append(case)
-		_expect(len(paired) == 6, "plan.quality_voicefocus_pairs", f"requires six paired scenes; found {len(paired)}")
-		for comparison_scene_id, rows in paired.items():
-			label = f"plan.quality_voicefocus_pairs.{comparison_scene_id}"
-			_expect({row["profile"] for row in rows} == {"Quality", "VoiceFocus"}, label, "requires one Quality and one VoiceFocus case")
-			_expect(len(rows) == 2, label, f"requires exactly two cases; found {len(rows)}")
-			normalized = []
-			for row in rows:
-				copy_row = copy.deepcopy(row)
-				copy_row.pop("case_id")
-				copy_row.pop("profile")
-				copy_row.pop("comparison_scene_id")
-				normalized.append(copy_row)
-			_expect(normalized[0] == normalized[1], label, "paired profiles do not share an identical rendered scene and transport")
-			if rows[0]["noise"] is not None:
-				_expect(rows[0]["mix"]["snr_db"] in (-5, 0), label, "paired noisy comparator must be severe")
 	return value
 
 
@@ -821,6 +883,40 @@ def run_self_test() -> None:
 	second = generate_plan(manifest, inventory, "pr_smoke", "validation", seed, 30, 6000)
 	if canonical_sha256(first) != canonical_sha256(second):
 		raise AssertionError("identical inputs did not produce an identical plan")
+	master = generate_plan(manifest, inventory, "master_quality", "validation", seed, 500, 6000)
+	if master.get("plan_revision") != QUALITY_VOICEFOCUS_PAIRING_REVISION:
+		raise AssertionError("master plan did not publish the explicit paired-scene revision")
+	master_pairs: dict[str, list[Mapping[str, Any]]] = {}
+	for case in master["cases"]:
+		if case.get("comparison_scene_id") is not None:
+			master_pairs.setdefault(str(case["comparison_scene_id"]), []).append(case)
+	if len(master_pairs) != 100 or any({row["profile"] for row in rows} != {"Quality", "VoiceFocus"} for rows in master_pairs.values()):
+		raise AssertionError("master plan did not pair every Quality/VoiceFocus scene")
+	if any(
+		case.get("comparison_scene_id") not in master_pairs
+		for case in master["cases"]
+		if case["profile"] == "VoiceFocus" and case["noise"] is not None and case["mix"]["snr_db"] <= 0
+	):
+		raise AssertionError("master plan left a severe VoiceFocus case unpaired")
+	stale_master = copy.deepcopy(master)
+	stale_master.pop("plan_revision")
+	try:
+		validate_plan(stale_master)
+	except PlanError as error:
+		if "explicitly regenerated" not in str(error):
+			raise
+	else:
+		raise AssertionError("pre-revision master plan remained qualification-eligible")
+	tampered_master = copy.deepcopy(master)
+	tampered_voice = next(case for case in tampered_master["cases"] if case["profile"] == "VoiceFocus")
+	tampered_voice["transport"]["frames_per_packet"] = 2 if tampered_voice["transport"]["frames_per_packet"] == 1 else 1
+	try:
+		validate_plan(tampered_master)
+	except PlanError as error:
+		if "quality_voicefocus_pairs" not in str(error):
+			raise
+	else:
+		raise AssertionError("master plan accepted a mismatched paired route")
 	short_sources = copy.deepcopy(inventory)
 	short_ids = set()
 	for kind in ("speech", "noise"):
