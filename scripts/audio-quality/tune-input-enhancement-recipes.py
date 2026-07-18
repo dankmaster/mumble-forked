@@ -351,6 +351,49 @@ def _direct_model_arguments(model: Mapping[str, Any], model_path: Path, mix: flo
 	]
 
 
+def _validate_direct_intrinsic_latency(model: Mapping[str, Any], direct_latency_samples: int) -> int:
+	descriptor_intrinsic_latency = OFFLINE._milliseconds_to_samples(
+		model["algorithmicLatencyMs"], f"model {model['id']}.algorithmicLatencyMs",
+	)
+	_expect(direct_latency_samples >= OFFLINE.FRAME_SAMPLES, "model comparison.latency", "missing direct-adapter collection frame")
+	measured_intrinsic_latency = direct_latency_samples - OFFLINE.FRAME_SAMPLES
+	_expect(
+		measured_intrinsic_latency == descriptor_intrinsic_latency,
+		"model comparison.latency",
+		f"descriptor intrinsic {descriptor_intrinsic_latency} samples does not match direct report intrinsic {measured_intrinsic_latency}",
+	)
+	return descriptor_intrinsic_latency
+
+
+def _model_product_projection(
+	model: Mapping[str, Any], projection_recipe: Mapping[str, Any], direct_latency_samples: int,
+) -> Mapping[str, Any]:
+	intrinsic_samples = _validate_direct_intrinsic_latency(model, direct_latency_samples)
+	execution_semantics_version = int(projection_recipe["executionSemanticsVersion"])
+	_expect(
+		execution_semantics_version >= OFFLINE.MIN_SUPPORTED_EXECUTION_SEMANTICS_VERSION,
+		"model comparison execution semantics", "predates the causal-tail contract",
+	)
+	worker_frames = 2 if execution_semantics_version >= 5 else 1
+	worker_samples = worker_frames * OFFLINE.FRAME_SAMPLES
+	projected_samples = intrinsic_samples + worker_samples
+	budget_samples = OFFLINE._milliseconds_to_samples(
+		projection_recipe["latencyBudgetMs"], f"recipe {projection_recipe['id']}.latencyBudgetMs",
+	)
+	return {
+		"execution_semantics_version": execution_semantics_version,
+		"direct_reported_latency_samples": direct_latency_samples,
+		"direct_collection_latency_samples": OFFLINE.FRAME_SAMPLES,
+		"descriptor_intrinsic_latency_samples": intrinsic_samples,
+		"worker_latency_frames": worker_frames,
+		"worker_latency_samples": worker_samples,
+		"projected_latency_samples": projected_samples,
+		"projected_latency_ms": projected_samples * 1000.0 / OFFLINE.SAMPLE_RATE_HZ,
+		"budget_latency_samples": budget_samples,
+		"within_product_latency_budget": projected_samples <= budget_samples,
+	}
+
+
 def _validate_direct_report(report_path: Path, output_path: Path, input_path: Path, model: Mapping[str, Any], model_path: Path, mix: float) -> Mapping[str, Any]:
 	report = _load_json(report_path, "DeepFilterNet model comparison report")
 	_expect(report.get("processing_mode") == "expert-backend" and report.get("backend") == "DeepFilterNet", "model comparison", "did not use direct DeepFilterNet")
@@ -362,6 +405,7 @@ def _validate_direct_report(report_path: Path, output_path: Path, input_path: Pa
 	_expect(int(report.get("saturated_sample_count", 0)) <= int(report.get("input_saturated_sample_count", 0)), "model comparison", "new clipping")
 	latency = int(report.get("reported_latency_samples", -1))
 	_expect(latency >= 0 and latency % OFFLINE.FRAME_SAMPLES == 0, "model comparison.latency", "invalid latency")
+	_validate_direct_intrinsic_latency(model, latency)
 	_expect(int(report.get("output_sample_count", -1)) == int(report.get("input_sample_count", -1)) + latency, "model comparison", "tail mismatch")
 	_expect(float(report.get("rtf", math.inf)) <= 0.35, "model comparison.rtf", "exceeds 0.35")
 	_expect(float(report.get("callback_p99_ms", math.inf)) <= 8.0, "model comparison.callback_p99_ms", "exceeds 8 ms")
@@ -473,14 +517,12 @@ def _execute_task(context: Mapping[str, Any], args: argparse.Namespace, executio
 			"artifacts": artifacts,
 		}
 		if task["kind"] == "model-comparison":
-			# Product semantics v5 uses two complete callback periods around the
-			# model.  A direct-backend win is not product-eligible if that projected
-			# latency exceeds the 50 ms Quality/Voice Focus budget.
-			projected = int(round(float(model["algorithmicLatencyMs"]))) + 20
-			result["model_product_projection"] = {
-				"execution_semantics_version": 5, "projected_latency_ms": projected,
-				"within_50ms_budget": projected <= 50,
-			}
+			# The direct expert adapter contributes one collection frame which is
+			# not intrinsic model latency. Product latency is derived independently
+			# from the descriptor's intrinsic value and the signed public Quality
+			# recipe's execution semantics.
+			projection_recipe = OFFLINE._public_recipe("Quality", context["recipes"])
+			result["model_product_projection"] = _model_product_projection(model, projection_recipe, latency)
 		_write_json_atomic(attempt_root / "result.json", result)
 		return result
 	except Exception as error:
@@ -674,7 +716,7 @@ def summarize_model_comparison(results: Sequence[Mapping[str, Any]]) -> Mapping[
 			"median_rtf": statistics.median(float(row["performance"]["rtf"]) for row in candidate),
 			"p99_callback_ms_max": max(float(row["performance"]["callback_p99_ms"]) for row in candidate),
 			"projected_product_latency_ms": candidate[0]["model_product_projection"]["projected_latency_ms"],
-			"within_product_latency_budget": candidate[0]["model_product_projection"]["within_50ms_budget"],
+			"within_product_latency_budget": candidate[0]["model_product_projection"]["within_product_latency_budget"],
 		})
 	standard = [row for row in summaries if row["model_id"] == "deepfilternet:balanced"]
 	low_latency = [row for row in summaries if row["model_id"] == "deepfilternet:low-latency"]
@@ -687,7 +729,7 @@ def summarize_model_comparison(results: Sequence[Mapping[str, Any]]) -> Mapping[
 			and statistics.median(row["median_dnsmos_ovrl"] for row in standard) > statistics.median(row["median_dnsmos_ovrl"] for row in low_latency)
 			else "retain-low-latency-product-model"
 		),
-		"note": "Standard DeepFilterNet3 projects to 40 ms intrinsic + 20 ms semantics-v5 worker latency.",
+		"latency_contract": "descriptor intrinsic latency plus worker frames selected by the signed public Quality recipe execution semantics",
 	}
 
 
@@ -850,6 +892,37 @@ def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 
 
 def run_self_test() -> None:
+	quality_recipe = {
+		"id": "input.quality.self-test", "executionSemanticsVersion": 5, "latencyBudgetMs": 50,
+	}
+	standard_projection = _model_product_projection(
+		{"id": "deepfilternet:balanced", "algorithmicLatencyMs": 30}, quality_recipe, 1920,
+	)
+	_expect(
+		standard_projection["descriptor_intrinsic_latency_samples"] == 1440
+		and standard_projection["worker_latency_samples"] == 960
+		and standard_projection["projected_latency_samples"] == 2400
+		and standard_projection["projected_latency_ms"] == 50.0
+		and standard_projection["within_product_latency_budget"] is True,
+		"model latency self-test", "standard DeepFilterNet projection drift",
+	)
+	low_latency_projection = _model_product_projection(
+		{"id": "deepfilternet:low-latency", "algorithmicLatencyMs": 10}, quality_recipe, 960,
+	)
+	_expect(
+		low_latency_projection["projected_latency_samples"] == 1440
+		and low_latency_projection["projected_latency_ms"] == 30.0,
+		"model latency self-test", "low-latency DeepFilterNet projection drift",
+	)
+	try:
+		_model_product_projection(
+			{"id": "deepfilternet:stale-descriptor", "algorithmicLatencyMs": 40}, quality_recipe, 1920,
+		)
+	except TuningError:
+		pass
+	else:
+		raise TuningError("model latency self-test: stale descriptor was accepted")
+
 	scheduler_tasks = [
 		{"task_id": f"task-{value}", "candidate_id": f"candidate-{value}", "value": value}
 		for value in (2, 1, 0)

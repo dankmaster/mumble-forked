@@ -92,7 +92,7 @@
       "path": "deepfilternet/DeepFilterNet3_onnx.tar.gz",
       "licenseSpdx": "MIT OR Apache-2.0",
       "sampleRateHz": 48000,
-      "algorithmicLatencyMs": 40,
+      "algorithmicLatencyMs": 30,
       "recipeCompatibility": []
     },
     {
