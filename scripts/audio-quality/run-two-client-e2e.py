@@ -921,10 +921,18 @@ def run(args: argparse.Namespace) -> Mapping[str, Any]:
 	# The clean control anchors fixed speech edges through the unchanged route.
 	# The noisy Original comparison remains available for OVRL/BAK/SIG/eSTOI/WER
 	# comparisons and is deliberately not treated as an edge-control.
-	roles = [("control", "Original"), ("original_comparison", "Original")]
-	if case["profile"] != "Original":
-		roles.append(("candidate", case["profile"]))
-		roles.append(("candidate_edge", case["profile"]))
+	# Keep the candidate side explicit even when the requested profile is
+	# Original.  Master/nightly case evidence requires receiver-capture
+	# objective scores for every core profile, and that scorer deliberately
+	# requires an independently captured noisy candidate plus its paired fixed-
+	# timeline score.  Reusing ``original_comparison`` would collapse the two
+	# sides of the comparison and leave no candidate-role attestation.
+	roles = [
+		("control", "Original"),
+		("original_comparison", "Original"),
+		("candidate", case["profile"]),
+		("candidate_edge", case["profile"]),
+	]
 	contracts: list[tuple[str, Mapping[str, Any], Path, str, Path]] = []
 	for role, profile in roles:
 		role_root = args.output_root / role
@@ -1275,18 +1283,30 @@ def run_self_test() -> None:
 		selected_case = plan["cases"][3]
 		if selected_case["profile"] != "Quality":
 			raise AssertionError("self-test must exercise the DeepFilterNet Quality worker contract")
-		audio = root / "audio"; case_root = audio / selected_case["case_id"]; case_root.mkdir(parents=True)
-		_write_sine(case_root / "client1-input.wav", frequency_hz=220)
-		_write_sine(case_root / "clean-reference.wav", frequency_hz=330)
+		original_case = next(case for case in plan["cases"] if case["profile"] == "Original")
+		audio = root / "audio"
+		render_cases = []
+		for index, rendered_case in enumerate((selected_case, original_case)):
+			case_root = audio / rendered_case["case_id"]
+			case_root.mkdir(parents=True)
+			_write_sine(case_root / "client1-input.wav", frequency_hz=220 + index * 20)
+			_write_sine(case_root / "clean-reference.wav", frequency_hz=330 + index * 20)
+			render_cases.append({
+				"case_id": rendered_case["case_id"],
+				"input": {
+					"path": f"{rendered_case['case_id']}/client1-input.wav",
+					"sha256": _file_sha256(case_root / "client1-input.wav"),
+				},
+				"clean_reference": {
+					"path": f"{rendered_case['case_id']}/clean-reference.wav",
+					"sha256": _file_sha256(case_root / "clean-reference.wav"),
+				},
+			})
 		render_manifest = {
 			"schema_version": 2, "renderer": "mumble-audio-mixture-renderer-v2",
 			"plan_sha256": PLAN.canonical_sha256(plan), "corpus_lock_sha256": plan["corpus_lock_sha256"],
 			"corpus_inventory_sha256": plan["corpus_inventory_sha256"], "private_audio_do_not_upload": True,
-			"cases": [{
-				"case_id": selected_case["case_id"],
-				"input": {"path": f"{selected_case['case_id']}/client1-input.wav", "sha256": _file_sha256(case_root / "client1-input.wav")},
-				"clean_reference": {"path": f"{selected_case['case_id']}/clean-reference.wav", "sha256": _file_sha256(case_root / "clean-reference.wav")},
-			}],
+			"cases": render_cases,
 		}
 		render_manifest_path = root / "render.json"; _write_json(render_manifest_path, render_manifest)
 		adapter = root / "adapter.py"
@@ -1401,6 +1421,74 @@ def run_self_test() -> None:
 			raise AssertionError("final evidence did not preserve the active binding, worker metrics, and provenance")
 		if candidate_edge_evidence["qualification_purpose"] != "clean-enhanced-input-edge-probe":
 			raise AssertionError("candidate_edge evidence was not labelled as the clean enhanced input-edge probe")
+
+		original_args = argparse.Namespace(
+			plan=plan_path, case_id=original_case["case_id"], render_manifest=render_manifest_path,
+			render_root=audio, runtime_root=runtime, client_binary=client, server_binary=server,
+			model_manifest=model_manifest, recipe_manifest=recipe_manifest, inventory=inventory_path,
+			corpus_lock=manifest_path, metrics_manifest=metrics_manifest, adapter=adapter,
+			qualification_case_set=plan_path, adapter_arg=[], output_root=root / "original-output",
+			emit_contracts_only=False,
+		)
+		original_result = run(original_args)
+		if set(original_result["results"]) != {
+			"control", "original_comparison", "candidate", "candidate_edge"
+		}:
+			raise AssertionError("Original did not produce the complete receiver-comparison role set")
+		original_candidate = original_result["results"]["candidate"]
+		if (
+			original_candidate["active_recipe"]["id"] != "input.original"
+			or original_candidate["active_models"] != []
+			or original_candidate["performance"]["model_initialization_attempts"] != 0
+			or original_candidate["fixed_timeline_score_sha256"]
+			!= _file_sha256(root / "original-output" / "candidate" / "fixed-timeline-score.json")
+		):
+			raise AssertionError("Original candidate did not retain its zero-model paired-route contract")
+		original_candidate_score = _load_json(
+			root / "original-output" / "candidate" / "fixed-timeline-score.json"
+		)
+		original_edge_score = _load_json(
+			root / "original-output" / "candidate_edge" / "pre-opus-fixed-timeline-score.json"
+		)
+		if (
+			original_candidate_score.get("passed") is not True
+			or original_candidate_score.get("timeline_alignment") != "fixed-paired-original-route"
+			or original_candidate_score.get("declared_latency_samples") != 0
+			or original_edge_score.get("passed") is not True
+		):
+			raise AssertionError("Original candidate did not produce passing zero-latency route and input-edge scores")
+		objective = _load_script("objective_quality_score.py", "mumble_two_client_original_objective")
+		original_role_root = root / "original-output"
+		original_candidate_result = _load_json(original_role_root / "candidate" / "adapter-result.json")
+		original_comparison_result = _load_json(
+			original_role_root / "original_comparison" / "adapter-result.json"
+		)
+		original_render_entry = next(
+			entry for entry in render_cases if entry["case_id"] == original_case["case_id"]
+		)
+		route_offset, route_binding = objective._receiver_route_alignment(
+			argparse.Namespace(
+				case_id=original_case["case_id"], profile="Original",
+				original_latency_samples=0, candidate_latency_samples=0,
+				route_control_wav=original_role_root / "control" / "capture.wav",
+				route_control_score=original_role_root / "control" / "fixed-timeline-score.json",
+				candidate_fixed_timeline_score=original_role_root / "candidate" / "fixed-timeline-score.json",
+				route_e2e_manifest=original_role_root / "e2e-manifest.json",
+			),
+			objective.file_record(audio / original_render_entry["clean_reference"]["path"]),
+			{
+				"noisy_original": objective.file_record(
+					original_role_root / "original_comparison"
+					/ original_comparison_result["capture"]["relative_path"]
+				),
+				"candidate": objective.file_record(
+					original_role_root / "candidate"
+					/ original_candidate_result["capture"]["relative_path"]
+				),
+			},
+		)
+		if route_offset < 0 or route_binding["edge_tail_gate"]["candidate_passed"] is not True:
+			raise AssertionError("Original paired route is not accepted by the objective receiver scorer")
 
 		candidate_root = root / "output" / "candidate"
 		candidate_contract_path = candidate_root / "adapter-contract.json"

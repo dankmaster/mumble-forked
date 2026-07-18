@@ -919,12 +919,8 @@ def _derive_e2e_case(
 	profile = str(case["profile"])
 	clean_sha = score["inputs"]["clean_reference"]["sha256"]
 	source_sha = _hash(_mapping(documents["candidate_adapter_result"], f"{path}.reports.candidate_adapter_result").get("input_sha256"), f"{path}.source_input_sha256")
-	candidate_role = "original_comparison" if profile == "Original" else "candidate"
-	edge_role = "control" if profile == "Original" else "candidate_edge"
-	if profile == "Original":
-		_same_reference(references["candidate_adapter_result"], references["original_adapter_result"], f"{path}.reports.candidate_adapter_result")
-		_same_reference(references["edge_adapter_result"], references["control_adapter_result"], f"{path}.reports.edge_adapter_result")
-		_same_reference(references["edge_fixed_timeline_score"], references["control_pre_opus_fixed_timeline_score"], f"{path}.reports.edge_fixed_timeline_score")
+	candidate_role = "candidate"
+	edge_role = "candidate_edge"
 	candidate = _adapter_measurement(documents["candidate_adapter_result"], role=candidate_role, profile=profile, input_sha256=source_sha, build=build, profile_bindings=profile_bindings, path=f"{path}.reports.candidate_adapter_result")
 	edge_runtime = _adapter_measurement(documents["edge_adapter_result"], role=edge_role, profile=profile, input_sha256=clean_sha, build=build, profile_bindings=profile_bindings, path=f"{path}.reports.edge_adapter_result")
 	original = _adapter_measurement(documents["original_adapter_result"], role="original_comparison", profile="Original", input_sha256=source_sha, build=build, profile_bindings=profile_bindings, path=f"{path}.reports.original_adapter_result")
@@ -967,7 +963,7 @@ def _derive_e2e_case(
 		"alignment", "artifact", "complete_tail_required", "max_end_loss_samples",
 		"max_onset_loss_samples", "roles",
 	}, f"{path}.reports.e2e_manifest.input_timeline_gate")
-	expected_edge_roles = ["control"] if profile == "Original" else ["control", "candidate_edge"]
+	expected_edge_roles = ["control", "candidate_edge"]
 	_expect(
 		input_gate == {
 			"artifact": "sender_pre_opus", "alignment": "fixed-declared-latency",
@@ -996,14 +992,10 @@ def _derive_e2e_case(
 		"does not match the attested OG transport route contract",
 	)
 	results = _mapping(manifest.get("results"), f"{path}.reports.e2e_manifest.results")
-	role_bindings = (
-		{"original_comparison": "original_adapter_result", "control": "control_adapter_result"}
-		if profile == "Original"
-		else {
-			"candidate": "candidate_adapter_result", "candidate_edge": "edge_adapter_result",
-			"original_comparison": "original_adapter_result", "control": "control_adapter_result",
-		}
-	)
+	role_bindings = {
+		"candidate": "candidate_adapter_result", "candidate_edge": "edge_adapter_result",
+		"original_comparison": "original_adapter_result", "control": "control_adapter_result",
+	}
 	_exact_keys(results, set(role_bindings), f"{path}.reports.e2e_manifest.results")
 	qualification_purposes = {
 		"control": "clean-original-route-control",
@@ -1049,7 +1041,7 @@ def _derive_e2e_case(
 	for label, runtime in (("edge", edge_runtime), ("original", original), ("control", control)):
 		_expect(runtime["identity"]["run_provenance_sha256"] == candidate["identity"]["run_provenance_sha256"], f"{path}.{label}.execution_identity", "roles do not share run provenance")
 	edge_result = _mapping(results[edge_role], f"{path}.reports.e2e_manifest.results.{edge_role}")
-	route_result = _mapping(results[candidate_role] if profile != "Original" else results["control"], f"{path}.reports.e2e_manifest.results.route")
+	route_result = _mapping(results[candidate_role], f"{path}.reports.e2e_manifest.results.route")
 	control_result = _mapping(results["control"], f"{path}.reports.e2e_manifest.results.control")
 	_expect(edge_result.get("pre_opus_fixed_timeline_score_sha256") == references["edge_fixed_timeline_score"]["sha256"], f"{path}.reports.edge_fixed_timeline_score", "E2E manifest hash mismatch")
 	_expect(route_result.get("fixed_timeline_score_sha256") == references["route_fixed_timeline_score"]["sha256"], f"{path}.reports.route_fixed_timeline_score", "E2E manifest hash mismatch")
@@ -1064,11 +1056,11 @@ def _derive_e2e_case(
 	)
 	route = _fixed_timeline_measurement(
 		documents["route_fixed_timeline_score"], reference_sha256=clean_sha,
-		received_sha256=(control["capture_sha256"] if profile == "Original" else candidate["capture_sha256"]),
+		received_sha256=candidate["capture_sha256"],
 		declared_latency_samples=int(candidate["latency_samples"]), path=f"{path}.reports.route_fixed_timeline_score",
 		require_complete_tail=require_route_tail, exact_limit_samples=route_budget,
-		expected_alignment="fixed" if profile == "Original" else "fixed-paired-original-route",
-		maximum_observed_edge_samples=None if profile == "Original" else FRAME_SAMPLES,
+		expected_alignment="fixed-paired-original-route",
+		maximum_observed_edge_samples=FRAME_SAMPLES,
 	)
 	control_score = _fixed_timeline_measurement(
 		documents["control_fixed_timeline_score"], reference_sha256=clean_sha,
@@ -1105,7 +1097,7 @@ def _derive_e2e_case(
 		"plan_case_sha256": qualification_binding["plan_case_sha256"],
 		"render_entry_sha256": qualification_binding["render_entry_sha256"],
 		"algorithmic_latency_ms": int(candidate["latency_samples"]) * 1000.0 / SAMPLE_RATE_HZ,
-		"speech_edge_loss_ms": max(edge["speech_edge_loss_ms"], route["speech_edge_loss_ms"] if profile != "Original" else 0.0),
+		"speech_edge_loss_ms": max(edge["speech_edge_loss_ms"], route["speech_edge_loss_ms"]),
 		"counters": counters,
 		"performance": {
 			"audio_duration_seconds": candidate["audio_duration_seconds"],
@@ -1839,13 +1831,55 @@ def run_self_test() -> None:
 			pass
 		else:
 			raise AssertionError("paired E2E route hid more than one frame of candidate speech-edge loss")
+		original_candidate_document = adapter_result(
+			"candidate", "Original", source_sha256, "8" * 64, "9" * 64, 0, original_binding, "5"
+		)
+		original_edge_document = adapter_result(
+			"candidate_edge", "Original", clean_sha256, "c" * 64, "d" * 64, 0, original_binding, "6"
+		)
+		original_documents = copy.deepcopy(documents)
+		original_documents["candidate_adapter_result"] = original_candidate_document
+		original_documents["edge_adapter_result"] = original_edge_document
+		original_documents["edge_fixed_timeline_score"] = fixed_score(
+			original_edge_document["sender_pre_opus"]["sha256"], 0, "fixed", True, FRAME_SAMPLES
+		)
+		original_documents["route_fixed_timeline_score"] = fixed_score(
+			original_candidate_document["capture"]["sha256"], 0,
+			"fixed-paired-original-route", False, 2880,
+		)
+		original_manifest = copy.deepcopy(e2e_manifest)
+		original_manifest["profile"] = "Original"
+		original_manifest["qualification_binding"]["profile"] = "Original"
+		original_manifest["results"] = {
+			"candidate": manifest_result("candidate", original_candidate_document),
+			"candidate_edge": manifest_result("candidate_edge", original_edge_document),
+			"original_comparison": manifest_result("original_comparison", original_document),
+			"control": manifest_result("control", control_document),
+		}
+		original_documents["e2e_manifest"] = original_manifest
+		original_score = copy.deepcopy(score)
+		original_score["inputs"]["candidate"]["sha256"] = original_candidate_document["capture"]["sha256"]
+		original_score["alignment"]["candidate_latency_samples"] = 0
 		original_case = {"case_id": "case-e2e", "profile": "Original", "dataset_split": "validation"}
+		derived_original = _derive_e2e_case(
+			original_case, original_score, references, original_documents, build, e2e_bindings,
+			"self-test explicit Original candidate",
+		)
+		if derived_original["algorithmic_latency_ms"] != 0.0:
+			raise AssertionError("explicit Original candidate did not retain zero enhancement latency")
+		legacy_alias_documents = copy.deepcopy(original_documents)
+		legacy_alias_documents["e2e_manifest"]["results"].pop("candidate")
+		legacy_alias_documents["e2e_manifest"]["results"].pop("candidate_edge")
+		legacy_alias_documents["e2e_manifest"]["input_timeline_gate"]["roles"] = ["control"]
 		try:
-			_derive_e2e_case(original_case, score, references, documents, build, e2e_bindings, "self-test Original aliases")
+			_derive_e2e_case(
+				original_case, original_score, references, legacy_alias_documents, build, e2e_bindings,
+				"self-test legacy Original aliases",
+			)
 		except MeasurementEvidenceError:
 			pass
 		else:
-			raise AssertionError("Original accepted distinct unbound candidate/control alias reports")
+			raise AssertionError("legacy Original candidate/control aliases remained qualification-eligible")
 		auto_soak_bindings = [
 			{
 				"profile": "Light", "engine": "Speex",
