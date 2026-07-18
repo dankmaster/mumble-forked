@@ -12,11 +12,13 @@ samples.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import importlib.util
 import json
 import math
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -31,6 +33,12 @@ class RenderError(ValueError):
 
 TARGET_RATE = 48_000
 TARGET_CHANNELS = 1
+MAX_RENDER_JOBS = 32
+WINDOWS_RESERVED_DEVICE_NAMES = {
+	"CON", "PRN", "AUX", "NUL",
+	*(f"COM{index}" for index in range(1, 10)),
+	*(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 def _load_plan_module() -> Any:
@@ -358,29 +366,136 @@ def _render_case(case: Mapping[str, Any], corpus_root: Path, output_root: Path, 
 	}
 
 
-def render(plan: Mapping[str, Any], corpus_root: Path, output_root: Path) -> Mapping[str, Any]:
-	PLAN.validate_plan(plan)
-	if output_root.exists() and any(output_root.iterdir()):
-		raise RenderError(f"output root must be empty: {output_root}")
-	output_root.mkdir(parents=True, exist_ok=True)
+def _validated_jobs(value: int) -> int:
+	if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= MAX_RENDER_JOBS:
+		raise RenderError(f"jobs must be an integer from 1 through {MAX_RENDER_JOBS}")
+	return value
+
+
+def _case_id(value: Any) -> str:
+	if not isinstance(value, str) or not value or value in (".", ".."):
+		raise RenderError("case id must be a non-empty safe path component")
+	if any(character in value for character in '<>:"/\\|?*') or any(ord(character) < 32 for character in value):
+		raise RenderError(f"unsafe case id: {value!r}")
+	if value.endswith((".", " ")):
+		raise RenderError(f"case id has a Windows-unsafe trailing dot or space: {value!r}")
+	device_basename = value.split(".", 1)[0].rstrip(" ").upper()
+	if device_basename in WINDOWS_RESERVED_DEVICE_NAMES:
+		raise RenderError(f"case id uses a reserved Windows device name: {value!r}")
+	return value
+
+
+def _windows_case_id_key(value: str) -> str:
+	return value.rstrip(" .").casefold()
+
+
+def _reject_windows_path_collisions(case_ids: Sequence[str], label: str) -> None:
+	seen: dict[str, str] = {}
+	for case_id in case_ids:
+		key = _windows_case_id_key(case_id)
+		previous = seen.get(key)
+		if previous is not None:
+			raise RenderError(
+				f"{label} contains a duplicate or Windows-normalized path collision: "
+				f"{previous!r} and {case_id!r}"
+			)
+		seen[key] = case_id
+
+
+def _select_cases(plan: Mapping[str, Any], requested_case_ids: Sequence[str] | None) -> list[Mapping[str, Any]]:
+	all_cases = list(plan["cases"])
+	plan_ids = [_case_id(case["case_id"]) for case in all_cases]
+	_reject_windows_path_collisions(plan_ids, "plan")
+	if requested_case_ids is None:
+		return all_cases
+	requested = [_case_id(case_id) for case_id in requested_case_ids]
+	if not requested:
+		raise RenderError("case-id filter must not be empty")
+	_reject_windows_path_collisions(requested, "case-id filter")
+	unknown = sorted(set(requested) - set(plan_ids))
+	if unknown:
+		raise RenderError(f"case-id filter contains unknown case id(s): {', '.join(unknown)}")
+	selected = set(requested)
+	# The canonical plan, rather than command-line ordering, owns manifest order.
+	return [case for case, case_id in zip(all_cases, plan_ids) if case_id in selected]
+
+
+def _render_entries(
+	cases: Sequence[Mapping[str, Any]], corpus_root: Path, staging_root: Path, target_samples: int, jobs: int
+) -> list[Mapping[str, Any]]:
+	if jobs == 1:
+		return [_render_case(case, corpus_root, staging_root, target_samples) for case in cases]
+	entries: list[Mapping[str, Any] | None] = [None] * len(cases)
+	futures: list[tuple[int, str, concurrent.futures.Future[Mapping[str, Any]]]] = []
+	try:
+		with concurrent.futures.ProcessPoolExecutor(max_workers=min(jobs, len(cases))) as executor:
+			for index, case in enumerate(cases):
+				future = executor.submit(_render_case, case, corpus_root, staging_root, target_samples)
+				futures.append((index, str(case["case_id"]), future))
+			for index, case_id, future in futures:
+				try:
+					entries[index] = future.result()
+				except Exception as error:
+					for _, _, pending in futures:
+						pending.cancel()
+					raise RenderError(f"worker failed while rendering {case_id}: {error}") from error
+	except RenderError:
+		raise
+	except Exception as error:
+		raise RenderError(f"unable to run render workers: {error}") from error
+	if any(entry is None for entry in entries):
+		raise RenderError("render worker completed without returning every case")
+	return [entry for entry in entries if entry is not None]
+
+
+def _render_validated(
+	plan: Mapping[str, Any], corpus_root: Path, output_root: Path, *, jobs: int = 1,
+	case_ids: Sequence[str] | None = None,
+) -> Mapping[str, Any]:
+	jobs = _validated_jobs(jobs)
+	cases = _select_cases(plan, case_ids)
+	if output_root.exists():
+		if not output_root.is_dir() or output_root.is_symlink() or any(output_root.iterdir()):
+			raise RenderError(f"output root must be an empty real directory: {output_root}")
+	output_root.parent.mkdir(parents=True, exist_ok=True)
+	staging_root = Path(tempfile.mkdtemp(prefix=f".{output_root.name}.render-", dir=output_root.parent)).resolve()
 	target_samples = round(int(plan["format"]["duration_ms"]) * TARGET_RATE / 1000)
-	entries = [_render_case(case, corpus_root, output_root, target_samples) for case in plan["cases"]]
-	manifest = {
-		"schema_version": 2,
-		"renderer": "mumble-audio-mixture-renderer-v2",
-		"plan_sha256": PLAN.canonical_sha256(plan),
-		"corpus_lock_sha256": plan["corpus_lock_sha256"],
-		"corpus_inventory_sha256": plan["corpus_inventory_sha256"],
-		"sample_rate_hz": TARGET_RATE,
-		"channels": TARGET_CHANNELS,
-		"private_audio_do_not_upload": True,
-		"cases": entries,
-	}
-	manifest_path = output_root / "render-manifest.json"
-	temporary = manifest_path.with_suffix(".tmp")
-	temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-	os.replace(temporary, manifest_path)
-	return manifest
+	try:
+		entries = _render_entries(cases, corpus_root.resolve(), staging_root, target_samples, jobs)
+		manifest = {
+			"schema_version": 2,
+			"renderer": "mumble-audio-mixture-renderer-v2",
+			"plan_sha256": PLAN.canonical_sha256(plan),
+			"corpus_lock_sha256": plan["corpus_lock_sha256"],
+			"corpus_inventory_sha256": plan["corpus_inventory_sha256"],
+			"sample_rate_hz": TARGET_RATE,
+			"channels": TARGET_CHANNELS,
+			"private_audio_do_not_upload": True,
+			"cases": entries,
+		}
+		manifest_path = staging_root / "render-manifest.json"
+		temporary = manifest_path.with_suffix(".tmp")
+		temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+		os.replace(temporary, manifest_path)
+		if output_root.exists():
+			# Re-check immediately before publishing so a concurrent writer cannot
+			# turn a successful staging render into a mixed, apparently valid tree.
+			if not output_root.is_dir() or output_root.is_symlink() or any(output_root.iterdir()):
+				raise RenderError(f"output root changed while rendering: {output_root}")
+			output_root.rmdir()
+		os.replace(staging_root, output_root)
+		return manifest
+	finally:
+		if staging_root.exists():
+			shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def render(
+	plan: Mapping[str, Any], corpus_root: Path, output_root: Path, *, jobs: int = 1,
+	case_ids: Sequence[str] | None = None,
+) -> Mapping[str, Any]:
+	PLAN.validate_plan(plan)
+	return _render_validated(plan, corpus_root, output_root, jobs=jobs, case_ids=case_ids)
 
 
 def _write_fixture(path: Path, rate: int, frequency: float, seconds: int) -> None:
@@ -445,24 +560,124 @@ def self_test() -> None:
 				},
 			},
 		}
-		output_a = root / "a"
-		output_b = root / "b"
-		a = _render_case(case, corpus, output_a, TARGET_RATE)
-		b = _render_case(case, corpus, output_b, TARGET_RATE)
-		if a["input"]["sha256"] != b["input"]["sha256"]:
-			raise AssertionError("renderer is not byte deterministic")
-		if a["input"]["sha256"] == a["clean_reference"]["sha256"]:
+		cases = []
+		for index, profile in enumerate(("Light", "Balanced", "Quality"), start=1):
+			item = json.loads(json.dumps(case))
+			item["case_id"] = f"self-test-validation-{index:05d}"
+			item["profile"] = profile
+			item["startup"]["preroll_ms"] = 0 if index % 2 else 300
+			cases.append(item)
+		plan = {
+			"format": { "duration_ms": 1000 },
+			"corpus_lock_sha256": "b" * 64,
+			"corpus_inventory_sha256": "c" * 64,
+			"cases": cases,
+		}
+
+		output_serial = root / "serial"
+		output_parallel = root / "parallel"
+		serial = _render_validated(plan, corpus, output_serial, jobs=1)
+		parallel = _render_validated(plan, corpus, output_parallel, jobs=3)
+		if (output_serial / "render-manifest.json").read_bytes() != (output_parallel / "render-manifest.json").read_bytes():
+			raise AssertionError("manifest bytes differ between serial and parallel rendering")
+		serial_tree = {
+			path.relative_to(output_serial).as_posix(): _sha256(path)
+			for path in output_serial.rglob("*") if path.is_file()
+		}
+		parallel_tree = {
+			path.relative_to(output_parallel).as_posix(): _sha256(path)
+			for path in output_parallel.rglob("*") if path.is_file()
+		}
+		if serial_tree != parallel_tree:
+			raise AssertionError("rendered tree differs between serial and parallel rendering")
+		if serial["cases"][0]["input"]["sha256"] == serial["cases"][0]["clean_reference"]["sha256"]:
 			raise AssertionError("0 dB noise did not alter the rendered input")
+
+		filtered_root = root / "filtered"
+		filtered = _render_validated(
+			plan, corpus, filtered_root, jobs=2,
+			case_ids=(cases[2]["case_id"], cases[0]["case_id"]),
+		)
+		expected_filtered_ids = [cases[0]["case_id"], cases[2]["case_id"]]
+		if [entry["case_id"] for entry in filtered["cases"]] != expected_filtered_ids:
+			raise AssertionError("case filter did not preserve canonical plan order")
+		full_entries = {entry["case_id"]: entry for entry in parallel["cases"]}
+		if filtered["cases"] != [full_entries[case_id] for case_id in expected_filtered_ids]:
+			raise AssertionError("case filter changed rendered case bytes or metadata")
+		if {path.parent.name for path in filtered_root.glob("*/client1-input.wav")} != set(expected_filtered_ids):
+			raise AssertionError("case filter rendered an unselected case")
+
+		for bad_ids, expected_message in (
+			((cases[0]["case_id"], cases[0]["case_id"]), "duplicate"),
+			((cases[0]["case_id"], cases[0]["case_id"].upper()), "Windows-normalized"),
+			(("unknown-case",), "unknown"),
+		):
+			try:
+				_render_validated(plan, corpus, root / f"rejected-{expected_message}", case_ids=bad_ids)
+			except RenderError as error:
+				if expected_message not in str(error):
+					raise
+			else:
+				raise AssertionError(f"renderer accepted a {expected_message} case-id filter")
+		duplicate_plan = { **plan, "cases": [cases[0], cases[0]] }
+		try:
+			_select_cases(duplicate_plan, None)
+		except RenderError as error:
+			if "duplicate" not in str(error):
+				raise
+		else:
+			raise AssertionError("renderer accepted duplicate case ids in a plan")
+		collision_plan = { **plan, "cases": json.loads(json.dumps(cases[:2])) }
+		collision_plan["cases"][0]["case_id"] = "Foo"
+		collision_plan["cases"][1]["case_id"] = "foo"
+		try:
+			_select_cases(collision_plan, None)
+		except RenderError as error:
+			if "Windows-normalized" not in str(error):
+				raise
+		else:
+			raise AssertionError("renderer accepted case-insensitive Windows path collisions")
+		for unsafe_case_id in (
+			".", "..", "trailing.", "trailing ", "CON", "con.wav", "CON .json", "PRN.log",
+			"aux", "NUL.tar.gz", "COM1", "com9.wav", "LPT1", "lpt9.bin",
+		):
+			try:
+				_case_id(unsafe_case_id)
+			except RenderError:
+				pass
+			else:
+				raise AssertionError(f"renderer accepted Windows-unsafe case id {unsafe_case_id!r}")
+		for safe_case_id in ("console", "COM0", "COM10", "LPT0", "LPT10", "auxiliary", "case.name"):
+			if _case_id(safe_case_id) != safe_case_id:
+				raise AssertionError(f"renderer changed safe case id {safe_case_id!r}")
+		for invalid_jobs in (0, MAX_RENDER_JOBS + 1):
+			try:
+				_validated_jobs(invalid_jobs)
+			except RenderError:
+				pass
+			else:
+				raise AssertionError(f"renderer accepted invalid worker count {invalid_jobs}")
+
 		corrupt = bytearray(noise_path.read_bytes())
 		corrupt[-1] ^= 0x01
 		noise_path.write_bytes(corrupt)
+		failure_plan = json.loads(json.dumps(plan))
+		failure_plan["cases"] = failure_plan["cases"][:2]
+		# The first worker completes and writes its clean case before the second
+		# worker's locked-noise failure is observed.  The whole staging tree must
+		# still disappear without publishing a manifest.
+		failure_plan["cases"][0]["noise"] = None
+		failure_plan["cases"][0]["mix"]["snr_db"] = None
+		failure_root = root / "worker-failure"
 		try:
-			_render_case(case, corpus, root / "corrupt", TARGET_RATE)
+			_render_validated(failure_plan, corpus, failure_root, jobs=2)
 		except RenderError as error:
 			if "SHA-256 mismatch" not in str(error):
 				raise
 		else:
 			raise AssertionError("renderer accepted a corpus file whose per-file hash changed")
+		if failure_root.exists() or list(root.glob(".worker-failure.render-*")):
+			raise AssertionError("failed worker published a partial output tree or left staging behind")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -470,6 +685,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--plan", type=Path)
 	parser.add_argument("--corpus-root", type=Path)
 	parser.add_argument("--output-root", type=Path)
+	parser.add_argument("--jobs", type=int, default=1, help=f"parallel render workers (1-{MAX_RENDER_JOBS})")
+	parser.add_argument("--case-id", action="append", dest="case_ids", help="render only this case id (repeatable)")
 	parser.add_argument("--self-test", action="store_true")
 	args = parser.parse_args(argv)
 	try:
@@ -480,7 +697,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 				return 0
 		if args.plan is None or args.corpus_root is None or args.output_root is None:
 			raise RenderError("--plan, --corpus-root, and --output-root are required")
-		manifest = render(_load_json(args.plan), args.corpus_root, args.output_root)
+		manifest = render(
+			_load_json(args.plan), args.corpus_root, args.output_root,
+			jobs=args.jobs, case_ids=args.case_ids,
+		)
 		print(f"Rendered {len(manifest['cases'])} private case(s) into {args.output_root}")
 		return 0
 	except (AssertionError, KeyError, RenderError, TypeError, ValueError) as error:
