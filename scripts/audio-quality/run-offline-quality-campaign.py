@@ -66,6 +66,15 @@ CASE_ARTIFACT_FILENAMES = {
 	"objective_stderr": "objective-score.stderr.txt",
 }
 UNSAFE_ENVIRONMENT_PREFIXES = ("PYTHON", "MUMBLE_", "HF_", "HUGGINGFACE_", "TRANSFORMERS_")
+METRICS_PYTHON_PROBE_SOURCE = (
+	"import json,sys;"
+	"print(json.dumps({"
+	"'executable':str(__import__('pathlib').Path(sys.executable).resolve()),"
+	"'implementation':sys.implementation.name,"
+	"'prefix':str(__import__('pathlib').Path(sys.prefix).resolve()),"
+	"'version':sys.version.split()[0]"
+	"},sort_keys=True,separators=(',',':')))"
+)
 
 
 class CampaignError(ValueError):
@@ -861,6 +870,105 @@ def _expected_latency_samples(recipe: Mapping[str, Any], model: Mapping[str, Any
 	return expected
 
 
+def _verify_metrics_python_preflight(
+	metrics_python: Path,
+	metrics_runtime_root: Path,
+	python_binding_value: Any,
+	timeout_seconds: int,
+) -> Mapping[str, Any]:
+	"""Fail before runtime snapshots if ``--metrics-python`` is not the pinned venv."""
+
+	python_binding = _mapping(python_binding_value, "metrics runtime inventory.python")
+	_exact_keys(
+		python_binding,
+		{"executable", "implementation", "venv_root", "version"},
+		set(),
+		"metrics runtime inventory.python",
+	)
+	executable_binding = _mapping(
+		python_binding["executable"], "metrics runtime inventory.python.executable"
+	)
+	_exact_keys(
+		executable_binding,
+		{"sha256", "size_bytes"},
+		{"relative_path"},
+		"metrics runtime inventory.python.executable",
+	)
+	expected_executable = {
+		"sha256": _hash(
+			executable_binding["sha256"], "metrics runtime inventory.python.executable.sha256"
+		),
+		"size_bytes": _integer(
+			executable_binding["size_bytes"], "metrics runtime inventory.python.executable.size_bytes", 1
+		),
+	}
+	actual_executable = _file_record(metrics_python)
+	_expect(
+		actual_executable == expected_executable,
+		"--metrics-python",
+		"executable hash/size does not match the pinned metrics runtime",
+	)
+
+	probe_timeout = max(1, min(int(timeout_seconds), 30))
+	try:
+		completed = subprocess.run(
+			[str(metrics_python), "-I", "-c", METRICS_PYTHON_PROBE_SOURCE],
+			cwd=str(SCRIPT_DIR),
+			env=_sanitized_environment(metrics_runtime_root),
+			capture_output=True,
+			text=True,
+			encoding="utf-8",
+			errors="replace",
+			timeout=probe_timeout,
+			check=False,
+		)
+	except (OSError, subprocess.SubprocessError) as error:
+		raise CampaignError(
+			f"--metrics-python: unable to execute pinned-runtime preflight before runtime snapshot: {error}"
+		) from error
+	if completed.returncode != 0:
+		detail = (completed.stderr.strip() or completed.stdout.strip() or "no diagnostic output")[:1000]
+		raise CampaignError(
+			f"--metrics-python: pinned-runtime preflight exited {completed.returncode} before runtime snapshot: {detail}"
+		)
+	try:
+		probe = _mapping(json.loads(completed.stdout), "metrics Python preflight output")
+	except (json.JSONDecodeError, TypeError) as error:
+		raise CampaignError("--metrics-python: pinned-runtime preflight returned invalid JSON") from error
+	_exact_keys(
+		probe,
+		{"executable", "implementation", "prefix", "version"},
+		set(),
+		"metrics Python preflight output",
+	)
+	reported_executable = Path(str(probe["executable"])).resolve()
+	reported_prefix = Path(str(probe["prefix"])).resolve()
+	expected_prefix = Path(str(python_binding["venv_root"])).resolve()
+	_expect(
+		os.path.normcase(str(reported_executable)) == os.path.normcase(str(metrics_python.resolve())),
+		"--metrics-python",
+		"the executed interpreter reported a different sys.executable",
+	)
+	_expect(
+		os.path.normcase(str(reported_prefix)) == os.path.normcase(str(expected_prefix)),
+		"--metrics-python",
+		"the interpreter is not running in the venv attested by the pinned metrics runtime",
+	)
+	_expect(
+		probe["implementation"] == python_binding["implementation"]
+		and probe["version"] == python_binding["version"],
+		"--metrics-python",
+		"implementation or version does not match the pinned metrics runtime",
+	)
+	return {
+		"status": "passed",
+		"executable": _file_record(metrics_python, include_path=True),
+		"implementation": str(probe["implementation"]),
+		"venv_root": str(reported_prefix),
+		"version": str(probe["version"]),
+	}
+
+
 def _build_run_context(args: argparse.Namespace) -> dict[str, Any]:
 	plan_path = _regular_file(args.plan, "mixture plan")
 	case_set_path = _regular_file(args.case_set, "protected qualification case set") if getattr(args, "case_set", None) is not None else None
@@ -916,6 +1024,25 @@ def _build_run_context(args: argparse.Namespace) -> dict[str, Any]:
 	except Exception as error:
 		raise CampaignError(f"pinned metrics runtime failed independent verification: {error}") from error
 	verified_metrics_runtime.pop("runtime_root", None)
+	metrics_inventory_path = _below(
+		metrics_runtime_root,
+		str(verified_metrics_runtime["inventory"]["relative_path"]),
+		"verified metrics runtime inventory",
+	)
+	metrics_inventory = _mapping(
+		_load_json(metrics_inventory_path, "verified metrics runtime inventory"),
+		"verified metrics runtime inventory",
+	)
+	metrics_python_preflight = (
+		{"status": "skipped-for-synthetic-self-test"}
+		if getattr(args, "_allow_fake_tools", False)
+		else _verify_metrics_python_preflight(
+			metrics_python,
+			metrics_runtime_root,
+			metrics_inventory.get("python"),
+			int(args.timeout_seconds),
+		)
+	)
 
 	toolchain_names = (
 		"build-corpus-inventory-v3.py", "generate-mixture-plan.py", "corpus-inventory-v3.py",
@@ -965,6 +1092,7 @@ def _build_run_context(args: argparse.Namespace) -> dict[str, Any]:
 		"benchmark": _file_record(benchmark, include_path=True),
 		"metrics": {
 			"python": _file_record(metrics_python, include_path=True),
+			"python_preflight": metrics_python_preflight,
 			"runtime_root": str(metrics_runtime_root),
 			"runtime_tree": metrics_tree,
 			"manifest": _json_record(metrics_manifest, _load_json(metrics_manifest, "metrics manifest")),
@@ -3005,6 +3133,60 @@ def run_self_test() -> None:
 			},
 			"models": metric_models,
 		})
+		self_test_metrics_python = Path(sys.executable).resolve()
+		self_test_python_binding = {
+			"executable": {
+				"relative_path": "venv/python.exe",
+				**_file_record(self_test_metrics_python),
+			},
+			"implementation": sys.implementation.name,
+			"venv_root": str(Path(sys.prefix).resolve()),
+			"version": sys.version.split()[0],
+		}
+		preflight = _verify_metrics_python_preflight(
+			self_test_metrics_python, metrics_runtime, self_test_python_binding, 30
+		)
+		_expect(
+			preflight["status"] == "passed"
+			and Path(str(preflight["executable"]["path"])).resolve() == self_test_metrics_python,
+			"self-test metrics Python preflight",
+			"the exact attested interpreter was not accepted",
+		)
+		wrong_prefix_binding = {
+			**self_test_python_binding,
+			"venv_root": str(root / "definitely-not-the-running-venv"),
+		}
+		try:
+			_verify_metrics_python_preflight(
+				self_test_metrics_python, metrics_runtime, wrong_prefix_binding, 30
+			)
+		except CampaignError as error:
+			_expect(
+				"not running in the venv attested" in str(error),
+				"self-test metrics Python preflight",
+				f"unexpected wrong-venv failure: {error}",
+			)
+		else:
+			raise AssertionError("metrics Python preflight accepted an interpreter from the wrong venv")
+		wrong_executable_binding = {
+			**self_test_python_binding,
+			"executable": {
+				**self_test_python_binding["executable"],
+				"sha256": "f" * 64,
+			},
+		}
+		try:
+			_verify_metrics_python_preflight(
+				self_test_metrics_python, metrics_runtime, wrong_executable_binding, 30
+			)
+		except CampaignError as error:
+			_expect(
+				"executable hash/size does not match" in str(error),
+				"self-test metrics Python preflight",
+				f"unexpected executable-pin failure: {error}",
+			)
+		else:
+			raise AssertionError("metrics Python preflight accepted an unpinned executable")
 		counter = root / "counter.txt"
 		test_environment = {
 			"OFFLINE_CAMPAIGN_SELFTEST_COUNTER": str(counter),
