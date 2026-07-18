@@ -2247,7 +2247,11 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.bScreenShareAutoOpenCurrentRoom = value.toBool();
 	} else if (id == QLatin1String("screenShare.diagnostics")) {
 		m_draft.bScreenShareDiagnostics = value.toBool();
-	} else if (id == QLatin1String("audio.inputSystem")) {
+	}
+
+	// Keep audio fields in an independent dispatch chain so MSVC does not hit its
+	// parser block-depth limit in this otherwise mechanical list of field IDs.
+	if (id == QLatin1String("audio.inputSystem")) {
 		const QList< QString > systems = inputSystemNames();
 		m_draft.qsAudioInput          = systemNameAt(systems, value, m_draft.qsAudioInput);
 		if (!AudioInputRegistrar::current.isEmpty() && m_draft.qsAudioInput.isEmpty()) {
