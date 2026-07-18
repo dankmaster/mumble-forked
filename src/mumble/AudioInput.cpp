@@ -1434,6 +1434,16 @@ void AudioInput::initializeInputEnhancement() {
 		// global migration override.
 		legacyOverride = unsafePendingState ? nullptr : &*settings.legacyOverride;
 	}
+	// Old settings files can retain a legacy override after their processing mode
+	// has been switched off. Treat that dormant record as exact Original instead
+	// of making the otherwise unmodified capture path look like an active legacy
+	// recipe. Besides reflecting the actual audio path, this keeps local input
+	// calibration available without forcing the user through a settings rewrite.
+	const bool legacyOverrideProcessesAudio =
+		legacyOverride && Mumble::InputEnhancement::legacyOverrideProcessingEnabled(*legacyOverride);
+	if (!legacyOverrideProcessesAudio) {
+		legacyOverride = nullptr;
+	}
 	m_usesLegacyInputEnhancement = legacyOverride != nullptr;
 	m_inputEnhancementEngine     = Mumble::InputEnhancement::Engine::None;
 	m_inputEnhancementLightProcessor.reset();

@@ -1424,7 +1424,8 @@ namespace {
 		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Use recommended settings"));
 		field.insert(QStringLiteral("calibrationTooltip"),
 					 QObject::tr("Stage recommended voice detection, input gate, amplification, and cleanup settings. Apply or save to activate them."));
-		field.insert(QStringLiteral("calibrationStatusText"), QObject::tr("Ready to tune voice input."));
+		field.insert(QStringLiteral("calibrationStatusText"),
+					 QObject::tr("Adjust the thresholds manually below, or run the optional enhancement calibration."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -1433,6 +1434,7 @@ namespace {
 		field.insert(QStringLiteral("sourceLabel"), vadSourceLabel(settings.vsVAD));
 		field.insert(QStringLiteral("silenceThreshold"), vadThresholdFromFloat(settings.fVADmin));
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
+		field.insert(QStringLiteral("voiceHold"), settings.iVoiceHold);
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
 		field.insert(QStringLiteral("maxAmplification"), currentAmplification);
 		field.insert(QStringLiteral("noiseCancelMode"), static_cast< int >(settings.noiseCancelMode));
@@ -3969,25 +3971,26 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												voiceMeterField(m_draft,
 													m_inputEnhancementCalibrationWorker->snapshot(),
 													inputEnhancementCalibrationUiError),
-												advancedField(hintedField(enabledField(
+												hintedField(enabledField(
 													rangeField(QStringLiteral("audio.vadMin"),
-															   QObject::tr("Stop transmitting below"),
+															   QObject::tr("Stop threshold"),
 															   vadThresholdFromFloat(m_draft.fVADmin), 0, 100, 1,
 															   QStringLiteral("%")),
 													voiceActivityTransmit),
-																		   QObject::tr("Lower boundary for closing the microphone."))),
-												advancedField(hintedField(enabledField(
+																	   QObject::tr("Close the microphone when the live signal falls below this level.")),
+												hintedField(enabledField(
 													rangeField(QStringLiteral("audio.vadMax"),
-															   QObject::tr("Start transmitting above"),
+															   QObject::tr("Start threshold"),
 															   vadThresholdFromFloat(m_draft.fVADmax), 0, 100, 1,
 															   QStringLiteral("%")),
 													voiceActivityTransmit),
-																		   QObject::tr("Upper boundary for opening the microphone."))),
-												advancedField(enabledField(numberField(QStringLiteral("audio.voiceHold"),
-																					  QObject::tr("Voice hold"),
-																					  m_draft.iVoiceHold, 0, 250, 1,
-																					  QObject::tr(" frames")),
-																		 voiceActivityTransmit)) }),
+																	   QObject::tr("Open the microphone when the live signal rises above this level.")),
+												hintedField(enabledField(numberField(QStringLiteral("audio.voiceHold"),
+																		  QObject::tr("Release delay"),
+																		  m_draft.iVoiceHold, 0, 250, 1,
+																		  QObject::tr(" frames")),
+																	 voiceActivityTransmit),
+																	   QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) }),
 			advancedSection(sectionItem(QObject::tr("Push-to-talk"), QVariantList {
 												enabledField(numberField(QStringLiteral("audio.doublePush"),
 																		QObject::tr("Double-push lockout"),

@@ -92,6 +92,7 @@ private slots:
 	void editableDeviceProfileInheritsDefaultWithoutMutatingIt();
 	void autoProfileAlwaysEnablesAdaptationOnLoad();
 	void fixedProfileAutoAdaptationIsPersistedButRuntimeDormant();
+	void dormantLegacyOverrideDoesNotClaimTheAudioPath();
 	void evictsOnlyLeastRecentlyUsedUncalibratedProfile();
 	void openedPhysicalDeviceAdvancesLruWithoutCreatingEntries();
 	void sessionOnlyProfilesAreNotPersistedAndKeysAreVerified();
@@ -228,6 +229,21 @@ void TestInputEnhancementSettings::fixedProfileAutoAdaptationIsPersistedButRunti
 	QVERIFY(deserializeSettings(serializeSettings(settings), restored));
 	QVERIFY(restored.defaultPreference.autoAdapt);
 	QVERIFY(!runtimeAutoAdaptationEnabled(restored.defaultPreference));
+}
+
+void TestInputEnhancementSettings::dormantLegacyOverrideDoesNotClaimTheAudioPath() {
+	using namespace Mumble::InputEnhancement;
+	LegacyOverride dormant;
+	dormant.noiseCancelMode         = 0;
+	dormant.backend                = 1;
+	dormant.modelId                = QStringLiteral("dtln:baseline");
+	dormant.speexNoiseCancelStrength = -30;
+	QVERIFY(!legacyOverrideProcessingEnabled(dormant));
+
+	dormant.noiseCancelMode = 1;
+	QVERIFY(legacyOverrideProcessingEnabled(dormant));
+	dormant.noiseCancelMode = 2;
+	QVERIFY(legacyOverrideProcessingEnabled(dormant));
 }
 
 void TestInputEnhancementSettings::migratesLegacyTuple_data() {

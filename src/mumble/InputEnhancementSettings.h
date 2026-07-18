@@ -66,6 +66,11 @@ struct LegacyOverride {
 	bool operator==(const LegacyOverride &other) const;
 };
 
+/// Returns whether a retained migration tuple actually changes the live audio
+/// path. Older settings may keep a complete tuple after noise cancellation was
+/// turned off; that dormant record is metadata, not an active legacy recipe.
+bool legacyOverrideProcessingEnabled(const LegacyOverride &legacyOverride) noexcept;
+
 /// Exact signed-catalog identity of a prepared product recipe. Absolute model
 /// paths are deliberately excluded: modelRelativePath is re-resolved and
 /// re-hashed by InputEnhancementPackageVerifier before every activation.

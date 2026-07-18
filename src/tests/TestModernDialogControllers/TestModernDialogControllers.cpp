@@ -728,6 +728,9 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	bool foundInputMeterInVoiceActivation = false;
 	bool foundDetectionMethodField        = false;
 	bool foundInputGateField              = false;
+	bool foundManualStopThreshold         = false;
+	bool foundManualStartThreshold        = false;
+	bool foundManualReleaseDelay          = false;
 	bool foundHiddenNeuralCleanupFields   = false;
 	bool foundNoiseCancelOptionHints      = false;
 	for (const QVariant &sectionValue : audioInputSections) {
@@ -792,6 +795,21 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 					&& field.value(QStringLiteral("value")).toInt() == Settings::InputGateOff && optionsHaveHints
 					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("original behavior"));
 			}
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")) {
+				const QString fieldID = field.value(QStringLiteral("id")).toString();
+				const bool directlyVisible = !field.value(QStringLiteral("advanced"), false).toBool()
+					&& field.value(QStringLiteral("type")).toString() != QLatin1String("hidden");
+				if (fieldID == QLatin1String("audio.vadMin")) {
+					foundManualStopThreshold = directlyVisible
+						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Stop threshold");
+				} else if (fieldID == QLatin1String("audio.vadMax")) {
+					foundManualStartThreshold = directlyVisible
+						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Start threshold");
+				} else if (fieldID == QLatin1String("audio.voiceHold")) {
+					foundManualReleaseDelay = directlyVisible
+						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Release delay");
+				}
+			}
 			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Audio processing")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelMode")) {
 				const QVariantList options = field.value(QStringLiteral("options")).toList();
@@ -813,6 +831,9 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(foundInputMeterInVoiceActivation);
 	QVERIFY(foundDetectionMethodField);
 	QVERIFY(foundInputGateField);
+	QVERIFY(foundManualStopThreshold);
+	QVERIFY(foundManualStartThreshold);
+	QVERIFY(foundManualReleaseDelay);
 	QVERIFY(foundHiddenNeuralCleanupFields);
 	QVERIFY(foundNoiseCancelOptionHints);
 

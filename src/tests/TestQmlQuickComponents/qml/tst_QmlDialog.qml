@@ -1760,7 +1760,7 @@ TestCase {
 			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
 			"value": { "available": true, "connected": true, "amplitude": 72, "signalToNoise": 48,
 				"hybrid": 63, "transmitting": true, "peakCleanMicDb": -17 },
-			"vadSource": 2, "silenceThreshold": 18, "speechThreshold": 62, "active": true,
+			"vadSource": 2, "silenceThreshold": 18, "speechThreshold": 62, "voiceHold": 37, "active": true,
 			"recommendedVadSource": 1, "recommendedInputGateMode": 1,
 			"recommendedNoiseCancelMode": 3, "recommendedMaxAmplification": 6400,
 			"staticMeter": false, "calibrationActionId": "finishAudioSetupWizard",
@@ -1803,6 +1803,7 @@ TestCase {
 		compare(dialogState.lastAction, "finishAudioSetupWizard");
 		compare(dialogState.lastPayload.silenceThreshold, 18);
 		compare(dialogState.lastPayload.speechThreshold, 62);
+		compare(dialogState.lastPayload.voiceHold, 37);
 		compare(dialogState.lastPayload.vadSource, 1);
 		compare(dialogState.lastPayload.inputGateMode, 1);
 		compare(dialogState.lastPayload.noiseCancelMode, 3);

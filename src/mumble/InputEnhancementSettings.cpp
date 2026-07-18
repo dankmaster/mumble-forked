@@ -385,6 +385,10 @@ bool LegacyOverride::operator==(const LegacyOverride &other) const {
 		   && customModelPath == other.customModelPath && speexNoiseCancelStrength == other.speexNoiseCancelStrength;
 }
 
+bool legacyOverrideProcessingEnabled(const LegacyOverride &legacyOverride) noexcept {
+	return legacyOverride.noiseCancelMode != 0;
+}
+
 RecipeBinding::RecipeBinding()
 	: requestedProfile(Profile::Original), effectiveProfile(Profile::Original), engine(Engine::None),
 	  minimumCpuClass(CpuClass::Low) {
