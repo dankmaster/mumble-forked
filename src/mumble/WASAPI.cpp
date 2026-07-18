@@ -456,7 +456,7 @@ static IMMDevice *openNamedOrDefaultDevice(
 				std::vector< wchar_t > endpointId(static_cast< std::size_t >(identity.physicalId.size()) + 1);
 				const int length = identity.physicalId.toWCharArray(endpointId.data());
 				endpointId[static_cast< std::size_t >(length)] = L'\0';
-				WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(endpointId.data());
+				WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(endpointId.data(), dataFlow, role);
 			} else {
 				WASAPINotificationClient::get().enlistDeviceAsUsed(identity.physicalId);
 			}

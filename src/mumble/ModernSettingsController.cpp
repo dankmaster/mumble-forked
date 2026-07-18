@@ -17,6 +17,7 @@
 #include "InputEnhancementAutoV2.h"
 #include "InputEnhancementCalibrationWorker.h"
 #include "InputEnhancementPackageVerifier.h"
+#include "InputEnhancementPolicyController.h"
 #include "ModernShellMenuSerializer.h"
 #include "ModernTheme.h"
 #include "PersistentChatMediaCache.h"
@@ -70,6 +71,15 @@ namespace {
 
 	Mumble::InputEnhancement::DeviceIdentity draftInputEnhancementDeviceIdentity(const Settings &settings);
 
+	struct InputEnhancementSettingsReadiness final {
+		bool selectable = false;
+		bool productionQualified = false;
+		Mumble::InputEnhancement::ProfileReadinessReason reason =
+			Mumble::InputEnhancement::ProfileReadinessReason::Ready;
+		Mumble::InputEnhancement::EnhancedRuntimeBlockReason runtimeBlockReason =
+			Mumble::InputEnhancement::EnhancedRuntimeBlockReason::None;
+	};
+
 	QString inputEnhancementReadinessReasonText(Mumble::InputEnhancement::ProfileReadinessReason reason) {
 		using Reason = Mumble::InputEnhancement::ProfileReadinessReason;
 		switch (reason) {
@@ -94,11 +104,47 @@ namespace {
 		return QObject::tr("The selected input-enhancement profile is unavailable.");
 	}
 
-	Mumble::InputEnhancement::ProfileReadiness inputEnhancementReadinessForSettings(
+	QString inputEnhancementReadinessReasonText(const InputEnhancementSettingsReadiness &readiness) {
+		using Reason = Mumble::InputEnhancement::EnhancedRuntimeBlockReason;
+		switch (readiness.runtimeBlockReason) {
+			case Reason::None:
+				return inputEnhancementReadinessReasonText(readiness.reason);
+			case Reason::ChannelUnavailable:
+				return QObject::tr("The verified channel policy does not make input enhancement available.");
+			case Reason::PolicyForcesOriginal:
+				return QObject::tr("The verified channel policy currently requires Original.");
+			case Reason::RecoveryDisabled:
+				return QObject::tr("Input enhancement is disabled by the local recovery switch.");
+		}
+		return QObject::tr("The selected input-enhancement profile is unavailable.");
+	}
+
+	InputEnhancementSettingsReadiness inputEnhancementReadinessForSettings(
 		const Settings &settings, Mumble::InputEnhancement::Profile profile, int noiseReduction, int naturalCrisp) {
 		using namespace Mumble::InputEnhancement;
 		const InputEnhancementPackageVerifier *verifier =
 			Global::g_global_struct ? Global::get().inputEnhancementPackageVerifier : nullptr;
+		if (profile != Profile::Original && Global::g_global_struct) {
+			const InputEnhancementPolicyController *policyController =
+				Global::get().inputEnhancementPolicyController;
+			EffectivePolicyState policyState;
+			if (policyController) {
+				policyState = policyController->effectiveState();
+			} else {
+				// A controller-less build is an unmanaged developer configuration.
+				// The explicit recovery switch still owns an Original-only session.
+				policyState.managedBySignedPolicy = false;
+				policyState.available             = true;
+				policyState.forceOriginal         = false;
+			}
+			const bool recoveryDisabled = Global::get().bInputEnhancementRecoveryDisabled
+				|| (!policyController && Global::get().bDisableInputEnhancement);
+			const EnhancedRuntimeBlockReason blockReason =
+				enhancedRuntimeBlockReason(policyState, recoveryDisabled);
+			if (blockReason != EnhancedRuntimeBlockReason::None) {
+				return { false, false, ProfileReadinessReason::Ready, blockReason };
+			}
+		}
 		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(settings);
 		ResolveRequest request;
 		request.profile             = profile;
@@ -108,9 +154,13 @@ namespace {
 		request.backendAvailability = BackendAvailability::compiled();
 		request.captureDevice = CaptureDeviceContext::liveDevice(identity.backendId, identity.stable);
 		if (!verifier && profile != Profile::Original) {
-			return { false, false, ProfileReadinessReason::PackageUnavailable };
+			return { false, false, ProfileReadinessReason::PackageUnavailable,
+					 EnhancedRuntimeBlockReason::None };
 		}
-		return verifier ? verifier->readinessForProfile(request) : profileReadiness(request);
+		const ProfileReadiness processingReadiness =
+			verifier ? verifier->readinessForProfile(request) : profileReadiness(request);
+		return { processingReadiness.selectable, processingReadiness.productionQualified, processingReadiness.reason,
+				 EnhancedRuntimeBlockReason::None };
 	}
 
 	QVariantMap optionItem(const QVariant &value, const QString &label, const bool enabled = true,
@@ -640,8 +690,9 @@ namespace {
 		const Settings &settings, Mumble::InputEnhancement::Profile selectedProfile) {
 		using namespace Mumble::InputEnhancement;
 		auto profileOption = [&](Profile profile, const QString &label, const QString &description) {
-			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(settings, profile, 50, 50);
-			QString reason = inputEnhancementReadinessReasonText(readiness.reason);
+			const InputEnhancementSettingsReadiness readiness =
+				inputEnhancementReadinessForSettings(settings, profile, 50, 50);
+			QString reason = inputEnhancementReadinessReasonText(readiness);
 			if (readiness.selectable && !readiness.productionQualified) {
 				reason = QObject::tr("Preview/session-only on this input backend or device identity.");
 			}
@@ -764,6 +815,23 @@ namespace {
 		return profile ? &profile->preference : nullptr;
 	}
 
+	void disarmDraftInputEnhancementProbationForManualEdit(Settings &settings) {
+		using namespace Mumble::InputEnhancement;
+		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(settings);
+		DeviceProfileState *state      = ensureDeviceProfile(settings.inputEnhancement, identity);
+		if (!state || !state->pendingValidation) {
+			return;
+		}
+		// This is draft-only state. The persisted candidate remains armed until
+		// Apply durably replaces it with the newly bound candidate.
+		state->pendingValidation = false;
+		state->pendingRecipeBinding.reset();
+		state->pendingAutoRecipeSetFingerprint.reset();
+		state->rollbackUndoPreference.reset();
+		state->rollbackUndoRecipeBinding.reset();
+		state->rollbackUndoAutoRecipeSetFingerprint.reset();
+	}
+
 	void projectInputEnhancementPreference(Settings &settings) {
 		using Profile = Mumble::InputEnhancement::Profile;
 		const Mumble::InputEnhancement::DefaultPreference &preference =
@@ -804,6 +872,181 @@ namespace {
 				settings.noiseCancelCustomModelPath.clear();
 				break;
 		}
+	}
+
+	std::optional< Mumble::InputEnhancement::RecipeBinding > verifiedRecipeBindingForPreference(
+		const Mumble::InputEnhancement::DefaultPreference &preference,
+		const Mumble::InputEnhancement::DeviceIdentity &identity) {
+		using namespace Mumble::InputEnhancement;
+		if (preference.profile == Profile::Original || preference.profile == Profile::Auto
+			|| !Global::g_global_struct) {
+			return std::nullopt;
+		}
+		const InputEnhancementPackageVerifier *verifier = Global::get().inputEnhancementPackageVerifier;
+		if (!verifier || !verifier->verificationHealthy()) {
+			return std::nullopt;
+		}
+
+		ResolveRequest request;
+		request.profile             = preference.profile;
+		request.noiseReduction      = preference.reduction;
+		request.naturalCrisp        = preference.character;
+		request.cpuClass            = inputEnhancementCpuClass(verifier, preference.profile);
+		request.backendAvailability = BackendAvailability::compiled();
+		request.captureDevice       = CaptureDeviceContext::liveDevice(identity.backendId, identity.stable);
+		if (!verifier->readinessForProfile(request).selectable) {
+			return std::nullopt;
+		}
+		const Recipe recipe = RecipeCatalog::resolve(request);
+		if (recipe.effectiveProfile() != preference.profile || !verifier->recipeAuthorized(recipe)) {
+			return std::nullopt;
+		}
+
+		QString modelSha256;
+		QString modelRelativePath;
+		if (recipe.usesNeuralProcessor()) {
+			if (!verifier->modelAuthorized(recipe.modelId())) {
+				return std::nullopt;
+			}
+			modelSha256       = verifier->modelSha256Hex(recipe.modelId());
+			modelRelativePath = verifier->modelRelativePath(recipe.modelId());
+		}
+		const QString catalogRevision = verifier->managedBySignedPackage()
+			? verifier->catalogRevision()
+			: QStringLiteral("unmanaged-build-zero");
+		RecipeBinding binding =
+			recipeBindingForRecipe(recipe, catalogRevision, modelSha256, modelRelativePath);
+		if (!recipeBindingMatches(binding, recipe, catalogRevision, modelSha256, modelRelativePath)
+			|| !recipeBindingMatchesPreference(binding, preference)) {
+			return std::nullopt;
+		}
+		return binding;
+	}
+
+	struct ExactManualLastKnownGood final {
+		Mumble::InputEnhancement::DefaultPreference preference;
+		std::optional< Mumble::InputEnhancement::RecipeBinding > binding;
+	};
+
+	ExactManualLastKnownGood lastKnownGoodForManualProfileChange(
+		const Settings &original, const Mumble::InputEnhancement::DeviceIdentity &identity) {
+		using namespace Mumble::InputEnhancement;
+		const auto safeOriginal = []() {
+			ExactManualLastKnownGood result;
+			result.preference.profile   = Profile::Original;
+			result.preference.autoAdapt = false;
+			return result;
+		};
+
+		const DeviceProfileState *state = findDeviceProfile(original.inputEnhancement, identity);
+		if (state && state->pendingValidation && state->lastKnownGood
+			&& state->lastKnownGood->profile != Profile::Auto
+			&& executionBindingMatchesPreference(*state->lastKnownGood, state->lastKnownGoodRecipeBinding,
+											 state->lastKnownGoodAutoRecipeSetFingerprint)) {
+			return { *state->lastKnownGood, state->lastKnownGoodRecipeBinding };
+		}
+		const bool legacyActive = state
+			? (state->legacyOverride && isValidLegacyOverride(*state->legacyOverride))
+			: (original.inputEnhancement.legacyOverride
+			   && isValidLegacyOverride(*original.inputEnhancement.legacyOverride));
+		if (legacyActive) {
+			return safeOriginal();
+		}
+
+		const DefaultPreference &previous = preferenceForDevice(original.inputEnhancement, identity);
+		if (previous.profile == Profile::Original) {
+			return { previous, std::nullopt };
+		}
+		if (previous.profile == Profile::Auto) {
+			return safeOriginal();
+		}
+		if (state && state->lastKnownGood && *state->lastKnownGood == previous
+			&& executionBindingMatchesPreference(previous, state->lastKnownGoodRecipeBinding,
+										 state->lastKnownGoodAutoRecipeSetFingerprint)) {
+			return { previous, state->lastKnownGoodRecipeBinding };
+		}
+		if (std::optional< RecipeBinding > binding = verifiedRecipeBindingForPreference(previous, identity)) {
+			return { previous, std::move(binding) };
+		}
+		return safeOriginal();
+	}
+
+	bool prepareManualInputEnhancementProbation(Settings &draft, const Settings &original, qint64 nowEpochMs) {
+		using namespace Mumble::InputEnhancement;
+		const DeviceIdentity identity = draftInputEnhancementDeviceIdentity(draft);
+		if (identity.backendId.isEmpty() || identity.physicalId.isEmpty()) {
+			return currentInputEnhancementPreference(draft).profile == Profile::Original;
+		}
+		DeviceProfileState *draftState = ensureDeviceProfile(draft.inputEnhancement, identity);
+		if (!draftState) {
+			return false;
+		}
+		DefaultPreference candidate = draftState->preference;
+		candidate.autoAdapt         = candidate.profile == Profile::Auto;
+
+		const DeviceProfileState *originalState = findDeviceProfile(original.inputEnhancement, identity);
+		const DefaultPreference &previous = preferenceForDevice(original.inputEnhancement, identity);
+		const DeviceProfileState *runtimeState = Global::g_global_struct
+			? findDeviceProfile(Global::get().s.inputEnhancement, identity)
+			: nullptr;
+		if (originalState && originalState->pendingValidation && runtimeState
+			&& !runtimeState->pendingValidation && candidate == originalState->preference) {
+			// The dialog may stay open while probation finishes or rolls back. If
+			// the user did not edit the candidate, merge the authoritative runtime
+			// result instead of accidentally resurrecting stale pending state.
+			DeviceProfileState resolved = *runtimeState;
+			resolved.identity           = identity;
+			*draftState                 = std::move(resolved);
+			projectInputEnhancementPreference(draft);
+			return true;
+		}
+		const bool originalLegacyActive = originalState
+			? (originalState->legacyOverride && isValidLegacyOverride(*originalState->legacyOverride))
+			: (original.inputEnhancement.legacyOverride
+			   && isValidLegacyOverride(*original.inputEnhancement.legacyOverride));
+		if (candidate == previous && !originalLegacyActive) {
+			if (originalState) {
+				DeviceProfileState unchanged = *originalState;
+				unchanged.identity           = identity;
+				*draftState                  = std::move(unchanged);
+				projectInputEnhancementPreference(draft);
+			}
+			return true;
+		}
+
+		if (candidate.profile == Profile::Original) {
+			candidate.autoAdapt                         = false;
+			draftState->preference                     = candidate;
+			draftState->lastKnownGood                  = candidate;
+			draftState->lastKnownGoodRecipeBinding.reset();
+			draftState->lastKnownGoodAutoRecipeSetFingerprint.reset();
+			draftState->pendingRecipeBinding.reset();
+			draftState->pendingAutoRecipeSetFingerprint.reset();
+			draftState->calibrated       = false;
+			draftState->pendingValidation = false;
+			draftState->lastUsedEpochMs = std::max(draftState->lastUsedEpochMs, nowEpochMs);
+			draftState->lastRollbackReason.clear();
+			draftState->legacyOverride.reset();
+			draftState->rollbackUndoPreference.reset();
+			draftState->rollbackUndoRecipeBinding.reset();
+			draftState->rollbackUndoAutoRecipeSetFingerprint.reset();
+			return true;
+		}
+		if (candidate.profile == Profile::Auto) {
+			// Auto has its own complete recipe-set binding and is not a direct
+			// fixed-profile selection in the community core release.
+			return false;
+		}
+
+		const std::optional< RecipeBinding > candidateBinding =
+			verifiedRecipeBindingForPreference(candidate, identity);
+		if (!candidateBinding) {
+			return false;
+		}
+		const ExactManualLastKnownGood lastKnownGood =
+			lastKnownGoodForManualProfileChange(original, identity);
+		return armManualProfileProbation(draft.inputEnhancement, identity, candidate, *candidateBinding,
+									 lastKnownGood.preference, lastKnownGood.binding, nowEpochMs);
 	}
 
 	QVariantList remoteSpeechCleanupPresetOptions() {
@@ -2464,23 +2707,26 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (knownProfile) {
 			using namespace Mumble::InputEnhancement;
 			const Profile selectedProfile = static_cast< Profile >(profileValue);
+			disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 			const DefaultPreference &currentPreference = currentInputEnhancementPreference(m_draft);
-			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+			const InputEnhancementSettingsReadiness readiness = inputEnhancementReadinessForSettings(
 				m_draft, selectedProfile, currentPreference.reduction, currentPreference.character);
 			if (!readiness.selectable) {
 				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement was not changed: %1")
-													 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+												 .arg(inputEnhancementReadinessReasonText(readiness));
 				return;
 			}
 			if (Mumble::InputEnhancement::DefaultPreference *preference =
 					editableCurrentInputEnhancementPreference(m_draft)) {
-				preference->profile = selectedProfile;
+				preference->profile   = selectedProfile;
+				preference->autoAdapt = false;
 				m_inputEnhancementPreAutoPreference.reset();
 				projectInputEnhancementPreference(m_draft);
 			}
 		}
 	} else if (id == QLatin1String("audio.inputEnhancementExperimentalAuto")) {
 		using namespace Mumble::InputEnhancement;
+		disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 		DefaultPreference *preference = editableCurrentInputEnhancementPreference(m_draft);
 		if (!preference) {
 			return;
@@ -2489,11 +2735,11 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 			if (preference->profile == Profile::Auto) {
 				return;
 			}
-			const ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+			const InputEnhancementSettingsReadiness readiness = inputEnhancementReadinessForSettings(
 				m_draft, Profile::Auto, preference->reduction, preference->character);
 			if (!readiness.selectable) {
 				m_inputEnhancementReadinessUiError = QObject::tr("Experimental Auto was not enabled: %1")
-												 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+												 .arg(inputEnhancementReadinessReasonText(readiness));
 				return;
 			}
 			m_inputEnhancementPreAutoPreference = *preference;
@@ -2511,12 +2757,14 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		}
 		projectInputEnhancementPreference(m_draft);
 	} else if (id == QLatin1String("audio.inputEnhancementReduction")) {
+		disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 		if (Mumble::InputEnhancement::DefaultPreference *preference =
 				editableCurrentInputEnhancementPreference(m_draft)) {
 			preference->reduction = qBound(0, value.toInt(), 100);
 			projectInputEnhancementPreference(m_draft);
 		}
 	} else if (id == QLatin1String("audio.inputEnhancementCharacter")) {
+		disarmDraftInputEnhancementProbationForManualEdit(m_draft);
 		if (Mumble::InputEnhancement::DefaultPreference *preference =
 				editableCurrentInputEnhancementPreference(m_draft)) {
 			preference->character = qBound(0, value.toInt(), 100);
@@ -3245,11 +3493,20 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		// the user explicitly selects a product profile. Do not block unrelated
 		// settings changes by preflighting the merely descriptive mapped profile.
 		if (!currentInputEnhancementUsesLegacyOverride(m_draft)) {
-			const Mumble::InputEnhancement::ProfileReadiness readiness = inputEnhancementReadinessForSettings(
+			const InputEnhancementSettingsReadiness readiness = inputEnhancementReadinessForSettings(
 				m_draft, preference.profile, preference.reduction, preference.character);
 			if (!readiness.selectable) {
 				m_inputEnhancementReadinessUiError = QObject::tr("Input enhancement settings were not saved: %1")
-													 .arg(inputEnhancementReadinessReasonText(readiness.reason));
+											 .arg(inputEnhancementReadinessReasonText(readiness));
+				result.accepted    = false;
+				result.closeDialog = false;
+				return result;
+			}
+			if (!prepareManualInputEnhancementProbation(
+					m_draft, m_original, QDateTime::currentMSecsSinceEpoch())) {
+				m_inputEnhancementReadinessUiError = QObject::tr(
+					"Input enhancement settings were not saved: the selected profile could not be bound to the "
+					"verified recipe package for safe rollback.");
 				result.accepted    = false;
 				result.closeDialog = false;
 				return result;
@@ -3567,7 +3824,18 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const bool pushToTalkTransmit    = m_draft.atTransmit == Settings::PushToTalk;
 		const Mumble::InputEnhancement::DefaultPreference &inputEnhancementPreference =
 			currentInputEnhancementPreference(m_draft);
-		const Mumble::InputEnhancement::ProfileReadiness inputEnhancementAutoReadiness =
+		const InputEnhancementSettingsReadiness currentInputEnhancementReadiness =
+			inputEnhancementReadinessForSettings(
+				m_draft, inputEnhancementPreference.profile, inputEnhancementPreference.reduction,
+				inputEnhancementPreference.character);
+		QString inputEnhancementProfileHint = m_inputEnhancementReadinessUiError;
+		if (inputEnhancementProfileHint.isEmpty()
+			&& inputEnhancementPreference.profile != Mumble::InputEnhancement::Profile::Original
+			&& !currentInputEnhancementReadiness.selectable) {
+			inputEnhancementProfileHint = QObject::tr("Effective profile: Original. %1")
+				.arg(inputEnhancementReadinessReasonText(currentInputEnhancementReadiness));
+		}
+		const InputEnhancementSettingsReadiness inputEnhancementAutoReadiness =
 			inputEnhancementReadinessForSettings(
 				m_draft, Mumble::InputEnhancement::Profile::Auto,
 				inputEnhancementPreference.reduction, inputEnhancementPreference.character);
@@ -3576,7 +3844,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		QString inputEnhancementAutoHint = QObject::tr(
 			"Experimental: dynamically chooses among Light, Balanced, and Quality. Voice Focus is never selected.");
 		const QString inputEnhancementAutoReadinessReason =
-			inputEnhancementReadinessReasonText(inputEnhancementAutoReadiness.reason);
+			inputEnhancementReadinessReasonText(inputEnhancementAutoReadiness);
 		if (!inputEnhancementAutoReadinessReason.isEmpty()) {
 			inputEnhancementAutoHint += QLatin1Char(' ');
 			inputEnhancementAutoHint += QObject::tr("Unavailable: %1").arg(inputEnhancementAutoReadinessReason);
@@ -3687,7 +3955,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													   static_cast< int >(inputEnhancementPreference.profile),
 													   inputEnhancementProfileOptions(
 														   m_draft, inputEnhancementPreference.profile)),
-											   m_inputEnhancementReadinessUiError),
+											   inputEnhancementProfileHint),
 												   rangeField(QStringLiteral("audio.inputEnhancementReduction"),
 															  QObject::tr("Noise reduction"),
 													  inputEnhancementPreference.reduction,

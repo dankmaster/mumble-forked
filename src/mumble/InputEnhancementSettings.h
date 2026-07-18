@@ -163,6 +163,15 @@ bool executionBindingMatchesPreference(const DefaultPreference &preference,
 									   const std::optional< RecipeBinding > &recipeBinding,
 									   const std::optional< QString > &autoRecipeSetFingerprint) noexcept;
 
+/// Persists a directly selected fixed enhanced profile as an exact pending
+/// candidate. AudioInput consumes these same fields through the existing
+/// 60-second / 10-second-of-speech probation and rollback controller used by
+/// calibration. Original and experimental Auto are intentionally rejected.
+bool armManualProfileProbation(Settings &settings, const DeviceIdentity &identity,
+								 const DefaultPreference &candidate, const RecipeBinding &candidateBinding,
+								 const DefaultPreference &lastKnownGood,
+								 std::optional< RecipeBinding > lastKnownGoodBinding, qint64 nowEpochMs);
+
 /// Ensures that an editable entry exists for the physical/session device. A
 /// new entry inherits the global default. Unstable identities are retained in
 /// memory but deliberately omitted by serializeSettings().

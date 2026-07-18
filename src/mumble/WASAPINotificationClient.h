@@ -6,9 +6,12 @@
 #ifndef MUMBLE_MUMBLE_WASAPINOTIFICATIONCLIENT_H_
 #define MUMBLE_MUMBLE_WASAPINOTIFICATIONCLIENT_H_
 
+#include <QtCore/QHash>
 #include <QtCore/QMutex>
 #include <QtCore/QObject>
 #include <mmdeviceapi.h>
+
+#include <chrono>
 
 /**
  * @brief Singleton for acting on WASAPINotification events for given devices.
@@ -27,7 +30,11 @@ public:
 	ULONG STDMETHODCALLTYPE Release();
 
 	/* Enlist/Unlist functionality */
-	void enlistDefaultDeviceAsUsed(LPCWSTR pwstrDefaultDevice);
+	void enlistDefaultDeviceAsUsed(LPCWSTR pwstrDefaultDevice, EDataFlow flow, ERole role);
+	static constexpr bool defaultDeviceNotificationMatches(EDataFlow trackedFlow, ERole trackedRole,
+														 EDataFlow changedFlow, ERole changedRole) noexcept {
+		return trackedFlow == changedFlow && trackedRole == changedRole;
+	}
 
 	void enlistDeviceAsUsed(LPCWSTR pwstrDevice);
 	void enlistDeviceAsUsed(const QString &device);
@@ -52,7 +59,10 @@ private:
 	static WASAPINotificationClient &doGet();
 	static void doGetOnce();
 
-	void restartAudio();
+	void restartAudioLocked();
+	static constexpr quint32 defaultDeviceNotificationKey(EDataFlow flow, ERole role) noexcept {
+		return (static_cast< quint32 >(flow) << 16U) | static_cast< quint32 >(role);
+	}
 
 	/* _fu = Non locking versions */
 	void _clearUsedDeviceLists();
@@ -60,6 +70,10 @@ private:
 
 	QStringList usedDefaultDevices;
 	QStringList usedDevices;
+	QHash< quint32, QString > usedDefaultDevicesByFlowAndRole;
+	bool hasRestartTimestamp = false;
+	std::chrono::steady_clock::time_point lastRestartTimestamp;
+	static constexpr auto restartDebounceWindow = std::chrono::milliseconds(500);
 	IMMDeviceEnumerator *pEnumerator;
 	LONG _cRef;
 	QMutex listsMutex;

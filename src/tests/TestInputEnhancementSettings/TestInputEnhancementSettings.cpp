@@ -7,6 +7,9 @@
 #include "InputEnhancementSettings.h"
 #include "JSONSerialization.h"
 #include "Settings.h"
+#ifdef Q_OS_WIN
+#	include "WASAPINotificationClient.h"
+#endif
 
 #include <QFile>
 #include <QSettings>
@@ -98,11 +101,77 @@ private slots:
 	void qualityExpertBindingsRequireQualifiedCpuAndLatency();
 	void exactRecipeBindingDetectsCatalogRecipeAndModelDrift();
 	void unmanagedBuildZeroNeuralBindingRemainsHashBound();
+	void manualProfileChangeArmsExactProbationAndRollsBack();
+	void wasapiDefaultDeviceRolesMatchExactly();
 	void abnormalExitRollsBackPendingValidation();
 	void abnormalExitWithoutExactLastKnownGoodUsesOriginal();
 	void abnormalExitRollbackIsDurablyPersisted();
 	void normalExitKeepsPendingValidationForResume();
 };
+
+void TestInputEnhancementSettings::wasapiDefaultDeviceRolesMatchExactly() {
+#ifdef Q_OS_WIN
+	QVERIFY(WASAPINotificationClient::defaultDeviceNotificationMatches(
+		eCapture, eConsole, eCapture, eConsole));
+	QVERIFY(WASAPINotificationClient::defaultDeviceNotificationMatches(
+		eCapture, eMultimedia, eCapture, eMultimedia));
+	QVERIFY(WASAPINotificationClient::defaultDeviceNotificationMatches(
+		eCapture, eCommunications, eCapture, eCommunications));
+	QVERIFY(!WASAPINotificationClient::defaultDeviceNotificationMatches(
+		eCapture, eConsole, eCapture, eCommunications));
+	QVERIFY(!WASAPINotificationClient::defaultDeviceNotificationMatches(
+		eRender, eConsole, eCapture, eConsole));
+#else
+	QSKIP("WASAPI role matching is Windows-only");
+#endif
+}
+
+void TestInputEnhancementSettings::manualProfileChangeArmsExactProbationAndRollsBack() {
+	using namespace Mumble::InputEnhancement;
+	Mumble::InputEnhancement::Settings settings;
+	DeviceIdentity identity;
+	identity.backendId  = QStringLiteral("WASAPI");
+	identity.physicalId = QStringLiteral("manual-probation-endpoint");
+	identity.stable     = true;
+
+	const DefaultPreference candidate = preference(Profile::Quality, 72, 81);
+	const RecipeBinding candidateBinding = exactBinding(Profile::Quality, 72, 81);
+	const DefaultPreference knownGood = preference(Profile::Light, 38, 44);
+	const RecipeBinding knownGoodBinding = exactBinding(Profile::Light, 38, 44);
+	QVERIFY(armManualProfileProbation(settings, identity, candidate, candidateBinding, knownGood,
+									 knownGoodBinding, 1234));
+
+	const DeviceProfileState *pending = findDeviceProfile(settings, identity);
+	QVERIFY(pending);
+	QVERIFY(pending->pendingValidation);
+	QVERIFY(!pending->calibrated);
+	QVERIFY(pending->preference == candidate);
+	QVERIFY(pending->pendingRecipeBinding.has_value());
+	QVERIFY(*pending->pendingRecipeBinding == candidateBinding);
+	QVERIFY(pending->lastKnownGood.has_value());
+	QVERIFY(*pending->lastKnownGood == knownGood);
+	QVERIFY(pending->lastKnownGoodRecipeBinding.has_value());
+	QVERIFY(*pending->lastKnownGoodRecipeBinding == knownGoodBinding);
+	QVERIFY(!pending->rollbackUndoPreference.has_value());
+	QCOMPARE(pending->lastUsedEpochMs, 1234);
+
+	QVERIFY(rollbackPendingValidationAfterAbnormalExit(settings));
+	const DeviceProfileState *rolledBack = findDeviceProfile(settings, identity);
+	QVERIFY(rolledBack);
+	QVERIFY(!rolledBack->pendingValidation);
+	QVERIFY(rolledBack->preference == knownGood);
+	QVERIFY(rolledBack->rollbackUndoPreference.has_value());
+	QVERIFY(*rolledBack->rollbackUndoPreference == candidate);
+	QVERIFY(rolledBack->rollbackUndoRecipeBinding.has_value());
+	QVERIFY(*rolledBack->rollbackUndoRecipeBinding == candidateBinding);
+
+	QVERIFY(!armManualProfileProbation(settings, identity, preference(Profile::Original),
+									 candidateBinding, knownGood, knownGoodBinding, 1235));
+	RecipeBinding wrongCandidate = candidateBinding;
+	wrongCandidate.noiseReduction = 71;
+	QVERIFY(!armManualProfileProbation(settings, identity, candidate, wrongCandidate, knownGood,
+									  knownGoodBinding, 1235));
+}
 
 void TestInputEnhancementSettings::newInstallDefaultsToOriginal() {
 	::Settings settings;

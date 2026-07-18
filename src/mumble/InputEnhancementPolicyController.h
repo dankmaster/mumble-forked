@@ -38,6 +38,20 @@ struct EffectivePolicyState final {
 	bool operator!=(const EffectivePolicyState &other) const noexcept { return !(*this == other); }
 };
 
+/// Product-facing reason why a fixed enhanced profile cannot be activated.
+/// This deliberately stays separate from recipe/model readiness: channel policy
+/// and the local recovery switch can force the runtime to Original even when the
+/// packaged processor itself is healthy.
+enum class EnhancedRuntimeBlockReason : std::uint8_t {
+	None,
+	ChannelUnavailable,
+	PolicyForcesOriginal,
+	RecoveryDisabled
+};
+
+EnhancedRuntimeBlockReason enhancedRuntimeBlockReason(const EffectivePolicyState &state,
+													  bool recoveryDisabled) noexcept;
+
 /// Owns client-local signed input-enhancement channel policy state. It has no
 /// protobuf, Murmur, voice-packet or receiver dependencies. All policy bytes
 /// are verified before use and the effective audio-thread state is one atomic
@@ -54,10 +68,18 @@ public:
 		QString recipeSetVersion;
 		QUrl manifestUrl;
 		bool remoteFetchEnabled = true;
+		/// Optional signed bootstrap pair packaged beside the executable. An
+		/// empty directory resolves to QCoreApplication::applicationDirPath().
+		/// The files are never treated as URLs and pass the same key/build/
+		/// catalog/expiry verification as cache and HTTPS candidates.
+		bool packagedBootstrapEnabled = true;
+		QString packagedBootstrapDirectory;
 	};
 
 	static constexpr qsizetype maximumManifestBytes  = 2048;
 	static constexpr qsizetype signatureBytes        = 64;
+	static constexpr auto packagedBootstrapManifestFileName = "input-enhancement-policy.json";
+	static constexpr auto packagedBootstrapSignatureFileName = "input-enhancement-policy.json.sig";
 	static constexpr int maximumRedirects            = 3;
 	static constexpr int transferTimeoutMilliseconds = 10'000;
 	static constexpr int refreshBaseIntervalMilliseconds    = 15 * 60 * 1000;
@@ -126,6 +148,7 @@ private:
 	void publish(const PolicyDecision &decision);
 	void publishUnmanagedDevelopmentState();
 	bool persistAcceptedPair(const QByteArray &manifest, const QByteArray &signature);
+	bool restorePackagedBootstrap(const QDateTime &nowUtc = QDateTime::currentDateTimeUtc());
 	bool loadSlot(const QString &slot, QByteArray &manifest, QByteArray &signature) const;
 	QString currentSlot() const;
 	bool commitCurrentSlot(const QString &slot) const;

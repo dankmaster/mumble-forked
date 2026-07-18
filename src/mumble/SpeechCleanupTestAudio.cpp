@@ -542,6 +542,41 @@ void SpeechCleanupTestAudioInput::writeDone(bool ok, const QString &errorMessage
 						 { QStringLiteral("recovery_disabled"),
 						   Global::get().bInputEnhancementRecoveryDisabled } });
 	}
+	if (Global::g_global_struct) {
+		using namespace Mumble::InputEnhancement;
+		const Profile requestedProfile =
+			preferenceForDevice(Global::get().s.inputEnhancement, inputDeviceIdentity()).profile;
+		const Profile effectiveProfile = inputEnhancementProfileForDiagnostics();
+		QString effectiveReason = requestedProfile == effectiveProfile
+			? QStringLiteral("requested_profile_active")
+			: QStringLiteral("runtime_fallback");
+		if (requestedProfile != Profile::Original) {
+			if (const InputEnhancementPolicyController *controller =
+					Global::get().inputEnhancementPolicyController) {
+				switch (enhancedRuntimeBlockReason(controller->effectiveState(),
+										  Global::get().bInputEnhancementRecoveryDisabled)) {
+					case EnhancedRuntimeBlockReason::None:
+						break;
+					case EnhancedRuntimeBlockReason::ChannelUnavailable:
+						effectiveReason = QStringLiteral("channel_policy_unavailable");
+						break;
+					case EnhancedRuntimeBlockReason::PolicyForcesOriginal:
+						effectiveReason = QStringLiteral("channel_policy_force_original");
+						break;
+					case EnhancedRuntimeBlockReason::RecoveryDisabled:
+						effectiveReason = QStringLiteral("local_recovery_switch");
+						break;
+				}
+			} else if (Global::get().bDisableInputEnhancement) {
+				effectiveReason = QStringLiteral("runtime_disabled");
+			}
+		}
+		inputEnhancementDiagnostics.insert(QStringLiteral("configured_profile"),
+									   static_cast< int >(requestedProfile));
+		inputEnhancementDiagnostics.insert(QStringLiteral("effective_profile"),
+									   static_cast< int >(effectiveProfile));
+		inputEnhancementDiagnostics.insert(QStringLiteral("effective_reason"), effectiveReason);
+	}
 	// Keep model construction observable for every enhanced E2E run, including
 	// preflight failures where no Pipeline object exists yet. Original and Light
 	// must report zero; each fixed neural product profile must report exactly one.

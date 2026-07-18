@@ -5,6 +5,7 @@
 
 #include "InputEnhancementPolicyController.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QNetworkAccessManager>
@@ -45,6 +46,23 @@ bool EffectivePolicyState::operator==(const EffectivePolicyState &other) const n
 	return managedBySignedPolicy == other.managedBySignedPolicy && hasVerifiedPolicy == other.hasVerifiedPolicy
 		   && available == other.available && forceOriginal == other.forceOriginal
 		   && recommendedProfile == other.recommendedProfile;
+}
+
+EnhancedRuntimeBlockReason enhancedRuntimeBlockReason(const EffectivePolicyState &state,
+													  const bool recoveryDisabled) noexcept {
+	if (recoveryDisabled) {
+		return EnhancedRuntimeBlockReason::RecoveryDisabled;
+	}
+	if (!state.managedBySignedPolicy) {
+		return EnhancedRuntimeBlockReason::None;
+	}
+	if (!state.available) {
+		return EnhancedRuntimeBlockReason::ChannelUnavailable;
+	}
+	if (state.forceOriginal) {
+		return EnhancedRuntimeBlockReason::PolicyForcesOriginal;
+	}
+	return EnhancedRuntimeBlockReason::None;
 }
 
 InputEnhancementPolicyController::InputEnhancementPolicyController(Configuration configuration,
@@ -91,12 +109,15 @@ void InputEnhancementPolicyController::start() {
 	}
 
 	const bool restoredVerifiedCache = restoreCache();
+	const bool restoredPackagedBootstrap =
+		!restoredVerifiedCache && restorePackagedBootstrap(QDateTime::currentDateTimeUtc());
+	const bool restoredVerifiedPolicy = restoredVerifiedCache || restoredPackagedBootstrap;
 	m_expiryTimer.start();
 	const bool remoteUrlUsable = isAllowedHttpsUrl(m_configuration.manifestUrl)
 								 && isAllowedHttpsUrl(signatureUrlForManifest(m_configuration.manifestUrl));
 	if (m_configuration.remoteFetchEnabled && m_networkManager && remoteUrlUsable) {
-		m_initialDecisionPending = !restoredVerifiedCache;
-		if (restoredVerifiedCache) {
+		m_initialDecisionPending = !restoredVerifiedPolicy;
+		if (restoredVerifiedPolicy) {
 			markInitialDecisionReady();
 		}
 		refresh();
@@ -106,6 +127,36 @@ void InputEnhancementPolicyController::start() {
 		// decision used by the update health gate.
 		markInitialDecisionReady();
 	}
+}
+
+bool InputEnhancementPolicyController::restorePackagedBootstrap(const QDateTime &nowUtc) {
+	if (m_developmentBypass || !m_configuration.packagedBootstrapEnabled) {
+		return false;
+	}
+	const QString directory = m_configuration.packagedBootstrapDirectory.trimmed().isEmpty()
+		? QCoreApplication::applicationDirPath()
+		: m_configuration.packagedBootstrapDirectory;
+	const QDir bootstrapRoot(directory);
+	const auto manifest = readBoundedFile(
+		bootstrapRoot.filePath(QString::fromLatin1(packagedBootstrapManifestFileName)), maximumManifestBytes);
+	const auto signature = readBoundedFile(
+		bootstrapRoot.filePath(QString::fromLatin1(packagedBootstrapSignatureFileName)), signatureBytes,
+		signatureBytes);
+	if (!manifest || !signature) {
+		return false;
+	}
+
+	const PolicyDecision decision = m_store->accept(*manifest, *signature, nowUtc);
+	if (!decision.candidateAccepted || !persistAcceptedPair(*manifest, *signature)) {
+		// A packaged pair is only authoritative after it has crossed the same
+		// durable cache boundary as a verified HTTPS candidate. Invalid,
+		// expired, or unpersistable bytes leave the managed runtime fail-closed.
+		m_store->clearCache();
+		publish(m_store->current(nowUtc));
+		return false;
+	}
+	publish(decision);
+	return true;
 }
 
 void InputEnhancementPolicyController::refresh() {

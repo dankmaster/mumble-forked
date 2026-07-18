@@ -88,6 +88,27 @@ QString currentSlot(const QTemporaryDir &cacheRoot) {
 	return QString::fromLatin1(file.readAll());
 }
 
+bool writePackagedBootstrap(const QString &directory, const QByteArray &manifest, const QByteArray &signature) {
+	if (!QDir().mkpath(directory)) {
+		return false;
+	}
+	QFile manifestFile(QDir(directory).filePath(
+		QString::fromLatin1(InputEnhancementPolicyController::packagedBootstrapManifestFileName)));
+	QFile signatureFile(QDir(directory).filePath(
+		QString::fromLatin1(InputEnhancementPolicyController::packagedBootstrapSignatureFileName)));
+	if (!manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
+		|| manifestFile.write(manifest) != manifest.size()) {
+		return false;
+	}
+	manifestFile.close();
+	if (!signatureFile.open(QIODevice::WriteOnly | QIODevice::Truncate)
+		|| signatureFile.write(signature) != signature.size()) {
+		return false;
+	}
+	signatureFile.close();
+	return true;
+}
+
 int rejectionValue(PolicyRejection rejection) {
 	return static_cast< int >(rejection);
 }
@@ -107,7 +128,100 @@ private slots:
 	void validatesHttpsUrlsAndBuildsBoundedRequests();
 	void policyRefreshCadenceIsBoundedBelowKillSwitchDeadline();
 	void startupReadinessRequiresAnExplicitOfflineDecision();
+	void enhancedRuntimeAvailabilityCombinesPolicyAndRecoverySwitch();
+	void packagedBootstrapRequiresValidCurrentSignedPair();
 };
+
+void TestInputEnhancementPolicyController::enhancedRuntimeAvailabilityCombinesPolicyAndRecoverySwitch() {
+	EffectivePolicyState unmanaged;
+	unmanaged.managedBySignedPolicy = false;
+	unmanaged.available             = true;
+	unmanaged.forceOriginal         = false;
+	QCOMPARE(enhancedRuntimeBlockReason(unmanaged, false), EnhancedRuntimeBlockReason::None);
+	QCOMPARE(enhancedRuntimeBlockReason(unmanaged, true), EnhancedRuntimeBlockReason::RecoveryDisabled);
+
+	EffectivePolicyState unavailable;
+	unavailable.managedBySignedPolicy = true;
+	unavailable.hasVerifiedPolicy     = true;
+	unavailable.available             = false;
+	unavailable.forceOriginal         = true;
+	QCOMPARE(enhancedRuntimeBlockReason(unavailable, false),
+			 EnhancedRuntimeBlockReason::ChannelUnavailable);
+
+	EffectivePolicyState forced = unavailable;
+	forced.available             = true;
+	QCOMPARE(enhancedRuntimeBlockReason(forced, false), EnhancedRuntimeBlockReason::PolicyForcesOriginal);
+
+	EffectivePolicyState enabled = forced;
+	enabled.forceOriginal         = false;
+	QCOMPARE(enhancedRuntimeBlockReason(enabled, false), EnhancedRuntimeBlockReason::None);
+	QCOMPARE(enhancedRuntimeBlockReason(enabled, true), EnhancedRuntimeBlockReason::RecoveryDisabled);
+}
+
+void TestInputEnhancementPolicyController::packagedBootstrapRequiresValidCurrentSignedPair() {
+	const auto makeConfiguration = [](const QTemporaryDir &root) {
+		auto config = configuration(root);
+		config.cacheRoot = QDir(QDir(root.path()).filePath(QStringLiteral("cache")));
+		config.packagedBootstrapDirectory = QDir(root.path()).filePath(QStringLiteral("package"));
+		config.remoteFetchEnabled = false;
+		return config;
+	};
+
+	{
+		QTemporaryDir root;
+		QVERIFY(root.isValid());
+		PolicyManifest manifest = policy(Profile::Balanced);
+		manifest.expiresAt = QDateTime::currentDateTimeUtc().addSecs(3600);
+		const QByteArray bytes = canonicalPolicyBytes(manifest);
+		QVERIFY(writePackagedBootstrap(QDir(root.path()).filePath(QStringLiteral("package")), bytes, sign(bytes)));
+
+		InputEnhancementPolicyController first(makeConfiguration(root));
+		first.start();
+		QVERIFY(first.effectiveState().hasVerifiedPolicy);
+		QVERIFY(first.available());
+		QVERIFY(!first.forceOriginal());
+
+		// Once persisted, the verified cache wins over later packaged drift.
+		QVERIFY(writePackagedBootstrap(QDir(root.path()).filePath(QStringLiteral("package")), bytes,
+									 QByteArray(InputEnhancementPolicyController::signatureBytes, 'x')));
+		InputEnhancementPolicyController restored(makeConfiguration(root));
+		restored.start();
+		QVERIFY(restored.effectiveState().hasVerifiedPolicy);
+		QVERIFY(restored.available());
+	}
+
+	{
+		QTemporaryDir root;
+		QVERIFY(root.isValid());
+		PolicyManifest manifest = policy(Profile::Quality);
+		manifest.expiresAt = QDateTime::currentDateTimeUtc().addSecs(3600);
+		QByteArray tampered       = canonicalPolicyBytes(manifest);
+		const QByteArray signature = sign(tampered);
+		tampered[0] = tampered[0] == '{' ? '[' : '{';
+		QVERIFY(writePackagedBootstrap(QDir(root.path()).filePath(QStringLiteral("package")), tampered, signature));
+
+		InputEnhancementPolicyController controller(makeConfiguration(root));
+		controller.start();
+		QVERIFY(!controller.effectiveState().hasVerifiedPolicy);
+		QVERIFY(!controller.available());
+		QVERIFY(controller.forceOriginal());
+	}
+
+	{
+		QTemporaryDir root;
+		QVERIFY(root.isValid());
+		PolicyManifest manifest = policy(Profile::Light);
+		manifest.expiresAt = QDateTime::currentDateTimeUtc().addSecs(-60);
+		const QByteArray bytes = canonicalPolicyBytes(manifest);
+		QVERIFY(writePackagedBootstrap(QDir(root.path()).filePath(QStringLiteral("package")), bytes, sign(bytes)));
+
+		InputEnhancementPolicyController controller(makeConfiguration(root));
+		controller.start();
+		QVERIFY(!controller.effectiveState().hasVerifiedPolicy);
+		QVERIFY(!controller.available());
+		QVERIFY(controller.forceOriginal());
+	}
+}
 
 void TestInputEnhancementPolicyController::buildZeroWithoutKeyIsTheOnlyUnmanagedDevelopmentMode() {
 	QTemporaryDir cacheRoot;

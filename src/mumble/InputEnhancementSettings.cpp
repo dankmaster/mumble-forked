@@ -613,6 +613,43 @@ bool executionBindingMatchesPreference(const DefaultPreference &preference,
 	return recipeBinding && recipeBindingMatchesPreference(*recipeBinding, preference);
 }
 
+bool armManualProfileProbation(Settings &settings, const DeviceIdentity &identity,
+								 const DefaultPreference &candidate, const RecipeBinding &candidateBinding,
+								 const DefaultPreference &lastKnownGood,
+								 std::optional< RecipeBinding > lastKnownGoodBinding, const qint64 nowEpochMs) {
+	if (identity.backendId.isEmpty() || identity.physicalId.isEmpty() || candidate.profile == Profile::Original
+		|| candidate.profile == Profile::Auto || !recipeBindingMatchesPreference(candidateBinding, candidate)
+		|| lastKnownGood.profile == Profile::Auto
+		|| !executionBindingMatchesPreference(lastKnownGood, lastKnownGoodBinding, std::nullopt)) {
+		return false;
+	}
+
+	Settings updated = settings;
+	DeviceProfileState *state = ensureDeviceProfile(updated, identity);
+	if (!state) {
+		return false;
+	}
+	DefaultPreference fixedCandidate = candidate;
+	fixedCandidate.autoAdapt         = false;
+	state->identity                   = identity;
+	state->lastKnownGood              = lastKnownGood;
+	state->lastKnownGoodRecipeBinding = std::move(lastKnownGoodBinding);
+	state->lastKnownGoodAutoRecipeSetFingerprint.reset();
+	state->preference                = fixedCandidate;
+	state->pendingRecipeBinding      = candidateBinding;
+	state->pendingAutoRecipeSetFingerprint.reset();
+	state->calibrated        = false;
+	state->pendingValidation = true;
+	state->lastUsedEpochMs   = std::max(state->lastUsedEpochMs, nowEpochMs);
+	state->lastRollbackReason.clear();
+	state->legacyOverride.reset();
+	state->rollbackUndoPreference.reset();
+	state->rollbackUndoRecipeBinding.reset();
+	state->rollbackUndoAutoRecipeSetFingerprint.reset();
+	settings = std::move(updated);
+	return true;
+}
+
 bool rollbackPendingValidationAfterAbnormalExit(Settings &settings) {
 	bool changed = false;
 	for (DeviceProfileState &state : settings.deviceProfiles) {
