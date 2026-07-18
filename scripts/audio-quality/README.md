@@ -582,6 +582,36 @@ The campaign independently computes the schema-v4 round-trip from the plan and
 fails if the C++ recipe reports anything else. Sanitized measurement evidence
 retains these integers but excludes the private model and filesystem paths.
 
+### Recipe autotuning and realtime evidence
+
+`tune-input-enhancement-recipes.py` crosses every candidate over the same
+private tuning scenes and reuses the production benchmark, fixed-timeline
+scorer and pinned objective scorer. Recipe and realtime-timing conclusions
+require `--jobs 1`. Objective scoring is CPU-heavy; running another benchmark
+while a scorer is active can create host-scheduling deadline misses that are
+not caused by the recipe.
+
+Values above one are therefore fail-closed. In addition to the complete set of
+hash-bound tuning inputs, they require all three switches below:
+
+```text
+--jobs 3 --evidence-label diagnostic --allow-concurrent-diagnostic
+```
+
+A concurrent run is permanently marked `execution_mode:
+concurrent-diagnostic`, `recipe_conclusions_allowed: false`,
+`timing_conclusions_allowed: false`, and `product_qualification_allowed:
+false` in its binding and campaign manifest. Its final campaign status is one
+of `concurrent-diagnostic-complete`, `concurrent-diagnostic-with-rejections`,
+or `concurrent-diagnostic-incomplete`, never `passed`. Its selection keeps
+diagnostic rankings but clears every winner, suppresses model recommendations, sets
+`eligible_for_recipe_freeze: false`, and reports
+`status: concurrent-diagnostic-only`. Ranking performance gates are forced to
+unqualified while their original result remains diagnostic metadata, and model
+product eligibility is forced false. The run cannot be resumed under a serial
+binding or relabeled into candidate evidence. Tuning-split campaigns never
+produce product-qualification evidence, including serial campaigns.
+
 ## Tracked two-client E2E core
 
 `run-two-client-e2e.py` owns the portable client 1 → localhost server → client

@@ -31,7 +31,7 @@ from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CAMPAIGN_ID = "mumble-input-enhancement-recipe-tuning-v1"
 PROFILES = ("Light", "Balanced", "Quality", "VoiceFocus")
 CONDITIONS = ("clean", "noisy", "severe")
@@ -792,9 +792,91 @@ def _run_task_matrix(
 	return results, rejections
 
 
+def _evidence_policy(jobs: int, evidence_label: str, allow_concurrent_diagnostic: bool) -> Mapping[str, Any]:
+	_expect(1 <= jobs <= 4, "--jobs", "must be within 1..4")
+	concurrent = jobs != 1
+	if concurrent:
+		_expect(
+			allow_concurrent_diagnostic,
+			"--jobs", "values above one require explicit --allow-concurrent-diagnostic",
+		)
+		_expect(
+			evidence_label == "diagnostic",
+			"--evidence-label", "concurrent execution is diagnostic-only",
+		)
+	else:
+		_expect(
+			not allow_concurrent_diagnostic,
+			"--allow-concurrent-diagnostic", "is only valid with --jobs above one",
+		)
+	return {
+		"execution_mode": "concurrent-diagnostic" if concurrent else "serial",
+		"concurrent_diagnostic_explicitly_allowed": concurrent and allow_concurrent_diagnostic,
+		"recipe_conclusions_allowed": not concurrent,
+		"timing_conclusions_allowed": not concurrent,
+		"product_qualification_allowed": False,
+		"reason": (
+			"concurrent benchmark and objective-scoring processes can contaminate realtime deadline measurements"
+			if concurrent else None
+		),
+	}
+
+
+def _apply_evidence_policy(selection: MutableMapping[str, Any], policy: Mapping[str, Any]) -> None:
+	selection.update({
+		"execution_mode": policy["execution_mode"],
+		"recipe_conclusions_allowed": policy["recipe_conclusions_allowed"],
+		"timing_conclusions_allowed": policy["timing_conclusions_allowed"],
+		"product_qualification_allowed": policy["product_qualification_allowed"],
+	})
+	if policy["recipe_conclusions_allowed"]:
+		return
+	selection["status"] = "concurrent-diagnostic-only"
+	selection["eligible_for_recipe_freeze"] = False
+	selection["diagnostic_rankings_only"] = True
+	selection["diagnostic_reason"] = policy["reason"]
+	selection["winners"] = {profile: None for profile in PROFILES}
+	for rows in selection.get("rankings", {}).values():
+		for row in rows:
+			performance = row.get("performance")
+			if isinstance(performance, MutableMapping):
+				performance["diagnostic_threshold_passed"] = performance.get("passed")
+				performance["passed"] = False
+				performance["evidence_qualified"] = False
+	if selection.get("voice_focus_over_quality") is not None:
+		selection["diagnostic_voice_focus_over_quality"] = selection["voice_focus_over_quality"]
+		selection["voice_focus_over_quality"] = None
+
+
+def _apply_model_evidence_policy(
+	model_comparison: Mapping[str, Any] | None, policy: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+	if model_comparison is None or policy["recipe_conclusions_allowed"]:
+		return model_comparison
+	quarantined = json.loads(json.dumps(model_comparison))
+	quarantined["diagnostic_standard_model_product_eligible"] = quarantined.get("standard_model_product_eligible")
+	quarantined["standard_model_product_eligible"] = False
+	quarantined["recommendation"] = "not-permitted-concurrent-diagnostic"
+	quarantined["recipe_conclusions_allowed"] = False
+	quarantined["timing_conclusions_allowed"] = False
+	for summary in quarantined.get("summaries", []):
+		summary["timing_evidence_qualified"] = False
+	return quarantined
+
+
+def _final_campaign_status(complete: bool, has_rejections: bool, policy: Mapping[str, Any]) -> str:
+	if policy["execution_mode"] == "concurrent-diagnostic":
+		if not complete:
+			return "concurrent-diagnostic-incomplete"
+		return "concurrent-diagnostic-with-rejections" if has_rejections else "concurrent-diagnostic-complete"
+	if not complete:
+		return "diagnostic-incomplete"
+	return "passed-with-rejections" if has_rejections else "passed"
+
+
 def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 	_expect(args.grid_step >= 5 and args.grid_step % 5 == 0, "--grid-step", "must be a multiple of five")
-	_expect(1 <= args.jobs <= 4, "--jobs", "must be within 1..4")
+	evidence_policy = _evidence_policy(args.jobs, args.evidence_label, args.allow_concurrent_diagnostic)
 	_expect(all(getattr(args, f"{condition}_scenes") > 0 for condition in CONDITIONS), "scene limits", "must be positive")
 	context = _build_context(args)
 	limits = {condition: int(getattr(args, f"{condition}_scenes")) for condition in CONDITIONS}
@@ -822,7 +904,7 @@ def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 		"base_offline_run_binding_sha256": context["run_binding_sha256"],
 		"tuner": _file_record(Path(__file__).resolve()), "dataset_split": "tuning",
 		"selection_seed": args.selection_seed, "grid_step": args.grid_step,
-		"jobs": args.jobs,
+		"jobs": args.jobs, "evidence_policy": evidence_policy,
 		"evidence_label": args.evidence_label, "scene_counts": scene_counts,
 		"task_count": len(tasks), "task_plan_sha256": _canonical_sha256(tasks),
 		"max_tasks": args.max_tasks, "compare_deepfilter_models": args.compare_deepfilter_models,
@@ -842,6 +924,10 @@ def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 	manifest = {
 		"schema_version": SCHEMA_VERSION, "campaign": CAMPAIGN_ID, "status": "running",
 		"private_audio_do_not_upload": True, "run_binding": run_binding, "run_binding_sha256": run_binding_sha256,
+		"execution_mode": evidence_policy["execution_mode"],
+		"recipe_conclusions_allowed": evidence_policy["recipe_conclusions_allowed"],
+		"timing_conclusions_allowed": evidence_policy["timing_conclusions_allowed"],
+		"product_qualification_allowed": evidence_policy["product_qualification_allowed"],
 		"summary": {"task_count": len(tasks), "passed": 0, "rejected": 0},
 	}
 	_write_json_atomic(campaign_path, manifest)
@@ -869,12 +955,14 @@ def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 			results, args.grid_step, scene_counts, args.evidence_label, complete,
 			exhaustive_grid=args.candidate_set is None,
 		)
-		selection["model_comparison"] = summarize_model_comparison(results)
+		model_comparison = _apply_model_evidence_policy(summarize_model_comparison(results), evidence_policy)
+		selection["model_comparison"] = model_comparison
 		selection["rejected_tasks"] = rejections
 		selection["run_binding_sha256"] = run_binding_sha256
+		_apply_evidence_policy(selection, evidence_policy)
 		_write_json_atomic(output_root / "selection.json", selection)
 		manifest.update({
-			"status": "passed-with-rejections" if complete and rejections else "passed" if complete else "diagnostic-incomplete",
+			"status": _final_campaign_status(complete, bool(rejections), evidence_policy),
 			"selection": _file_record(output_root / "selection.json", relative_to=output_root),
 			"summary": {"task_count": len(tasks), "passed": len(results), "rejected": len(rejections), "complete": complete},
 		})
@@ -892,6 +980,65 @@ def run_campaign(args: argparse.Namespace) -> Mapping[str, Any]:
 
 
 def run_self_test() -> None:
+	serial_policy = _evidence_policy(1, "candidate", False)
+	_expect(
+		serial_policy["recipe_conclusions_allowed"] is True
+		and serial_policy["timing_conclusions_allowed"] is True,
+		"evidence policy self-test", "serial evidence was disabled",
+	)
+	concurrent_policy = _evidence_policy(3, "diagnostic", True)
+	_expect(
+		concurrent_policy["recipe_conclusions_allowed"] is False
+		and concurrent_policy["timing_conclusions_allowed"] is False,
+		"evidence policy self-test", "concurrent diagnostic was not quarantined",
+	)
+	for jobs, label, explicitly_allowed in ((3, "diagnostic", False), (3, "candidate", True), (1, "diagnostic", True)):
+		try:
+			_evidence_policy(jobs, label, explicitly_allowed)
+		except TuningError:
+			pass
+		else:
+			raise TuningError("evidence policy self-test: unsafe concurrency arguments were accepted")
+	diagnostic_selection: dict[str, Any] = {
+		"status": "qualified", "eligible_for_recipe_freeze": True,
+		"winners": {profile: {"candidate_id": f"{profile}-unsafe"} for profile in PROFILES},
+		"rankings": {"Light": [{"performance": {"passed": True, "average_rtf": 0.1}}]},
+		"voice_focus_over_quality": {"passed": True},
+	}
+	_apply_evidence_policy(diagnostic_selection, concurrent_policy)
+	_expect(
+		diagnostic_selection["status"] == "concurrent-diagnostic-only"
+		and diagnostic_selection["eligible_for_recipe_freeze"] is False
+		and diagnostic_selection["recipe_conclusions_allowed"] is False
+		and all(value is None for value in diagnostic_selection["winners"].values())
+		and diagnostic_selection["rankings"]["Light"][0]["performance"]["passed"] is False
+		and diagnostic_selection["rankings"]["Light"][0]["performance"]["diagnostic_threshold_passed"] is True
+		and diagnostic_selection["rankings"]["Light"][0]["performance"]["evidence_qualified"] is False
+		and diagnostic_selection["voice_focus_over_quality"] is None
+		and diagnostic_selection["diagnostic_voice_focus_over_quality"] == {"passed": True},
+		"evidence policy self-test", "concurrent diagnostic leaked a recipe conclusion",
+	)
+	diagnostic_model_comparison = _apply_model_evidence_policy({
+		"standard_model_product_eligible": True,
+		"recommendation": "consider-standard-product-recipe",
+		"summaries": [{"median_rtf": 0.1}],
+	}, concurrent_policy)
+	_expect(
+		diagnostic_model_comparison is not None
+		and diagnostic_model_comparison["standard_model_product_eligible"] is False
+		and diagnostic_model_comparison["diagnostic_standard_model_product_eligible"] is True
+		and diagnostic_model_comparison["recommendation"] == "not-permitted-concurrent-diagnostic"
+		and diagnostic_model_comparison["summaries"][0]["timing_evidence_qualified"] is False,
+		"evidence policy self-test", "concurrent model comparison leaked a product conclusion",
+	)
+	_expect(
+		_final_campaign_status(True, False, concurrent_policy) == "concurrent-diagnostic-complete"
+		and _final_campaign_status(True, True, concurrent_policy) == "concurrent-diagnostic-with-rejections"
+		and _final_campaign_status(False, False, concurrent_policy) == "concurrent-diagnostic-incomplete"
+		and _final_campaign_status(True, False, serial_policy) == "passed",
+		"evidence policy self-test", "campaign status can be mistaken for qualified serial evidence",
+	)
+
 	quality_recipe = {
 		"id": "input.quality.self-test", "executionSemanticsVersion": 5, "latencyBudgetMs": 50,
 	}
@@ -1009,7 +1156,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 	parser.add_argument("--scorer", type=Path)
 	parser.add_argument("--output-root", type=Path)
 	parser.add_argument("--grid-step", type=int, default=5, help="Recipe-space grid step; must be a multiple of five")
-	parser.add_argument("--jobs", type=int, default=1, help="Concurrent independent tasks (1..4)")
+	parser.add_argument("--jobs", type=int, default=1, help="Task workers (1..4); only one may produce recipe/timing conclusions")
+	parser.add_argument(
+		"--allow-concurrent-diagnostic", action="store_true",
+		help="Explicitly allow --jobs above one as quarantined diagnostic-only output",
+	)
 	parser.add_argument("--candidate-set", type=Path, help="Optional tuning-only five-point candidate-set JSON; prevents automatic freeze")
 	parser.add_argument("--clean-scenes", type=int, default=6)
 	parser.add_argument("--noisy-scenes", type=int, default=12)
@@ -1027,6 +1178,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 			run_self_test()
 			print("input enhancement recipe tuning self-test: ok")
 			return 0
+		# Reject unsafe concurrency before validating the remaining, potentially
+		# expensive campaign inputs.
+		_evidence_policy(args.jobs, args.evidence_label, args.allow_concurrent_diagnostic)
 		required = (
 			"plan", "render_manifest", "render_root", "inventory", "corpus_lock", "transformation_manifest",
 			"benchmark", "runtime_root", "metrics_python", "metrics_runtime_root", "metrics_manifest", "scorer", "output_root",
