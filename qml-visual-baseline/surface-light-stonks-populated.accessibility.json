@@ -1,0 +1,565 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Stonks",
+          "rect": {
+            "height": 26,
+            "width": 59,
+            "x": 150,
+            "y": 64
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1002,
+            "y": 68
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Portfolio, leaderboard, following, and server settings.",
+          "rect": {
+            "height": 15,
+            "width": 847,
+            "x": 150,
+            "y": 93
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Refresh",
+              "rect": {
+                "height": 36,
+                "width": 63,
+                "x": 969,
+                "y": 124
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Portfolio data is ready.",
+              "rect": {
+                "height": 16,
+                "width": 813,
+                "x": 148,
+                "y": 134
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Overview",
+              "rect": {
+                "height": 36,
+                "width": 74,
+                "x": 148,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Portfolio",
+              "rect": {
+                "height": 36,
+                "width": 69,
+                "x": 228,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Leaderboard",
+              "rect": {
+                "height": 36,
+                "width": 90,
+                "x": 303,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Following",
+              "rect": {
+                "height": 36,
+                "width": 76,
+                "x": 399,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Audit",
+              "rect": {
+                "height": 36,
+                "width": 53,
+                "x": 481,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Admin",
+              "rect": {
+                "height": 36,
+                "width": 59,
+                "x": 540,
+                "y": 172
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Total value",
+              "rect": {
+                "height": 14,
+                "width": 46,
+                "x": 158,
+                "y": 230
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Last update",
+              "rect": {
+                "height": 14,
+                "width": 51,
+                "x": 381,
+                "y": 230
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Owner",
+              "rect": {
+                "height": 14,
+                "width": 29,
+                "x": 604,
+                "y": 230
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Snapshots",
+              "rect": {
+                "height": 14,
+                "width": 45,
+                "x": 827,
+                "y": 230
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "2 744,04 USD",
+              "rect": {
+                "height": 20,
+                "width": 195,
+                "x": 158,
+                "y": 248
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "2026-05-28 02:00",
+              "rect": {
+                "height": 20,
+                "width": 195,
+                "x": 381,
+                "y": 248
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "You",
+              "rect": {
+                "height": 20,
+                "width": 195,
+                "x": 604,
+                "y": 248
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "1",
+              "rect": {
+                "height": 20,
+                "width": 195,
+                "x": 827,
+                "y": 248
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Portfolio history",
+              "rect": {
+                "height": 16,
+                "width": 828,
+                "x": 160,
+                "y": 312
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "1 save",
+              "rect": {
+                "height": 14,
+                "width": 27,
+                "x": 993,
+                "y": 313
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Portfolio allocation",
+              "rect": {
+                "height": 16,
+                "width": 105,
+                "x": 148,
+                "y": 484
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "RKLB",
+              "rect": {
+                "height": 16,
+                "width": 30,
+                "x": 158,
+                "y": 522
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "773,64 USD",
+              "rect": {
+                "height": 16,
+                "width": 58,
+                "x": 158,
+                "y": 541
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Rocket Lab USA",
+              "rect": {
+                "height": 12,
+                "width": 200,
+                "x": 158,
+                "y": 560
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Mine",
+              "rect": {
+                "height": 36,
+                "width": 68,
+                "x": 792,
+                "y": 596
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "checked",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Popular",
+              "rect": {
+                "height": 36,
+                "width": 84,
+                "x": 865,
+                "y": 596
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "checked",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Pinned",
+              "rect": {
+                "height": 36,
+                "width": 78,
+                "x": 954,
+                "y": 596
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "checked",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Ticker feed",
+              "rect": {
+                "height": 16,
+                "width": 639,
+                "x": 148,
+                "y": 606
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Show banner",
+              "rect": {
+                "height": 36,
+                "width": 115,
+                "x": 778,
+                "y": 656
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "checked",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Keep moving",
+              "rect": {
+                "height": 36,
+                "width": 115,
+                "x": 905,
+                "y": 656
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Stonks ticker banner",
+              "rect": {
+                "height": 16,
+                "width": 606,
+                "x": 160,
+                "y": 658
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Show your selected ticker feed in the conversation header. Off by default on this client.",
+              "rect": {
+                "height": 14,
+                "width": 606,
+                "x": 160,
+                "y": 677
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "RKLB",
+              "rect": {
+                "height": 16,
+                "width": 30,
+                "x": 157,
+                "y": 717
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "4 holders",
+              "rect": {
+                "height": 12,
+                "width": 36,
+                "x": 194,
+                "y": 717
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Unpin RKLB",
+              "rect": {
+                "height": 36,
+                "width": 36,
+                "x": 237,
+                "y": 717
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Stonks content",
+          "rect": {
+            "height": 630,
+            "width": 884,
+            "x": 148,
+            "y": 124
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Close",
+          "rect": {
+            "height": 36,
+            "width": 52,
+            "x": 986,
+            "y": 802
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Portfolio, leaderboard, following, and server settings.",
+      "name": "Stonks",
+      "rect": {
+        "height": 804,
+        "width": 920,
+        "x": 130,
+        "y": 48
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 900,
+    "width": 1180,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

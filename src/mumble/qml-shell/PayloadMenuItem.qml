@@ -3,10 +3,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Mumble.Theme 1.0
 
-MenuItem {
+	MenuItem {
 	id: item
-	objectName: "payloadMenuItem"
 	required property var payload
+	// Visual automation and accessibility focus recovery must be able to
+	// distinguish equal delegate types that live in several closed/open menus.
+	// Action IDs are stable across model refreshes and already form the command ABI.
+	objectName: "payloadMenuItem_"
+		+ String(menu && menu.objectName ? menu.objectName : "menu") + "_"
+		+ String(payload.id || payload.kind || "item")
 	readonly property string itemKind: String(payload.kind || "action")
 	readonly property string itemTone: String(payload.tone || "").toLowerCase()
 	readonly property string iconName: String(payload.icon || "")
@@ -14,7 +19,8 @@ MenuItem {
 		|| ((itemKind === "header" || itemKind === "label") ? payload.hint : "") || "")
 	readonly property string trailingState: String(payload.state || payload.trailing || "")
 	readonly property int hierarchyDepth: Math.max(0, Math.min(3, Number(payload.depth || 0)))
-	readonly property bool hasSubmenu: itemKind === "action" && (!!payload.hasSubmenu || !!payload.submenu)
+	readonly property bool hasSubmenu: itemKind === "submenu"
+		|| (itemKind === "action" && (!!payload.hasSubmenu || !!payload.submenu || !!payload.items))
 	readonly property color toneColor: itemTone === "danger" || itemTone === "error" ? Theme.danger
 		: itemTone === "warning" || itemTone === "retry" ? Theme.warning
 		: itemTone === "success" ? Theme.success
@@ -22,19 +28,39 @@ MenuItem {
 	signal actionRequested(string actionId)
 	signal valueRequested(string actionId, int value, bool finalValue)
 
-	visible: payload.visible !== false
-	implicitHeight: itemKind === "separator" ? 9
+	function openAttachedSubmenu(focusChild) {
+		if (!hasSubmenu || !enabled || !subMenu)
+			return false
+		const ownerMenu = menu
+		if (ownerMenu && ownerMenu["openSubmenuFor"] !== undefined)
+			return ownerMenu["openSubmenuFor"](item, subMenu, !!focusChild)
+		// Passing both the visual parent and its owning MenuItem selects Qt Quick
+		// Controls' cascade positioning path (including left-edge flipping).
+		subMenu.popup(item, item)
+		return true
+	}
+
+	function closeOwningSubmenu() {
+		const ownerMenu = menu
+		if (!ownerMenu || ownerMenu["closeToOpener"] === undefined)
+			return false
+		return ownerMenu["closeToOpener"]()
+	}
+
+	readonly property real rowImplicitHeight: itemKind === "separator" ? 9
 		: itemKind === "section" ? (Theme.compact ? 22 : 25)
 		: itemKind === "header" ? (Theme.compact ? 44 : 50)
 		: itemKind === "slider" ? Math.max(44, Theme.rowHeight)
 		: secondaryText.length > 0 ? Math.max(42, Theme.rowHeight) : Theme.controlHeight
-	height: visible ? implicitHeight : 0
+	visible: payload.visible !== false
+	implicitHeight: rowImplicitHeight
 	leftPadding: Theme.space2 + hierarchyDepth * Theme.space3
 	rightPadding: Theme.space2
 	topPadding: 0
 	bottomPadding: 0
-	activeFocusOnTab: enabled
-	enabled: (itemKind === "action" || itemKind === "slider")
+	activeFocusOnTab: activeFocus || enabled
+	hoverEnabled: hasSubmenu
+	enabled: (itemKind === "action" || itemKind === "slider" || itemKind === "submenu")
 		&& (payload.enabled === undefined || !!payload.enabled)
 	checkable: itemKind === "action" && !!payload.checkable
 	checked: checkable && !!payload.checked
@@ -43,6 +69,34 @@ MenuItem {
 	Accessible.name: itemKind === "separator" ? "" : text
 	Accessible.description: String(payload.hint || secondaryText || "")
 	Accessible.checked: checked
+
+	Keys.onRightPressed: event => event.accepted = item.openAttachedSubmenu(true)
+	Keys.onReturnPressed: event => event.accepted = item.openAttachedSubmenu(true)
+	Keys.onEnterPressed: event => event.accepted = item.openAttachedSubmenu(true)
+	Keys.onSpacePressed: event => event.accepted = item.openAttachedSubmenu(true)
+	Keys.onLeftPressed: event => event.accepted = item.closeOwningSubmenu()
+	Keys.onEscapePressed: event => event.accepted = item.closeOwningSubmenu()
+	Shortcut {
+		enabled: item.hasSubmenu && item.enabled && item.activeFocus
+		sequences: [Qt.Key_Right, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]
+		context: Qt.WindowShortcut
+		onActivated: item.openAttachedSubmenu(true)
+	}
+	Shortcut {
+		enabled: item.activeFocus && item.menu && item.menu["openerItem"]
+		sequences: [Qt.Key_Left, Qt.Key_Escape]
+		context: Qt.WindowShortcut
+		onActivated: item.closeOwningSubmenu()
+	}
+
+	onHoveredChanged: {
+		if (!item.hasSubmenu)
+			return
+		// The menu tree and its delegates are already materialized. Opening here is
+		// cheap and removes the previous fixed 120 ms hover latency.
+		if (hovered)
+			item.openAttachedSubmenu(false)
+	}
 
 	background: Rectangle {
 		id: focusBackground
@@ -67,7 +121,7 @@ MenuItem {
 		Item {
 			id: leadingSlot
 			objectName: "payloadLeadingSlot"
-			visible: item.itemKind === "action"
+			visible: item.itemKind === "action" || item.itemKind === "submenu"
 			Layout.preferredWidth: visible ? 20 : 0
 			Layout.preferredHeight: 20
 			Layout.alignment: Qt.AlignVCenter
@@ -118,6 +172,7 @@ MenuItem {
 					? Font.DemiBold : Font.Medium
 				font.letterSpacing: item.itemKind === "section" ? 0.55 : 0
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 
 			Label {
@@ -131,6 +186,7 @@ MenuItem {
 					: item.itemTone === "warning" ? Theme.warning : Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 		}
 
@@ -158,10 +214,11 @@ MenuItem {
 			text: Math.round(valueSlider.value) + (item.payload.suffix || "")
 			color: Theme.textMuted
 			font.pixelSize: Theme.fontCaption
+			Accessible.ignored: true
 		}
 
 		ColumnLayout {
-			visible: item.itemKind === "action"
+			visible: item.itemKind === "action" || item.itemKind === "submenu"
 			Layout.maximumWidth: 120
 			spacing: 1
 
@@ -176,6 +233,7 @@ MenuItem {
 				font.pixelSize: Theme.fontCaption
 				font.weight: Font.Medium
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 
 			Label {
@@ -188,6 +246,7 @@ MenuItem {
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 		}
 

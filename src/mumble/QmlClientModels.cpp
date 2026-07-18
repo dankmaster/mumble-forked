@@ -6,17 +6,23 @@
 #include "ClientActionRegistry.h"
 
 #include <QtCore/QCache>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QSaveFile>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QString>
 #include <QtCore/QSet>
+#include <QtCore/QThread>
 #include <QtCore/QThreadPool>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtGui/QAction>
@@ -30,6 +36,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <utility>
@@ -42,6 +49,179 @@ namespace {
 	constexpr qsizetype MaxReactionActorCount = 32;
 	constexpr qsizetype MaxReactionEmojiCharacters = 64;
 	constexpr qsizetype MaxReactionActorNameCharacters = 256;
+
+	struct NativePlaybackPreparationResult {
+		qulonglong generation = 0;
+		QUrl mediaUrl;
+		QUrl audioUrl;
+		QStringList materializedPaths;
+		QString error;
+		QString audioWarning;
+		bool cancelled = false;
+	};
+
+	struct MaterializedNativeMediaSource {
+		QUrl url;
+		QString path;
+		QString error;
+		bool cancelled = false;
+	};
+
+	std::once_flag g_nativeMediaCrashCleanupOnce;
+
+	QString nativeMediaCacheRoot() {
+		QString root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+		if (root.isEmpty()) root = QDir::tempPath() + QStringLiteral("/Mumble");
+		return QDir(root).filePath(QStringLiteral("native-direct-media"));
+	}
+
+	QString nativeMediaSuffix(const QString &mime) {
+		static const QHash< QString, QString > suffixes {
+			{ QStringLiteral("audio/aac"), QStringLiteral(".aac") },
+			{ QStringLiteral("audio/flac"), QStringLiteral(".flac") },
+			{ QStringLiteral("audio/mp4"), QStringLiteral(".m4a") },
+			{ QStringLiteral("audio/mpeg"), QStringLiteral(".mp3") },
+			{ QStringLiteral("audio/ogg"), QStringLiteral(".ogg") },
+			{ QStringLiteral("audio/wav"), QStringLiteral(".wav") },
+			{ QStringLiteral("audio/webm"), QStringLiteral(".webm") },
+			{ QStringLiteral("audio/x-wav"), QStringLiteral(".wav") },
+			{ QStringLiteral("video/mp4"), QStringLiteral(".mp4") },
+			{ QStringLiteral("video/ogg"), QStringLiteral(".ogv") },
+			{ QStringLiteral("video/quicktime"), QStringLiteral(".mov") },
+			{ QStringLiteral("video/webm"), QStringLiteral(".webm") }
+		};
+		return suffixes.value(mime);
+	}
+
+	void removeNativePlaybackFiles(const QStringList &paths, const QString &sessionDirectory) {
+		for (const QString &path : paths) {
+			for (int attempt = 0; attempt < 40; ++attempt) {
+				if (!QFileInfo::exists(path) || QFile::remove(path)) break;
+				QThread::msleep(50);
+			}
+		}
+		if (!sessionDirectory.isEmpty()) QDir().rmdir(sessionDirectory);
+	}
+
+	void scheduleNativePlaybackCleanup(const QStringList &paths, const QString &sessionDirectory) {
+		if (paths.isEmpty() && sessionDirectory.isEmpty()) return;
+		(void) QtConcurrent::run([paths, sessionDirectory]() {
+			removeNativePlaybackFiles(paths, sessionDirectory);
+		});
+	}
+
+	void cleanupNativeMediaFilesFromPreviousRuns(const QString &cacheRoot) {
+		const QDir root(cacheRoot);
+		if (!root.exists()) return;
+		for (const QFileInfo &entry : root.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)) {
+			if (entry.isDir()) QDir(entry.absoluteFilePath()).removeRecursively();
+			else QFile::remove(entry.absoluteFilePath());
+		}
+	}
+
+	MaterializedNativeMediaSource materializeNativeMediaSource(
+		const QUrl &source, const QString &mime, const QString &sessionDirectory,
+		const std::shared_ptr< std::atomic_bool > &token) {
+		MaterializedNativeMediaSource result;
+		if (!token->load(std::memory_order_acquire)) {
+			result.cancelled = true;
+			return result;
+		}
+		if (source.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0) {
+			result.url = source;
+			return result;
+		}
+
+		const QString encodedSource = source.toString();
+		const qsizetype comma = encodedSource.indexOf(QLatin1Char(','));
+		const QString suffix = nativeMediaSuffix(mime);
+		if (source.scheme().compare(QLatin1String("data"), Qt::CaseInsensitive) != 0
+			|| comma <= 5 || suffix.isEmpty()) {
+			result.error = QObject::tr("The native media source is not supported.");
+			return result;
+		}
+
+		const QByteArray payload = encodedSource.mid(comma + 1).toLatin1();
+		const QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(
+			payload, QByteArray::AbortOnBase64DecodingErrors);
+		if (!decoded || decoded.decoded.isEmpty() || decoded.decoded.size() > MaxInlineMediaBytes) {
+			result.error = QObject::tr("The media data is invalid or exceeds the playback limit.");
+			return result;
+		}
+		if (!token->load(std::memory_order_acquire)) {
+			result.cancelled = true;
+			return result;
+		}
+
+		if (!QDir().mkpath(sessionDirectory)) {
+			result.error = QObject::tr("The private media cache is unavailable.");
+			return result;
+		}
+		const QString path = QDir(sessionDirectory).filePath(
+			QUuid::createUuid().toString(QUuid::WithoutBraces) + suffix);
+		QSaveFile output(path);
+		if (!output.open(QIODevice::WriteOnly)
+			|| output.write(decoded.decoded) != decoded.decoded.size()
+			|| !output.commit()) {
+			output.cancelWriting();
+			QFile::remove(path);
+			result.error = QObject::tr("The native media file could not be prepared.");
+			return result;
+		}
+		if (!token->load(std::memory_order_acquire)) {
+			QFile::remove(path);
+			result.cancelled = true;
+			return result;
+		}
+		result.path = path;
+		result.url = QUrl::fromLocalFile(path);
+		return result;
+	}
+
+	NativePlaybackPreparationResult materializeNativePlaybackSources(
+		const qulonglong generation, const QUrl &mediaUrl, const QString &mediaMime,
+		const QUrl &audioUrl, const QString &audioMime, const QString &cacheRoot,
+		const QString &sessionDirectory, const std::shared_ptr< std::atomic_bool > &token) {
+		NativePlaybackPreparationResult result;
+		result.generation = generation;
+		std::call_once(g_nativeMediaCrashCleanupOnce, [cacheRoot]() {
+			cleanupNativeMediaFilesFromPreviousRuns(cacheRoot);
+		});
+
+		const MaterializedNativeMediaSource media = materializeNativeMediaSource(
+			mediaUrl, mediaMime, sessionDirectory, token);
+		if (media.cancelled) {
+			result.cancelled = true;
+			return result;
+		}
+		if (!media.error.isEmpty()) {
+			result.error = media.error;
+			return result;
+		}
+		result.mediaUrl = media.url;
+		if (!media.path.isEmpty()) result.materializedPaths.push_back(media.path);
+
+		if (!audioUrl.isEmpty()) {
+			const MaterializedNativeMediaSource audio = materializeNativeMediaSource(
+				audioUrl, audioMime, sessionDirectory, token);
+			if (audio.cancelled) {
+				removeNativePlaybackFiles(result.materializedPaths, sessionDirectory);
+				result.materializedPaths.clear();
+				result.cancelled = true;
+				return result;
+			}
+			if (!audio.error.isEmpty()) {
+				// A separate track is optional. Preserve the playable primary source
+				// and let QML surface a degraded-audio warning instead of replacing
+				// the entire video with a fatal error state.
+				result.audioWarning = audio.error;
+				return result;
+			}
+			result.audioUrl = audio.url;
+			if (!audio.path.isEmpty()) result.materializedPaths.push_back(audio.path);
+		}
+		return result;
+	}
 
 	bool participantHasStatus(const QVariantList &statuses, const QStringList &kinds) {
 		for (const QVariant &entry : statuses) {
@@ -161,7 +341,8 @@ namespace {
 	bool isAllowedDirectMediaMime(const QString &mime, const bool audio) {
 		static const QSet< QString > videoMimes {
 			QStringLiteral("video/mp4"), QStringLiteral("video/webm"), QStringLiteral("video/ogg"),
-			QStringLiteral("video/quicktime")
+			QStringLiteral("video/quicktime"), QStringLiteral("application/vnd.apple.mpegurl"),
+			QStringLiteral("application/dash+xml")
 		};
 		static const QSet< QString > audioMimes {
 			QStringLiteral("audio/aac"), QStringLiteral("audio/flac"), QStringLiteral("audio/mp4"),
@@ -179,6 +360,12 @@ namespace {
 		const QString scheme = url.scheme().toLower();
 		if (scheme == QLatin1String("https")) {
 			return source.size() <= 16384 ? safeExternalUrl(url) : QString();
+		}
+		if (mime == QLatin1String("application/vnd.apple.mpegurl")
+			|| mime == QLatin1String("application/dash+xml")) {
+			// Manifest playback is delegated to the isolated WebEngineQuick surface.
+			// Unlike bounded audio/video payloads it never accepts an inline data URL.
+			return {};
 		}
 		if (scheme != QLatin1String("data")) return {};
 
@@ -700,6 +887,10 @@ namespace {
 		}
 		appendBoundedText(QStringLiteral("contentWarning"), 256);
 		appendBoolean(QStringLiteral("thumbnailBlur"));
+		// X metadata is normalized by the common scalar pass, but its avatar is a
+		// managed image capability and must not lose priority to a noisy metadata
+		// tail once backend hydration has replaced the remote source.
+		appendManagedImage(QStringLiteral("xAvatarUrl"));
 
 		const QString provider = source.value(QStringLiteral("provider"),
 										 source.value(QStringLiteral("previewProvider")))
@@ -869,8 +1060,10 @@ namespace {
 		static const QStringList textFields {
 			QStringLiteral("kind"), QStringLiteral("title"), QStringLiteral("subtitle"),
 			QStringLiteral("description"), QStringLiteral("host"), QStringLiteral("openLabel"),
+			QStringLiteral("errorDescription"), QStringLiteral("errorMessage"), QStringLiteral("error"),
 			QStringLiteral("loadingLabel"), QStringLiteral("embedKind"), QStringLiteral("embedAspect"),
-			QStringLiteral("previewSize"), QStringLiteral("mediaKind")
+			QStringLiteral("previewSize"), QStringLiteral("mediaKind"),
+			QStringLiteral("presentationFamily"), QStringLiteral("caseVariant")
 		};
 		for (const QString &field : textFields) {
 			if (preview.contains(field)) normalized.insert(field, preview.value(field).toString().left(4096));
@@ -969,8 +1162,13 @@ namespace {
 			if (!itemExternalUrl.isEmpty()) normalizedItem.insert(QStringLiteral("externalUrl"), itemExternalUrl);
 			if (!thumbnail.isEmpty()) normalizedItem.insert(QStringLiteral("thumbnail"), thumbnail);
 			if (!poster.isEmpty()) normalizedItem.insert(QStringLiteral("poster"), poster);
-			const QString streamKind = item.value(QStringLiteral("streamKind")).toString().trimmed().toLower();
-			if (!streamKind.isEmpty()) normalizedItem.insert(QStringLiteral("streamKind"), streamKind.left(32));
+			QString streamKind = item.value(QStringLiteral("streamKind")).toString().trimmed().toLower();
+			const bool hlsManifest = itemMime == QLatin1String("application/vnd.apple.mpegurl");
+			const bool dashManifest = itemMime == QLatin1String("application/dash+xml");
+			if (hlsManifest) streamKind = QStringLiteral("hls");
+			else if (dashManifest) streamKind = QStringLiteral("dash");
+			else if (streamKind != QLatin1String("direct")) streamKind.clear();
+			if (!streamKind.isEmpty()) normalizedItem.insert(QStringLiteral("streamKind"), streamKind);
 			mediaItems.push_back(normalizedItem);
 		}
 		if (!mediaItems.isEmpty()) normalized.insert(QStringLiteral("mediaItems"), mediaItems);
@@ -993,6 +1191,7 @@ namespace {
 
 	QVariantList normalizedAttachments(const QVariant &value) {
 		QVariantList normalized;
+		static const QRegularExpression safeInlineToken(QStringLiteral("^[0-9a-f]{24}$"));
 		for (const QVariant &entry : value.toList()) {
 			if (normalized.size() >= MaxAttachmentCount) break;
 			const QVariantMap attachment = entry.toMap();
@@ -1005,7 +1204,9 @@ namespace {
 			const qulonglong assetID = rawAssetID.toString().trimmed().toULongLong(&validAssetID);
 			validAssetID = validAssetID && assetID > 0
 				&& assetID <= std::numeric_limits< unsigned int >::max();
-			if (source.isEmpty() && thumbnail.isEmpty() && !validAssetID) continue;
+			const QString inlineToken = attachment.value(QStringLiteral("inlineToken")).toString().trimmed().toLower();
+			const bool validInlineToken = safeInlineToken.match(inlineToken).hasMatch();
+			if (source.isEmpty() && thumbnail.isEmpty() && !validAssetID && !validInlineToken) continue;
 			QString kind = attachment.value(QStringLiteral("kind")).toString().trimmed().toLower().left(64);
 			const QString mime = attachment.value(QStringLiteral("mime")).toString().trimmed().toLower().left(128);
 			if (kind.isEmpty()) {
@@ -1016,6 +1217,19 @@ namespace {
 			}
 			const QString fileName = attachment.value(
 				QStringLiteral("fileName"), attachment.value(QStringLiteral("name"))).toString().left(1024);
+			QString state = attachment.value(QStringLiteral("state"), QStringLiteral("ready"))
+				.toString().trimmed().toLower();
+			if (state != QLatin1String("ready") && state != QLatin1String("loading")
+				&& state != QLatin1String("error")) {
+				state = QStringLiteral("ready");
+			}
+			const bool previewCanRetry = validAssetID && kind == QLatin1String("image")
+				&& state == QLatin1String("error")
+				&& attachment.value(QStringLiteral("previewCanRetry")).toBool();
+			QString previewErrorCode = attachment.value(QStringLiteral("previewErrorCode"))
+				.toString().trimmed().toLower().left(64);
+			static const QRegularExpression safePreviewErrorCode(QStringLiteral("^[a-z0-9][a-z0-9-]{0,63}$"));
+			if (!safePreviewErrorCode.match(previewErrorCode).hasMatch()) previewErrorCode.clear();
 			QVariantMap item {
 				{ QStringLiteral("id"), attachment.value(QStringLiteral("id"), rawAssetID).toString().left(512) },
 				{ QStringLiteral("kind"), kind },
@@ -1025,9 +1239,16 @@ namespace {
 				{ QStringLiteral("alt"), attachment.value(QStringLiteral("alt")).toString().left(4096) },
 				{ QStringLiteral("url"), source },
 				{ QStringLiteral("thumbnailUrl"), thumbnail.isEmpty() ? source : thumbnail },
-				{ QStringLiteral("state"), attachment.value(QStringLiteral("state"), QStringLiteral("ready")).toString().left(64) }
+				{ QStringLiteral("state"), state },
+				{ QStringLiteral("previewCanRetry"), previewCanRetry },
+				{ QStringLiteral("previewError"), attachment.value(QStringLiteral("previewError"))
+					.toString().trimmed().left(512) }
 			};
+			if (!previewErrorCode.isEmpty()) {
+				item.insert(QStringLiteral("previewErrorCode"), previewErrorCode);
+			}
 			if (validAssetID) item.insert(QStringLiteral("assetId"), QVariant::fromValue(assetID));
+			if (validInlineToken) item.insert(QStringLiteral("inlineToken"), inlineToken);
 			if (attachment.contains(QStringLiteral("byteSize"))) {
 				item.insert(QStringLiteral("byteSize"), attachment.value(QStringLiteral("byteSize")).toULongLong());
 			} else if (attachment.contains(QStringLiteral("size"))) {
@@ -1322,6 +1543,7 @@ bool ActiveScopeController::hasPendingReply() const { return m_hasPendingReply; 
 QString ActiveScopeController::replyActor() const { return m_replyActor; }
 QString ActiveScopeController::replySnippet() const { return m_replySnippet; }
 bool ActiveScopeController::canAttachImages() const { return m_canAttachImages; }
+bool ActiveScopeController::canAttachFiles() const { return m_canAttachFiles; }
 bool ActiveScopeController::canLoadOlder() const { return m_canLoadOlder; }
 qulonglong ActiveScopeController::unreadCount() const { return m_unreadCount; }
 bool ActiveScopeController::canMarkRead() const { return m_canMarkRead; }
@@ -1354,6 +1576,9 @@ void ActiveScopeController::setReplySnippet(const QString &value) { SET_SCOPE_VA
 void ActiveScopeController::setCanAttachImages(bool value) {
 	SET_SCOPE_VALUE(m_canAttachImages, canAttachImagesChanged);
 }
+void ActiveScopeController::setCanAttachFiles(bool value) {
+	SET_SCOPE_VALUE(m_canAttachFiles, canAttachFilesChanged);
+}
 void ActiveScopeController::setCanLoadOlder(bool value) { SET_SCOPE_VALUE(m_canLoadOlder, canLoadOlderChanged); }
 void ActiveScopeController::setUnreadCount(qulonglong value) { SET_SCOPE_VALUE(m_unreadCount, unreadCountChanged); }
 void ActiveScopeController::setCanMarkRead(bool value) { SET_SCOPE_VALUE(m_canMarkRead, canMarkReadChanged); }
@@ -1379,6 +1604,7 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setReplyActor(state.value(QStringLiteral("replyActor")).toString());
 	setReplySnippet(state.value(QStringLiteral("replySnippet")).toString());
 	setCanAttachImages(state.value(QStringLiteral("canAttachImages")).toBool());
+	setCanAttachFiles(state.value(QStringLiteral("canAttachFiles")).toBool());
 	setCanLoadOlder(state.value(QStringLiteral("canLoadOlder")).toBool());
 	setUnreadCount(state.value(QStringLiteral("unreadCount")).toULongLong());
 	setCanMarkRead(state.value(QStringLiteral("canMarkRead")).toBool());
@@ -1558,6 +1784,7 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 			purePrepend = m_rowIds.at(oldRow) == validIds.at(prependCount + oldRow);
 		}
 		if (purePrepend) {
+			emit rowsAboutToBePrepended(prependCount);
 			beginInsertRows(QModelIndex(), 0, prependCount - 1);
 			QVariantList mergedRows;
 			QStringList mergedIds;
@@ -1659,6 +1886,10 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 
 void StableListModel::upsertRow(const QVariantMap &row) {
 	if (!acceptsFrontendStateMutation(this)) return;
+	upsertRowFromInternalResult(row);
+}
+
+void StableListModel::upsertRowFromInternalResult(const QVariantMap &row) {
 	const QString stableId = row.value(QStringLiteral("id")).toString();
 	if (stableId.isEmpty()) {
 		return;
@@ -1949,6 +2180,129 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 	}
 }
 
+namespace {
+	QString normalizedNavigationFilter(const QString &value) {
+		return value.simplified().toCaseFolded();
+	}
+
+	bool navigationTextMatches(const QVariant &value, const QString &filter) {
+		return !filter.isEmpty() && value.toString().toCaseFolded().contains(filter);
+	}
+
+	bool navigationListMatches(const QVariant &value, const QString &filter) {
+		for (const QVariant &entry : value.toList()) {
+			const QVariantMap map = entry.toMap();
+			if (map.isEmpty()) {
+				if (navigationTextMatches(entry, filter)) return true;
+				continue;
+			}
+			if (navigationTextMatches(map.value(QStringLiteral("label")), filter)
+				|| navigationTextMatches(map.value(QStringLiteral("kind")), filter)) return true;
+		}
+		return false;
+	}
+
+	bool navigationParticipantMatches(const QVariantMap &participant, const QString &filter) {
+		if (filter.isEmpty()) return true;
+		return navigationTextMatches(participant.value(QStringLiteral("label")), filter)
+			|| navigationTextMatches(participant.value(QStringLiteral("name")), filter)
+			|| navigationTextMatches(participant.value(QStringLiteral("talkLabel")), filter)
+			|| navigationTextMatches(participant.value(QStringLiteral("talkState")), filter)
+			|| navigationListMatches(participant.value(QStringLiteral("badges")), filter)
+			|| navigationListMatches(participant.value(QStringLiteral("statuses")), filter);
+	}
+
+	bool navigationRoomMatches(const QVariantMap &room, const QString &filter) {
+		if (filter.isEmpty()) return true;
+		return navigationTextMatches(room.value(QStringLiteral("label")), filter)
+			|| navigationTextMatches(room.value(QStringLiteral("topic")), filter)
+			|| navigationTextMatches(room.value(QStringLiteral("description")), filter)
+			|| navigationTextMatches(room.value(QStringLiteral("subtitle")), filter)
+			|| navigationTextMatches(room.value(QStringLiteral("pathLabel")), filter)
+			|| navigationListMatches(room.value(QStringLiteral("badges")), filter);
+	}
+
+	bool navigationParticipantIsTalking(const QVariantMap &participant) {
+		if (participant.value(QStringLiteral("talking")).toBool()) return true;
+		const QString state = participant.value(QStringLiteral("talkState")).toString().trimmed().toLower();
+		return state == QLatin1String("talking") || state == QLatin1String("whispering")
+			|| state == QLatin1String("shouting") || state == QLatin1String("mutedtalking");
+	}
+}
+
+QString NavigationRailModel::filterText() const { return m_filterText; }
+
+void NavigationRailModel::setFilterText(const QString &filterText) {
+	const QString accepted = filterText.left(128);
+	if (m_filterText == accepted) return;
+	m_filterText = accepted;
+	synchronizeAllRows();
+	emit filterTextChanged();
+}
+
+bool NavigationRailModel::isRoomExpanded(const QString &scopeToken) const {
+	const QString token = scopeToken.trimmed();
+	return !token.isEmpty() && !m_collapsedRoomScopes.contains(token);
+}
+
+void NavigationRailModel::setRoomExpanded(const QString &scopeToken, const bool expanded) {
+	const QString token = scopeToken.trimmed();
+	if (token.isEmpty() || isRoomExpanded(token) == expanded) return;
+	if (expanded) {
+		m_collapsedRoomScopes.remove(token);
+	} else {
+		m_collapsedRoomScopes.insert(token);
+	}
+	synchronizeAllRows();
+	emit roomExpansionChanged(token, expanded);
+}
+
+void NavigationRailModel::toggleRoomExpanded(const QString &scopeToken) {
+	const QString token = scopeToken.trimmed();
+	if (!token.isEmpty()) setRoomExpanded(token, !isRoomExpanded(token));
+}
+
+QVariantMap NavigationRailModel::navigationRoomRow(const QVariantMap &room, const QString &kind) const {
+	QVariantMap row = RoomModel::roomRow(room, kind);
+	if (row.isEmpty()) return {};
+
+	const QVariantList participants = room.value(QStringLiteral("participants")).toList();
+	const int participantCount = room.contains(QStringLiteral("participants"))
+		? participants.size() : room.value(QStringLiteral("participantCount")).toInt();
+	int talkingCount = 0;
+	QStringList talkingLabels;
+	for (const QVariant &entry : participants) {
+		const QVariantMap participant = entry.toMap();
+		if (!navigationParticipantIsTalking(participant)) continue;
+		++talkingCount;
+		const QString label = participant.value(QStringLiteral("label")).toString().trimmed();
+		if (!label.isEmpty() && !talkingLabels.contains(label) && talkingLabels.size() < 3)
+			talkingLabels.push_back(label);
+	}
+
+	const QString filter = normalizedNavigationFilter(m_filterText);
+	const bool ownMatch = navigationRoomMatches(room, filter);
+	bool participantMatch = false;
+	for (const QVariant &entry : participants) {
+		if (navigationParticipantMatches(entry.toMap(), filter)) {
+			participantMatch = true;
+			break;
+		}
+	}
+	const bool selected = row.value(QStringLiteral("selected")).toBool();
+	const bool expanded = kind != QLatin1String("voice")
+		|| isRoomExpanded(row.value(QStringLiteral("scopeToken")).toString());
+	row.insert(QStringLiteral("rowKind"), QStringLiteral("room"));
+	row.insert(QStringLiteral("sectionKind"), kind);
+	row.insert(QStringLiteral("participantCount"), participantCount);
+	row.insert(QStringLiteral("talkingParticipantCount"), talkingCount);
+	row.insert(QStringLiteral("talkingParticipantLabels"), talkingLabels);
+	row.insert(QStringLiteral("expanded"), expanded);
+	row.insert(QStringLiteral("filterMatch"), ownMatch);
+	row.insert(QStringLiteral("railVisible"), filter.isEmpty() || ownMatch || participantMatch || selected);
+	return row;
+}
+
 void NavigationRailModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	m_voiceRoomStates = voiceRooms;
@@ -2019,6 +2373,7 @@ void NavigationRailModel::updatePresence(const QString &sessionId, const QString
 	// Keep the retained room payload in sync with the flattened rows. Scope
 	// selection rebuilds the rail from this payload and must not roll a fresh
 	// talk-state update back to its bootstrap value.
+	QVariantList changedRooms;
 	for (QVariant &roomEntry : m_voiceRoomStates) {
 		QVariantMap room = roomEntry.toMap();
 		QVariantList participants = room.value(QStringLiteral("participants")).toList();
@@ -2043,7 +2398,18 @@ void NavigationRailModel::updatePresence(const QString &sessionId, const QString
 		if (roomChanged) {
 			room.insert(QStringLiteral("participants"), participants);
 			roomEntry = room;
+			changedRooms.push_back(room);
 		}
+	}
+	if (!normalizedNavigationFilter(m_filterText).isEmpty()) {
+		// Presence labels are searchable. Re-evaluate room ancestry and matching
+		// participant visibility, while StableListModel keeps this reset-free.
+		synchronizeAllRows();
+		return;
+	}
+	for (const QVariant &entry : std::as_const(changedRooms)) {
+		const QVariantMap roomRow = navigationRoomRow(entry.toMap(), QStringLiteral("voice"));
+		if (!roomRow.isEmpty()) upsertRow(roomRow);
 	}
 
 	for (int rowIndex = 0; rowIndex < rowCount(); ++rowIndex) {
@@ -2085,6 +2451,7 @@ void NavigationRailModel::removeParticipant(const QString &sessionId) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	const QString id = sessionId.trimmed();
 	if (id.isEmpty()) return;
+	QVariantList changedRooms;
 	for (QVariant &roomEntry : m_voiceRoomStates) {
 		QVariantMap room = roomEntry.toMap();
 		QVariantList participants = room.value(QStringLiteral("participants")).toList();
@@ -2097,7 +2464,16 @@ void NavigationRailModel::removeParticipant(const QString &sessionId) {
 			room.insert(QStringLiteral("participants"), participants);
 			room.insert(QStringLiteral("participantCount"), participants.size());
 			roomEntry = room;
+			changedRooms.push_back(room);
 		}
+	}
+	if (!normalizedNavigationFilter(m_filterText).isEmpty()) {
+		synchronizeAllRows();
+		return;
+	}
+	for (const QVariant &entry : std::as_const(changedRooms)) {
+		const QVariantMap roomRow = navigationRoomRow(entry.toMap(), QStringLiteral("voice"));
+		if (!roomRow.isEmpty()) upsertRow(roomRow);
 	}
 	for (int rowIndex = rowCount() - 1; rowIndex >= 0; --rowIndex) {
 		const QVariantMap row = get(rowIndex);
@@ -2109,8 +2485,9 @@ void NavigationRailModel::removeParticipant(const QString &sessionId) {
 
 void NavigationRailModel::synchronizeAllRows() {
 	QVariantList rows;
-	const auto appendRoom = [&rows](const QVariantMap &room, const QString &kind) {
-		QVariantMap roomRow = RoomModel::roomRow(room, kind);
+	const QString filter = normalizedNavigationFilter(m_filterText);
+	const auto appendRoom = [this, &rows, &filter](const QVariantMap &room, const QString &kind) {
+		QVariantMap roomRow = navigationRoomRow(room, kind);
 		if (roomRow.isEmpty()) return;
 		roomRow.insert(QStringLiteral("rowKind"), QStringLiteral("room"));
 		roomRow.insert(QStringLiteral("sectionKind"), kind);
@@ -2119,15 +2496,24 @@ void NavigationRailModel::synchronizeAllRows() {
 		if (kind != QLatin1String("voice")) return;
 		const QString parentScopeToken = roomRow.value(QStringLiteral("scopeToken")).toString();
 		const int participantDepth = roomRow.value(QStringLiteral("depth")).toInt() + 1;
+		const bool expanded = roomRow.value(QStringLiteral("expanded"), true).toBool();
+		const bool roomVisible = roomRow.value(QStringLiteral("railVisible"), true).toBool();
+		const bool roomMatches = roomRow.value(QStringLiteral("filterMatch"), filter.isEmpty()).toBool();
 		for (const QVariant &entry : room.value(QStringLiteral("participants")).toList()) {
-			QVariantMap participantRow = ParticipantModel::participantRow(entry.toMap());
+			const QVariantMap participant = entry.toMap();
+			QVariantMap participantRow = ParticipantModel::participantRow(participant);
 			if (participantRow.isEmpty()) continue;
+			const bool participantMatches = navigationParticipantMatches(participant, filter);
 			participantRow.insert(QStringLiteral("rowKind"), QStringLiteral("participant"));
 			participantRow.insert(QStringLiteral("sectionKind"), kind);
 			participantRow.insert(QStringLiteral("parentScopeToken"), parentScopeToken);
 			participantRow.insert(QStringLiteral("depth"), participantDepth);
 			if (participantRow.value(QStringLiteral("scopeToken")).toString().isEmpty())
 				participantRow.insert(QStringLiteral("scopeToken"), parentScopeToken);
+			participantRow.insert(QStringLiteral("parentExpanded"), expanded);
+			participantRow.insert(QStringLiteral("filterMatch"), participantMatches);
+			participantRow.insert(QStringLiteral("railVisible"), roomVisible && expanded
+				&& (filter.isEmpty() || roomMatches || participantMatches));
 			rows.push_back(participantRow);
 		}
 	};
@@ -2143,6 +2529,154 @@ void NavigationRailModel::synchronizeAllRows() {
 }
 
 ChatTimelineModel::ChatTimelineModel(QObject *parent) : StableListModel(parent) {}
+
+QString ChatTimelineModel::query() const { return m_query; }
+
+void ChatTimelineModel::setQuery(const QString &queryValue) {
+	const QString accepted = queryValue.left(512);
+	if (m_query == accepted) return;
+	m_query = accepted;
+	emit queryChanged();
+	refreshSearchState(false);
+}
+
+int ChatTimelineModel::matchCount() const { return static_cast< int >(m_searchMatchIds.size()); }
+int ChatTimelineModel::currentMatchIndex() const { return m_currentMatchIndex; }
+int ChatTimelineModel::currentMatchRow() const { return m_currentMatchRow; }
+QString ChatTimelineModel::currentMatchStableId() const { return m_currentMatchStableId; }
+
+bool ChatTimelineModel::searchActive() const { return !m_query.trimmed().isEmpty(); }
+
+bool ChatTimelineModel::rowMatchesQuery(const QVariantMap &row, const QString &normalizedQuery) const {
+	if (normalizedQuery.isEmpty()) return false;
+	const auto matchesText = [&normalizedQuery](const QVariant &value) {
+		return value.toString().toCaseFolded().contains(normalizedQuery);
+	};
+	const auto matchesFields = [&matchesText](const QVariantMap &source, const QStringList &fields) {
+		for (const QString &field : fields) {
+			if (matchesText(source.value(field))) return true;
+		}
+		return false;
+	};
+	const auto matchesAttachmentNames = [&matchesText](const QVariant &attachmentsValue) {
+		for (const QVariant &entry : attachmentsValue.toList()) {
+			const QVariantMap attachment = entry.toMap();
+			if (matchesText(attachment.value(QStringLiteral("fileName")))
+				|| matchesText(attachment.value(QStringLiteral("filename")))
+				|| matchesText(attachment.value(QStringLiteral("name")))
+				|| matchesText(attachment.value(QStringLiteral("label")))) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	static const QStringList senderFields {
+		QStringLiteral("actor"), QStringLiteral("actorLabel"), QStringLiteral("actorName"),
+		QStringLiteral("author"), QStringLiteral("authorName"), QStringLiteral("sender"),
+		QStringLiteral("senderName")
+	};
+	static const QStringList bodyFields {
+		QStringLiteral("bodyText"), QStringLiteral("plainText")
+	};
+	static const QStringList replyFields {
+		QStringLiteral("replyActor"), QStringLiteral("replySnippet"), QStringLiteral("replyText")
+	};
+
+	const QVariantMap source = row.value(QStringLiteral("source")).toMap();
+	if (matchesText(row.value(QStringLiteral("title")))
+		|| matchesText(row.value(QStringLiteral("subtitle")))
+		|| matchesText(row.value(QStringLiteral("replyActor")))
+		|| matchesText(row.value(QStringLiteral("replySnippet")))
+		|| matchesFields(source, senderFields)
+		|| matchesFields(source, bodyFields)
+		|| matchesFields(source, replyFields)
+		|| matchesAttachmentNames(row.value(QStringLiteral("attachments")))
+		|| matchesAttachmentNames(source.value(QStringLiteral("attachments")))) {
+		return true;
+	}
+
+	const QVariantMap reply = source.value(QStringLiteral("reply")).toMap();
+	return matchesFields(reply, senderFields) || matchesFields(reply, bodyFields)
+		|| matchesFields(reply, replyFields);
+}
+
+void ChatTimelineModel::refreshSearchState(const bool preserveCurrentMatch) {
+	const int previousMatchCount = static_cast< int >(m_searchMatchIds.size());
+	const int previousIndex = m_currentMatchIndex;
+	const int previousRow = m_currentMatchRow;
+	const QString previousStableId = m_currentMatchStableId;
+	const QString anchorStableId = preserveCurrentMatch ? previousStableId : QString();
+	const int anchorIndex = preserveCurrentMatch ? previousIndex : -1;
+
+	QStringList matches;
+	const QString normalizedQuery = m_query.trimmed().toCaseFolded();
+	if (!normalizedQuery.isEmpty()) {
+		matches.reserve(rowCount());
+		for (int row = 0; row < rowCount(); ++row) {
+			const QVariantMap candidate = get(row);
+			if (rowMatchesQuery(candidate, normalizedQuery)) {
+				matches.push_back(candidate.value(QStringLiteral("id")).toString());
+			}
+		}
+	}
+
+	int selectedIndex = -1;
+	if (!matches.isEmpty()) {
+		selectedIndex = anchorStableId.isEmpty() ? -1
+			: static_cast< int >(matches.indexOf(anchorStableId));
+		if (selectedIndex < 0) {
+			selectedIndex = anchorIndex >= 0
+				? qMin(anchorIndex, static_cast< int >(matches.size()) - 1) : 0;
+		}
+	}
+	m_searchMatchIds = std::move(matches);
+	m_currentMatchIndex = selectedIndex;
+	m_currentMatchStableId = selectedIndex >= 0 ? m_searchMatchIds.at(selectedIndex) : QString();
+	m_currentMatchRow = m_currentMatchStableId.isEmpty() ? -1 : rowForStableId(m_currentMatchStableId);
+
+	if (previousMatchCount != static_cast< int >(m_searchMatchIds.size())) emit matchCountChanged();
+	if (previousIndex != m_currentMatchIndex || previousRow != m_currentMatchRow
+		|| previousStableId != m_currentMatchStableId) {
+		emit currentMatchChanged();
+	}
+}
+
+bool ChatTimelineModel::selectMatch(const int matchIndex) {
+	if (matchIndex < 0 || matchIndex >= static_cast< int >(m_searchMatchIds.size())) return false;
+	const QString stableId = m_searchMatchIds.at(matchIndex);
+	const int row = rowForStableId(stableId);
+	if (row < 0) {
+		refreshSearchState(true);
+		return false;
+	}
+	if (m_currentMatchIndex == matchIndex && m_currentMatchRow == row
+		&& m_currentMatchStableId == stableId) {
+		return false;
+	}
+	m_currentMatchIndex = matchIndex;
+	m_currentMatchRow = row;
+	m_currentMatchStableId = stableId;
+	emit currentMatchChanged();
+	return true;
+}
+
+bool ChatTimelineModel::nextMatch() {
+	if (m_searchMatchIds.isEmpty()) return false;
+	const int count = static_cast< int >(m_searchMatchIds.size());
+	const int nextIndex = m_currentMatchIndex < 0 ? 0 : (m_currentMatchIndex + 1) % count;
+	return selectMatch(nextIndex);
+}
+
+bool ChatTimelineModel::previousMatch() {
+	if (m_searchMatchIds.isEmpty()) return false;
+	const int count = static_cast< int >(m_searchMatchIds.size());
+	const int previousIndex = m_currentMatchIndex < 0 ? count - 1
+		: (m_currentMatchIndex + count - 1) % count;
+	return selectMatch(previousIndex);
+}
+
+void ChatTimelineModel::clearSearch() { setQuery(QString()); }
 
 bool ChatTimelineModel::isUserHistoryRow(const QVariantMap &row) {
 	const QVariantMap source = row.value(QStringLiteral("source")).toMap();
@@ -2193,6 +2727,12 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	}
 	const QVariant previewValue = message.contains(QStringLiteral("preview"))
 		? message.value(QStringLiteral("preview")) : message.value(QStringLiteral("previewStub"));
+	QVariantMap source = message;
+	// Preview payloads can contain base64 audio/video data. The normalized preview
+	// role below is the single QML-facing copy; retaining the original payload in
+	// SourceRole doubled dormant-card memory before playback was ever activated.
+	source.remove(QStringLiteral("preview"));
+	source.remove(QStringLiteral("previewStub"));
 
 	return { { QStringLiteral("id"), messageId },
 			 { QStringLiteral("title"), message.value(QStringLiteral("actor"),
@@ -2216,7 +2756,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")).toBool() },
 			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")).toBool() },
 			 { QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")).toBool() },
-			 { QStringLiteral("source"), message } };
+			 { QStringLiteral("source"), source } };
 }
 
 ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVariantMap &message) {
@@ -2235,11 +2775,13 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 		upsertRow(row);
 		updateUserHistoryRow(id, row);
 		scheduleRichBodyParses(requests);
+		if (searchActive()) refreshSearchState(true);
 		return MessageMutation::Updated;
 	}
 	upsertRow(row);
 	updateUserHistoryRow(id, row);
 	scheduleRichBodyParses(requests);
+	if (searchActive()) refreshSearchState(true);
 	return MessageMutation::Inserted;
 }
 
@@ -2257,11 +2799,13 @@ bool ChatTimelineModel::removeMessage(const QString &messageId) {
 	m_userHistoryMessageIds.remove(id);
 	removeRow(id);
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
+	if (searchActive()) refreshSearchState(true);
 	return true;
 }
 
 int ChatTimelineModel::appendMessages(const QVariantList &messages) {
 	int applied = 0;
+	bool searchStateMayHaveChanged = false;
 	QList< RichBodyParseRequest > requests;
 	for (const QVariant &entry : messages) {
 		if (!acceptsFrontendStateMutation(this)) break;
@@ -2273,8 +2817,10 @@ int ChatTimelineModel::appendMessages(const QVariantList &messages) {
 		if (rowIndex >= 0 && get(rowIndex) == row) continue;
 		upsertRow(row);
 		updateUserHistoryRow(id, row);
+		searchStateMayHaveChanged = true;
 	}
 	scheduleRichBodyParses(requests);
+	if (searchActive() && searchStateMayHaveChanged) refreshSearchState(true);
 	return applied;
 }
 
@@ -2324,6 +2870,7 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	m_userHistoryMessageIds = std::move(userHistoryMessageIds);
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
 	scheduleRichBodyParses(requests);
+	if (searchActive()) refreshSearchState(true);
 }
 
 QVariantList ChatTimelineModel::messages() const {
@@ -2353,6 +2900,7 @@ void ChatTimelineModel::clear() {
 	m_userHistoryMessageIds.clear();
 	StableListModel::clear();
 	if (hadUserHistory) emit hasUserHistoryChanged();
+	if (searchActive()) refreshSearchState(true);
 }
 
 void ChatTimelineModel::forgetRichBodyMessage(const QString &messageId) {
@@ -2490,7 +3038,10 @@ void ChatTimelineModel::drainRichBodyResults() {
 		QVariantMap row = get(rowIndex);
 		if (row.value(QStringLiteral("bodySegments")).toList() == ready.segments) continue;
 		row.insert(QStringLiteral("bodySegments"), ready.segments);
-		upsertRow(row);
+		// The parser result is owned by this model and is accepted only after both
+		// the stable message id and expected cache key still match. It must be able
+		// to land while the visual-fixture override rejects unrelated live writes.
+		upsertRowFromInternalResult(row);
 	}
 	if (!m_readyRichBodies.empty()) scheduleRichBodyDrain();
 }
@@ -2657,6 +3208,37 @@ QString DirectMessageController::historyError() const {
 QString DirectMessageController::emptyCopy() const {
 	return m_activeConversation.value(QStringLiteral("emptyCopy"), tr("Direct messages will appear here.")).toString();
 }
+bool DirectMessageController::canAttachImages() const {
+	return canSend() && m_activeConversation.value(QStringLiteral("canAttachImages")).toBool();
+}
+bool DirectMessageController::canAttachFiles() const {
+	return canSend() && m_activeConversation.value(QStringLiteral("canAttachFiles")).toBool();
+}
+QVariantList DirectMessageController::draftAttachments() const {
+	QVariantList attachments;
+	for (const QVariant &value : m_activeConversation.value(QStringLiteral("draftAttachments")).toList()) {
+		if (attachments.size() >= 16) break;
+		const QVariantMap source = value.toMap();
+		const QString id = source.value(QStringLiteral("id"), source.value(QStringLiteral("stableId")))
+			.toString().trimmed().left(256);
+		if (id.isEmpty()) continue;
+		QVariantMap attachment {
+			{ QStringLiteral("id"), id },
+			{ QStringLiteral("fileName"), QFileInfo(source.value(QStringLiteral("fileName"),
+				 source.value(QStringLiteral("name"))).toString()).fileName().left(255) },
+			{ QStringLiteral("kind"), source.value(QStringLiteral("kind")).toString().trimmed().toLower().left(64) },
+			{ QStringLiteral("status"), source.value(QStringLiteral("status")).toString().trimmed().toLower().left(64) },
+			{ QStringLiteral("error"), source.value(QStringLiteral("error")).toString().left(1024) },
+			{ QStringLiteral("progress"), qBound(0.0, source.value(QStringLiteral("progress")).toDouble(), 1.0) }
+		};
+		attachments.push_back(attachment);
+	}
+	return attachments;
+}
+bool DirectMessageController::hasPendingReply() const { return !m_pendingReplyMessageId.isEmpty(); }
+QString DirectMessageController::pendingReplyMessageId() const { return m_pendingReplyMessageId; }
+QString DirectMessageController::pendingReplyActor() const { return m_pendingReplyActor; }
+QString DirectMessageController::pendingReplySnippet() const { return m_pendingReplySnippet; }
 QString DirectMessageController::draft() const { return m_drafts.value(m_activeSessionId); }
 bool DirectMessageController::windowDocked() const { return m_windowDocked; }
 bool DirectMessageController::windowMinimized() const { return m_windowMinimized; }
@@ -2664,6 +3246,35 @@ bool DirectMessageController::windowMinimized() const { return m_windowMinimized
 QString DirectMessageController::normalizedSessionId(const QVariant &value) {
 	qulonglong session = 0;
 	return parseProtocolId(value.toString(), false, &session) ? QString::number(session) : QString();
+}
+
+QVariantMap DirectMessageController::timelineRow(const QString &stableId) const {
+	const QString id = stableId.trimmed();
+	if (id.isEmpty()) return {};
+	const int row = m_timelineModel.rowForStableId(id);
+	if (row >= 0) return m_timelineModel.get(row);
+	for (int index = 0; index < m_timelineModel.rowCount(); ++index) {
+		const QVariantMap candidate = m_timelineModel.get(index);
+		if (candidate.value(QStringLiteral("source")).toMap().value(QStringLiteral("messageId")).toString() == id)
+			return candidate;
+	}
+	return {};
+}
+
+QString DirectMessageController::protocolMessageId(const QVariantMap &row) const {
+	const QVariantMap source = row.value(QStringLiteral("source")).toMap();
+	const QVariant candidate = source.value(QStringLiteral("messageId"), row.value(QStringLiteral("id")));
+	qulonglong messageId = 0;
+	return parseProtocolId(candidate.toString(), false, &messageId)
+		? QString::number(messageId) : QString();
+}
+
+void DirectMessageController::clearPendingReplyState() {
+	if (!hasPendingReply() && m_pendingReplyActor.isEmpty() && m_pendingReplySnippet.isEmpty()) return;
+	m_pendingReplyMessageId.clear();
+	m_pendingReplyActor.clear();
+	m_pendingReplySnippet.clear();
+	emit pendingReplyChanged();
 }
 
 void DirectMessageController::switchActiveConversation(const QVariantMap &conversation) {
@@ -2691,6 +3302,14 @@ void DirectMessageController::switchActiveConversation(const QVariantMap &conver
 		normalizedMessages.push_back(message);
 	}
 	m_timelineModel.replaceMessages(normalizedMessages);
+	if (previousSession != m_activeSessionId) {
+		clearPendingReplyState();
+	} else if (hasPendingReply()) {
+		const QVariantMap replyRow = timelineRow(m_pendingReplyMessageId);
+		if (replyRow.isEmpty() || !replyRow.value(QStringLiteral("canReply")).toBool()) {
+			clearPendingReplyState();
+		}
+	}
 
 	if (previousSession != m_activeSessionId || previousDraft != draft()) emit draftChanged();
 	if (!conversationOpen() && m_windowMinimized) {
@@ -2724,6 +3343,37 @@ void DirectMessageController::applyState(const QVariantMap &state) {
 	switchActiveConversation(activeConversation);
 	if (previousTrayOpen != m_trayOpen) emit trayOpenChanged();
 	if (previousState != m_state || previousConversation != m_activeConversation) emit stateChanged();
+}
+
+bool DirectMessageController::applyMessageState(const QString &sessionId, const QVariantMap &sourceMessage) {
+	if (!acceptsFrontendStateMutation(this) || normalizedSessionId(sessionId) != m_activeSessionId) return false;
+	QVariantMap message = sourceMessage;
+	if (!message.contains(QStringLiteral("bodyHtml")))
+		message.insert(QStringLiteral("bodyHtml"), message.value(QStringLiteral("messageHtml")));
+	if (!message.contains(QStringLiteral("bodyText")))
+		message.insert(QStringLiteral("bodyText"), message.value(QStringLiteral("plainText")));
+	if (!message.contains(QStringLiteral("timeLabel"))) {
+		const qint64 createdAtMs = message.value(QStringLiteral("createdAtMs")).toLongLong();
+		message.insert(QStringLiteral("timeLabel"), createdAtMs > 0
+			? QDateTime::fromMSecsSinceEpoch(createdAtMs).toString(QStringLiteral("HH:mm")) : QString());
+	}
+	const QString stableId = message.value(QStringLiteral("id")).toString().trimmed();
+	if (stableId.isEmpty()) return false;
+	const ChatTimelineModel::MessageMutation mutation = m_timelineModel.applyMessage(message);
+	if (mutation == ChatTimelineModel::MessageMutation::Ignored) return false;
+
+	QVariantList messages = m_activeConversation.value(QStringLiteral("messages")).toList();
+	bool replaced = false;
+	for (QVariant &value : messages) {
+		if (value.toMap().value(QStringLiteral("id")).toString() != stableId) continue;
+		value = message;
+		replaced = true;
+		break;
+	}
+	if (!replaced) messages.push_back(message);
+	m_activeConversation.insert(QStringLiteral("messages"), messages);
+	emit stateChanged();
+	return true;
 }
 
 void DirectMessageController::setTrayOpen(const bool open) {
@@ -2780,7 +3430,121 @@ void DirectMessageController::clearDraft(const QString &sessionId) {
 void DirectMessageController::sendDraft() {
 	if (m_activeSessionId.isEmpty() || !canSend()) return;
 	const QString message = draft().trimmed();
-	if (!message.isEmpty()) emit sendRequested(m_activeSessionId, message);
+	const QVariantList attachments = draftAttachments();
+	if (message.isEmpty() && attachments.isEmpty()) return;
+	if (hasPendingReply() || !attachments.isEmpty()) {
+		emit richSendRequested(m_activeSessionId, message, m_pendingReplyMessageId, attachments);
+		return;
+	}
+	emit sendRequested(m_activeSessionId, message);
+}
+
+void DirectMessageController::replyToMessage(const QString &messageId) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	if (row.isEmpty() || !row.value(QStringLiteral("canReply")).toBool()) return;
+	const QString protocolId = protocolMessageId(row);
+	if (protocolId.isEmpty()) return;
+	const QString actor = row.value(QStringLiteral("title")).toString().trimmed().left(256);
+	const QString snippet = row.value(QStringLiteral("subtitle")).toString().trimmed().left(512);
+	const bool changed = m_pendingReplyMessageId != protocolId || m_pendingReplyActor != actor
+		|| m_pendingReplySnippet != snippet;
+	m_pendingReplyMessageId = protocolId;
+	m_pendingReplyActor = actor;
+	m_pendingReplySnippet = snippet;
+	if (changed) emit pendingReplyChanged();
+	emit messageReplyRequested(m_activeSessionId, protocolId);
+}
+
+void DirectMessageController::cancelPendingReply() { clearPendingReplyState(); }
+
+void DirectMessageController::retryMessage(const QString &messageId) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	if (row.isEmpty() || !row.value(QStringLiteral("source")).toMap()
+		.value(QStringLiteral("deliveryCanRetry")).toBool()) return;
+	emit messageRetryRequested(m_activeSessionId, row.value(QStringLiteral("id")).toString());
+}
+
+void DirectMessageController::deleteMessage(const QString &messageId) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	if (row.isEmpty() || !row.value(QStringLiteral("canDelete")).toBool()) return;
+	const QString protocolId = protocolMessageId(row);
+	if (!protocolId.isEmpty()) emit messageDeleteRequested(m_activeSessionId, protocolId);
+}
+
+void DirectMessageController::toggleMessageReaction(const QString &messageId, const QString &emoji) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	const QString reaction = emoji.trimmed().left(64);
+	if (row.isEmpty() || !row.value(QStringLiteral("canReact")).toBool() || reaction.isEmpty()) return;
+	const QString protocolId = protocolMessageId(row);
+	if (!protocolId.isEmpty()) emit messageReactionToggleRequested(m_activeSessionId, protocolId, reaction);
+}
+
+void DirectMessageController::chooseAttachment() {
+	if (!m_activeSessionId.isEmpty() && (canAttachImages() || canAttachFiles())) {
+		emit attachmentChooseRequested(m_activeSessionId);
+	}
+}
+
+void DirectMessageController::removeDraftAttachment(const QString &attachmentId) {
+	const QString id = attachmentId.trimmed();
+	if (!m_activeSessionId.isEmpty() && !id.isEmpty()) emit draftAttachmentRemoveRequested(m_activeSessionId, id);
+}
+
+void DirectMessageController::retryDraftAttachment(const QString &attachmentId) {
+	const QString id = attachmentId.trimmed();
+	if (!m_activeSessionId.isEmpty() && !id.isEmpty()) emit draftAttachmentRetryRequested(m_activeSessionId, id);
+}
+
+void DirectMessageController::openAttachment(const QString &assetId, const QString &fileName) {
+	qulonglong parsed = 0;
+	if (!m_activeSessionId.isEmpty() && parseProtocolId(assetId, false, &parsed)
+		&& parsed <= std::numeric_limits< unsigned int >::max()) {
+		emit attachmentOpenRequested(m_activeSessionId, static_cast< unsigned int >(parsed),
+			QFileInfo(fileName).fileName().left(255));
+	}
+}
+
+void DirectMessageController::downloadAttachment(const QString &assetId, const QString &fileName) {
+	qulonglong parsed = 0;
+	if (!m_activeSessionId.isEmpty() && parseProtocolId(assetId, false, &parsed)
+		&& parsed <= std::numeric_limits< unsigned int >::max()) {
+		emit attachmentDownloadRequested(m_activeSessionId, static_cast< unsigned int >(parsed),
+			QFileInfo(fileName).fileName().left(255));
+	}
+}
+
+void DirectMessageController::retryAttachmentPreview(const QString &messageId, const QString &assetId) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	const QString protocolId = protocolMessageId(row);
+	qulonglong parsedAsset = 0;
+	if (protocolId.isEmpty() || !parseProtocolId(assetId, false, &parsedAsset)
+		|| parsedAsset > std::numeric_limits< unsigned int >::max()) return;
+	bool retryable = false;
+	for (const QVariant &value : row.value(QStringLiteral("attachments")).toList()) {
+		const QVariantMap attachment = value.toMap();
+		if (attachment.value(QStringLiteral("assetId")).toULongLong() == parsedAsset
+			&& attachment.value(QStringLiteral("previewCanRetry")).toBool()) {
+			retryable = true;
+			break;
+		}
+	}
+	if (retryable) {
+		emit attachmentPreviewRetryRequested(m_activeSessionId, protocolId,
+			static_cast< unsigned int >(parsedAsset));
+	}
+}
+
+void DirectMessageController::requestContentHydration(const QString &messageId, const bool highPriority) {
+	if (m_activeSessionId.isEmpty()) return;
+	const QVariantMap row = timelineRow(messageId);
+	const QString protocolId = protocolMessageId(row);
+	if (protocolId.isEmpty()) return;
+	emit contentHydrationRequested(m_activeSessionId, { protocolId }, highPriority);
 }
 
 void DirectMessageController::setWindowDocked(const bool docked) {
@@ -2802,6 +3566,85 @@ void DirectMessageController::pruneDrafts() {
 		if (it.key() == m_activeSessionId && m_drafts.size() > 1) ++it;
 		m_drafts.erase(it);
 	}
+}
+
+ToastController::ToastController(QObject *parent) : QObject(parent), m_dismissTimer(new QTimer(this)) {
+	m_dismissTimer->setSingleShot(true);
+	connect(m_dismissTimer, &QTimer::timeout, this, &ToastController::dismiss);
+}
+
+bool ToastController::visible() const { return m_visible; }
+QString ToastController::tone() const { return m_tone; }
+QString ToastController::title() const { return m_title; }
+QString ToastController::message() const { return m_message; }
+QString ToastController::actionId() const { return m_actionId; }
+QString ToastController::actionLabel() const { return m_actionLabel; }
+int ToastController::repeatCount() const { return m_repeatCount; }
+qulonglong ToastController::revision() const { return m_revision; }
+
+void ToastController::publish(const QString &tone, const QString &title, const QString &message,
+							  const QString &actionId, const QString &actionLabel, const int timeoutMs) {
+	QString normalizedTone = tone.trimmed().toLower();
+	if (normalizedTone == QLatin1String("error")) normalizedTone = QStringLiteral("danger");
+	if (normalizedTone != QLatin1String("info") && normalizedTone != QLatin1String("accent")
+		&& normalizedTone != QLatin1String("success") && normalizedTone != QLatin1String("warning")
+		&& normalizedTone != QLatin1String("danger")) {
+		normalizedTone = QStringLiteral("info");
+	}
+	const QString normalizedTitle = title.trimmed();
+	const QString normalizedMessage = message.trimmed();
+	const QString normalizedActionId = actionId.trimmed();
+	const QString normalizedActionLabel = actionLabel.trimmed();
+	const bool duplicate = m_visible && normalizedTone == m_tone && normalizedTitle == m_title
+		&& normalizedMessage == m_message && normalizedActionId == m_actionId
+		&& normalizedActionLabel == m_actionLabel;
+
+	m_visible = true;
+	m_tone = normalizedTone;
+	m_title = normalizedTitle;
+	m_message = normalizedMessage;
+	m_actionId = normalizedActionId;
+	m_actionLabel = normalizedActionLabel;
+	m_repeatCount = duplicate ? qMin(m_repeatCount + 1, 999) : 1;
+	m_remainingMs = qBound(250, timeoutMs > 0 ? timeoutMs : 4500, 60000);
+	++m_revision;
+	scheduleDismiss();
+	emit stateChanged();
+}
+
+void ToastController::dismiss() {
+	if (!m_visible) return;
+	m_dismissTimer->stop();
+	m_visible = false;
+	m_interactionActive = false;
+	m_repeatCount = 0;
+	m_remainingMs = 4500;
+	m_timerStartedMs = 0;
+	emit stateChanged();
+}
+
+void ToastController::setInteractionActive(const bool active) {
+	if (m_interactionActive == active) return;
+	m_interactionActive = active;
+	if (!m_visible) return;
+	if (active) {
+		if (m_dismissTimer->isActive()) {
+			const qint64 elapsed = qMax< qint64 >(0, QDateTime::currentMSecsSinceEpoch() - m_timerStartedMs);
+			m_remainingMs = qMax(1, m_remainingMs - static_cast< int >(qMin< qint64 >(elapsed, m_remainingMs)));
+			m_dismissTimer->stop();
+		}
+	} else {
+		scheduleDismiss();
+	}
+}
+
+void ToastController::scheduleDismiss() {
+	if (!m_visible || m_interactionActive) {
+		m_dismissTimer->stop();
+		return;
+	}
+	m_timerStartedMs = QDateTime::currentMSecsSinceEpoch();
+	m_dismissTimer->start(qMax(1, m_remainingMs));
 }
 
 void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
@@ -3141,11 +3984,35 @@ void UiCommandController::requestPreviewHydration(const QString &scopeToken, con
 }
 void UiCommandController::cancelPendingReply() { emit pendingReplyCancelRequested(); }
 void UiCommandController::chooseAttachment() { emit attachmentChooseRequested(); }
+void UiCommandController::openChatAttachment(const QString &assetId, const QString &fileName) {
+	bool valid = false;
+	const qulonglong parsed = assetId.trimmed().toULongLong(&valid);
+	if (!valid || parsed == 0 || parsed > std::numeric_limits< unsigned int >::max()) return;
+	emit chatAttachmentOpenRequested(static_cast< unsigned int >(parsed), QFileInfo(fileName).fileName().left(255));
+}
 void UiCommandController::downloadChatAttachment(const QString &assetId, const QString &fileName) {
 	bool valid = false;
 	const qulonglong parsed = assetId.trimmed().toULongLong(&valid);
 	if (!valid || parsed == 0 || parsed > std::numeric_limits< unsigned int >::max()) return;
 	emit chatAttachmentDownloadRequested(static_cast< unsigned int >(parsed), QFileInfo(fileName).fileName().left(255));
+}
+void UiCommandController::retryChatAttachmentPreview(const QString &scopeToken, const QString &messageId,
+											  const QString &assetId) {
+	const QString scope = scopeToken.trimmed();
+	bool validMessage = false;
+	const qulonglong parsedMessage = messageId.trimmed().toULongLong(&validMessage);
+	bool validAsset = false;
+	const qulonglong parsedAsset = assetId.trimmed().toULongLong(&validAsset);
+	if (scope.isEmpty() || !validMessage || parsedMessage == 0 || parsedMessage > MaxProtocolId
+		|| !validAsset || parsedAsset == 0 || parsedAsset > MaxProtocolId) return;
+	emit chatAttachmentPreviewRetryRequested(scope, QString::number(parsedMessage),
+		static_cast< unsigned int >(parsedAsset));
+}
+void UiCommandController::saveChatInlineImage(const QString &token, const QString &fileName) {
+	const QString normalizedToken = token.trimmed().toLower();
+	static const QRegularExpression safeToken(QStringLiteral("^[0-9a-f]{24}$"));
+	if (!safeToken.match(normalizedToken).hasMatch()) return;
+	emit chatInlineImageSaveRequested(normalizedToken, QFileInfo(fileName).fileName().left(255));
 }
 void UiCommandController::replyToMessage(const QString &messageId) {
 	const QString id = messageId.trimmed();
@@ -3396,7 +4263,16 @@ void DialogStateController::requestClose() {
 	emit closeRequested(dialogId());
 }
 
-MediaSessionBackend::MediaSessionBackend(QObject *parent) : QObject(parent) {
+MediaSessionBackend::MediaSessionBackend(QObject *parent, const int sharedOperationAcknowledgementTimeoutMs)
+	: QObject(parent), m_sharedOperationAcknowledgementTimer(new QTimer(this)),
+	  m_sharedOperationAcknowledgementTimeoutMs(qMax(1, sharedOperationAcknowledgementTimeoutMs)) {
+	m_sharedOperationAcknowledgementTimer->setSingleShot(true);
+}
+
+MediaSessionBackend::~MediaSessionBackend() {
+	cancelSharedOperationAcknowledgementTimeout();
+	if (m_nativePreparationToken) m_nativePreparationToken->store(false, std::memory_order_release);
+	scheduleNativePlaybackCleanup(m_materializedPlaybackPaths, m_nativePlaybackSessionDirectory);
 }
 
 namespace {
@@ -3404,7 +4280,8 @@ const QHash< QString, QSet< QString > > &mediaProviderHosts() {
 	static const QHash< QString, QSet< QString > > hosts {
 		{ QStringLiteral("youtube"), { QStringLiteral("www.youtube.com"), QStringLiteral("youtube.com"),
 									 QStringLiteral("www.youtube-nocookie.com"), QStringLiteral("youtube-nocookie.com") } },
-		{ QStringLiteral("twitch"), { QStringLiteral("player.twitch.tv") } },
+		{ QStringLiteral("twitch"),
+		  { QStringLiteral("player.twitch.tv"), QStringLiteral("clips.twitch.tv") } },
 		{ QStringLiteral("streamable"), { QStringLiteral("streamable.com") } },
 		{ QStringLiteral("vimeo"), { QStringLiteral("player.vimeo.com") } },
 		{ QStringLiteral("dailymotion"), { QStringLiteral("geo.dailymotion.com") } },
@@ -3435,10 +4312,15 @@ QString canonicalMediaProvider(const QUrl &url, const QString &provider) {
 
 bool mediaProviderSupportsSynchronizedPlayback(const QString &provider) {
 	static const QSet< QString > supported {
-		QStringLiteral("direct"), QStringLiteral("youtube"), QStringLiteral("twitch"),
-		QStringLiteral("streamable"), QStringLiteral("vimeo"), QStringLiteral("dailymotion")
+		QStringLiteral("direct"), QStringLiteral("youtube")
 	};
 	return supported.contains(provider.trimmed().toLower());
+}
+
+QString normalizedMediaErrorCode(const QString &code) {
+	const QString normalized = code.trimmed().toLower().left(64);
+	static const QRegularExpression validCode(QStringLiteral("^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"));
+	return validCode.match(normalized).hasMatch() ? normalized : QStringLiteral("playback-failed");
 }
 }
 
@@ -3456,13 +4338,20 @@ QString MediaSessionBackend::sharedOperationStatus() const { return m_sharedOper
 QString MediaSessionBackend::sharedOperationError() const { return m_sharedOperationError; }
 QUrl MediaSessionBackend::url() const { return m_url; }
 QUrl MediaSessionBackend::audioUrl() const { return m_audioUrl; }
+QUrl MediaSessionBackend::playbackUrl() const { return m_playbackUrl; }
+QUrl MediaSessionBackend::playbackAudioUrl() const { return m_playbackAudioUrl; }
+QString MediaSessionBackend::playbackAudioWarning() const { return m_playbackAudioWarning; }
+bool MediaSessionBackend::playbackSourceReady() const { return m_playbackSourceReady; }
+bool MediaSessionBackend::playbackSourcePreparing() const { return m_playbackSourcePreparing; }
+qulonglong MediaSessionBackend::playbackSourceGeneration() const { return m_playbackSourceGeneration; }
 QString MediaSessionBackend::provider() const { return m_provider; }
 bool MediaSessionBackend::detached() const { return m_detached; }
 bool MediaSessionBackend::playbackControllable() const {
 	return mediaProviderSupportsSynchronizedPlayback(m_provider);
 }
 bool MediaSessionBackend::playbackControlAllowed() const {
-	return playbackControllable() && (!m_sharedAvailable || m_sharedHost);
+	return playbackControllable()
+		&& (!m_sharedAvailable || (m_sharedHost && sharedScopeMatchesCurrentVoiceRoom()));
 }
 QString MediaSessionBackend::mediaMime() const { return m_mediaMime; }
 QString MediaSessionBackend::audioMime() const { return m_audioMime; }
@@ -3471,10 +4360,73 @@ QString MediaSessionBackend::state() const { return m_state; }
 double MediaSessionBackend::position() const { return m_position; }
 double MediaSessionBackend::duration() const { return m_duration; }
 QString MediaSessionBackend::error() const { return m_error; }
+QString MediaSessionBackend::errorCode() const { return m_errorCode; }
 qulonglong MediaSessionBackend::syncGeneration() const { return m_syncGeneration; }
 int MediaSessionBackend::loadProgress() const { return m_loadProgress; }
 int MediaSessionBackend::volume() const { return m_volume; }
 bool MediaSessionBackend::muted() const { return m_muted; }
+
+void MediaSessionBackend::setCurrentVoiceScopeId(const qulonglong scopeId) {
+	if (m_currentVoiceScopeId == scopeId) return;
+	m_currentVoiceScopeId = scopeId;
+	if (m_sharedAvailable && m_sharedScopeId != 0 && !sharedScopeMatchesCurrentVoiceRoom()) clearSharedState();
+}
+
+bool MediaSessionBackend::sharedScopeMatchesCurrentVoiceRoom() const {
+	return m_currentVoiceScopeId != 0 && m_sharedScopeId != 0 && m_sharedScopeId == m_currentVoiceScopeId;
+}
+
+void MediaSessionBackend::armSharedOperationAcknowledgementTimeout(const SharedOperationKind kind,
+														 const QString &sessionId) {
+	cancelSharedOperationAcknowledgementTimeout();
+	if (kind == SharedOperationKind::None || sessionId.isEmpty()) return;
+
+	++m_sharedOperationGeneration;
+	if (m_sharedOperationGeneration == 0) ++m_sharedOperationGeneration;
+	const qulonglong generation = m_sharedOperationGeneration;
+	m_pendingSharedOperationGeneration = generation;
+	m_pendingSharedOperationKind = kind;
+	m_sharedOperationAcknowledgementConnection = connect(
+		m_sharedOperationAcknowledgementTimer, &QTimer::timeout, this,
+		[this, generation, kind, sessionId]() { recoverTimedOutSharedOperation(generation, kind, sessionId); });
+	m_sharedOperationAcknowledgementTimer->start(m_sharedOperationAcknowledgementTimeoutMs);
+}
+
+void MediaSessionBackend::cancelSharedOperationAcknowledgementTimeout() {
+	if (m_sharedOperationAcknowledgementTimer) m_sharedOperationAcknowledgementTimer->stop();
+	QObject::disconnect(m_sharedOperationAcknowledgementConnection);
+	m_sharedOperationAcknowledgementConnection = {};
+	m_pendingSharedOperationGeneration = 0;
+	m_pendingSharedOperationKind = SharedOperationKind::None;
+}
+
+void MediaSessionBackend::recoverTimedOutSharedOperation(const qulonglong generation,
+														 const SharedOperationKind kind,
+														 const QString &sessionId) {
+	if (generation == 0 || generation != m_pendingSharedOperationGeneration
+		|| kind != m_pendingSharedOperationKind || sessionId != m_pendingExplicitSessionId
+		|| sessionId != m_sharedSessionId) {
+		return;
+	}
+
+	cancelSharedOperationAcknowledgementTimeout();
+	if (!m_sharedAvailable || m_sharedJoined) return;
+	m_pendingExplicitSessionId.clear();
+
+	const QString message = kind == SharedOperationKind::Start
+		? tr("The server did not confirm the watch-together start. Try again.")
+		: tr("The server did not confirm joining the watch-together session. Try again.");
+	if (kind == SharedOperationKind::Start) {
+		clearSharedState();
+		m_sharedOperationStatus = QStringLiteral("idle");
+	} else {
+		m_state = QStringLiteral("available");
+		m_sharedOperationStatus = QStringLiteral("available");
+	}
+	m_sharedOperationError = message;
+	emit stateChanged();
+	emit playbackRejected(message);
+}
 
 bool MediaSessionBackend::validateSource(const QUrl &url, const QString &provider, QUrl *normalized,
 										 QString *error) const {
@@ -3532,6 +4484,7 @@ bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &p
 		return false;
 	}
 	const QString normalizedProvider = canonicalMediaProvider(normalized, provider);
+	invalidateNativePlaybackSources();
 	m_active = true;
 	m_url = normalized;
 	m_audioUrl = {};
@@ -3540,20 +4493,33 @@ bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &p
 	m_mediaMime.clear();
 	m_audioMime.clear();
 	m_sessionId = requestedSessionId;
-	m_navigationHost = normalized.host().toLower();
-	m_navigationPort = normalized.port(443);
 	m_state = QStringLiteral("loading");
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	m_errorCode.clear();
+	m_remoteStateSessionId.clear();
+	m_remoteStateGeneration = 0;
 	updateLoadProgress(0);
 	++m_syncGeneration;
+	emit sourceChanged();
 	emit stateChanged();
 	return true;
 }
 
 bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
 									 const QString &audioMime, const QString &sessionId) {
+	return openDirectWithPresentation(url, mediaMime, audioUrl, audioMime, sessionId, true);
+}
+
+bool MediaSessionBackend::openDirectInline(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
+										   const QString &audioMime, const QString &sessionId) {
+	return openDirectWithPresentation(url, mediaMime, audioUrl, audioMime, sessionId, false);
+}
+
+bool MediaSessionBackend::openDirectWithPresentation(const QUrl &url, const QString &mediaMime,
+											   const QUrl &audioUrl, const QString &audioMime,
+											   const QString &sessionId, const bool detached) {
 	if (m_sharedAvailable) {
 		emit playbackRejected(tr("Leave or end the current watch-together session before opening other media."));
 		return false;
@@ -3579,24 +4545,106 @@ bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, 
 		}
 	}
 
+	invalidateNativePlaybackSources();
 	m_active = true;
 	m_url = normalizedMediaUrl;
 	m_audioUrl = normalizedAudioUrl;
 	m_provider = QStringLiteral("direct");
 	m_mediaMime = normalizedMediaMime;
 	m_audioMime = normalizedAudioMime;
-	m_detached = true;
+	m_detached = detached;
 	m_sessionId = sessionId.trimmed();
-	m_navigationHost.clear();
-	m_navigationPort = -1;
 	m_state = QStringLiteral("loading");
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	m_errorCode.clear();
+	m_remoteStateSessionId.clear();
+	m_remoteStateGeneration = 0;
 	updateLoadProgress(0);
 	++m_syncGeneration;
+	emit sourceChanged();
 	emit stateChanged();
+	prepareNativePlaybackSources();
 	return true;
+}
+
+void MediaSessionBackend::invalidateNativePlaybackSources() {
+	if (m_nativePreparationToken) m_nativePreparationToken->store(false, std::memory_order_release);
+	m_nativePreparationToken.reset();
+	const QStringList stalePaths = std::exchange(m_materializedPlaybackPaths, {});
+	m_playbackUrl = {};
+	m_playbackAudioUrl = {};
+	m_playbackAudioWarning.clear();
+	m_playbackSourceReady = false;
+	m_playbackSourcePreparing = false;
+	++m_playbackSourceGeneration;
+	emit playbackSourceChanged();
+	scheduleNativePlaybackCleanup(stalePaths, m_nativePlaybackSessionDirectory);
+}
+
+void MediaSessionBackend::prepareNativePlaybackSources() {
+	if (!m_active || m_provider != QLatin1String("direct") || m_url.isEmpty()) return;
+	const qulonglong generation = m_playbackSourceGeneration;
+	if (m_url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0
+		&& (m_audioUrl.isEmpty()
+			|| m_audioUrl.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0)) {
+		m_playbackUrl = m_url;
+		m_playbackAudioUrl = m_audioUrl;
+		m_playbackAudioWarning.clear();
+		m_playbackSourceReady = true;
+		m_playbackSourcePreparing = false;
+		emit playbackSourceChanged();
+		return;
+	}
+
+	const QString cacheRoot = nativeMediaCacheRoot();
+	if (m_nativePlaybackSessionDirectory.isEmpty()) {
+		m_nativePlaybackSessionDirectory = QDir(cacheRoot).filePath(
+			QUuid::createUuid().toString(QUuid::WithoutBraces));
+	}
+	const auto token = std::make_shared< std::atomic_bool >(true);
+	m_nativePreparationToken = token;
+	m_playbackSourcePreparing = true;
+	m_playbackSourceReady = false;
+	emit playbackSourceChanged();
+
+	auto *watcher = new QFutureWatcher< NativePlaybackPreparationResult >(this);
+	connect(watcher, &QFutureWatcher< NativePlaybackPreparationResult >::finished, this,
+		[this, watcher, token, generation]() {
+			const NativePlaybackPreparationResult result = watcher->result();
+			watcher->deleteLater();
+			if (!token->load(std::memory_order_acquire)
+				|| result.cancelled || result.generation != m_playbackSourceGeneration
+				|| generation != m_playbackSourceGeneration || !m_active
+				|| m_provider != QLatin1String("direct")) {
+				scheduleNativePlaybackCleanup(result.materializedPaths, m_nativePlaybackSessionDirectory);
+				return;
+			}
+
+			m_nativePreparationToken.reset();
+			m_playbackSourcePreparing = false;
+			if (!result.error.isEmpty()) {
+				m_playbackSourceReady = false;
+				emit playbackSourceChanged();
+				reportTypedError(QStringLiteral("native-source-prepare-failed"), result.error);
+				return;
+			}
+			m_playbackUrl = result.mediaUrl;
+			m_playbackAudioUrl = result.audioUrl;
+			m_playbackAudioWarning = result.audioWarning.isEmpty()
+				? QString()
+				: tr("The separate audio track could not be prepared: %1").arg(result.audioWarning);
+			m_materializedPlaybackPaths = result.materializedPaths;
+			m_playbackSourceReady = true;
+			emit playbackSourceChanged();
+		});
+	watcher->setFuture(QtConcurrent::run([generation, mediaUrl = m_url, mediaMime = m_mediaMime,
+			audioUrl = m_audioUrl, audioMime = m_audioMime, cacheRoot,
+			sessionDirectory = m_nativePlaybackSessionDirectory, token]() {
+		return materializeNativePlaybackSources(generation, mediaUrl, mediaMime, audioUrl, audioMime,
+			cacheRoot, sessionDirectory, token);
+	}));
 }
 
 bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, const QString &title) {
@@ -3608,6 +4656,10 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	}
 	if (m_sharedAvailable) {
 		reportError(tr("Leave or end the current watch-together session first."));
+		return false;
+	}
+	if (m_currentVoiceScopeId == 0) {
+		rejectPlayback(tr("Join a voice room before using Watch Together."));
 		return false;
 	}
 	const QString normalizedProvider = canonicalMediaProvider(normalized, provider);
@@ -3625,6 +4677,7 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_sharedSessionId = sessionId;
 	m_sharedUrl = normalized;
 	m_sharedProvider = normalizedProvider;
+	m_sharedScopeId = m_currentVoiceScopeId;
 	m_sharedParticipantSessions.clear();
 	m_sharedOperationStatus = QStringLiteral("starting");
 	m_sharedOperationError.clear();
@@ -3634,6 +4687,8 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_sharedGeneration = 0;
 	m_state = QStringLiteral("starting");
 	m_error.clear();
+	m_errorCode.clear();
+	armSharedOperationAcknowledgementTimeout(SharedOperationKind::Start, sessionId);
 	emit stateChanged();
 	emit sharedStartRequested(sessionId, normalized, m_sharedProvider, m_sharedTitle);
 	return true;
@@ -3641,14 +4696,20 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 
 void MediaSessionBackend::joinShared() {
 	if (!m_sharedAvailable || m_sharedSessionId.isEmpty() || m_sharedJoined) return;
+	if (!sharedScopeMatchesCurrentVoiceRoom()) {
+		clearSharedState();
+		return;
+	}
 	m_pendingExplicitSessionId = m_sharedSessionId;
 	m_sharedOperationStatus = QStringLiteral("starting");
 	m_sharedOperationError.clear();
+	armSharedOperationAcknowledgementTimeout(SharedOperationKind::Join, m_sharedSessionId);
 	emit stateChanged();
 	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("join"), 0);
 }
 
 void MediaSessionBackend::leaveShared() {
+	cancelSharedOperationAcknowledgementTimeout();
 	if (!m_sharedAvailable || m_sharedSessionId.isEmpty()) return;
 	if (m_sharedHost) {
 		endShared();
@@ -3665,6 +4726,7 @@ void MediaSessionBackend::leaveShared() {
 }
 
 void MediaSessionBackend::endShared() {
+	cancelSharedOperationAcknowledgementTimeout();
 	if (!m_sharedAvailable || m_sharedSessionId.isEmpty() || !m_sharedHost) return;
 	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("end"), 0);
 	clearSharedState();
@@ -3679,12 +4741,15 @@ void MediaSessionBackend::transferSharedHost(const QString &sessionId) {
 }
 
 bool MediaSessionBackend::reopenSharedPlayer() {
-	if (!m_sharedAvailable || !m_sharedJoined || m_sharedUrl.isEmpty()) return false;
+	if (!m_sharedAvailable || !m_sharedJoined || m_sharedUrl.isEmpty()
+		|| !sharedScopeMatchesCurrentVoiceRoom()) return false;
 	m_sharedPlayerSuppressed = false;
 	m_sharedOperationStatus = QStringLiteral("reconnecting");
 	m_sharedOperationError.clear();
 	emit stateChanged();
 	if (!open(m_sharedUrl, m_sharedProvider, m_sharedSessionId)) return false;
+	m_remoteStateSessionId = m_sharedSessionId;
+	m_remoteStateGeneration = m_sharedGeneration;
 	m_position = m_sharedPosition;
 	m_state = m_sharedPaused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_syncGeneration = qMax(m_syncGeneration, m_sharedGeneration);
@@ -3696,11 +4761,16 @@ void MediaSessionBackend::retry() {
 	if (!m_active || m_url.isEmpty()) return;
 	m_state = QStringLiteral("loading");
 	m_error.clear();
+	m_errorCode.clear();
 	if (m_sharedAvailable) {
 		m_sharedOperationStatus = QStringLiteral("reconnecting");
 		m_sharedOperationError.clear();
 	}
 	updateLoadProgress(0);
+	if (m_provider == QLatin1String("direct") && !m_playbackSourceReady) {
+		invalidateNativePlaybackSources();
+		prepareNativePlaybackSources();
+	}
 	emit stateChanged();
 	emit retryRequested();
 }
@@ -3709,13 +4779,15 @@ bool MediaSessionBackend::isNavigationAllowed(const QUrl &url) const {
 	if (url == QUrl(QStringLiteral("about:blank"))) return true;
 	if (!m_active) return false;
 	if (m_provider == QLatin1String("direct")) {
-		const QUrl candidate = url.adjusted(QUrl::RemoveFragment);
-		return candidate == m_url.adjusted(QUrl::RemoveFragment)
-			|| (!m_audioUrl.isEmpty() && candidate == m_audioUrl.adjusted(QUrl::RemoveFragment));
+		const QUrl candidate = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
+		return candidate == m_url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment)
+			|| (!m_audioUrl.isEmpty()
+				&& candidate == m_audioUrl.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment));
 	}
+	if (!url.isValid() || url.scheme() != QLatin1String("https") || url.host().isEmpty()
+		|| !url.userInfo().isEmpty() || (url.port(-1) != -1 && url.port(-1) != 443)) return false;
 	const auto providerHosts = mediaProviderHosts().constFind(m_provider);
-	return providerHosts != mediaProviderHosts().cend() && url.isValid() && url.scheme() == QLatin1String("https")
-		   && providerHosts->contains(url.host().toLower());
+	return providerHosts != mediaProviderHosts().cend() && providerHosts->contains(url.host().toLower());
 }
 
 bool MediaSessionBackend::supportsSynchronizedPlayback(const QString &provider) const {
@@ -3725,10 +4797,19 @@ bool MediaSessionBackend::supportsSynchronizedPlayback(const QString &provider) 
 void MediaSessionBackend::detach() {
 	if (!m_active || m_detached) return;
 	m_detached = true;
+	emit sourceChanged();
+	emit stateChanged();
+}
+
+void MediaSessionBackend::attach() {
+	if (!m_active || !m_detached) return;
+	m_detached = false;
+	emit sourceChanged();
 	emit stateChanged();
 }
 
 void MediaSessionBackend::closePlayer() {
+	invalidateNativePlaybackSources();
 	if (!m_active) {
 		if (m_sharedAvailable && m_state != QLatin1String("available")) {
 			m_state = QStringLiteral("available");
@@ -3752,8 +4833,6 @@ void MediaSessionBackend::closePlayer() {
 	m_mediaMime.clear();
 	m_audioMime.clear();
 	m_sessionId.clear();
-	m_navigationHost.clear();
-	m_navigationPort = -1;
 	m_state = m_sharedAvailable ? QStringLiteral("available") : QStringLiteral("idle");
 	if (m_sharedAvailable) {
 		m_sharedOperationStatus = m_sharedJoined ? QStringLiteral("ready") : QStringLiteral("available");
@@ -3762,12 +4841,25 @@ void MediaSessionBackend::closePlayer() {
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	m_errorCode.clear();
+	m_remoteStateSessionId.clear();
+	m_remoteStateGeneration = 0;
 	updateLoadProgress(0);
 	++m_syncGeneration;
+	emit sourceChanged();
 	emit stateChanged();
 }
 
 void MediaSessionBackend::close() {
+	if (m_pendingSharedOperationKind == SharedOperationKind::Start) {
+		clearSharedState();
+		return;
+	}
+	if (m_pendingSharedOperationKind == SharedOperationKind::Join) {
+		leaveShared();
+		return;
+	}
+	cancelSharedOperationAcknowledgementTimeout();
 	if (m_sharedJoined) {
 		leaveShared();
 		return;
@@ -3779,6 +4871,7 @@ void MediaSessionBackend::play() {
 	if (!m_active || !playbackControlAllowed()) return;
 	m_state = QStringLiteral("playing");
 	m_error.clear();
+	m_errorCode.clear();
 	if (m_sharedAvailable && m_sharedJoined) {
 		m_sharedPosition = m_position;
 		m_sharedPaused = false;
@@ -3792,6 +4885,7 @@ void MediaSessionBackend::pause() {
 	if (!m_active || !playbackControlAllowed()) return;
 	m_state = QStringLiteral("paused");
 	m_error.clear();
+	m_errorCode.clear();
 	if (m_sharedAvailable && m_sharedJoined) {
 		m_sharedPosition = m_position;
 		m_sharedPaused = true;
@@ -3855,6 +4949,7 @@ void MediaSessionBackend::reportLoadProgress(const int progress) {
 	if (normalized == 100 && !playbackControllable() && m_state == QLatin1String("loading")) {
 		m_state = QStringLiteral("ready");
 		m_error.clear();
+		m_errorCode.clear();
 		emit stateChanged();
 	} else if (sharedOperationChanged) {
 		emit stateChanged();
@@ -3867,6 +4962,7 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 	m_duration = qIsFinite(duration) ? qMax(0.0, duration) : 0.0;
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
+	m_errorCode.clear();
 	if (m_sharedAvailable && m_sharedJoined) {
 		m_sharedOperationStatus = QStringLiteral("ready");
 		m_sharedOperationError.clear();
@@ -3880,8 +4976,13 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 }
 
 void MediaSessionBackend::reportError(const QString &message) {
+	reportTypedError(QStringLiteral("playback-failed"), message);
+}
+
+void MediaSessionBackend::reportTypedError(const QString &code, const QString &message) {
 	m_state = QStringLiteral("error");
 	m_error = message.trimmed().isEmpty() ? tr("Media playback failed.") : message.trimmed();
+	m_errorCode = normalizedMediaErrorCode(code);
 	if (m_sharedAvailable) {
 		m_sharedOperationStatus = QStringLiteral("error");
 		m_sharedOperationError = m_error;
@@ -3893,17 +4994,25 @@ void MediaSessionBackend::rejectPlayback(const QString &message) {
 	// Validation happens before a player window becomes active, so an error-only
 	// state would otherwise remain invisible. Reuse the shell's typed rejection
 	// channel to publish a native toast while preserving the inspectable state.
-	reportError(message);
+	reportTypedError(QStringLiteral("source-rejected"), message);
 	emit playbackRejected(m_error);
 }
 
 void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId,
 										   const double position, const bool paused, const qulonglong generation) {
-	if (generation != 0 && generation < m_syncGeneration) return;
+	const QString remoteSessionId = sessionId.trimmed();
+	const bool sameRemoteSession = !remoteSessionId.isEmpty()
+		&& remoteSessionId == m_remoteStateSessionId;
+	if (sameRemoteSession && generation != 0 && m_remoteStateGeneration != 0
+		&& generation < m_remoteStateGeneration) {
+		return;
+	}
 	const QString previousState = m_state;
 	const double previousPosition = m_position;
-	const bool sourceChanged = !m_active || m_sessionId != sessionId || m_url != url;
-	if (sourceChanged && !open(url, provider, sessionId)) return;
+	const bool sourceChanged = !m_active || m_sessionId != remoteSessionId || m_url != url;
+	if (sourceChanged && !open(url, provider, remoteSessionId)) return;
+	m_remoteStateSessionId = remoteSessionId;
+	if (generation != 0 || !sameRemoteSession) m_remoteStateGeneration = generation;
 	m_syncGeneration = generation == 0 ? m_syncGeneration + 1 : qMax(m_syncGeneration, generation);
 	const double targetPosition = qIsFinite(position) ? qMax(0.0, position) : 0.0;
 	const double drift = qAbs(targetPosition - previousPosition);
@@ -3914,6 +5023,7 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 	m_position = targetPosition;
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
+	m_errorCode.clear();
 	if (m_sharedAvailable && m_sharedJoined && sessionId == m_sharedSessionId) {
 		m_sharedOperationStatus = QStringLiteral("ready");
 		m_sharedOperationError.clear();
@@ -3930,7 +5040,8 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 }
 
 void MediaSessionBackend::publishSharedPlaybackState(const double position, const bool paused, const bool force) {
-	if (!m_sharedAvailable || !m_sharedJoined || !m_sharedHost || m_sharedSessionId.isEmpty()) return;
+	if (!m_sharedAvailable || !m_sharedJoined || !m_sharedHost || m_sharedSessionId.isEmpty()
+		|| !sharedScopeMatchesCurrentVoiceRoom()) return;
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const bool stateChanged = paused != m_lastSharedPublishPaused;
 	const bool positionChanged = m_lastSharedPublishPosition < 0.0
@@ -3951,6 +5062,10 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	const QString id = sessionId.trimmed();
 	const QString normalizedEvent = event.trimmed().toLower();
 	if (id.isEmpty()) return;
+	if (scopeId == 0 || scopeId != m_currentVoiceScopeId) {
+		if (m_sharedSessionId == id) clearSharedState();
+		return;
+	}
 	if (normalizedEvent == QLatin1String("end")) {
 		if (m_sharedSessionId == id) clearSharedState();
 		return;
@@ -3966,6 +5081,10 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	const bool sameSession = m_sharedSessionId == id;
 	const bool wasJoined = sameSession && m_sharedJoined;
 	const bool explicitlyRequested = m_pendingExplicitSessionId == id;
+	if (!sameSession && m_pendingSharedOperationKind != SharedOperationKind::None) {
+		cancelSharedOperationAcknowledgementTimeout();
+		m_pendingExplicitSessionId.clear();
+	}
 	if (!sameSession && m_sharedJoined) closePlayer();
 
 	QVariantList normalizedParticipants;
@@ -4001,6 +5120,7 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	m_sharedParticipantSessions = normalizedParticipants;
 	if (!sameSession) m_sharedPlayerSuppressed = false;
 	if (explicitlyRequested && joined) {
+		cancelSharedOperationAcknowledgementTimeout();
 		m_pendingExplicitSessionId.clear();
 		m_sharedPlayerSuppressed = false;
 	}
@@ -4009,29 +5129,38 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 		if (wasJoined) closePlayer();
 		m_state = QStringLiteral("available");
 		m_error.clear();
+		m_errorCode.clear();
 		m_sharedOperationStatus = QStringLiteral("available");
 		m_sharedOperationError.clear();
 		emit stateChanged();
 		return;
 	}
 
-	if (!paused && generation > 0) {
-		const qint64 ageMs = qMax< qint64 >(0, QDateTime::currentMSecsSinceEpoch() - static_cast< qint64 >(generation));
-		position += static_cast< double >(ageMs) / 1000.0;
-	}
+	// The protocol currently transports the server's wall-clock timestamp in
+	// `generation`. Comparing it with the client's wall clock turns ordinary
+	// clock skew into a huge seek and treating it as an ordering token rejects
+	// valid updates after a server clock correction. ServerHandler delivers these
+	// events in connection order, so derive a client-local monotonic generation
+	// and use the host-reported position as-is. The next regular host heartbeat
+	// naturally absorbs network transit without coupling playback to wall clocks.
+	Q_UNUSED(generation);
+	const qulonglong currentLocalGeneration = qMax(m_sharedGeneration, m_syncGeneration);
+	const qulonglong localGeneration = currentLocalGeneration == std::numeric_limits< qulonglong >::max()
+		? currentLocalGeneration : currentLocalGeneration + 1;
 	m_sharedPosition = qIsFinite(position) ? qMax(0.0, position) : 0.0;
 	m_sharedPaused = paused;
-	m_sharedGeneration = qMax(m_sharedGeneration, generation);
+	m_sharedGeneration = localGeneration;
 	if (m_sharedPlayerSuppressed) {
 		m_state = QStringLiteral("available");
 		m_error.clear();
+		m_errorCode.clear();
 		m_sharedOperationStatus = QStringLiteral("ready");
 		m_sharedOperationError.clear();
 		emit stateChanged();
 		return;
 	}
 	if (wasJoined || explicitlyRequested) {
-		applyRemoteState(normalizedUrl, m_sharedProvider, id, m_sharedPosition, paused, generation);
+		applyRemoteState(normalizedUrl, m_sharedProvider, id, m_sharedPosition, paused, localGeneration);
 	} else {
 		m_state = QStringLiteral("available");
 		m_sharedOperationStatus = QStringLiteral("available");
@@ -4041,6 +5170,7 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 }
 
 void MediaSessionBackend::clearSharedState() {
+	cancelSharedOperationAcknowledgementTimeout();
 	closePlayer();
 	m_sharedAvailable = false;
 	m_sharedJoined = false;
@@ -4064,6 +5194,7 @@ void MediaSessionBackend::clearSharedState() {
 	m_lastSharedPublishPaused = true;
 	m_state = QStringLiteral("idle");
 	m_error.clear();
+	m_errorCode.clear();
 	emit stateChanged();
 }
 

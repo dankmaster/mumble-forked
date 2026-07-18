@@ -1,0 +1,326 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Voice recorder",
+          "rect": {
+            "height": 26,
+            "width": 129,
+            "x": 44,
+            "y": 113
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 888,
+            "y": 117
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Record the current voice session.",
+          "rect": {
+            "height": 15,
+            "width": 839,
+            "x": 44,
+            "y": 142
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Recording",
+                  "rect": {
+                    "height": 16,
+                    "width": 56,
+                    "x": 82,
+                    "y": 189
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Elapsed 00:14:32",
+                  "rect": {
+                    "height": 19,
+                    "width": 69,
+                    "x": 833,
+                    "y": 196
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "C:/Users/Demo/Mumble recordings/Mumble-%date-%time-%user.flac",
+                  "rect": {
+                    "height": 15,
+                    "width": 739,
+                    "x": 82,
+                    "y": 207
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Recording, 00:14:32",
+              "rect": {
+                "height": 65,
+                "width": 876,
+                "x": 42,
+                "y": 173
+              },
+              "role": "StatusBar",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Output",
+              "rect": {
+                "height": 20,
+                "width": 49,
+                "x": 42,
+                "y": 254
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Target directory",
+              "rect": {
+                "height": 16,
+                "width": 83,
+                "x": 42,
+                "y": 282
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Target directory",
+              "rect": {
+                "height": 36,
+                "width": 805,
+                "x": 42,
+                "y": 306
+              },
+              "role": "EditableText",
+              "states": [
+                "disabled",
+                "editable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Browse",
+              "rect": {
+                "height": 36,
+                "width": 63,
+                "x": 855,
+                "y": 306
+              },
+              "role": "Button",
+              "states": [
+                "disabled"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Filename",
+              "rect": {
+                "height": 16,
+                "width": 48,
+                "x": 42,
+                "y": 350
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Format",
+              "rect": {
+                "height": 16,
+                "width": 38,
+                "x": 493,
+                "y": 350
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Filename",
+              "rect": {
+                "height": 36,
+                "width": 439,
+                "x": 42,
+                "y": 370
+              },
+              "role": "EditableText",
+              "states": [
+                "disabled",
+                "editable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Recording format",
+              "rect": {
+                "height": 36,
+                "width": 425,
+                "x": 493,
+                "y": 370
+              },
+              "role": "ComboBox",
+              "states": [
+                "disabled"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Recording mode",
+              "rect": {
+                "height": 16,
+                "width": 88,
+                "x": 42,
+                "y": 414
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Recording mode",
+              "rect": {
+                "height": 36,
+                "width": 876,
+                "x": 42,
+                "y": 438
+              },
+              "role": "ComboBox",
+              "states": [
+                "disabled"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Pause",
+              "rect": {
+                "height": 36,
+                "width": 55,
+                "x": 806,
+                "y": 490
+              },
+              "role": "Button",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Stop",
+              "rect": {
+                "height": 36,
+                "width": 49,
+                "x": 869,
+                "y": 490
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Voice recorder",
+          "rect": {
+            "height": 353,
+            "width": 876,
+            "x": 42,
+            "y": 173
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Close",
+          "rect": {
+            "height": 36,
+            "width": 53,
+            "x": 871,
+            "y": 574
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Record the current voice session.",
+      "name": "Voice recorder",
+      "rect": {
+        "height": 527,
+        "width": 912,
+        "x": 24,
+        "y": 97
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 720,
+    "width": 960,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

@@ -1,6 +1,6 @@
 # Qt Quick Theme Coverage Guide
 
-The desktop product UI is themed through typed C++ tokens exposed directly to QML. Product UI must not depend on HTML, CSS, JavaScript, WebChannel, or a QWidget theme bridge.
+The supported Windows desktop product UI is themed through typed C++ tokens exposed directly to QML. Product UI must not depend on HTML, CSS, JavaScript, WebChannel, or a QWidget theme bridge. Retained Linux/macOS client builds are diagnostic and non-gating.
 
 ## Runtime pipeline
 
@@ -46,6 +46,8 @@ Hardcoded colors are acceptable only for content whose color is intrinsic or for
 ## Review checklist
 
 - Main shell, rails, timeline, composer, dialogs, menus, banners, tools, media and screen-share windows use `Theme`.
+- Rich previews, provider embeddings, media chrome, and their loading, empty,
+  error, disabled, and fallback states use the same tokens and interaction rules.
 - Focus rings and keyboard navigation remain visible in dark and light themes.
 - Muted text and dividers retain sufficient contrast.
 - Semantic success/warning/danger colors are not confused with selection or accent.
@@ -56,4 +58,4 @@ Hardcoded colors are acceptable only for content whose color is intrinsic or for
 
 ## Verification
 
-Run the controller and manifest tests, lint the QML module, build the client, and run the strict Modern-only verifier. Screenshot review should cover dark, light and a custom manifest at the reference DPI sizes.
+Run the controller and manifest tests, lint the QML module, build the client, and run the strict Modern-only verifier. Screenshot review should cover dark, light and a custom manifest at the reference DPI sizes. This checklist defines required coverage; source and controller tests alone do not prove visual parity.

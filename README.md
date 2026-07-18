@@ -34,12 +34,13 @@ This fork is not an official Mumble release. It is an experimental,
 server-specific build for one group of friends running a private community
 server. The goal is to keep the core Mumble voice experience intact while
 adding features that make that server feel more modern and easier to live in.
-The intended fork desktop client path is now the native Qt Quick Modern shell.
+The supported fork desktop product is the Windows Qt Quick Modern shell.
 Classic Qt Widgets UI is not a product path; Qt Widgets remains only for narrow
-operating-system and plugin-owned surfaces while migration cleanup finishes. The server is not
-modern-only: `mumble-server` must still let ordinary upstream/native Mumble
-clients connect for voice and basic text behavior, with fork features gated per
-client capability.
+operating-system and plugin-owned surfaces. Linux and macOS desktop-client
+builds are not product or release gates. The server is not modern-only:
+`mumble-server` must still let ordinary upstream/native Mumble clients connect
+for voice and basic text behavior, with fork features gated per client
+capability.
 
 If you want the official stable Mumble project, start at
 [mumble.info](https://www.mumble.info/) or
@@ -70,12 +71,12 @@ community feature set on top. The long-form inventory lives in
 | Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, direct-message history when supported, read state, unread counts, pagination, replies, deletion, and reactions. |
 | Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
 | Link preview cards | Active fork feature | Provider-aware cards for playable YouTube/video previews, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
-| Modern client shell | Active fork direction | Native Qt Quick chat/navigator shell with typed C++ models, persistent rooms, compact message controls, rich cards, direct-message tray, room-aware composer state, theme/density variants, and Modern dialogs. WebEngine is reserved for explicit interactive media playback. |
+| Modern Windows client | Active; parity and polish in progress | Native Qt Quick chat/navigator shell with typed C++ models, persistent rooms, compact message controls, rich cards, direct-message tray, room-aware composer state, theme/density variants, and Modern dialogs. The structural cutover is complete; visual and interaction parity is still being refined. WebEngine is reserved for explicit interactive media playback. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
-| Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
+| Watch together | Experimental Windows client and protocol | Capability-gated room media sessions and Qt Quick playback/sync UI exist; connected sync, reconnect, and renderer-recovery validation are still release work. |
 | Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, GStreamer LiveKit publish/view, and diagnostic logging. |
 | Speech cleanup | Experimental | RNNoise, DTLN, and DeepFilterNet model paths plus local benchmark/smoke-test support for packaged Windows builds. |
-| Windows fork distribution | Active fork tooling | Shared/WebEngine build lane, unsigned convenience MSI release, generated changelog, and update-manifest support for `mumble-forked`. |
+| Windows fork distribution | Active fork tooling | Shared Qt Quick build lane with a lazy WebEngineQuick media runtime, unsigned convenience MSI release, generated changelog, and update-manifest support for `mumble-forked`. |
 | Fork identity controls | Active fork utility | Hidden advertised release/OS overrides and update-check environment overrides for controlled community deployments. |
 
 ## Repository Map
@@ -112,9 +113,11 @@ If you are running a server for the fork features:
 4. Read [`docs/status-and-roadmap.md`](docs/status-and-roadmap.md) before
    depending on experimental features such as screen sharing or speech cleanup.
 
-If you are hacking on the client, build the shared Qt Quick/WebEngineQuick lane.
-The native QML shell is the only product surface; Qt Widgets is restricted to
-the documented operating-system and third-party-plugin allowlist.
+For supported fork client work on Windows, build the shared Qt
+Quick/WebEngineQuick lane. The native QML shell is the only product surface; Qt
+Widgets is restricted to the documented operating-system and third-party-plugin
+allowlist. The manual Linux/macOS Qt Quick client workflow is diagnostic and
+non-gating; it is not a product-support promise.
 
 ## Building
 

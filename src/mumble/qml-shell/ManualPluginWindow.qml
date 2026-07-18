@@ -10,6 +10,16 @@ ApplicationWindow {
 	readonly property bool compactLayout: width < 640
 	readonly property var speakerRows: manualPlugin.speakers || []
 	property string statusMessage: ""
+	property bool visualFixtureMode: false
+	property var baselineState: ({})
+	property string baselineSignature: ""
+	property bool awaitingInitialState: false
+	property int focusRequestGeneration: 0
+	property Item focusBeforeDiscardPrompt: null
+	property bool approvedClose: false
+	readonly property string draftSignature: stateSignature(currentDraftState())
+	readonly property bool dirty: baselineSignature.length > 0
+		&& draftSignature !== baselineSignature
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -79,11 +89,32 @@ ApplicationWindow {
 	onVisibleChanged: {
 		if (visible) {
 			statusMessage = ""
+			awaitingInitialState = true
 			manualPlugin.refresh()
+			const generation = ++focusRequestGeneration
+			Qt.callLater(function() {
+				if (!tool.visible || generation !== tool.focusRequestGeneration)
+					return
+				// The production controller publishes refresh synchronously. Keep this
+				// fallback for test doubles and future asynchronous adapters.
+				if (tool.awaitingInitialState) {
+					tool.syncFields()
+					tool.captureBaseline()
+				}
+				xField.forceActiveFocus(Qt.TabFocusReason)
+			})
+		} else {
+			++focusRequestGeneration
+			discardDialog.close()
 		}
 		manualPlugin.setSpeakerUpdatesEnabled(visible)
 	}
 	onClosing: function(close) {
+		if (!approvedClose && dirty) {
+			close.accepted = false
+			requestClose()
+			return
+		}
 		manualPlugin.setSpeakerUpdatesEnabled(false)
 		close.accepted = true
 	}
@@ -92,6 +123,70 @@ ApplicationWindow {
 	function updateNumber(propertyName, text, fallbackValue) {
 		const parsed = Number.fromLocaleString(Qt.locale(), text)
 		manualPlugin[propertyName] = Number.isFinite(parsed) ? parsed : fallbackValue
+	}
+
+	function currentDraftState() {
+		return {
+			"x": xField.text,
+			"y": yField.text,
+			"z": zField.text,
+			"azimuth": azimuthField.value,
+			"elevation": elevationField.value,
+			"context": contextField.text,
+			"identity": identityField.text,
+			"staleSeconds": staleField.value,
+			"active": activeField.checked,
+			"linked": linkedField.checked
+		}
+	}
+
+	function stateSignature(state) {
+		return JSON.stringify(state || {})
+	}
+
+	function captureBaseline() {
+		baselineState = currentDraftState()
+		baselineSignature = stateSignature(baselineState)
+		awaitingInitialState = false
+	}
+
+	function restoreBaseline() {
+		if (baselineSignature.length === 0)
+			return
+		const state = baselineState
+		xField.text = String(state.x)
+		yField.text = String(state.y)
+		zField.text = String(state.z)
+		azimuthField.value = Number(state.azimuth)
+		elevationField.value = Number(state.elevation)
+		contextField.text = String(state.context)
+		identityField.text = String(state.identity)
+		staleField.value = Number(state.staleSeconds)
+		activeField.checked = !!state.active
+		linkedField.checked = !!state.linked
+		updateNumber("x", xField.text, manualPlugin.x)
+		updateNumber("y", yField.text, manualPlugin.y)
+		updateNumber("z", zField.text, manualPlugin.z)
+		manualPlugin.azimuth = azimuthField.value
+		manualPlugin.elevation = elevationField.value
+		manualPlugin.context = contextField.text
+		manualPlugin.identity = identityField.text
+		manualPlugin.staleSeconds = staleField.value
+		manualPlugin.active = activeField.checked
+		manualPlugin.linked = linkedField.checked
+		baselineSignature = stateSignature(currentDraftState())
+	}
+
+	function requestClose() {
+		if (!dirty) {
+			approvedClose = true
+			hide()
+			approvedClose = false
+			return
+		}
+		focusBeforeDiscardPrompt = activeFocusItem
+		if (!discardDialog.opened)
+			discardDialog.open()
 	}
 
 	function syncFields() {
@@ -131,12 +226,20 @@ ApplicationWindow {
 
 	Connections {
 		target: manualPlugin
-		function onStateChanged() { tool.syncFields() }
+		function onStateChanged() {
+			tool.syncFields()
+			if (tool.awaitingInitialState)
+				tool.captureBaseline()
+		}
 		function onApplied() {
+			tool.syncFields()
+			tool.captureBaseline()
 			tool.statusMessage = qsTr("Position updated")
 			statusTimer.restart()
 		}
 		function onResetCompleted() {
+			tool.syncFields()
+			tool.captureBaseline()
 			tool.statusMessage = qsTr("Position reset")
 			statusTimer.restart()
 		}
@@ -155,8 +258,83 @@ ApplicationWindow {
 	}
 	Shortcut {
 		sequence: StandardKey.Cancel
-		enabled: tool.visible
-		onActivated: tool.hide()
+		enabled: tool.visible && !discardDialog.opened
+		onActivated: tool.requestClose()
+	}
+
+	Dialog {
+		id: discardDialog
+		objectName: "manualDiscardDialog"
+		parent: Overlay.overlay
+		anchors.centerIn: parent
+		modal: true
+		focus: true
+		closePolicy: Popup.NoAutoClose
+		padding: Theme.space4
+		title: qsTr("Discard manual placement changes?")
+		onOpened: keepEditingButton.forceActiveFocus(Qt.TabFocusReason)
+
+		background: Rectangle {
+			color: Theme.surfaceRaised
+			border.color: Theme.surfaceBorder
+			border.width: 1
+			radius: Theme.shellRadius
+		}
+
+		contentItem: ColumnLayout {
+			spacing: Theme.space3
+			Accessible.role: Accessible.Dialog
+			Accessible.name: discardDialog.title
+			Label {
+				Layout.preferredWidth: Math.min(420, Math.max(280, implicitWidth))
+				textFormat: Text.PlainText
+				text: qsTr("Your unapplied position, orientation, context and identity changes will be lost.")
+				wrapMode: Text.WordWrap
+				color: Theme.textMain
+				Accessible.role: Accessible.StaticText
+			}
+			RowLayout {
+				Layout.fillWidth: true
+				spacing: Theme.space2
+				Item { Layout.fillWidth: true }
+				ModernButton {
+					id: keepEditingButton
+					objectName: "manualKeepEditingButton"
+					text: qsTr("Keep editing")
+					onClicked: {
+						discardDialog.close()
+						Qt.callLater(function() {
+							const target = tool.focusBeforeDiscardPrompt
+							if (tool.visible && target && target.forceActiveFocus)
+								target.forceActiveFocus(Qt.TabFocusReason)
+						})
+					}
+				}
+				ModernButton {
+					id: discardChangesButton
+					objectName: "manualDiscardChangesButton"
+					text: qsTr("Discard changes")
+					tone: "danger"
+					onClicked: {
+						tool.restoreBaseline()
+						discardDialog.close()
+						tool.approvedClose = true
+						tool.hide()
+						tool.approvedClose = false
+					}
+				}
+			}
+		}
+	}
+
+	ModalAccessibilityBarrier {
+		id: discardAccessibilityBarrier
+		objectName: "manualDiscardAccessibilityBarrier"
+		active: discardDialog.visible
+		// The discard dialog is hosted by Overlay.overlay. Keep the editor and its
+		// sticky footer visually present while pruning every promoted background
+		// descendant from the platform accessibility tree.
+		targets: [ scrollView, manualPluginFooter ]
 	}
 
 	component FieldLabel: Label {
@@ -185,13 +363,17 @@ ApplicationWindow {
 		ScrollBar.vertical: ScrollBar {
 			id: manualPluginScrollBar
 			policy: ScrollBar.AsNeeded
+			active: scrollView.contentHeight > scrollView.availableHeight || hovered || pressed
 			contentItem: Rectangle {
 				implicitWidth: 8
 				radius: width / 2
 				color: manualPluginScrollBar.pressed ? Theme.accent
 					: manualPluginScrollBar.hovered ? Theme.surfaceHover : Theme.surfaceBorder
 				opacity: manualPluginScrollBar.size < 1 ? 1 : 0
-				Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+				Behavior on color {
+					enabled: !tool.visualFixtureMode
+					ColorAnimation { duration: Theme.motionFast }
+				}
 			}
 			background: Rectangle { color: "transparent" }
 		}
@@ -279,6 +461,7 @@ ApplicationWindow {
 							id: xField
 							objectName: "manualXField"
 							text: Number(manualPlugin.x).toLocaleString(Qt.locale(), "f", 2)
+							readOnly: tool.visualFixtureMode
 							validator: DoubleValidator { notation: DoubleValidator.StandardNotation }
 							onEditingFinished: tool.updateNumber("x", text, manualPlugin.x)
 							Accessible.name: qsTr("X position")
@@ -290,6 +473,7 @@ ApplicationWindow {
 							id: yField
 							objectName: "manualYField"
 							text: Number(manualPlugin.y).toLocaleString(Qt.locale(), "f", 2)
+							readOnly: tool.visualFixtureMode
 							validator: DoubleValidator { notation: DoubleValidator.StandardNotation }
 							onEditingFinished: tool.updateNumber("y", text, manualPlugin.y)
 							Accessible.name: qsTr("Y position")
@@ -301,6 +485,7 @@ ApplicationWindow {
 							id: zField
 							objectName: "manualZField"
 							text: Number(manualPlugin.z).toLocaleString(Qt.locale(), "f", 2)
+							readOnly: tool.visualFixtureMode
 							validator: DoubleValidator { notation: DoubleValidator.StandardNotation }
 							onEditingFinished: tool.updateNumber("z", text, manualPlugin.z)
 							Accessible.name: qsTr("Z position")
@@ -509,6 +694,7 @@ ApplicationWindow {
 								objectName: "manualContextField"
 								Layout.fillWidth: true
 								text: manualPlugin.context
+								readOnly: tool.visualFixtureMode
 								onEditingFinished: manualPlugin.context = text
 								Accessible.name: qsTr("Context")
 								placeholderText: qsTr("Game or world context")
@@ -523,6 +709,7 @@ ApplicationWindow {
 								objectName: "manualIdentityField"
 								Layout.fillWidth: true
 								text: manualPlugin.identity
+								readOnly: tool.visualFixtureMode
 								onEditingFinished: manualPlugin.identity = text
 								Accessible.name: qsTr("Identity")
 								placeholderText: qsTr("Player identity")
@@ -610,6 +797,18 @@ ApplicationWindow {
 				Accessible.name: text
 			}
 
+			Label {
+				objectName: "manualPluginDirtyStatus"
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: qsTr("Unapplied changes")
+				color: Theme.warning
+				font.weight: Font.DemiBold
+				visible: tool.dirty
+				Accessible.role: Accessible.StatusBar
+				Accessible.name: text
+			}
+
 			RowLayout {
 				id: actionRow
 				objectName: "manualPluginActions"
@@ -628,7 +827,7 @@ ApplicationWindow {
 					id: closeButton
 					objectName: "manualCloseButton"
 					text: qsTr("Close")
-					onClicked: tool.hide()
+					onClicked: tool.requestClose()
 				}
 				ModernButton {
 					id: applyButton

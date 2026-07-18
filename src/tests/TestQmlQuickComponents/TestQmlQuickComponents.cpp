@@ -1,11 +1,16 @@
 #include <QtCore/QByteArray>
+#include <QtCore/QAbstractListModel>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QObject>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
+#include <QtCore/QSet>
+#include <QtGui/QAccessible>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QWindow>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQml/qqml.h>
@@ -19,7 +24,9 @@ public:
 
 	QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override {
 		const QSize naturalSize(96, 64);
-		const QSize imageSize = requestedSize.isValid() ? requestedSize.boundedTo(QSize(512, 512)) : naturalSize;
+		const bool usableRequestedSize = requestedSize.width() > 0 && requestedSize.height() > 0;
+		const QSize imageSize = usableRequestedSize
+			? requestedSize.boundedTo(QSize(512, 512)) : naturalSize;
 		if (size) {
 			*size = naturalSize;
 		}
@@ -50,6 +57,215 @@ QString ensureManagedGifFixture() {
 	return QUrl::fromLocalFile(filePath).toString();
 }
 } // namespace
+
+class DirectMessageTimelineFixtureModel final : public QAbstractListModel {
+	Q_OBJECT
+	Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
+	Q_PROPERTY(int matchCount READ matchCount NOTIFY matchCountChanged)
+	Q_PROPERTY(int currentMatchIndex READ currentMatchIndex NOTIFY currentMatchChanged)
+	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
+	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
+
+public:
+	enum Role {
+		StableIdRole = Qt::UserRole + 1,
+		TitleRole,
+		TimestampRole,
+		BodySegmentsRole,
+		OwnRole,
+		AvatarUrlRole,
+		SubtitleRole,
+		StatusRole,
+		ReplyActorRole,
+		ReplySnippetRole,
+		ReactionsRole,
+		PreviewRole,
+		AttachmentsRole,
+		SourceRole,
+		DeletedRole,
+		CanReplyRole,
+		CanReactRole,
+		CanDeleteRole
+	};
+
+	explicit DirectMessageTimelineFixtureModel(QObject *parent = nullptr) : QAbstractListModel(parent) {}
+
+	QString query() const { return m_query; }
+	int matchCount() const { return static_cast< int >(m_matchRows.size()); }
+	int currentMatchIndex() const { return m_currentMatchIndex; }
+	int currentMatchRow() const {
+		return m_currentMatchIndex >= 0 && m_currentMatchIndex < static_cast< int >(m_matchRows.size())
+			? m_matchRows.at(m_currentMatchIndex) : -1;
+	}
+	QString currentMatchStableId() const {
+		const int row = currentMatchRow();
+		return row < 0 ? QString() : data(index(row), StableIdRole).toString();
+	}
+
+	void setQuery(const QString &query) {
+		const QString accepted = query.left(512);
+		if (m_query == accepted) return;
+		m_query = accepted;
+		emit queryChanged();
+		refreshSearch();
+	}
+
+	Q_INVOKABLE bool nextMatch() {
+		if (m_matchRows.isEmpty()) return false;
+		const int next = m_currentMatchIndex < 0 ? 0
+			: (m_currentMatchIndex + 1) % static_cast< int >(m_matchRows.size());
+		return selectMatch(next);
+	}
+
+	Q_INVOKABLE bool previousMatch() {
+		if (m_matchRows.isEmpty()) return false;
+		const int count = static_cast< int >(m_matchRows.size());
+		const int previous = m_currentMatchIndex < 0 ? count - 1
+			: (m_currentMatchIndex + count - 1) % count;
+		return selectMatch(previous);
+	}
+
+	Q_INVOKABLE void clearSearch() { setQuery(QString()); }
+
+	int rowCount(const QModelIndex &parent = QModelIndex()) const override {
+		return parent.isValid() ? 0 : 2;
+	}
+
+	QVariant data(const QModelIndex &index, int role) const override {
+		if (!index.isValid() || index.row() < 0 || index.row() >= rowCount()) return {};
+		const bool own = index.row() == 1;
+		switch (role) {
+			case StableIdRole: return own ? QStringLiteral("cpp-dm-2") : QStringLiteral("cpp-dm-1");
+			case TitleRole: return own ? QStringLiteral("You") : QStringLiteral("C++ Alex");
+			case TimestampRole: return own ? QStringLiteral("10:42") : QStringLiteral("10:41");
+			case BodySegmentsRole:
+				return QVariantList { QVariantMap {
+					{ QStringLiteral("kind"), QStringLiteral("text") },
+					{ QStringLiteral("text"), own ? QStringLiteral("C++ QVariantList reply")
+													  : QStringLiteral("C++ QVariantList message") }
+				} };
+			case OwnRole: return own;
+			case AvatarUrlRole: return QString();
+			case SubtitleRole:
+				return own ? QStringLiteral("C++ QVariantList reply")
+						   : QStringLiteral("C++ QVariantList message");
+			case StatusRole: return own ? QStringLiteral("Failed to send") : QString();
+			case ReplyActorRole: return own ? QStringLiteral("C++ Alex") : QString();
+			case ReplySnippetRole: return own ? QStringLiteral("Earlier C++ message") : QString();
+			case ReactionsRole:
+				return own ? QVariantList {} : QVariantList { QVariantMap {
+					{ QStringLiteral("emoji"), QStringLiteral("👍") },
+					{ QStringLiteral("count"), 2 },
+					{ QStringLiteral("selfReacted"), true }
+				} };
+			case PreviewRole:
+				return own ? QVariantMap {} : QVariantMap {
+					{ QStringLiteral("title"), QStringLiteral("C++ rich preview") },
+					{ QStringLiteral("url"), QStringLiteral("https://example.com/direct") },
+					{ QStringLiteral("host"), QStringLiteral("example.com") },
+					{ QStringLiteral("state"), QStringLiteral("ready") }
+				};
+			case AttachmentsRole:
+				return own ? QVariantList {} : QVariantList { QVariantMap {
+					{ QStringLiteral("id"), QStringLiteral("asset:52") },
+					{ QStringLiteral("assetId"), 52 },
+					{ QStringLiteral("kind"), QStringLiteral("file") },
+					{ QStringLiteral("mime"), QStringLiteral("application/pdf") },
+					{ QStringLiteral("fileName"), QStringLiteral("rich-dm.pdf") },
+					{ QStringLiteral("state"), QStringLiteral("ready") }
+				} };
+			case SourceRole:
+				return QVariantMap {
+					{ QStringLiteral("messageId"), own ? 42 : 41 },
+					{ QStringLiteral("deliveryState"), own ? QStringLiteral("failed") : QString() },
+					{ QStringLiteral("deliveryLabel"), own ? QStringLiteral("Failed to send") : QString() },
+					{ QStringLiteral("deliveryCanRetry"), own }
+				};
+			case DeletedRole: return false;
+			case CanReplyRole: return true;
+			case CanReactRole: return true;
+			case CanDeleteRole: return own;
+			default: return {};
+		}
+	}
+
+	QHash< int, QByteArray > roleNames() const override {
+		return {
+			{ StableIdRole, QByteArrayLiteral("stableId") },
+			{ TitleRole, QByteArrayLiteral("title") },
+			{ TimestampRole, QByteArrayLiteral("timestamp") },
+			{ BodySegmentsRole, QByteArrayLiteral("bodySegments") },
+			{ OwnRole, QByteArrayLiteral("own") },
+			{ AvatarUrlRole, QByteArrayLiteral("avatarUrl") },
+			{ SubtitleRole, QByteArrayLiteral("subtitle") },
+			{ StatusRole, QByteArrayLiteral("status") },
+			{ ReplyActorRole, QByteArrayLiteral("replyActor") },
+			{ ReplySnippetRole, QByteArrayLiteral("replySnippet") },
+			{ ReactionsRole, QByteArrayLiteral("reactions") },
+			{ PreviewRole, QByteArrayLiteral("preview") },
+			{ AttachmentsRole, QByteArrayLiteral("attachments") },
+			{ SourceRole, QByteArrayLiteral("source") },
+			{ DeletedRole, QByteArrayLiteral("deleted") },
+			{ CanReplyRole, QByteArrayLiteral("canReply") },
+			{ CanReactRole, QByteArrayLiteral("canReact") },
+			{ CanDeleteRole, QByteArrayLiteral("canDelete") }
+		};
+	}
+
+signals:
+	void queryChanged();
+	void matchCountChanged();
+	void currentMatchChanged();
+
+private:
+	QString searchableText(const int row) const {
+		QStringList fields {
+			data(index(row), TitleRole).toString(),
+			data(index(row), SubtitleRole).toString(),
+			data(index(row), ReplyActorRole).toString(),
+			data(index(row), ReplySnippetRole).toString()
+		};
+		for (const QVariant &entry : data(index(row), AttachmentsRole).toList()) {
+			const QVariantMap attachment = entry.toMap();
+			fields.push_back(attachment.value(QStringLiteral("fileName")).toString());
+			fields.push_back(attachment.value(QStringLiteral("name")).toString());
+		}
+		return fields.join(QLatin1Char('\n')).toCaseFolded();
+	}
+
+	void refreshSearch() {
+		const int previousCount = static_cast< int >(m_matchRows.size());
+		const int previousIndex = m_currentMatchIndex;
+		const int previousRow = currentMatchRow();
+		const QString normalized = m_query.trimmed().toCaseFolded();
+		QList< int > matches;
+		if (!normalized.isEmpty()) {
+			for (int row = 0; row < rowCount(); ++row) {
+				if (searchableText(row).contains(normalized)) matches.push_back(row);
+			}
+		}
+		m_matchRows = std::move(matches);
+		m_currentMatchIndex = m_matchRows.isEmpty() ? -1 : 0;
+		if (previousCount != static_cast< int >(m_matchRows.size())) emit matchCountChanged();
+		if (previousIndex != m_currentMatchIndex || previousRow != currentMatchRow()) {
+			emit currentMatchChanged();
+		}
+	}
+
+	bool selectMatch(const int matchIndex) {
+		if (matchIndex < 0 || matchIndex >= static_cast< int >(m_matchRows.size())
+			|| m_currentMatchIndex == matchIndex) {
+			return false;
+		}
+		m_currentMatchIndex = matchIndex;
+		emit currentMatchChanged();
+		return true;
+	}
+
+	QString m_query;
+	QList< int > m_matchRows;
+	int m_currentMatchIndex = -1;
+};
 
 class FakeDialogState final : public QObject {
 	Q_OBJECT
@@ -401,22 +617,85 @@ private:
 	bool m_speakerUpdatesEnabled = false;
 };
 
+class AccessibilityProbe final : public QObject {
+	Q_OBJECT
+
+public:
+	explicit AccessibilityProbe(QObject *parent = nullptr) : QObject(parent) {}
+
+	Q_INVOKABLE QStringList visibleNames() const {
+		QStringList names;
+		QSet< quintptr > visited;
+		for (QWindow *window : QGuiApplication::topLevelWindows()) {
+			if (window && window->isVisible()) {
+				collectVisibleNames(QAccessible::queryAccessibleInterface(window), names, visited, 0);
+			}
+		}
+		return names;
+	}
+
+private:
+	static void collectVisibleNames(QAccessibleInterface *interface, QStringList &names,
+								QSet< quintptr > &visited, int depth) {
+		if (!interface || !interface->isValid() || depth > 64) return;
+		const quintptr identity = interface->object()
+			? reinterpret_cast< quintptr >(interface->object())
+			: reinterpret_cast< quintptr >(interface);
+		if (visited.contains(identity)) return;
+		visited.insert(identity);
+		const QAccessible::State state = interface->state();
+		if (state.invisible || state.offscreen) return;
+		const QString name = interface->text(QAccessible::Name);
+		if (!name.isEmpty()) names.push_back(name);
+		for (int index = 0; index < interface->childCount(); ++index) {
+			collectVisibleNames(interface->child(index), names, visited, depth + 1);
+		}
+	}
+};
+
 class QmlQuickComponentsSetup final : public QObject {
 	Q_OBJECT
 
 public slots:
 	void qmlEngineAvailable(QQmlEngine *engine) {
+		// Activate accessibility before any QML component is instantiated. Qt
+		// Quick decides whether to create attached accessibility objects while
+		// constructing the scene, so enabling it lazily from a test probe can leave
+		// otherwise semantic delegates absent from the off-screen tree.
+		QAccessible::setActive(true);
+		// QUICK_TEST_SOURCE_DIR is used for test discovery, but a component loaded
+		// from qrc:/ resolves URI imports only through the engine import path. Add
+		// the fixture root explicitly so Mumble.ScreenShare resolves to the fake
+		// module under qml/Mumble/ScreenShare instead of requiring the production
+		// C++ QML registration in this component-only test executable.
+		engine->addImportPath(QStringLiteral(QUICK_TEST_SOURCE_DIR));
 		const int themeType = qmlRegisterSingletonType(QUrl(QStringLiteral("qrc:/qml-shell/Theme.qml")),
 											 "Mumble.Theme", 1, 0, "Theme");
 		Q_UNUSED(themeType)
+		const int providerPresentationType = qmlRegisterSingletonType(
+			QUrl(QStringLiteral("qrc:/qml-shell/ProviderPresentation.qml")),
+			"Mumble.ProviderPresentation", 1, 0, "ProviderPresentation");
+		Q_UNUSED(providerPresentationType)
 		engine->addImageProvider(QStringLiteral("mumble"), new FixtureImageProvider());
 		engine->rootContext()->setContextProperty(QStringLiteral("uiTheme"), QVariant::fromValue< QObject * >(nullptr));
 		engine->rootContext()->setContextProperty(QStringLiteral("managedGifUrl"), ensureManagedGifFixture());
+		QFile mainQmlSource(QStringLiteral(":/qml-shell/Main.qml"));
+		const QString mainQmlText = mainQmlSource.open(QIODevice::ReadOnly)
+			? QString::fromUtf8(mainQmlSource.readAll()) : QString();
+		engine->rootContext()->setContextProperty(QStringLiteral("mainQmlSource"), mainQmlText);
+		QFile directMessageQmlSource(QStringLiteral(":/qml-shell/DirectMessageWindow.qml"));
+		const QString directMessageQmlText = directMessageQmlSource.open(QIODevice::ReadOnly)
+			? QString::fromUtf8(directMessageQmlSource.readAll()) : QString();
+		engine->rootContext()->setContextProperty(QStringLiteral("directMessageQmlSource"), directMessageQmlText);
+		engine->rootContext()->setContextProperty(QStringLiteral("cppDirectMessageTimelineModel"),
+											 new DirectMessageTimelineFixtureModel(engine));
 		auto *dialogState = new FakeDialogState(engine);
 		engine->rootContext()->setContextProperty(QStringLiteral("dialogState"), dialogState);
 		engine->rootContext()->setContextProperty(QStringLiteral("uiCommands"), new FakeUiCommands(engine));
 		engine->rootContext()->setContextProperty(QStringLiteral("manualPlugin"),
 											 new FakeManualPluginController(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("accessibilityProbe"),
+											 new AccessibilityProbe(engine));
 	}
 };
 

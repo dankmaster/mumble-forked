@@ -5,17 +5,27 @@ import Mumble.Theme 1.0
 
 ApplicationWindow {
     id: viewer
+	objectName: "attachmentViewerWindow"
+	readonly property string surfaceId: "attachmentViewer.window"
 
-    required property var attachment
-	readonly property string sourceUrl: safeText(attachment
-		? (attachment.url || attachment.thumbnailUrl || "") : "", 2048)
+	required property var attachment
+	signal saveRequested(var attachment)
+	signal refreshRequested(var attachment)
+	property string lastRefreshSource: ""
+	property bool retryingSource: false
+	readonly property string fullSource: safeRenderImageSource(attachment ? attachment.url : "")
+	readonly property string thumbnailSource: safeRenderImageSource(attachment ? attachment.thumbnailUrl : "")
+	readonly property string sourceUrl: fullSource || thumbnailSource
 	readonly property string displayTitle: safeText(attachment
 		? (attachment.alt || attachment.name || qsTr("Image attachment")) : "", 512)
 		|| qsTr("Image attachment")
 	readonly property string renderSource: safeRenderImageSource(sourceUrl)
 	readonly property bool managedAnimated: /^file:\/\//i.test(renderSource)
 	readonly property int loadStatus: managedAnimated ? animation.status : picture.status
+	readonly property bool loadFailed: loadStatus === Image.Error || renderSource.length === 0
 	readonly property bool compactLayout: width < 560 || height < 440
+	readonly property bool canSaveOriginal: attachment && (safeText(attachment.inlineToken, 128).length > 0
+		|| safeText(attachment.assetId !== undefined ? attachment.assetId : attachment.assetID, 128).length > 0)
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -73,7 +83,7 @@ ApplicationWindow {
 	palette.disabled.toolTipBase: Theme.panel
 	palette.disabled.toolTipText: Theme.textMuted
 
-    function safeRenderImageSource(value) {
+	function safeRenderImageSource(value) {
         const source = String(value === undefined || value === null ? "" : value).trim()
 		if (/^(image:\/\/mumble\/|qrc:\/)/i.test(source))
 			return source
@@ -81,6 +91,30 @@ ApplicationWindow {
 			&& /\/mumble-qml-images-[A-Za-z0-9]+\/[0-9a-f]{64}-[0-9a-f-]{36}\.gif$/i.test(source)
 			? source : ""
     }
+
+	function focusRetryIfFailed() {
+		if (!visible || !loadFailed)
+			return
+		requestActivate()
+		Qt.callLater(function() {
+			if (viewer.visible && viewer.loadFailed && retryButton.visible && retryButton.enabled)
+				retryButton.forceActiveFocus(Qt.OtherFocusReason)
+		})
+	}
+
+	function retryLoad() {
+		lastRefreshSource = renderSource
+		refreshRequested(attachment)
+		if (renderSource.length > 0) {
+			retryingSource = true
+			Qt.callLater(function() { viewer.retryingSource = false })
+		}
+	}
+
+	onLoadFailedChanged: focusRetryIfFailed()
+	onVisibleChanged: focusRetryIfFailed()
+	onActiveChanged: if (active) focusRetryIfFailed()
+	Component.onCompleted: focusRetryIfFailed()
 
     width: 900
     height: 680
@@ -113,7 +147,7 @@ ApplicationWindow {
 
 			Label {
 				anchors.left: parent.left
-				anchors.right: closeButton.left
+				anchors.right: saveButton.visible ? saveButton.left : closeButton.left
 				anchors.leftMargin: viewer.compactLayout ? Theme.space3 : Theme.space4
 				anchors.rightMargin: Theme.space2
 				anchors.verticalCenter: parent.verticalCenter
@@ -123,6 +157,21 @@ ApplicationWindow {
 				font.pixelSize: Theme.fontTitle
 				font.bold: true
 				elide: Text.ElideMiddle
+			}
+
+			ModernIconButton {
+				id: saveButton
+				objectName: "attachmentViewerSaveButton"
+				anchors.right: closeButton.left
+				anchors.rightMargin: Theme.space1
+				anchors.verticalCenter: parent.verticalCenter
+				visible: viewer.canSaveOriginal
+				iconName: "download"
+				text: qsTr("Save original")
+				Accessible.name: qsTr("Save original %1").arg(viewer.displayTitle)
+				ToolTip.visible: hovered
+				ToolTip.text: text
+				onClicked: viewer.saveRequested(viewer.attachment)
 			}
 
 			ModernIconButton {
@@ -147,27 +196,43 @@ ApplicationWindow {
 
 			Image {
 				id: picture
+				objectName: "attachmentViewerImage"
             anchors.fill: parent
 				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
-			source: viewer.managedAnimated ? "" : viewer.renderSource
+			source: viewer.retryingSource || viewer.managedAnimated ? "" : viewer.renderSource
             asynchronous: true
             cache: false
             fillMode: Image.PreserveAspectFit
-			visible: !viewer.managedAnimated
-            Accessible.name: viewer.displayTitle
+				visible: !viewer.managedAnimated
+				Accessible.role: Accessible.Graphic
+				Accessible.name: viewer.displayTitle
+				Accessible.ignored: !visible
+				onStatusChanged: if (status === Image.Error && viewer.renderSource.length > 0
+						&& viewer.lastRefreshSource !== viewer.renderSource) {
+					viewer.lastRefreshSource = viewer.renderSource
+					viewer.refreshRequested(viewer.attachment)
+				}
             }
 
 			AnimatedImage {
 				id: animation
+				objectName: "attachmentViewerAnimation"
 				anchors.fill: parent
 				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
-				source: viewer.managedAnimated ? viewer.renderSource : ""
+				source: viewer.retryingSource || !viewer.managedAnimated ? "" : viewer.renderSource
 				asynchronous: true
 				cache: false
 				fillMode: Image.PreserveAspectFit
 				playing: viewer.visible && status === AnimatedImage.Ready
 				visible: viewer.managedAnimated
+				Accessible.role: Accessible.Graphic
 				Accessible.name: viewer.displayTitle
+				Accessible.ignored: !visible
+				onStatusChanged: if (status === AnimatedImage.Error && viewer.renderSource.length > 0
+						&& viewer.lastRefreshSource !== viewer.renderSource) {
+					viewer.lastRefreshSource = viewer.renderSource
+					viewer.refreshRequested(viewer.attachment)
+				}
 			}
 
 			ModernBusyIndicator {
@@ -176,22 +241,39 @@ ApplicationWindow {
 				running: viewer.loadStatus === Image.Loading
 				visible: running
 				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
+				Accessible.ignored: !visible
 			}
 
-			Label {
-				objectName: "attachmentViewerError"
-				textFormat: Text.PlainText
+			ColumnLayout {
 				anchors.centerIn: parent
 				width: Math.max(1, parent.width - Theme.space6 * 2)
-				visible: viewer.loadStatus === Image.Error || viewer.renderSource.length === 0
-				text: qsTr("Attachment unavailable")
-				color: Theme.textMuted
-				font.pixelSize: Theme.fontLabel
-				horizontalAlignment: Text.AlignHCenter
-				wrapMode: Text.Wrap
-				Accessible.role: Accessible.AlertMessage
-				Accessible.name: text
-				Accessible.description: viewer.displayTitle
+				visible: viewer.loadFailed
+				spacing: Theme.space3
+
+				Label {
+					objectName: "attachmentViewerError"
+					Layout.fillWidth: true
+					textFormat: Text.PlainText
+					text: qsTr("Attachment unavailable")
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontLabel
+					horizontalAlignment: Text.AlignHCenter
+					wrapMode: Text.Wrap
+					Accessible.role: Accessible.AlertMessage
+					Accessible.name: text
+					Accessible.description: viewer.displayTitle
+					Accessible.ignored: !visible
+				}
+
+				ModernButton {
+					id: retryButton
+					objectName: "attachmentViewerRetryButton"
+					Layout.alignment: Qt.AlignHCenter
+					text: qsTr("Retry")
+					tone: "retry"
+					Accessible.name: qsTr("Retry loading %1").arg(viewer.displayTitle)
+					onClicked: viewer.retryLoad()
+				}
 			}
 		}
     }

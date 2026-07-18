@@ -5,6 +5,9 @@
 
 #include "ClientActionRegistry.h"
 #include "ComposerController.h"
+#include "ModernServerAdminController.h"
+#include "ModernRecorderController.h"
+#include "ModernRecorderRuntimeAdapter.h"
 #include "QmlClientModels.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlImageProvider.h"
@@ -18,6 +21,7 @@
 #	include "ManualPluginController.h"
 #endif
 
+#include <QtCore/QAbstractItemModel>
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
 #include <QtCore/QFileInfo>
@@ -41,11 +45,15 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_navigationModel(std::make_unique< NavigationRailModel >(this)),
 	  m_participantModel(std::make_unique< ParticipantModel >(this)),
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
+	  m_toastController(std::make_unique< ToastController >(this)),
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_directMessageController(std::make_unique< DirectMessageController >(this)),
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
+	  m_serverAdminController(std::make_unique< ModernServerAdminController >(this)),
+	  m_recorderRuntime(std::make_unique< Mumble::ModernRecorderRuntimeAdapter >(this)),
+	  m_recorderController(std::make_unique< Mumble::ModernRecorderController >(this)),
 	  m_mediaProfileFactory(std::make_unique< QmlMediaProfileFactory >(m_mediaSession.get(), this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
 	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
@@ -54,6 +62,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_themeController(std::make_unique< QmlThemeController >(this)),
 	  m_windowStateController(std::make_unique< QmlWindowStateController >(this)),
 	  m_pttWindowStateController(std::make_unique< QmlWindowStateController >(this)) {
+	m_recorderController->setRuntime(m_recorderRuntime.get());
 	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
 #ifdef USE_MANUAL_PLUGIN
 	m_manualPluginController = std::make_unique< ManualPluginController >(this);
@@ -61,6 +70,16 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	connect(m_activeScopeController.get(), &ActiveScopeController::canSendChanged, this, [this]() {
 		m_composerController->setCanSend(m_activeScopeController->canSend());
 	});
+	const auto trackModelReset = [this](QAbstractItemModel *model, const QString &modelName) {
+		connect(model, &QAbstractItemModel::modelReset, m_performanceMonitor.get(),
+			[monitor = m_performanceMonitor.get(), modelName]() { monitor->recordModelReset(modelName); });
+	};
+	trackModelReset(m_roomModel.get(), QStringLiteral("room"));
+	trackModelReset(m_navigationModel.get(), QStringLiteral("navigation"));
+	trackModelReset(m_participantModel.get(), QStringLiteral("participant"));
+	trackModelReset(m_chatModel.get(), QStringLiteral("chat"));
+	trackModelReset(m_operationModel.get(), QStringLiteral("operation"));
+	trackModelReset(m_actionModel.get(), QStringLiteral("action"));
 }
 
 QmlShellHost::~QmlShellHost() {
@@ -81,8 +100,12 @@ bool QmlShellHost::start(QString *error) {
 		return true;
 	}
 	static const int themeType = qmlRegisterSingletonType(QUrl(QStringLiteral("qrc:/qml-shell/Theme.qml")),
-														 "Mumble.Theme", 1, 0, "Theme");
+												 "Mumble.Theme", 1, 0, "Theme");
 	Q_UNUSED(themeType)
+	static const int providerPresentationType = qmlRegisterSingletonType(
+		QUrl(QStringLiteral("qrc:/qml-shell/ProviderPresentation.qml")),
+		"Mumble.ProviderPresentation", 1, 0, "ProviderPresentation");
+	Q_UNUSED(providerPresentationType)
 	static const int screenShareVideoType =
 		qmlRegisterType< ScreenShareVideoItem >("Mumble.ScreenShare", 1, 0, "ScreenShareVideoItem");
 	Q_UNUSED(screenShareVideoType)
@@ -97,6 +120,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_participantModel.get()),
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_composerController.get()),
+						  static_cast< QObject * >(m_toastController.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
@@ -104,6 +128,10 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_directMessageController->summaryModel()),
 						  static_cast< QObject * >(m_directMessageController->timelineModel()),
 						  static_cast< QObject * >(m_mediaSession.get()),
+						  static_cast< QObject * >(m_serverAdminController.get()),
+						  static_cast< QObject * >(m_serverAdminController->users()),
+						  static_cast< QObject * >(m_serverAdminController->bans()),
+						  static_cast< QObject * >(m_recorderController.get()),
 						  static_cast< QObject * >(m_mediaProfileFactory.get()),
 						  static_cast< QObject * >(m_selectionState.get()),
 						  static_cast< QObject * >(m_performanceMonitor.get()),
@@ -119,11 +147,14 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());
+	context->setContextProperty(QStringLiteral("toastState"), m_toastController.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
 	context->setContextProperty(QStringLiteral("directMessages"), m_directMessageController.get());
 	context->setContextProperty(QStringLiteral("mediaSession"), m_mediaSession.get());
+	context->setContextProperty(QStringLiteral("serverAdmin"), m_serverAdminController.get());
+	context->setContextProperty(QStringLiteral("recorder"), m_recorderController.get());
 	context->setContextProperty(QStringLiteral("mediaProfiles"), m_mediaProfileFactory.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("qmlPerformance"), m_performanceMonitor.get());
@@ -179,7 +210,7 @@ bool QmlShellHost::start(QString *error) {
 	connect(m_window, &QQuickWindow::afterRendering, m_performanceMonitor.get(),
 			&QmlPerformanceMonitor::markFrameRenderingFinished, Qt::DirectConnection);
 	connect(m_window, &QQuickWindow::frameSwapped, m_performanceMonitor.get(),
-			&QmlPerformanceMonitor::markFramePresented, Qt::QueuedConnection);
+			&QmlPerformanceMonitor::markFramePresented, Qt::DirectConnection);
 	connect(m_window, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
 		if (visibility == QWindow::Hidden || visibility == QWindow::Minimized) {
 			releasePttForSafety(PttSafetyReason::WindowHidden);
@@ -240,11 +271,18 @@ NavigationRailModel *QmlShellHost::navigationModel() const { return m_navigation
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 ComposerController *QmlShellHost::composerController() const { return m_composerController.get(); }
+ToastController *QmlShellHost::toastController() const { return m_toastController.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }
 DirectMessageController *QmlShellHost::directMessageController() const { return m_directMessageController.get(); }
 MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
+ModernServerAdminController *QmlShellHost::serverAdminController() const {
+	return m_serverAdminController.get();
+}
+Mumble::ModernRecorderController *QmlShellHost::recorderController() const {
+	return m_recorderController.get();
+}
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
 std::shared_ptr< QmlImagePipeline > QmlShellHost::imagePipeline() const { return m_imagePipeline; }
@@ -264,6 +302,9 @@ void QmlShellHost::setVisualFixtureOverrideActive(const bool active) {
 						  static_cast< QObject * >(m_directMessageController.get()),
 						  static_cast< QObject * >(m_directMessageController->summaryModel()),
 						  static_cast< QObject * >(m_directMessageController->timelineModel()),
+						  static_cast< QObject * >(m_serverAdminController.get()),
+						  static_cast< QObject * >(m_serverAdminController->users()),
+						  static_cast< QObject * >(m_serverAdminController->bans()),
 						  static_cast< QObject * >(m_themeController.get()) }) {
 		object->setProperty(QmlVisualFixtureMutation::OverrideProperty, active);
 		if (!active) object->setProperty(QmlVisualFixtureMutation::WriteProperty, false);
@@ -283,12 +324,15 @@ void QmlShellHost::setVisualFixtureMutationActive(const bool active) {
 						  static_cast< QObject * >(m_directMessageController.get()),
 						  static_cast< QObject * >(m_directMessageController->summaryModel()),
 						  static_cast< QObject * >(m_directMessageController->timelineModel()),
+						  static_cast< QObject * >(m_serverAdminController.get()),
+						  static_cast< QObject * >(m_serverAdminController->users()),
+						  static_cast< QObject * >(m_serverAdminController->bans()),
 						  static_cast< QObject * >(m_themeController.get()) }) {
 		object->setProperty(QmlVisualFixtureMutation::WriteProperty, active);
 	}
 }
 
-QQuickWindow *QmlShellHost::captureTargetWindow(const QString &windowId, QString *error) const {
+QQuickWindow *QmlShellHost::captureWindowTarget(const QString &windowId, QString *error) const {
 	const QString normalizedWindowId = windowId.trimmed().toLower();
 	if (normalizedWindowId == QLatin1String("ptt")) {
 		return m_pttToolWindow;
@@ -299,6 +343,35 @@ QQuickWindow *QmlShellHost::captureTargetWindow(const QString &windowId, QString
 		return m_manualPluginWindow;
 	}
 #endif
+	if (normalizedWindowId == QLatin1String("settings")
+		|| normalizedWindowId == QLatin1String("direct-message")
+		|| normalizedWindowId == QLatin1String("media-session")
+		|| normalizedWindowId == QLatin1String("screen-share")
+		|| normalizedWindowId == QLatin1String("attachment-viewer")
+		|| normalizedWindowId == QLatin1String("image-viewer")) {
+		QString surfaceId;
+		if (normalizedWindowId == QLatin1String("settings")) {
+			surfaceId = QStringLiteral("settings.window");
+		} else if (normalizedWindowId == QLatin1String("direct-message")) {
+			surfaceId = QStringLiteral("directMessage.window");
+		} else if (normalizedWindowId == QLatin1String("media-session")) {
+			surfaceId = QStringLiteral("mediaSession.window");
+		} else if (normalizedWindowId == QLatin1String("screen-share")) {
+			surfaceId = QStringLiteral("screenShare.viewer");
+		} else if (normalizedWindowId == QLatin1String("attachment-viewer")) {
+			surfaceId = QStringLiteral("attachmentViewer.window");
+		} else {
+			surfaceId = QStringLiteral("imageViewer.window");
+		}
+		QQuickWindow *fallback = nullptr;
+		for (QWindow *candidate : QGuiApplication::topLevelWindows()) {
+			auto *quickWindow = qobject_cast< QQuickWindow * >(candidate);
+			if (!quickWindow || quickWindow->property("surfaceId").toString() != surfaceId) continue;
+			if (!fallback) fallback = quickWindow;
+			if (quickWindow->isVisible() && quickWindow->isExposed()) return quickWindow;
+		}
+		return fallback;
+	}
 	if (!normalizedWindowId.isEmpty() && normalizedWindowId != QLatin1String("main")) {
 		if (error) *error = tr("Unknown Qt Quick window '%1'.").arg(windowId);
 		return nullptr;
@@ -328,13 +401,22 @@ void QmlShellHost::registerCaptureWindow(QQuickWindow *window) {
 }
 
 bool QmlShellHost::captureWindowReady(const QString &windowId) const {
-	QQuickWindow *targetWindow = captureTargetWindow(windowId);
+	QQuickWindow *targetWindow = captureWindowTarget(windowId);
+	const QString normalizedWindowId = windowId.trimmed().toLower();
+	if (normalizedWindowId == QLatin1String("settings")
+		|| normalizedWindowId == QLatin1String("direct-message")
+		|| normalizedWindowId == QLatin1String("media-session")
+		|| normalizedWindowId == QLatin1String("screen-share")
+		|| normalizedWindowId == QLatin1String("attachment-viewer")
+		|| normalizedWindowId == QLatin1String("image-viewer")) {
+		return targetWindow && targetWindow->isVisible() && targetWindow->isExposed();
+	}
 	return targetWindow && targetWindow->isVisible() && targetWindow->isExposed()
 		&& m_captureReadyWindows.contains(targetWindow);
 }
 
 bool QmlShellHost::captureWindow(const QString &path, QString *error, const QString &windowId) const {
-	QQuickWindow *targetWindow = captureTargetWindow(windowId, error);
+	QQuickWindow *targetWindow = captureWindowTarget(windowId, error);
 
 	if (!targetWindow) {
 		if (error) {
@@ -478,6 +560,19 @@ QObject *QmlShellHost::createScreenShareView(QObject *backend) {
 	QObject *view = invoked ? result.value< QObject * >() : nullptr;
 	if (view) {
 		QQmlEngine::setObjectOwnership(view, QQmlEngine::CppOwnership);
+		if (auto *window = qobject_cast< QQuickWindow * >(view)) {
+			window->setTransientParent(m_window);
+			registerCaptureWindow(window);
+			applyUiThemeNativeTitleBar(window);
+			// ApplicationWindow's initial visible binding is not a sufficient
+			// reopen contract on Windows while the previous viewer is completing
+			// deferred destruction. Explicitly show and schedule a frame so a
+			// replacement viewer becomes exposed deterministically.
+			window->show();
+			window->raise();
+			window->requestActivate();
+			window->requestUpdate();
+		}
 		m_screenShareViews.insert(view);
 		connect(view, &QObject::destroyed, this, [this](QObject *destroyedView) {
 			m_screenShareViews.remove(destroyedView);

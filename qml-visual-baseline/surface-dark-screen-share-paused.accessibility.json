@@ -1,0 +1,176 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Paused locally",
+          "rect": {
+            "height": 27,
+            "width": 520,
+            "x": 300,
+            "y": 314
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "The receiver stays connected while this frame is frozen locally.",
+          "rect": {
+            "height": 17,
+            "width": 520,
+            "x": 300,
+            "y": 353
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Resume immediately; the receiver remained connected",
+          "name": "Resume live share",
+          "rect": {
+            "height": 36,
+            "width": 118,
+            "x": 501,
+            "y": 382
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "The receiver stays connected while this frame is frozen locally.",
+      "name": "Paused locally",
+      "rect": {
+        "height": 668,
+        "width": 1120,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "100 percent",
+          "name": "Stream volume",
+          "rect": {
+            "height": 36,
+            "width": 112,
+            "x": 928,
+            "y": 676
+          },
+          "role": "Slider",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Resume immediately without reconnecting the receiver",
+          "name": "Resume",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 860,
+            "y": 679
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Change local audio playback for this share",
+          "name": "Mute",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 894,
+            "y": 679
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Enter full screen",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 1044,
+            "y": 679
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Stop receiving this screen share",
+          "name": "Close viewer",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 1078,
+            "y": 679
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Paused locally",
+          "rect": {
+            "height": 24,
+            "width": 84,
+            "x": 760,
+            "y": 681
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "Alex's screen share, Shared by Alex · in Lobby, Paused locally",
+      "name": "Screen share viewer controls",
+      "rect": {
+        "height": 52,
+        "width": 1120,
+        "x": 0,
+        "y": 668
+      },
+      "role": "ToolBar",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Screen Share — Shared by Alex · in Lobby",
+  "rect": {
+    "height": 720,
+    "width": 1120,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

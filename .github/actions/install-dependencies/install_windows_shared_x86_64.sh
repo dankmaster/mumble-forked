@@ -42,11 +42,15 @@ PY
 shared_environment_has_webengine_runtime() {
 	local triplet_dir="$MUMBLE_ENVIRONMENT_DIR/installed/x64-windows"
 	local webengine_targets_file="$triplet_dir/share/Qt6WebEngineCore/Qt6WebEngineCoreTargets.cmake"
+	local multimedia_targets_file="$triplet_dir/share/Qt6Multimedia/Qt6MultimediaTargets.cmake"
+	local multimedia_qml_plugin="$triplet_dir/Qt6/qml/QtMultimedia/quickmultimediaplugin.dll"
 
 	[[ -f "$MUMBLE_ENVIRONMENT_DIR/vcpkg.exe" ]] \
 		&& [[ -f "$MUMBLE_ENVIRONMENT_DIR/scripts/buildsystems/vcpkg.cmake" ]] \
 		&& [[ -f "$webengine_targets_file" ]] \
 		&& shared_environment_has_webengine_required_features "$webengine_targets_file" \
+		&& [[ -f "$multimedia_targets_file" ]] \
+		&& [[ -f "$multimedia_qml_plugin" ]] \
 		&& [[ -f "$triplet_dir/tools/Qt6/bin/windeployqt.exe" ]] \
 		&& [[ -f "$triplet_dir/share/Qt6/resources/icudtl.dat" ]] \
 		&& [[ -f "$triplet_dir/share/Qt6/resources/qtwebengine_resources.pak" ]]

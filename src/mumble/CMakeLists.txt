@@ -98,6 +98,7 @@ find_pkg(Qt6
 
 find_pkg(Qt6
 	COMPONENTS
+		Multimedia
 		Qml
 		Quick
 		QuickControls2
@@ -189,10 +190,20 @@ set(MUMBLE_SOURCES
 	"Markdown.cpp"
 	"Markdown.h"
 	"Messages.cpp"
+	"ModernConnectDiscoveryService.cpp"
+	"ModernConnectDiscoveryService.h"
 	"ModernConnectController.cpp"
 	"ModernConnectController.h"
 	"ModernDialogController.cpp"
 	"ModernDialogController.h"
+	"ModernProductDialogStateFactory.cpp"
+	"ModernProductDialogStateFactory.h"
+	"ModernRecorderController.cpp"
+	"ModernRecorderController.h"
+	"ModernRecorderRuntimeAdapter.cpp"
+	"ModernRecorderRuntimeAdapter.h"
+	"ModernServerAdminController.cpp"
+	"ModernServerAdminController.h"
 	"ModernSettingsController.cpp"
 	"ModernSettingsController.h"
 	"ModernShellMenuSerializer.cpp"
@@ -277,6 +288,8 @@ set(MUMBLE_SOURCES
 	"VersionCheck.h"
 	"VoiceRecorder.cpp"
 	"VoiceRecorder.h"
+	"VoiceRecorderSessionAdapter.cpp"
+	"VoiceRecorderSessionAdapter.h"
 	"VolumeAdjustmentController.cpp"
 	"VolumeAdjustmentController.h"
 	"WebRTCAudioEchoCanceller.cpp"
@@ -306,6 +319,7 @@ set(MUMBLE_SOURCES
 	"${SHARED_SOURCE_DIR}/User.h"
 
 	"mumble.qrc"
+	"adaptive-media-player.qrc"
 	"qml-shell.qrc"
 )
 
@@ -588,6 +602,7 @@ target_link_libraries(mumble_client_object_lib
 		Qt6::Sql
 		Qt6::Svg
 		Qt6::Widgets
+		Qt6::Multimedia
 		Qt6::Qml
 		Qt6::Quick
 		Qt6::QuickControls2
@@ -615,6 +630,33 @@ target_link_libraries(mumble
 	PRIVATE
 		Qt6::WebEngineQuick
 )
+
+if(MSVC AND NOT static)
+	# The Qt WebEngine Quick surface is an isolated, explicit media feature. Its
+	# C++ factory remains linked for type safety, while the runtime DLLs are only
+	# resolved when that factory creates the first profile. Publish the link
+	# contract from the object library so tests and benchmarks that consume it do
+	# not accidentally acquire eager imports. TARGET_FILE_NAME also selects the
+	# correct debug-suffixed Qt DLL. Resolve the imported locations here: a
+	# TARGET_FILE_NAME expression stored as a PUBLIC usage requirement would be
+	# evaluated in consumer directories where the scoped imported Qt target may
+	# not exist.
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_DELAYLOAD_WEBENGINE_QUICK)
+	function(mumble_delay_load_qt_runtime qt_target)
+		get_target_property(runtime_release "${qt_target}" IMPORTED_LOCATION_RELEASE)
+		get_target_property(runtime_debug "${qt_target}" IMPORTED_LOCATION_DEBUG)
+		if(NOT runtime_release OR NOT runtime_debug)
+			message(FATAL_ERROR "${qt_target} does not expose shared Debug/Release runtime locations")
+		endif()
+		get_filename_component(runtime_release_name "${runtime_release}" NAME)
+		get_filename_component(runtime_debug_name "${runtime_debug}" NAME)
+		target_link_options(mumble_client_object_lib PUBLIC
+			"/DELAYLOAD:$<IF:$<CONFIG:Debug>,${runtime_debug_name},${runtime_release_name}>")
+	endfunction()
+	mumble_delay_load_qt_runtime(Qt6::WebEngineQuick)
+	mumble_delay_load_qt_runtime(Qt6::WebEngineCore)
+	target_link_libraries(mumble_client_object_lib PUBLIC Delayimp.lib)
+endif()
 
 if(chat-perf-trace)
 	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_CHAT_PERF_TRACE)
@@ -821,6 +863,15 @@ if(rnnoise)
 
 		target_link_libraries(mumble_client_object_lib PRIVATE rnnoise)
 
+		if(MSVC AND NOT static)
+			# RNNoise is an optional runtime mode. Do not map its sizeable model/runtime
+			# DLL into every client process before the user selects a neural cleanup
+			# mode; the first factory call resolves the existing import normally.
+			target_link_options(mumble_client_object_lib PUBLIC
+				"/DELAYLOAD:$<TARGET_FILE_NAME:rnnoise>")
+			target_link_libraries(mumble_client_object_lib PUBLIC Delayimp.lib)
+		endif()
+
 		if(WIN32)
 			# Shared library on Windows (e.g. ".dll")
 			set_target_properties(rnnoise PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -853,6 +904,19 @@ if(dtln)
 	target_compile_definitions(mumble_client_object_lib PRIVATE "USE_DTLN")
 	target_include_directories(mumble_client_object_lib SYSTEM PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
 	target_link_libraries(mumble_client_object_lib PRIVATE ONNXRuntime::ONNXRuntime)
+
+	if(MSVC AND NOT static)
+		# DTLN is lazy at the C++ ownership boundary. Keep the Windows loader lazy
+		# as well so ONNX Runtime does not contribute startup and connected-idle
+		# memory while speech cleanup is disabled.
+		if(NOT DEFINED ONNXRUNTIME_RUNTIME OR "${ONNXRUNTIME_RUNTIME}" STREQUAL "")
+			message(FATAL_ERROR "Shared Windows DTLN builds require ONNXRUNTIME_RUNTIME for delay-load identity")
+		endif()
+		get_filename_component(ONNXRUNTIME_RUNTIME_NAME "${ONNXRUNTIME_RUNTIME}" NAME)
+		target_link_options(mumble_client_object_lib PUBLIC
+			"/DELAYLOAD:${ONNXRUNTIME_RUNTIME_NAME}")
+		target_link_libraries(mumble_client_object_lib PUBLIC Delayimp.lib)
+	endif()
 
 	set(DTLN_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dtln")
 	set(DTLN_MODEL_OUTPUT_DIR "${CMAKE_BINARY_DIR}/dtln")

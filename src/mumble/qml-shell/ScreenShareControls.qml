@@ -6,6 +6,7 @@ import Mumble.Theme 1.0
 Item {
 	id: root
 	required property var backend
+	property bool fullscreen: false
 	readonly property bool controlsWrapped: headerActions.childrenRect.height > Theme.controlHeight
 	readonly property string operationStatus: String(backend.operationStatus || "idle")
 	readonly property bool operationBusy: operationStatus === "loading"
@@ -19,6 +20,7 @@ Item {
 	readonly property color stateTone: operationFailed ? Theme.danger
 		: operationBusy ? Theme.warning
 		: backend.paused ? Theme.textMuted : Theme.success
+	signal fullscreenRequested(bool fullscreen)
 
 	implicitWidth: controlsLayout.implicitWidth
 	implicitHeight: controlsLayout.implicitHeight
@@ -27,7 +29,7 @@ Item {
 	Accessible.description: stateLabel
 
 	function focusInitialControl() {
-		const candidates = [ pauseButton, muteButton, volumeSlider, stopButton ]
+		const candidates = [ pauseButton, muteButton, volumeSlider, fullscreenButton, stopButton ]
 		for (let index = 0; index < candidates.length; ++index) {
 			const control = candidates[index]
 			if (!control || !control.visible || !control.enabled)
@@ -109,20 +111,23 @@ Item {
 			id: headerActions
 			objectName: "screenShareHeaderActions"
 			Layout.fillWidth: true
-			Layout.minimumHeight: Theme.controlHeight
-			Layout.preferredHeight: Math.max(Theme.controlHeight, childrenRect.height)
+			Layout.minimumHeight: visible ? Theme.controlHeight : 0
+			Layout.preferredHeight: visible ? Math.max(Theme.controlHeight, childrenRect.height) : 0
+			visible: !root.operationFailed
 			spacing: Theme.space2
 
 			ModernButton {
 				id: pauseButton
 				objectName: "screenSharePauseButton"
 				width: Math.min(implicitWidth, root.maximumActionWidth)
-				text: root.backend.paused ? qsTr("Resume live") : qsTr("Pause view")
+				text: root.backend.paused ? qsTr("Start playback") : qsTr("Stop playback")
+				visible: !root.operationBusy
 				enabled: root.transportControlsEnabled
 				highlighted: root.backend.paused
 				tone: root.backend.paused ? "accent" : "neutral"
 				Accessible.description: root.backend.paused
-					? qsTr("Resume at the current live edge") : qsTr("Pause this view locally")
+					? qsTr("Start receiving again at the current live edge")
+					: qsTr("Stop receiving this stream without closing the player")
 				onClicked: root.backend.setPaused(!root.backend.paused)
 			}
 			ModernButton {
@@ -130,6 +135,7 @@ Item {
 				objectName: "screenShareMuteButton"
 				width: Math.min(implicitWidth, root.maximumActionWidth)
 				text: root.backend.audioMuted ? qsTr("Unmute audio") : qsTr("Mute audio")
+				visible: !root.operationBusy
 				enabled: root.backend.audioAvailable && root.transportControlsEnabled
 				highlighted: root.backend.audioMuted
 				Accessible.description: root.backend.audioAvailable
@@ -140,6 +146,7 @@ Item {
 				id: volumeSlider
 				objectName: "screenShareVolumeSlider"
 				width: Math.min(180, Math.max(120, headerActions.width))
+				visible: !root.operationBusy
 				from: 0
 				to: 100
 				value: root.backend.audioVolume
@@ -147,6 +154,15 @@ Item {
 				onMoved: root.backend.setAudioVolume(value)
 				Accessible.name: qsTr("Stream volume")
 				Accessible.description: qsTr("%1 percent").arg(Math.round(value))
+			}
+			ModernIconButton {
+				id: fullscreenButton
+				objectName: "screenShareFullscreenButton"
+				visible: !root.operationBusy
+				text: root.fullscreen ? "↙" : "⛶"
+				selected: root.fullscreen
+				Accessible.name: root.fullscreen ? qsTr("Exit full screen") : qsTr("Enter full screen")
+				onClicked: root.fullscreenRequested(!root.fullscreen)
 			}
 			ModernButton {
 				id: stopButton

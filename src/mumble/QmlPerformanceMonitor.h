@@ -18,6 +18,8 @@ class QmlPerformanceMonitor final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(double p95FrameMs READ p95FrameMs NOTIFY metricsChanged)
 	Q_PROPERTY(double p99FrameMs READ p99FrameMs NOTIFY metricsChanged)
+	Q_PROPERTY(double p95RenderDurationMs READ p95RenderDurationMs NOTIFY metricsChanged)
+	Q_PROPERTY(double p99RenderDurationMs READ p99RenderDurationMs NOTIFY metricsChanged)
 	Q_PROPERTY(bool frameSampling READ frameSampling NOTIFY frameSamplingChanged)
 	Q_PROPERTY(double lastInputLatencyMs READ lastInputLatencyMs NOTIFY metricsChanged)
 	Q_PROPERTY(double maxInputLatencyMs READ maxInputLatencyMs NOTIFY metricsChanged)
@@ -32,6 +34,8 @@ public:
 
 	double p95FrameMs() const;
 	double p99FrameMs() const;
+	double p95RenderDurationMs() const;
+	double p99RenderDurationMs() const;
 	bool frameSampling() const;
 	double lastInputLatencyMs() const;
 	double maxInputLatencyMs() const;
@@ -52,10 +56,13 @@ public:
 	Q_INVOKABLE void reset();
 
 	// Deterministic hooks used by tests and non-QML automation adapters.
+	void recordFramePresentedAt(qint64 timestampNs);
 	void recordFrameDuration(double durationMs);
 	void recordHeartbeatAt(qint64 timestampNs);
 	void recordInputAt(const QString &operationId, qint64 timestampNs);
 	void recordVisualAt(const QString &operationId, qint64 timestampNs);
+	void recordModelReset(const QString &modelName);
+	void recordSyncUiOperationViolation(const QString &category);
 
 signals:
 	void metricsChanged();
@@ -67,15 +74,21 @@ private:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 	static double percentile(const QVector< double > &values, double fraction);
 	static void appendBounded(QVector< double > &values, double value);
+	void recordFramePresentedAt(qint64 timestampNs, bool sampledAtPresentation, qulonglong samplingGeneration);
 	qint64 nowNs() const;
 
 	QElapsedTimer m_clock;
 	QTimer m_heartbeat;
 	std::atomic< qint64 > m_frameRenderingStartedNs = -1;
 	std::atomic< bool > m_frameSampling = false;
+	std::atomic< qulonglong > m_samplingGeneration = 0;
 	qint64 m_lastHeartbeatNs = -1;
-	QVector< double > m_frameDurationsMs;
+	qint64 m_lastPresentedFrameNs = -1;
+	QVector< double > m_frameIntervalsMs;
+	QVector< double > m_renderDurationsMs;
 	QVector< double > m_inputLatenciesMs;
+	QHash< QString, int > m_modelResetCounts;
+	QHash< QString, int > m_syncUiOperationViolationCounts;
 	QHash< QString, qint64 > m_pendingInputs;
 	QQueue< QString > m_pendingInputOrder;
 	QPointer< QObject > m_inputTarget;

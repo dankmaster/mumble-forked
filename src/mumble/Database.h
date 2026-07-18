@@ -20,6 +20,11 @@ struct FavoriteServer {
 	unsigned short usPort;
 };
 
+struct ScreenShareAudioPreference {
+	int volume = 100;
+	bool muted = false;
+};
+
 class Database : public QObject {
 private:
 	Q_OBJECT
@@ -69,6 +74,8 @@ public:
 	void setUserLocalVolume(const QString &hash, float volume);
 	std::optional< bool > getUserRemoteSpeechCleanup(const QString &hash);
 	void setUserRemoteSpeechCleanup(const QString &hash, std::optional< bool > enabled);
+	std::optional< ScreenShareAudioPreference > getScreenShareAudioPreference(const QString &identityKey);
+	void setScreenShareAudioPreference(const QString &identityKey, const ScreenShareAudioPreference &preference);
 
 	QString getUserLocalNickname(const QString &hash);
 	void setUserLocalNickname(const QString &hash, const QString &nickname);

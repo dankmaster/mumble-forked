@@ -3,17 +3,26 @@
 // that can be found in the LICENSE file at the root of the
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
+#include <QtCore/QBuffer>
+#include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QLockFile>
 #include <QtTest>
 
 #include <algorithm>
 
 #include "AudioInput.h"
 #include "ModernConnectController.h"
+#include "ModernConnectDiscoveryService.h"
 #include "ModernDialogController.h"
+#include "ModernProductDialogStateFactory.h"
 #include "ModernSettingsController.h"
 #include "ModernTheme.h"
 #include "GlobalShortcut.h"
+#include "GlobalShortcutTypes.h"
+#include "Log.h"
+#include "MainWindow.h"
 
 namespace {
 QString readTestSource(const QString &path) {
@@ -31,6 +40,32 @@ public:
 		return info;
 	}
 };
+
+QVariantMap dialogSection(const QVariantMap &dialog, const QString &id) {
+	for (const QVariant &value : dialog.value(QStringLiteral("sections")).toList()) {
+		const QVariantMap section = value.toMap();
+		if (section.value(QStringLiteral("id")).toString() == id) return section;
+	}
+	return {};
+}
+
+QVariantMap dialogField(const QVariantMap &dialog, const QString &id) {
+	for (const QVariant &sectionValue : dialog.value(QStringLiteral("sections")).toList()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("id")).toString() == id) return field;
+		}
+	}
+	return {};
+}
+
+QVariantMap dialogAction(const QVariantMap &dialog, const QString &id) {
+	for (const QVariant &value : dialog.value(QStringLiteral("actions")).toList()) {
+		const QVariantMap action = value.toMap();
+		if (action.value(QStringLiteral("id")).toString() == id) return action;
+	}
+	return {};
+}
 } // namespace
 
 class TestModernDialogControllers : public QObject {
@@ -38,6 +73,11 @@ class TestModernDialogControllers : public QObject {
 
 private slots:
 	void connectControllerSelectsAndSavesFavorites();
+	void connectControllerPublishesTypedDiscoverySourcesAndSafeEditorTransitions();
+	void connectDiscoveryParsesRegistryRowsDeterministically();
+	void connectControllerPublishesVisualContract();
+	void productCertificateDialogUsesProductionContract();
+	void productScreenShareEditorUsesProductionContract();
 	void settingsControllerForcesModernAndAppliesDraft();
 	void settingsAppearanceAutoAccentTracksDraftTheme();
 	void settingsAppearancePreviewCommitsAndRollsBack();
@@ -45,17 +85,162 @@ private slots:
 	void settingsControllerClampsAudioSetupPayload();
 	void settingsControllerRollsBackVoiceReplayPreview();
 	void settingsControllerReconcilesPluginRuntimeState();
+	void pluginLoadActionUsesAsyncRuntimeReconciliation();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void audioInputVoiceActivitySnapshotIsBounded();
 	void nativeAutomationBoundariesRemainTypedAndDeterministic();
+	void visualFixturePresentationWaitIsBoundedAndDestroySafe();
+	void mediaAutomationReadinessStateIsTyped();
+	void conversationAutomationUsesLiveTypedControllers();
+	void detachedMediaWindowWaitsForRuntimeReadiness();
+	void automationWalkProbesUseDeterministicFixtures();
+	void persistentChatAttachmentIoIsStrictAndAsynchronous();
+	void persistentChatProviderImagesStayManagedAndCancelable();
+	void serverIdentityImagePickerIsManagedAndAsynchronous();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
+	void dialogControllerRestoresTransientDialogParents();
+	void dialogControllerRefreshesSameDialogWithoutStacking();
 	void dialogControllerBuildsDisconnectConfirmation();
 	void dialogControllerBuildsQuitConfirmation();
 	void dialogControllerBuildsDeleteMessageConfirmation();
 	void dialogControllerBuildsChangeAvatar();
 	void dialogControllerBuildsMigrationNotice();
 };
+
+void TestModernDialogControllers::productCertificateDialogUsesProductionContract() {
+	Mumble::ModernProductDialogs::CertificateDialogInput input;
+	input.certificate = { true, QStringLiteral("Demo User"), QStringLiteral("demo@example.com"),
+		QStringLiteral("Demo CA"), QStringLiteral("2034-05-16T10:30:00+02:00"),
+		QStringLiteral("7a:18:93:24:df:8a:61:4b:15:8d:7c:60:9f:42:aa:b1:43:5c:de:72"),
+		QStringLiteral("2034-05-16") };
+	QVariantMap dialog = Mumble::ModernProductDialogs::certificateDialog(input);
+	QCOMPARE(dialog.value(QStringLiteral("id")).toString(), QStringLiteral("certificate"));
+	QCOMPARE(dialog.value(QStringLiteral("kind")).toString(), QStringLiteral("certificate"));
+	QCOMPARE(dialog.value(QStringLiteral("width")).toInt(), 820);
+	QCOMPARE(dialog.value(QStringLiteral("height")).toInt(), 680);
+	QCOMPARE(dialog.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("runCertificateAction"));
+	QCOMPARE(dialog.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("cert.mode"));
+	QCOMPARE(dialogSection(dialog, QStringLiteral("certificate-current")).value(QStringLiteral("presentation")).toString(),
+		QStringLiteral("certificate-current"));
+	QCOMPARE(dialogSection(dialog, QStringLiteral("certificate-action")).value(QStringLiteral("presentation")).toString(),
+		QStringLiteral("certificate-action"));
+	QVERIFY(!dialogField(dialog, QStringLiteral("cert.current.name")).isEmpty());
+	QVERIFY(!dialogField(dialog, QStringLiteral("cert.current.email")).isEmpty());
+	QVERIFY(!dialogField(dialog, QStringLiteral("cert.name")).isEmpty());
+	QVERIFY(!dialogField(dialog, QStringLiteral("cert.email")).isEmpty());
+	QCOMPARE(dialogField(dialog, QStringLiteral("cert.mode")).value(QStringLiteral("value")).toString(),
+		QStringLiteral("export"));
+	QCOMPARE(dialogField(dialog, QStringLiteral("cert.mode")).value(QStringLiteral("valueType")).toString(),
+		QStringLiteral("string"));
+	QCOMPARE(dialogAction(dialog, QStringLiteral("cancel")).value(QStringLiteral("closesDialog")).toBool(), true);
+	QCOMPARE(dialogAction(dialog, QStringLiteral("runCertificateAction")).value(QStringLiteral("tone")).toString(),
+		QStringLiteral("accent"));
+
+	input.fieldValues = { { QStringLiteral("cert.mode"), QStringLiteral("create") },
+		{ QStringLiteral("cert.name"), QStringLiteral("Review User") },
+		{ QStringLiteral("cert.email"), QStringLiteral("bad address") } };
+	input.errors = { { QStringLiteral("cert.email"), QStringLiteral("Enter a valid email address.") } };
+	dialog = Mumble::ModernProductDialogs::certificateDialog(input);
+	QCOMPARE(dialogField(dialog, QStringLiteral("cert.name")).value(QStringLiteral("value")).toString(),
+		QStringLiteral("Review User"));
+	QCOMPARE(dialogField(dialog, QStringLiteral("cert.email")).value(QStringLiteral("value")).toString(),
+		QStringLiteral("bad address"));
+	QCOMPARE(dialog.value(QStringLiteral("errors")).toMap().value(QStringLiteral("cert.email")).toString(),
+		QStringLiteral("Enter a valid email address."));
+
+	input = {};
+	dialog = Mumble::ModernProductDialogs::certificateDialog(input);
+	QCOMPARE(dialogField(dialog, QStringLiteral("cert.mode")).value(QStringLiteral("value")).toString(),
+		QStringLiteral("quick"));
+	const QVariantList options = dialogField(dialog, QStringLiteral("cert.mode")).value(QStringLiteral("options")).toList();
+	QCOMPARE(options.constLast().toMap().value(QStringLiteral("enabled")).toBool(), false);
+}
+
+void TestModernDialogControllers::productScreenShareEditorUsesProductionContract() {
+	Mumble::ModernProductDialogs::ScreenShareEditorStateInput input;
+	input.channelName = QStringLiteral("Lobby");
+	input.channelId = QStringLiteral("7");
+	input.selectedSourceId = QStringLiteral("monitor:0");
+	input.sources = { QVariantMap { { QStringLiteral("id"), QStringLiteral("screens") },
+		{ QStringLiteral("section"), QStringLiteral("Screens") },
+		{ QStringLiteral("items"), QVariantList { QVariantMap {
+			{ QStringLiteral("id"), QStringLiteral("monitor:0") },
+			{ QStringLiteral("title"), QStringLiteral("Screen 1") } } } } } };
+	input.resolutionOptions = { QVariantMap { { QStringLiteral("label"), QStringLiteral("1080p") },
+		{ QStringLiteral("value"), QStringLiteral("1920x1080") } } };
+	input.resolutionDefault = QStringLiteral("1920x1080");
+	input.frameRateOptions = { QVariantMap { { QStringLiteral("label"), QStringLiteral("30 FPS") },
+		{ QStringLiteral("value"), 30 } } };
+	input.frameRateDefault = 30;
+	input.audioOptions = { QVariantMap { { QStringLiteral("label"), QStringLiteral("No audio") },
+		{ QStringLiteral("value"), QString() } } };
+	input.sourcesLoading = false;
+	const QVariantMap state = Mumble::ModernProductDialogs::screenShareEditorState(input);
+	QCOMPARE(state.value(QStringLiteral("channelId")).toString(), QStringLiteral("7"));
+	QCOMPARE(state.value(QStringLiteral("sourcesLoading")).toBool(), false);
+
+	const QVariantMap dialog = Mumble::ModernProductDialogs::screenShareEditorDialog(state);
+	QCOMPARE(dialog.value(QStringLiteral("id")).toString(), QStringLiteral("screenShare"));
+	QCOMPARE(dialog.value(QStringLiteral("kind")).toString(), QStringLiteral("screenShare"));
+	QCOMPARE(dialog.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Share to Lobby"));
+	QCOMPARE(dialog.value(QStringLiteral("width")).toInt(), 720);
+	QCOMPARE(dialog.value(QStringLiteral("height")).toInt(), 600);
+	QCOMPARE(dialog.value(QStringLiteral("tone")).toString(), QStringLiteral("wide"));
+	QCOMPARE(dialog.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("screenShareSource_monitor:0"));
+	const QVariantMap startAction = dialogAction(dialog, QStringLiteral("screenShare.start"));
+	QCOMPARE(startAction.value(QStringLiteral("enabled")).toBool(), true);
+	QCOMPARE(startAction.value(QStringLiteral("closesDialog")).toBool(), false);
+
+	QVariantMap invalidSelectionState = state;
+	invalidSelectionState.insert(QStringLiteral("selectedSourceId"), QStringLiteral("window:missing"));
+	const QVariantMap invalidSelectionDialog =
+		Mumble::ModernProductDialogs::screenShareEditorDialog(invalidSelectionState);
+	QCOMPARE(dialogAction(invalidSelectionDialog, QStringLiteral("screenShare.start"))
+		.value(QStringLiteral("enabled")).toBool(), false);
+	QCOMPARE(invalidSelectionDialog.value(QStringLiteral("initialFocusId")).toString(),
+		QStringLiteral("screenShareSource_monitor:0"));
+
+	invalidSelectionState.insert(QStringLiteral("selectedSourceId"), QString());
+	invalidSelectionState.insert(QStringLiteral("sourceError"),
+		QStringLiteral("That screen is no longer available."));
+	const QVariantMap staleSourceDialog =
+		Mumble::ModernProductDialogs::screenShareEditorDialog(invalidSelectionState);
+	QCOMPARE(staleSourceDialog.value(QStringLiteral("statusMessage")).toString(),
+		QStringLiteral("That screen is no longer available."));
+	QCOMPARE(staleSourceDialog.value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+	QCOMPARE(staleSourceDialog.value(QStringLiteral("errors")).toMap()
+		.value(QStringLiteral("screenShare.source")).toString(),
+		QStringLiteral("That screen is no longer available."));
+
+	QVariantMap probingState = state;
+	probingState.insert(QStringLiteral("runtimeProbePending"), true);
+	const QVariantMap probingDialog = Mumble::ModernProductDialogs::screenShareEditorDialog(probingState);
+	QCOMPARE(dialogAction(probingDialog, QStringLiteral("screenShare.start"))
+		.value(QStringLiteral("enabled")).toBool(), false);
+	QCOMPARE(dialogAction(probingDialog, QStringLiteral("screenShare.retryRuntime")).isEmpty(), true);
+	QCOMPARE(probingDialog.value(QStringLiteral("runtimeStatus")).toString(),
+		QStringLiteral("Checking the local screen-share runtime…"));
+	QCOMPARE(probingDialog.value(QStringLiteral("statusMessage")).toString(), QString());
+	QCOMPARE(probingDialog.value(QStringLiteral("initialFocusId")).toString(),
+		QStringLiteral("dialogAction_cancel"));
+
+	QVariantMap failedRuntimeState = state;
+	failedRuntimeState.insert(QStringLiteral("runtimeError"),
+		QStringLiteral("The bundled runtime is unavailable."));
+	const QVariantMap failedRuntimeDialog =
+		Mumble::ModernProductDialogs::screenShareEditorDialog(failedRuntimeState);
+	QCOMPARE(dialogAction(failedRuntimeDialog, QStringLiteral("screenShare.start"))
+		.value(QStringLiteral("enabled")).toBool(), false);
+	QCOMPARE(dialogAction(failedRuntimeDialog, QStringLiteral("screenShare.retryRuntime"))
+		.value(QStringLiteral("enabled")).toBool(), true);
+	QCOMPARE(failedRuntimeDialog.value(QStringLiteral("errors")).toMap()
+		.value(QStringLiteral("screenShare.runtime")).toString(),
+		QStringLiteral("The bundled runtime is unavailable."));
+	QCOMPARE(failedRuntimeDialog.value(QStringLiteral("statusMessage")).toString(), QString());
+	QCOMPARE(failedRuntimeDialog.value(QStringLiteral("initialFocusId")).toString(),
+		QStringLiteral("dialogAction_screenShare.retryRuntime"));
+}
 
 void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	Settings settings;
@@ -105,6 +290,11 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(controller.state().value(QStringLiteral("selectedFavoriteIndex")).toInt(), -1);
 	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), true);
 	QCOMPARE(controller.state().value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("dialogField_host"));
+	controller.invokeAction(QStringLiteral("backToFavorites"), QVariantMap());
+	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), false);
+	QCOMPARE(controller.state().value(QStringLiteral("selectedFavoriteIndex")).toInt(), 0);
+	QCOMPARE(controller.state().value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("connectFavoriteList"));
+	controller.invokeAction(QStringLiteral("newFavorite"), QVariantMap());
 
 	controller.updateField(QStringLiteral("host"), QStringLiteral("mumble://dev.example.test/lobby"));
 	controller.updateField(QStringLiteral("name"), QStringLiteral("Dev"));
@@ -171,6 +361,40 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("settings"));
 	QCOMPARE(state.value(QStringLiteral("activePage")).toString(), QStringLiteral("network"));
 	QCOMPARE(state.value(QStringLiteral("preventBackdropClose")).toBool(), true);
+	const QStringList productionSettingsPages {
+		QStringLiteral("audioInput"), QStringLiteral("audioOutput"), QStringLiteral("look"),
+		QStringLiteral("ui"), QStringLiteral("messages"), QStringLiteral("keys"),
+		QStringLiteral("network"), QStringLiteral("screenShare"), QStringLiteral("plugins"),
+		QStringLiteral("about")
+	};
+	QStringList advertisedSettingsPages;
+	for (const QVariant &pageValue : state.value(QStringLiteral("pages")).toList()) {
+		const QVariantMap page = pageValue.toMap();
+		advertisedSettingsPages.push_back(page.value(QStringLiteral("id")).toString());
+		if (page.value(QStringLiteral("id")).toString() == QLatin1String("screenShare")) {
+			QVERIFY(page.value(QStringLiteral("contentFitCompact")).toBool());
+		}
+	}
+	QCOMPARE(advertisedSettingsPages, productionSettingsPages);
+	QStringList controllerStatePages = productionSettingsPages;
+	// Plugin rows come from the live PluginManager and are exercised by the
+	// running-app visual fixture. This controller unit has no Global lifecycle,
+	// so only assert that the production page is advertised here.
+	controllerStatePages.removeAll(QStringLiteral("plugins"));
+	for (const QString &page : controllerStatePages) {
+		ModernSettingsController pageController;
+		pageController.open(settings, page);
+		const QVariantMap pageState = pageController.state();
+		QCOMPARE(pageState.value(QStringLiteral("activePage")).toString(), page);
+		QCOMPARE(pageState.value(QStringLiteral("pages")).toList().size(), productionSettingsPages.size());
+		QVERIFY2(!pageState.value(QStringLiteral("sections")).toList().isEmpty(),
+				 qPrintable(QStringLiteral("Production Settings page '%1' has no sections").arg(page)));
+		const QVariantList pageActions = pageState.value(QStringLiteral("actions")).toList();
+		QCOMPARE(pageActions.size(), 3);
+		QCOMPARE(pageActions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
+		QCOMPARE(pageActions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("apply"));
+		QCOMPARE(pageActions.at(2).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("ok"));
+	}
 
 	auto verifySettingsTooltips = [](const Settings &sourceSettings) {
 		ModernSettingsController tooltipController;
@@ -238,6 +462,50 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(shortcutEditorField.value(QStringLiteral("type")).toString(), QStringLiteral("shortcutEditor"));
 	keyController.updateField(QStringLiteral("keys.globalShortcuts"), true);
 	QCOMPARE(keyController.draft().bShortcutEnable, true);
+
+	ModernSettingsController messageController;
+	messageController.open(settings, QStringLiteral("messages"));
+	const QString linkPreviewsFieldID = QStringLiteral("network.linkPreviews");
+	QVERIFY(!findSettingsFieldById(messageController.state().value(QStringLiteral("sections")).toList(),
+								 linkPreviewsFieldID)
+			 .isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("network")), linkPreviewsFieldID).isEmpty());
+	QVariantMap messageEvents = findSettingsFieldById(
+		messageController.state().value(QStringLiteral("sections")).toList(),
+		QStringLiteral("messages.events"));
+	QCOMPARE(messageEvents.value(QStringLiteral("type")).toString(), QStringLiteral("messageEventEditor"));
+	QCOMPARE(messageEvents.value(QStringLiteral("rows")).toList().size(),
+			 static_cast< int >(Log::lastMsgType) - static_cast< int >(Log::firstMsgType) + 1);
+	QVERIFY(messageController.invokeAction(QStringLiteral("messages.toggleEvent"),
+		QVariantMap { { QStringLiteral("messageType"), static_cast< int >(Log::TextMessage) },
+			{ QStringLiteral("property"), QStringLiteral("console") },
+			{ QStringLiteral("value"), true } })
+			.stateChanged);
+	QVERIFY(messageController.invokeAction(QStringLiteral("messages.toggleEvent"),
+		QVariantMap { { QStringLiteral("messageType"), static_cast< int >(Log::TextMessage) },
+			{ QStringLiteral("property"), QStringLiteral("tts") },
+			{ QStringLiteral("value"), true } })
+			.stateChanged);
+	QVERIFY(messageController.invokeAction(QStringLiteral("messages.toggleEvent"),
+		QVariantMap { { QStringLiteral("messageType"), static_cast< int >(Log::TextMessage) },
+			{ QStringLiteral("property"), QStringLiteral("sound") },
+			{ QStringLiteral("value"), true } })
+			.stateChanged);
+	messageEvents = findSettingsFieldById(
+		messageController.state().value(QStringLiteral("sections")).toList(),
+		QStringLiteral("messages.events"));
+	QVariantMap textMessageEvent;
+	for (const QVariant &rowValue : messageEvents.value(QStringLiteral("rows")).toList()) {
+		const QVariantMap row = rowValue.toMap();
+		if (row.value(QStringLiteral("type")).toInt() == static_cast< int >(Log::TextMessage)) {
+			textMessageEvent = row;
+			break;
+		}
+	}
+	QVERIFY(!textMessageEvent.isEmpty());
+	QVERIFY(textMessageEvent.value(QStringLiteral("console")).toBool());
+	QVERIFY(!textMessageEvent.value(QStringLiteral("tts")).toBool());
+	QVERIFY(textMessageEvent.value(QStringLiteral("sound")).toBool());
 
 	ModernSettingsController aboutController;
 	aboutController.open(settings, QStringLiteral("about"));
@@ -560,6 +828,124 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(audioInputResult.closeDialog, true);
 }
 
+void TestModernDialogControllers::connectControllerPublishesVisualContract() {
+	Settings settings;
+	settings.qsUsername = QStringLiteral("Demo User");
+
+	FavoriteServer community;
+	community.qsName     = QStringLiteral("Mumble Community");
+	community.qsHostname = QStringLiteral("voice.example.invalid");
+	community.usPort     = 64738;
+	community.qsUsername = QStringLiteral("Demo User");
+
+	FavoriteServer studio;
+	studio.qsName     = QStringLiteral("Studio");
+	studio.qsHostname = QStringLiteral("studio.example.invalid");
+	studio.usPort     = 64739;
+	studio.qsUsername = QStringLiteral("Producer");
+
+	auto actionIDs = [](const QVariantMap &state) {
+		QStringList ids;
+		for (const QVariant &actionValue : state.value(QStringLiteral("actions")).toList()) {
+			ids.push_back(actionValue.toMap().value(QStringLiteral("id")).toString());
+		}
+		return ids;
+	};
+	auto action = [](const QVariantMap &state, const QString &id) {
+		for (const QVariant &actionValue : state.value(QStringLiteral("actions")).toList()) {
+			const QVariantMap candidate = actionValue.toMap();
+			if (candidate.value(QStringLiteral("id")).toString() == id) return candidate;
+		}
+		return QVariantMap {};
+	};
+	auto fieldIDs = [](const QVariantMap &state) {
+		QStringList ids;
+		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+				ids.push_back(fieldValue.toMap().value(QStringLiteral("id")).toString());
+			}
+		}
+		return ids;
+	};
+
+	ModernConnectController controller;
+	controller.open({ community, studio }, settings);
+	QVERIFY(controller.setFavoritePing(community.qsHostname, community.usPort, 28, 18, 128));
+	QVERIFY(controller.setFavoritePing(studio.qsHostname, studio.usPort, 41, 6, 64));
+
+	QVariantMap state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("Connect to a server"));
+	QCOMPARE(state.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Choose a saved server or add one."));
+	QCOMPARE(state.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("connect"));
+	QCOMPARE(state.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("connectFavoriteList"));
+	QCOMPARE(state.value(QStringLiteral("width")).toInt(), 860);
+	QCOMPARE(state.value(QStringLiteral("height")).toInt(), 640);
+	QCOMPARE(actionIDs(state), QStringList({ QStringLiteral("cancel"), QStringLiteral("editFavorite"),
+											QStringLiteral("connect") }));
+	QCOMPARE(action(state, QStringLiteral("connect")).value(QStringLiteral("tone")).toString(),
+			 QStringLiteral("accent"));
+
+	const QVariantList favorites = state.value(QStringLiteral("favorites")).toList();
+	QCOMPARE(favorites.size(), 2);
+	const QVariantMap first = favorites.at(0).toMap();
+	QCOMPARE(first.value(QStringLiteral("label")).toString(), QStringLiteral("Mumble Community"));
+	QCOMPARE(first.value(QStringLiteral("host")).toString(), QStringLiteral("voice.example.invalid"));
+	QCOMPARE(first.value(QStringLiteral("port")).toUInt(), 64738U);
+	QCOMPARE(first.value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("voice.example.invalid:64738 / Demo User"));
+	QCOMPARE(first.value(QStringLiteral("usersLabel")).toString(), QStringLiteral("Users: 18/128"));
+	QCOMPARE(first.value(QStringLiteral("usersValue")).toString(), QStringLiteral("18/128"));
+	QCOMPARE(first.value(QStringLiteral("pingLabel")).toString(), QStringLiteral("Ping: 28 ms"));
+	QCOMPARE(first.value(QStringLiteral("pingValue")).toString(), QStringLiteral("28 ms"));
+	QVERIFY(!first.contains(QStringLiteral("name")));
+	QVERIFY(!first.contains(QStringLiteral("address")));
+
+	controller.invokeAction(QStringLiteral("editFavorite"),
+		QVariantMap { { QStringLiteral("index"), 1 } });
+	state = controller.state();
+	QVERIFY(state.value(QStringLiteral("editorOpen")).toBool());
+	QCOMPARE(state.value(QStringLiteral("editorTitle")).toString(), QStringLiteral("Edit server"));
+	QCOMPARE(state.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("dialogField_host"));
+	QCOMPARE(fieldIDs(state), QStringList({ QStringLiteral("name"), QStringLiteral("host"),
+										 QStringLiteral("port"), QStringLiteral("username"),
+										 QStringLiteral("password") }));
+	const QVariantList editorFields = state.value(QStringLiteral("sections")).toList().first().toMap()
+		.value(QStringLiteral("fields")).toList();
+	const auto portFieldIt = std::find_if(editorFields.cbegin(), editorFields.cend(), [](const QVariant &field) {
+		return field.toMap().value(QStringLiteral("id")).toString() == QLatin1String("port");
+	});
+	QVERIFY(portFieldIt != editorFields.cend());
+	QCOMPARE(portFieldIt->toMap().value(QStringLiteral("useGrouping")).toBool(), false);
+	QCOMPARE(actionIDs(state), QStringList({ QStringLiteral("backToFavorites"), QStringLiteral("removeFavorite"),
+											QStringLiteral("saveFavorite"), QStringLiteral("connect") }));
+	QVERIFY(action(state, QStringLiteral("removeFavorite")).value(QStringLiteral("enabled")).toBool());
+	QVERIFY(action(state, QStringLiteral("saveFavorite")).value(QStringLiteral("enabled")).toBool());
+	QVERIFY(action(state, QStringLiteral("connect")).value(QStringLiteral("enabled")).toBool());
+
+	controller.invokeAction(QStringLiteral("newFavorite"), {});
+	controller.updateField(QStringLiteral("username"), QString());
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("editorTitle")).toString(), QStringLiteral("Add server"));
+	QCOMPARE(state.value(QStringLiteral("errors")).toMap().value(QStringLiteral("host")).toString(),
+			 QStringLiteral("Enter a server host."));
+	QCOMPARE(state.value(QStringLiteral("errors")).toMap().value(QStringLiteral("username")).toString(),
+			 QStringLiteral("Enter a username."));
+	QVERIFY(!state.value(QStringLiteral("canSubmit")).toBool());
+	QVERIFY(!action(state, QStringLiteral("removeFavorite")).value(QStringLiteral("enabled")).toBool());
+	QVERIFY(!action(state, QStringLiteral("saveFavorite")).value(QStringLiteral("enabled")).toBool());
+	QVERIFY(!action(state, QStringLiteral("connect")).value(QStringLiteral("enabled")).toBool());
+
+	controller.open({}, settings);
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("favorites")).toList().size(), 0);
+	QCOMPARE(state.value(QStringLiteral("sections")).toList().size(), 0);
+	QCOMPARE(state.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("connectNewFavoriteButton"));
+	QCOMPARE(actionIDs(state), QStringList({ QStringLiteral("cancel"), QStringLiteral("editFavorite"),
+											QStringLiteral("connect") }));
+	QVERIFY(!action(state, QStringLiteral("editFavorite")).value(QStringLiteral("enabled")).toBool());
+	QVERIFY(!action(state, QStringLiteral("connect")).value(QStringLiteral("enabled")).toBool());
+}
+
 void TestModernDialogControllers::settingsAppearanceAutoAccentTracksDraftTheme() {
 	const auto findField = [](const QVariantMap &state, const QString &fieldID) {
 		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
@@ -769,6 +1155,7 @@ void TestModernDialogControllers::settingsControllerEditsShortcutDataAndTargets(
 		Settings settings;
 		Shortcut targetShortcut;
 		targetShortcut.iIndex = 501;
+		targetShortcut.qlButtons = { QStringLiteral("test-control") };
 		ShortcutTarget target;
 		target.bUsers         = false;
 		target.iChannel       = SHORTCUT_TARGET_CURRENT;
@@ -812,6 +1199,9 @@ void TestModernDialogControllers::settingsControllerEditsShortcutDataAndTargets(
 		QCOMPARE(rows.size(), 4);
 		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("target"));
 		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("dataEditable")).toBool(), true);
+		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("assigned")).toBool(), true);
+		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("inputLabel")).toString(),
+				 QStringLiteral("Test keyboard: Test key"));
 		const QVariantMap targetDetail = rows.at(0).toMap().value(QStringLiteral("target")).toMap();
 		QCOMPARE(targetDetail.value(QStringLiteral("mode")).toString(), QStringLiteral("channel"));
 		QCOMPARE(targetDetail.value(QStringLiteral("channelId")).toInt(), SHORTCUT_TARGET_CURRENT);
@@ -820,6 +1210,24 @@ void TestModernDialogControllers::settingsControllerEditsShortcutDataAndTargets(
 		QCOMPARE(rows.at(1).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("toggle"));
 		QCOMPARE(rows.at(2).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("text"));
 		QCOMPARE(rows.at(3).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("channel"));
+
+		controller.invokeAction(QStringLiteral("keys.beginShortcutCapture"),
+			QVariantMap { { QStringLiteral("index"), 0 } });
+		QCOMPARE(shortcutField().value(QStringLiteral("rows")).toList().at(0).toMap()
+				 .value(QStringLiteral("capturing")).toBool(), true);
+		controller.invokeAction(QStringLiteral("keys.cancelShortcutCapture"), QVariantMap());
+		QCOMPARE(shortcutField().value(QStringLiteral("rows")).toList().at(0).toMap()
+				 .value(QStringLiteral("capturing")).toBool(), false);
+		controller.invokeAction(QStringLiteral("keys.beginShortcutCapture"),
+			QVariantMap { { QStringLiteral("index"), 1 } });
+		controller.invokeAction(QStringLiteral("keys.finishShortcutCapture"),
+			QVariantMap { { QStringLiteral("index"), 1 },
+				{ QStringLiteral("buttons"), QVariantList { QStringLiteral("test-alt") } } });
+		const QVariantMap capturedRow = shortcutField().value(QStringLiteral("rows")).toList().at(1).toMap();
+		QCOMPARE(capturedRow.value(QStringLiteral("capturing")).toBool(), false);
+		QCOMPARE(capturedRow.value(QStringLiteral("assigned")).toBool(), true);
+		QCOMPARE(capturedRow.value(QStringLiteral("inputLabel")).toString(),
+				 QStringLiteral("Test keyboard: Test key"));
 
 		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
 								QVariantMap{ { QStringLiteral("index"), 0 },
@@ -905,6 +1313,25 @@ void TestModernDialogControllers::settingsControllerReconcilesPluginRuntimeState
 	controller.invokeAction(QStringLiteral("reset"), QVariantMap());
 	setting = controller.draft().qhPluginSettings.constBegin().value();
 	QVERIFY(!setting.enabled);
+}
+
+void TestModernDialogControllers::pluginLoadActionUsesAsyncRuntimeReconciliation() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	const QString source = readTestSource(mainWindowPath);
+	QVERIFY(!source.isEmpty());
+
+	const qsizetype loadActionStart =
+		source.indexOf(QStringLiteral("if (actionID == QLatin1String(\"plugins.load\"))"));
+	const qsizetype configureActionStart =
+		source.indexOf(QStringLiteral("if (actionID == QLatin1String(\"plugins.configure\"))"), loadActionStart);
+	QVERIFY(loadActionStart >= 0);
+	QVERIFY(configureActionStart > loadActionStart);
+	const QString loadAction = source.mid(loadActionStart, configureActionStart - loadActionStart);
+	QVERIFY(loadAction.contains(QStringLiteral("setPluginLoadedAsync(pluginID, true)")));
+	QVERIFY(loadAction.contains(QStringLiteral("m_pendingPluginLoadedTransitions.insert(operationID")));
+	QVERIFY(loadAction.contains(
+		QStringLiteral("plugin->name, true, true, plugin->positionalDataEnabled, true")));
 }
 
 void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
@@ -1074,19 +1501,23 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	const QString audioInputPath = QFINDTESTDATA("../../mumble/AudioInput.h");
 	const QString shellHostPath = QFINDTESTDATA("../../mumble/QmlShellHost.cpp");
 	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	const QString mainQmlPath = QFINDTESTDATA("../../mumble/qml-shell/Main.qml");
 	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
 	QVERIFY2(!audioInputPath.isEmpty(), "AudioInput.h test data was not found");
 	QVERIFY2(!shellHostPath.isEmpty(), "QmlShellHost.cpp test data was not found");
 	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	QVERIFY2(!mainQmlPath.isEmpty(), "Main.qml test data was not found");
 
 	const QString mainWindowSource = readTestSource(mainWindowPath);
 	const QString audioInputSource = readTestSource(audioInputPath);
 	const QString shellHostSource = readTestSource(shellHostPath);
 	const QString automationSource = readTestSource(automationPath);
+	const QString mainQmlSource = readTestSource(mainQmlPath);
 	QVERIFY(!mainWindowSource.isEmpty());
 	QVERIFY(!audioInputSource.isEmpty());
 	QVERIFY(!shellHostSource.isEmpty());
 	QVERIFY(!automationSource.isEmpty());
+	QVERIFY(!mainQmlSource.isEmpty());
 
 	QVERIFY(mainWindowSource.contains(QStringLiteral("voiceActivitySnapshot()")));
 	for (const QString &unsafeRead : { QStringLiteral("audioInput->dPeak"),
@@ -1130,6 +1561,1011 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(stateBody.contains(QStringLiteral("session->selfMenu()")));
 	QVERIFY(automationSource.contains(QStringLiteral("\"mainCaptureReady\"")));
 	QVERIFY(automationSource.contains(QStringLiteral("\"pttToolCaptureReady\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"windowVisible\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"windowExposed\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceTalkRun")));
+	QVERIFY(automationSource.contains(QStringLiteral("&QQuickWindow::frameSwapped")));
+	QVERIFY(automationSource.contains(QStringLiteral("advanceTalkPerformanceWorkload")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceChatScrollRun")));
+	QVERIFY(automationSource.contains(QStringLiteral("advanceChatPerformanceWorkload")));
+	QVERIFY(automationSource.contains(QStringLiteral("chat-scroll:%1")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("function performanceChatFixtureState()")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("function preparePerformanceChatScrollWorkload(stepCount)")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("function advancePerformanceChatScrollWorkload(step, totalSteps)")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("timeline.contentY = performanceChatScrollStartY")));
+	QVERIFY(!mainQmlSource.contains(QStringLiteral("id: timelineScrollWorkload")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("\"firstVisibleId\"")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("\"settled\"")));
+}
+
+void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestroySafe() {
+	const QString fixturePath = QFINDTESTDATA("../../mumble/QmlVisualFixtureController.cpp");
+	QVERIFY2(!fixturePath.isEmpty(), "QmlVisualFixtureController.cpp test data was not found");
+	const QString fixtureSource = readTestSource(fixturePath);
+	QVERIFY(!fixtureSource.isEmpty());
+	const qsizetype captureWaitStart = fixtureSource.indexOf(
+		QStringLiteral("QQuickWindow *QmlVisualFixtureController::waitForCaptureWindow"));
+	const qsizetype waitStart = fixtureSource.indexOf(
+		QStringLiteral("bool QmlVisualFixtureController::waitForPresentedFrame"));
+	QVERIFY(captureWaitStart >= 0);
+	QVERIFY(waitStart > captureWaitStart);
+	const QString captureWaitBody = fixtureSource.mid(captureWaitStart, waitStart - captureWaitStart);
+	QVERIFY(captureWaitBody.contains(QStringLiteral("captureWindowTimeoutMilliseconds = 5000")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("QPointer< QmlShellHost > guardedHost")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("poll.setInterval(16)")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("m_host->captureWindowTarget(windowId")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("candidate->isVisible()")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("candidate->isExposed()")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("targetWindow.clear()")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("mediaSessionWindowComponentFailed")));
+	QVERIFY(captureWaitBody.contains(QStringLiteral("Timed out waiting for Qt Quick capture window")));
+	QVERIFY(!captureWaitBody.contains(QStringLiteral("processEvents")));
+
+	const QString waitBody = fixtureSource.mid(waitStart);
+	QVERIFY(waitBody.contains(QStringLiteral("QPointer< QQuickWindow > guardedWindow")));
+	QVERIFY(waitBody.contains(QStringLiteral("exposureTimeoutMilliseconds = 5000")));
+	QVERIFY(waitBody.contains(QStringLiteral("presentationTimeoutMilliseconds = 5000")));
+	QVERIFY(waitBody.contains(QStringLiteral("QElapsedTimer exposureElapsed")));
+	QVERIFY(waitBody.contains(QStringLiteral("guardedWindow->isExposed()")));
+	QVERIFY(waitBody.contains(QStringLiteral("&QQuickWindow::frameSwapped")));
+	QVERIFY(waitBody.contains(QStringLiteral("&QQuickWindow::afterFrameEnd")));
+	QVERIFY(waitBody.contains(QStringLiteral("&QQuickWindow::afterRendering")));
+	QVERIFY(waitBody.contains(QStringLiteral("&QQuickWindow::afterAnimating")));
+	QVERIFY(waitBody.contains(QStringLiteral("std::atomic_bool")));
+	QVERIFY(waitBody.contains(QStringLiteral("std::memory_order_release")));
+	QVERIFY(waitBody.contains(QStringLiteral("std::memory_order_acquire")));
+	QVERIFY(waitBody.contains(QStringLiteral("Qt::DirectConnection")));
+	QVERIFY(waitBody.contains(QStringLiteral("QCoreApplication::processEvents")));
+	QVERIFY(waitBody.contains(QStringLiteral("QThread::msleep(1)")));
+	QVERIFY(waitBody.contains(QStringLiteral("frameEventTurns")));
+	QVERIFY(waitBody.contains(QStringLiteral("nested QEventLoop::exec() inherits a process-level quit flag")));
+	const qsizetype frameHookIndex = waitBody.indexOf(QStringLiteral("&QQuickWindow::afterAnimating"));
+	const qsizetype boundedFrameRequestIndex =
+		waitBody.indexOf(QStringLiteral("guardedWindow->requestUpdate()"));
+	const qsizetype presentationTimerIndex =
+		waitBody.indexOf(QStringLiteral("QElapsedTimer presentationElapsed"));
+	QVERIFY(frameHookIndex >= 0);
+	QVERIFY(boundedFrameRequestIndex > frameHookIndex);
+	QVERIFY(presentationTimerIndex > boundedFrameRequestIndex);
+	QVERIFY(!waitBody.contains(QStringLiteral("guardedWindow->update()")));
+	QVERIFY(!waitBody.contains(QStringLiteral("guardedWindow->grabWindow()")));
+	QVERIFY(waitBody.contains(QStringLiteral("QObject::disconnect(frameConnection)")));
+	QVERIFY(waitBody.contains(QStringLiteral("QObject::disconnect(frameEndConnection)")));
+	QVERIFY(waitBody.contains(QStringLiteral("QObject::disconnect(renderingConnection)")));
+	QVERIFY(waitBody.contains(QStringLiteral("QObject::disconnect(animatingConnection)")));
+	QVERIFY(waitBody.contains(QStringLiteral("Timed out waiting for Qt Quick window exposure.")));
+	QVERIFY(waitBody.contains(QStringLiteral("Timed out waiting for a completed Qt Quick scene-graph frame after")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("productDialogTransitionActive")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("Focus ownership is a GUI-item contract")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("closeTimeout.start(2000)")));
+
+	const qsizetype applyStart = fixtureSource.indexOf(
+		QStringLiteral("QVariantMap QmlVisualFixtureController::apply("));
+	const qsizetype requestUpdate = fixtureSource.indexOf(
+		QStringLiteral("presentationWindow->requestUpdate();"), applyStart);
+	const qsizetype captureWindowWait = fixtureSource.indexOf(
+		QStringLiteral("waitForCaptureWindow(captureWindow, error)"), applyStart);
+	const qsizetype firstFrameWait = fixtureSource.indexOf(
+		QStringLiteral("waitForPresentedFrame(&frameError, presentationWindow)"), requestUpdate);
+	const qsizetype navigationCloseTimer = fixtureSource.indexOf(
+		QStringLiteral("QElapsedTimer navigationCloseTimer"), requestUpdate);
+	const qsizetype focusAttempts = fixtureSource.indexOf(
+		QStringLiteral("maximumFocusAttempts"), requestUpdate);
+	QVERIFY(applyStart >= 0);
+	QVERIFY(captureWindowWait > applyStart);
+	QVERIFY(requestUpdate > captureWindowWait);
+	QVERIFY(requestUpdate > applyStart);
+	QVERIFY(firstFrameWait > requestUpdate);
+	QVERIFY(navigationCloseTimer > firstFrameWait);
+	QVERIFY(focusAttempts > navigationCloseTimer);
+
+	const qsizetype applySurfaceStart = fixtureSource.indexOf(
+		QStringLiteral("bool QmlVisualFixtureController::applySurface"));
+	const qsizetype preSurfaceNavigationClose = fixtureSource.indexOf(
+		QStringLiteral("preSurfaceNavigationCloseTimer"), applyStart);
+	const qsizetype applySurfaceCall = fixtureSource.indexOf(
+		QStringLiteral("applySurface(surfaceVariant, &captureWindow, error)"), applyStart);
+	QVERIFY(preSurfaceNavigationClose > applyStart);
+	QVERIFY(applySurfaceCall > preSurfaceNavigationClose);
+	const qsizetype manualSurfaceStart = fixtureSource.indexOf(
+		QStringLiteral("if (surfaceVariant == QLatin1String(\"manual-plugin\"))"), applySurfaceStart);
+	const qsizetype manualShow = fixtureSource.indexOf(
+		QStringLiteral("m_host->showManualPluginTool(true);"), manualSurfaceStart);
+	const qsizetype manualFixtureSet = fixtureSource.indexOf(
+		QStringLiteral("manual->setX(2.75)"), manualSurfaceStart);
+	QVERIFY(applySurfaceStart >= 0);
+	QVERIFY(manualSurfaceStart > applySurfaceStart);
+	QVERIFY(manualShow > manualSurfaceStart);
+	QVERIFY(manualFixtureSet > manualShow);
+	QVERIFY(fixtureSource.contains(QStringLiteral("manual_plugin_state")));
+	const qsizetype directMessageFixtureStart = fixtureSource.indexOf(
+		QStringLiteral("if (surfaceVariant.startsWith(QLatin1String(\"direct-message-\")))"), applySurfaceStart);
+	const qsizetype directMessageFixtureEnd = fixtureSource.indexOf(
+		QStringLiteral("if (surfaceVariant == QLatin1String(\"attachment-viewer\"))"), directMessageFixtureStart);
+	QVERIFY(directMessageFixtureStart > applySurfaceStart);
+	QVERIFY(directMessageFixtureEnd > directMessageFixtureStart);
+	const QString directMessageFixtureBody = fixtureSource.mid(
+		directMessageFixtureStart, directMessageFixtureEnd - directMessageFixtureStart);
+	QVERIFY(directMessageFixtureBody.contains(QStringLiteral("roomModel()->replaceDirectMessageStates")));
+	QVERIFY(directMessageFixtureBody.contains(QStringLiteral("navigationModel()->replaceDirectMessageStates")));
+	QVERIFY(directMessageFixtureBody.contains(QStringLiteral("roomModel()->selectScope")));
+	QVERIFY(directMessageFixtureBody.contains(QStringLiteral("navigationModel()->selectScope")));
+	const qsizetype pttFixtureStart = fixtureSource.indexOf(
+		QStringLiteral("if (surfaceVariant.startsWith(QLatin1String(\"ptt-\")))"), applySurfaceStart);
+	const qsizetype pttFixtureEnd = fixtureSource.indexOf(
+		QStringLiteral("if (surfaceVariant == QLatin1String(\"manual-plugin\"))"), pttFixtureStart);
+	QVERIFY(pttFixtureStart > applySurfaceStart);
+	QVERIFY(pttFixtureEnd > pttFixtureStart);
+	const QString pttFixtureBody = fixtureSource.mid(pttFixtureStart, pttFixtureEnd - pttFixtureStart);
+	QVERIFY(pttFixtureBody.contains(QStringLiteral("captureWindowTarget(QStringLiteral(\"ptt\"))")));
+	QVERIFY(pttFixtureBody.contains(QStringLiteral("&QWindow::activeChanged")));
+	QVERIFY(pttFixtureBody.contains(QStringLiteral("Qt::SingleShotConnection")));
+	QVERIFY(pttFixtureBody.contains(QStringLiteral("QMetaObject::invokeMethod(pttWindow, \"beginHold\")")));
+	QVERIFY(!pttFixtureBody.contains(QStringLiteral("setPttPressed(")));
+
+	for (const QString &variant : {
+			 QStringLiteral("chat-message-states"), QStringLiteral("chat-composer-states"),
+			 QStringLiteral("chat-attachment-states"), QStringLiteral("chat-history-prepend-anchor") }) {
+		QVERIFY2(fixtureSource.contains(QStringLiteral("QStringLiteral(\"") + variant + QStringLiteral("\")")),
+			qPrintable(QStringLiteral("Missing integrated chat fixture variant %1").arg(variant)));
+	}
+	QVERIFY(fixtureSource.contains(QStringLiteral("#include \"ComposerController.h\"")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("visualMessageCount(state, surfaceVariant, false)")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("visualMessageCount(state, surfaceVariant, true)")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("composer->attachments()->append(uploading)")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("composer->attachments()->append(failed)")));
+	QVERIFY(fixtureSource.contains(
+		QStringLiteral("scopeState.insert(QStringLiteral(\"hasPendingReply\"), true)")));
+	QVERIFY(fixtureSource.count(QStringLiteral("composer_has_pending_reply")) >= 2);
+	QVERIFY(fixtureSource.contains(QStringLiteral("previewCanRetry")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("chat->replaceMessages(fixtureMessages)")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("m_host->chatModel()->messages()")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("m_host->chatModel()->replaceMessages(prependedMessages)")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("positionVisualFixtureTimelineAt")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("visualFixtureTimelineState")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("qAbs(afterOffset - anchorBeforeOffset) <= 1.0")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("chat_fixture_state")));
+	for (const QString &field : {
+			 QStringLiteral("reply_message_count"), QStringLiteral("reaction_message_count"),
+			 QStringLiteral("sending_message_count"), QStringLiteral("failed_retry_message_count"),
+			 QStringLiteral("deleted_message_count"), QStringLiteral("ready_attachment_count"),
+			 QStringLiteral("loading_attachment_count"), QStringLiteral("error_attachment_count"),
+			 QStringLiteral("composer_upload_progress_percent"), QStringLiteral("prepend_count"),
+			 QStringLiteral("anchor_offset_delta"), QStringLiteral("anchor_preserved"),
+			 QStringLiteral("pure_prepend_applied") }) {
+		QVERIFY2(fixtureSource.contains(QStringLiteral("QStringLiteral(\"") + field + QStringLiteral("\")")),
+			qPrintable(QStringLiteral("Missing normalized chat fixture state field %1").arg(field)));
+	}
+	const qsizetype positionHistoryAnchor = fixtureSource.indexOf(
+		QStringLiteral("positionVisualFixtureTimelineAt"), firstFrameWait);
+	const qsizetype applyHistoryPrepend = fixtureSource.indexOf(
+		QStringLiteral("m_host->chatModel()->replaceMessages(prependedMessages)"), positionHistoryAnchor);
+	QVERIFY(positionHistoryAnchor > firstFrameWait);
+	QVERIFY(applyHistoryPrepend > positionHistoryAnchor);
+
+	const qsizetype resetStart = fixtureSource.indexOf(
+		QStringLiteral("void QmlVisualFixtureController::resetSurfaceFixtures"));
+	const qsizetype resetEnd = fixtureSource.indexOf(
+		QStringLiteral("bool QmlVisualFixtureController::applySurface"), resetStart);
+	QVERIFY(resetStart >= 0);
+	QVERIFY(resetEnd > resetStart);
+	const QString resetBody = fixtureSource.mid(resetStart, resetEnd - resetStart);
+	const qsizetype closePreviousView = resetBody.indexOf(
+		QStringLiteral("m_host->closeScreenShareView(previousView)"));
+	const qsizetype drainPreviousView = resetBody.indexOf(
+		QStringLiteral("sendPostedEvents(previousView.data(), QEvent::DeferredDelete)"));
+	const qsizetype drainPreviousBackend = resetBody.indexOf(
+		QStringLiteral("sendPostedEvents(previousBackend, QEvent::DeferredDelete)"));
+	QVERIFY(closePreviousView >= 0);
+	QVERIFY(drainPreviousView > closePreviousView);
+	QVERIFY(drainPreviousBackend > drainPreviousView);
+
+	QVERIFY(resetBody.contains(QStringLiteral("if (!preserveDetachedMediaWindow)")));
+	QVERIFY(resetBody.contains(QStringLiteral("m_host->mediaSession()->clearSharedState()")));
+	const QString applySurfaceBody = fixtureSource.mid(resetEnd);
+	const qsizetype preserveDetachedMedia = applySurfaceBody.indexOf(
+		QStringLiteral("const bool preserveDetachedMediaWindow"));
+	const qsizetype requireDetachedSurface = applySurfaceBody.indexOf(
+		QStringLiteral("surfaceVariant.startsWith(QLatin1String(\"media-detached-\"))"), preserveDetachedMedia);
+	const qsizetype requireActiveBackend = applySurfaceBody.indexOf(
+		QStringLiteral("m_host->mediaSession()->active()"), requireDetachedSurface);
+	const qsizetype resetSurface = applySurfaceBody.indexOf(
+		QStringLiteral("resetSurfaceFixtures(preserveDetachedMediaWindow, preserveProductMenus);"),
+		requireActiveBackend);
+	const qsizetype openMediaSurface = applySurfaceBody.indexOf(
+		QStringLiteral("if (surfaceVariant.startsWith(QLatin1String(\"media-\")))"), resetSurface);
+	QVERIFY(preserveDetachedMedia >= 0);
+	QVERIFY(requireDetachedSurface > preserveDetachedMedia);
+	QVERIFY(requireActiveBackend > requireDetachedSurface);
+	QVERIFY(resetSurface > requireActiveBackend);
+	QVERIFY(openMediaSurface > resetSurface);
+	QVERIFY(!applySurfaceBody.contains(QStringLiteral("mediaWindowCloseLoop")));
+}
+
+void TestModernDialogControllers::connectControllerPublishesTypedDiscoverySourcesAndSafeEditorTransitions() {
+	Settings settings;
+	settings.qsUsername = QStringLiteral("community-user");
+	FavoriteServer favorite;
+	favorite.qsName = QStringLiteral("Saved home");
+	favorite.qsHostname = QStringLiteral("saved.example.test");
+	favorite.usPort = 64738;
+	favorite.qsUsername = QStringLiteral("saved-user");
+
+	ModernConnectController controller;
+	controller.open({ favorite }, settings);
+	QVariantMap state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("activeSource")).toString(), QStringLiteral("favorites"));
+	const QVariantList sources = state.value(QStringLiteral("sources")).toList();
+	QCOMPARE(sources.size(), 3);
+	QCOMPARE(sources.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("favorites"));
+	QCOMPARE(sources.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("public"));
+	QCOMPARE(sources.at(2).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("lan"));
+	QVERIFY(!state.value(QStringLiteral("sourceRows")).toList().constFirst().toMap()
+		.value(QStringLiteral("id")).toString().isEmpty());
+
+	ModernConnectController::ActionResult publicRequest = controller.invokeAction(QStringLiteral("selectSource"),
+		{ { QStringLiteral("sourceId"), QStringLiteral("public") } });
+	QVERIFY(publicRequest.sourceOperation.has_value());
+	QCOMPARE(publicRequest.sourceOperation->sourceID, QStringLiteral("public"));
+	QCOMPARE(publicRequest.sourceOperation->operation, QStringLiteral("retry"));
+	QVERIFY(publicRequest.sourceOperation->generation > 0);
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("activeSource")).toString(), QStringLiteral("public"));
+	QCOMPARE(state.value(QStringLiteral("sources")).toList().at(1).toMap()
+		.value(QStringLiteral("status")).toString(), QStringLiteral("loading"));
+	QVERIFY(controller.requestPublicListConsent(publicRequest.sourceOperation->generation));
+	state = controller.state();
+	const QVariantMap publicConsent = state.value(QStringLiteral("pendingConfirmation")).toMap();
+	QCOMPARE(publicConsent.value(QStringLiteral("kind")).toString(), QStringLiteral("publicConsent"));
+	QCOMPARE(publicConsent.value(QStringLiteral("confirmActionId")).toString(),
+		QStringLiteral("confirmEnablePublicSource"));
+	QCOMPARE(publicConsent.value(QStringLiteral("confirmTone")).toString(), QStringLiteral("accent"));
+	QVERIFY(publicConsent.value(QStringLiteral("message")).toString().contains(QStringLiteral("IP address")));
+
+	Settings consentSettings;
+	consentSettings.bDisablePublicList = true;
+	const ModernConnectController::ActionResult consentCancelled =
+		controller.invokeAction(QStringLiteral("dismissConfirmation"), {});
+	QVERIFY(consentCancelled.publicListDisabledSetting.has_value());
+	consentSettings.bDisablePublicList = *consentCancelled.publicListDisabledSetting;
+	QVERIFY(consentSettings.bDisablePublicList);
+	QCOMPARE(controller.state().value(QStringLiteral("sources")).toList().at(1).toMap()
+		.value(QStringLiteral("status")).toString(), QStringLiteral("unavailable"));
+
+	const ModernConnectController::ActionResult consentRetry = controller.invokeAction(
+		QStringLiteral("retrySource"), { { QStringLiteral("sourceId"), QStringLiteral("public") } });
+	QVERIFY(consentRetry.sourceOperation.has_value());
+	QVERIFY(controller.requestPublicListConsent(consentRetry.sourceOperation->generation));
+	const ModernConnectController::ActionResult consentConfirmed =
+		controller.invokeAction(QStringLiteral("confirmEnablePublicSource"), {});
+	QVERIFY(consentConfirmed.publicListDisabledSetting.has_value());
+	consentSettings.bDisablePublicList = *consentConfirmed.publicListDisabledSetting;
+	QVERIFY(!consentSettings.bDisablePublicList);
+	QVERIFY(consentConfirmed.sourceOperation.has_value());
+	QCOMPARE(consentConfirmed.sourceOperation->sourceID, QStringLiteral("public"));
+	QCOMPARE(consentConfirmed.sourceOperation->generation, consentRetry.sourceOperation->generation);
+
+	ModernConnectController::ServerEntry stockholm;
+	stockholm.id = QStringLiteral("registry:stockholm-1");
+	stockholm.label = QStringLiteral("Stockholm Community");
+	stockholm.host = QStringLiteral("se.example.test");
+	stockholm.port = 64738;
+	stockholm.country = QStringLiteral("Sweden");
+	stockholm.region = QStringLiteral("Stockholm");
+	stockholm.ping = 18;
+	stockholm.users = 42;
+	stockholm.maxUsers = 128;
+	ModernConnectController::ServerEntry gothenburg;
+	gothenburg.label = QStringLiteral("Gothenburg Voice");
+	gothenburg.host = QStringLiteral("gbg.example.test");
+	gothenburg.port = 64739;
+	gothenburg.country = QStringLiteral("Sweden");
+	gothenburg.region = QStringLiteral("Gothenburg");
+
+	QVERIFY(!controller.applySourceServers(QStringLiteral("public"),
+		consentConfirmed.sourceOperation->generation + 1, { stockholm }));
+	QVERIFY(controller.applySourceServers(QStringLiteral("public"), consentConfirmed.sourceOperation->generation,
+		{ stockholm, gothenburg }));
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("sourceRows")).toList().size(), 2);
+	const QVariantMap firstPublic = state.value(QStringLiteral("sourceRows")).toList().constFirst().toMap();
+	QCOMPARE(firstPublic.value(QStringLiteral("sourceId")).toString(), QStringLiteral("public"));
+	// Source IDs are opaque and their source-local component is percent encoded so
+	// adapter-provided delimiters can never collide with the source separator.
+	QCOMPARE(firstPublic.value(QStringLiteral("id")).toString(), QStringLiteral("public:registry%3Astockholm-1"));
+	QCOMPARE(firstPublic.value(QStringLiteral("usersValue")).toString(), QStringLiteral("42/128"));
+
+	controller.updateField(QStringLiteral("connect.filter"), QStringLiteral("gothenburg"));
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("sourceRows")).toList().size(), 1);
+	const QVariantMap filteredPublic = state.value(QStringLiteral("sourceRows")).toList().constFirst().toMap();
+	QCOMPARE(filteredPublic.value(QStringLiteral("host")).toString(), QStringLiteral("gbg.example.test"));
+	controller.invokeAction(QStringLiteral("selectServer"),
+		{ { QStringLiteral("sourceId"), QStringLiteral("public") },
+		  { QStringLiteral("id"), filteredPublic.value(QStringLiteral("id")) } });
+	const ModernConnectController::ActionResult connectPublic =
+		controller.invokeAction(QStringLiteral("connect"), {});
+	QVERIFY(connectPublic.connectionRequest.has_value());
+	QCOMPARE(connectPublic.connectionRequest->host, QStringLiteral("gbg.example.test"));
+	QCOMPARE(connectPublic.connectionRequest->port, 64739);
+	QCOMPARE(connectPublic.connectionRequest->username, QStringLiteral("community-user"));
+
+	controller.open({ favorite }, settings);
+	controller.invokeAction(QStringLiteral("editFavorite"), { { QStringLiteral("index"), 0 } });
+	controller.updateField(QStringLiteral("host"), QStringLiteral("draft.example.test"));
+	QVERIFY(controller.state().value(QStringLiteral("editorDirty")).toBool());
+	const ModernConnectController::ActionResult hiddenSourceChange = controller.invokeAction(
+		QStringLiteral("selectSource"), { { QStringLiteral("sourceId"), QStringLiteral("public") } });
+	QVERIFY(!hiddenSourceChange.stateChanged);
+	state = controller.state();
+	QVERIFY(state.value(QStringLiteral("editorOpen")).toBool());
+	QCOMPARE(state.value(QStringLiteral("activeSource")).toString(), QStringLiteral("favorites"));
+	const QVariantMap draftHost = state.value(QStringLiteral("sections")).toList().constFirst().toMap()
+		.value(QStringLiteral("fields")).toList().at(1).toMap();
+	QCOMPARE(draftHost.value(QStringLiteral("value")).toString(), QStringLiteral("draft.example.test"));
+
+	controller.invokeAction(QStringLiteral("backToFavorites"), {});
+	state = controller.state();
+	QVERIFY(state.value(QStringLiteral("editorOpen")).toBool());
+	QCOMPARE(state.value(QStringLiteral("pendingConfirmation")).toMap()
+		.value(QStringLiteral("kind")).toString(), QStringLiteral("discard"));
+	controller.invokeAction(QStringLiteral("dismissConfirmation"), {});
+	QVERIFY(controller.state().value(QStringLiteral("editorOpen")).toBool());
+	controller.invokeAction(QStringLiteral("backToFavorites"), {});
+	controller.invokeAction(QStringLiteral("confirmDiscardEditor"), {});
+	state = controller.state();
+	QVERIFY(!state.value(QStringLiteral("editorOpen")).toBool());
+	QCOMPARE(state.value(QStringLiteral("activeSource")).toString(), QStringLiteral("favorites"));
+
+	controller.invokeAction(QStringLiteral("selectSource"),
+		{ { QStringLiteral("sourceId"), QStringLiteral("favorites") } });
+	controller.invokeAction(QStringLiteral("editFavorite"), { { QStringLiteral("index"), 0 } });
+	ModernConnectController::ActionResult removeRequest =
+		controller.invokeAction(QStringLiteral("removeFavorite"), {});
+	QVERIFY(!removeRequest.favoritesToSave.has_value());
+	QCOMPARE(controller.favorites().size(), 1);
+	QCOMPARE(controller.state().value(QStringLiteral("pendingConfirmation")).toMap()
+		.value(QStringLiteral("kind")).toString(), QStringLiteral("remove"));
+	ModernConnectController::ActionResult removeConfirmed =
+		controller.invokeAction(QStringLiteral("confirmRemoveFavorite"), {});
+	QVERIFY(removeConfirmed.favoritesToSave.has_value());
+	QVERIFY(removeConfirmed.favoritesToSave->isEmpty());
+
+	ModernConnectController::ServerEntry lanServer;
+	lanServer.id = QStringLiteral("bonjour:studio");
+	lanServer.label = QStringLiteral("Studio LAN");
+	lanServer.host = QStringLiteral("studio.local");
+	lanServer.port = 64738;
+	const quint64 liveLanGeneration = controller.beginSourceRefresh(QStringLiteral("lan"));
+	QVERIFY(controller.applySourceServers(QStringLiteral("lan"), liveLanGeneration, { lanServer }));
+	lanServer.host = QStringLiteral("studio-renamed.local");
+	QVERIFY(controller.applySourceServers(QStringLiteral("lan"), liveLanGeneration, { lanServer }));
+	controller.invokeAction(QStringLiteral("selectSource"),
+		{ { QStringLiteral("sourceId"), QStringLiteral("lan") } });
+	QCOMPARE(controller.state().value(QStringLiteral("sourceRows")).toList().constFirst().toMap()
+		.value(QStringLiteral("host")).toString(), QStringLiteral("studio-renamed.local"));
+
+	const quint64 lanGeneration = controller.beginSourceRefresh(QStringLiteral("lan"));
+	QVERIFY(lanGeneration > 0);
+	QVERIFY(controller.applySourceError(QStringLiteral("lan"), lanGeneration,
+		QStringLiteral("Local discovery failed")));
+	controller.invokeAction(QStringLiteral("selectSource"),
+		{ { QStringLiteral("sourceId"), QStringLiteral("lan") } });
+	state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("sources")).toList().at(2).toMap()
+		.value(QStringLiteral("status")).toString(), QStringLiteral("error"));
+	const ModernConnectController::ActionResult retry = controller.invokeAction(QStringLiteral("retrySource"), {});
+	QVERIFY(retry.sourceOperation.has_value());
+	const ModernConnectController::ActionResult cancel = controller.invokeAction(QStringLiteral("cancelSource"), {});
+	QVERIFY(cancel.sourceOperation.has_value());
+	QCOMPARE(cancel.sourceOperation->operation, QStringLiteral("cancel"));
+	QVERIFY(!controller.applySourceServers(QStringLiteral("lan"), retry.sourceOperation->generation, {}));
+
+	controller.open({ favorite }, settings);
+	const ModernConnectController::ActionResult staleRequest = controller.invokeAction(
+		QStringLiteral("selectSource"), { { QStringLiteral("sourceId"), QStringLiteral("public") } });
+	QVERIFY(staleRequest.sourceOperation.has_value());
+	QVERIFY(controller.requestPublicListConsent(staleRequest.sourceOperation->generation));
+	const quint64 newerGeneration = controller.beginSourceRefresh(QStringLiteral("public"));
+	QVERIFY(newerGeneration > staleRequest.sourceOperation->generation);
+	const ModernConnectController::ActionResult staleConsent =
+		controller.invokeAction(QStringLiteral("confirmEnablePublicSource"), {});
+	QVERIFY(staleConsent.stateChanged);
+	QVERIFY(!staleConsent.publicListDisabledSetting.has_value());
+	QVERIFY(!staleConsent.sourceOperation.has_value());
+	QVERIFY(controller.state().value(QStringLiteral("pendingConfirmation")).toMap().isEmpty());
+}
+
+void TestModernDialogControllers::connectDiscoveryParsesRegistryRowsDeterministically() {
+	const QByteArray registryXml = QByteArrayLiteral(
+		"<servers>"
+		"<server name=\"Zeta Voice\" ip=\"zeta.example.test\" port=\"64738\" country=\"Sweden\" "
+		"continent_code=\"eu\"/>"
+		"<server name=\"Duplicate endpoint\" ip=\"zeta.example.test\" port=\"64738\"/>"
+		"<server name=\"Alpha Voice\" url=\"mumble://alpha.example.test:64739\" country=\"Norway\" "
+		"continent_code=\"eu\"/>"
+		"<server name=\"Invalid\" ip=\"invalid.example.test\" port=\"0\"/>"
+		"</servers>");
+	const ModernConnectDiscoveryService::PublicListParseResult parsed =
+		ModernConnectDiscoveryService::parsePublicServerList(registryXml);
+	QVERIFY2(parsed.ok, qPrintable(parsed.error));
+	QCOMPARE(parsed.servers.size(), 2);
+	QCOMPARE(parsed.servers.at(0).label, QStringLiteral("Alpha Voice"));
+	QCOMPARE(parsed.servers.at(0).host, QStringLiteral("alpha.example.test"));
+	QCOMPARE(parsed.servers.at(0).port, static_cast< unsigned short >(64739));
+	QCOMPARE(parsed.servers.at(0).country, QStringLiteral("Norway"));
+	QCOMPARE(parsed.servers.at(0).region, QStringLiteral("Europe"));
+	QCOMPARE(parsed.servers.at(1).id, QStringLiteral("registry:zeta.example.test:64738"));
+
+	const ModernConnectDiscoveryService::PublicListParseResult malformed =
+		ModernConnectDiscoveryService::parsePublicServerList(QByteArrayLiteral("<servers><server"));
+	QVERIFY(!malformed.ok);
+	QVERIFY(!malformed.error.isEmpty());
+
+	const ModernConnectDiscoveryService::PublicListParseResult oversized =
+		ModernConnectDiscoveryService::parsePublicServerList(QByteArray(4 * 1024 * 1024 + 1, 'x'));
+	QVERIFY(!oversized.ok);
+	QVERIFY(!oversized.error.isEmpty());
+}
+
+void TestModernDialogControllers::mediaAutomationReadinessStateIsTyped() {
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	const QString automationSource = readTestSource(automationPath);
+	QVERIFY(!automationSource.isEmpty());
+
+	const qsizetype helperStart = automationSource.indexOf(
+		QStringLiteral("QVariantMap automationMediaControllerState(MediaSessionBackend *media)"));
+	const qsizetype helperEnd = automationSource.indexOf(
+		QStringLiteral("QObject *automationFindRichPreviewCard"), helperStart);
+	QVERIFY(helperStart >= 0);
+	QVERIFY(helperEnd > helperStart);
+	const QString helperBody = automationSource.mid(helperStart, helperEnd - helperStart);
+
+	for (const QString &field : { QStringLiteral("active"), QStringLiteral("state"),
+			 QStringLiteral("errorCode"), QStringLiteral("detached"), QStringLiteral("provider"),
+			 QStringLiteral("position"), QStringLiteral("duration"), QStringLiteral("syncGeneration"),
+			 QStringLiteral("sharedAvailable"), QStringLiteral("sharedJoined"),
+			 QStringLiteral("sharedHost"), QStringLiteral("sharedSessionId"),
+			 QStringLiteral("sharedScopeId"), QStringLiteral("sharedHostSession"),
+			 QStringLiteral("sharedParticipantSessions"), QStringLiteral("sharedOperationStatus"),
+			 QStringLiteral("sharedOperationError"),
+			 QStringLiteral("rendererPresent"), QStringLiteral("rendererState"),
+			 QStringLiteral("rendererReady"), QStringLiteral("windowPresent"),
+			 QStringLiteral("windowReady"), QStringLiteral("windowComponentFailed") }) {
+		QVERIFY2(helperBody.contains(QStringLiteral("\"%1\"").arg(field)),
+			qPrintable(QStringLiteral("Missing typed media automation field: %1").arg(field)));
+	}
+	QVERIFY(helperBody.contains(QStringLiteral("media->active()")));
+	QVERIFY(helperBody.contains(QStringLiteral("media->state()")));
+	QVERIFY(helperBody.contains(QStringLiteral("media->errorCode()")));
+	QVERIFY(helperBody.contains(QStringLiteral("media->detached()")));
+	QVERIFY(helperBody.contains(QStringLiteral("media->provider()")));
+	QVERIFY(helperBody.contains(QStringLiteral("\"mediaSession.inline\"")));
+	QVERIFY(helperBody.contains(QStringLiteral("\"mediaSession.window\"")));
+	QVERIFY(helperBody.contains(QStringLiteral("property(\"rendererState\")")));
+	QVERIFY(helperBody.contains(QStringLiteral("property(\"documentReady\")")));
+
+	const qsizetype commandStart = automationSource.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"qmlReadinessState\"))"));
+	const qsizetype commandEnd = automationSource.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"pttLifecycleProbe\"))"), commandStart);
+	QVERIFY(commandStart >= 0);
+	QVERIFY(commandEnd > commandStart);
+	const QString commandBody = automationSource.mid(commandStart, commandEnd - commandStart);
+	QVERIFY(commandBody.contains(QStringLiteral("\"mediaActive\"")));
+	QVERIFY(commandBody.contains(QStringLiteral("\"media\"), automationMediaLifecycleState(host)")));
+}
+
+void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers() {
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	const QString mainQmlPath = QFINDTESTDATA("../../mumble/qml-shell/Main.qml");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	QVERIFY2(!mainQmlPath.isEmpty(), "Main.qml test data was not found");
+	const QString automationSource = readTestSource(automationPath);
+	const QString mainQmlSource = readTestSource(mainQmlPath);
+	QVERIFY(!automationSource.isEmpty());
+	QVERIFY(!mainQmlSource.isEmpty());
+
+	const qsizetype directMessageHelperStart = automationSource.indexOf(
+		QStringLiteral("QVariantMap automationDirectMessageState(DirectMessageController *directMessages)"));
+	const qsizetype directMessageHelperEnd = automationSource.indexOf(
+		QStringLiteral("QVariantMap automationMediaControllerState"), directMessageHelperStart);
+	QVERIFY(directMessageHelperStart >= 0);
+	QVERIFY(directMessageHelperEnd > directMessageHelperStart);
+	const QString directMessageHelper = automationSource.mid(
+		directMessageHelperStart, directMessageHelperEnd - directMessageHelperStart);
+	for (const QString &field : { QStringLiteral("activeSessionId"), QStringLiteral("activeScopeToken"),
+			 QStringLiteral("conversationOpen"), QStringLiteral("canSend"), QStringLiteral("mode"),
+			 QStringLiteral("historyLoading"), QStringLiteral("historyError"),
+			 QStringLiteral("conversations"), QStringLiteral("messages") }) {
+		QVERIFY2(directMessageHelper.contains(QStringLiteral("\"%1\"").arg(field)),
+			qPrintable(QStringLiteral("Missing typed direct-message automation field: %1").arg(field)));
+	}
+	QVERIFY(directMessageHelper.contains(QStringLiteral("directMessages->summaryModel()")));
+	QVERIFY(directMessageHelper.contains(QStringLiteral("directMessages->timelineModel()")));
+
+	for (const QString &command : { QStringLiteral("directMessageState"), QStringLiteral("sendDirectMessage"),
+			 QStringLiteral("closeDirectMessage"), QStringLiteral("setDirectMessageMode"),
+			 QStringLiteral("markDirectMessageRead"), QStringLiteral("watchTogetherState"),
+			 QStringLiteral("startWatchTogether"), QStringLiteral("watchTogetherAction"),
+			 QStringLiteral("requestPreviewHydration"), QStringLiteral("richPreviewState"),
+			 QStringLiteral("invokeRichPreviewAction"), QStringLiteral("screenShareViewerState"),
+			 QStringLiteral("screenShareViewerAction"), QStringLiteral("toastState"),
+			 QStringLiteral("publishToast"), QStringLiteral("dismissToast"),
+			 QStringLiteral("directMessageReply"), QStringLiteral("directMessageCancelReply"),
+			 QStringLiteral("directMessageRetry"), QStringLiteral("directMessageDelete"),
+			 QStringLiteral("directMessageToggleReaction"), QStringLiteral("directMessageChooseAttachment"),
+			 QStringLiteral("directMessageRemoveAttachment"), QStringLiteral("directMessageRetryAttachment"),
+			 QStringLiteral("directMessageOpenAttachment"), QStringLiteral("directMessageDownloadAttachment"),
+			 QStringLiteral("directMessageHydrateContent") }) {
+		QVERIFY2(automationSource.contains(QStringLiteral("QLatin1String(\"%1\")").arg(command)),
+			qPrintable(QStringLiteral("Missing live automation command: %1").arg(command)));
+	}
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->sendDraft()")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->startShared(url, provider, title)")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->joinShared()")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->leaveShared()")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->endShared()")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->transferSharedHost(sessionId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("media->reopenSharedPlayer()")));
+	QVERIFY(automationSource.contains(QStringLiteral(
+		"host->commandController()->requestPreviewHydration(scopeToken, messageIds, highPriority)")));
+	QVERIFY(automationSource.contains(QStringLiteral("automationLiveRichPreviewState(host, messageId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("timeline->rowForStableId(stableId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"requestInlinePlaybackWithFocus\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"requestCurrentDirectMediaPopout\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"watchTogetherRequested\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("QGuiApplication::topLevelWindows()")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"screenShare.viewer\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("backend->setPaused(true)")));
+	QVERIFY(automationSource.contains(QStringLiteral("backend->setAudioMuted(true)")));
+	QVERIFY(automationSource.contains(QStringLiteral("backend->setAudioVolume(volume)")));
+	QVERIFY(automationSource.contains(QStringLiteral("backend->requestRetry()")));
+	QVERIFY(automationSource.contains(QStringLiteral("backend->requestStop()")));
+	QVERIFY(automationSource.contains(QStringLiteral("toast->publish(")));
+	QVERIFY(automationSource.contains(QStringLiteral("toast->dismiss()")));
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->replyToMessage(stableId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->retryMessage(stableId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->deleteMessage(stableId)")));
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->toggleMessageReaction(stableId, emoji)")));
+	QVERIFY(automationSource.contains(QStringLiteral("directMessages->requestContentHydration(stableId,")));
+	QVERIFY(automationSource.contains(QStringLiteral("requiresNativeDialog")));
+	for (const QString &field : { QStringLiteral("visible"), QStringLiteral("tone"),
+			 QStringLiteral("title"), QStringLiteral("message"), QStringLiteral("actionId"),
+			 QStringLiteral("repeatCount") }) {
+		QVERIFY2(automationSource.contains(QStringLiteral("QStringLiteral(\"%1\"), toast->").arg(field)),
+			qPrintable(QStringLiteral("Missing typed toast automation field: %1").arg(field)));
+	}
+	QVERIFY(automationSource.contains(QStringLiteral("QStringLiteral(\"revision\")")));
+	QVERIFY(automationSource.contains(QStringLiteral("toast->revision()")));
+
+	const qsizetype snapshotStart = automationSource.indexOf(
+		QStringLiteral("QVariantMap ModernUiAutomationServer::buildStateResponse() const"));
+	const qsizetype snapshotEnd = automationSource.indexOf(
+		QStringLiteral("void ModernUiAutomationServer::writeResponse"), snapshotStart);
+	QVERIFY(snapshotStart >= 0);
+	QVERIFY(snapshotEnd > snapshotStart);
+	const QString snapshotBody = automationSource.mid(snapshotStart, snapshotEnd - snapshotStart);
+	QVERIFY(snapshotBody.contains(QStringLiteral("automationDirectMessageState(host->directMessageController())")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("automationMediaControllerState(host->mediaSession())")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("captureWindowReady(QStringLiteral(\"direct-message\"))")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("automationScreenShareViewerStates()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("automationToastState(host->toastController())")));
+}
+
+void TestModernDialogControllers::detachedMediaWindowWaitsForRuntimeReadiness() {
+	const QString mainPath = QFINDTESTDATA("../../mumble/qml-shell/Main.qml");
+	const QString windowPath = QFINDTESTDATA("../../mumble/qml-shell/MediaSessionWindow.qml");
+	const QString directMessagePath = QFINDTESTDATA("../../mumble/qml-shell/DirectMessageWindow.qml");
+	const QString profileFactoryPath = QFINDTESTDATA("../../mumble/QmlMediaProfileFactory.cpp");
+	QVERIFY2(!mainPath.isEmpty(), "Main.qml test data was not found");
+	QVERIFY2(!windowPath.isEmpty(), "MediaSessionWindow.qml test data was not found");
+	QVERIFY2(!directMessagePath.isEmpty(), "DirectMessageWindow.qml test data was not found");
+	QVERIFY2(!profileFactoryPath.isEmpty(), "QmlMediaProfileFactory.cpp test data was not found");
+
+	const QString mainSource = readTestSource(mainPath);
+	const QString windowSource = readTestSource(windowPath);
+	const QString directMessageSource = readTestSource(directMessagePath);
+	const QString profileFactorySource = readTestSource(profileFactoryPath);
+	QVERIFY(mainSource.contains(QStringLiteral("property bool runtimePresentationStarted: false")));
+	QVERIFY(mainSource.contains(QStringLiteral(
+		"active: root.mediaSessionWindowRequested && runtimePresentationStarted")));
+	QVERIFY(mainSource.contains(QStringLiteral("root.mediaRuntimePreparing")));
+	QVERIFY(mainSource.contains(QStringLiteral("root.mediaRuntimeError.length > 0")));
+	QVERIFY(mainSource.contains(QStringLiteral(
+		"readonly property bool mediaRuntimeReady")));
+	QVERIFY(mainSource.contains(QStringLiteral(
+		"visible: root.mediaSessionWindowUnavailable")));
+	QVERIFY(mainSource.contains(QStringLiteral(
+		"visible: root.mediaSessionWindowComponentFailed")));
+	QVERIFY(mainSource.contains(QStringLiteral("mediaProfiles.retryRuntime()")));
+	QVERIFY(windowSource.contains(QStringLiteral(
+		"readonly property bool providerSurfaceAllowed: providerSurfaceRequested")));
+	QVERIFY(windowSource.contains(QStringLiteral(
+		"&& !nativeDirectMedia && mediaRuntimeReady")));
+	QVERIFY(windowSource.contains(QStringLiteral("active: mediaWindow.providerSurfaceAllowed")));
+	QVERIFY(windowSource.contains(QStringLiteral("mediaWindow.mediaProfileFactory.videoProfile")));
+	QVERIFY(windowSource.contains(QStringLiteral("onClosing: function(close) { handleWindowClosing(close) }")));
+	QVERIFY(windowSource.contains(QStringLiteral("if (!mediaSession.active)")));
+	QVERIFY(windowSource.contains(QStringLiteral("close.accepted = true")));
+	QVERIFY(windowSource.contains(QStringLiteral("close.accepted = false")));
+	QVERIFY(windowSource.contains(QStringLiteral("controls.requestClose()")));
+	QVERIFY(mainSource.contains(QStringLiteral("function startWatchTogether(url, provider, title)")));
+	QVERIFY(mainSource.contains(QStringLiteral("onManagedImageOpenRequested")));
+	QVERIFY(mainSource.contains(QStringLiteral("onPreviewSizePresetRequested")));
+	QVERIFY(directMessageSource.contains(QStringLiteral("root.watchTogetherRequested(url, provider, title)")));
+	QVERIFY(directMessageSource.contains(QStringLiteral("root.managedImageOpenRequested(")));
+	QVERIFY(directMessageSource.contains(QStringLiteral("savedSizePreset: root.savedPreviewSizePreset")));
+	QVERIFY(profileFactorySource.contains(QStringLiteral(
+		"if (m_runtimeReady) emit profilesChanged();")));
+}
+
+void TestModernDialogControllers::automationWalkProbesUseDeterministicFixtures() {
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	const QString mainQmlPath = QFINDTESTDATA("../../mumble/qml-shell/Main.qml");
+	const QString fixturePath = QFINDTESTDATA("../../mumble/QmlVisualFixtureController.cpp");
+	const QString stonksHeaderPath = QFINDTESTDATA("../../mumble/qml-shell/StonksHeader.qml");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	QVERIFY2(!mainQmlPath.isEmpty(), "Main.qml test data was not found");
+	QVERIFY2(!fixturePath.isEmpty(), "QmlVisualFixtureController.cpp test data was not found");
+	QVERIFY2(!stonksHeaderPath.isEmpty(), "StonksHeader.qml test data was not found");
+
+	const QString automationSource = readTestSource(automationPath);
+	const QString mainQmlSource = readTestSource(mainQmlPath);
+	const QString fixtureSource = readTestSource(fixturePath);
+	const QString stonksHeaderSource = readTestSource(stonksHeaderPath);
+	QVERIFY(!automationSource.isEmpty());
+	QVERIFY(!mainQmlSource.isEmpty());
+	QVERIFY(!fixtureSource.isEmpty());
+	QVERIFY(!stonksHeaderSource.isEmpty());
+
+	const qsizetype watchStart = automationSource.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"watchTogetherLifecycleProbe\"))"));
+	const qsizetype watchEnd = automationSource.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"attachmentModelProbe\"))"), watchStart);
+	QVERIFY(watchStart >= 0);
+	QVERIFY(watchEnd > watchStart);
+	const QString watchBody = automationSource.mid(watchStart, watchEnd - watchStart);
+	QVERIFY(watchBody.contains(QStringLiteral("MediaSessionBackend media;")));
+	QVERIFY(watchBody.contains(
+		QStringLiteral("https://www.youtube-nocookie.com/embed/automation-lifecycle")));
+	QVERIFY(watchBody.contains(QStringLiteral("media.openInline(url, provider, sessionID)")));
+	QVERIFY(watchBody.contains(QStringLiteral("media.applyRemoteState(url, provider, sessionID")));
+	QVERIFY(watchBody.contains(QStringLiteral("\"inlinePresentation\"")));
+	QVERIFY(watchBody.contains(QStringLiteral("\"rendererActivated\"")));
+	QVERIFY(watchBody.contains(QStringLiteral("\"remoteApplied\"")));
+	QVERIFY(watchBody.contains(QStringLiteral("\"closedState\"")));
+	QVERIFY(!watchBody.contains(QStringLiteral("https://example.com/watch-together")));
+	QVERIFY(!watchBody.contains(QStringLiteral("host->mediaSession()")));
+
+	const qsizetype stonksStart = automationSource.indexOf(
+		QStringLiteral("QVariantMap automationStonksStateProbe(const QString &variant)"));
+	const qsizetype stonksEnd = automationSource.indexOf(
+		QStringLiteral("QVariantMap automationStonksDialogProbe(const QString &variant)"), stonksStart);
+	QVERIFY(stonksStart >= 0);
+	QVERIFY(stonksEnd > stonksStart);
+	const QString stonksBody = automationSource.mid(stonksStart, stonksEnd - stonksStart);
+	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerBannerEnabled\"), true")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerBannerAlwaysScroll\"), false")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"disableTickerAnimation\"), true")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"automationHeaderVisible\"), true")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"disableQuoteLookup\"), true")));
+	QVERIFY(stonksHeaderSource.contains(
+		QStringLiteral("stonks.disableTickerAnimation === true")));
+	QVERIFY(stonksHeaderSource.contains(
+		QStringLiteral("!automationAnimationDisabled && tickerRows.length > 0")));
+
+	const qsizetype menuStart = mainQmlSource.indexOf(QStringLiteral("function openAutomationMenuProbe(variant)"));
+	const qsizetype menuEnd = mainQmlSource.indexOf(
+		QStringLiteral("function directMessageAutomationSurfaceState(variant)"), menuStart);
+	QVERIFY(menuStart >= 0);
+	QVERIFY(menuEnd > menuStart);
+	const QString menuBody = mainQmlSource.mid(menuStart, menuEnd - menuStart);
+	QVERIFY(menuBody.contains(QStringLiteral("candidateIsSelf")));
+	QVERIFY(menuBody.contains(QStringLiteral("root.navigationRailModel.get(index)")));
+	QVERIFY(menuBody.contains(QStringLiteral("rail.requestParticipantMenu(participantId")));
+	QVERIFY(menuBody.contains(QStringLiteral("\"fixtureUsed\": false")));
+	QVERIFY(!menuBody.contains(QStringLiteral("automation:participant:4294967295")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("QStringLiteral(\"isSelf\"), true")));
+}
+
+void TestModernDialogControllers::persistentChatAttachmentIoIsStrictAndAsynchronous() {
+	QImage image(3, 2, QImage::Format_ARGB32_Premultiplied);
+	image.fill(QColor(QStringLiteral("#4b7bec")));
+	QByteArray pngBytes;
+	QBuffer pngBuffer(&pngBytes);
+	QVERIFY(pngBuffer.open(QIODevice::WriteOnly));
+	QVERIFY(image.save(&pngBuffer, "PNG"));
+	pngBuffer.close();
+	QVERIFY(!pngBytes.isEmpty());
+
+	const auto dataUrl = [](const QString &mime, const QByteArray &bytes) {
+		return QStringLiteral("data:%1;base64,%2").arg(mime, QString::fromLatin1(bytes.toBase64()));
+	};
+	const mumble::chatattachmentio::InlineDataImagePayload valid =
+		mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+			dataUrl(QStringLiteral("image/png"), pngBytes), 1024 * 1024);
+	QVERIFY(valid.isValid());
+	QCOMPARE(valid.bytes, pngBytes);
+	QCOMPARE(valid.mimeType, QStringLiteral("image/png"));
+	QCOMPARE(valid.fileExtension, QStringLiteral("png"));
+
+	const auto mismatch = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/jpeg"), pngBytes), 1024 * 1024);
+	QCOMPARE(mismatch.errorCode, QStringLiteral("mime-mismatch"));
+	const auto invalidMime = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/svg+xml"), pngBytes), 1024 * 1024);
+	QCOMPARE(invalidMime.errorCode, QStringLiteral("invalid-mime"));
+
+	QByteArray truncated = pngBytes;
+	truncated.chop(12);
+	const auto truncatedResult = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/png"), truncated), 1024 * 1024);
+	QCOMPARE(truncatedResult.errorCode, QStringLiteral("truncated-or-trailing-image"));
+	QByteArray trailing = pngBytes;
+	trailing.append("unexpected");
+	const auto trailingResult = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/png"), trailing), 1024 * 1024);
+	QCOMPARE(trailingResult.errorCode, QStringLiteral("truncated-or-trailing-image"));
+
+	QByteArray jpegBytes;
+	QBuffer jpegBuffer(&jpegBytes);
+	QVERIFY(jpegBuffer.open(QIODevice::WriteOnly));
+	QVERIFY(image.save(&jpegBuffer, "JPEG"));
+	jpegBuffer.close();
+	QVERIFY(mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/jpeg"), jpegBytes), 1024 * 1024).isValid());
+	QByteArray trailingJpeg = jpegBytes;
+	trailingJpeg.append("unexpected");
+	trailingJpeg.append(QByteArray("\xFF\xD9", 2));
+	QCOMPARE(mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/jpeg"), trailingJpeg), 1024 * 1024).errorCode,
+		QStringLiteral("truncated-or-trailing-image"));
+
+	const QByteArray gifBytes = QByteArray::fromBase64(
+		QByteArrayLiteral("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="));
+	QVERIFY(mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/gif"), gifBytes), 1024 * 1024).isValid());
+	QByteArray trailingGif = gifBytes;
+	trailingGif.append("unexpected");
+	trailingGif.append('\x3B');
+	QCOMPARE(mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/gif"), trailingGif), 1024 * 1024).errorCode,
+		QStringLiteral("truncated-or-trailing-image"));
+
+	const auto invalidEncoding = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/png"), pngBytes) + QLatin1Char('!'), 1024 * 1024);
+	QCOMPARE(invalidEncoding.errorCode, QStringLiteral("invalid-encoding"));
+	const auto tooLarge = mumble::chatattachmentio::decodeAndValidateInlineDataImage(
+		dataUrl(QStringLiteral("image/png"), pngBytes), pngBytes.size() - 1);
+	QCOMPARE(tooLarge.errorCode, QStringLiteral("too-large"));
+
+	QString cleanupPath;
+	{
+		const auto lease = mumble::chatattachmentio::TemporaryDirectoryLease::create(
+			QDir::temp().filePath(QStringLiteral("mumble-chat-attachments-test-XXXXXX")), 123);
+		QVERIFY(lease);
+		QCOMPARE(lease->retainedBytes(), 123ULL);
+		cleanupPath = lease->path();
+		QVERIFY(QFileInfo::exists(QDir(cleanupPath).filePath(QStringLiteral(".mumble-owner"))));
+		QLockFile competingOwner(QDir(cleanupPath).filePath(QStringLiteral(".mumble-owner.lock")));
+		competingOwner.setStaleLockTime(0);
+		QVERIFY(!competingOwner.tryLock(0));
+		QFile temporaryPayload(QDir(cleanupPath).filePath(QStringLiteral("payload.bin")));
+		QVERIFY(temporaryPayload.open(QIODevice::WriteOnly));
+		QCOMPARE(temporaryPayload.write("payload"), 7LL);
+	}
+	QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(cleanupPath), 5000);
+
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString messagesPath = QFINDTESTDATA("../../mumble/Messages.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!messagesPath.isEmpty(), "Messages.cpp test data was not found");
+	const QString mainWindowSource = readTestSource(mainWindowPath);
+	const QString messagesSource = readTestSource(messagesPath);
+	const qsizetype saveStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::savePersistentChatInlineDataImage"));
+	const qsizetype saveEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::openImageDialog"), saveStart);
+	QVERIFY(saveStart >= 0);
+	QVERIFY(saveEnd > saveStart);
+	const QString saveBody = mainWindowSource.mid(saveStart, saveEnd - saveStart);
+	QVERIFY(saveBody.contains(QStringLiteral("queuePersistentChatAssetIo(")));
+	QVERIFY(saveBody.indexOf(QStringLiteral("queuePersistentChatAssetIo("))
+		< saveBody.indexOf(QStringLiteral("QSaveFile output(destination)")));
+	QVERIFY(saveBody.contains(QStringLiteral("startOperation(operationID")));
+	QVERIFY(saveBody.contains(QStringLiteral("finishOperation(operationID")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("directory->setAutoRemove(false)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("PersistentChatAttachmentCleanupPool")));
+	QVERIFY(mainWindowSource.contains(
+		QStringLiteral("persistentChatAttachmentCleanupPool().start(")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("retryDelaysMs { 0, 100, 500, 2000, 5000 }")));
+	QVERIFY(mainWindowSource.contains(
+		QStringLiteral("scheduleStalePersistentChatAttachmentDirectoryCleanup()")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("static std::once_flag scheduled")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("std::call_once(scheduled")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral(".mumble-owner")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral(".mumble-owner.lock")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("ownerLock.setStaleLockTime(0)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("if (!ownerLock.tryLock(0)) continue")));
+	const qsizetype timeoutStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::armPersistentChatAssetDownloadTimeout"));
+	const qsizetype timeoutEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::ensurePersistentChatPreviewSiteSnapshot"), timeoutStart);
+	QVERIFY(timeoutStart >= 0);
+	QVERIFY(timeoutEnd > timeoutStart);
+	const QString timeoutBody = mainWindowSource.mid(timeoutStart, timeoutEnd - timeoutStart);
+	QVERIFY(timeoutBody.indexOf(QStringLiteral("finishPersistentChatAssetDownloadOperations("))
+		< timeoutBody.indexOf(QStringLiteral("m_persistentChatAssetDownloads.erase(timedOut)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("void MainWindow::cancelPersistentChatAttachmentWork")));
+	QVERIFY(mainWindowSource.contains(
+		QStringLiteral("cancelGroupsWithPrefix(this, QStringLiteral(\"attachment-io:\"))")));
+	QVERIFY(mainWindowSource.count(QStringLiteral("finishPersistentChatAssetDownloadOperations(")) >= 3);
+	QVERIFY(mainWindowSource.contains(QStringLiteral("m_persistentChatAssetConnectionGeneration")));
+
+	const qsizetype chunkStart = messagesSource.indexOf(
+		QStringLiteral("void MainWindow::msgChatAssetChunk"));
+	const qsizetype chunkEnd = messagesSource.indexOf(
+		QStringLiteral("void MainWindow::msgChatEmbedState"), chunkStart);
+	QVERIFY(chunkStart >= 0);
+	QVERIFY(chunkEnd > chunkStart);
+	const QString chunkBody = messagesSource.mid(chunkStart, chunkEnd - chunkStart);
+	const qsizetype moveIndex = chunkBody.indexOf(
+		QStringLiteral("PersistentChatAssetDownload download = std::move(*it)"));
+	const qsizetype queueIndex = chunkBody.indexOf(QStringLiteral("queuePersistentChatAssetIo("));
+	const qsizetype desktopIndex = chunkBody.indexOf(QStringLiteral("QDesktopServices::openUrl"));
+	QVERIFY(moveIndex >= 0);
+	QVERIFY(queueIndex > moveIndex);
+	QVERIFY(desktopIndex > queueIndex);
+	QVERIFY(chunkBody.contains(QStringLiteral("updateProgress(operationID")));
+	QVERIFY(chunkBody.contains(QStringLiteral("connectionGeneration != m_persistentChatAssetConnectionGeneration")));
+	QVERIFY(chunkBody.contains(QStringLiteral("m_persistentChatAttachmentIoOperationIDs.unite(ioOperationIDs)")));
+	QVERIFY(chunkBody.contains(
+		QStringLiteral("!previewKeys.isEmpty() && isPersistentChatPlayableMediaMime(mime)")));
+	QVERIFY(chunkBody.indexOf(QStringLiteral("publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys)"))
+		< chunkBody.indexOf(QStringLiteral("schedulePendingPersistentChatAttachmentImageDownloads()")));
+	QVERIFY(chunkBody.contains(QStringLiteral("maximumRetainedDirectories = 8")));
+	QVERIFY(chunkBody.contains(QStringLiteral("maximumRetainedBytes = 256ULL * 1024ULL * 1024ULL")));
+	QVERIFY(chunkBody.contains(QStringLiteral("m_persistentChatOpenAttachmentDirectories.erase(")));
+
+	const qsizetype hydrateStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::ensurePersistentChatAttachmentImageDownload"));
+	const qsizetype hydrateEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::openPersistentChatAttachment"), hydrateStart);
+	QVERIFY(hydrateStart >= 0);
+	QVERIFY(hydrateEnd > hydrateStart);
+	const QString hydrateBody = mainWindowSource.mid(hydrateStart, hydrateEnd - hydrateStart);
+	QVERIFY(mainWindowSource.contains(
+		QStringLiteral("PERSISTENT_CHAT_ATTACHMENT_HYDRATION_MAX_PENDING_TRANSFERS = 256")));
+	QVERIFY(mainWindowSource.contains(
+		QStringLiteral("PERSISTENT_CHAT_ATTACHMENT_HYDRATION_MAX_MESSAGE_KEYS_PER_TRANSFER = 64")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		"m_persistentChatPendingAttachmentHydrations.size()")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		">= PERSISTENT_CHAT_ATTACHMENT_HYDRATION_MAX_PENDING_TRANSFERS")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		"m_persistentChatPendingAttachmentHydrationOrder.takeFirst()")));
+	QVERIFY(hydrateBody.contains(QStringLiteral("downloadIt->savePaths.isEmpty()")));
+	QVERIFY(hydrateBody.contains(QStringLiteral("downloadIt->openFileName.isEmpty()")));
+	QVERIFY(hydrateBody.contains(QStringLiteral("pendingMessageKeyCount += assetIt->size()")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		">= PERSISTENT_CHAT_ATTACHMENT_HYDRATION_MAX_MESSAGE_KEYS_PER_TRANSFER")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		"chat.attachment_hydration.queue_transfer_dropped")));
+	QVERIFY(hydrateBody.contains(QStringLiteral(
+		"chat.attachment_hydration.queue_message_key_dropped")));
+
+	const qsizetype snapshotStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::publishPersistentChatSnapshot()"));
+	const qsizetype snapshotEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::syncPersistentChatGatewayHandler()"), snapshotStart);
+	QVERIFY(snapshotStart >= 0);
+	QVERIFY(snapshotEnd > snapshotStart);
+	const QString snapshotBody = mainWindowSource.mid(snapshotStart, snapshotEnd - snapshotStart);
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"m_persistentChatPendingAttachmentHydrations.clear()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"m_persistentChatPendingAttachmentHydrationOrder.clear()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"!downloadIt->savePaths.isEmpty() || !downloadIt->openFileName.isEmpty()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("downloadIt->attachmentAssetIDs.clear()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral("downloadIt->attachmentMessageKeys.clear()")));
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"downloadIt = m_persistentChatAssetDownloads.erase(downloadIt)")));
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"chat.attachment_hydration.scope_switch.pending_dropped")));
+	QVERIFY(snapshotBody.contains(QStringLiteral(
+		"chat.attachment_hydration.scope_switch.active_dropped")));
+
+	const qsizetype refillStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::schedulePendingPersistentChatAttachmentImageDownloads"));
+	const qsizetype refillEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::finishPersistentChatAssetDownloadOperations"), refillStart);
+	QVERIFY(refillStart >= 0);
+	QVERIFY(refillEnd > refillStart);
+	const QString refillBody = mainWindowSource.mid(refillStart, refillEnd - refillStart);
+	QVERIFY(refillBody.contains(QStringLiteral("m_persistentChatPendingAttachmentHydrationOrder.takeFirst()")));
+	QVERIFY(refillBody.contains(QStringLiteral("ensurePersistentChatAttachmentImageDownload(")));
+	QVERIFY(refillBody.contains(QStringLiteral("downloadIt->savePaths.isEmpty()")));
+	QVERIFY(refillBody.contains(QStringLiteral("downloadIt->openFileName.isEmpty()")));
+	QVERIFY(!refillBody.contains(QStringLiteral("publishPersistentChatAttachmentImageUpdate(")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("m_persistentChatMessageIndexValid")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("m_modernShellMessageDtoCacheKeysByMessage.take(")));
+}
+
+void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCancelable() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	const QString source = readTestSource(mainWindowPath);
+	QVERIFY(!source.isEmpty());
+
+	const qsizetype dtoStart = source.indexOf(
+		QStringLiteral("QVariantMap MainWindow::modernShellPreviewStateForKey"));
+	const qsizetype dtoEnd = source.indexOf(
+		QStringLiteral("QVariantMap MainWindow::buildModernShellCachedMessageState"), dtoStart);
+	QVERIFY(dtoStart >= 0);
+	QVERIFY(dtoEnd > dtoStart);
+	const QString dto = source.mid(dtoStart, dtoEnd - dtoStart);
+	QVERIFY(dto.contains(QStringLiteral("QVariantMap metadataState = preview.metadata")));
+	QVERIFY(dto.contains(QStringLiteral("metadataState.remove(metadataKey)")));
+	QVERIFY(dto.contains(QStringLiteral("metadataState.insert(metadataKey, managedIt->providerUrl)")));
+	for (const QString &field : {
+			 QStringLiteral("forumPostAuthorAvatarUrl"), QStringLiteral("xAvatarUrl"),
+			 QStringLiteral("instagramAvatarUrl"), QStringLiteral("githubOwnerAvatarUrl"),
+			 QStringLiteral("steamHeaderImage"), QStringLiteral("steamCapsuleImage") }) {
+		QVERIFY2(dto.contains(field), qPrintable(QStringLiteral("missing managed DTO field %1").arg(field)));
+	}
+
+	const qsizetype requestStart = source.indexOf(
+		QStringLiteral("void MainWindow::requestPersistentChatPreviewMetadataImageProvider"));
+	const qsizetype requestEnd = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatRemotePlayableMediaCache"), requestStart);
+	QVERIFY(requestStart >= 0);
+	QVERIFY(requestEnd > requestStart);
+	const QString request = source.mid(requestStart, requestEnd - requestStart);
+	QVERIFY(request.contains(QStringLiteral("sourceIdentity.size() > 16384")));
+	QVERIFY(request.contains(QStringLiteral("requestUrl.scheme().toLower() != QLatin1String(\"https\")")));
+	QVERIFY(request.contains(QStringLiteral("!isSafePreviewTarget(requestUrl)")));
+	QVERIFY(request.contains(QStringLiteral("ManualRedirectPolicy")));
+	QVERIFY(request.contains(QStringLiteral("redirectCount > 3")));
+	QVERIFY(request.contains(QStringLiteral("PREVIEW_MAX_IMAGE_BYTES")));
+	QVERIFY(request.contains(QStringLiteral("supportedMimes")));
+	QVERIFY(request.contains(QStringLiteral("startPersistentChatPreviewGet(request, previewKey)")));
+	QVERIFY(request.contains(QStringLiteral("metadata.value(metadataKey).toString().trimmed() != sourceIdentity")));
+	QVERIFY(request.contains(QStringLiteral("managedIt->source != sourceIdentity")));
+
+	QVERIFY(source.contains(QStringLiteral("validatedSteamPreviewMediaItems(mediaItems)")));
+	QVERIFY(source.contains(QStringLiteral("previewIt->mediaItems = validatedSteamPreviewMediaItems")));
+	QVERIFY(source.contains(QStringLiteral("application/vnd.apple.mpegurl")));
+	QVERIFY(source.contains(QStringLiteral("application/dash+xml")));
+	QVERIFY(source.contains(QStringLiteral("normalized.thumbnail")));
+	QVERIFY(source.contains(QStringLiteral("normalized.poster")));
+	QVERIFY(source.contains(QStringLiteral("persistentChatMediaItemImageKey")));
+	QVERIFY(!source.contains(QStringLiteral(
+		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
+	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
+}
+
+void TestModernDialogControllers::serverIdentityImagePickerIsManagedAndAsynchronous() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	const QString source = readTestSource(mainWindowPath);
+	QVERIFY(!source.isEmpty());
+
+	QVERIFY(source.contains(QStringLiteral("browseServerIdentityImage")));
+	QVERIFY(source.contains(QStringLiteral("removeServerIdentityImage")));
+	QVERIFY(source.contains(QStringLiteral("browseActionId")));
+	QVERIFY(source.contains(QStringLiteral("removeActionId")));
+	QVERIFY(source.contains(QStringLiteral("ModernServerIdentityImageLoadResult")));
+	QVERIFY(source.contains(QStringLiteral("QFutureWatcher< ModernServerIdentityImageLoadResult >")));
+	QVERIFY(source.contains(QStringLiteral("QtConcurrent::run([path]()")));
+	QVERIFY(source.contains(QStringLiteral("ModernServerIdentityImageMaxInputBytes + 1")));
+	QVERIFY(source.contains(QStringLiteral("image://mumble/")));
+	QVERIFY(source.contains(QStringLiteral("data:image/png;base64,%1")));
+	QVERIFY(source.contains(QStringLiteral("startOperation(")));
+	QVERIFY(source.contains(QStringLiteral("finishOperation(operationID")));
 }
 
 void TestModernDialogControllers::dialogControllerBuildsFailedConnectionReconnect() {
@@ -1199,6 +2635,95 @@ void TestModernDialogControllers::dialogControllerDispatchesGenericDialogAction(
 			 QStringLiteral("AFK cleanup"));
 	QCOMPARE(result.closeDialog, true);
 	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+}
+
+void TestModernDialogControllers::dialogControllerRestoresTransientDialogParents() {
+	Settings settings;
+	ModernDialogController controller;
+	controller.openSettings(settings, QStringLiteral("look"));
+	controller.updateField(QStringLiteral("settings"), QStringLiteral("look.modernTheme"),
+						   QStringLiteral("latte"));
+	const QVariantMap settingsDraft = controller.state();
+	QCOMPARE(settingsDraft.value(QStringLiteral("id")).toString(), QStringLiteral("settings"));
+	QCOMPARE(settingsDraft.value(QStringLiteral("activePage")).toString(), QStringLiteral("look"));
+
+	QVariantMap updateAction;
+	updateAction.insert(QStringLiteral("id"), QStringLiteral("plugins.startUpdates"));
+	updateAction.insert(QStringLiteral("label"), QStringLiteral("Update selected"));
+	updateAction.insert(QStringLiteral("closesDialog"), true);
+	QVariantMap updateDialog;
+	updateDialog.insert(QStringLiteral("id"), QStringLiteral("pluginUpdates"));
+	updateDialog.insert(QStringLiteral("kind"), QStringLiteral("form"));
+	updateDialog.insert(QStringLiteral("actions"), QVariantList { updateAction });
+
+	QCOMPARE(controller.openGenericDialog(updateDialog).value(QStringLiteral("id")).toString(),
+			 QStringLiteral("pluginUpdates"));
+	const ModernDialogController::ActionResult updateResult = controller.invokeAction(
+		QStringLiteral("pluginUpdates"), QStringLiteral("plugins.startUpdates"), {});
+	QVERIFY(updateResult.closeDialog);
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("settings"));
+	QCOMPARE(controller.state(), settingsDraft);
+
+	QVariantMap parentField;
+	parentField.insert(QStringLiteral("id"), QStringLiteral("note"));
+	parentField.insert(QStringLiteral("value"), QStringLiteral("before"));
+	QVariantMap parentSection;
+	parentSection.insert(QStringLiteral("fields"), QVariantList { parentField });
+	QVariantMap parentDialog;
+	parentDialog.insert(QStringLiteral("id"), QStringLiteral("pluginAbout"));
+	parentDialog.insert(QStringLiteral("kind"), QStringLiteral("about"));
+	parentDialog.insert(QStringLiteral("sections"), QVariantList { parentSection });
+	controller.openGenericDialog(parentDialog);
+	controller.updateField(QStringLiteral("pluginAbout"), QStringLiteral("note"), QStringLiteral("edited"));
+	const QVariantMap genericParent = controller.state();
+
+	QVariantMap overwriteDialog;
+	overwriteDialog.insert(QStringLiteral("id"), QStringLiteral("pluginInstallConfirm"));
+	overwriteDialog.insert(QStringLiteral("kind"), QStringLiteral("confirm"));
+	controller.openGenericDialog(overwriteDialog);
+	QCOMPARE(controller.close(QStringLiteral("pluginInstallConfirm")), genericParent);
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("pluginAbout"));
+
+	controller.close(QStringLiteral("pluginAbout"));
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("settings"));
+	QCOMPARE(controller.state(), settingsDraft);
+
+	// Opening a root surface intentionally discards transient ancestry. A later
+	// close must not resurrect an unrelated stale Settings draft.
+	controller.openGenericDialog(updateDialog);
+	controller.openConnect({}, settings);
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("connect"));
+	controller.close(QStringLiteral("connect"));
+	QVERIFY(controller.activeDialogID().isEmpty());
+	QVERIFY(!controller.state().value(QStringLiteral("open")).toBool());
+
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	const QString mainWindowSource = readTestSource(mainWindowPath);
+	const qsizetype helperStart =
+		mainWindowSource.indexOf(QStringLiteral("void MainWindow::openModernGenericDialog"));
+	const qsizetype helperEnd = mainWindowSource.indexOf(QStringLiteral("\n}"), helperStart);
+	QVERIFY(helperStart >= 0 && helperEnd > helperStart);
+	const QString helperSource = mainWindowSource.mid(helperStart, helperEnd - helperStart);
+	QVERIFY2(!helperSource.contains(QStringLiteral("cancelPendingPluginInstallConfirmation")),
+			 "Transient child presentation must not cancel the parent plugin overwrite operation");
+}
+
+void TestModernDialogControllers::dialogControllerRefreshesSameDialogWithoutStacking() {
+	ModernDialogController controller;
+	QVariantMap first;
+	first.insert(QStringLiteral("id"), QStringLiteral("pluginUpdates"));
+	first.insert(QStringLiteral("kind"), QStringLiteral("form"));
+	first.insert(QStringLiteral("title"), QStringLiteral("First"));
+	controller.openGenericDialog(first);
+
+	QVariantMap refreshed = first;
+	refreshed.insert(QStringLiteral("title"), QStringLiteral("Refreshed"));
+	QCOMPARE(controller.openGenericDialog(refreshed).value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Refreshed"));
+	controller.close(QStringLiteral("pluginUpdates"));
+	QVERIFY(controller.activeDialogID().isEmpty());
+	QVERIFY(!controller.state().value(QStringLiteral("open")).toBool());
 }
 
 void TestModernDialogControllers::dialogControllerBuildsDisconnectConfirmation() {

@@ -1,0 +1,2482 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 24,
+            "y": 29
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "EXPERIENCE",
+              "rect": {
+                "height": 12,
+                "width": 63,
+                "x": 286,
+                "y": 98
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 22,
+                "width": 1132,
+                "x": 286,
+                "y": 111
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Appearance",
+          "rect": {
+            "height": 62,
+            "width": 1226,
+            "x": 214,
+            "y": 84
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 182,
+            "x": 16,
+            "y": 100
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 139
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 124
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 189
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 174
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 239
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 224
+              },
+              "role": "ListItem",
+              "states": [
+                "focused",
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 289
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 274
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 339
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 324
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 389
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 374
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 439
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 424
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 489
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 474
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 539
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 524
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 135,
+                    "x": 53,
+                    "y": 589
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 46,
+                "width": 186,
+                "x": 14,
+                "y": 574
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 790,
+            "width": 186,
+            "x": 14,
+            "y": 124
+          },
+          "role": "List",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Native interface",
+              "rect": {
+                "height": 17,
+                "width": 1146,
+                "x": 254,
+                "y": 164
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Mumble uses the native Qt Quick interface for all product surfaces.",
+                  "rect": {
+                    "height": 16,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 195
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 16,
+                "width": 1146,
+                "x": 254,
+                "y": 195
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Native interface",
+          "rect": {
+            "height": 83,
+            "width": 1182,
+            "x": 236,
+            "y": 146
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Tweaks",
+          "rect": {
+            "height": 17,
+            "width": 1146,
+            "x": 254,
+            "y": 267
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Theme",
+                      "rect": {
+                        "height": 16,
+                        "width": 37,
+                        "x": 254,
+                        "y": 298
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "9 theme(s)",
+                      "rect": {
+                        "height": 16,
+                        "width": 55,
+                        "x": 1345,
+                        "y": 298
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 16,
+                        "width": 1146,
+                        "x": 296,
+                        "y": 306
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 16,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 298
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 22,
+                                "width": 22,
+                                "x": 270,
+                                "y": 337
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 118,
+                                "width": 22,
+                                "x": 270,
+                                "y": 337
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 22,
+                                "width": 22,
+                                "x": 270,
+                                "y": 369
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 22,
+                                "width": 22,
+                                "x": 270,
+                                "y": 401
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 22,
+                                "width": 22,
+                                "x": 270,
+                                "y": 433
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 118,
+                            "width": 22,
+                            "x": 270,
+                            "y": 337
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 132,
+                        "width": 54,
+                        "x": 254,
+                        "y": 330
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 28,
+                        "width": 1092,
+                        "x": 308,
+                        "y": 330
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Dark",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 990,
+                                    "x": 332,
+                                    "y": 390
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 6,
+                                    "width": 990,
+                                    "x": 332,
+                                    "y": 413
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 5,
+                                    "width": 673,
+                                    "x": 332,
+                                    "y": 426
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 41,
+                                "width": 990,
+                                "x": 332,
+                                "y": 390
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 10,
+                                    "width": 10,
+                                    "x": 1334,
+                                    "y": 405
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 10,
+                                    "width": 42,
+                                    "x": 1334,
+                                    "y": 405
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 10,
+                                    "width": 10,
+                                    "x": 1350,
+                                    "y": 405
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 10,
+                                    "width": 10,
+                                    "x": 1366,
+                                    "y": 405
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 10,
+                                "width": 42,
+                                "x": 1334,
+                                "y": 405
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 56,
+                            "width": 1044,
+                            "x": 332,
+                            "y": 382
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 80,
+                        "width": 1068,
+                        "x": 320,
+                        "y": 370
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Current appearance preview: Dark",
+                  "rect": {
+                    "height": 132,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 330
+                  },
+                  "role": "Pane",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 268,
+                                    "y": 513
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 262,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 300,
+                                        "y": 494
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 300,
+                                        "y": 505
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 300,
+                                        "y": 524
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 300,
+                                    "y": 494
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 292,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Dark",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 263,
+                                    "y": 559
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 263,
+                                "y": 559
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Dark",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 254,
+                        "y": 478
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 356,
+                        "width": 1146,
+                        "x": 254,
+                        "y": 478
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 543,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 557,
+                                    "y": 513
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 551,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 589,
+                                        "y": 494
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 589,
+                                        "y": 505
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 589,
+                                        "y": 524
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 589,
+                                    "y": 494
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 581,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Light",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 552,
+                                    "y": 559
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 552,
+                                "y": 559
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 543,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Light",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 543,
+                        "y": 478
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 832,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 846,
+                                    "y": 513
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 840,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 878,
+                                        "y": 494
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 878,
+                                        "y": 505
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 878,
+                                        "y": 524
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 878,
+                                    "y": 494
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 870,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Mocha",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 841,
+                                    "y": 559
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 841,
+                                "y": 559
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 832,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Mocha",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 832,
+                        "y": 478
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 1121,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 1135,
+                                    "y": 513
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 1129,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 1167,
+                                        "y": 494
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 1167,
+                                        "y": 505
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 1167,
+                                        "y": 524
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 1167,
+                                    "y": 494
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 1159,
+                                "y": 486
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Macchiato",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 1130,
+                                    "y": 559
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 1130,
+                                "y": 559
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 1121,
+                            "y": 478
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Macchiato",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 1121,
+                        "y": 478
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 268,
+                                    "y": 635
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 262,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 300,
+                                        "y": 616
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 300,
+                                        "y": 627
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 300,
+                                        "y": 646
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 300,
+                                    "y": 616
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 292,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Frappe",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 263,
+                                    "y": 681
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 263,
+                                "y": 681
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Frappe",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 254,
+                        "y": 600
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 543,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 557,
+                                    "y": 635
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 551,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 589,
+                                        "y": 616
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 589,
+                                        "y": 627
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 589,
+                                        "y": 646
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 589,
+                                    "y": 616
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 581,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Latte",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 552,
+                                    "y": 681
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 552,
+                                "y": 681
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 543,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Latte",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 543,
+                        "y": 600
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 832,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 846,
+                                    "y": 635
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 840,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 878,
+                                        "y": 616
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 878,
+                                        "y": 627
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 878,
+                                        "y": 646
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 878,
+                                    "y": 616
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 870,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Nord",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 841,
+                                    "y": 681
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 841,
+                                "y": 681
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 832,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Nord",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 832,
+                        "y": 600
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 1121,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 1135,
+                                    "y": 635
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 1129,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 1167,
+                                        "y": 616
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 1167,
+                                        "y": 627
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 1167,
+                                        "y": 646
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 1167,
+                                    "y": 616
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 1159,
+                                "y": 608
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Gruvbox",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 261,
+                                    "x": 1130,
+                                    "y": 681
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 1130,
+                                "y": 681
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 1121,
+                            "y": 600
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Built-in theme",
+                      "name": "Gruvbox",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 1121,
+                        "y": 600
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 722
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 12,
+                                    "x": 268,
+                                    "y": 757
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 24,
+                                "x": 262,
+                                "y": 730
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 156,
+                                        "x": 300,
+                                        "y": 738
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 13,
+                                        "width": 217,
+                                        "x": 300,
+                                        "y": 749
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 5,
+                                        "width": 126,
+                                        "x": 300,
+                                        "y": 768
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 50,
+                                    "width": 217,
+                                    "x": 300,
+                                    "y": 738
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 66,
+                                "width": 233,
+                                "x": 292,
+                                "y": 730
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Catppuccin Nord",
+                                  "rect": {
+                                    "height": 16,
+                                    "width": 225,
+                                    "x": 263,
+                                    "y": 803
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Custom",
+                                  "rect": {
+                                    "height": 12,
+                                    "width": 31,
+                                    "x": 493,
+                                    "y": 805
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 261,
+                                "x": 263,
+                                "y": 803
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 112,
+                            "width": 279,
+                            "x": 254,
+                            "y": 722
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Custom theme",
+                      "name": "Catppuccin Nord",
+                      "rect": {
+                        "height": 112,
+                        "width": 279,
+                        "x": 254,
+                        "y": 722
+                      },
+                      "role": "RadioButton",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 356,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 478
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Select a theme to preview it instantly. Apply saves without closing; Done saves and closes.",
+                  "rect": {
+                    "height": 16,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 850
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 568,
+                "width": 1146,
+                "x": 254,
+                "y": 298
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 568,
+            "width": 1146,
+            "x": 254,
+            "y": 298
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 40,
+                            "width": 103,
+                            "x": 1297,
+                            "y": 880
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 28,
+                            "width": 71,
+                            "x": 1313,
+                            "y": 886
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Open folder",
+                      "rect": {
+                        "height": 40,
+                        "width": 103,
+                        "x": 1297,
+                        "y": 880
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Custom theme folder",
+                      "rect": {
+                        "height": 19,
+                        "width": 1027,
+                        "x": 254,
+                        "y": 891
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 40,
+                    "width": 1146,
+                    "x": 254,
+                    "y": 880
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 40,
+                "width": 1146,
+                "x": 254,
+                "y": 880
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 40,
+            "width": 1146,
+            "x": 254,
+            "y": 880
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 36,
+            "width": 58,
+            "x": 1245,
+            "y": 946
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 36,
+            "width": 53,
+            "x": 1311,
+            "y": 946
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 36,
+            "width": 52,
+            "x": 1372,
+            "y": 946
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 1000,
+        "width": 1440,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 1000,
+    "width": 1440,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

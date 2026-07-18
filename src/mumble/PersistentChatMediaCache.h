@@ -19,6 +19,10 @@ struct MediaItem {
 	QString url;
 	QString mime;
 	QString kind;
+	QString title;
+	QString streamKind;
+	QString thumbnail;
+	QString poster;
 };
 
 struct PreviewEntry {

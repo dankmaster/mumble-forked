@@ -15,6 +15,7 @@
 #include <QHashIterator>
 #include <QKeyEvent>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QElapsedTimer>
 #include <QReadLocker>
 #include <QScopeGuard>
@@ -493,8 +494,21 @@ void PluginManager::refreshPluginDescriptor(const plugin_ptr_t &plugin, const bo
 		descriptor.name = QFileInfo(descriptor.path).completeBaseName();
 		if (descriptor.name.isEmpty()) descriptor.name = PluginManager::tr("Unknown plugin");
 	}
+	const auto metadataIsUnknown = [](const QString &value) {
+		const QString normalized = value.trimmed();
+		return normalized.isEmpty()
+			|| normalized.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0
+			|| normalized.compare(PluginManager::tr("Unknown"), Qt::CaseInsensitive) == 0;
+	};
+	if (descriptor.builtIn) {
+		// Legacy built-ins do not expose author/version callbacks. Present their
+		// packaging status instead of publishing two misleading Unknown values to
+		// every frontend consuming the descriptor snapshot.
+		if (metadataIsUnknown(descriptor.version)) descriptor.version = PluginManager::tr("Built in");
+		if (metadataIsUnknown(descriptor.author)) descriptor.author.clear();
+	}
 	if (descriptor.version.isEmpty()) descriptor.version = PluginManager::tr("Unknown");
-	if (descriptor.author.isEmpty()) descriptor.author = PluginManager::tr("Unknown");
+	if (descriptor.author.isEmpty() && !descriptor.builtIn) descriptor.author = PluginManager::tr("Unknown");
 
 	{
 		QWriteLocker lock(&m_pluginDescriptorLock);
@@ -2501,9 +2515,13 @@ void PluginManager::on_keyEvent(unsigned int key, Qt::KeyboardModifiers modifier
 	}, PluginAbiWorker::RuntimeQueueClass::Key);
 }
 
-void PluginManager::on_syncPositionalData() {
+void PluginManager::publishPositionalDataSnapshot(const bool valid, const QString &context,
+											  const QString &identity) {
+	Q_ASSERT(QThread::currentThread() == thread());
 	if (m_shuttingDown.load()) return;
-	const auto clearPublishedPosition = [this]() {
+	const bool mayPublish = Global::get().s.bTransmitPosition
+		&& (Global::get().bPosTest || m_activePositionalPermissionAllowed.load());
+	if (!valid || !mayPublish) {
 		QMutexLocker lock(&m_sentDataMutex);
 		if (m_sentData.identity.isEmpty() && m_sentData.context.isEmpty()) return;
 		MumbleProto::UserState state;
@@ -2514,52 +2532,74 @@ void PluginManager::on_syncPositionalData() {
 		if (serverHandler) serverHandler->sendMessage(state);
 		m_sentData.identity.clear();
 		m_sentData.context.clear();
-	};
-	if (!Global::get().s.bTransmitPosition
-		|| (!Global::get().bPosTest && !m_activePositionalPermissionAllowed.load())) {
-		clearPublishedPosition();
 		return;
 	}
-	// fetch positional data
-	if (fetchPositionalData()) {
-		// Sync the gathered data (context + identity) with the server
-		if (!Global::get().uiSession) {
-			// For some reason the local session ID is not set -> clear all data sent to the server in order to
-			// guarantee a re-send once the session is restored and there is data available
-			QMutexLocker mLock(&m_sentDataMutex);
 
-			m_sentData.context.clear();
-			m_sentData.identity.clear();
-		} else {
-			// Check if the identity and/or the context has changed and if it did, send that new info to the server
-			QMutexLocker mLock(&m_sentDataMutex);
-			QReadLocker rLock(&m_positionalData.m_lock);
-
-			if (m_sentData.context != m_positionalData.m_context
-				|| m_sentData.identity != m_positionalData.m_identity) {
-				MumbleProto::UserState mpus;
-				mpus.set_session(Global::get().uiSession);
-
-				if (m_sentData.context != m_positionalData.m_context) {
-					m_sentData.context = m_positionalData.m_context;
-					mpus.set_plugin_context(m_sentData.context.toUtf8().constData(),
-											static_cast< std::size_t >(m_sentData.context.size()));
-				}
-				if (m_sentData.identity != m_positionalData.m_identity) {
-					m_sentData.identity = m_positionalData.m_identity;
-					mpus.set_plugin_identity(m_sentData.identity.toUtf8().constData());
-				}
-
-				const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
-				if (serverHandler) {
-					// send the message if the serverHandler is available
-					serverHandler->sendMessage(mpus);
-				}
-			}
-		}
-	} else {
-		clearPublishedPosition();
+	if (!Global::get().uiSession) {
+		// For some reason the local session ID is not set -> clear all data sent to the server in order to
+		// guarantee a re-send once the session is restored and there is data available.
+		QMutexLocker lock(&m_sentDataMutex);
+		m_sentData.context.clear();
+		m_sentData.identity.clear();
+		return;
 	}
+
+	QMutexLocker lock(&m_sentDataMutex);
+	if (m_sentData.context == context && m_sentData.identity == identity) return;
+
+	MumbleProto::UserState state;
+	state.set_session(Global::get().uiSession);
+	if (m_sentData.context != context) {
+		m_sentData.context = context;
+		state.set_plugin_context(m_sentData.context.toUtf8().constData(),
+								 static_cast< std::size_t >(m_sentData.context.size()));
+	}
+	if (m_sentData.identity != identity) {
+		m_sentData.identity = identity;
+		state.set_plugin_identity(m_sentData.identity.toUtf8().constData());
+	}
+
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (serverHandler) serverHandler->sendMessage(state);
+}
+
+void PluginManager::on_syncPositionalData() {
+	Q_ASSERT(QThread::currentThread() == thread());
+	if (m_shuttingDown.load()) return;
+	if (!Global::get().s.bTransmitPosition
+		|| (!Global::get().bPosTest && !m_activePositionalPermissionAllowed.load())) {
+		publishPositionalDataSnapshot(false, {}, {});
+		return;
+	}
+	if (m_positionalServerSyncPending.exchange(true)) return;
+
+	const QPointer< PluginManager > manager(this);
+	const bool queued = sharedPluginAbiWorker().enqueue([this, manager]() mutable {
+		bool posted = false;
+		const auto pendingGuard = qScopeGuard([this, &posted]() {
+			if (!posted) m_positionalServerSyncPending.store(false);
+		});
+		if (m_shuttingDown.load()) return;
+
+		const bool valid = fetchPositionalData();
+		QString context;
+		QString identity;
+		if (valid) {
+			QReadLocker lock(&m_positionalData.m_lock);
+			context  = m_positionalData.m_context;
+			identity = m_positionalData.m_identity;
+		}
+		if (m_shuttingDown.load()) return;
+
+		posted = QMetaObject::invokeMethod(this,
+			[manager, valid, context = std::move(context), identity = std::move(identity)]() {
+				if (!manager) return;
+				manager->m_positionalServerSyncPending.store(false);
+				if (manager->m_shuttingDown.load()) return;
+				manager->publishPositionalDataSnapshot(valid, context, identity);
+			}, Qt::QueuedConnection);
+	});
+	if (!queued) m_positionalServerSyncPending.store(false);
 }
 
 void PluginManager::on_updatesAvailable() {

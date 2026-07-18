@@ -1,0 +1,1173 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 16,
+            "y": 21
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "EXPERIENCE",
+              "rect": {
+                "height": 12,
+                "width": 63,
+                "x": 270,
+                "y": 82
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 22,
+                "width": 476,
+                "x": 270,
+                "y": 95
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "User Interface",
+          "rect": {
+            "height": 62,
+            "width": 546,
+            "x": 214,
+            "y": 68
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 198,
+            "x": 8,
+            "y": 76
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 109
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 96
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 147
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 134
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 185
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 172
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 223
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 210
+              },
+              "role": "ListItem",
+              "states": [
+                "focused",
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 261
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 248
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 299
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 286
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 337
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 324
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 375
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 362
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 413
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 400
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 451
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 438
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 740,
+            "width": 198,
+            "x": 8,
+            "y": 96
+          },
+          "role": "List",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Window behavior",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 140
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Close button",
+                      "rect": {
+                        "height": 15,
+                        "width": 62,
+                        "x": 238,
+                        "y": 163
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 498,
+                            "x": 238,
+                            "y": 183
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 471,
+                            "x": 246,
+                            "y": 183
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 21,
+                            "width": 11,
+                            "x": 717,
+                            "y": 189
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Close button",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 183
+                      },
+                      "role": "ComboBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 498,
+                    "x": 238,
+                    "y": 163
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 498,
+                "x": 238,
+                "y": 163
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Always on top",
+                      "rect": {
+                        "height": 15,
+                        "width": 68,
+                        "x": 238,
+                        "y": 221
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 498,
+                            "x": 238,
+                            "y": 241
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 471,
+                            "x": 246,
+                            "y": 241
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 21,
+                            "width": 11,
+                            "x": 717,
+                            "y": 247
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Always on top",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 241
+                      },
+                      "role": "ComboBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 498,
+                    "x": 238,
+                    "y": 221
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 498,
+                "x": 238,
+                "y": 221
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 285
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 286
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Hide in tray when minimised",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 279
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 279
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 279
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 323
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 247,
+                                "y": 325
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 324
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Show talking state in tray",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 317
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 317
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 317
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Window behavior",
+          "rect": {
+            "height": 229,
+            "width": 518,
+            "x": 228,
+            "y": 130
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Room browser and presence",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 381
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 410
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 247,
+                                "y": 412
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 411
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Show local volume badges",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 404
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 404
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 404
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 448
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 449
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Show nicknames only",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 442
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 442
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 442
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 486
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 247,
+                                "y": 488
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 487
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Filter hides empty rooms",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 480
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 480
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 480
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Idle presence timeout",
+                      "rect": {
+                        "height": 15,
+                        "width": 106,
+                        "x": 238,
+                        "y": 518
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 498,
+                            "x": 238,
+                            "y": 538
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 471,
+                            "x": 246,
+                            "y": 538
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 21,
+                            "width": 11,
+                            "x": 717,
+                            "y": 544
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Idle presence timeout",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 538
+                      },
+                      "role": "ComboBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 498,
+                    "x": 238,
+                    "y": 518
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 498,
+                "x": 238,
+                "y": 518
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Room browser and presence",
+          "rect": {
+            "height": 209,
+            "width": 518,
+            "x": 228,
+            "y": 371
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 28,
+            "width": 47,
+            "x": 609,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 28,
+            "width": 43,
+            "x": 662,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 28,
+            "width": 41,
+            "x": 711,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 900,
+        "width": 760,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 900,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

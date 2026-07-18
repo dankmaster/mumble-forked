@@ -47,8 +47,11 @@ TestCase {
 			systemMessage: false
 			objectName: "chat-frame:" + stableId
 			Text {
+				objectName: "chatTestSemanticText"
 				anchors.fill: parent
 				text: stableId
+				Accessible.role: Accessible.StaticText
+				Accessible.name: text
 			}
 		}
 	}
@@ -59,6 +62,62 @@ TestCase {
 		timeline.model = directRows
 		timeline.forceLayout()
 		wait(20)
+		for (let index = 0; index < timeline.count; ++index) {
+			const item = timeline.itemAtIndex(index)
+			if (item)
+				item.accessibilitySuppressed = false
+		}
+	}
+
+	function test_modal_suppression_prunes_promoted_message_content_and_restores_it() {
+		const item = timeline.itemAtIndex(0)
+		verify(item !== null)
+		const semanticText = findChild(item, "chatTestSemanticText")
+		const contentHost = findChild(item, "chatMessageContentHost")
+		const barrier = findChild(item, "chatMessageAccessibilityBarrier")
+		verify(semanticText !== null && contentHost !== null && barrier !== null)
+		verify(!semanticText.Accessible.ignored)
+		verify(contentHost.Accessible.ignored)
+
+		item.accessibilitySuppressed = true
+		tryCompare(barrier, "active", true)
+		verify(barrier.bindingFor(item) !== null)
+		verify(item.Accessible.ignored)
+		tryCompare(contentHost.Accessible, "ignored", true)
+		tryCompare(semanticText.Accessible, "ignored", true)
+
+		item.accessibilitySuppressed = false
+		tryCompare(barrier, "active", false)
+		tryCompare(contentHost.Accessible, "ignored", true)
+		tryCompare(semanticText.Accessible, "ignored", false)
+	}
+
+	function test_promoted_message_owners_bind_modal_suppression_directly() {
+		directRows.setProperty(0, "separatorLabel", "Today")
+		timeline.forceLayout()
+		const item = timeline.itemAtIndex(0)
+		verify(item !== null)
+		const contentHost = findChild(item, "chatMessageContentHost")
+		const separatorText = findChild(item, "chatDateSeparatorText")
+		const barrier = findChild(item, "chatMessageAccessibilityBarrier")
+		verify(contentHost !== null && separatorText !== null && barrier !== null)
+		verify(contentHost.Accessible.ignored)
+		const originalTargets = barrier.targets
+		try {
+			// Disable traversal to prove the layout-only Client host is never
+			// materialized, while the date semantic owner follows the modal.
+			barrier.targets = []
+			item.accessibilitySuppressed = true
+			tryCompare(contentHost.Accessible, "ignored", true)
+			tryCompare(separatorText.Accessible, "ignored", true)
+
+			item.accessibilitySuppressed = false
+			tryCompare(contentHost.Accessible, "ignored", true)
+			tryCompare(separatorText.Accessible, "ignored", false)
+		} finally {
+			item.accessibilitySuppressed = false
+			barrier.targets = originalTargets
+		}
 	}
 
 	function test_scope_replacement_does_not_paint_pooled_rows() {
@@ -95,7 +154,9 @@ TestCase {
 		const item = timeline.itemAtIndex(0)
 		verify(item !== null)
 		const surface = findChild(item, "chatMessageSurface")
+		const barrier = findChild(item, "chatMessageAccessibilityBarrier")
 		verify(surface !== null)
+		verify(barrier !== null)
 		verify(item.accessibilityFrameIgnored)
 		verify(item.accessibilitySubtreeActive)
 
@@ -106,6 +167,19 @@ TestCase {
 		item.accessibilityPooled = false
 		verify(item.accessibilityFrameIgnored)
 		verify(item.accessibilitySubtreeActive)
+
+		const laidOutHeight = item.height
+		const surfaceHeight = surface.height
+		item.accessibilityViewportVisible = false
+		verify(item.accessibilityFrameIgnored)
+		verify(!item.accessibilitySubtreeActive)
+		tryCompare(barrier, "active", true)
+		compare(surface.height, surfaceHeight)
+		compare(item.height, laidOutHeight)
+		item.accessibilityViewportVisible = true
+		verify(item.accessibilitySubtreeActive)
+		tryCompare(barrier, "active", false)
+		compare(item.height, laidOutHeight)
 	}
 
 	function test_compact_rows_reserve_padding_and_minimum_height() {
@@ -169,6 +243,10 @@ TestCase {
 		compare(outgoing.bubbleBorderColor, Theme.chatOwnBorder)
 		compare(outgoing.surfaceColor, Theme.chatOwnSurface)
 		compare(outgoing.surfaceBorderWidth, 1)
+		compare(incoming.horizontalPadding, 0)
+		compare(incoming.verticalPadding, 0)
+		compare(outgoing.horizontalPadding, Theme.chatBubbleHorizontalPadding)
+		compare(outgoing.verticalPadding, Theme.chatBubbleVerticalPadding)
 
 		incoming.preferredIncomingWidth = 300
 		compare(incoming.messageWidth, 300)
@@ -202,14 +280,14 @@ TestCase {
 		const outgoing = timeline.itemAtIndex(1)
 		verify(incoming !== null)
 		verify(outgoing !== null)
-		compare(incoming.laneWidth, 840)
+		compare(incoming.laneWidth, Theme.chatLaneMaximumWidth)
 		compare(incoming.messageWidth, 520)
 		compare(incoming.surfaceX, 120)
 		compare(outgoing.messageWidth, 260)
 		compare(outgoing.surfaceX, 700)
 
 		incoming.wideContent = true
-		compare(incoming.messageWidth, 840)
+		compare(incoming.messageWidth, Theme.chatRichMaximumWidth)
 		compare(incoming.surfaceX, 120)
 		incoming.preferredWideContentWidth = 596
 		compare(incoming.messageWidth, 596)
@@ -217,12 +295,26 @@ TestCase {
 		incoming.wideContent = false
 
 		outgoing.wideContent = true
-		compare(outgoing.messageWidth, 840)
-		compare(outgoing.surfaceX, 120)
+		compare(outgoing.messageWidth, Theme.chatRichMaximumWidth)
+		compare(outgoing.surfaceX, 200)
 		outgoing.preferredWideContentWidth = 596
 		compare(outgoing.messageWidth, 596)
 		compare(outgoing.surfaceX, 364)
 		verify(outgoing.surfaceX + outgoing.surfaceWidth <= 960)
 		outgoing.wideContent = false
+	}
+
+	function test_hover_area_matches_the_message_surface_not_the_complete_row() {
+		const outgoing = timeline.itemAtIndex(1)
+		verify(outgoing !== null)
+		verify(outgoing.surfaceX > 0)
+		const hoverArea = findChild(outgoing, "chatMessageHoverArea")
+		verify(hoverArea !== null)
+		compare(hoverArea.parent.width, outgoing.surfaceWidth)
+		compare(hoverArea.parent.height, outgoing.contentItem.height
+			+ outgoing.verticalPadding * 2)
+		verify(hoverArea.parent.width < outgoing.width)
+		const outsidePoint = outgoing.mapToItem(hoverArea.parent, 1, outgoing.height / 2)
+		verify(outsidePoint.x < 0)
 	}
 }

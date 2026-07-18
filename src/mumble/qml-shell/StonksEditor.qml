@@ -15,6 +15,9 @@ ColumnLayout {
 	property var pendingPayload: ({})
 	property string pendingTitle: ""
 	property string pendingMessage: ""
+	readonly property bool confirmationVisible: pendingAction.length > 0
+	property Item focusBeforeConfirmation: null
+	property var modalHost: null
 	property bool adminEnabled: true
 	property bool adminAnnouncements: true
 	property int adminTextChannelId: 0
@@ -248,6 +251,8 @@ ColumnLayout {
 	}
 
 	function requestDestructiveAction(action, payload, title, message) {
+		const window = root.Window.window
+		focusBeforeConfirmation = window ? window.activeFocusItem : null
 		pendingAction = action
 		pendingPayload = payload || ({})
 		pendingTitle = title || qsTr("Confirm action")
@@ -268,6 +273,13 @@ ColumnLayout {
 		const payload = pendingPayload
 		cancelDestructiveAction()
 		dialogState.invokeAction(action, payload)
+	}
+
+	function syncConfirmationPopup() {
+		if (confirmationVisible && !confirmationPopup.visible)
+			confirmationPopup.open()
+		else if (!confirmationVisible && confirmationPopup.visible)
+			confirmationPopup.close()
 	}
 
 	function chartValues() {
@@ -352,10 +364,21 @@ ColumnLayout {
 		Qt.callLater(synchronizeDraft)
 		Qt.callLater(synchronizeAdmin)
 	}
+	onConfirmationVisibleChanged: syncConfirmationPopup()
 	Component.onCompleted: {
 		Qt.callLater(synchronizeDraft)
 		Qt.callLater(synchronizeAdmin)
+		Qt.callLater(syncConfirmationPopup)
 	}
+
+	ColumnLayout {
+		id: backgroundContent
+		objectName: "stonksBackgroundContent"
+		Layout.fillWidth: true
+		spacing: 12
+		enabled: !root.confirmationVisible
+		Accessible.role: Accessible.Pane
+		Accessible.name: qsTr("Stonks content")
 
 	RowLayout {
 		Layout.fillWidth: true
@@ -386,6 +409,7 @@ ColumnLayout {
 			onClicked: dialogState.invokeAction("register", {})
 		}
 		ModernButton {
+			id: stonksRefresh
 			objectName: "stonksRefresh"
 			text: qsTr("Refresh")
 			onClicked: dialogState.invokeAction("refresh", {})
@@ -426,27 +450,6 @@ ColumnLayout {
 				text: modelData.label
 				onClicked: root.selectTab(modelData.id)
 			}
-		}
-	}
-
-	Rectangle {
-		Layout.fillWidth: true
-		Layout.preferredHeight: confirmLayout.implicitHeight + 20
-		visible: root.pendingAction.length > 0
-		color: Theme.strip
-		border.color: Theme.danger
-		radius: Theme.innerRadius
-		RowLayout {
-			id: confirmLayout
-			anchors.fill: parent
-			anchors.margins: 10
-			ColumnLayout {
-				Layout.fillWidth: true
-				Label { textFormat: Text.PlainText; text: root.pendingTitle; color: Theme.textStrong; font.bold: true }
-				Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: root.pendingMessage; color: Theme.textMuted; wrapMode: Text.Wrap }
-			}
-			ModernButton { objectName: "stonksConfirmCancel"; text: qsTr("Cancel"); onClicked: root.cancelDestructiveAction() }
-			ModernButton { objectName: "stonksConfirmAction"; text: qsTr("Confirm"); onClicked: root.confirmDestructiveAction() }
 		}
 	}
 
@@ -498,7 +501,13 @@ ColumnLayout {
 				RowLayout {
 					Layout.fillWidth: true
 					Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("Portfolio history"); color: Theme.textStrong; font.bold: true }
-					Label { textFormat: Text.PlainText; text: qsTr("%1 saves").arg(root.snapshots.length); color: Theme.textMuted; font.pixelSize: 10 }
+					Label {
+						textFormat: Text.PlainText
+						text: root.snapshots.length === 1 ? qsTr("1 save")
+							: qsTr("%1 saves").arg(root.snapshots.length)
+						color: Theme.textMuted
+						font.pixelSize: 10
+					}
 				}
 				Canvas {
 					id: historyChart
@@ -534,10 +543,17 @@ ColumnLayout {
 						for (let index = 0; index < values.length; ++index) {
 							const x = values.length === 1 ? width / 2
 								: inset + index * (width - inset * 2) / (values.length - 1)
-							const y = height - inset - (values[index] - minimum) * (height - inset * 2) / range
+							const y = values.length === 1 ? height / 2
+								: height - inset - (values[index] - minimum) * (height - inset * 2) / range
 							if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
 						}
 						ctx.stroke()
+						if (values.length === 1) {
+							ctx.fillStyle = Theme.accent
+							ctx.beginPath()
+							ctx.arc(width / 2, height / 2, 4, 0, Math.PI * 2)
+							ctx.fill()
+						}
 					}
 				}
 				Label {
@@ -1080,5 +1096,131 @@ ColumnLayout {
 				}
 			}
 		}
+	}
+	}
+
+	Popup {
+		id: confirmationPopup
+		objectName: "stonksConfirmationPopup"
+		parent: Overlay.overlay
+		modal: true
+		dim: true
+		focus: true
+		closePolicy: Popup.NoAutoClose
+		width: parent ? Math.min(460, Math.max(300, parent.width - Theme.space5 * 2)) : 420
+		x: parent ? Math.round((parent.width - width) / 2) : 0
+		y: parent ? Math.round((parent.height - height) / 2) : 0
+		padding: Theme.space4
+		onAboutToShow: {
+			if (!root.focusBeforeConfirmation) {
+				const window = root.Window.window
+				root.focusBeforeConfirmation = window ? window.activeFocusItem : null
+			}
+			if (root.modalHost && typeof root.modalHost.rememberNestedModalFocus === "function") {
+				root.modalHost.rememberNestedModalFocus(root.focusBeforeConfirmation)
+				root.modalHost.nestedModalOpen = true
+			}
+		}
+		onOpened: confirmationCancelButton.forceActiveFocus(Qt.PopupFocusReason)
+		onClosed: {
+			const restoreTarget = root.focusBeforeConfirmation
+			root.focusBeforeConfirmation = null
+			if (root.modalHost && typeof root.modalHost.restoreNestedModalFocus === "function") {
+				root.modalHost.nestedModalOpen = false
+				root.modalHost.restoreNestedModalFocus(restoreTarget)
+				return
+			}
+			Qt.callLater(function() {
+				if (!root.visible || root.confirmationVisible)
+					return
+				if (restoreTarget && restoreTarget.forceActiveFocus
+						&& restoreTarget.visible !== false && restoreTarget.enabled !== false) {
+					restoreTarget.forceActiveFocus(Qt.PopupFocusReason)
+				} else if (stonksRefresh.visible && stonksRefresh.enabled) {
+					stonksRefresh.forceActiveFocus(Qt.PopupFocusReason)
+				}
+			})
+		}
+		Overlay.modal: Rectangle { color: Theme.modalScrim }
+		background: Rectangle {
+			color: Theme.surfaceRaised
+			border.color: Theme.surfaceBorder
+			border.width: 1
+			radius: Theme.shellRadius
+		}
+		contentItem: ColumnLayout {
+			Accessible.role: Accessible.Dialog
+			Accessible.name: root.pendingTitle || qsTr("Confirm action")
+			spacing: Theme.space3
+			Keys.priority: Keys.BeforeItem
+			Keys.onEscapePressed: event => {
+				root.cancelDestructiveAction()
+				event.accepted = true
+			}
+			Label {
+				objectName: "stonksConfirmationTitle"
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: root.pendingTitle || qsTr("Confirm action")
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontTitle
+				font.weight: Font.DemiBold
+				wrapMode: Text.Wrap
+			}
+			Label {
+				objectName: "stonksConfirmationMessage"
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: root.pendingMessage
+				color: Theme.textMain
+				wrapMode: Text.Wrap
+			}
+			RowLayout {
+				Layout.fillWidth: true
+				Item { Layout.fillWidth: true }
+				ModernButton {
+					id: confirmationCancelButton
+					objectName: "stonksConfirmCancel"
+					text: qsTr("Cancel")
+					tone: "secondary"
+					activeFocusOnTab: true
+					KeyNavigation.tab: confirmationActionButton
+					KeyNavigation.backtab: confirmationActionButton
+					Keys.priority: Keys.BeforeItem
+					Keys.onPressed: event => {
+						if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+							confirmationActionButton.forceActiveFocus(Qt.TabFocusReason)
+							event.accepted = true
+						}
+					}
+					onClicked: root.cancelDestructiveAction()
+				}
+				ModernButton {
+					id: confirmationActionButton
+					objectName: "stonksConfirmAction"
+					text: qsTr("Confirm")
+					tone: "danger"
+					highlighted: true
+					activeFocusOnTab: true
+					KeyNavigation.tab: confirmationCancelButton
+					KeyNavigation.backtab: confirmationCancelButton
+					Keys.priority: Keys.BeforeItem
+					Keys.onPressed: event => {
+						if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+							confirmationCancelButton.forceActiveFocus(Qt.TabFocusReason)
+							event.accepted = true
+						}
+					}
+					onClicked: root.confirmDestructiveAction()
+				}
+			}
+		}
+	}
+
+	ModalAccessibilityBarrier {
+		id: confirmationAccessibilityBarrier
+		objectName: "stonksConfirmationAccessibilityBarrier"
+		active: root.confirmationVisible
+		targets: [ backgroundContent ]
 	}
 }

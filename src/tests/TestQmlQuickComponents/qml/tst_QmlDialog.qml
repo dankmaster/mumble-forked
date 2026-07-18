@@ -15,9 +15,16 @@ TestCase {
         anchors.fill: parent
         source: "qrc:/qml-shell/QmlDialog.qml"
     }
+	SignalSpy {
+		id: dialogActionSpy
+		target: dialogState
+		signalName: "lastActionChanged"
+	}
 
     function init() {
         verify(loader.item !== null);
+		dialogActionSpy.clear();
+		loader.item.visualFixtureMode = false;
         dialogState.setValidationError("name", "");
         dialogState.open = true;
         tryCompare(loader.item, "visible", true);
@@ -25,6 +32,11 @@ TestCase {
 
     function cleanup() {
 		loader.item.beforeOpen = null;
+		loader.item.visualFixtureMode = false;
+		dialogState.setValidationError("hiddenAdvanced", "");
+		dialogState.setValidationError("visibleField", "");
+		dialogState.setValidationError("liveInvalid", "");
+		dialogState.setValidationError("parent0", "");
         dialogState.open = false;
         tryCompare(loader.item, "visible", false);
 		dialogState.resetSections();
@@ -47,7 +59,7 @@ TestCase {
 		tryCompare(loader.item, "visible", true);
 	}
 
-    function test_open_focus_and_close_action() {
+	function test_open_focus_and_close_action() {
 		compare(loader.item.title, "Test dialog");
 		compare(loader.item.header, null);
 		compare(loader.item.footer, null);
@@ -91,6 +103,77 @@ TestCase {
         });
     }
 
+	function test_validation_focuses_and_reveals_the_first_invalid_field() {
+		const fields = [];
+		for (let index = 0; index < 17; ++index) {
+			fields.push({ "id": "validation" + index, "type": "text",
+				"label": "Field " + index, "value": "Value " + index });
+		}
+		fields.push({ "id": "name", "type": "text", "label": "Name", "value": "" });
+		dialogState.setSections([{ "title": "Validation", "fields": fields }]);
+		dialogState.setSpecialState("generic", {
+			"id": "validation-focus", "pages": [], "width": 720, "height": 380,
+			"initialFocusId": "dialogCloseButton"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const nameField = findChild(loader.item.contentItem, "dialogField_name");
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		tryVerify(function() {
+			return scroll !== null && nameField !== null && closeButton !== null
+				&& scroll.contentHeight > scroll.height;
+		});
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		dialogState.setValidationError("name", "Name is required");
+		tryCompare(nameField, "activeFocus", true);
+		tryVerify(function() { return scroll.contentItem.contentY > 0; });
+		dialogState.setValidationError("name", "");
+	}
+
+	function test_validation_skips_hidden_errors_and_reveals_advanced_when_needed() {
+		dialogState.setValidationError("hiddenAdvanced", "Advanced value is required");
+		dialogState.setValidationError("visibleField", "Visible value is required");
+		dialogState.setSections([{ "title": "Validation", "fields": [
+			{ "id": "hiddenAdvanced", "type": "text", "label": "Advanced", "value": "", "advanced": true },
+			{ "id": "visibleField", "type": "text", "label": "Visible", "value": "" }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "validation-hidden", "pages": [], "width": 720, "height": 420,
+			"initialFocusId": "dialogCloseButton"
+		});
+		const visibleField = findChild(loader.item.contentItem, "dialogField_visibleField");
+		tryVerify(function() { return visibleField !== null && visibleField.activeFocus; });
+		compare(loader.item.showAdvanced, false);
+
+		dialogState.setValidationError("visibleField", "");
+		let advancedField = null;
+		tryVerify(function() {
+			advancedField = findChild(loader.item.contentItem, "dialogField_hiddenAdvanced");
+			return loader.item.showAdvanced && advancedField !== null && advancedField.activeFocus;
+		});
+		dialogState.setValidationError("hiddenAdvanced", "");
+	}
+
+	function test_live_validation_copy_does_not_steal_active_editor_focus() {
+		dialogState.setSections([{ "title": "Live validation", "fields": [
+			{ "id": "liveInvalid", "type": "text", "label": "Validated field", "value": "" },
+			{ "id": "liveEditor", "type": "text", "label": "Active editor", "value": "typing" }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "live-validation-focus", "pages": [], "width": 720, "height": 420
+		});
+		const editor = findChild(loader.item.contentItem, "dialogField_liveEditor");
+		tryVerify(function() { return editor !== null; });
+		editor.forceActiveFocus();
+		tryCompare(editor, "activeFocus", true);
+		dialogState.setValidationError("liveInvalid", "A value is required");
+		tryCompare(editor, "activeFocus", true);
+		dialogState.setValidationError("liveInvalid", "Enter at least three characters");
+		tryCompare(editor, "activeFocus", true);
+		dialogState.setValidationError("liveInvalid", "");
+	}
+
     function test_action_keyboard_activation() {
         const saveButton = findChild(loader.item.contentItem, "dialogAction_save");
         verify(saveButton !== null);
@@ -117,8 +200,68 @@ TestCase {
 		tryVerify(function() { return footer !== null && footer.height > 64; });
 	}
 
+	function test_nested_modal_owns_escape_before_the_parent_dialog() {
+		const shortcut = findChild(loader.item, "dialogCancelShortcut");
+		verify(shortcut !== null);
+		const before = dialogState.closeRequests;
+		loader.item.nestedModalOpen = true;
+		compare(shortcut.enabled, false);
+		keyClick(Qt.Key_Escape);
+		compare(dialogState.closeRequests, before);
+
+		loader.item.nestedModalOpen = false;
+		compare(shortcut.enabled, true);
+		keyClick(Qt.Key_Escape);
+		tryCompare(dialogState, "closeRequests", before + 1);
+	}
+
+	function test_stonks_confirmation_owns_parent_modal_state_and_escape() {
+		dialogState.setSections([]);
+		dialogState.setSpecialState("stonks", {
+			"id": "stonks-modal-host", "pages": [], "width": 820, "height": 700,
+			"stonks": { "supported": true, "enabled": true, "registered": true,
+				"canAdmin": false, "selfUserId": 1, "selectedUserId": 1, "snapshots": [] }
+		});
+		const stonksLoader = findChild(loader.item.contentItem, "stonksEditorLoader");
+		tryVerify(function() { return stonksLoader !== null && stonksLoader.item !== null; });
+		const editor = stonksLoader.item;
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		const popup = findChild(editor, "stonksConfirmationPopup");
+		const cancelButton = findChild(editor, "stonksConfirmCancel");
+		const barrier = findChild(loader.item, "dialogNestedModalAccessibilityBarrier");
+		verify(closeButton !== null && popup !== null && cancelButton !== null && barrier !== null);
+		compare(editor.modalHost, loader.item);
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		const closeRequestsBeforeConfirmation = dialogState.closeRequests;
+
+		editor.requestDestructiveAction("clearPortfolio", { "userId": 1 },
+			"Clear portfolio", "Clear this portfolio?");
+		tryVerify(function() {
+			return popup.opened && cancelButton.activeFocus && loader.item.nestedModalOpen
+				&& barrier.active;
+		});
+		verify(loader.item.contentItem.Accessible.ignored);
+		keyClick(Qt.Key_Escape);
+		tryCompare(popup, "opened", false);
+		compare(editor.pendingAction, "");
+		compare(dialogState.closeRequests, closeRequestsBeforeConfirmation);
+		tryVerify(function() {
+			return !loader.item.nestedModalOpen && !barrier.active
+				&& !loader.item.contentItem.Accessible.ignored;
+		});
+		tryCompare(closeButton, "activeFocus", true);
+	}
+
 	function test_page_rail_is_keyboard_accessible_at_medium_width() {
-		dialogState.setSpecialState("generic", { "id": "medium", "width": 760, "height": 620 });
+		dialogState.setSpecialState("settings", {
+			"id": "medium", "width": 760, "height": 620,
+			"pages": [
+				{ "id": "general", "label": "Audio Input" },
+				{ "id": "appearance", "label": "Appearance" }
+			]
+		});
+		dialogState.invokeAction("selectPage", { "pageId": "general" });
 		tryCompare(loader.item, "width", 760);
 		verify(!loader.item.compactDialogLayout);
 		const rail = findChild(loader.item.contentItem, "dialogPageRail");
@@ -132,13 +275,102 @@ TestCase {
 		tryVerify(function() { return pages.itemAtIndex(0) !== null });
 		const firstPage = pages.itemAtIndex(0);
 		compare(firstPage.Accessible.role, Accessible.ListItem);
-		compare(firstPage.Accessible.selected, true);
+		tryVerify(function() { return firstPage.highlighted && firstPage.Accessible.selected; });
 		compare(firstPage.background.color, Theme.selected);
 		firstPage.forceActiveFocus();
 		tryCompare(firstPage, "activeFocus", true);
 		keyClick(Qt.Key_Return);
 		compare(dialogState.lastAction, "selectPage");
 		compare(dialogState.lastPayload.pageId, "general");
+	}
+
+	function test_settings_initial_focus_and_plugin_semantics_track_the_active_page() {
+		dialogState.setSections([{ "id": "plugins", "title": "Plugins", "fields": [{
+			"id": "plugins.editor", "type": "pluginEditor", "label": "Installed plugins",
+			"rows": [{
+				"id": "manual", "name": "Manual placement", "description": "Manual position tool",
+				"version": "1.2.0", "author": "Mumble", "path": "Built in",
+				"loaded": true, "enabled": true, "positionalAvailable": true,
+				"positionalEnabled": true, "keyboardMonitoringAllowed": false,
+				"canConfigure": true, "canShowAbout": true, "builtIn": true
+			}]
+		}] }]);
+		dialogState.setSpecialState("settings", {
+			"id": "settings-plugin-focus", "width": 920, "height": 700,
+			"pages": [
+				{ "id": "audioInput", "label": "Audio Input" },
+				{ "id": "plugins", "label": "Plugins" }
+			]
+		});
+		dialogState.invokeAction("selectPage", { "pageId": "plugins" });
+
+		const pages = findChild(loader.item.contentItem, "dialogPageList");
+		tryVerify(function() {
+			return pages !== null && pages.visible && pages.activeFocus
+				&& pages.currentIndex === 1 && pages.itemAtIndex(1) !== null;
+		});
+		const pluginPage = pages.itemAtIndex(1);
+		compare(pluginPage.Accessible.name, "Plugins");
+		compare(pluginPage.Accessible.selected, true);
+		verify(pluginPage.current);
+
+		const pluginCard = findChild(loader.item.contentItem, "pluginCard_manual");
+		const semanticCard = findChild(loader.item.contentItem, "pluginSemanticCard_manual");
+		const pluginList = findChild(loader.item.contentItem, "pluginList");
+		tryVerify(function() {
+			return pluginCard !== null && semanticCard !== null && pluginList !== null
+				&& pluginCard.width > 0 && pluginCard.height > 0
+				&& pluginCard.accessibilityExposed && !semanticCard.Accessible.ignored;
+		}, 5000, "The visible plugin card must enter the Settings accessibility tree after layout settles");
+		compare(pluginList.Accessible.role, Accessible.List);
+		compare(pluginList.Accessible.name, "Installed plugins");
+		compare(semanticCard.Accessible.name, "Manual placement");
+		verify(findChild(pluginCard, "pluginConfigure_manual") !== null);
+		verify(findChild(pluginCard, "pluginAbout_manual") !== null);
+	}
+
+	function test_page_rail_keeps_tab_focus_valid_while_pages_are_replaced() {
+		dialogState.setSpecialState("settings", {
+			"id": "settings-focus-transition", "width": 760, "height": 620,
+			"pages": [
+				{ "id": "general", "label": "Audio Input" },
+				{ "id": "appearance", "label": "Appearance" }
+			]
+		});
+		const pages = findChild(loader.item.contentItem, "dialogPageList");
+		verify(pages !== null);
+		pages.forceActiveFocus();
+		tryCompare(pages, "activeFocus", true);
+
+		dialogState.setSpecialState("connect", { "id": "connect-focus-transition", "pages": [] });
+		tryCompare(pages, "count", 0);
+		verify(pages.activeFocusOnTab,
+			"The current focus owner must remain tab-valid until focus is handed off");
+
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		verify(closeButton !== null);
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		tryCompare(pages, "activeFocusOnTab", false);
+	}
+
+	function test_wide_footer_places_primary_action_at_the_right_edge() {
+		dialogState.setSpecialState("generic", {
+			"id": "wide-actions", "width": 760, "height": 620,
+			"primaryActionId": "save"
+		});
+		tryCompare(loader.item, "width", 760);
+		tryVerify(function() {
+			return findChild(loader.item.contentItem, "dialogAction_save") !== null
+				&& findChild(loader.item.contentItem, "dialogAction_cancel") !== null;
+		});
+		const primary = findChild(loader.item.contentItem, "dialogAction_save");
+		const cancel = findChild(loader.item.contentItem, "dialogAction_cancel");
+		verify(primary.parent === cancel.parent);
+		tryVerify(function() {
+			return primary.mapToItem(loader.item.contentItem, 0, 0).x
+				> cancel.mapToItem(loader.item.contentItem, 0, 0).x;
+		}, 1000, "Expected the primary action to settle at the right edge after Row polish");
 	}
 
 	function test_settings_uses_icon_navigation_page_hierarchy_and_sticky_advanced_footer() {
@@ -154,7 +386,23 @@ TestCase {
 			],
 			"primaryActionId": "save"
 		});
+		dialogState.invokeAction("selectPage", { "pageId": "general" });
 
+		tryVerify(function() {
+			const railHeading = findChild(loader.item.contentItem, "dialogPageRailHeading");
+			const pageHeading = findChild(loader.item.contentItem, "dialogSettingsPageHeading");
+			const pageTitle = findChild(loader.item.contentItem, "dialogSettingsPageTitle");
+			const inputIcon = findChild(loader.item.contentItem, "dialogPageIcon_general");
+			const appearanceIcon = findChild(loader.item.contentItem, "dialogPageIcon_appearance");
+			const footerAdvanced = findChild(loader.item.contentItem, "dialogSettingsAdvancedFooter");
+			const footerToggle = findChild(loader.item.contentItem, "dialogSettingsAdvancedToggle");
+			return railHeading !== null && railHeading.visible
+				&& pageHeading !== null && pageHeading.visible
+				&& pageTitle !== null && pageTitle.text === "Audio Input"
+				&& inputIcon !== null && appearanceIcon !== null
+				&& footerAdvanced !== null && footerAdvanced.visible
+				&& footerToggle !== null && footerToggle.visible;
+		});
 		const railHeading = findChild(loader.item.contentItem, "dialogPageRailHeading");
 		const pageHeading = findChild(loader.item.contentItem, "dialogSettingsPageHeading");
 		const pageTitle = findChild(loader.item.contentItem, "dialogSettingsPageTitle");
@@ -164,14 +412,6 @@ TestCase {
 		const headerAdvanced = findChild(loader.item.contentItem, "dialogAdvancedToggle");
 		const footerAdvanced = findChild(loader.item.contentItem, "dialogSettingsAdvancedFooter");
 		const footerToggle = findChild(loader.item.contentItem, "dialogSettingsAdvancedToggle");
-		tryVerify(function() {
-			return railHeading !== null && railHeading.visible
-				&& pageHeading !== null && pageHeading.visible
-				&& pageTitle !== null && pageTitle.text === "Audio Input"
-				&& inputIcon !== null && appearanceIcon !== null
-				&& footerAdvanced !== null && footerAdvanced.visible
-				&& footerToggle !== null && footerToggle.visible;
-		});
 		compare(railHeading.Accessible.role, Accessible.Heading);
 		compare(pageTitle.Accessible.role, Accessible.Heading);
 		compare(inputIcon.name, "microphone");
@@ -185,15 +425,87 @@ TestCase {
 		verify(footer !== null && scroll !== null);
 		verify(scroll.y + scroll.height <= footer.y + 1,
 			"The Settings action and advanced controls must stay in the sticky footer");
-		mouseClick(footerToggle);
+		compare(loader.item.showAdvanced, false);
+		// Invoke the control signal directly here: the test window uses an
+		// offscreen platform and pointer delivery to sticky popup footers is not
+		// deterministic. ModernButton has separate pointer/keyboard coverage.
+		footerToggle.clicked();
+		compare(loader.item.showAdvanced, true);
 		tryVerify(function() { return findChild(loader.item.contentItem, "dialogField_expert") !== null; });
+	}
+
+	function test_settings_hides_only_a_section_heading_that_duplicates_the_active_page() {
+		dialogState.setSections([
+			{ "id": "appearance", "title": "  Appearance  ", "fields": [
+				{ "id": "theme", "type": "text", "label": "Theme", "value": "Dark" }
+			] },
+			{ "id": "behavior", "title": "Interface behavior", "fields": [
+				{ "id": "density", "type": "text", "label": "Density", "value": "Comfortable" }
+			] }
+		]);
+		dialogState.setSpecialState("settings", {
+			"id": "settings-heading-dedup", "width": 920, "height": 700,
+			"pages": [{ "id": "appearance", "label": "APPEARANCE" }]
+		});
+
+		const pageTitle = findChild(loader.item.contentItem, "dialogSettingsPageTitle");
+		const appearanceSection = findChild(loader.item.contentItem, "dialogSection_appearance");
+		const appearanceHeading = findChild(loader.item.contentItem, "dialogSectionHeading_appearance");
+		const behaviorHeading = findChild(loader.item.contentItem, "dialogSectionHeading_behavior");
+		tryVerify(function() {
+			return pageTitle !== null && pageTitle.visible && pageTitle.text === "APPEARANCE"
+				&& appearanceSection !== null && appearanceHeading !== null
+				&& behaviorHeading !== null && behaviorHeading.visible;
+		});
+		verify(!appearanceHeading.visible,
+			"A normalized section title must not repeat the active Settings page title");
+		verify(appearanceHeading.Accessible.ignored);
+		compare(appearanceSection.Accessible.role, Accessible.Pane);
+		compare(appearanceSection.Accessible.name, "  Appearance  ");
+		compare(behaviorHeading.Accessible.role, Accessible.Heading);
+		compare(behaviorHeading.Accessible.name, "Interface behavior");
+		verify(!behaviorHeading.Accessible.ignored);
+
+		dialogState.setSpecialState("generic", { "id": "non-settings-heading" });
+		tryVerify(function() {
+			const genericHeading = findChild(loader.item.contentItem, "dialogSectionHeading_appearance");
+			return genericHeading !== null && genericHeading.visible;
+		});
+		const genericHeading = findChild(loader.item.contentItem, "dialogSectionHeading_appearance");
+		compare(genericHeading.Accessible.role, Accessible.Heading);
+		verify(!genericHeading.Accessible.ignored);
+	}
+
+	function test_readonly_values_keep_a_paintable_font_family() {
+		dialogState.setSections([{ "id": "about-runtime", "title": "Runtime", "fields": [
+			{ "id": "about.version", "type": "readonly", "label": "Version", "value": "1.7.0" },
+			{ "id": "about.commit", "type": "readonly", "label": "Commit", "value": "abc123", "monospace": true }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "readonly-font-contract", "width": 720, "height": 520
+		});
+
+		let versionValue = null;
+		let commitValue = null;
+		tryVerify(function() {
+			versionValue = findChild(loader.item.contentItem, "dialogReadonlyValue_about.version");
+			commitValue = findChild(loader.item.contentItem, "dialogReadonlyValue_about.commit");
+			return versionValue !== null && commitValue !== null
+				&& versionValue.text === "1.7.0" && commitValue.text === "abc123";
+		});
+		verify(versionValue.font.family.length > 0,
+			"Readonly values must inherit a concrete application font on Windows");
+		compare(versionValue.font.family, loader.item.font.family);
+		compare(commitValue.font.family, "Consolas");
+		verify(versionValue.implicitWidth > 0 && versionValue.implicitHeight > 0);
 	}
 
 	function test_initial_focus_scrolls_long_content_clear_of_footer() {
 		const fields = [];
 		for (let index = 0; index < 18; ++index) {
 			fields.push({ "id": "field" + index, "type": "text",
-				"label": "Field " + index, "value": "Value " + index });
+				"label": "Field " + index, "value": "Value " + index,
+				"hint": index === 17 ? "The complete focused field must clear the sticky footer." : "" });
 		}
 		dialogState.setSections([{ "title": "Long settings page", "fields": fields }]);
 		dialogState.setSpecialState("generic", {
@@ -201,16 +513,309 @@ TestCase {
 			"initialFocusId": "field17", "primaryActionId": "save"
 		});
 		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const scrollBar = findChild(loader.item.contentItem, "dialogContentScrollBar");
 		const footer = findChild(loader.item.contentItem, "dialogFooter");
 		const lastField = findChild(loader.item.contentItem, "dialogField_field17");
-		tryVerify(function() { return scroll !== null && footer !== null && lastField !== null && lastField.activeFocus; });
+		const lastFieldContainer = findChild(loader.item.contentItem, "dialogFieldContainer_field17");
+		tryVerify(function() { return scroll !== null && scrollBar !== null && footer !== null
+			&& lastField !== null && lastFieldContainer !== null && lastField.activeFocus; });
 		tryVerify(function() { return scroll.contentItem.contentY > 0; });
-		const scrollBottom = scroll.mapToItem(loader.item.contentItem, 0, scroll.height).y;
-		verify(scrollBottom <= footer.y + 1,
-			"Scrollable dialog content must end before the persistent action footer");
-		const fieldBottom = lastField.mapToItem(loader.item.contentItem, 0, lastField.height).y;
-		verify(fieldBottom <= footer.y,
-			"Focused settings fields must be scrolled above the persistent action footer");
+		tryVerify(function() { return scrollBar.size < 1 && scrollBar.opacity > 0; });
+		compare(scrollBar.parent, scroll);
+		tryVerify(function() {
+			const scrollBarPoint = scrollBar.mapToItem(scroll, 0, 0);
+			return scrollBarPoint.x >= scroll.width - scrollBar.width - 1
+				&& Math.abs(scrollBarPoint.y) <= 1;
+		}, 1000, "The dialog scrollbar must stay attached to the right edge of its viewport");
+		tryVerify(function() {
+			return scroll.mapToItem(loader.item.contentItem, 0, scroll.height).y <= footer.y + 1;
+		}, 1000, "Scrollable dialog content must settle before the persistent action footer");
+		tryVerify(function() {
+			return lastField.mapToItem(loader.item.contentItem, 0, lastField.height).y <= footer.y;
+		}, 1000, "Focused settings fields must settle above the persistent action footer");
+		tryVerify(function() { return lastFieldContainer.accessibilityExposed; }, 1000,
+			"Keyboard reveal must expose the complete focused field subtree to accessibility");
+	}
+
+	function test_initial_focus_returns_stable_named_control_for_composite_editor() {
+		loader.item.visualFixtureMode = true;
+		dialogState.setSections([{ "title": "Playback", "fields": [
+			{ "id": "audio.jitterBuffer", "type": "number", "label": "Jitter buffer",
+				"value": 2, "minimum": 0, "maximum": 10 }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "stable-initial-focus", "width": 720, "height": 420,
+			"initialFocusId": "audio.jitterBuffer", "primaryActionId": "save"
+		});
+		const numberField = findChild(loader.item.contentItem,
+			"dialogField_audio.jitterBuffer");
+		tryVerify(function() { return numberField !== null; });
+
+		compare(numberField.cursorPaintEnabled, false);
+		compare(loader.item.applyInitialFocus(), "dialogField_audio.jitterBuffer");
+		tryVerify(function() { return numberField.activeFocus; });
+	}
+
+	function test_identifier_number_field_does_not_insert_locale_grouping() {
+		dialogState.setSections([{ "title": "Details", "fields": [
+			{ "id": "port", "type": "number", "label": "Port", "value": 64738,
+				"minimum": 1, "maximum": 65535, "useGrouping": false }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "ungrouped-port", "width": 560, "height": 360,
+			"initialFocusId": "port", "primaryActionId": "connect"
+		});
+		const portField = findChild(loader.item.contentItem, "dialogField_port");
+		tryVerify(function() { return portField !== null; });
+		compare(portField.textFromValue(64738, Qt.locale("sv_SE")), "64738");
+		compare(portField.displayText, "64738");
+	}
+
+	function test_compact_settings_page_can_opt_into_content_fit() {
+		dialogState.setSections([
+			{ "id": "behavior", "title": "Behavior", "fields": [
+				{ "id": "share.autoOpen", "type": "checkbox", "label": "Auto-open shares", "value": false }
+			] },
+			{ "id": "capabilities", "title": "Capabilities", "fields": [
+				{ "id": "share.note", "type": "note", "text": "Limits are negotiated with the server." }
+			] }
+		]);
+		dialogState.setSpecialState("settings", {
+			"id": "compact-screen-share", "width": 640, "height": 700,
+			"pages": [{ "id": "screenShare", "label": "Screen Sharing", "contentFitCompact": true }],
+			"primaryActionId": "save"
+		});
+		dialogState.invokeAction("selectPage", { "pageId": "screenShare" });
+
+		const heading = findChild(loader.item.contentItem, "dialogSettingsPageHeading");
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const footer = findChild(loader.item.contentItem, "dialogFooter");
+		tryVerify(function() {
+			return loader.item.compactDialogLayout && loader.item.compactContentFitPage
+				&& heading !== null && heading.visible && scroll !== null && footer !== null
+				&& loader.item.height < dialogState.preferredHeight;
+		});
+		verify(loader.item.height < 600,
+			"A sparse compact Settings page must not reserve the full multi-page viewport");
+		verify(scroll.mapToItem(loader.item.contentItem, 0, scroll.height).y <= footer.y + 1,
+			"Content-fit Settings must keep the body above the sticky footer");
+	}
+
+	function test_runtime_focus_change_scrolls_control_clear_of_footer() {
+		const fields = [];
+		for (let index = 0; index < 18; ++index) {
+			fields.push({ "id": "runtime" + index, "type": "text",
+				"label": "Runtime field " + index, "value": "Value " + index });
+		}
+		dialogState.setSections([{ "title": "Runtime focus page", "fields": fields }]);
+		dialogState.setSpecialState("generic", {
+			"id": "runtime-focus-content", "width": 760, "height": 420,
+			"initialFocusId": "runtime0", "primaryActionId": "save"
+		});
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const footer = findChild(loader.item.contentItem, "dialogFooter");
+		const firstField = findChild(loader.item.contentItem, "dialogField_runtime0");
+		const lastField = findChild(loader.item.contentItem, "dialogField_runtime17");
+		tryVerify(function() {
+			return scroll !== null && footer !== null && firstField !== null
+				&& lastField !== null && firstField.activeFocus;
+		});
+		tryVerify(function() { return scroll.contentItem.contentY === 0; });
+
+		lastField.forceActiveFocus(Qt.TabFocusReason);
+		tryCompare(lastField, "activeFocus", true);
+		tryVerify(function() { return scroll.contentItem.contentY > 0; });
+		tryVerify(function() {
+			return lastField.mapToItem(loader.item.contentItem, 0, lastField.height).y <= footer.y;
+		}, 1000, "A newly focused body control must scroll above the sticky footer");
+	}
+
+	function test_scrolled_section_heading_leaves_and_reenters_accessibility_viewport() {
+		const sections = [];
+		for (let index = 0; index < 14; ++index) {
+			sections.push({ "id": "viewport" + index, "title": "Viewport section " + index,
+				"fields": [{ "id": "viewport-note" + index, "type": "note",
+					"text": "Bounded content for section " + index }]
+			});
+		}
+		dialogState.setSections(sections);
+		dialogState.setSpecialState("generic", {
+			"id": "heading-viewport", "pages": [], "width": 720, "height": 420,
+			"initialFocusId": "dialogCloseButton"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const firstHeading = findChild(loader.item.contentItem, "dialogSectionHeading_viewport0");
+		tryVerify(function() {
+			return scroll !== null && firstHeading !== null && firstHeading.visible
+				&& scroll.contentHeight > scroll.height;
+		});
+		tryCompare(firstHeading.Accessible, "ignored", false);
+
+		const headingPoint = firstHeading.mapToItem(scroll.contentItem, 0, 0);
+		scroll.contentItem.contentY = Math.min(scroll.contentHeight - scroll.height,
+			headingPoint.y + Math.max(1, firstHeading.height / 2));
+		tryCompare(firstHeading.Accessible, "ignored", true);
+
+		scroll.contentItem.contentY = 0;
+		tryCompare(firstHeading.Accessible, "ignored", false);
+	}
+
+	function test_scrolled_field_subtree_leaves_and_reenters_accessibility_viewport() {
+		const fields = [];
+		for (let index = 0; index < 18; ++index) {
+			fields.push({ "id": "viewport-field" + index, "type": "checkbox",
+				"label": "Viewport option " + index, "value": index % 2 === 0 });
+		}
+		dialogState.setSections([{ "id": "field-viewport", "title": "Viewport fields",
+			"fields": fields }]);
+		dialogState.setSpecialState("generic", {
+			"id": "field-viewport", "pages": [], "width": 720, "height": 420,
+			"initialFocusId": "dialogCloseButton"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const firstField = findChild(loader.item.contentItem, "dialogField_viewport-field0");
+		const firstBarrier = findChild(loader.item.contentItem,
+			"dialogFieldViewportAccessibilityBarrier_viewport-field0");
+		tryVerify(function() {
+			return scroll !== null && firstField !== null && firstBarrier !== null
+				&& firstField.visible && scroll.contentHeight > scroll.height;
+		});
+		tryCompare(firstField.Accessible, "ignored", false);
+		compare(firstBarrier.active, false);
+
+		const fieldPoint = firstField.mapToItem(scroll.contentItem, 0, 0);
+		scroll.contentItem.contentY = Math.min(scroll.contentHeight - scroll.height,
+			fieldPoint.y + Math.max(1, firstField.height / 2));
+		tryCompare(firstBarrier, "active", true);
+		tryCompare(firstField.Accessible, "ignored", true);
+
+		scroll.contentItem.contentY = 0;
+		tryCompare(firstBarrier, "active", false);
+		tryCompare(firstField.Accessible, "ignored", false);
+	}
+
+	function test_partially_visible_composite_editor_keeps_its_own_viewport_accessible() {
+		const rows = [];
+		for (let index = 0; index < 12; ++index) {
+			rows.push({ "type": index + 1, "name": "Event " + (index + 1),
+				"console": index % 2 === 0, "notification": false,
+				"highlight": false, "tts": false, "sound": false });
+		}
+		dialogState.setSections([{ "id": "event-section", "title": "Per-event behavior",
+			"fields": [{ "id": "event-editor", "type": "messageEventEditor",
+				"label": "Event behavior", "rows": rows }] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "composite-viewport", "pages": [], "width": 720, "height": 420,
+			"initialFocusId": "dialogCloseButton"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const eventList = findChild(loader.item.contentItem, "messageEventList");
+		const barrier = findChild(loader.item.contentItem,
+			"dialogFieldViewportAccessibilityBarrier_event-editor");
+		tryVerify(function() {
+			return scroll !== null && eventList !== null && barrier !== null
+				&& eventList.visible && eventList.height > scroll.height;
+		});
+		compare(barrier.active, false,
+			"A composite editor owns its nested viewport and must remain semantic while intersecting the dialog body");
+		tryCompare(eventList.Accessible, "ignored", false);
+	}
+
+	function test_external_initial_focus_does_not_scroll_dialog_content() {
+		const fields = [];
+		for (let index = 0; index < 18; ++index) {
+			fields.push({ "id": "external" + index, "type": "text",
+				"label": "Field " + index, "value": "Value " + index });
+		}
+		dialogState.setSections([{ "title": "Long external-focus page", "fields": fields }]);
+		dialogState.setSpecialState("generic", {
+			"id": "external-focus", "pages": [], "width": 760, "height": 420,
+			"initialFocusId": "dialogCloseButton"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		tryVerify(function() {
+			return scroll !== null && closeButton !== null && closeButton.activeFocus
+				&& scroll.contentHeight > scroll.height;
+		});
+		compare(scroll.contentItem.contentY, 0);
+		loader.item.ensureContentVisible(closeButton);
+		compare(scroll.contentItem.contentY, 0,
+			"A footer focus target must never be mapped into the scroll content viewport");
+	}
+
+	function test_raw_nested_initial_focus_object_name_precedes_field_shorthand() {
+		dialogState.setSections([{ "id": "plugins", "title": "Plugins", "fields": [{
+			"id": "plugins.editor", "type": "pluginEditor", "label": "Installed plugins",
+			"rows": []
+		}] }]);
+		dialogState.setSpecialState("settings", {
+			"id": "nested-plugin-focus", "pages": [], "width": 760, "height": 620,
+			"initialFocusId": "pluginInstallButton"
+		});
+
+		const installButton = findChild(loader.item.contentItem, "pluginInstallButton");
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		tryVerify(function() { return installButton !== null && closeButton !== null; });
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		loader.item.applyInitialFocus();
+		tryCompare(installButton, "activeFocus", true);
+	}
+
+	function test_explicit_focus_request_retargets_same_surface_once() {
+		dialogState.setSections([{ "title": "Tokens", "fields": [
+			{ "id": "token.0", "type": "text", "label": "Token 1", "value": "alpha" },
+			{ "id": "token.1", "type": "text", "label": "Token 2", "value": "" }
+		] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "same-surface-focus-request", "width": 620, "height": 460,
+			"initialFocusId": "dialogField_token.0"
+		});
+		const first = findChild(loader.item.contentItem, "dialogField_token.0");
+		const second = findChild(loader.item.contentItem, "dialogField_token.1");
+		tryVerify(function() { return first !== null && second !== null; });
+		tryCompare(first, "activeFocus", true);
+
+		dialogState.setSpecialState("generic", {
+			"id": "same-surface-focus-request", "width": 620, "height": 460,
+			"initialFocusId": "dialogField_token.1", "focusRequestId": "add-token:1"
+		});
+		tryCompare(second, "activeFocus", true);
+
+		first.forceActiveFocus();
+		tryCompare(first, "activeFocus", true);
+		// A normal DTO refresh carrying the same request must not steal the caret.
+		dialogState.setSpecialState("generic", {
+			"id": "same-surface-focus-request", "width": 620, "height": 460,
+			"initialFocusId": "dialogField_token.1", "focusRequestId": "add-token:1"
+		});
+		wait(0);
+		compare(first.activeFocus, true);
+
+		dialogState.setSpecialState("generic", {
+			"id": "same-surface-focus-request", "width": 620, "height": 460,
+			"initialFocusId": "dialogField_token.1", "focusRequestId": "add-token:2"
+		});
+		tryCompare(second, "activeFocus", true);
+	}
+
+	function test_visual_fixture_keeps_focus_without_a_nondeterministic_text_cursor() {
+		const nameField = findChild(loader.item.contentItem, "dialogField_name");
+		verify(nameField !== null);
+		nameField.forceActiveFocus();
+		tryCompare(nameField, "activeFocus", true);
+		const cursorPaint = findChild(nameField, "dialogTextCursorPaint");
+		verify(cursorPaint !== null);
+		tryCompare(cursorPaint, "visible", true);
+
+		loader.item.visualFixtureMode = true;
+		tryCompare(nameField, "activeFocus", true);
+		tryCompare(cursorPaint, "visible", false);
 	}
 
 	function test_single_surface_dialog_fits_sparse_content_and_grows_for_long_content() {
@@ -255,7 +860,10 @@ TestCase {
 
 	function test_color_control_is_named_and_keyboard_focusable() {
 		const colorButton = findChild(loader.item.contentItem, "dialogColorButton_accent");
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		const barrier = findChild(loader.item, "dialogNestedModalAccessibilityBarrier");
 		verify(colorButton !== null);
+		verify(closeButton !== null && barrier !== null);
 		compare(colorButton.Accessible.role, Accessible.Button);
 		compare(colorButton.Accessible.name, "Choose Accent");
 		// Let the dialog's deferred initial-focus pass finish before taking focus
@@ -270,6 +878,11 @@ TestCase {
 		colorButton.clicked();
 		tryCompare(picker, "visible", true);
 		compare(loader.item.contentItem.enabled, false);
+		tryVerify(function() {
+			return loader.item.contentItem.Accessible.ignored
+				&& colorButton.Accessible.ignored && closeButton.Accessible.ignored
+				&& barrier.active;
+		});
 		compare(picker.palette.highlight, Theme.selected);
 		compare(picker.palette.toolTipBase, Theme.surfaceRaised);
 		compare(picker.palette.disabled.link, Theme.textMuted);
@@ -279,6 +892,8 @@ TestCase {
 		verify(pickerDialog !== null && hexInput !== null && applyButton !== null);
 		compare(pickerDialog.Accessible.role, Accessible.Dialog);
 		compare(pickerDialog.Accessible.name, "Choose Accent");
+		compare(pickerDialog.Accessible.ignored, false);
+		compare(hexInput.Accessible.ignored, false);
 		tryCompare(hexInput, "activeFocus", true);
 
 		picker.draftColor = "#12";
@@ -289,6 +904,11 @@ TestCase {
 		applyButton.clicked();
 		tryCompare(picker, "visible", false);
 		compare(loader.item.contentItem.enabled, true);
+		tryVerify(function() {
+			return !loader.item.contentItem.Accessible.ignored
+				&& !colorButton.Accessible.ignored && !closeButton.Accessible.ignored
+				&& !barrier.active;
+		});
 		tryCompare(colorButton, "activeFocus", true);
 		compare(String(dialogState.fieldValue("accent")), "#A1B2C3");
 	}
@@ -367,6 +987,194 @@ TestCase {
 		})
 	}
 
+	function test_range_uses_slider_metadata_live_value_keyboard_and_typed_updates() {
+		dialogState.setSections([{ "id": "levels", "title": "Levels", "fields": [{
+			"id": "audio.level", "type": "range", "label": "Input level", "value": 40,
+			"min": 0, "max": 100, "step": 5, "suffix": "%", "hint": "Adjust the input level"
+		}, {
+			"id": "audio.delay", "type": "number", "label": "Delay", "value": 30,
+			"min": 0, "max": 500, "step": 10, "suffix": " ms", "hint": "Applied before playback"
+		}]}])
+
+		const slider = findChild(loader.item.contentItem, "dialogField_audio.level")
+		const valueLabel = findChild(loader.item.contentItem, "dialogRangeValue_audio.level")
+		const sliderHint = findChild(loader.item.contentItem, "dialogFieldHint_audio.level")
+		const number = findChild(loader.item.contentItem, "dialogField_audio.delay")
+		const numberHint = findChild(loader.item.contentItem, "dialogFieldHint_audio.delay")
+		tryVerify(function() {
+			return slider !== null && valueLabel !== null && sliderHint !== null
+				&& number !== null && numberHint !== null
+		})
+		compare(slider.Accessible.role, Accessible.Slider)
+		compare(slider.Accessible.name, "Input level")
+		verify(String(slider.Accessible.description).indexOf("40%") >= 0)
+		compare(slider.from, 0)
+		compare(slider.to, 100)
+		compare(slider.stepSize, 5)
+		compare(slider.value, 40)
+		compare(valueLabel.text, "40%")
+		compare(sliderHint.text, "Adjust the input level")
+
+		slider.forceActiveFocus()
+		tryCompare(slider, "activeFocus", true)
+		keyClick(Qt.Key_Right)
+		tryCompare(slider, "value", 45)
+		tryCompare(valueLabel, "text", "45%")
+		compare(dialogState.fieldValue("audio.level"), 45)
+		compare(typeof dialogState.fieldValue("audio.level"), "number")
+
+		compare(number.stepSize, 10)
+		compare(number.displayText, "30 ms")
+		compare(number.Accessible.name, "Delay")
+		compare(number.Accessible.description, "Applied before playback")
+		compare(numberHint.text, "Applied before playback")
+	}
+
+	function test_segmented_presentation_is_bounded_keyboard_accessible_and_preserves_types() {
+		dialogState.setSpecialState("generic", { "id": "segments", "width": 372, "height": 620 })
+		dialogState.setSections([{ "id": "appearance", "title": "Appearance", "fields": [{
+			"id": "layout.density", "type": "select", "presentation": "segmented",
+			"label": "Density", "value": "compact", "hint": "Choose interface spacing",
+			"options": [
+				{ "label": "Compact interface", "value": "compact" },
+				{ "label": "Comfortable interface", "value": "comfortable" },
+				{ "label": "Extra spacious interface", "value": "spacious" }
+			]
+		}, {
+			"id": "layout.columns", "type": "select", "presentation": "segmented",
+			"label": "Columns", "value": 1,
+			"options": [{ "label": "One", "value": 1 }, { "label": "Two", "value": 2 }]
+		}]}])
+
+		const density = findChild(loader.item.contentItem, "dialogField_layout.density")
+		const compact = findChild(loader.item.contentItem, "dialogSegmentOption_layout.density_compact")
+		const comfortable = findChild(loader.item.contentItem, "dialogSegmentOption_layout.density_comfortable")
+		const spacious = findChild(loader.item.contentItem, "dialogSegmentOption_layout.density_spacious")
+		const columns = findChild(loader.item.contentItem, "dialogField_layout.columns")
+		const twoColumns = findChild(loader.item.contentItem, "dialogSegmentOption_layout.columns_2")
+		tryVerify(function() {
+			return density !== null && compact !== null && comfortable !== null && spacious !== null
+				&& columns !== null && twoColumns !== null && density.width > 0
+		})
+		compare(density.Accessible.role, Accessible.Grouping)
+		compare(density.Accessible.name, "Density")
+		compare(density.Accessible.description, "Choose interface spacing")
+		compare(compact.Accessible.role, Accessible.RadioButton)
+		compare(compact.Accessible.name, "Compact interface")
+		compare(compact.Accessible.checked, true)
+		compare(comfortable.Accessible.checked, false)
+		verify(spacious.x + spacious.width <= density.width,
+			"Long segmented labels must remain bounded by the narrow field")
+		verify(compact.width > 0 && comfortable.width > 0 && spacious.width > 0)
+		verify(compact.contentItem.implicitWidth > compact.contentItem.width,
+			"The narrow layout should elide long labels without changing their accessible names")
+
+		density.forceActiveFocus()
+		tryCompare(density, "activeFocus", true)
+		keyClick(Qt.Key_Right)
+		tryCompare(density, "currentIndex", 1)
+		compare(density.currentValue, "comfortable")
+		compare(dialogState.fieldValue("layout.density"), "comfortable")
+		compare(typeof dialogState.fieldValue("layout.density"), "string")
+		compare(comfortable.Accessible.checked, true)
+		keyClick(Qt.Key_Right)
+		compare(density.currentValue, "spacious")
+		compare(dialogState.fieldValue("layout.density"), "spacious")
+
+		mouseClick(twoColumns)
+		compare(columns.currentValue, 2)
+		compare(dialogState.fieldValue("layout.columns"), 2)
+		compare(typeof dialogState.fieldValue("layout.columns"), "number")
+		compare(twoColumns.Accessible.checked, true)
+	}
+
+	function test_field_hints_enabled_actions_and_image_picker_preserve_typed_presentation() {
+		dialogState.setSections([{ "id": "behavior", "title": "Behavior", "fields": [
+			{ "id": "feature.enabled", "type": "checkbox", "label": "Feature", "value": true,
+				"hint": "Controls the feature" },
+			{ "id": "profile.name", "type": "text", "label": "Name", "value": "Alice",
+				"hint": "Shown to other users" },
+			{ "id": "profile.bio", "type": "textarea", "label": "Bio", "value": "Hello",
+				"hint": "A short introduction" },
+			{ "id": "folder", "type": "pathPicker", "label": "Folder", "value": "C:/data",
+				"browseActionId": "browseFolder", "browseLabel": "Choose", "enabled": false,
+				"hint": "Stored locally" },
+			{ "id": "refresh", "type": "action", "label": "Theme library", "buttonLabel": "Reload",
+				"actionId": "reloadThemes", "tone": "warning", "hint": "Reload theme manifests" },
+			{ "id": "server.image", "type": "imagePicker", "label": "Server image",
+				"value": "managed-image-token", "previewSource": "image://mumble/dialog-image",
+				"browseActionId": "browseServerImage", "browseLabel": "Choose image",
+				"removeActionId": "removeServerImage", "removeLabel": "Clear image",
+				"hint": "Square images work best" }
+		]}])
+
+		const checkbox = findChild(loader.item.contentItem, "dialogField_feature.enabled")
+		const text = findChild(loader.item.contentItem, "dialogField_profile.name")
+		const textarea = findChild(loader.item.contentItem, "dialogField_profile.bio")
+		const path = findChild(loader.item.contentItem, "dialogField_folder")
+		const browsePath = findChild(loader.item.contentItem, "dialogBrowse_folder")
+		const action = findChild(loader.item.contentItem, "dialogField_refresh")
+		const preview = findChild(loader.item.contentItem, "dialogImagePreview_server.image")
+		const imageContent = findChild(loader.item.contentItem, "dialogImagePreviewContent_server.image")
+		const browseImage = findChild(loader.item.contentItem, "dialogImageBrowse_server.image")
+		const removeImage = findChild(loader.item.contentItem, "dialogImageRemove_server.image")
+		tryVerify(function() {
+			return checkbox !== null && text !== null && textarea !== null && path !== null
+				&& browsePath !== null && action !== null && preview !== null && imageContent !== null
+				&& browseImage !== null && removeImage !== null
+		})
+		compare(checkbox.Accessible.description, "Controls the feature")
+		compare(text.Accessible.description, "Shown to other users")
+		compare(textarea.Accessible.description, "A short introduction")
+		verify(!path.enabled && !browsePath.enabled)
+		compare(path.Accessible.description, "Stored locally")
+		compare(action.text, "Reload")
+		compare(action.tone, "warning")
+		compare(action.Accessible.description, "Reload theme manifests")
+		compare(preview.Accessible.role, Accessible.Graphic)
+		compare(preview.Accessible.name, "Preview of Server image")
+		compare(String(imageContent.source), "image://mumble/dialog-image")
+		verify(removeImage.visible)
+		browseImage.clicked()
+		compare(dialogState.lastAction, "browseServerImage")
+		compare(dialogState.lastPayload.fieldId, "server.image")
+		removeImage.clicked()
+		compare(dialogState.lastAction, "removeServerImage")
+		compare(dialogState.lastPayload.fieldId, "server.image")
+
+		dialogState.setSections([{ "id": "invalid-image", "fields": [{
+			"id": "unsafe.image", "type": "imagePicker", "label": "Unsafe image",
+			"value": "token", "previewSource": "https://example.test/image.png"
+		}]}])
+		const invalidPreview = findChild(loader.item.contentItem, "dialogImagePreview_unsafe.image")
+		const validation = findChild(loader.item.contentItem, "dialogImageValidation_unsafe.image")
+		tryVerify(function() { return invalidPreview !== null && validation !== null && validation.visible })
+		compare(validation.Accessible.role, Accessible.AlertMessage)
+		verify(validation.text.length > 0)
+		compare(invalidPreview.border.color, Theme.danger)
+	}
+
+	function test_section_presentation_metadata_selects_tokenized_surfaces() {
+		dialogState.setSections([
+			{ "id": "list", "title": "List", "presentation": "list",
+				"fields": [{ "type": "note", "text": "List item" }] },
+			{ "id": "records", "title": "Records", "presentation": "records",
+				"fields": [{ "type": "note", "text": "Record item" }] },
+			{ "id": "form", "title": "Form", "presentation": "form",
+				"fields": [{ "type": "note", "text": "Form item" }] }
+		])
+		const list = findChild(loader.item.contentItem, "dialogSection_list")
+		const records = findChild(loader.item.contentItem, "dialogSection_records")
+		const form = findChild(loader.item.contentItem, "dialogSection_form")
+		tryVerify(function() { return list !== null && records !== null && form !== null })
+		compare(list.Accessible.description, "list")
+		compare(records.Accessible.description, "records")
+		compare(form.Accessible.description, "form")
+		compare(list.color, Theme.strip)
+		compare(records.color, Theme.surfaceRaised)
+		compare(form.color, Theme.panel)
+	}
+
 	function test_special_editor_state_stays_live() {
 		dialogState.setSpecialState("stonks", { "stonks": { "status": "loading-marker" } });
 		const editorLoader = findChild(loader.item.contentItem, "stonksEditorLoader");
@@ -380,21 +1188,29 @@ TestCase {
 	}
 
 	function test_connect_favorites_selection_and_editor_rendering() {
-		dialogState.setSpecialState("connect", {
-			"id": "connect",
-			"pages": [],
-			"width": 860,
-			"height": 640,
-			"primaryActionId": "save",
-			"initialFocusId": "connectFavoriteList",
-			"selectedFavoriteIndex": 0,
-			"editorOpen": false,
-			"editorTitle": "Edit server",
-			"favorites": [
-				{ "index": 0, "label": "Production", "subtitle": "voice.example.test:64738 / Alice", "selected": true, "usersValue": "5/20", "pingValue": "24 ms" },
-				{ "index": 1, "label": "Testing", "subtitle": "test.example.test:64738 / Bob", "selected": false, "usersValue": "2/20", "pingValue": "31 ms" }
-			]
-		});
+		const favoriteState = selectedIndex => {
+			const rows = [
+				{ "id": "favorites:voice.example.test:64738", "sourceId": "favorites", "index": 0,
+					"label": "Production", "subtitle": "voice.example.test:64738 / Alice",
+					"selected": selectedIndex === 0, "usersValue": "5/20", "pingValue": "24 ms" },
+				{ "id": "favorites:test.example.test:64738", "sourceId": "favorites", "index": 1,
+					"label": "Testing", "subtitle": "test.example.test:64738 / Bob",
+					"selected": selectedIndex === 1, "usersValue": "2/20", "pingValue": "31 ms" }
+			];
+			return {
+				"id": "connect", "pages": [], "width": 860, "height": 640,
+				"primaryActionId": "save", "initialFocusId": "connectFavoriteList",
+				"selectedFavoriteIndex": selectedIndex, "selectedServerIndex": selectedIndex,
+				"selectedServerId": rows[selectedIndex].id, "activeSource": "favorites", "filter": "",
+				"editorOpen": false, "editorTitle": "Edit server", "favorites": rows, "sourceRows": rows,
+				"sources": [
+					{ "id": "favorites", "label": "Favorites", "status": "ready", "selected": true },
+					{ "id": "public", "label": "Public", "status": "idle" },
+					{ "id": "lan", "label": "LAN", "status": "idle" }
+				]
+			};
+		};
+		dialogState.setSpecialState("connect", favoriteState(0));
 		const list = findChild(loader.item.contentItem, "connectFavoriteList");
 		const surface = findChild(loader.item.contentItem, "connectFavoriteSurface");
 		const connectEyebrow = findChild(loader.item.contentItem, "dialogProductEyebrow");
@@ -404,7 +1220,9 @@ TestCase {
 		verify(connectEyebrow !== null && connectEyebrow.visible && connectEyebrow.text === "MUMBLE");
 		verify(addServer !== null && addServer.tone === "secondary");
 		tryCompare(list, "count", 2);
-		tryVerify(function() { return surface.height < 260 && loader.item.height < 500; });
+		const sourceSelector = findChild(loader.item.contentItem, "connectSourceSelector");
+		verify(sourceSelector !== null && sourceSelector.optionCount === 3);
+		tryVerify(function() { return surface.height < 320 && loader.item.height < 620; });
 		tryCompare(list, "activeFocus", true);
 
 		tryVerify(function() { return list.itemAtIndex(0) !== null && list.itemAtIndex(1) !== null; });
@@ -426,28 +1244,422 @@ TestCase {
 				&& secondFavorite.y >= list.contentY - 1
 				&& secondFavorite.y + secondFavorite.height <= list.contentY + list.height + 1;
 		});
-		wait(0);
-		mouseClick(secondFavorite, 8, Math.round(secondFavorite.height / 2));
-		compare(dialogState.lastAction, "selectFavorite");
+		keyClick(Qt.Key_Down);
+		compare(dialogState.lastAction, "selectServer");
+		compare(dialogState.lastPayload.id, "favorites:test.example.test:64738");
+		dialogState.setSpecialState("connect", favoriteState(1));
+		tryCompare(list, "currentIndex", 1);
+		tryVerify(function() {
+			return list.itemAtIndex(0) !== null && list.itemAtIndex(1) !== null
+				&& !list.itemAtIndex(0).highlighted && list.itemAtIndex(1).highlighted;
+		});
+		keyClick(Qt.Key_Space);
+		compare(dialogState.lastAction, "selectServer");
 		compare(dialogState.lastPayload.index, 1);
+		keyClick(Qt.Key_Return);
+		compare(dialogState.lastAction, "connectServer");
+		compare(dialogState.lastPayload.index, 1);
+		wait(0);
+		const firstAfterKeyboard = list.itemAtIndex(0);
+		verify(firstAfterKeyboard !== null);
+		mouseClick(firstAfterKeyboard, 8, Math.round(firstAfterKeyboard.height / 2));
+		compare(dialogState.lastAction, "selectServer");
+		compare(dialogState.lastPayload.index, 0);
+		compare(dialogState.lastPayload.sourceId, "favorites");
 		compare(dialogState.lastPayload.edit, false);
+		dialogState.setSpecialState("connect", favoriteState(0));
+		tryCompare(list, "currentIndex", 0);
+		tryVerify(function() {
+			return list.itemAtIndex(0) !== null && list.itemAtIndex(1) !== null
+				&& list.itemAtIndex(0).highlighted && !list.itemAtIndex(1).highlighted;
+		});
 
 		const connectAction = findChild(list.itemAtIndex(0), "connectFavoriteAction_0");
 		compare(connectAction, null);
 		const selectionIndicator = findChild(list.itemAtIndex(0), "connectFavoriteSelection_0");
 		verify(selectionIndicator !== null);
 		compare(selectionIndicator.name, "check");
-		firstFavorite.doubleClicked();
-		compare(dialogState.lastAction, "connectFavorite");
+		list.itemAtIndex(0).doubleClicked();
+		compare(dialogState.lastAction, "connectServer");
 		compare(dialogState.lastPayload.index, 0);
 
+		dialogState.setSections([{ "title": "Details", "fields": [{
+			"id": "host", "type": "text", "label": "Server address", "value": "voice.example.test"
+		}] }]);
 		dialogState.setSpecialState("connect", {
 			"id": "connect", "pages": [], "width": 860, "height": 640,
+			"initialFocusId": "dialogField_host",
 			"selectedFavoriteIndex": 0, "editorOpen": true,
 			"editorTitle": "Edit server", "favorites": [{ "index": 0, "label": "Production", "selected": true }]
 		});
 		const editorTitle = findChild(loader.item.contentItem, "connectEditorTitle");
-		tryVerify(function() { return editorTitle !== null && editorTitle.visible && editorTitle.text === "Edit server"; });
+		const editorSurface = findChild(loader.item.contentItem, "connectEditorSurface");
+		const sourceBar = findChild(loader.item.contentItem, "connectSourceBar");
+		const headerAction = findChild(loader.item.contentItem, "dialogCloseButton");
+		const hostField = findChild(loader.item.contentItem, "dialogField_host");
+		tryVerify(function() {
+			return editorTitle !== null && editorTitle.visible && editorTitle.text === "Edit server"
+				&& editorSurface !== null && editorSurface.visible
+				&& sourceBar !== null && !sourceBar.visible
+				&& !surface.visible && !list.visible && headerAction !== null
+				&& hostField !== null && hostField.activeFocus;
+		});
+		compare(headerAction.iconName, "previous");
+		compare(headerAction.text, "Back");
+		compare(headerAction.Accessible.name, "Back to favorites");
+		const actionCountBeforeHeader = dialogActionSpy.count;
+		mouseClick(headerAction);
+		compare(dialogState.lastAction, "backToFavorites");
+		compare(dialogActionSpy.count, actionCountBeforeHeader + 1);
+		hostField.forceActiveFocus();
+		tryCompare(hostField, "activeFocus", true);
+		keyClick(Qt.Key_Escape);
+		compare(dialogState.lastAction, "backToFavorites");
+		compare(dialogActionSpy.count, actionCountBeforeHeader + 2);
+	}
+
+	function test_connect_sources_expose_discovery_states_filter_keyboard_and_confirmations() {
+		const sources = status => [
+			{ "id": "favorites", "label": "Favorites", "status": "ready", "selected": false },
+			{ "id": "public", "label": "Public", "status": status, "selected": true,
+				"canCancel": status === "loading", "canRetry": status === "error",
+				"error": status === "error" ? "Directory unavailable" : "" },
+			{ "id": "lan", "label": "LAN", "status": "idle", "selected": false }
+		];
+		const publicRows = [
+			{ "id": "public:se", "sourceId": "public", "index": 0, "label": "Stockholm",
+				"subtitle": "se.example.test:64738 / Sweden", "usersValue": "12/64", "pingValue": "18 ms",
+				"selected": true },
+			{ "id": "public:de", "sourceId": "public", "index": 1, "label": "Berlin",
+				"subtitle": "de.example.test:64738 / Germany", "usersValue": "5/64", "pingValue": "31 ms" }
+		];
+		const state = (status, rows, confirmation) => ({
+			"id": "connect", "pages": [], "width": 860, "height": 640,
+			"initialFocusId": "connectSourceSelector", "activeSource": "public", "filter": "",
+			"selectedServerIndex": rows.length > 0 ? 0 : -1,
+			"selectedServerId": rows.length > 0 ? rows[0].id : "",
+			"editorOpen": false, "favorites": [], "sourceRows": rows,
+			"sources": sources(status), "pendingConfirmation": confirmation || {}
+		});
+
+		dialogState.setSpecialState("connect", state("loading", [], {}));
+		const selector = findChild(loader.item.contentItem, "connectSourceSelector");
+		const statusPanel = findChild(loader.item.contentItem, "connectSourceStatus");
+		let cancel = findChild(loader.item.contentItem, "connectSourceCancelButton");
+		tryVerify(function() { return selector !== null && statusPanel !== null && statusPanel.visible
+			&& cancel !== null && cancel.visible; });
+		compare(selector.currentValue, "public");
+		mouseClick(cancel);
+		compare(dialogState.lastAction, "cancelSource");
+		compare(dialogState.lastPayload.sourceId, "public");
+
+		dialogState.setSpecialState("connect", state("error", [], {}));
+		const retry = findChild(loader.item.contentItem, "connectSourceRetryButton");
+		tryVerify(function() { return retry !== null && retry.visible; });
+		compare(statusPanel.Accessible.role, Accessible.AlertMessage);
+		mouseClick(retry);
+		compare(dialogState.lastAction, "retrySource");
+		compare(dialogState.lastPayload.sourceId, "public");
+
+		dialogState.setSpecialState("connect", state("ready", publicRows, {}));
+		const list = findChild(loader.item.contentItem, "connectFavoriteList");
+		const filter = findChild(loader.item.contentItem, "connectServerFilter");
+		tryVerify(function() { return list !== null && list.count === 2 && filter !== null; });
+		filter.forceActiveFocus();
+		tryCompare(filter, "activeFocus", true);
+		keyClick(Qt.Key_Down);
+		tryCompare(list, "activeFocus", true);
+		keyClick(Qt.Key_Down);
+		compare(dialogState.lastAction, "selectServer");
+		compare(dialogState.lastPayload.id, "public:de");
+		keyClick(Qt.Key_Return);
+		compare(dialogState.lastAction, "connectServer");
+		compare(dialogState.lastPayload.sourceId, "public");
+
+		selector.forceActiveFocus();
+		tryCompare(selector, "activeFocus", true);
+		keyClick(Qt.Key_Right);
+		compare(dialogState.lastAction, "selectSource");
+		compare(dialogState.lastPayload.sourceId, "lan");
+
+		const discard = {
+			"kind": "discard", "title": "Discard server changes?", "message": "Unsaved details will be lost.",
+			"confirmActionId": "confirmDiscardEditor", "confirmLabel": "Discard changes"
+		};
+		dialogState.setSpecialState("connect", state("ready", publicRows, discard));
+		const confirmation = findChild(loader.item, "connectConfirmationPopup");
+		const confirmationCancel = findChild(loader.item, "connectConfirmationCancel");
+		const confirmationConfirm = findChild(loader.item, "connectConfirmationConfirm");
+		const barrier = findChild(loader.item, "dialogNestedModalAccessibilityBarrier");
+		tryVerify(function() { return confirmation !== null && confirmation.visible
+			&& confirmationCancel !== null && confirmationCancel.activeFocus && confirmationConfirm !== null
+			&& barrier !== null && barrier.active; });
+		compare(loader.item.nestedModalOpen, true);
+		verify(loader.item.contentItem.Accessible.ignored);
+		verify(selector.Accessible.ignored);
+		verify(!confirmation.contentItem.Accessible.ignored);
+		verify(!confirmationCancel.Accessible.ignored);
+		keyClick(Qt.Key_Tab);
+		tryCompare(confirmationConfirm, "activeFocus", true);
+		keyClick(Qt.Key_Tab);
+		tryCompare(confirmationCancel, "activeFocus", true);
+		keyClick(Qt.Key_Backtab);
+		tryCompare(confirmationConfirm, "activeFocus", true);
+		keyClick(Qt.Key_Backtab);
+		tryCompare(confirmationCancel, "activeFocus", true);
+		mouseClick(confirmationCancel);
+		compare(dialogState.lastAction, "dismissConfirmation");
+		dialogState.setSpecialState("connect", state("ready", publicRows, {}));
+		tryCompare(confirmation, "visible", false);
+		tryVerify(function() {
+			return !loader.item.contentItem.Accessible.ignored && !selector.Accessible.ignored
+				&& !barrier.active;
+		});
+		tryCompare(selector, "activeFocus", true);
+
+		const remove = {
+			"kind": "remove", "title": "Remove saved server?", "message": "This cannot be undone.",
+			"confirmActionId": "confirmRemoveFavorite", "confirmLabel": "Remove server"
+		};
+		dialogState.setSpecialState("connect", state("ready", publicRows, remove));
+		tryCompare(confirmation, "visible", true);
+		mouseClick(confirmationConfirm);
+		compare(dialogState.lastAction, "confirmRemoveFavorite");
+
+		const privacyConsent = {
+			"kind": "publicConsent", "title": "Enable public server discovery?",
+			"message": "The registry can see your IP address.",
+			"confirmActionId": "confirmEnablePublicSource", "confirmLabel": "Enable public servers",
+			"cancelLabel": "Keep disabled", "confirmTone": "accent"
+		};
+		dialogState.setSpecialState("connect", state("loading", [], privacyConsent));
+		tryCompare(confirmation, "visible", true);
+		compare(confirmationCancel.text, "Keep disabled");
+		compare(confirmationConfirm.text, "Enable public servers");
+		compare(confirmationConfirm.tone, "accent");
+		verify(findChild(loader.item, "connectConfirmationMessage").text.indexOf("IP address") >= 0);
+		const closeRequestsBeforeConfirmationEscape = dialogState.closeRequests;
+		keyClick(Qt.Key_Escape);
+		compare(dialogState.lastAction, "dismissConfirmation");
+		compare(dialogState.closeRequests, closeRequestsBeforeConfirmationEscape);
+		dialogState.setSpecialState("connect", state("loading", [], {}));
+		tryCompare(confirmation, "visible", false);
+
+		dialogState.setSpecialState("connect", state("loading", [], privacyConsent));
+		tryCompare(confirmation, "visible", true);
+		mouseClick(confirmationConfirm);
+		compare(dialogState.lastAction, "confirmEnablePublicSource");
+	}
+
+	function test_screen_share_selection_is_forwarded_to_native_validation() {
+		dialogState.setSpecialState("screenShare", {
+			"id": "screenShare", "primaryActionId": "screenShare.start",
+			"screenShare": {
+				"channelId": "7", "selectedSourceId": "",
+				"sources": [{ "id": "screens", "section": "Screens", "items": [
+					{ "id": "monitor:0", "title": "Screen 1", "thumbnail": "" }
+				] }],
+				"resolutionOptions": [{ "value": "1920x1080", "label": "1080p" }],
+				"resolutionDefault": "1920x1080",
+				"frameRateOptions": [{ "value": 30, "label": "30 FPS" }],
+				"frameRateDefault": 30,
+				"audioOptions": [{ "value": "", "label": "No audio" }],
+				"audioDefault": ""
+			}
+		})
+		const editorLoader = findChild(loader.item.contentItem, "screenShareEditorLoader")
+		tryVerify(function() { return editorLoader !== null && editorLoader.item !== null })
+		const source = findChild(editorLoader.item, "screenShareSource_monitor:0")
+		verify(source !== null)
+		source.selectSource()
+		compare(dialogState.lastAction, "screenShare.selectSource")
+		compare(dialogState.lastPayload.sourceId, "monitor:0")
+	}
+
+	function test_picker_action_restores_focus_after_native_round_trip() {
+		dialogState.setSections([{ "id": "storage", "title": "Storage", "fields": [{
+			"id": "folder", "type": "pathPicker", "label": "Folder", "value": "C:/data",
+			"browseActionId": "browseFolder", "browseLabel": "Choose folder"
+		}]}]);
+		const pickerState = { "id": "picker-focus", "pages": [], "width": 720, "height": 460 };
+		dialogState.setSpecialState("generic", pickerState);
+
+		let browse = findChild(loader.item.contentItem, "dialogBrowse_folder");
+		let closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		tryVerify(function() { return browse !== null && closeButton !== null && browse.visible; });
+		browse.forceActiveFocus();
+		tryCompare(browse, "activeFocus", true);
+		browse.clicked();
+		compare(dialogState.lastAction, "browseFolder");
+		// A native picker selection can republish the dialog DTO before the
+		// synchronous action returns. Reacquire the delegate and verify its stable
+		// product ID receives focus rather than relying on the old QObject pointer.
+		dialogState.setSpecialState("generic", Object.assign({ "roundTrip": 1 }, pickerState));
+		tryVerify(function() {
+			browse = findChild(loader.item.contentItem, "dialogBrowse_folder");
+			return browse !== null && browse.activeFocus;
+		});
+
+		// A later refresh must not steal focus back when the user has already
+		// selected a different named destination.
+		browse.clicked();
+		closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		dialogState.setSpecialState("generic", Object.assign({ "roundTrip": 2 }, pickerState));
+		tryVerify(function() {
+			closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+			return closeButton !== null && closeButton.activeFocus;
+		});
+	}
+
+	function test_settings_starts_on_navigation_and_resets_scroll_between_pages() {
+		const fields = [];
+		for (let index = 0; index < 18; ++index) {
+			fields.push({ "id": "pageField" + index, "type": "text",
+				"label": "Page field " + index, "value": "Value " + index });
+		}
+		dialogState.setSections([{ "title": "Long page", "fields": fields }]);
+		dialogState.setSpecialState("settings", {
+			"id": "settings-page-focus", "width": 920, "height": 520,
+			"pages": [
+				{ "id": "general", "label": "Audio Input" },
+				{ "id": "appearance", "label": "Appearance" }
+			],
+			"primaryActionId": "save"
+		});
+		dialogState.invokeAction("selectPage", { "pageId": "general" });
+
+		const pages = findChild(loader.item.contentItem, "dialogPageList");
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		tryVerify(function() {
+			return pages !== null && pages.visible && pages.activeFocus
+				&& scroll !== null && scroll.contentHeight > scroll.height;
+		});
+		keyClick(Qt.Key_Down);
+		compare(pages.currentIndex, 1);
+		keyClick(Qt.Key_Return);
+		compare(dialogState.lastAction, "selectPage");
+		compare(dialogState.lastPayload.pageId, "appearance");
+		dialogState.invokeAction("selectPage", { "pageId": "general" });
+		tryCompare(pages, "activeFocus", true);
+		scroll.contentItem.contentY = Math.max(0, scroll.contentItem.contentHeight - scroll.height);
+		verify(scroll.contentItem.contentY > 0);
+
+		dialogState.invokeAction("selectPage", { "pageId": "appearance" });
+		tryCompare(pages, "activeFocus", true);
+		tryCompare(scroll.contentItem, "contentY", 0);
+
+		dialogState.setSpecialState("settings", {
+			"id": "settings-page-focus", "width": 640, "height": 520,
+			"pages": [
+				{ "id": "general", "label": "Audio Input" },
+				{ "id": "appearance", "label": "Appearance" }
+			],
+			"primaryActionId": "save"
+		});
+		const compactSelector = findChild(loader.item.contentItem, "dialogCompactPageSelector");
+		tryVerify(function() {
+			return compactSelector !== null && compactSelector.visible && compactSelector.activeFocus;
+		});
+	}
+
+	function test_transient_child_restores_parent_focus_and_scroll() {
+		const parentFields = [];
+		for (let index = 0; index < 18; ++index) {
+			parentFields.push({ "id": "parent" + index, "type": "text",
+				"label": "Parent field " + index, "value": "Value " + index });
+		}
+		const parentSections = [{ "title": "Parent settings", "fields": parentFields }];
+		const parentState = {
+			"id": "settings", "width": 920, "height": 500,
+			"pages": [{ "id": "general", "label": "Audio Input" }],
+			"primaryActionId": "save"
+		};
+		dialogState.setSections(parentSections);
+		dialogState.setSpecialState("settings", parentState);
+		dialogState.invokeAction("selectPage", { "pageId": "general" });
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		let parentField = findChild(loader.item.contentItem, "dialogField_parent17");
+		tryVerify(function() {
+			return scroll !== null && parentField !== null && scroll.contentHeight > scroll.height;
+		});
+		parentField.forceActiveFocus();
+		tryCompare(parentField, "activeFocus", true);
+		dialogState.setValidationError("parent0", "Parent value is invalid");
+		tryCompare(parentField, "activeFocus", true);
+		scroll.contentItem.contentY = Math.min(140,
+			Math.max(0, scroll.contentItem.contentHeight - scroll.height));
+		const savedContentY = scroll.contentItem.contentY;
+		verify(savedContentY > 0);
+
+		// Opening a different generic ID represents the controller's transient
+		// child push and must snapshot the parent's presentation state.
+		dialogState.setSpecialState("info", {
+			"id": "pluginUpdateConfirm", "pages": [], "width": 620, "height": 360
+		});
+		dialogState.setSections([{ "title": "Plugin update", "fields": [{
+			"id": "confirmation", "type": "note", "text": "Install update?"
+		}]}]);
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+
+		// Simulate the controller pop: restore the exact parent DTO, then its ID.
+		dialogState.setSections(parentSections);
+		dialogState.setSpecialState("settings", parentState);
+		parentField = findChild(loader.item.contentItem, "dialogField_parent17");
+		tryVerify(function() { return parentField !== null && parentField.activeFocus; });
+		tryVerify(function() {
+			return Math.abs(scroll.contentItem.contentY - savedContentY) < 0.5;
+		});
+		dialogState.setValidationError("parent0", "");
+	}
+
+	function test_search_query_debounces_and_hands_keyboard_to_results() {
+		dialogState.setSpecialState("form", {
+			"id": "serverSearch", "pages": [], "width": 820, "height": 680,
+			"initialFocusId": "search.query", "primaryActionId": "close"
+		});
+		dialogState.setSections([{ "title": "Search", "fields": [
+			{
+				"id": "search.query", "type": "text", "label": "Search", "value": "",
+				"liveUpdate": true, "updateDelayMs": 80, "resultListId": "search.results"
+			},
+			{
+				"id": "search.results", "type": "resultList", "label": "Results",
+				"inputFieldId": "search.query", "items": [
+					{ "stableId": "channel:7", "id": 7, "type": "channel", "label": "Lobby",
+						"primaryActionId": "selectSearchResult" },
+					{ "stableId": "user:11", "id": 11, "type": "user", "label": "Alex",
+						"primaryActionId": "messageSearchResult" }
+				]
+			}
+		] }]);
+
+		const query = findChild(loader.item.contentItem, "dialogField_search.query");
+		const results = findChild(loader.item.contentItem, "dialogResultList_search.results");
+		tryVerify(function() { return query !== null && query.activeFocus && results !== null && results.count === 2; });
+		keyClick(Qt.Key_L);
+		keyClick(Qt.Key_O);
+		keyClick(Qt.Key_B);
+		tryVerify(function() { return String(dialogState.fieldValue("search.query")) === "lob"; }, 500);
+		tryCompare(query, "activeFocus", true);
+
+		keyClick(Qt.Key_Down);
+		tryCompare(results, "activeFocus", true);
+		compare(results.currentIndex, 0);
+		keyClick(Qt.Key_Return);
+		compare(dialogState.lastAction, "selectSearchResult");
+		compare(dialogState.lastPayload.id, 7);
+		compare(dialogState.lastPayload.type, "channel");
+
+		keyClick(Qt.Key_Up);
+		tryCompare(query, "activeFocus", true);
+		keyClick(Qt.Key_Return);
+		compare(dialogState.lastAction, "selectSearchResult");
+		compare(dialogState.lastPayload.id, 7);
 	}
 
 	function test_certificate_uses_summary_cards_and_two_column_workflow() {
@@ -545,6 +1757,21 @@ TestCase {
 		compare(dialogState.revision, structuralRevision)
 		tryCompare(meter, "meterValue", 31)
 		tryVerify(function() { return Math.round((fill.width / track.width) * 100) === 31; })
+
+		// Screenshot fixtures retain the production field but intentionally ignore
+		// the audio thread's presentation-only samples. The rendered meter must
+		// return to the DTO value and remain unchanged across subsequent updates.
+		loader.item.visualFixtureMode = true
+		tryCompare(meter, "meterValue", 63)
+		tryVerify(function() { return Math.round((fill.width / track.width) * 100) === 63; })
+		const fixtureWidth = fill.width
+		verify(dialogState.updatePresentationFieldValue("audio.inputMeter", {
+			"available": true, "connected": true, "amplitude": 91, "signalToNoise": 89,
+			"hybrid": 93, "transmitting": true, "peakCleanMicDb": -5
+		}))
+		wait(120)
+		compare(meter.meterValue, 63)
+		compare(fill.width, fixtureWidth)
 
 		const setup = findChild(loader.item.contentItem, "voiceMeterCalibration_audio.inputMeter");
 		verify(setup !== null && setup.visible);
@@ -689,6 +1916,80 @@ TestCase {
 		list.positionViewAtIndex(999, ListView.Contain);
 		tryVerify(function() { return list.itemAtIndex(999) !== null; });
 		compare(list.itemAtIndex(999).stableId, "record-999");
+	}
+
+	function test_message_event_editor_uses_delegate_indices_for_row_striping() {
+		dialogState.setSections([{ "fields": [{
+			"id": "messages.events", "type": "messageEventEditor", "label": "Event behavior",
+			"rows": [
+				{ "type": 1, "name": "Debug", "console": true },
+				{ "type": 2, "name": "Warning", "notification": true }
+			]
+		}] }]);
+		let first = null;
+		let second = null;
+		tryVerify(function() {
+			first = findChild(loader.item.contentItem, "messageEventRow_1");
+			second = findChild(loader.item.contentItem, "messageEventRow_2");
+			return first !== null && second !== null;
+		});
+		compare(String(first.color), String(Theme.strip));
+		compare(second.color.a, 0);
+	}
+
+	function test_message_event_editor_keeps_labeled_columns_pinned_and_aligned() {
+		const rows = [];
+		for (let index = 0; index < 80; ++index) {
+			rows.push({ "type": index + 1, "name": "Event " + (index + 1),
+				"console": index === 0, "notification": false,
+				"highlight": false, "tts": false, "sound": false });
+		}
+		dialogState.setSections([{ "fields": [{
+			"id": "messages.events", "type": "messageEventEditor", "label": "Event behavior",
+			"rows": rows
+		}] }]);
+
+		const list = findChild(loader.item.contentItem, "messageEventList");
+		const header = findChild(loader.item.contentItem, "messageEventHeader");
+		const columnObjectNames = [
+			["messageEventHeaderLogColumn", "messageEventConsoleColumn_1"],
+			["messageEventHeaderNotifyColumn", "messageEventNotificationColumn_1"],
+			["messageEventHeaderHighlightColumn", "messageEventHighlightColumn_1"],
+			["messageEventHeaderTtsColumn", "messageEventTtsColumn_1"],
+			["messageEventHeaderSoundColumn", "messageEventSoundColumn_1"]
+		];
+		const columnPairs = [];
+		tryVerify(function() {
+			if (list === null || header === null)
+				return false;
+			columnPairs.length = 0;
+			for (let index = 0; index < columnObjectNames.length; ++index) {
+				const heading = findChild(loader.item.contentItem, columnObjectNames[index][0]);
+				const cell = findChild(loader.item.contentItem, columnObjectNames[index][1]);
+				if (heading === null || cell === null)
+					return false;
+				columnPairs.push([heading, cell]);
+			}
+			return true;
+		});
+		verify(list.contentHeight > list.height);
+		compare(findChild(loader.item.contentItem, "messageEventHeaderLog").text, "Log");
+		for (let index = 0; index < columnPairs.length; ++index) {
+			const heading = columnPairs[index][0];
+			const cell = columnPairs[index][1];
+			compare(heading.width, cell.width);
+			const headerCenter = heading.mapToItem(list, heading.width / 2, 0).x;
+			const cellCenter = cell.mapToItem(list, cell.width / 2, 0).x;
+			verify(Math.abs(headerCenter - cellCenter) < 0.01,
+				columnObjectNames[index][0] + " center " + headerCenter
+					+ " did not match " + columnObjectNames[index][1] + " center " + cellCenter);
+		}
+
+		list.positionViewAtEnd();
+		tryVerify(function() { return list.contentY > 0; });
+		tryVerify(function() {
+			return Math.abs(header.mapToItem(list, 0, 0).y) <= 1.5;
+		});
 	}
 
 	function test_result_list_has_bounded_empty_loading_and_error_states() {

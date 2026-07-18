@@ -72,6 +72,12 @@ TestCase {
 	}
 
 	SignalSpy {
+		id: attachmentRetrySpy
+		target: attachmentLoader.item
+		signalName: "attachmentRetryRequested"
+	}
+
+	SignalSpy {
 		id: linkSpy
 		target: bodyLoader.item
 		signalName: "linkRequested"
@@ -108,6 +114,18 @@ TestCase {
 	}
 
 	SignalSpy {
+		id: popoutDirectMediaSpy
+		target: previewLoader.item
+		signalName: "popoutDirectMediaRequested"
+	}
+
+	SignalSpy {
+		id: sizePresetSpy
+		target: previewLoader.item
+		signalName: "sizePresetRequested"
+	}
+
+	SignalSpy {
 		id: watchTogetherSpy
 		target: previewLoader.item
 		signalName: "watchTogetherRequested"
@@ -118,10 +136,60 @@ TestCase {
 		property bool active: false
 		property bool detached: true
 		property string sessionId: ""
+		property string provider: "youtube"
+		property string url: "https://www.youtube.com/embed/test"
+		property string audioUrl: ""
+		property string state: "idle"
+		property string error: ""
+		property string errorCode: ""
+		property bool sharedHost: false
 		property int detachCalls: 0
+		property int pauseCalls: 0
+		property int retryCalls: 0
+		property int closeCalls: 0
+		property int typedErrorCalls: 0
 		function detach() {
 			detachCalls += 1
 			detached = true
+		}
+		function pause() {
+			pauseCalls += 1
+			state = "paused"
+		}
+		function retry() {
+			retryCalls += 1
+			state = "loading"
+			error = ""
+			errorCode = ""
+		}
+		function reportError(message) {
+			state = "error"
+			error = String(message || "")
+			errorCode = "playback-failed"
+		}
+		function reportTypedError(code, message) {
+			typedErrorCalls += 1
+			state = "error"
+			errorCode = String(code || "")
+			error = String(message || "")
+		}
+		function closePlayer() {
+			closeCalls += 1
+			active = false
+			detached = true
+		}
+	}
+
+	QtObject {
+		id: mediaRuntime
+		property bool runtimeReady: false
+		property bool runtimePreparing: false
+		property string runtimeError: ""
+		property int retryCalls: 0
+		function retryRuntime() {
+			retryCalls += 1
+			runtimeError = ""
+			runtimePreparing = true
 		}
 	}
 
@@ -129,13 +197,16 @@ TestCase {
         tryVerify(function() {
             return bodyLoader.item !== null && previewLoader.item !== null && attachmentLoader.item !== null
         })
-        attachmentSpy.clear()
+		attachmentSpy.clear()
 		attachmentDownloadSpy.clear()
+		attachmentRetrySpy.clear()
         directMediaSpy.clear()
         externalOpenSpy.clear()
         imageOpenSpy.clear()
 		inlinePlaySpy.clear()
 		popoutPlaySpy.clear()
+		popoutDirectMediaSpy.clear()
+		sizePresetSpy.clear()
 		watchTogetherSpy.clear()
 		linkSpy.clear()
 		bodyLoader.item.segments = [
@@ -143,9 +214,12 @@ TestCase {
 			{ "text": " bad", "href": "javascript:alert(2)" },
 			{ "text": " safe", "href": "https://example.com/path?q=1", "bold": true }
 		]
+		bodyLoader.item.accessibilitySuppressed = false
+		bodyLoader.item.resourceActive = true
 		previewLoader.width = testCase.width
 		previewLoader.height = 180
 		attachmentLoader.width = testCase.width
+		attachmentLoader.item.resourceActive = true
         previewLoader.item.preview = {
             "state": "loading",
             "loading": true,
@@ -156,7 +230,12 @@ TestCase {
 		previewLoader.item.watchTogetherAvailable = true
 		previewLoader.item.renderActive = true
 		previewLoader.item.mediaSessionController = null
+		previewLoader.item.mediaProfileFactory = null
+		previewLoader.item.visualMediaFixtureMode = ""
 		previewLoader.item.mediaSessionId = ""
+		previewLoader.item.savedSizePreset = ""
+		previewLoader.item.inlinePlayerComponentUrl = Qt.resolvedUrl(
+			"../../../mumble/qml-shell/InlineMediaPlayer.qml")
 		previewLoader.item.resetForReuse()
 		const previewOverflowMenu = findChild(previewLoader.item, "previewOverflowMenu")
 		if (previewOverflowMenu && previewOverflowMenu.visible)
@@ -164,7 +243,22 @@ TestCase {
 		inlineSession.active = false
 		inlineSession.detached = true
 		inlineSession.sessionId = ""
+		inlineSession.url = "https://www.youtube.com/embed/test"
+		inlineSession.audioUrl = ""
+		inlineSession.provider = "youtube"
+		inlineSession.state = "idle"
+		inlineSession.error = ""
+		inlineSession.errorCode = ""
+		inlineSession.sharedHost = false
 		inlineSession.detachCalls = 0
+		inlineSession.pauseCalls = 0
+		inlineSession.retryCalls = 0
+		inlineSession.closeCalls = 0
+		inlineSession.typedErrorCalls = 0
+		mediaRuntime.runtimeReady = false
+		mediaRuntime.runtimePreparing = false
+		mediaRuntime.runtimeError = ""
+		mediaRuntime.retryCalls = 0
 		attachmentLoader.item.attachments = [{
 			"id": "asset:1",
 			"kind": "image",
@@ -185,14 +279,75 @@ TestCase {
         compare(body.safeExternalUrl("https://example.com"), "https://example.com")
         const renderedText = findChild(body, "richMessageBodyText")
         verify(renderedText !== null)
-        compare(renderedText.textFormat, Text.RichText)
+		compare(renderedText.textFormat, Text.RichText)
+		compare(body.lineHeight, Theme.chatBodyLineHeight)
+		compare(renderedText.lineHeightMode, Text.ProportionalHeight)
+		compare(renderedText.lineHeight, Theme.chatBodyLineHeight)
 		compare(body.keyboardLinks.length, 1)
-		body.forceActiveFocus()
-		tryCompare(body, "activeFocus", true)
+		const linkTarget = findChild(body, "richMessageBodyLinkTarget")
+		verify(linkTarget !== null)
+		linkTarget.forceActiveFocus()
+		tryCompare(linkTarget, "activeFocus", true)
 		keyClick(Qt.Key_Return)
 		compare(linkSpy.count, 1)
 		compare(linkSpy.signalArguments[0][0], "https://example.com/path?q=1")
     }
+
+	function test_multiple_text_links_keep_one_visible_named_keyboard_target() {
+		const body = bodyLoader.item
+		body.segments = [
+			{ "text": "Documentation", "href": "https://example.com/docs" },
+			{ "text": " and " },
+			{ "text": "Support", "href": "https://example.com/support" }
+		]
+		const renderedText = findChild(body, "richMessageBodyText")
+		const linkTarget = findChild(body, "richMessageBodyLinkTarget")
+		const focusRing = findChild(body, "richMessageBodyFocusRing")
+		verify(renderedText !== null && renderedText.visible && linkTarget !== null && focusRing !== null)
+		compare(linkTarget.objectName, "richMessageBodyLinkTarget")
+		compare(body.keyboardLinks.length, 2)
+		compare(body.keyboardLinkEntries[0].label, "Documentation")
+		compare(body.keyboardLinkEntries[1].label, "Support")
+		compare(body.Accessible.ignored, true)
+		compare(linkTarget.Accessible.role, Accessible.Link)
+		compare(linkTarget.Accessible.name, "Documentation and Support")
+		verify(linkTarget.Accessible.description.indexOf("Documentation") >= 0)
+
+		linkTarget.forceActiveFocus()
+		tryCompare(linkTarget, "activeFocus", true)
+		tryCompare(focusRing, "visible", true)
+		keyClick(Qt.Key_Right)
+		compare(body.keyboardLinkIndex, 1)
+		compare(linkTarget.Accessible.name, "Documentation and Support")
+		verify(linkTarget.Accessible.description.indexOf("Link 2 of 2") >= 0)
+		verify(linkTarget.Accessible.description.indexOf("Support") >= 0)
+		keyClick(Qt.Key_Return)
+		compare(linkSpy.count, 1)
+		compare(linkSpy.signalArguments[0][0], "https://example.com/support")
+	}
+
+	function test_modal_owner_suppresses_promoted_rich_message_semantics() {
+		const body = bodyLoader.item
+		body.segments = [ { "text": "Background message", "href": "https://example.com/background" } ]
+		const linkTarget = findChild(body, "richMessageBodyLinkTarget")
+		verify(linkTarget !== null)
+		compare(linkTarget.Accessible.ignored, false)
+		verify(linkTarget.activeFocusOnTab)
+
+		body.accessibilitySuppressed = true
+		compare(linkTarget.Accessible.ignored, true)
+		compare(linkTarget.activeFocusOnTab, false)
+		body.segments = [ {
+			"kind": "image", "source": "image://mumble/fixture-inline-image",
+			"alt": "Background image", "href": "https://example.com/background-image"
+		} ]
+		wait(0)
+		const imageCard = findChild(body, "richMessageImageCard_0")
+		verify(imageCard !== null)
+		compare(imageCard.Accessible.ignored, true)
+
+		body.accessibilitySuppressed = false
+	}
 
 	function test_plain_text_fast_path_preserves_rich_formatting() {
 		const body = bodyLoader.item
@@ -213,10 +368,23 @@ TestCase {
 		compare(renderedText.textFormat, Text.RichText)
 	}
 
-    function test_preview_loading_error_and_expansion_states() {
-        const card = previewLoader.item
-        compare(card.previewState, "loading")
-        card.preview = {
+	function test_preview_loading_error_and_expansion_states() {
+		const card = previewLoader.item
+		compare(card.previewState, "loading")
+		const stateBadge = findChild(card, "previewStateBadge")
+		const stateBadgeLabel = findChild(card, "previewStateBadgeLabel")
+		const actionFlow = findChild(card, "previewActionFlow")
+		const openButton = findChild(card, "previewOpenButton")
+		verify(stateBadge !== null && stateBadge.visible)
+		verify(stateBadgeLabel !== null)
+		compare(stateBadgeLabel.text, "Loading")
+		verify(actionFlow !== null && actionFlow.visible)
+		verify(openButton !== null && openButton.visible && openButton.enabled)
+		compare(openButton.Accessible.role, Accessible.Link)
+		openButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], "https://example.com/card")
+		card.preview = {
             "state": "error",
             "failed": true,
             "title": "Preview unavailable",
@@ -224,7 +392,8 @@ TestCase {
 			"errorDescription": "<b>Provider request failed</b>",
             "url": "https://example.com/card"
         }
-        compare(card.previewState, "error")
+		compare(card.previewState, "error")
+		compare(stateBadgeLabel.text, "Unavailable")
 		compare(card.sanitizedDescription, "The original provider summary remains ordinary content.")
 		compare(card.errorDescription, "<b>Provider request failed</b>")
 		verify(card.Accessible.description.indexOf("<b>Provider request failed</b>") >= 0)
@@ -287,7 +456,8 @@ TestCase {
 			"state": "ready", "title": "Hidden structured details", "url": "https://example.com/details",
 			"previewSize": "compact", "metadata": {
 				"previewKind": "product", "productPrice": "10 kr", "productAvailability": "In stock",
-				"productDelivery": "Tomorrow", "productRating": "4.8", "productBrand": "Example"
+				"productDelivery": "Tomorrow", "productRating": "4.8", "productBrand": "Example",
+				"productSku": "SKU-42"
 			}
 		}
 		card.previewIdentity = "message:hidden-details"
@@ -314,12 +484,13 @@ TestCase {
             ]
         }
         card.previewIdentity = "message:1|gallery"
-        card.userExpanded = true
+		card.setSizePreset("large")
         card.selectedMediaIndex = 1
 		const animationLoader = findChild(card, "previewExpandedAnimatedLoader")
 		verify(animationLoader !== null)
 		compare(animationLoader.active, false)
         verify(card.expanded)
+		compare(card.sizePresetOverride, "large")
         compare(card.selectedMediaIndex, 1)
 		card.preview = {
 			"state": "ready",
@@ -332,14 +503,21 @@ TestCase {
 			]
 		}
 		compare(card.selectedMediaIndex, 1)
-        card.previewIdentity = "message:2|gallery"
-        verify(!card.userExpanded)
-        compare(card.selectedMediaIndex, 0)
-        card.userExpanded = true
-        card.selectedMediaIndex = 1
-        card.resetForReuse()
-        verify(!card.userExpanded)
-        compare(card.selectedMediaIndex, 0)
+		compare(card.sizePresetOverride, "large")
+		card.savedSizePreset = "large"
+		card.previewIdentity = "message:2|gallery"
+		verify(!card.userExpanded)
+		compare(card.sizePresetOverride, "")
+		compare(card.effectiveSizePreset, "large")
+		compare(card.selectedMediaIndex, 0)
+		card.setSizePreset("compact")
+		card.selectedMediaIndex = 1
+		card.resetForReuse()
+		verify(!card.userExpanded)
+		compare(card.sizePresetOverride, "")
+		compare(card.savedSizePreset, "large")
+		compare(card.effectiveSizePreset, "large")
+		compare(card.selectedMediaIndex, 0)
     }
 
     function test_preview_images_never_render_remote_or_data_urls_directly() {
@@ -443,7 +621,75 @@ TestCase {
 		tryVerify(function() { return Math.abs(expandedPanel.width - card.width) <= 1 }, 5000,
 			"expanded media width " + expandedPanel.width + " did not fill card width " + card.width)
 		compare(expandedImage.fillMode, Image.PreserveAspectCrop)
-		verify(expandedPanel.height > compactImage.height * 3)
+		tryVerify(function() { return expandedPanel.height > compactImage.height * 3 }, 5000,
+			"expanded media height " + expandedPanel.height
+			+ " did not settle above compact media height " + compactImage.height)
+	}
+
+	function test_pooled_rich_images_release_sources_without_changing_geometry() {
+		bodyLoader.item.segments = [{
+			"kind": "image", "source": "image://mumble/fixture-inline",
+			"width": 320, "height": 180, "alt": "Fixture inline image"
+		}]
+		tryVerify(function() {
+			return findChild(bodyLoader.item, "richMessageInlineImage_0") !== null
+		})
+		const inlineImage = findChild(bodyLoader.item, "richMessageInlineImage_0")
+		const bodyHeight = bodyLoader.item.implicitHeight
+		verify(String(inlineImage.source).length > 0)
+		bodyLoader.item.resourceActive = false
+		tryCompare(inlineImage, "source", "")
+		compare(bodyLoader.item.implicitHeight, bodyHeight)
+
+		const attachmentImage = findChild(attachmentLoader.item, "attachmentImage_asset:1")
+		verify(attachmentImage !== null)
+		const attachmentHeight = attachmentLoader.item.implicitHeight
+		verify(String(attachmentImage.source).length > 0)
+		attachmentLoader.item.resourceActive = false
+		tryCompare(attachmentImage, "source", "")
+		compare(attachmentLoader.item.implicitHeight, attachmentHeight)
+	}
+
+	function test_expanded_product_keeps_inset_content_inside_card() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "product",
+			"title": "Logitech G Pro X Superlight 2",
+			"subtitle": "Inet",
+			"description": "Wireless mouse · 60 g · LIGHTSPEED",
+			"previewSize": "large",
+			"mediaItems": [{
+				"kind": "image",
+				"mime": "image/png",
+				"url": "image://mumble/full-bleed-fixture?g=product"
+			}],
+			"metadata": {
+				"provider": "inet",
+				"previewKind": "product",
+				"productTitle": "Logitech G Pro X Superlight 2",
+				"productPrice": "1 499 kr",
+				"productAvailability": "In stock online"
+			}
+		}
+		card.previewIdentity = "message:expanded-product-insets"
+		const content = findChild(card, "previewContent")
+		const header = findChild(card, "previewGenericHeader")
+		const details = findChild(card, "providerDetails")
+		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
+		verify(content !== null && header !== null && details !== null && expandedPanel !== null)
+		tryVerify(function() { return card.expanded && card.implicitHeight > 180 })
+		previewLoader.height = Math.ceil(card.implicitHeight)
+		wait(0)
+		tryCompare(header, "width", content.width)
+		tryCompare(details, "width", content.width)
+		const headerOrigin = header.mapToItem(content, 0, 0)
+		verify(headerOrigin.x >= -0.5)
+		verify(headerOrigin.x + header.width <= content.width + 0.5,
+			"generic header width " + header.width + " escaped inset content width " + content.width)
+		const panelOrigin = expandedPanel.mapToItem(card, 0, 0)
+		verify(Math.abs(panelOrigin.x) <= 1)
+		verify(Math.abs(expandedPanel.width - card.width) <= 1)
 	}
 
     function test_direct_media_gallery_is_bounded_and_typed() {
@@ -471,6 +717,8 @@ TestCase {
         compare(card.mediaItems.length, 16)
         compare(card.currentMediaKind, "video")
         verify(card.hasDirectMedia)
+		verify(card.localPlaybackSupported)
+		verify(!card.sharedPlaybackSupported)
         card.requestCurrentMedia()
         compare(directMediaSpy.count, 1)
         compare(directMediaSpy.signalArguments[0][0], "data:video/mp4;base64,AAAA")
@@ -512,30 +760,114 @@ TestCase {
 		}
 		card.previewIdentity = "message:embed-actions|youtube"
 		const inlineButton = findChild(card, "previewPlayButton")
+		const originalFooterButton = findChild(card, "previewEmbedOriginalButton")
 		const posterAction = findChild(card, "previewEmbedPosterAction")
 		const cardOpenSurface = findChild(card, "previewCardOpenSurface")
+		const externalPrimaryButton = findChild(card, "previewOpenButton")
+		const originalButton = findChild(card, "previewOpenOriginalButton")
 		const popoutButton = findChild(card, "previewPopoutButton")
 		const overflowButton = findChild(card, "previewOverflowButton")
 		verify(inlineButton !== null && inlineButton.visible)
+		verify(originalFooterButton !== null && originalFooterButton.visible)
 		verify(posterAction !== null && posterAction.visible && posterAction.enabled)
 		verify(cardOpenSurface !== null && !cardOpenSurface.enabled)
+		verify(externalPrimaryButton !== null && !externalPrimaryButton.visible)
 		verify(popoutButton !== null && overflowButton !== null)
 		compare(inlineButton.text, "Play here")
+		verify(card.localPlaybackSupported)
+		verify(card.sharedPlaybackSupported)
 		compare(inlineButton.posterBacked, false)
-		verify(inlineButton.implicitWidth > inlineButton.implicitHeight)
-		compare(findChild(card, "previewPlayText").visible, true)
+		compare(inlineButton.implicitWidth, inlineButton.implicitHeight)
+		compare(findChild(card, "previewPlayText").visible, false)
+		compare(originalFooterButton.text, "Open")
+		compare(originalFooterButton.Accessible.role, Accessible.Link)
 		compare(card.playAccessibilityName, "Play Video here")
 		compare(inlineButton.Accessible.name, card.playAccessibilityName)
 		overflowButton.clicked()
 		tryCompare(popoutButton, "visible", true)
-		compare(popoutButton.text, "Open player")
+		compare(popoutButton.text, "Open in separate player")
+		tryCompare(originalButton, "visible", false)
+		originalFooterButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], "https://www.youtube.com/watch?v=test")
 		posterAction.clicked()
 		compare(inlinePlaySpy.count, 1)
 		compare(inlinePlaySpy.signalArguments[0][0], "https://www.youtube.com/embed/test")
-		compare(externalOpenSpy.count, 0)
+		compare(externalOpenSpy.count, 1)
+		compare(card.effectiveSizePreset, "default")
 		popoutButton.triggered()
 		compare(popoutPlaySpy.count, 1)
 		findChild(card, "previewOverflowMenu").close()
+	}
+
+	function test_instagram_post_uses_view_semantics_while_reel_and_tv_remain_playback() {
+		const card = previewLoader.item
+		const inlineButton = findChild(card, "previewPlayButton")
+		const inlineIcon = findChild(card, "previewPlayIcon")
+		const popoutButton = findChild(card, "previewPopoutButton")
+		const watchButton = findChild(card, "previewWatchTogetherButton")
+		const overflowButton = findChild(card, "previewOverflowButton")
+		const overflowMenu = findChild(card, "previewOverflowMenu")
+		verify(inlineButton !== null && inlineIcon !== null && popoutButton !== null
+			&& watchButton !== null && overflowButton !== null && overflowMenu !== null)
+
+		const fixtures = [
+			{ "path": "p/static-post", "metadataKind": "post", "normalizedKind": "post",
+			  "aspect": "square", "label": "View here", "icon": "eye",
+			  "accessibleName": "View Instagram item here",
+			  "accessibleDescription": "Loads the provider post in this preview",
+			  "popoutLabel": "Open in separate viewer",
+			  "popoutDescription": "Open the provider post in a separate window",
+			  "localPlayback": false },
+			{ "path": "reel/moving-reel", "metadataKind": "reel", "normalizedKind": "reel",
+			  "aspect": "short", "label": "Play here", "icon": "play",
+			  "accessibleName": "Play Instagram item here",
+			  "accessibleDescription": "Loads the provider player in this preview",
+			  "popoutLabel": "Open in separate player",
+			  "popoutDescription": "Open the provider player in a separate window",
+			  "localPlayback": true },
+			// The canonical path wins over stale cached metadata. Older cache entries
+			// classified /tv/ as a post even though it is a video embed.
+			{ "path": "tv/legacy-video", "metadataKind": "post", "normalizedKind": "tv",
+			  "aspect": "square", "label": "Play here", "icon": "play",
+			  "accessibleName": "Play Instagram item here",
+			  "accessibleDescription": "Loads the provider player in this preview",
+			  "popoutLabel": "Open in separate player",
+			  "popoutDescription": "Open the provider player in a separate window",
+			  "localPlayback": true }
+		]
+		for (let index = 0; index < fixtures.length; ++index) {
+			const fixture = fixtures[index]
+			const embedUrl = "https://www.instagram.com/" + fixture.path + "/embed/"
+			card.preview = {
+				"state": "ready", "title": "Instagram item",
+				"url": "https://www.instagram.com/" + fixture.path + "/",
+				"embedUrl": embedUrl, "embedKind": "instagram",
+				"metadata": { "instagramMediaKind": fixture.metadataKind }
+			}
+			card.previewIdentity = "message:instagram-semantics:" + index
+			compare(card.instagramEmbedMediaKind, fixture.normalizedKind)
+			compare(card.normalizedEmbedAspect, fixture.aspect)
+			compare(card.localPlaybackSupported, fixture.localPlayback)
+			verify(!card.sharedPlaybackSupported)
+			verify(!card.watchTogetherSupported)
+			compare(inlineButton.text, fixture.label)
+			compare(inlineIcon.name, fixture.icon)
+			compare(inlineButton.Accessible.name, fixture.accessibleName)
+			compare(inlineButton.Accessible.description, fixture.accessibleDescription)
+
+			overflowButton.clicked()
+			tryCompare(popoutButton, "visible", true)
+			compare(popoutButton.text, fixture.popoutLabel)
+			compare(popoutButton.Accessible.description, fixture.popoutDescription)
+			compare(watchButton.visible, false)
+			overflowMenu.close()
+
+			inlineButton.clicked()
+			compare(inlinePlaySpy.count, index + 1)
+			compare(inlinePlaySpy.signalArguments[index][0], embedUrl)
+			compare(inlinePlaySpy.signalArguments[index][1], "instagram")
+		}
 	}
 
 	function test_embed_preview_is_media_first_aspect_aware_and_lazy() {
@@ -547,13 +879,14 @@ TestCase {
 		verify(panel !== null && poster !== null && loader !== null && playButton !== null)
 
 		const cases = [
-			{ "aspect": "", "normalized": "wide", "width": card.actionAvailableWidth,
-				"height": card.actionAvailableWidth * 9 / 16 },
+			{ "aspect": "", "normalized": "wide", "width": card.width,
+				"height": card.width * 9 / 16 },
 			{ "aspect": "short", "normalized": "short", "width": 280, "height": 280 * 16 / 9 },
-			{ "aspect": "square", "normalized": "square", "width": 320, "height": 320 },
-			{ "aspect": "audio", "normalized": "audio", "width": card.actionAvailableWidth, "height": 352 },
+			{ "aspect": "square", "normalized": "square", "width": card.actionAvailableWidth,
+				"height": card.actionAvailableWidth },
+			{ "aspect": "audio", "normalized": "audio", "width": card.width, "height": 352 },
 			{ "aspect": "compact-audio", "normalized": "compact-audio",
-				"width": card.actionAvailableWidth, "height": 166 }
+				"width": card.width, "height": 166 }
 		]
 		for (let index = 0; index < cases.length; ++index) {
 			const fixture = cases[index]
@@ -566,9 +899,14 @@ TestCase {
 			card.previewIdentity = "message:aspect:" + fixture.normalized
 			compare(card.normalizedEmbedAspect, fixture.normalized)
 			tryCompare(panel, "visible", true)
-			tryVerify(function() { return Math.abs(panel.width - fixture.width) < 1 })
-			tryVerify(function() { return Math.abs(panel.height - fixture.height) < 1 })
-			tryCompare(poster, "status", Image.Ready)
+			tryVerify(function() { return Math.abs(panel.width - fixture.width) < 1 }, 1000,
+				fixture.normalized + " panel width=" + panel.width + " expected=" + fixture.width
+				+ " card=" + card.width + " slot=" + panel.parent.width)
+			tryVerify(function() { return Math.abs(panel.height - fixture.height) < 1 }, 1000,
+				fixture.normalized + " panel height=" + panel.height + " expected=" + fixture.height
+				+ " slot=" + panel.parent.height + " cardHeight=" + card.height)
+			tryCompare(poster, "status", Image.Ready, 15000,
+				fixture.normalized + " poster did not finish its asynchronous fixture load")
 			compare(poster.fillMode, Image.PreserveAspectCrop)
 			verify(playButton.visible)
 			tryCompare(playButton, "posterBacked", true)
@@ -588,10 +926,81 @@ TestCase {
 		compare(loader.item, null)
 	}
 
+	function test_preview_state_visuals_are_compact_and_media_insets_are_not_clipped() {
+		const card = previewLoader.item
+		card.userExpanded = false
+		card.sizePresetOverride = ""
+		card.savedSizePreset = ""
+		card.preview = {
+			"state": "loading", "loading": true,
+			"loadingLabel": "Fetching link preview", "host": "example.com"
+		}
+		card.previewIdentity = "message:loading-layout"
+		const compactVisual = findChild(card, "previewCompactVisual")
+		verify(compactVisual !== null && compactVisual.visible)
+		compare(card.genericHeaderUsesThumbnailGeometry, false)
+		tryCompare(compactVisual, "width", 64)
+		tryCompare(compactVisual, "height", 64)
+
+		card.preview = {
+			"state": "ready", "title": "Vertical creator preview",
+			"url": "https://www.tiktok.com/@mumble/video/layout",
+			"embedUrl": "https://www.tiktok.com/player/v1/layout",
+			"embedKind": "tiktok", "embedAspect": "short"
+		}
+		card.previewIdentity = "message:short-layout"
+		compare(card.fullBleedMediaStage, false)
+		compare(card.contentTopInset, Theme.space4)
+		compare(card.contentBottomInset, Theme.space4)
+		const content = findChild(card, "previewContent")
+		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
+		verify(content !== null && mediaSlot !== null)
+		compare(card.Accessible.ignored, false)
+		compare(content.Accessible.ignored, true)
+		compare(mediaSlot.Accessible.ignored, true)
+		compare(card.implicitHeight, content.implicitHeight
+			+ card.contentTopInset + card.contentBottomInset)
+
+		card.preview = {
+			"state": "ready", "title": "Wide media preview",
+			"url": "https://www.youtube.com/watch?v=layout",
+			"embedUrl": "https://www.youtube.com/embed/layout",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:wide-layout"
+		compare(card.fullBleedMediaStage, true)
+		compare(card.contentTopInset, 0)
+		compare(card.implicitHeight, content.implicitHeight + card.contentBottomInset)
+	}
+
+	function test_dark_preview_media_surfaces_use_overlay_contrast_tokens() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Provider media",
+			"url": "https://www.youtube.com/watch?v=overlay",
+			"embedUrl": "https://www.youtube.com/embed/overlay",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:overlay-contract"
+
+		const emptyPosterIcon = findChild(card, "previewEmptyPosterIcon")
+		const runtimeStatus = findChild(card, "previewInlineMediaRuntimeStatus")
+		const failureHeading = findChild(card, "previewInlineMediaFailureHeading")
+		const failureDetail = findChild(card, "previewInlineMediaFailureDetail")
+		verify(emptyPosterIcon !== null && runtimeStatus !== null
+			&& failureHeading !== null && failureDetail !== null)
+		compare(String(emptyPosterIcon.color), String(Theme.mediaOverlayTextMuted))
+		compare(String(runtimeStatus.color), String(Theme.mediaOverlayTextMuted))
+		compare(String(failureHeading.color), String(Theme.mediaOverlayTextStrong))
+		compare(String(failureDetail.color), String(Theme.mediaOverlayTextMuted))
+	}
+
 	function test_loading_embed_reserves_final_media_geometry() {
 		const card = previewLoader.item
 		const panel = findChild(card, "previewEmbedMediaPanel")
-		verify(panel !== null)
+		const originalButton = findChild(card, "previewEmbedOriginalButton")
+		const overflowButton = findChild(card, "previewOverflowButton")
+		verify(panel !== null && originalButton !== null && overflowButton !== null)
 
 		card.preview = {
 			"state": "loading", "loading": true,
@@ -602,7 +1011,14 @@ TestCase {
 		}
 		card.previewIdentity = "message:loading-embed"
 		tryCompare(panel, "visible", true)
-		tryVerify(function() { return Math.abs(panel.height - card.actionAvailableWidth * 9 / 16) < 1 })
+		tryCompare(originalButton, "visible", true)
+		compare(overflowButton.visible, false)
+		originalButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], "https://www.youtube.com/watch?v=test")
+		tryVerify(function() { return Math.abs(panel.height - card.width * 9 / 16) < 1 }, 1000,
+			"loading panel height=" + panel.height + " expected=" + card.width * 9 / 16
+			+ " slot=" + panel.parent.height + " cardHeight=" + card.height)
 		const loadingMediaHeight = panel.height
 
 		card.preview = {
@@ -616,6 +1032,208 @@ TestCase {
 		compare(panel.height, loadingMediaHeight)
 	}
 
+	function test_active_inline_player_adds_controls_below_the_full_media_viewport() {
+		const card = previewLoader.item
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		card.preview = {
+			"state": "ready", "title": "Full-width player",
+			"url": "https://www.youtube.com/watch?v=test",
+			"embedUrl": "https://www.youtube.com/embed/test",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:active-player-geometry"
+		card.renderActive = false
+		card.mediaSessionController = inlineSession
+		card.mediaSessionId = "message:active-player-geometry"
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "youtube"
+		inlineSession.detached = false
+		inlineSession.active = true
+		tryCompare(card, "inlinePlaybackActive", true)
+		for (const fixture of [
+			{ "preset": "compact", "width": card.responsiveCompactCardWidth },
+			{ "preset": "default", "width": card.responsiveDefaultCardWidth },
+			{ "preset": "large", "width": card.responsiveLargeCardWidth }
+		]) {
+			card.setSizePreset(fixture.preset)
+			previewLoader.width = card.targetCardWidth
+			tryCompare(card, "width", fixture.width)
+			tryVerify(function() {
+				return Math.abs(panel.height - (card.inlineMediaViewportHeight
+					+ card.inlineControlsEstimate)) < 1
+			})
+			verify(Math.abs(card.inlineMediaViewportHeight / card.width - 9 / 16) < 0.01)
+			verify(card.inlinePlaybackActive)
+			compare(inlineSession.detachCalls, 0)
+			compare(inlineSession.closeCalls, 0)
+		}
+		verify(panel.height > card.inlineMediaViewportHeight)
+		compare(findChild(card, "previewInlineMediaLoader").active, false)
+	}
+
+	function test_inline_runtime_preparation_is_native_visible_and_defers_webengine_component() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Deferred runtime",
+			"url": "https://www.youtube.com/watch?v=runtime",
+			"embedUrl": "https://www.youtube.com/embed/runtime",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:runtime-preparation"
+		card.mediaSessionId = "message:runtime-preparation"
+		card.visualMediaFixtureMode = "active"
+		card.mediaProfileFactory = mediaRuntime
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "youtube"
+		inlineSession.detached = false
+		mediaRuntime.runtimePreparing = true
+		inlineSession.active = true
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const loadingSurface = findChild(card, "previewInlineMediaRuntimeLoadingSurface")
+		tryCompare(card, "inlinePlaybackActive", true)
+		verify(loadingSurface !== null && loadingSurface.visible)
+		compare(loadingSurface.surfaceId, "mediaSession.inline")
+		compare(loadingSurface.rendererState, "loading")
+		compare(loader.active, false)
+
+		mediaRuntime.runtimePreparing = false
+		mediaRuntime.runtimeReady = true
+		tryCompare(loader, "active", true)
+		tryVerify(function() { return loader.item !== null })
+		compare(loadingSurface.visible, false)
+	}
+
+	function test_inline_runtime_error_exposes_keyboard_retry_without_loading_provider_surface() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Retryable runtime",
+			"url": "https://www.youtube.com/watch?v=runtime-error",
+			"embedUrl": "https://www.youtube.com/embed/runtime-error",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:runtime-error"
+		card.mediaSessionId = "message:runtime-error"
+		card.visualMediaFixtureMode = "active"
+		card.mediaProfileFactory = mediaRuntime
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "youtube"
+		inlineSession.detached = false
+		const playButton = findChild(card, "previewPlayButton")
+		verify(playButton !== null)
+		playButton.forceActiveFocus()
+		tryCompare(playButton, "activeFocus", true)
+		card.prepareInlinePlaybackFocus()
+		mediaRuntime.runtimeError = "The packaged media runtime is unavailable."
+		inlineSession.active = true
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const runtimeSurface = findChild(card, "previewInlineMediaRuntimeLoadingSurface")
+		const status = findChild(card, "previewInlineMediaRuntimeStatus")
+		const retry = findChild(card, "previewInlineMediaRuntimeRetryButton")
+		verify(loader !== null && runtimeSurface !== null && status !== null && retry !== null)
+		tryCompare(card, "inlinePlaybackActive", true)
+		tryCompare(runtimeSurface, "visible", true)
+		compare(runtimeSurface.rendererState, "error")
+		compare(status.text, mediaRuntime.runtimeError)
+		tryCompare(retry, "visible", true)
+		compare(retry.Accessible.name, "Retry media player setup")
+		tryCompare(retry, "activeFocus", true)
+		compare(loader.active, false)
+		compare(loader.item, null)
+
+		retry.clicked()
+		compare(mediaRuntime.retryCalls, 1)
+		compare(inlineSession.retryCalls, 1)
+		compare(mediaRuntime.runtimePreparing, true)
+		compare(mediaRuntime.runtimeError, "")
+		compare(runtimeSurface.rendererState, "loading")
+		compare(loader.active, false)
+		compare(loader.item, null)
+
+		mediaRuntime.runtimePreparing = false
+		mediaRuntime.runtimeReady = true
+		tryCompare(loader, "active", true)
+		tryVerify(function() { return loader.item !== null })
+		compare(runtimeSurface.visible, false)
+	}
+
+	function test_direct_media_plays_in_the_card_and_keeps_popout_optional() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Direct clip",
+			"url": "https://provider.example/watch/direct-clip",
+			"openLabel": "Open media source",
+			"mediaUrl": "data:video/mp4;base64,AAAA", "mediaMime": "video/mp4",
+			"thumbnailUrl": "image://mumble/direct-media-poster"
+		}
+		card.previewIdentity = "message:direct-inline"
+		card.mediaSessionId = "message:direct-inline"
+		const directButton = findChild(card, "previewDirectMediaButton")
+		const inlineButton = findChild(card, "previewPlayButton")
+		const poster = findChild(card, "previewEmbedPoster")
+		const compactVisual = findChild(card, "previewCompactVisual")
+		const popoutButton = findChild(card, "previewPopoutButton")
+		const originalButton = findChild(card, "previewOpenOriginalButton")
+		const cardOpenSurface = findChild(card, "previewCardOpenSurface")
+		const overflowButton = findChild(card, "previewOverflowButton")
+		verify(directButton !== null && originalButton !== null
+			&& cardOpenSurface !== null && overflowButton !== null)
+		verify(!directButton.visible)
+		verify(!cardOpenSurface.enabled && !cardOpenSurface.visible)
+		verify(poster !== null)
+		verify(compactVisual !== null && !compactVisual.visible)
+		verify(card.inlineMediaStageVisible)
+		compare(card.inlineMediaStageWidth, card.width)
+		tryCompare(poster, "status", Image.Ready)
+		verify(poster.visible)
+		verify(inlineButton !== null && inlineButton.visible)
+		inlineButton.clicked()
+		compare(directMediaSpy.count, 1)
+		compare(inlinePlaySpy.count, 0)
+		compare(popoutDirectMediaSpy.count, 0)
+		compare(card.restoreInlinePlaybackFocus, true)
+
+		card.renderActive = false
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "direct"
+		inlineSession.url = "data:video/mp4;base64,AAAA"
+		inlineSession.detached = false
+		inlineSession.active = true
+		tryCompare(card, "directInlinePlaybackActive", true)
+		tryCompare(directButton, "visible", false)
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		tryCompare(panel, "visible", true)
+		compare(panel.width, card.width)
+		verify(panel.height > card.width * 9 / 16)
+		compare(findChild(card, "previewCompactImage").visible, false)
+		compare(findChild(card, "previewInlineMediaLoader").active, false)
+
+		overflowButton.clicked()
+		tryCompare(popoutButton, "visible", true)
+		tryCompare(originalButton, "visible", true)
+		popoutButton.triggered()
+		compare(popoutDirectMediaSpy.count, 1)
+		compare(popoutPlaySpy.count, 0)
+		findChild(card, "previewOverflowMenu").close()
+	}
+
+	function test_embed_fallback_deduplicates_host_title_and_prefers_provider_name() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "www.youtube.com", "subtitle": "www.youtube.com",
+			"host": "www.youtube.com", "url": "https://youtu.be/test",
+			"embedUrl": "https://www.youtube.com/embed/test", "embedKind": "youtube"
+		}
+		card.previewIdentity = "message:provider-fallback"
+		compare(card.displayTitle, "YouTube video")
+		compare(card.metadataLine, "www.youtube.com")
+		compare(card.providerLabel, "YouTube")
+	}
+
 	function test_provider_embed_aspect_fallbacks_preserve_production_shapes() {
 		const card = previewLoader.item
 		const cases = [
@@ -623,6 +1241,8 @@ TestCase {
 			{ "provider": "instagram", "metadata": { "instagramMediaKind": "reel" },
 			  "aspect": "short" },
 			{ "provider": "instagram", "metadata": { "instagramMediaKind": "post" },
+			  "aspect": "square" },
+			{ "provider": "instagram", "metadata": { "instagramMediaKind": "tv" },
 			  "aspect": "square" },
 			{ "provider": "twitch", "metadata": {}, "aspect": "twitch" },
 			{ "provider": "spotify", "metadata": {}, "aspect": "compact-audio" },
@@ -650,21 +1270,41 @@ TestCase {
 				"twitchPlaybackNote": "Twitch may require playback confirmation." }
 		}
 		card.previewIdentity = "message:twitch-provider-badges"
+		previewLoader.width = card.targetCardWidth
 		const providerBadge = findChild(card, "previewEmbedProviderBadge")
 		const stateBadge = findChild(card, "previewEmbedProviderState")
+		const posterScrim = findChild(card, "previewTwitchPosterScrim")
+		const scrimTop = findChild(card, "previewTwitchPosterScrimTop")
+		const scrimMiddle = findChild(card, "previewTwitchPosterScrimMiddle")
+		const scrimBottom = findChild(card, "previewTwitchPosterScrimBottom")
 		const details = findChild(card, "providerDetails")
 		verify(providerBadge !== null && stateBadge !== null && details !== null)
+		verify(posterScrim !== null && scrimTop !== null && scrimMiddle !== null
+			&& scrimBottom !== null)
 		tryCompare(providerBadge, "visible", true)
+		compare(providerBadge.presentation, "overlay")
 		tryCompare(stateBadge, "visible", true)
+		tryCompare(posterScrim, "visible", true)
 		compare(details.providerToken, "twitch")
 		compare(details.providerStateLabel, "Live")
 		compare(card.normalizedEmbedAspect, "twitch")
-		verify(card.embedMediaWidth <= 400)
+		verify(card.embedMediaWidth <= 520)
 		verify(Math.abs(card.embedMediaWidth / card.embedMediaHeight - 4 / 3) < 0.01)
-		compare(findChild(card, "previewTwitchPosterCopy").visible, true)
-		compare(findChild(card, "previewTwitchPosterTitle").text, "Mumble Dev")
-		compare(findChild(card, "previewTwitchPosterNote").text,
+		const posterCopy = findChild(card, "previewTwitchPosterCopy")
+		const posterTitle = findChild(card, "previewTwitchPosterTitle")
+		const posterNote = findChild(card, "previewTwitchPosterNote")
+		compare(posterCopy.visible, true)
+		compare(posterTitle.text, "Mumble Dev")
+		compare(posterNote.text,
 			"Twitch may require playback confirmation.")
+		compare(String(posterTitle.color), String(Theme.mediaOverlayTextStrong))
+		compare(String(posterNote.color), String(Theme.mediaOverlayTextMuted))
+		compare(posterCopy.Accessible.ignored, true)
+		compare(posterTitle.Accessible.ignored, true)
+		compare(posterNote.Accessible.ignored, true)
+		verify(scrimTop.color.a < 0.01)
+		verify(scrimMiddle.color.a >= 0.83)
+		verify(scrimBottom.color.a >= 0.95)
 		verify(Math.abs(providerBadge.color.r - details.providerAccent.r) < 0.01)
 		verify(Math.abs(providerBadge.color.g - details.providerAccent.g) < 0.01)
 		verify(Math.abs(providerBadge.color.b - details.providerAccent.b) < 0.01)
@@ -735,9 +1375,17 @@ TestCase {
 		}
 		card.previewIdentity = "message:reduced-motion"
 		card.animationsEnabled = false
+		card.hoverEffectsEnabled = false
 		compare(card.animationDuration, 0)
-		compare(findChild(card, "previewEmbedBusyIndicator").animated, false)
+		compare(card.effectiveHovered, false)
+		const embedBusy = findChild(card, "previewEmbedBusyIndicator")
+		const compactBusy = findChild(card, "previewCompactBusyIndicator")
+		compare(embedBusy.animated, false)
+		compare(compactBusy.animated, false)
+		compare(embedBusy.rotation, 0)
+		compare(compactBusy.rotation, 0)
 		card.animationsEnabled = true
+		card.hoverEffectsEnabled = true
 		compare(card.animationDuration, Theme.motionFast)
 	}
 
@@ -801,15 +1449,41 @@ TestCase {
 		const overflowMenu = findChild(card, "previewOverflowMenu")
 		verify(watchAction !== null && overflowButton !== null && overflowMenu !== null)
 
-		for (const provider of [ "youtube", "twitch", "streamable", "vimeo", "dailymotion", "direct" ]) {
+		card.preview = {
+			"state": "ready", "title": "youtube",
+			"embedUrl": "https://www.youtube.com/embed/sync-video", "embedKind": "youtube"
+		}
+		card.previewIdentity = "message:sync:youtube"
+		verify(card.localPlaybackSupported)
+		verify(card.sharedPlaybackSupported)
+		verify(card.watchTogetherSupported)
+		overflowButton.clicked()
+		tryCompare(watchAction, "visible", true)
+		overflowMenu.close()
+
+		card.preview = {
+			"state": "ready", "title": "Generic direct embed",
+			"embedUrl": "https://example.com/embed/direct", "embedKind": "direct"
+		}
+		card.previewIdentity = "message:provider-controls:direct"
+		verify(!card.hasEmbedPreview)
+		verify(!card.localPlaybackSupported)
+		verify(!card.sharedPlaybackSupported)
+		verify(!card.watchTogetherSupported)
+		compare(findChild(card, "previewPlayButton").visible, false)
+		compare(watchAction.visible, false)
+
+		for (const provider of [ "twitch", "streamable", "vimeo", "dailymotion" ]) {
 			card.preview = {
 				"state": "ready", "title": provider,
 				"embedUrl": "https://example.com/embed/" + provider, "embedKind": provider
 			}
-			card.previewIdentity = "message:sync:" + provider
-			verify(card.watchTogetherSupported)
+			card.previewIdentity = "message:provider-controls:" + provider
+			verify(card.localPlaybackSupported)
+			verify(!card.sharedPlaybackSupported)
+			verify(!card.watchTogetherSupported)
 			overflowButton.clicked()
-			tryCompare(watchAction, "visible", true)
+			compare(watchAction.visible, false)
 			overflowMenu.close()
 		}
 
@@ -822,9 +1496,21 @@ TestCase {
 		overflowButton.clicked()
 		compare(watchAction.visible, false)
 		overflowMenu.close()
+
+		card.preview = {
+			"state": "ready", "title": "Spoofed YouTube provider",
+			"embedUrl": "https://example.com/embed/not-youtube", "embedKind": "youtube"
+		}
+		card.previewIdentity = "message:sync:spoofed-youtube"
+		verify(card.localPlaybackSupported)
+		verify(!card.sharedPlaybackSupported)
+		verify(!card.watchTogetherSupported)
+		overflowButton.clicked()
+		compare(watchAction.visible, false)
+		overflowMenu.close()
 	}
 
-	function test_inline_playback_detaches_before_delegate_becomes_inactive() {
+	function test_inline_playback_closes_without_implicitly_opening_a_window() {
 		const card = previewLoader.item
 		card.renderActive = false
 		card.mediaSessionId = "message:inline"
@@ -833,14 +1519,108 @@ TestCase {
 		inlineSession.detached = false
 		inlineSession.active = true
 		verify(card.inlinePlaybackActive)
-		// Entering the render window may schedule the lazy WebEngine component,
-		// but leaving it must synchronously preserve playback in the pop-out before
-		// a pooled delegate can destroy its inline renderer.
+		// Leaving the render window must never create a popup the user did not ask
+		// for. Close the card-local renderer; explicit Pop out remains available.
+		card.renderActive = true
+		card.renderActive = false
+		tryCompare(inlineSession, "closeCalls", 1)
+		compare(inlineSession.detachCalls, 0)
+		verify(inlineSession.detached)
+		verify(!inlineSession.active)
+		compare(card.inlinePlaybackActive, false)
+	}
+
+	function test_visual_fixture_replacement_leaves_media_reset_to_fixture_controller() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.visualMediaFixtureMode = "loading"
+		card.mediaSessionId = "message:fixture-inline"
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.detached = false
+		inlineSession.active = true
+		verify(card.inlinePlaybackActive)
+
+		card.renderActive = true
+		card.renderActive = false
+		wait(0)
+		compare(inlineSession.closeCalls, 0)
+		compare(inlineSession.detachCalls, 0)
+		verify(inlineSession.active)
+		verify(!inlineSession.detached)
+	}
+
+	function test_virtualizing_shared_host_detaches_without_pausing_the_room() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.mediaSessionId = "message:shared-host"
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.detached = false
+		inlineSession.sharedHost = true
+		inlineSession.state = "playing"
+		inlineSession.active = true
+		verify(card.inlinePlaybackActive)
+
 		card.renderActive = true
 		card.renderActive = false
 		tryCompare(inlineSession, "detachCalls", 1)
+		compare(inlineSession.pauseCalls, 0)
+		compare(inlineSession.closeCalls, 0)
+		verify(inlineSession.active)
 		verify(inlineSession.detached)
+		compare(inlineSession.state, "playing")
 		compare(card.inlinePlaybackActive, false)
+	}
+
+	function test_missing_inline_player_component_reports_typed_error_and_offers_browser_fallback() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Provider clip",
+			"url": "https://www.youtube.com/watch?v=component-fallback",
+			"embedUrl": "https://www.youtube.com/embed/component-fallback",
+			"embedKind": "youtube"
+		}
+		card.previewIdentity = "message:component-fallback"
+		card.mediaSessionId = "message:component-fallback"
+		card.mediaSessionController = inlineSession
+		card.inlinePlayerComponentUrl = Qt.resolvedUrl("DefinitelyMissingInlineMediaPlayer.qml")
+		inlineSession.sessionId = "message:component-fallback"
+		inlineSession.url = "https://www.youtube.com/embed/component-fallback"
+		inlineSession.detached = false
+		card.prepareInlinePlaybackFocus()
+		inlineSession.active = true
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const failure = findChild(card, "previewInlineMediaComponentFailure")
+		const retryButton = findChild(card, "previewInlineMediaComponentRetryButton")
+		const externalButton = findChild(card, "previewInlineMediaComponentExternalButton")
+		const closeButton = findChild(card, "previewInlineMediaComponentCloseButton")
+		verify(loader !== null && failure !== null && retryButton !== null
+			&& externalButton !== null && closeButton !== null)
+		tryCompare(loader, "status", Loader.Error)
+		tryCompare(inlineSession, "typedErrorCalls", 1)
+		compare(inlineSession.errorCode, "renderer-component-unavailable")
+		verify(inlineSession.error.indexOf("unavailable") >= 0)
+		verify(failure.visible)
+		tryCompare(retryButton, "activeFocus", true)
+
+		externalButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0],
+			"https://www.youtube.com/watch?v=component-fallback")
+		retryButton.clicked()
+		compare(inlineSession.retryCalls, 1)
+		tryVerify(function() { return inlineSession.typedErrorCalls >= 2 })
+		closeButton.forceActiveFocus()
+		verify(closeButton.activeFocus)
+		verify(card.inlineFocusRequestMatchesCurrentSession())
+		closeButton.clicked()
+		compare(inlineSession.closeCalls, 1)
+		verify(!inlineSession.active)
+		tryCompare(card, "inlinePlaybackActive", false)
+		tryCompare(findChild(card, "previewPlayButton"), "activeFocus", true)
 	}
 
 	function test_structured_image_link_has_mouse_keyboard_and_accessible_activation() {
@@ -855,13 +1635,25 @@ TestCase {
 		}]
 		tryVerify(function() { return findChild(body, "richMessageImageCard_0") !== null })
 		const imageCard = findChild(body, "richMessageImageCard_0")
+		const inlineImage = findChild(body, "richMessageInlineImage_0")
 		const imageState = findChild(body, "richMessageImageState_0")
-		verify(imageState !== null)
+		verify(imageState !== null && inlineImage !== null)
+		compare(body.imageSurfaceColor, Theme.embedSurface)
+		compare(body.imageBorderColor, Theme.embedBorder)
+		compare(body.keyboardLinks.length, 0)
+		compare(body.activeFocusOnTab, false)
+		compare(body.Accessible.ignored, true)
 		compare(imageCard.Accessible.role, Accessible.Link)
 		compare(imageCard.Accessible.name, "Embedded release diagram")
+		verify(imageCard.Accessible.description.indexOf("Press Enter") >= 0)
+		compare(inlineImage.Accessible.ignored, true)
 		verify(body.plainText.indexOf("Embedded release diagram") >= 0)
 
 		tryVerify(function() { return previewLoader.y >= bodyLoader.y + imageCard.height })
+		// The previous test can leave the synthetic pointer at the same scene
+		// coordinate. Move outside first so a newly materialized MouseArea receives
+		// a deterministic hover-enter edge on every full-suite run.
+		mouseMove(testCase, testCase.width - 1, testCase.height - 1)
 		mouseMove(imageCard, imageCard.width / 2, imageCard.height / 2)
 		tryVerify(function() { return imageState.color.a > 0 })
 		mousePress(imageCard, imageCard.width / 2, imageCard.height / 2, Qt.LeftButton)
@@ -879,6 +1671,84 @@ TestCase {
 		compare(linkSpy.count, 2)
 		imageCard.Accessible.pressAction()
 		compare(linkSpy.count, 3)
+	}
+
+	function test_structured_z_image_failure_is_exposed_on_the_image_semantic_owner() {
+		const body = bodyLoader.item
+		body.segments = [{
+			"kind": "image",
+			"source": "qrc:/qml-shell/definitely-not-present-mumble-rich-image.png",
+			"alt": "Unavailable architecture image",
+			"width": 320,
+			"height": 180
+		}]
+		tryVerify(function() { return findChild(body, "richMessageInlineImage_0") !== null })
+		const imageCard = findChild(body, "richMessageImageCard_0")
+		const inlineImage = findChild(body, "richMessageInlineImage_0")
+		const errorLabel = findChild(body, "richMessageImageError_0")
+		verify(imageCard !== null && inlineImage !== null && errorLabel !== null)
+		tryCompare(inlineImage, "status", Image.Error)
+		tryCompare(errorLabel, "visible", true)
+		compare(imageCard.Accessible.role, Accessible.Graphic)
+		verify(imageCard.Accessible.description.indexOf("Image unavailable") >= 0)
+		mouseMove(testCase, 1, 1)
+	}
+
+	function test_structured_static_text_accessibility_normalizes_boundary_whitespace() {
+		const body = bodyLoader.item
+		body.segments = [
+			{ "text": "  First line\nsecond line  \n" },
+			{ "kind": "image", "source": "image://mumble/static-text-owner?g=1",
+				"alt": "Supporting artwork", "width": 320, "height": 180 }
+		]
+		tryVerify(function() {
+			return findChild(body, "richMessageTextBlock_0") !== null
+				&& findChild(body, "richMessageImageCard_1") !== null
+		})
+		const textTarget = findChild(body, "richMessageTextBlock_0")
+		compare(textTarget.Accessible.role, Accessible.StaticText)
+		compare(textTarget.Accessible.name, "First line second line")
+	}
+
+	function test_structured_text_links_and_linked_image_have_separate_semantic_owners() {
+		const body = bodyLoader.item
+		body.segments = [
+			{ "text": "Documentation", "href": "https://example.com/docs" },
+			{ "text": " and " },
+			{ "text": "Support", "href": "https://example.com/support" },
+			{ "kind": "image", "source": "image://mumble/semantic-owner?g=1",
+				"alt": "Architecture diagram", "width": 320, "height": 180,
+				"href": "https://example.com/diagram" }
+		]
+		tryVerify(function() {
+			return findChild(body, "richMessageTextBlock_0") !== null
+				&& findChild(body, "richMessageImageCard_1") !== null
+		})
+		const textTarget = findChild(body, "richMessageTextBlock_0")
+		const textFocus = findChild(body, "richMessageTextBlockFocus_0")
+		const imageCard = findChild(body, "richMessageImageCard_1")
+		const inlineImage = findChild(body, "richMessageInlineImage_1")
+		verify(textFocus !== null && inlineImage !== null)
+		compare(body.Accessible.ignored, true)
+		compare(body.activeFocusOnTab, false)
+		compare(body.keyboardLinks.length, 2)
+		compare(textTarget.keyboardLinkEntries.length, 2)
+		compare(textTarget.Accessible.role, Accessible.Link)
+		compare(textTarget.Accessible.name, "Documentation and Support")
+		verify(textTarget.Accessible.description.indexOf("Documentation") >= 0)
+		compare(imageCard.Accessible.role, Accessible.Link)
+		compare(imageCard.Accessible.name, "Architecture diagram")
+		compare(inlineImage.Accessible.ignored, true)
+
+		textTarget.forceActiveFocus()
+		tryCompare(textTarget, "activeFocus", true)
+		tryCompare(textFocus, "visible", true)
+		keyClick(Qt.Key_Right)
+		compare(textTarget.Accessible.name, "Documentation and Support")
+		verify(textTarget.Accessible.description.indexOf("Support") >= 0)
+		keyClick(Qt.Key_Return)
+		compare(linkSpy.count, 1)
+		compare(linkSpy.signalArguments[0][0], "https://example.com/support")
 	}
 
 	function test_provider_actions_reject_unsafe_embed_and_media_urls() {
@@ -943,22 +1813,29 @@ TestCase {
 			"embedKind": "youtube"
 		}
 		card.previewIdentity = "message:responsive|youtube"
-		compare(card.targetCardWidth, 580)
+		compare(card.responsiveViewportWidth, testCase.width)
+		compare(card.responsiveCompactCardWidth, 346)
+		compare(card.responsiveDefaultCardWidth, 446)
+		compare(card.responsiveLargeCardWidth, 533)
+		compare(card.targetCardWidth, card.responsiveDefaultCardWidth)
 		for (const width of [340, 420, 680, 760, 1082]) {
 			previewLoader.width = width
 			previewLoader.height = 640
 			tryCompare(card, "width", width)
-			compare(card.narrowLayout, width < 440)
+			compare(card.narrowLayout, card.compact || width < 440)
 			const flow = findChild(card, "previewActionFlow")
-			const primary = findChild(card, "previewOpenButton")
+			const primary = findChild(card, "previewEmbedOriginalButton")
+			const externalPrimary = findChild(card, "previewOpenButton")
 			const overflow = findChild(card, "previewOverflowButton")
 			verify(flow !== null)
 			verify(primary !== null && primary.visible)
+			verify(externalPrimary !== null && !externalPrimary.visible)
 			verify(overflow !== null && overflow.visible)
 			tryCompare(flow, "width", card.actionAvailableWidth)
 			verify(primary.x >= -0.5 && primary.x + primary.width <= overflow.x + 0.5)
 			verify(overflow.x + overflow.width <= flow.width + 0.5)
 			verify(Math.abs(primary.y - overflow.y) <= 1)
+			compare(primary.Accessible.role, Accessible.Link)
 			verify(primary.Accessible.name.length > 0)
 			verify(overflow.Accessible.name.length > 0)
 		}
@@ -967,12 +1844,176 @@ TestCase {
 			"state": "ready", "title": "Compact", "url": "https://example.com/compact",
 			"previewSize": "compact"
 		}
-		compare(card.targetCardWidth, 460)
+		compare(card.targetCardWidth, card.responsiveCompactCardWidth)
+		verify(card.compact)
+		verify(card.narrowLayout)
+		card.userExpanded = true
+		compare(card.targetCardWidth, card.responsiveLargeCardWidth)
+		verify(!card.compact)
+		card.userExpanded = false
 		card.preview = {
 			"state": "ready", "title": "Large", "url": "https://example.com/large",
 			"previewSize": "large"
 		}
-		compare(card.targetCardWidth, 720)
+		compare(card.targetCardWidth, card.responsiveLargeCardWidth)
+		card.preview = {
+			"state": "ready", "title": "Unknown", "url": "https://example.com/unknown-size",
+			"previewSize": "unexpected"
+		}
+		compare(card.effectiveSizePreset, "default")
+		compare(card.targetCardWidth, card.responsiveDefaultCardWidth)
+	}
+
+	function test_media_card_size_presets_are_exclusive_and_accessible() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Resizable video",
+			"url": "https://www.youtube.com/watch?v=sizes",
+			"embedUrl": "https://www.youtube.com/embed/sizes", "embedKind": "youtube"
+		}
+		card.previewIdentity = "message:size-presets"
+		const overflow = findChild(card, "previewOverflowButton")
+		const menu = findChild(card, "previewOverflowMenu")
+		const compact = findChild(card, "previewSizeCompactButton")
+		const standard = findChild(card, "previewSizeStandardButton")
+		const large = findChild(card, "previewSizeLargeButton")
+		verify(overflow !== null && menu !== null && compact !== null
+			&& standard !== null && large !== null)
+		overflow.clicked()
+		tryCompare(standard, "visible", true)
+		compare(standard.checked, true)
+		compare(compact.checked, false)
+		compare(large.checked, false)
+		for (const action of [ compact, standard, large ]) {
+			compare(action.Accessible.role, Accessible.RadioButton)
+			verify(action.Accessible.name.length > 0)
+		}
+
+		compact.triggered()
+		compare(card.effectiveSizePreset, "compact")
+		compare(card.targetCardWidth, card.responsiveCompactCardWidth)
+		compare(compact.Accessible.checked, true)
+		compare(sizePresetSpy.count, 1)
+		standard.triggered()
+		compare(card.effectiveSizePreset, "default")
+		compare(card.targetCardWidth, card.responsiveDefaultCardWidth)
+		large.triggered()
+		compare(card.effectiveSizePreset, "large")
+		compare(card.targetCardWidth, card.responsiveLargeCardWidth)
+		compare(sizePresetSpy.count, 3)
+		menu.close()
+
+		card.preview = {
+			"state": "ready", "title": "Square",
+			"embedUrl": "https://www.instagram.com/p/square/embed/",
+			"embedKind": "instagram", "embedAspect": "square"
+		}
+		card.previewIdentity = "message:size-square"
+		for (const fixture of [
+			{ "preset": "compact", "width": 340 },
+			{ "preset": "default", "width": 460 },
+			{ "preset": "large", "width": 520 }
+		]) {
+			card.setSizePreset(fixture.preset)
+			compare(card.targetCardWidth, fixture.width)
+			previewLoader.width = fixture.width
+			tryCompare(card, "width", fixture.width)
+			compare(card.embedMediaWidth, card.actionAvailableWidth)
+		}
+
+		card.preview = {
+			"state": "ready", "title": "Twitch",
+			"embedUrl": "https://player.twitch.tv/?channel=mumbledev",
+			"embedKind": "twitch", "embedAspect": "twitch"
+		}
+		card.previewIdentity = "message:size-twitch"
+		for (const fixture of [
+			{ "preset": "compact", "width": 420 },
+			{ "preset": "default", "width": 520 },
+			{ "preset": "large", "width": 620 }
+		]) {
+			card.setSizePreset(fixture.preset)
+			compare(card.targetCardWidth, fixture.width)
+			previewLoader.width = fixture.width
+			tryCompare(card, "width", fixture.width)
+			verify(card.embedMediaWidth >= 400)
+			verify(Math.abs(card.embedMediaWidth / card.embedMediaHeight - 4 / 3) < 0.01)
+		}
+
+		card.preview = {
+			"state": "ready", "title": "Short video",
+			"embedUrl": "https://www.tiktok.com/player/v1/size-test",
+			"embedKind": "tiktok", "embedAspect": "short"
+		}
+		card.previewIdentity = "message:size-short"
+		for (const fixture of [
+			{ "preset": "compact", "width": 320, "mediaWidth": 240 },
+			{ "preset": "default", "width": 360, "mediaWidth": 280 },
+			{ "preset": "large", "width": 420, "mediaWidth": 340 }
+		]) {
+			card.setSizePreset(fixture.preset)
+			previewLoader.width = fixture.width
+			tryCompare(card, "width", fixture.width)
+			compare(card.embedMediaWidth, fixture.mediaWidth)
+			verify(Math.abs(card.embedMediaWidth / card.embedMediaHeight - 9 / 16) < 0.01)
+			compare(findChild(card, "previewContent").anchors.topMargin, 16)
+		}
+
+		card.preview = {
+			"state": "ready", "title": "Audio",
+			"embedUrl": "https://w.soundcloud.com/player/?url=size-test",
+			"embedKind": "soundcloud", "embedAspect": "audio"
+		}
+		card.previewIdentity = "message:size-audio"
+		let previousHeight = 0
+		for (const fixture of [
+			{ "preset": "compact", "width": card.responsiveCompactCardWidth },
+			{ "preset": "default", "width": card.responsiveDefaultCardWidth },
+			{ "preset": "large", "width": card.responsiveLargeCardWidth }
+		]) {
+			card.setSizePreset(fixture.preset)
+			previewLoader.width = fixture.width
+			tryCompare(card, "width", fixture.width)
+			compare(card.embedMediaWidth, fixture.width)
+			verify(card.embedMediaHeight >= previousHeight)
+			verify(card.embedMediaHeight <= 352)
+			previousHeight = card.embedMediaHeight
+		}
+	}
+
+	function test_direct_media_keeps_original_provider_action_in_overflow() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Direct clip",
+			"url": "https://provider.example/watch/direct-clip",
+			"openLabel": "Open media source",
+			"mediaUrl": "data:video/mp4;base64,AAAA", "mediaMime": "video/mp4"
+		}
+		card.previewIdentity = "message:direct-original"
+		const directAction = findChild(card, "previewDirectMediaButton")
+		const overflow = findChild(card, "previewOverflowButton")
+		const menu = findChild(card, "previewOverflowMenu")
+		const original = findChild(card, "previewOpenOriginalButton")
+		const popout = findChild(card, "previewPopoutButton")
+		const inlineAction = findChild(card, "previewPlayButton")
+		verify(directAction !== null && !directAction.visible)
+		verify(inlineAction !== null && inlineAction.visible)
+		compare(inlineAction.text, "Play here")
+		verify(overflow !== null && overflow.visible)
+		verify(menu !== null && original !== null && popout !== null)
+		overflow.clicked()
+		tryCompare(original, "visible", true)
+		tryCompare(popout, "visible", true)
+		compare(popout.text, "Open in separate player")
+		compare(original.text, "Open media source")
+		compare(original.Accessible.name, "Open media source: Direct clip")
+		popout.triggered()
+		compare(popoutDirectMediaSpy.count, 1)
+		compare(original.Accessible.description, "Open this item on the original provider")
+		original.triggered()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0],
+			"https://provider.example/watch/direct-clip")
 	}
 
 	function test_short_provider_label_is_not_elided_by_its_chip_padding() {
@@ -987,24 +2028,88 @@ TestCase {
 		const chip = findChild(card, "previewProviderChip")
 		const label = findChild(card, "previewProviderLabel")
 		verify(chip !== null && label !== null)
+		compare(chip.presentation, "inline")
 		tryVerify(function() { return chip.width > 0 && label.width > 0 })
 		verify(label.width + 0.5 >= label.implicitWidth,
 			"provider label width " + label.width + " clipped implicit width " + label.implicitWidth)
+		const details = findChild(card, "providerDetails")
+		compare(String(label.color), String(details.providerForeground))
+		compare(String(chip.color), String(details.providerAccentSubtle))
+		compare(String(chip.border.color), String(details.providerAccentBorder))
+	}
+
+	function test_generic_social_previews_route_to_the_single_social_post_owner() {
+		const card = previewLoader.item
+		const fixtures = [
+			{ "provider": "bluesky", "name": "Bluesky", "url": "https://bsky.app/profile/ada/post/1",
+			  "author": "Ada (@ada.bsky.social)", "post": "Bounded delegates stay smooth." },
+			{ "provider": "mastodon", "name": "Mastodon", "url": "https://social.example/@ada/2",
+			  "author": "@ada@social.example", "post": "Native previews keep their identity." },
+			{ "provider": "reddit", "name": "Reddit", "url": "https://www.reddit.com/r/mumble/comments/3",
+			  "author": "r/mumble", "post": "Modern client preview parity." }
+		]
+
+		for (let index = 0; index < fixtures.length; ++index) {
+			const fixture = fixtures[index]
+			card.preview = {
+				"state": "ready", "title": fixture.post, "subtitle": fixture.author,
+				"description": fixture.name, "url": fixture.url
+			}
+			card.previewIdentity = "message:generic-social:" + index
+			wait(0)
+
+			const details = findChild(card, "providerDetails")
+			const socialPost = findChild(card, "providerSocialPost")
+			const genericHeader = findChild(card, "previewGenericHeader")
+			const providerChip = findChild(card, "previewProviderChip")
+			const providerLabel = findChild(card, "providerSocialIdentityLabel")
+			const author = findChild(card, "providerSocialAuthor")
+			const post = findChild(card, "providerSocialPostText")
+
+			compare(card.inferredGenericSocialProviderToken, fixture.provider)
+			compare(card.providerLabel, fixture.name)
+			compare(details.genericSocialPostPresentation, true)
+			compare(details.presentation, "socialPost")
+			compare(details.ownsHeader, true)
+			compare(genericHeader.visible, false)
+			compare(providerChip.visible, false)
+			verify(socialPost !== null && socialPost.visible)
+			compare(providerLabel.text, fixture.name.toUpperCase())
+			compare(author.text, fixture.author)
+			compare(post.text, fixture.post)
+			compare(socialPost.Accessible.description.indexOf(fixture.name), 0)
+			compare(socialPost.Accessible.description.indexOf(fixture.name),
+				socialPost.Accessible.description.lastIndexOf(fixture.name))
+			compare(socialPost.Accessible.description.indexOf(fixture.author),
+				socialPost.Accessible.description.lastIndexOf(fixture.author))
+			compare(socialPost.Accessible.description.indexOf(fixture.post),
+				socialPost.Accessible.description.lastIndexOf(fixture.post))
+		}
 	}
 
 	function test_game_store_provider_chip_uses_store_name_instead_of_transport_kind() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready", "title": "Hades II", "url": "https://store.steampowered.com/app/1",
+			"mediaItems": [{ "kind": "image", "url": "image://mumble/steam-hero?g=1" }],
 			"metadata": { "previewProvider": "game-store", "previewKind": "gameStoreProduct",
 				"gameStoreProvider": "steam", "gameStoreName": "Steam", "gameStorePrice": "29,99 €" }
 		}
 		card.previewIdentity = "message:game-store-provider"
 		compare(card.providerLabel, "Steam")
-		compare(findChild(card, "previewProviderLabel").text, "STEAM")
+		const genericProviderLabel = findChild(card, "previewProviderLabel")
+		compare(genericProviderLabel.text, "STEAM")
 		const details = findChild(card, "providerDetails")
 		compare(details.providerToken, "steam")
 		compare(details.providerDisplayName, "Steam")
+		compare(details.ownsHeader, true)
+		compare(findChild(card, "previewGenericHeader").visible, false)
+		compare(genericProviderLabel.visible, false)
+		const hero = findChild(card, "providerSteamHeroImage")
+		verify(hero !== null)
+		tryCompare(hero, "status", Image.Ready)
+		verify(hero.visible)
+		compare(hero.source.toString(), "image://mumble/steam-hero?g=1")
 	}
 
 	function test_steam_gallery_keeps_bounded_selectable_thumbnails() {
@@ -1036,11 +2141,56 @@ TestCase {
 			return findChild(card, "previewSteamMediaThumbnail_1") !== null
 		})
 		const second = findChild(card, "previewSteamMediaThumbnail_1")
+		const playLabel = findChild(card, "previewSteamPlayLabel_1")
 		verify(second !== null)
+		verify(playLabel !== null)
 		compare(second.Accessible.name, "Steam trailer 2")
-		mouseClick(second)
+		compare(String(playLabel.color), String(Theme.mediaOverlayTextStrong))
+		// This case verifies stable gallery selection rather than pointer hit testing.
+		// The expanded provider card can place the horizontal rail outside the test
+		// window's current viewport, so invoke the semantic button action directly.
+		second.clicked()
 		compare(card.selectedMediaIndex, 1)
 		compare(second.Accessible.selected, true)
+	}
+
+	function test_steam_manifest_only_trailers_keep_managed_posters_and_lazy_media_contract() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Steam manifest trailers",
+			"url": "https://store.steampowered.com/app/1",
+			"mediaItems": [
+				{ "kind": "video", "mime": "application/vnd.apple.mpegurl",
+				  "streamKind": "hls",
+				  "url": "https://cdn.cloudflare.steamstatic.com/trailer/master.m3u8",
+				  "poster": "image://mumble/steam-hls-poster?g=1",
+				  "thumbnail": "image://mumble/steam-hls-thumb?g=1", "title": "HLS trailer" },
+				{ "kind": "video", "mime": "application/dash+xml",
+				  "streamKind": "dash",
+				  "url": "https://cdn.cloudflare.steamstatic.com/trailer/manifest.mpd",
+				  "poster": "image://mumble/steam-dash-poster?g=1", "title": "DASH trailer" }
+			],
+			"metadata": { "provider": "steam", "previewKind": "gameStoreProduct" }
+		}
+		card.previewIdentity = "message:steam-manifest"
+		compare(card.mediaItems.length, 2)
+		compare(card.currentMedia.mime, "application/vnd.apple.mpegurl")
+		compare(card.imageSource, "image://mumble/steam-hls-poster?g=1")
+		verify(card.hasDirectMedia)
+		card.requestCurrentMedia()
+		compare(directMediaSpy.count, 1)
+		compare(directMediaSpy.signalArguments[0][0],
+			"https://cdn.cloudflare.steamstatic.com/trailer/master.m3u8")
+		compare(directMediaSpy.signalArguments[0][1], "application/vnd.apple.mpegurl")
+
+		card.selectedMediaIndex = 1
+		compare(card.currentMedia.mime, "application/dash+xml")
+		compare(card.imageSource, "image://mumble/steam-dash-poster?g=1")
+		card.requestCurrentDirectMediaPopout()
+		compare(popoutDirectMediaSpy.count, 1)
+		compare(popoutDirectMediaSpy.signalArguments[0][0],
+			"https://cdn.cloudflare.steamstatic.com/trailer/manifest.mpd")
+		compare(popoutDirectMediaSpy.signalArguments[0][1], "application/dash+xml")
 	}
 
 	function test_attachment_tile_is_bounded_below_360_width() {
@@ -1082,9 +2232,8 @@ TestCase {
 		compare(errorLabel.Accessible.role, Accessible.AlertMessage)
 		const action = findChild(gallery, "attachmentAction_rejected")
 		const tile = findChild(gallery, "attachment_rejected")
-		action.forceActiveFocus()
-		tryCompare(action, "activeFocus", true)
-		verify(tile.border.width > 1)
+		compare(action.enabled, false)
+		compare(tile.border.width, 1)
 	}
 
 	function test_attachment_loading_state_and_original_download_action() {
@@ -1118,12 +2267,142 @@ TestCase {
 		const failedError = findChild(gallery, "attachmentError_asset:42")
 		const failedAction = findChild(gallery, "attachmentAction_asset:42")
 		const failedDownload = findChild(gallery, "attachmentDownload_asset:42")
-		verify(failedError !== null && failedAction !== null && failedDownload !== null)
+		const permanentRetry = findChild(gallery, "attachmentRetry_asset:42")
+		verify(failedError !== null && failedAction !== null && failedDownload !== null
+			&& permanentRetry !== null)
 		tryCompare(failedError, "visible", true)
 		tryCompare(failedAction, "enabled", true)
+		compare(permanentRetry.visible, false)
 		mouseClick(failedDownload)
 		compare(attachmentDownloadSpy.count, 1)
 		compare(attachmentDownloadSpy.signalArguments[0][0].assetId, "42")
+
+		gallery.attachments = [{
+			"id": "asset:42",
+			"assetId": "42",
+			"kind": "image",
+			"mime": "image/png",
+			"fileName": "photo.png",
+			"state": "error",
+			"previewCanRetry": true,
+			"previewError": "The preview timed out. You can try again."
+		}]
+		const retryableError = findChild(gallery, "attachmentError_asset:42")
+		const retryPreview = findChild(gallery, "attachmentRetry_asset:42")
+		verify(retryableError !== null && retryPreview !== null)
+		tryCompare(retryPreview, "visible", true)
+		compare(retryableError.text, "The preview timed out. You can try again.")
+		compare(retryPreview.Accessible.name, "Retry preview for photo.png")
+		mouseClick(retryPreview)
+		compare(attachmentRetrySpy.count, 1)
+		compare(attachmentRetrySpy.signalArguments[0][0].assetId, "42")
+
+		gallery.attachments = [{
+			"id": "inline:legacy",
+			"inlineToken": "abcdef0123456789abcdef01",
+			"kind": "image",
+			"mime": "image/png",
+			"fileName": "embedded-image.png",
+			"state": "error"
+		}]
+		const inlineDownload = findChild(gallery, "attachmentDownload_inline:legacy")
+		const inlineRetry = findChild(gallery, "attachmentRetry_inline:legacy")
+		verify(inlineDownload !== null && inlineRetry !== null)
+		tryCompare(inlineDownload, "visible", true)
+		compare(inlineRetry.visible, false)
+		mouseClick(inlineDownload)
+		compare(attachmentDownloadSpy.count, 2)
+		compare(attachmentDownloadSpy.signalArguments[1][0].inlineToken,
+			"abcdef0123456789abcdef01")
+	}
+
+	function test_attachment_gallery_uses_safe_image_fallback_and_distinct_file_actions() {
+		const gallery = attachmentLoader.item
+		gallery.attachments = [{
+			"id": "fallback-image",
+			"assetId": "50",
+			"kind": "image",
+			"url": "image://mumble/fallback-image?g=1",
+			"thumbnailUrl": "https://untrusted.example/masked.png",
+			"alt": "Fallback image"
+		}]
+		const imageTile = findChild(gallery, "attachment_fallback-image")
+		verify(imageTile !== null)
+		compare(imageTile.sourceUrl, "image://mumble/fallback-image?g=1")
+		const imageAction = findChild(gallery, "attachmentAction_fallback-image")
+		compare(imageAction.Accessible.name, "Fallback image")
+		compare(imageAction.Accessible.description, "Attachment 1 of 1")
+
+		gallery.attachments = [{
+			"id": "asset:pdf",
+			"assetId": "51",
+			"kind": "document",
+			"mime": "application/pdf",
+			"fileName": "quarterly.pdf",
+			"byteSize": 8192
+		}]
+		const pdfAction = findChild(gallery, "attachmentAction_asset:pdf")
+		const pdfSave = findChild(gallery, "attachmentDownload_asset:pdf")
+		verify(pdfAction !== null && pdfSave !== null)
+		compare(pdfAction.Accessible.name, "Open quarterly.pdf")
+		tryCompare(pdfSave, "visible", true)
+		mouseClick(pdfAction)
+		compare(attachmentSpy.count, 1)
+		compare(attachmentSpy.signalArguments[0][0].assetId, "51")
+		mouseClick(pdfSave)
+		compare(attachmentDownloadSpy.count, 1)
+		compare(attachmentDownloadSpy.signalArguments[0][0].assetId, "51")
+
+		gallery.attachments = [{
+			"id": "asset:zip",
+			"assetId": "52",
+			"kind": "binary",
+			"mime": "application/zip",
+			"fileName": "archive.zip"
+		}]
+		const zipAction = findChild(gallery, "attachmentAction_asset:zip")
+		const zipSave = findChild(gallery, "attachmentDownload_asset:zip")
+		verify(zipAction !== null && zipSave !== null)
+		compare(zipAction.Accessible.name, "Save archive.zip")
+		compare(zipSave.visible, false)
+		mouseClick(zipAction)
+		compare(attachmentSpy.count, 2)
+		compare(attachmentSpy.signalArguments[1][0].assetId, "52")
+
+		gallery.attachments = [{
+			"id": "asset:legacy-pdf",
+			"assetId": "53",
+			"kind": "document",
+			"mime": "application/octet-stream",
+			"fileName": "legacy.pdf"
+		}]
+		const legacyPdfAction = findChild(gallery, "attachmentAction_asset:legacy-pdf")
+		verify(legacyPdfAction !== null)
+		compare(legacyPdfAction.Accessible.name, "Open legacy.pdf")
+
+		gallery.attachments = [{
+			"id": "asset:spoofed-pdf",
+			"assetId": "54",
+			"kind": "binary",
+			"mime": "application/octet-stream",
+			"fileName": "not-a-document.pdf"
+		}]
+		const spoofedPdfAction = findChild(gallery, "attachmentAction_asset:spoofed-pdf")
+		verify(spoofedPdfAction !== null)
+		compare(spoofedPdfAction.Accessible.name, "Save not-a-document.pdf")
+
+		gallery.attachments = [{
+			"id": "asset:m4a",
+			"assetId": "55",
+			"kind": "audio",
+			"mime": "audio/mp4",
+			"fileName": "voice-note.m4a"
+		}]
+		const m4aAction = findChild(gallery, "attachmentAction_asset:m4a")
+		const m4aSave = findChild(gallery, "attachmentDownload_asset:m4a")
+		verify(m4aAction !== null && m4aSave !== null)
+		compare(m4aAction.Accessible.name, "Open voice-note.m4a")
+		tryCompare(m4aSave, "visible", true)
 	}
 
 	function test_managed_animation_unloads_when_preview_is_inactive() {
@@ -1172,6 +2451,14 @@ TestCase {
 		}
 		card.previewIdentity = "message:sensitive|one"
 		verify(card.mediaRequiresReveal)
+		const stateBadge = findChild(card, "previewStateBadge")
+		const stateBadgeLabel = findChild(card, "previewStateBadgeLabel")
+		verify(stateBadge !== null && stateBadge.visible)
+		verify(stateBadgeLabel !== null)
+		compare(stateBadgeLabel.text, "Hidden")
+		compare(card.previewStateColor, Theme.warning)
+		verify(card.Accessible.description.indexOf("Sensitive imagery") >= 0)
+		verify(card.Accessible.description.indexOf("Reveal the media") >= 0)
 		compare(findChild(card, "previewCompactImage").source.toString(), "")
 		const reveal = findChild(card, "previewCompactRevealButton")
 		const revealState = findChild(card, "previewCompactRevealState")
@@ -1193,6 +2480,7 @@ TestCase {
 		tryCompare(revealState, "color", Theme.accentSubtle)
 		mouseRelease(reveal, reveal.width / 2, reveal.height / 2, Qt.LeftButton)
 		verify(!card.mediaRequiresReveal)
+		compare(stateBadge.visible, false)
 		verify(!compactRevealSurface.visible && !expandedRevealSurface.visible
 			&& !embedRevealSurface.visible && !providerWarning.visible)
 		card.sensitiveMediaRevealed = false

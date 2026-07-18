@@ -1,0 +1,173 @@
+{
+  "children": [
+    {
+      "children": [],
+      "description": "Decoded video from the active screen share",
+      "name": "Live shared screen frame",
+      "rect": {
+        "height": 452,
+        "width": 760,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Graphic",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "LIVE",
+      "rect": {
+        "height": 15,
+        "width": 21,
+        "x": 23,
+        "y": 13
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "100 percent",
+          "name": "Stream volume",
+          "rect": {
+            "height": 32,
+            "width": 112,
+            "x": 572,
+            "y": 459
+          },
+          "role": "Slider",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Pause this stream locally without closing the viewer",
+          "name": "Pause",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 504,
+            "y": 460
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Change local audio playback for this share",
+          "name": "Mute",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 538,
+            "y": 460
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Enter full screen",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 688,
+            "y": 460
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Stop receiving this screen share",
+          "name": "Close viewer",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 722,
+            "y": 460
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Live",
+          "rect": {
+            "height": 24,
+            "width": 28,
+            "x": 464,
+            "y": 463
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "Alex's screen share, Shared by Alex · in Lobby, Live",
+      "name": "Screen share viewer controls",
+      "rect": {
+        "height": 45,
+        "width": 760,
+        "x": 0,
+        "y": 452
+      },
+      "role": "ToolBar",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Live via native Qt Quick frame transport.",
+      "rect": {
+        "height": 15,
+        "width": 678,
+        "x": 8,
+        "y": 501
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "In-app video",
+      "rect": {
+        "height": 15,
+        "width": 60,
+        "x": 692,
+        "y": 501
+      },
+      "role": "StaticText",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Screen Share — Shared by Alex · in Lobby",
+  "rect": {
+    "height": 520,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

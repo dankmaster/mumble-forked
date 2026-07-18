@@ -1,0 +1,116 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Screen share unavailable",
+          "rect": {
+            "height": 27,
+            "width": 520,
+            "x": 300,
+            "y": 316
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "The deterministic helper handshake timed out.",
+          "rect": {
+            "height": 17,
+            "width": 520,
+            "x": 300,
+            "y": 355
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Clean up the failed helper and start a fresh screen-share viewer",
+          "name": "Retry viewer",
+          "rect": {
+            "height": 36,
+            "width": 89,
+            "x": 467,
+            "y": 384
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Stop receiving this unavailable screen share",
+          "name": "Close viewer",
+          "rect": {
+            "height": 36,
+            "width": 89,
+            "x": 564,
+            "y": 384
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "The deterministic helper handshake timed out.",
+      "name": "Screen share unavailable",
+      "rect": {
+        "height": 671,
+        "width": 1120,
+        "x": 0,
+        "y": 0
+      },
+      "role": "AlertMessage",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Viewer unavailable",
+          "rect": {
+            "height": 24,
+            "width": 106,
+            "x": 986,
+            "y": 684
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "Alex's screen share, Shared by Alex · in Lobby, Viewer unavailable",
+      "name": "Screen share viewer controls",
+      "rect": {
+        "height": 49,
+        "width": 1120,
+        "x": 0,
+        "y": 671
+      },
+      "role": "ToolBar",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Screen Share — Shared by Alex · in Lobby",
+  "rect": {
+    "height": 720,
+    "width": 1120,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

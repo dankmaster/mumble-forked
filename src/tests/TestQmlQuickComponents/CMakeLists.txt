@@ -1,4 +1,4 @@
-find_pkg(Qt6 COMPONENTS Quick QuickControls2 QuickTest Qml REQUIRED)
+find_pkg(Qt6 COMPONENTS Multimedia Quick QuickControls2 QuickTest Qml REQUIRED)
 
 add_executable(TestQmlQuickComponents
 	TestQmlQuickComponents.cpp
@@ -12,6 +12,7 @@ target_compile_definitions(TestQmlQuickComponents PRIVATE
 target_link_libraries(TestQmlQuickComponents PRIVATE
 	Qt6::Core
 	Qt6::Gui
+	Qt6::Multimedia
 	Qt6::Qml
 	Qt6::Quick
 	Qt6::QuickControls2

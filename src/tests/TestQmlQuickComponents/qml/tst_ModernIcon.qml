@@ -79,7 +79,10 @@ TestCase {
 	}
 
 	function test_semantic_navigation_and_media_icons_have_vector_paths() {
-		const names = ["chevron-down", "chevron-up", "previous", "next", "external", "play", "warning"]
+		const names = [
+			"chevron-down", "chevron-up", "previous", "next", "external", "play", "pause",
+			"volume-off", "fullscreen", "fullscreen-exit", "warning"
+		]
 		for (let index = 0; index < names.length; ++index) {
 			loader.item.name = names[index]
 			verify(loader.item.pathData.length > 0, names[index])
@@ -90,7 +93,7 @@ TestCase {
 	function test_action_menu_vocabulary_has_stable_vector_paths() {
 		const names = [
 			"action", "add", "certificate", "connect", "copy", "delete", "disconnect", "edit",
-			"eye", "eye-off", "info", "join", "key", "link", "message", "move", "pin",
+			"eye", "eye-off", "history", "info", "join", "key", "link", "message", "minimize", "move", "pin",
 			"plugin", "quit", "record", "refresh", "reply", "screen-share", "send", "settings", "shield",
 			"terminal", "unlink", "user", "user-add", "user-remove", "volume"
 		]

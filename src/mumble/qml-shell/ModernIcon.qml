@@ -41,10 +41,18 @@ Item {
 			return "M20 11.5 A8 8 0 0 1 11.5 19.5 A8.5 8.5 0 1 1 20 11.5 Z M7 20 L4 21 L5 18"
 		case "disconnect":
 			return "M5 5 L19 19 M8 3 V7 M16 3 V7 M7 8 H17 V10 M12 17 V21"
+		case "download":
+			return "M12 3 V15 M7 10 L12 15 L17 10 M5 20 H19"
 		case "edit":
 			return "M4 20 L8.5 19 L19 8.5 L15.5 5 L5 15.5 Z M13.5 7 L17 10.5"
 		case "external":
 			return "M14 5 H19 V10 M19 5 L11 13 M18 13 V19 H5 V6 H11"
+		case "fullscreen":
+			return "M8 3 H3 V8 M16 3 H21 V8 M21 16 V21 H16 M3 16 V21 H8"
+		case "fullscreen-exit":
+			return "M3 8 H8 V3 M21 8 H16 V3 M16 21 V16 H21 M8 21 V16 H3"
+		case "history":
+			return "M12 3 A9 9 0 1 1 3 12 A9 9 0 0 1 12 3 Z M12 7 V12 L16 14"
 		case "eye":
 			return "M2.5 12 S6 6 12 6 S21.5 12 21.5 12 S18 18 12 18 S2.5 12 2.5 12 Z M12 9 A3 3 0 1 1 12 15 A3 3 0 0 1 12 9 Z"
 		case "eye-off":
@@ -61,6 +69,8 @@ Item {
 			return "M4 7 H20 M4 12 H20 M4 17 H20"
 		case "message":
 			return "M4 4 H20 V17 H9 L4 21 Z M8 9 H16 M8 13 H14"
+		case "minimize":
+			return "M5 12 H19"
 		case "microphone":
 			return "M12 3 A3 3 0 0 1 15 6 V12 A3 3 0 0 1 9 12 V6 A3 3 0 0 1 12 3 Z M5 11 A7 7 0 0 0 19 11 M12 18 V21 M8 21 H16"
 		case "more":
@@ -73,6 +83,8 @@ Item {
 			return "M9 6 L15 12 L9 18"
 		case "pin":
 			return "M8 3 H16 L15 8 L19 12 H13 V21 L11 19 V12 H5 L9 8 Z"
+		case "pause":
+			return "M9 5 V19 M15 5 V19"
 		case "play":
 			return "M8 5 L19 12 L8 19 Z"
 		case "plugin":
@@ -113,6 +125,8 @@ Item {
 		case "voice-room":
 		case "volume":
 			return "M4 10 V14 H8 L13 18 V6 L8 10 Z M16 9 A4 4 0 0 1 16 15 M18.5 6.5 A8 8 0 0 1 18.5 17.5"
+		case "volume-off":
+			return "M4 10 V14 H8 L13 18 V6 L8 10 Z M17 9 L21 13 M21 9 L17 13"
 		case "warning":
 			return "M12 3 L22 20 H2 Z M12 9 V14 M12 17 H12.01"
 		default:

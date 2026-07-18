@@ -44,6 +44,14 @@ TestCase {
         compare(clickedSpy.count, 1);
     }
 
+	function test_return_and_keypad_enter_activate_once() {
+		keyClick(Qt.Key_Return)
+		compare(clickedSpy.count, 1)
+		clickedSpy.clear()
+		keyClick(Qt.Key_Enter)
+		compare(clickedSpy.count, 1)
+	}
+
 	function test_tone_and_checked_states_use_design_tokens() {
 		loader.item.tone = "danger"
 		verify(loader.item.emphasized)

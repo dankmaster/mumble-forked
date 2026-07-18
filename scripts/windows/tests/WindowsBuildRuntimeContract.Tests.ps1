@@ -5,6 +5,11 @@ Describe "Windows helper runtime capability gate" {
 	BeforeAll {
 		$buildScriptPath = Join-Path $PSScriptRoot "..\build-local-windows-client.ps1"
 		$scriptText = Get-Content -Raw -LiteralPath $buildScriptPath
+		$artifactAssertionScriptText = Get-Content -Raw -LiteralPath (
+			Join-Path $PSScriptRoot "..\assert-windows-build-artifacts.ps1"
+		)
+		$updatePackageScriptPath = Join-Path $PSScriptRoot "..\create-windows-update-package.ps1"
+		$updatePackageScriptText = Get-Content -Raw -LiteralPath $updatePackageScriptPath
 		$tokens = $null
 		$parseErrors = $null
 		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -17,7 +22,8 @@ Describe "Windows helper runtime capability gate" {
 		foreach ($functionName in @(
 			"Test-ObjectHasProperty",
 			"Get-ObjectBooleanProperty",
-			"Test-UsableH264EncoderCapability"
+			"Test-UsableH264EncoderCapability",
+			"Get-PeRuntimeDependencies"
 		)) {
 			$function = $ast.Find(
 				{
@@ -30,6 +36,25 @@ Describe "Windows helper runtime capability gate" {
 			$function | Should Not BeNullOrEmpty
 			. ([scriptblock]::Create($function.Extent.Text))
 		}
+
+		$packageTokens = $null
+		$packageParseErrors = $null
+		$packageAst = [System.Management.Automation.Language.Parser]::ParseFile(
+			$updatePackageScriptPath,
+			[ref]$packageTokens,
+			[ref]$packageParseErrors
+		)
+		$packageParseErrors.Count | Should Be 0
+		$requiredPayloadFunction = $packageAst.Find(
+			{
+				param($node)
+				$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+					$node.Name -eq "Get-RequiredQtQuickPayloadPaths"
+			},
+			$true
+		)
+		$requiredPayloadFunction | Should Not BeNullOrEmpty
+		. ([scriptblock]::Create($requiredPayloadFunction.Extent.Text))
 	}
 
 	It "accepts an executable GStreamer H.264 backend when ffmpeg encoders are unavailable" {
@@ -71,5 +96,91 @@ Describe "Windows helper runtime capability gate" {
 
 	It "uses the shared capability helper in the release probe" {
 		$scriptText | Should Match 'Test-UsableH264EncoderCapability -Capabilities \$capabilities -RuntimeSupport \$runtimeSupport'
+	}
+
+	It "separates startup imports from media-only delay-load imports" {
+		$report = Get-PeRuntimeDependencies -DumpbinOutput @(
+			"Image has the following dependencies:",
+			"  Qt6Quick.dll",
+			"  Qt6Qml.dll",
+			"Image has the following delay load dependencies:",
+			"  Qt6WebEngineQuick.dll",
+			"  Qt6WebEngineCore.dll",
+			"  rnnoise.dll",
+			"  onnxruntime.dll",
+			"Summary",
+			"  ignored.dll"
+		)
+
+		@($report.Direct).Count | Should Be 2
+		($report.Direct -contains "Qt6Quick.dll") | Should Be $true
+		($report.Direct -contains "Qt6WebEngineQuick.dll") | Should Be $false
+		@($report.DelayLoad).Count | Should Be 4
+		($report.DelayLoad -contains "Qt6WebEngineQuick.dll") | Should Be $true
+		($report.DelayLoad -contains "Qt6WebEngineCore.dll") | Should Be $true
+		($report.DelayLoad -contains "rnnoise.dll") | Should Be $true
+		($report.DelayLoad -contains "onnxruntime.dll") | Should Be $true
+	}
+
+	It "keeps WebEngine out of the Windows startup import table" {
+		$cmakeText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\..\..\src\mumble\CMakeLists.txt")
+		$mainText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\..\..\src\mumble\main.cpp")
+
+		$cmakeText | Should Match 'mumble_delay_load_qt_runtime\(Qt6::WebEngineQuick\)'
+		$cmakeText | Should Match 'mumble_delay_load_qt_runtime\(Qt6::WebEngineCore\)'
+		$cmakeText | Should Match 'target_link_options\(mumble_client_object_lib PUBLIC'
+		$mainText | Should Match 'QCoreApplication::setAttribute\(Qt::AA_ShareOpenGLContexts\)'
+		$mainText | Should Match 'api != QSGRendererInterface::Software'
+		$mainText | Should Match 'QQuickWindow::setGraphicsApi\(QSGRendererInterface::Direct3D11\)'
+		$mainText | Should Not Match 'QQuickWindow::setGraphicsApi\(QSGRendererInterface::OpenGL\)'
+		$scriptText | Should Match 'delay-load-runtime-dependencies\.txt'
+		$scriptText | Should Match 'media-only runtimes'
+	}
+
+	It "keeps optional neural speech runtimes out of the Windows startup import table" {
+		$cmakeText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\..\..\src\mumble\CMakeLists.txt")
+
+		$cmakeText | Should Match '/DELAYLOAD:\$<TARGET_FILE_NAME:rnnoise>'
+		$cmakeText | Should Match '/DELAYLOAD:\$\{ONNXRUNTIME_RUNTIME_NAME\}'
+		foreach ($runtime in @('rnnoise.dll', 'onnxruntime.dll')) {
+			$scriptText | Should Match ([regex]::Escape($runtime))
+			$artifactAssertionScriptText | Should Match ([regex]::Escape($runtime))
+			$updatePackageScriptText | Should Match ([regex]::Escape($runtime))
+		}
+		$scriptText | Should Match 'Test-Path -LiteralPath \(Join-Path \$StageRoot \$optionalNeuralRuntime\)'
+		$artifactAssertionScriptText | Should Match 'Test-Path -LiteralPath \(Join-Path \$Root \$optionalNeuralRuntime\)'
+		$updatePackageScriptText | Should Match 'Test-Path -LiteralPath \(Join-Path \$Root \$optionalNeuralRuntime\)'
+	}
+
+	It "requires the complete native Qt Multimedia QML and WMF runtime" {
+		$stagePaths = @(
+			"Qt6Multimedia.dll",
+			"Qt6MultimediaQuick.dll",
+			"multimedia\windowsmediaplugin.dll",
+			"qml\QtMultimedia\qmldir",
+			"qml\QtMultimedia\plugins.qmltypes",
+			"qml\QtMultimedia\quickmultimediaplugin.dll",
+			"qml\QtMultimedia\Video.qml"
+		)
+		$payloadPaths = @($stagePaths | ForEach-Object { $_.Replace('\', '/') })
+
+		foreach ($path in $stagePaths) {
+			$scriptText | Should Match ([regex]::Escape($path))
+		}
+		foreach ($path in $payloadPaths) {
+			$artifactAssertionScriptText | Should Match ([regex]::Escape($path))
+			$updatePackageScriptText | Should Match ([regex]::Escape($path))
+			(@(Get-RequiredQtQuickPayloadPaths) -contains $path) | Should Be $true
+		}
+	}
+
+	It "rejects the unused Qt Multimedia Widgets runtime from every Windows payload gate" {
+		$scriptText | Should Match '(?s)\$forbiddenRuntime\s*=\s*@\(.*?Qt6MultimediaWidgets\.dll'
+		$scriptText | Should Match '(?s)\$forbiddenDirectRuntimes\s*=\s*@\(.*?Qt6MultimediaWidgets\.dll'
+		$artifactAssertionScriptText | Should Match '(?s)\$forbiddenPayloadRuntimes\s*=.*?Qt6MultimediaWidgets\.dll'
+		$artifactAssertionScriptText | Should Match '(?s)\$forbiddenDirectRuntimes\s*=\s*@\(.*?Qt6MultimediaWidgets\.dll'
+		$updatePackageScriptText | Should Match '(?s)\$forbiddenPayloadRuntimes\s*=.*?Qt6MultimediaWidgets\.dll'
+		$updatePackageScriptText | Should Match '(?s)\$forbiddenDirectRuntimes\s*=\s*@\(.*?Qt6MultimediaWidgets\.dll'
+		(@(Get-RequiredQtQuickPayloadPaths) -contains 'Qt6MultimediaWidgets.dll') | Should Be $false
 	}
 }

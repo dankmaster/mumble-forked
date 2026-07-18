@@ -5,6 +5,7 @@ import Mumble.Theme 1.0
 ToolButton {
 	id: control
 	property bool selected: false
+	property bool overlay: false
 	property string tone: "neutral"
 	property bool dense: false
 	property string iconName: ""
@@ -23,9 +24,11 @@ ToolButton {
 	Behavior on scale { NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic } }
 
 	contentItem: Item {
-		readonly property color foreground: !control.enabled ? Theme.textMuted
-			: control.selected ? Theme.textStrong
-			: control.hovered ? Theme.textStrong : Theme.textMain
+		readonly property color foreground: !control.enabled
+			? (control.overlay ? Theme.mediaOverlayTextMuted : Theme.textMuted)
+			: control.selected || control.hovered
+				? (control.overlay ? Theme.mediaOverlayTextStrong : Theme.textStrong)
+				: control.overlay ? Theme.mediaOverlayTextMuted : Theme.textMain
 		ModernIcon {
 			anchors.centerIn: parent
 			visible: control.iconName.length > 0
@@ -46,10 +49,13 @@ ToolButton {
 
 	background: Rectangle {
 		radius: Theme.innerRadius
-		color: !control.enabled ? Theme.panel
-			: control.selected ? Theme.accentSubtle
-			: control.hovered || control.down ? Theme.surfaceHover : "transparent"
-		border.color: !control.enabled ? Theme.divider
+		color: !control.enabled ? (control.overlay ? "transparent" : Theme.panel)
+			: control.selected ? (control.overlay
+				? Theme.withAlpha(Theme.accent, 0.22) : Theme.accentSubtle)
+			: control.hovered || control.down ? (control.overlay
+				? Theme.withAlpha(Theme.mediaOverlayTextStrong, 0.12) : Theme.surfaceHover)
+			: "transparent"
+		border.color: !control.enabled ? (control.overlay ? "transparent" : Theme.divider)
 			: control.activeFocus ? Theme.focus
 			: control.selected ? control.toneColor : "transparent"
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1

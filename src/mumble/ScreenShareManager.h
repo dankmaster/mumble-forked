@@ -84,6 +84,10 @@ public:
 	void logLocalShareAvailabilityDiagnostic(const QString &context = QString()) const;
 
 	bool canRequestLocalShare() const;
+	// Returns whether the foreground share setup may be opened. Unlike
+	// canRequestLocalShare(), this deliberately permits the lazy capability
+	// probe that is started by opening the picker.
+	bool canOpenLocalShareSetup() const;
 	QString localShareUnavailableReason() const;
 	bool canViewSession(const QString &streamID) const;
 	bool isPublishingSession(const QString &streamID) const;
@@ -118,12 +122,15 @@ signals:
 
 private:
 	ScreenShareSession sessionFromState(const MumbleProto::ScreenShareState &msg) const;
+	void reconcileSession(const ScreenShareSession &session);
+	void reconcileSessionsAfterCapabilityRefresh();
 	bool canViewSession(const ScreenShareSession &session) const;
 	bool canPublishSession(const ScreenShareSession &session) const;
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
 	void retryExternalViewSession(const QString &streamID);
 	void showExternalViewWindow(const ScreenShareSession &session, qint64 processID);
+	void updateViewBackendIdentity(ScreenShareViewBackend *backend, const ScreenShareSession &session) const;
 	void startLocalPublishSession(const ScreenShareSession &session);
 	void startLocalViewSession(const ScreenShareSession &session);
 	void stopLocalPublishSession(const QString &streamID);
@@ -131,7 +138,12 @@ private:
 	void updateExternalRuntimeWatchdog();
 	void checkExternalRuntimeLiveness();
 	void setExternalViewAudioMuted(const QString &streamID, bool muted);
+	void setExternalViewAudioVolume(const QString &streamID, int percent);
 	void setExternalViewPaused(const QString &streamID, bool paused);
+	QString externalViewAudioPreferenceKey(const ScreenShareSession &session) const;
+	void scheduleExternalViewAudioPreferenceSave(const QString &streamID);
+	void persistExternalViewAudioPreference(const QString &streamID);
+	void flushExternalViewAudioPreferenceSaves();
 	void logRemoteViewAvailability(const ScreenShareSession &session);
 	void stopLocalHelperSessions(const QString &streamID);
 	void notifyServerShareStopped(const QString &streamID);
@@ -155,6 +167,9 @@ private:
 	QHash< QString, ScreenShareViewBackend * > m_viewBackends;
 	QHash< QString, QPointer< QObject > > m_qmlViewWindows;
 	QSet< QString > m_externalViewAudioMuted;
+	QHash< QString, QString > m_externalViewAudioPreferenceKeys;
+	QSet< QString > m_pendingExternalViewAudioPreferenceSaves;
+	QTimer m_externalViewAudioPreferenceSaveTimer;
 	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_manualViewRetryRequired;
 	QSet< QString > m_announcedViewableSessions;

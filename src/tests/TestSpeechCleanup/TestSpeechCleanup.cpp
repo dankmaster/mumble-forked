@@ -30,12 +30,18 @@ extern "C" {
 #include <numeric>
 #include <vector>
 
+#ifdef Q_OS_WIN
+#	include <windows.h>
+#endif
+
 class TestSpeechCleanup : public QObject {
 	Q_OBJECT
 
 private slots:
+	void windowsDelayLoadsNeuralRuntimesOnFirstUse();
 	void transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame();
 	void transmitDrainCanBeCancelledForFreshSpeech();
+	void processorOwnershipFollowsNoiseCancelModeWithoutModelInitialization();
 #ifdef TEST_EXPECT_RNNOISE
 	void customModelDirectoryFallsBackSafely();
 	void missingCustomModelFallsBackSafely();
@@ -80,6 +86,40 @@ private:
 	static void verifyNonFiniteInputSanitized(const Mumble::SpeechCleanup::Selection &selection);
 };
 
+namespace {
+	class TestSpeechCleanupProcessor final : public SpeechCleanupProcessor {
+	public:
+		bool isReady() const override { return true; }
+		void reset() override {}
+		void processInPlace(float *, unsigned int, float) override {}
+	};
+}
+
+void TestSpeechCleanup::windowsDelayLoadsNeuralRuntimesOnFirstUse() {
+#ifdef Q_OS_WIN
+	QVERIFY2(GetModuleHandleW(L"rnnoise.dll") == nullptr,
+			 "RNNoise must not be mapped before an RNNoise processor is requested");
+	QVERIFY2(GetModuleHandleW(L"onnxruntime.dll") == nullptr,
+			 "ONNX Runtime must not be mapped before a DTLN processor is requested");
+
+#	ifdef TEST_EXPECT_RNNOISE
+	auto rnnoiseProcessor = createSpeechCleanupProcessor(embeddedSelection(Settings::RNNoiseBackend));
+	QVERIFY(rnnoiseProcessor && rnnoiseProcessor->isReady());
+	QVERIFY(GetModuleHandleW(L"rnnoise.dll") != nullptr);
+	QVERIFY2(GetModuleHandleW(L"onnxruntime.dll") == nullptr,
+			 "Creating RNNoise must not load the unrelated ONNX runtime");
+#	endif
+
+#	ifdef TEST_EXPECT_DTLN
+	auto dtlnProcessor = createSpeechCleanupProcessor(embeddedSelection(Settings::DTLNBackend));
+	QVERIFY(dtlnProcessor && dtlnProcessor->isReady());
+	QVERIFY(GetModuleHandleW(L"onnxruntime.dll") != nullptr);
+#	endif
+#else
+	QSKIP("Windows delay-load semantics are only available on Windows.");
+#endif
+}
+
 void TestSpeechCleanup::transmitDrainUsesExactLatencyAndTerminatesOnlyItsLastFrame() {
 	Mumble::SpeechCleanup::TransmitDrain drain;
 	drain.begin(1776);
@@ -121,6 +161,37 @@ void TestSpeechCleanup::transmitDrainCanBeCancelledForFreshSpeech() {
 	QVERIFY(!drain.active());
 	QCOMPARE(drain.remainingSamples(), 0u);
 	QVERIFY(!drain.takeFrame(480).draining);
+}
+
+void TestSpeechCleanup::processorOwnershipFollowsNoiseCancelModeWithoutModelInitialization() {
+	Mumble::SpeechCleanup::Selection dtlnSelection;
+	dtlnSelection.backend = Settings::DTLNBackend;
+	dtlnSelection.modelId = QStringLiteral("dtln:baseline");
+
+	Mumble::SpeechCleanup::Selection activeSelection;
+	std::unique_ptr< SpeechCleanupProcessor > processor;
+	reconcileSpeechCleanupProcessor(Settings::NoiseCancelOff, dtlnSelection, activeSelection, processor);
+	QVERIFY(!processor);
+	QVERIFY(activeSelection == Mumble::SpeechCleanup::normalizeSelection(dtlnSelection));
+	QVERIFY(!noiseCancelUsesSpeechCleanup(Settings::NoiseCancelOff));
+	QVERIFY(!noiseCancelUsesSpeechCleanup(Settings::NoiseCancelSpeex));
+	QVERIFY(noiseCancelUsesSpeechCleanup(Settings::NoiseCancelRNN));
+	QVERIFY(noiseCancelUsesSpeechCleanup(Settings::NoiseCancelBoth));
+
+	processor = std::make_unique< TestSpeechCleanupProcessor >();
+	SpeechCleanupProcessor *const retainedProcessor = processor.get();
+	reconcileSpeechCleanupProcessor(Settings::NoiseCancelRNN, dtlnSelection, activeSelection, processor);
+	QCOMPARE(processor.get(), retainedProcessor);
+
+	reconcileSpeechCleanupProcessor(Settings::NoiseCancelSpeex, dtlnSelection, activeSelection, processor);
+	QVERIFY(!processor);
+	QVERIFY(activeSelection == Mumble::SpeechCleanup::normalizeSelection(dtlnSelection));
+
+	processor = std::make_unique< TestSpeechCleanupProcessor >();
+	reconcileSpeechCleanupProcessor(Settings::NoiseCancelBoth, dtlnSelection, activeSelection, processor);
+	QVERIFY(processor);
+	reconcileSpeechCleanupProcessor(Settings::NoiseCancelOff, dtlnSelection, activeSelection, processor);
+	QVERIFY(!processor);
 }
 
 Mumble::SpeechCleanup::Selection TestSpeechCleanup::customSelection(const QString &path) {

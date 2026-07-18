@@ -79,6 +79,34 @@ endif()
 
 target_link_libraries(mumble_database PUBLIC SOCI::soci)
 
+# A static Qt build can discover PostgreSQL through the QPSQL plugin before
+# bundled SOCI requests it. In that order, vcpkg's FindPostgreSQL wrapper does
+# not reliably retain libpq's supplemental frontend libraries on the imported
+# target, leaving Windows server executables with unresolved pg_* symbols.
+# Link the two vcpkg-provided support libraries explicitly for this one static
+# configuration while preserving PostgreSQL support in the server package.
+if(WIN32 AND static AND enable-postgresql)
+	include(SelectLibraryConfigurations)
+	get_filename_component(postgresql_library_directory "${PostgreSQL_LIBRARY_RELEASE}" DIRECTORY)
+	foreach(postgresql_support_library IN ITEMS pgcommon pgport)
+		set(postgresql_support_prefix "MUMBLE_POSTGRESQL_${postgresql_support_library}")
+		unset(${postgresql_support_prefix}_LIBRARY_RELEASE CACHE)
+		unset(${postgresql_support_prefix}_LIBRARY_DEBUG CACHE)
+		find_library(${postgresql_support_prefix}_LIBRARY_RELEASE
+			NAMES ${postgresql_support_library} lib${postgresql_support_library}
+			HINTS "${postgresql_library_directory}")
+		find_library(${postgresql_support_prefix}_LIBRARY_DEBUG
+			NAMES ${postgresql_support_library} lib${postgresql_support_library}
+			HINTS "${postgresql_library_directory}/../debug/lib")
+		select_library_configurations(${postgresql_support_prefix})
+		if(NOT ${postgresql_support_prefix}_LIBRARY)
+			message(FATAL_ERROR "Static PostgreSQL support library '${postgresql_support_library}' was not found")
+		endif()
+		target_link_libraries(mumble_database PUBLIC ${${postgresql_support_prefix}_LIBRARY})
+	endforeach()
+	target_link_libraries(mumble_database PUBLIC Secur32 Wldap32)
+endif()
+
 
 if (NOT TARGET nlohmann_json)
 	if(bundled-json)

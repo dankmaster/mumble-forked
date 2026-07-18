@@ -51,7 +51,7 @@ The selected ID remains local to the profile. Existing IDs use the `custom:<id>`
 
 `formatVersion`, `id`, `name`, and all palette entries are required. `appearance` is `dark` or `light`. Colors use formats accepted by `QColor`; `#AARRGGBB` preserves alpha. Radii are clamped to 0–64 and spacing to 0–48.
 
-These roles feed the whole Modern UI contract: window and panel surfaces, native and QML title bars, dialogs, menus, tooltips, form controls, selection/focus/disabled states, text, links, and semantic success/warning/error colors. A complete manifest therefore never needs component-specific selectors.
+These roles feed the whole Modern UI contract: window and panel surfaces, QML title bars, dialogs, menus, tooltips, form controls, rich previews, provider embeddings, media chrome, loading/error/fallback states, selection/focus/disabled states, text, links, and semantic success/warning/error colors. A complete manifest therefore never needs component-specific selectors.
 
 Bundled manifests live under `src/mumble/themes/`.
 
@@ -61,4 +61,4 @@ Older profile-local `.css` token themes continue to load for compatibility, and 
 
 ## Sharing and testing
 
-Share the JSON manifest plus screenshots of Settings and an active room. Verify text contrast, selection/focus state, status colors, dialogs, menus, timeline, composer, and both built-in and custom accents.
+Share the JSON manifest plus screenshots of Settings and an active room. Verify text contrast, selection/focus state, status colors, dialogs, menus, timeline, composer, provider previews/embeddings, media states, and both built-in and custom accents.

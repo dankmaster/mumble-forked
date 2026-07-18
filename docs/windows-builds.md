@@ -3,6 +3,10 @@
 This fork separates the static Windows server gate from the shared Qt Quick
 desktop-client gate:
 
+Windows is the supported desktop product and release target. The separate
+manual Linux/macOS Qt Quick client workflow is diagnostic only and does not
+extend product support beyond Windows.
+
 - Workflow: `CI`
 - File: [ci.yml](../.github/workflows/ci.yml)
 - Trigger: push, pull request, and manual dispatch
@@ -17,7 +21,8 @@ explicit provider playback:
 - File: [windows-shared-client.yml](../.github/workflows/windows-shared-client.yml)
 - Trigger: push to `master`, pull request to `master`, and manual dispatch
 - Shared Windows runner: `windows-2022`
-- Output: unsigned shared/WebEngine client payload and installer artifacts
+- Output: unsigned shared Qt Quick client payload, lazy WebEngineQuick media
+  runtime, and installer artifacts
 
 The reusable shared/WebEngine dependency archive has its own manual workflow:
 
@@ -34,21 +39,22 @@ There is also a small human-facing installer workflow for this fork:
 - File: [mumble-forked.yml](../.github/workflows/mumble-forked.yml)
 - Trigger: manual dispatch from `master`
 - Shared Windows runner: `windows-2022`
-- Output: the latest unsigned shared/WebEngine client MSI attached to the stable
-  `mumble-forked` GitHub Release
+- Output: the latest unsigned shared Qt Quick/WebEngineQuick-runtime client MSI
+  attached to the stable `mumble-forked` GitHub Release
 
 ## Recommended use
 
 - Use `CI` for the normal pull-request gate and static Windows server artifact validation.
-- Use `Windows Shared Client Installer` when you need the shared/WebEngine payload
-  under `build-shared-webengine\shared-webengine-stage` or downloadable Windows
-  shared client artifacts.
+- Use `Windows Shared Client Installer` when you need the shared Qt Quick payload
+  and lazy WebEngineQuick media runtime under
+  `build-shared-webengine\shared-webengine-stage` or as downloadable Windows
+  artifacts.
 - Use `Windows Shared Build Environment` only when the pinned shared/WebEngine
   dependency archive itself needs to be rebuilt and republished.
 - Use `mumble-forked MSI Release` when you want a simple stable download link
-  for this fork. It uses the shared/WebEngine lane so the installer includes
-  the current modern-only client shell direction, then publishes the MSI to a normal
-  GitHub Release instead of a short-lived Actions artifact.
+  for this fork. It uses the shared Qt Quick/WebEngineQuick-runtime lane so the
+  installer includes the current modern-only client shell, then publishes the
+  MSI to a normal GitHub Release instead of a short-lived Actions artifact.
 
 ## How to run the shared client workflow
 
@@ -73,7 +79,8 @@ There is also a small human-facing installer workflow for this fork:
 7. Use the stable release page:
    `https://github.com/dankmaster/mumble/releases/tag/mumble-forked`.
 
-The workflow builds the shared/WebEngine Windows client with packaging enabled,
+The workflow builds the shared Qt Quick Windows client and its lazy
+WebEngineQuick media runtime with packaging enabled,
 downloads the pinned GStreamer MSVC runtime, stages it under
 `shared-webengine-stage\gstreamer\`, verifies the helper can see the GStreamer
 LiveKit runtime, deletes older `mumble-forked` / `mumble-forked-*` releases and
@@ -194,7 +201,7 @@ Notes for local use:
 - `-InstallFfmpeg` downloads a portable Windows `ffmpeg` bundle into
   `build_tools\ffmpeg` and prepends it to `PATH` for the current run. It does
   not require Chocolatey or an administrator shell.
-- To include GStreamer in local shared/WebEngine payloads and MSI builds, set
+- To include GStreamer in local shared Qt Quick payloads and MSI builds, set
   `MUMBLE_GSTREAMER_ROOT`, `GSTREAMER_1_0_ROOT_X86_64`, or
   `GSTREAMER_1_0_ROOT_MSVC_X86_64` / `GSTREAMER_ROOT_X86_64` to an installed
   MSVC GStreamer runtime before running the build. The staging step copies it

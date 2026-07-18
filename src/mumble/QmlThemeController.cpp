@@ -270,16 +270,22 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	emit themeStateChanged();
 }
 
-bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const QString &layout) {
+bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const QString &layout,
+											 const QString &density) {
 	const QString normalizedTheme = theme.trimmed().toLower();
 	const QString normalizedLayout = layout.trimmed().toLower();
+	const QString normalizedDensity = density.trimmed().toLower();
 	if ((normalizedTheme != QLatin1String("light") && normalizedTheme != QLatin1String("dark")
 		 && normalizedTheme != QLatin1String("custom"))
-		|| (normalizedLayout != QLatin1String("regular") && normalizedLayout != QLatin1String("compact"))) {
+		|| (normalizedLayout != QLatin1String("regular") && normalizedLayout != QLatin1String("compact"))
+		|| (!normalizedDensity.isEmpty() && normalizedDensity != QLatin1String("compact")
+			&& normalizedDensity != QLatin1String("comfortable")
+			&& normalizedDensity != QLatin1String("spacious"))) {
 		return false;
 	}
-	const QString densityId = normalizedLayout == QLatin1String("compact")
-		? QStringLiteral("compact") : QStringLiteral("comfortable");
+	const QString densityId = normalizedDensity.isEmpty()
+		? (normalizedLayout == QLatin1String("compact") ? QStringLiteral("compact")
+			: QStringLiteral("comfortable")) : normalizedDensity;
 	UiThemeTokens tokens = uiThemeTokensForThemeId(
 		normalizedTheme == QLatin1String("custom") ? QStringLiteral("frappe") : normalizedTheme);
 	QString themeId = normalizedTheme;

@@ -1,321 +1,917 @@
 {
   "children": [
     {
-      "children": [],
-      "description": "",
-      "name": "Lobby",
-      "rect": {
-        "height": 27,
-        "width": 548,
-        "x": 24,
-        "y": 20
-      },
-      "role": "StaticText",
-      "states": []
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Open rooms and participants",
-      "rect": {
-        "height": 32,
-        "width": 32,
-        "x": 578,
-        "y": 28
-      },
-      "role": "Button",
-      "states": [
-        "focusable"
-      ]
-    },
-    {
-      "children": [],
-      "description": "Activate to hide the server welcome message.",
-      "name": "Hide welcome message",
-      "rect": {
-        "height": 28,
-        "width": 48,
-        "x": 616,
-        "y": 28
-      },
-      "role": "Button",
-      "states": [
-        "checked",
-        "focusable"
-      ]
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Search users and rooms",
-      "rect": {
-        "height": 32,
-        "width": 32,
-        "x": 670,
-        "y": 28
-      },
-      "role": "Button",
-      "states": [
-        "focusable"
-      ]
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Application menu",
-      "rect": {
-        "height": 32,
-        "width": 32,
-        "x": 708,
-        "y": 28
-      },
-      "role": "Button",
-      "states": [
-        "focusable",
-        "focused"
-      ]
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Voice room",
-      "rect": {
-        "height": 16,
-        "width": 548,
-        "x": 24,
-        "y": 51
-      },
-      "role": "StaticText",
-      "states": []
-    },
-    {
       "children": [
         {
-          "children": [],
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Lobby",
+                          "rect": {
+                            "height": 27,
+                            "width": 510,
+                            "x": 24,
+                            "y": 20
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Voice room",
+                          "rect": {
+                            "height": 16,
+                            "width": 510,
+                            "x": 24,
+                            "y": 51
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 47,
+                        "width": 510,
+                        "x": 24,
+                        "y": 20
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 540,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 540,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Open rooms and participants",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 540,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 48,
+                                "x": 578,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 20,
+                                "width": 36,
+                                "x": 584,
+                                "y": 32
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "Activate to hide the server welcome message.",
+                          "name": "Hide welcome message",
+                          "rect": {
+                            "height": 28,
+                            "width": 48,
+                            "x": 578,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "checked",
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 632,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 632,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "Search message text, senders, replies, and attachments",
+                          "name": "Search this conversation",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 632,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 670,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 670,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Direct messages",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 670,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 708,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 718,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 12,
+                                    "x": 718,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 723,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 728,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 708,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Application menu",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 708,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable",
+                            "focused"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 200,
+                        "x": 540,
+                        "y": 28
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 744,
+                        "x": 8,
+                        "y": 79
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 72,
+                    "width": 744,
+                    "x": 8,
+                    "y": 8
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Collapse",
+                                  "rect": {
+                                    "height": 26,
+                                    "width": 26,
+                                    "x": 682,
+                                    "y": 90
+                                  },
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 26,
+                                    "width": 56,
+                                    "x": 682,
+                                    "y": 90
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Dismiss",
+                                  "rect": {
+                                    "height": 26,
+                                    "width": 26,
+                                    "x": 712,
+                                    "y": 90
+                                  },
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 26,
+                                "width": 56,
+                                "x": 682,
+                                "y": 90
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 38,
+                            "width": 712,
+                            "x": 26,
+                            "y": 84
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 38,
+                        "width": 728,
+                        "x": 16,
+                        "y": 84
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "Welcome to Mumble This deterministic server message verifies the native Qt Quick welcome surface. Tip: Choose a room on the left, then say hello.",
+                                  "rect": {
+                                    "height": 54,
+                                    "width": 678,
+                                    "x": 58,
+                                    "y": 122
+                                  },
+                                  "role": "StaticText",
+                                  "states": [
+                                    "readOnly"
+                                  ]
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 54,
+                                "width": 678,
+                                "x": 58,
+                                "y": 122
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 54,
+                            "width": 678,
+                            "x": 58,
+                            "y": 122
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 54,
+                        "width": 678,
+                        "x": 58,
+                        "y": 122
+                      },
+                      "role": "Pane",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Server message of the day",
+                  "rect": {
+                    "height": 100,
+                    "width": 728,
+                    "x": 16,
+                    "y": 84
+                  },
+                  "role": "Pane",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Alex",
+                          "rect": {
+                            "height": 15,
+                            "width": 631,
+                            "x": 56,
+                            "y": 215
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:24",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 690,
+                            "y": 215
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Welcome to the deterministic visual fixture.",
+                          "rect": {
+                            "height": 20,
+                            "width": 660,
+                            "x": 56,
+                            "y": 233
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Message actions",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 686,
+                            "y": 265
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 102,
+                        "width": 700,
+                        "x": 36,
+                        "y": 200
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Demo User",
+                          "rect": {
+                            "height": 15,
+                            "width": 631,
+                            "x": 66,
+                            "y": 317
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:25",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 700,
+                            "y": 317
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Qt Quick is ready for review.",
+                          "rect": {
+                            "height": 20,
+                            "width": 660,
+                            "x": 66,
+                            "y": 335
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 68,
+                        "width": 700,
+                        "x": 36,
+                        "y": 302
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 16,
+                        "width": 744,
+                        "x": 36,
+                        "y": 370
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Conversation messages",
+                  "rect": {
+                    "height": 256,
+                    "width": 744,
+                    "x": 8,
+                    "y": 184
+                  },
+                  "role": "List",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 744,
+                        "x": 8,
+                        "y": 440
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 72,
+                        "width": 744,
+                        "x": 8,
+                        "y": 440
+                      },
+                      "role": "Client",
+                      "states": [
+                        "disabled"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 20,
+                                            "width": 620,
+                                            "x": 72,
+                                            "y": 466
+                                          },
+                                          "role": "StaticText",
+                                          "states": [
+                                            "disabled"
+                                          ]
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Message Lobby",
+                                      "rect": {
+                                        "height": 32,
+                                        "width": 636,
+                                        "x": 62,
+                                        "y": 460
+                                      },
+                                      "role": "EditableText",
+                                      "states": [
+                                        "disabled"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 28,
+                                            "y": 462
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 28,
+                                            "y": 462
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Attach images",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 28,
+                                        "y": 462
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "focusable"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 702,
+                                            "y": 462
+                                          },
+                                          "role": "Client",
+                                          "states": [
+                                            "disabled"
+                                          ]
+                                        },
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 702,
+                                            "y": 462
+                                          },
+                                          "role": "Client",
+                                          "states": [
+                                            "disabled"
+                                          ]
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Send",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 702,
+                                        "y": 462
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "disabled"
+                                      ]
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 32,
+                                    "width": 704,
+                                    "x": 28,
+                                    "y": 460
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 704,
+                                "x": 28,
+                                "y": 460
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 44,
+                            "width": 716,
+                            "x": 22,
+                            "y": 454
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 44,
+                        "width": 716,
+                        "x": 22,
+                        "y": 454
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 72,
+                    "width": 744,
+                    "x": 8,
+                    "y": 440
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 504,
+                "width": 744,
+                "x": 8,
+                "y": 8
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
           "description": "",
-          "name": "Collapse",
+          "name": "",
           "rect": {
-            "height": 26,
-            "width": 26,
-            "x": 682,
-            "y": 90
+            "height": 504,
+            "width": 744,
+            "x": 8,
+            "y": 8
           },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Dismiss",
-          "rect": {
-            "height": 26,
-            "width": 26,
-            "x": 712,
-            "y": 90
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Welcome to Mumble\nThis deterministic server message verifies the native Qt Quick welcome surface.\nTip: Choose a room on the left, then say hello.",
-          "rect": {
-            "height": 48,
-            "width": 678,
-            "x": 58,
-            "y": 122
-          },
-          "role": "StaticText",
-          "states": [
-            "readOnly"
-          ]
-        }
-      ],
-      "description": "",
-      "name": "Server message of the day",
-      "rect": {
-        "height": 94,
-        "width": 728,
-        "x": 16,
-        "y": 84
-      },
-      "role": "Pane",
-      "states": []
-    },
-    {
-      "children": [
-        {
-          "children": [],
-          "description": "",
-          "name": "Message actions",
-          "rect": {
-            "height": 32,
-            "width": 32,
-            "x": 692,
-            "y": 208
-          },
-          "role": "Button",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Alex",
-          "rect": {
-            "height": 15,
-            "width": 594,
-            "x": 60,
-            "y": 217
-          },
-          "role": "StaticText",
+          "role": "Client",
           "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "10:24",
-          "rect": {
-            "height": 15,
-            "width": 26,
-            "x": 660,
-            "y": 217
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Welcome to the deterministic visual fixture.",
-          "rect": {
-            "height": 17,
-            "width": 664,
-            "x": 60,
-            "y": 244
-          },
-          "role": "StaticText",
-          "states": [
-            "readOnly"
-          ]
         }
       ],
       "description": "",
       "name": "",
       "rect": {
-        "height": 73,
-        "width": 712,
-        "x": 36,
-        "y": 194
+        "height": 504,
+        "width": 744,
+        "x": 8,
+        "y": 8
       },
       "role": "Client",
       "states": []
-    },
-    {
-      "children": [
-        {
-          "children": [],
-          "description": "",
-          "name": "Demo User",
-          "rect": {
-            "height": 15,
-            "width": 632,
-            "x": 76,
-            "y": 281
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "10:25",
-          "rect": {
-            "height": 15,
-            "width": 26,
-            "x": 714,
-            "y": 281
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Qt Quick is ready for review.",
-          "rect": {
-            "height": 17,
-            "width": 664,
-            "x": 76,
-            "y": 300
-          },
-          "role": "StaticText",
-          "states": [
-            "readOnly"
-          ]
-        }
-      ],
-      "description": "",
-      "name": "",
-      "rect": {
-        "height": 56,
-        "width": 712,
-        "x": 36,
-        "y": 267
-      },
-      "role": "Client",
-      "states": []
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Message Lobby",
-      "rect": {
-        "height": 34,
-        "width": 615,
-        "x": 67,
-        "y": 459
-      },
-      "role": "EditableText",
-      "states": [
-        "focusable"
-      ]
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Attach image",
-      "rect": {
-        "height": 32,
-        "width": 32,
-        "x": 22,
-        "y": 460
-      },
-      "role": "Button",
-      "states": [
-        "focusable"
-      ]
-    },
-    {
-      "children": [],
-      "description": "",
-      "name": "Send",
-      "rect": {
-        "height": 32,
-        "width": 43,
-        "x": 695,
-        "y": 460
-      },
-      "role": "Button",
-      "states": [
-        "disabled"
-      ]
     }
   ],
   "description": "",

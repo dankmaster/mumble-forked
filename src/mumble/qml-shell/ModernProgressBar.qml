@@ -6,6 +6,7 @@ ProgressBar {
 	id: control
 
 	property string tone: "accent"
+	property bool animated: true
 	property int trackHeight: Theme.compact ? 4 : 5
 	readonly property color indicatorColor: tone === "danger" ? Theme.danger
 		: tone === "warning" ? Theme.warning
@@ -43,6 +44,7 @@ ProgressBar {
 			color: control.indicatorColor
 			opacity: control.enabled ? 1 : 0.55
 			Behavior on width {
+				enabled: control.animated
 				NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic }
 			}
 		}
@@ -53,13 +55,15 @@ ProgressBar {
 			y: Math.round((parent.height - height) / 2)
 			width: Math.max(28, Math.min(parent.width * 0.32, 72))
 			height: control.trackHeight
+			property real animatedX: -width
+			x: control.animated ? animatedX : Math.round((parent.width - width) / 2)
 			radius: height / 2
 			visible: control.indeterminate
 			color: control.indicatorColor
 			opacity: control.enabled ? 1 : 0.55
 
-			SequentialAnimation on x {
-				running: control.visible && control.indeterminate
+			SequentialAnimation on animatedX {
+				running: control.animated && control.visible && control.indeterminate
 				loops: Animation.Infinite
 				NumberAnimation {
 					from: -indeterminatePill.width

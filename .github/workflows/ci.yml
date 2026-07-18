@@ -212,6 +212,7 @@ jobs:
         run: |
           .\scripts\windows\assert-windows-build-artifacts.ps1 `
             -BuildRoot .\build `
+            -RequireServer `
             -RequireServerInstaller `
             -RequireEnglishOnlyInstallers `
             -ArtifactListPath .\build\windows-installer-artifacts.txt
@@ -244,6 +245,10 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Test Linux Murmur evidence gate
+        shell: bash
+        run: python3 scripts/linux/tests/test-create-murmur-evidence.py
+
       - name: Initialize submodules with retry
         shell: bash
         run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
@@ -258,7 +263,7 @@ jobs:
           set -euxo pipefail
           echo "MUMBLE_BUILD_CLIENT=OFF" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF -Dscreen-helper=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dscreen-helper=OFF -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF" >> "$GITHUB_ENV"
 
       - id: restore-build-env-cache
         uses: actions/cache/restore@v5
@@ -278,13 +283,22 @@ jobs:
         env:
           MUMBLE_BUILD_NUMBER: ${{ needs.fetch_build_number.outputs.build_number }}
 
-      - name: Validate Linux Server Binary Set
+      - name: Test Linux Server
+        working-directory: ${{ github.workspace }}/build
         shell: bash
-        run: |
-          set -euxo pipefail
-          test -x build/mumble-server
-          test ! -e build/mumble
-          test ! -e build/mumble-screen-helper
+        run: ctest --output-on-failure --output-junit linux-murmur-ctest.xml -C $BUILD_TYPE
+
+      - name: Record Linux Server Evidence
+        shell: bash
+        run: >-
+          bash scripts/linux/create-murmur-evidence.sh
+          --server-binary build/mumble-server
+          --output build/linux-murmur-test-evidence.json
+          --candidate-git-sha "${{ github.sha }}"
+          --build-number "${{ needs.fetch_build_number.outputs.build_number }}"
+          --configuration linux-x86_64-static-release-tests
+          --cmake-cache build/CMakeCache.txt
+          --test-results build/linux-murmur-ctest.xml
 
       - name: Publish Linux Server Artifacts
         if: ${{ github.event_name != 'pull_request' }}
@@ -294,60 +308,11 @@ jobs:
           compression-level: 0
           path: |
             build/mumble-server
+            build/linux-murmur-ctest.xml
+            build/linux-murmur-test-evidence.json
 
       - if: ${{ github.event_name != 'pull_request' && steps.restore-build-env-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
           key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
-
-  linux-tests:
-    name: linux-tests
-    needs: [ fetch_build_number ]
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
-      - name: Initialize submodules with retry
-        shell: bash
-        run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
-
-      - name: Set environment variables
-        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "ubuntu-24.04" "shared" "x86_64" "${{ github.workspace }}"
-        shell: bash
-
-      - name: Select Linux test components
-        shell: bash
-        run: |
-          set -euxo pipefail
-          echo "MUMBLE_BUILD_CLIENT=OFF" >> "$GITHUB_ENV"
-          echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dscreen-helper=OFF -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF" >> "$GITHUB_ENV"
-
-      - uses: ./.github/actions/install-dependencies
-        with:
-          type: shared
-          os: ubuntu-24.04
-          arch: x86_64
-
-      - name: Build
-        run: ./.github/workflows/build.sh "ubuntu-24.04" "shared" "x86_64"
-        shell: bash
-        env:
-          MUMBLE_BUILD_NUMBER: ${{ needs.fetch_build_number.outputs.build_number }}
-
-      - name: Test
-        working-directory: ${{ github.workspace }}/build
-        shell: bash
-        run: ctest --output-on-failure -C $BUILD_TYPE
-
-      - name: Validate Linux Server Test Binary Set
-        shell: bash
-        run: |
-          set -euxo pipefail
-          test -x build/mumble-server
-          test ! -e build/mumble
-          test ! -e build/mumble-screen-helper

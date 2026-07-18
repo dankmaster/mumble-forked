@@ -107,6 +107,8 @@ as your changes would likely be overwritten by said service.
   belongs in typed controllers and `QAbstractItemModel` implementations rather than visible or hidden widgets.
 - `qml-shell/`: This fork's native Qt Quick product UI. `QmlShellHost` creates the direct `QQuickWindow` and exposes typed C++ controllers/models.
   WebEngineQuick is lazy and isolated to explicit provider playback; it is not the application shell and carries no app bridge.
+  This is the supported Windows product architecture. Linux and macOS client builds retained by generic CMake support or manual workflows are
+  diagnostic references, not product or release gates.
 - `UserModel.cpp`: This class is responsible for managing the in-memory representation of the channel and user tree. All user and channel objects on
   the client are created here.
 - `Messages.cpp`: This class implements all Protobuf message handling that is performed on the client-side. Technically all these functions belong to
@@ -123,8 +125,8 @@ as your changes would likely be overwritten by said service.
   Mumble.
 - `Global.cpp`: The `Global` class is a singleton accessed via `Global::get()` and it holds a variety of shared data used throughout the client.
 
-The fork desktop product UI has no `.ui` files under `src/mumble`. Build product surfaces as QML components backed by typed C++ state. Qt Widgets is
-kept only for the documented operating-system and third-party-plugin allowlist.
+The supported Windows fork desktop UI has no `.ui` files under `src/mumble`. Build product surfaces as QML components backed by typed C++ state. Qt
+Widgets is kept only for the documented operating-system and third-party-plugin allowlist.
 
 When creating or changing existing UI elements, always consider the [accessibility checklist](/docs/dev/Accessibility.md).
 

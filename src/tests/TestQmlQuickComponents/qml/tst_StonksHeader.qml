@@ -98,6 +98,20 @@ TestCase {
 		tryCompare(header, "marqueeRunning", true)
 	}
 
+	function test_automation_fixture_disables_marquee_without_hiding_tickers() {
+		const header = loader.item
+		const state = populatedState()
+		state.disableTickerAnimation = true
+		header.stonks = state
+		header.tickerBannerAlwaysScroll = true
+
+		tryCompare(header, "automationAnimationDisabled", true)
+		tryCompare(header, "marqueeShouldRun", false)
+		tryCompare(header, "marqueeRunning", false)
+		tryCompare(header, "visible", true)
+		compare(header.visibleTickerRows.length, 3)
+	}
+
 	function test_populated_state_is_visible_typed_and_keyboard_accessible() {
 		const header = loader.item
 		compare(header.visibleTickerRows.length, 3)

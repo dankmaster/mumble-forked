@@ -1,0 +1,743 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Back to favorites",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 644,
+            "y": 129
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connect to a server",
+          "rect": {
+            "height": 26,
+            "width": 170,
+            "x": 32,
+            "y": 131
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Review the server details, then save or connect.",
+          "rect": {
+            "height": 15,
+            "width": 607,
+            "x": 32,
+            "y": 160
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Add server",
+              "rect": {
+                "height": 17,
+                "width": 590,
+                "x": 70,
+                "y": 189
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Server details",
+              "rect": {
+                "height": 15,
+                "width": 590,
+                "x": 70,
+                "y": 207
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Add server",
+          "rect": {
+            "height": 53,
+            "width": 640,
+            "x": 30,
+            "y": 179
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Details",
+              "rect": {
+                "height": 17,
+                "width": 620,
+                "x": 40,
+                "y": 254
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Server title",
+                      "rect": {
+                        "height": 15,
+                        "width": 54,
+                        "x": 40,
+                        "y": 277
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 620,
+                            "x": 40,
+                            "y": 297
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 604,
+                            "x": 48,
+                            "y": 303
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Server title",
+                      "rect": {
+                        "height": 32,
+                        "width": 620,
+                        "x": 40,
+                        "y": 297
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 620,
+                    "x": 40,
+                    "y": 277
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 620,
+                "x": 40,
+                "y": 277
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Server address",
+                      "rect": {
+                        "height": 15,
+                        "width": 72,
+                        "x": 40,
+                        "y": 335
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 620,
+                            "x": 40,
+                            "y": 355
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 604,
+                            "x": 48,
+                            "y": 361
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 17,
+                            "width": 1,
+                            "x": 48,
+                            "y": 363
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Server address",
+                      "rect": {
+                        "height": 32,
+                        "width": 620,
+                        "x": 40,
+                        "y": 355
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable",
+                        "focused"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 620,
+                    "x": 40,
+                    "y": 335
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 620,
+                "x": 40,
+                "y": 335
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Enter a server host.",
+              "rect": {
+                "height": 15,
+                "width": 620,
+                "x": 40,
+                "y": 391
+              },
+              "role": "AlertMessage",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Port",
+                      "rect": {
+                        "height": 15,
+                        "width": 20,
+                        "x": 40,
+                        "y": 412
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 1,
+                                "x": 84,
+                                "y": 431
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 1,
+                                "width": 32,
+                                "x": 85,
+                                "y": 447
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 77,
+                            "x": 40,
+                            "y": 431
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Port",
+                          "rect": {
+                            "height": 32,
+                            "width": 35,
+                            "x": 48,
+                            "y": 431
+                          },
+                          "role": "SpinBox",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 8,
+                                "x": 97,
+                                "y": 432
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 15,
+                            "width": 32,
+                            "x": 85,
+                            "y": 432
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 16,
+                                "width": 8,
+                                "x": 97,
+                                "y": 447
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 15,
+                            "width": 32,
+                            "x": 85,
+                            "y": 447
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Port",
+                      "rect": {
+                        "height": 32,
+                        "width": 77,
+                        "x": 40,
+                        "y": 431
+                      },
+                      "role": "SpinBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 51,
+                    "width": 620,
+                    "x": 40,
+                    "y": 412
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 51,
+                "width": 620,
+                "x": 40,
+                "y": 412
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Username",
+                      "rect": {
+                        "height": 15,
+                        "width": 50,
+                        "x": 40,
+                        "y": 469
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 620,
+                            "x": 40,
+                            "y": 489
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 604,
+                            "x": 48,
+                            "y": 495
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Username",
+                      "rect": {
+                        "height": 32,
+                        "width": 620,
+                        "x": 40,
+                        "y": 489
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 620,
+                    "x": 40,
+                    "y": 469
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 620,
+                "x": 40,
+                "y": 469
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Enter a username.",
+              "rect": {
+                "height": 15,
+                "width": 620,
+                "x": 40,
+                "y": 525
+              },
+              "role": "AlertMessage",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Server password",
+                      "rect": {
+                        "height": 15,
+                        "width": 80,
+                        "x": 40,
+                        "y": 546
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 32,
+                            "width": 620,
+                            "x": 40,
+                            "y": 566
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 604,
+                            "x": 48,
+                            "y": 572
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Server password",
+                      "rect": {
+                        "height": 32,
+                        "width": 620,
+                        "x": 40,
+                        "y": 566
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable",
+                        "passwordEdit"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 52,
+                    "width": 620,
+                    "x": 40,
+                    "y": 546
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 620,
+                "x": 40,
+                "y": 546
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Details",
+          "rect": {
+            "height": 364,
+            "width": 640,
+            "x": 30,
+            "y": 244
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Back",
+          "rect": {
+            "height": 32,
+            "width": 41,
+            "x": 24,
+            "y": 646
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Remove",
+          "rect": {
+            "height": 32,
+            "width": 59,
+            "x": 71,
+            "y": 646
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Save",
+          "rect": {
+            "height": 32,
+            "width": 40,
+            "x": 136,
+            "y": 646
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Connect",
+          "rect": {
+            "height": 32,
+            "width": 60,
+            "x": 182,
+            "y": 646
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        }
+      ],
+      "description": "Review the server details, then save or connect.",
+      "name": "Connect to a server",
+      "rect": {
+        "height": 579,
+        "width": 668,
+        "x": 16,
+        "y": 111
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble",
+  "rect": {
+    "height": 800,
+    "width": 700,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

@@ -140,6 +140,9 @@ TestCase {
         session.motdChanged = true
 		motdLoader.item.hiddenForHistory = false
 		motdLoader.item.maximumImageHeight = 82
+		connectionLoader.item.showDisconnectedAction = true
+		connectionLoader.item.animationsEnabled = true
+		connectionLoader.item.height = connectionLoader.height
 		session.motdSegments = [
 			{ "text": "Welcome", "bold": true },
 			{ "text": " to the test server. " },
@@ -183,13 +186,41 @@ TestCase {
 		keyClick(Qt.Key_Space)
 		compare(connectionActionSpy.count, 0)
 		const primary = findChild(banner, "connectionBannerPrimaryAction")
+		const busy = findChild(banner, "connectionBannerBusyIndicator")
 		verify(primary !== null)
+		verify(busy !== null && !busy.visible)
 		verify(primary.activeFocusOnTab)
 		verify(banner.focusPrimaryAction())
 		tryCompare(primary, "activeFocus", true)
         keyClick(Qt.Key_Space)
         compare(connectionActionSpy.count, 1)
-        compare(connectionActionSpy.signalArguments[0][0], "server.connect")
+		compare(connectionActionSpy.signalArguments[0][0], "server.connect")
+
+		banner.showDisconnectedAction = false
+		compare(banner.primaryActionId, "")
+		verify(!primary.visible)
+		verify(banner.bannerVisible,
+			"Suppressing the duplicate CTA must retain disconnected status context")
+		banner.showDisconnectedAction = true
+		compare(banner.primaryActionId, "server.connect")
+		verify(primary.visible)
+
+		session.connectionState = "connecting"
+		session.connectionTone = "muted"
+		session.connectionDetail = "Loading rooms and participants."
+		session.canConnect = false
+		session.canCancel = false
+		banner.animationsEnabled = false
+		verify(busy.visible && busy.running)
+		compare(busy.animated, false)
+		compare(busy.Accessible.role, Accessible.ProgressBar)
+		compare(busy.Accessible.name, banner.title)
+		compare(busy.Accessible.description, session.connectionDetail)
+		const frozenRotation = busy.rotation
+		wait(120)
+		compare(busy.rotation, frozenRotation,
+			"The deterministic connecting fixture must retain visible static progress")
+		verify(!banner.focusPrimaryAction())
 
         session.connectionState = "retrying"
         session.connectionTone = "retry"
@@ -198,6 +229,7 @@ TestCase {
         session.canCancel = true
         compare(banner.retryRemainingSeconds, 3)
         compare(banner.primaryActionId, "server.disconnect")
+		verify(busy.visible && busy.running)
         verify(banner.detail.indexOf("3s") >= 0)
 		compare(banner.Accessible.description, session.connectionDetail)
 		tryVerify(function() { return banner.retryRemainingSeconds <= 2 }, 1500)
@@ -206,6 +238,28 @@ TestCase {
         session.connectionState = "connected"
         verify(!banner.bannerVisible)
     }
+
+	function test_disconnected_status_echo_is_visual_once_but_remains_accessible() {
+		const banner = connectionLoader.item
+		const detailLabel = findChild(banner, "connectionBannerDetail")
+		verify(detailLabel !== null)
+		session.connectionState = "disconnected"
+		session.connectionTone = "muted"
+		session.connectionLabel = "Disconnected"
+		session.connectionDetail = "Disconnected"
+
+		tryCompare(banner, "detailEchoesDisconnectedStatus", true)
+		compare(banner.title, "You're disconnected")
+		compare(banner.detail, "")
+		verify(!detailLabel.visible)
+		compare(banner.Accessible.description, "Disconnected")
+
+		session.connectionDetail = "Open the server browser to reconnect."
+		tryCompare(banner, "detailEchoesDisconnectedStatus", false)
+		compare(banner.detail, "Open the server browser to reconnect.")
+		verify(detailLabel.visible)
+		compare(banner.Accessible.description, banner.detail)
+	}
 
     function test_motd_actions_focus_accessibility_and_probe() {
         const panel = motdLoader.item
@@ -337,6 +391,7 @@ TestCase {
 		const bodyScroll = findChild(motdLoader.item, "motdBodyScroll")
 		verify(bodyScroll !== null)
 		tryVerify(function() { return bodyScroll.height > 0 })
+		compare(bodyScroll.contentWidth, bodyScroll.availableWidth)
 		const collapse = findChild(motdLoader.item, "motdAction_motd.hide")
 		verify(collapse !== null)
 		compare(collapse.iconName, "chevron-down")
@@ -366,7 +421,9 @@ TestCase {
 		verify(image !== null, "managed MOTD image was not created")
 		verify(card !== null, "managed MOTD image card was not created")
 		compare(image.source.toString(), "image://mumble/motd-inline?g=1")
-		compare(image.Accessible.name, "Server welcome art")
+		compare(image.Accessible.ignored, true)
+		compare(card.Accessible.role, Accessible.Graphic)
+		compare(card.Accessible.name, "Server welcome art")
 		compare(richBody.maximumImageWidth, 560)
 		compare(richBody.maximumImageHeight, 82)
 		compare(richBody.imageBorderWidth, 0)
@@ -399,6 +456,7 @@ TestCase {
 		compare(banner.participantModel, participants)
 		compare(banner.participantLabel("42"), "Guest")
 		compare(banner.participantLabel("999"), "Session 999")
+		compare(banner.participantCountLabel, "2 participants")
 		compare(banner.surfaceId, "watchTogether.banner")
 		verify(banner.captureRect.width > 0)
 		compare(banner.color, Theme.chatSurface)
@@ -407,6 +465,13 @@ TestCase {
 		tryCompare(transferButton, "activeFocus", true)
 		const endButton = findChild(banner, "watchTogetherEndButton")
 		compare(endButton.tone, "danger")
+		session.active = false
+		const openButton = findChild(banner, "watchTogetherOpenButton")
+		tryCompare(openButton, "visible", true)
+		tryVerify(function() {
+			return Math.abs(openButton.y - transferButton.y) <= 1
+				&& Math.abs(transferButton.y - endButton.y) <= 1
+		}, 1000)
 		const stateBadge = findChild(banner, "watchTogetherStateBadge")
 		verify(stateBadge !== null && stateBadge.visible)
 	}
@@ -464,11 +529,40 @@ TestCase {
 
 		const connection = connectionLoader.item
 		const connectionAction = findChild(connection, "connectionBannerPrimaryAction")
+		const connectionContent = findChild(connection, "connectionBannerContent")
+		const connectionTitle = findChild(connection, "connectionBannerTitle")
+		const connectionDetail = findChild(connection, "connectionBannerDetail")
 		tryCompare(connection, "compactLayout", true)
 		verify(connectionAction !== null)
-		const actionOrigin = connectionAction.mapToItem(connection, 0, 0)
-		verify(actionOrigin.x >= -0.5)
-		verify(actionOrigin.x + connectionAction.width <= connection.width + 0.5)
+		tryVerify(function() { return connection.implicitHeight > 60 }, 1000,
+			"Wrapped compact banner must grow beyond its one-line minimum height")
+		connection.height = connection.implicitHeight
+		wait(0)
+		for (const control of [ connectionContent, connectionTitle, connectionDetail,
+				connectionAction ]) {
+			verify(control !== null)
+			const origin = control.mapToItem(connection, 0, 0)
+			verify(origin.x >= -0.5 && origin.x + control.width <= connection.width + 0.5,
+				control.objectName + " horizontal bounds " + origin.x + "+" + control.width
+				+ " within " + connection.width)
+			verify(origin.y >= -0.5 && origin.y + control.height <= connection.height + 0.5,
+				control.objectName + " vertical bounds " + origin.y + "+" + control.height
+				+ " within " + connection.height)
+		}
+
+		testCase.width = 760
+		tryCompare(connection, "compactLayout", false)
+		wait(0)
+		connection.height = connection.implicitHeight
+		wait(0)
+		for (const control of [ connectionContent, connectionTitle, connectionDetail,
+				connectionAction ]) {
+			const origin = control.mapToItem(connection, 0, 0)
+			verify(origin.x >= -0.5 && origin.x + control.width <= connection.width + 0.5)
+			verify(origin.y >= -0.5 && origin.y + control.height <= connection.height + 0.5)
+		}
+
+		testCase.width = 420
 
 		const panel = motdLoader.item
 		const flow = findChild(panel, "motdActionFlow")
@@ -504,6 +598,16 @@ TestCase {
 		verify(banner !== null)
 		banner.height = banner.implicitHeight
 		const baseState = banner.state
+		banner.state = Object.assign({}, baseState, {
+			"progressVisible": true, "progressPercent": 64,
+			"progressLabel": "Update download progress"
+		})
+		banner.animationsEnabled = false
+		const progress = findChild(banner, "updateBannerProgress")
+		verify(progress !== null && progress.visible)
+		compare(progress.animated, false)
+		compare(progress.value, 64)
+		compare(progress.Accessible.name, "Update download progress")
 		banner.state = Object.assign({}, baseState, { "tone": "danger" })
 		compare(banner.toneColor, Theme.danger)
 		banner.state = Object.assign({}, baseState, { "tone": "warning" })
@@ -539,6 +643,8 @@ TestCase {
 		const transferButton = findChild(banner, "watchTogetherTransferButton")
 		const endButton = findChild(banner, "watchTogetherEndButton")
 		endButton.text = "End synchronized playback for every participant in this voice room"
+		wait(0)
+		banner.height = Math.max(120, banner.implicitHeight)
 
 		tryCompare(banner, "compactLayout", true)
 		tryVerify(function() { return banner.actionsWrapped })

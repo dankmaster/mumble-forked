@@ -1,0 +1,988 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Lobby",
+                          "rect": {
+                            "height": 27,
+                            "width": 564,
+                            "x": 24,
+                            "y": 20
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Voice room",
+                          "rect": {
+                            "height": 16,
+                            "width": 564,
+                            "x": 24,
+                            "y": 51
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 47,
+                        "width": 564,
+                        "x": 24,
+                        "y": 20
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 594,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 594,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Open rooms and participants",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 594,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 632,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 632,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "Search message text, senders, replies, and attachments",
+                          "name": "Search this conversation",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 632,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 670,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 670,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Direct messages",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 670,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 708,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 718,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 12,
+                                    "x": 718,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 723,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 2,
+                                    "width": 2,
+                                    "x": 728,
+                                    "y": 43
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 32,
+                                "width": 32,
+                                "x": 708,
+                                "y": 28
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Application menu",
+                          "rect": {
+                            "height": 32,
+                            "width": 32,
+                            "x": 708,
+                            "y": 28
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 146,
+                        "x": 594,
+                        "y": 28
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 744,
+                        "x": 8,
+                        "y": 79
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 72,
+                    "width": 744,
+                    "x": 8,
+                    "y": 8
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 102,
+                        "width": 700,
+                        "x": 36,
+                        "y": 96
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Alex",
+                          "rect": {
+                            "height": 15,
+                            "width": 323,
+                            "x": 74,
+                            "y": 104
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:24",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 400,
+                            "y": 104
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Welcome to the deterministic visual fixture.",
+                          "rect": {
+                            "height": 20,
+                            "width": 332,
+                            "x": 84,
+                            "y": 129
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Message actions",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 386,
+                            "y": 161
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 102,
+                        "width": 700,
+                        "x": 36,
+                        "y": 96
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Qt Quick is ready for review.",
+                          "rect": {
+                            "height": 20,
+                            "width": 219,
+                            "x": 507,
+                            "y": 213
+                          },
+                          "role": "StaticText",
+                          "states": [
+                            "readOnly"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "10:25",
+                          "rect": {
+                            "height": 15,
+                            "width": 26,
+                            "x": 700,
+                            "y": 245
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 69,
+                        "width": 700,
+                        "x": 36,
+                        "y": 198
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 16,
+                        "width": 744,
+                        "x": 36,
+                        "y": 267
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Conversation messages",
+                  "rect": {
+                    "height": 604,
+                    "width": 744,
+                    "x": 8,
+                    "y": 80
+                  },
+                  "role": "List",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 1,
+                        "width": 744,
+                        "x": 8,
+                        "y": 684
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 208,
+                        "width": 744,
+                        "x": 8,
+                        "y": 684
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 42,
+                                        "width": 3,
+                                        "x": 28,
+                                        "y": 704
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "Replying to Alex",
+                                              "rect": {
+                                                "height": 15,
+                                                "width": 646,
+                                                "x": 53,
+                                                "y": 710
+                                              },
+                                              "role": "StaticText",
+                                              "states": []
+                                            },
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "Use the community test build once this check passes.",
+                                              "rect": {
+                                                "height": 16,
+                                                "width": 646,
+                                                "x": 53,
+                                                "y": 725
+                                              },
+                                              "role": "StaticText",
+                                              "states": []
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 31,
+                                            "width": 646,
+                                            "x": 53,
+                                            "y": 710
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 30,
+                                                "x": 702,
+                                                "y": 710
+                                              },
+                                              "role": "Client",
+                                              "states": []
+                                            },
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 30,
+                                                "x": 702,
+                                                "y": 710
+                                              },
+                                              "role": "Client",
+                                              "states": []
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "Cancel reply",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 702,
+                                            "y": 710
+                                          },
+                                          "role": "Button",
+                                          "states": [
+                                            "focusable"
+                                          ]
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 42,
+                                        "width": 698,
+                                        "x": 34,
+                                        "y": 704
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 42,
+                                    "width": 704,
+                                    "x": 28,
+                                    "y": 704
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "Remove community-preview.png",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 30,
+                                                "x": 204,
+                                                "y": 758
+                                              },
+                                              "role": "Button",
+                                              "states": [
+                                                "focusable"
+                                              ]
+                                            },
+                                            {
+                                              "children": [],
+                                              "description": "Uploading · 54%",
+                                              "name": "Uploading community-preview.png",
+                                              "rect": {
+                                                "height": 4,
+                                                "width": 124,
+                                                "x": 75,
+                                                "y": 784
+                                              },
+                                              "role": "ProgressBar",
+                                              "states": []
+                                            }
+                                          ],
+                                          "description": "Uploading · 54%",
+                                          "name": "community-preview.png",
+                                          "rect": {
+                                            "height": 48,
+                                            "width": 210,
+                                            "x": 28,
+                                            "y": 749
+                                          },
+                                          "role": "Grouping",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "Retry release-notes.pdf",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 30,
+                                                "x": 385,
+                                                "y": 758
+                                              },
+                                              "role": "Button",
+                                              "states": [
+                                                "focusable"
+                                              ]
+                                            },
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "Remove release-notes.pdf",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 30,
+                                                "x": 420,
+                                                "y": 758
+                                              },
+                                              "role": "Button",
+                                              "states": [
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "Upload interrupted",
+                                          "name": "release-notes.pdf",
+                                          "rect": {
+                                            "height": 48,
+                                            "width": 210,
+                                            "x": 244,
+                                            "y": 749
+                                          },
+                                          "role": "Grouping",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 52,
+                                        "width": 426,
+                                        "x": 28,
+                                        "y": 749
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 52,
+                                    "width": 704,
+                                    "x": 28,
+                                    "y": 749
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "Alex",
+                                          "rect": {
+                                            "height": 28,
+                                            "width": 35,
+                                            "x": 28,
+                                            "y": 804
+                                          },
+                                          "role": "Button",
+                                          "states": [
+                                            "focusable"
+                                          ]
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 35,
+                                        "x": 28,
+                                        "y": 804
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 30,
+                                    "width": 704,
+                                    "x": 28,
+                                    "y": 804
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Message Lobby",
+                                      "rect": {
+                                        "height": 35,
+                                        "width": 636,
+                                        "x": 62,
+                                        "y": 837
+                                      },
+                                      "role": "EditableText",
+                                      "states": [
+                                        "focusable",
+                                        "focused"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 28,
+                                            "y": 842
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 28,
+                                            "y": 842
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Attach images",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 28,
+                                        "y": 842
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "focusable"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 702,
+                                            "y": 842
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 30,
+                                            "width": 30,
+                                            "x": 702,
+                                            "y": 842
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "Send",
+                                      "rect": {
+                                        "height": 30,
+                                        "width": 30,
+                                        "x": 702,
+                                        "y": 842
+                                      },
+                                      "role": "Button",
+                                      "states": [
+                                        "focusable"
+                                      ]
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 35,
+                                    "width": 704,
+                                    "x": 28,
+                                    "y": 837
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 168,
+                                "width": 704,
+                                "x": 28,
+                                "y": 704
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 180,
+                            "width": 716,
+                            "x": 22,
+                            "y": 698
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 180,
+                        "width": 716,
+                        "x": 22,
+                        "y": 698
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 208,
+                    "width": 744,
+                    "x": 8,
+                    "y": 684
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 884,
+                "width": 744,
+                "x": 8,
+                "y": 8
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 884,
+            "width": 744,
+            "x": 8,
+            "y": 8
+          },
+          "role": "Client",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 884,
+        "width": 744,
+        "x": 8,
+        "y": 8
+      },
+      "role": "Client",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 900,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

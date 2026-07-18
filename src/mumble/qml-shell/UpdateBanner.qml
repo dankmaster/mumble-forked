@@ -6,6 +6,7 @@ import Mumble.Theme 1.0
 Rectangle {
     id: root
     property var state: ({})
+	property bool animationsEnabled: true
     signal actionRequested(string actionId)
 
     readonly property string tone: String(state.tone || "accent")
@@ -22,8 +23,10 @@ Rectangle {
     objectName: "updateBanner"
     visible: !!state.visible
     implicitHeight: visible ? content.implicitHeight + Theme.space3 * 2 : 0
-    color: Theme.panel
-    border.color: toneColor
+    color: Theme.bannerBackground
+    radius: Theme.innerRadius
+    border.width: 1
+    border.color: Theme.bannerBorder
     Accessible.role: Accessible.AlertMessage
     Accessible.name: String(state.title || qsTr("Update"))
     Accessible.description: String(state.detail || "")
@@ -44,44 +47,60 @@ Rectangle {
             color: root.toneColor
         }
 
-        ColumnLayout {
+        GridLayout {
+            id: bannerGrid
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            Layout.maximumWidth: root.contentAvailableWidth
-            spacing: Theme.space2
-            Label {
-				textFormat: Text.PlainText
+            columns: root.compactLayout ? 1 : 2
+            columnSpacing: Theme.space3
+            rowSpacing: Theme.space2
+
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: String(root.state.title || qsTr("Update"))
-                color: Theme.textStrong
-                font.bold: true
-                elide: Text.ElideRight
+                Layout.minimumWidth: 0
+                spacing: Theme.space2
+                Label {
+					textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: String(root.state.title || qsTr("Update"))
+                    color: Theme.textStrong
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
+                Label {
+					textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    text: String(root.state.detail || "")
+                    color: Theme.secondaryText
+                    font.pixelSize: Theme.fontCaption
+                    wrapMode: Text.Wrap
+                }
+                ModernProgressBar {
+					objectName: "updateBannerProgress"
+                    Layout.fillWidth: true
+                    visible: !!root.state.progressVisible
+                    indeterminate: !!root.state.progressIndeterminate
+                    from: 0
+                    to: 100
+                    value: Number(root.state.progressPercent || 0)
+					animated: root.animationsEnabled
+                    Accessible.name: String(root.state.progressLabel || qsTr("Update progress"))
+                }
             }
-            Label {
-				textFormat: Text.PlainText
-                Layout.fillWidth: true
-                visible: text.length > 0
-                text: String(root.state.detail || "")
-                color: Theme.textMuted
-                font.pixelSize: Theme.fontCaption
-                wrapMode: Text.Wrap
-            }
-            ModernProgressBar {
-                Layout.fillWidth: true
-                visible: !!root.state.progressVisible
-                indeterminate: !!root.state.progressIndeterminate
-                from: 0
-                to: 100
-                value: Number(root.state.progressPercent || 0)
-                Accessible.name: String(root.state.progressLabel || qsTr("Update progress"))
-            }
+
             Flow {
                 id: actionFlow
                 objectName: "updateBannerActionFlow"
-                Layout.fillWidth: true
+                Layout.row: root.compactLayout ? 1 : 0
+                Layout.column: root.compactLayout ? 0 : 1
+                Layout.fillWidth: root.compactLayout
                 Layout.minimumWidth: 0
-                Layout.maximumWidth: root.contentAvailableWidth
+                Layout.preferredWidth: root.compactLayout ? -1
+                    : Math.min(360, Math.max(Theme.controlHeight, root.width * 0.42))
+                Layout.maximumWidth: root.compactLayout ? Number.POSITIVE_INFINITY : 360
                 Layout.preferredHeight: visible ? implicitHeight : 0
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                 visible: root.actions.length > 0
                 spacing: Theme.space2
 

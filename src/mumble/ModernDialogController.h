@@ -11,6 +11,7 @@
 
 #include <QtCore/QString>
 #include <QtCore/QVariant>
+#include <QtCore/QVector>
 
 #include <optional>
 
@@ -21,6 +22,8 @@ public:
 		bool closeDialog  = false;
 		std::optional< ModernConnectController::ConnectionRequest > connectionRequest;
 		std::optional< QList< FavoriteServer > > favoritesToSave;
+		std::optional< ModernConnectController::SourceOperationRequest > connectSourceOperation;
+		std::optional< bool > publicListDisabledSetting;
 		std::optional< Settings > settingsToApply;
 		std::optional< ModernSettingsController::AppearancePreview > appearanceToPreview;
 		bool settingsAccepted = false;
@@ -54,18 +57,34 @@ public:
 	bool setConnectFavoritePing(const QString &host, unsigned short port, quint32 ping,
 								std::optional< quint32 > users = std::nullopt,
 								std::optional< quint32 > maxUsers = std::nullopt);
+	quint64 beginConnectSourceRefresh(const QString &sourceID);
+	bool applyConnectSourceServers(const QString &sourceID, quint64 generation,
+								   const QList< ModernConnectController::ServerEntry > &servers);
+	bool applyConnectSourceError(const QString &sourceID, quint64 generation, const QString &message,
+								 bool retryable = true);
+	bool applyConnectSourceUnavailable(const QString &sourceID, quint64 generation, const QString &message);
+	bool setConnectSourceUnavailable(const QString &sourceID, const QString &message);
+	bool requestConnectPublicListConsent(quint64 generation);
 
 	QString activeDialogID() const;
 
 private:
+	struct DialogFrame {
+		QString activeDialogID;
+		QVariantMap genericDialog;
+	};
+
 	ModernConnectController m_connect;
 	ModernSettingsController m_settings;
 	QString m_activeDialogID;
 	QVariantMap m_failedConnection;
 	QVariantMap m_genericDialog;
+	QVector< DialogFrame > m_parentDialogs;
 
 	QVariantMap failedConnectionState() const;
 	QVariantMap genericDialogState() const;
+	void beginRootDialog(const QString &dialogID);
+	void dismissActiveDialog();
 	ActionResult invokeFailedConnectionAction(const QString &actionID);
 	ActionResult invokeGenericDialogAction(const QString &actionID, const QVariantMap &payload) const;
 };

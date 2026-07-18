@@ -372,8 +372,10 @@ AudioInput::AudioInput()
 
 	opus_encoder_ctl(opusState, OPUS_SET_VBR(0)); // CBR
 
+	// Keep the selected backend/model observable without constructing its
+	// heavyweight runtime. selectNoiseCancel() materializes it on the audio
+	// thread only when RNN/Both is actually enabled.
 	m_speechCleanupSelection = currentInputSpeechCleanupSelection();
-	m_speechCleanupProcessor = createSpeechCleanupProcessor(m_speechCleanupSelection);
 	m_webrtcEchoCanceller    = std::make_unique< WebRTCAudioEchoCanceller >(iSampleRate, iFrameSize);
 
 	qWarning("AudioInput: %d bits/s, %d hz, %d sample", iAudioQuality, iSampleRate, iFrameSize);
@@ -988,21 +990,23 @@ void AudioInput::selectNoiseCancel() {
 	const Mumble::SpeechCleanup::Selection selection = currentInputSpeechCleanupSelection();
 	const Settings::SpeechCleanupBackend backend     = selection.backend;
 
-	if (selection != m_speechCleanupSelection || !m_speechCleanupProcessor) {
-		m_speechCleanupSelection = selection;
-		m_speechCleanupProcessor = createSpeechCleanupProcessor(selection);
-	}
-
-	if (noiseCancel == Settings::NoiseCancelRNN || noiseCancel == Settings::NoiseCancelBoth) {
+	if (noiseCancelUsesSpeechCleanup(noiseCancel)) {
 		if (!Mumble::SpeechCleanup::isBackendAvailable(backend)) {
 			qInfo("AudioInput: Ignoring request to enable %s: %s", Mumble::SpeechCleanup::backendDisplayName(backend),
 				  qUtf8Printable(Mumble::SpeechCleanup::unavailableReason(backend)));
 			noiseCancel = Settings::NoiseCancelSpeex;
 		}
+	}
+
+	reconcileSpeechCleanupProcessor(noiseCancel, selection, m_speechCleanupSelection, m_speechCleanupProcessor);
+
+	if (noiseCancelUsesSpeechCleanup(noiseCancel)) {
 		if (!m_speechCleanupProcessor || !m_speechCleanupProcessor->isReady()) {
 			qInfo("AudioInput: Ignoring request to enable %s: backend initialization failed",
 				  Mumble::SpeechCleanup::backendDisplayName(backend));
 			noiseCancel = Settings::NoiseCancelSpeex;
+			reconcileSpeechCleanupProcessor(noiseCancel, selection, m_speechCleanupSelection,
+									m_speechCleanupProcessor);
 		}
 	}
 

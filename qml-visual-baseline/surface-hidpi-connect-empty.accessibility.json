@@ -1,0 +1,280 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 862,
+            "y": 154
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connect to a server",
+          "rect": {
+            "height": 26,
+            "width": 173,
+            "x": 70,
+            "y": 158
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Choose a saved server or add one.",
+          "rect": {
+            "height": 15,
+            "width": 787,
+            "x": 70,
+            "y": 187
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Favorites",
+                  "rect": {
+                    "height": 32,
+                    "width": 100,
+                    "x": 82,
+                    "y": 224
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "checked",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Public",
+                  "rect": {
+                    "height": 32,
+                    "width": 100,
+                    "x": 184,
+                    "y": 224
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "LAN",
+                  "rect": {
+                    "height": 32,
+                    "width": 102,
+                    "x": 286,
+                    "y": 224
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Choose saved, public, or local network servers",
+              "name": "Server source",
+              "rect": {
+                "height": 36,
+                "width": 310,
+                "x": 80,
+                "y": 222
+              },
+              "role": "Grouping",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Filter servers",
+              "rect": {
+                "height": 36,
+                "width": 478,
+                "x": 402,
+                "y": 222
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Server sources",
+          "rect": {
+            "height": 60,
+            "width": 824,
+            "x": 68,
+            "y": 210
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Add server",
+          "rect": {
+            "height": 36,
+            "width": 81,
+            "x": 142,
+            "y": 300
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Favorites",
+          "rect": {
+            "height": 18,
+            "width": 55,
+            "x": 82,
+            "y": 301
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "0 server(s)",
+          "rect": {
+            "height": 15,
+            "width": 50,
+            "x": 82,
+            "y": 320
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Add a server to get started.",
+              "rect": {
+                "height": 16,
+                "width": 144,
+                "x": 408,
+                "y": 382
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Saved servers",
+          "rect": {
+            "height": 88,
+            "width": 796,
+            "x": 82,
+            "y": 346
+          },
+          "role": "List",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 62,
+            "y": 496
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Edit",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 342,
+            "y": 496
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Connect",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 622,
+            "y": 496
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        }
+      ],
+      "description": "Choose a saved server or add one.",
+      "name": "Connect to a server",
+      "rect": {
+        "height": 412,
+        "width": 860,
+        "x": 50,
+        "y": 134
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble",
+  "rect": {
+    "height": 680,
+    "width": 960,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

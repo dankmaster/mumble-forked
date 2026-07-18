@@ -13,6 +13,8 @@
 #include "GlobalShortcut.h"
 #include "MainWindow.h"
 #include "ModernDialogController.h"
+#include "ModernProductDialogStateFactory.h"
+#include "ModernRecorderController.h"
 #include "QmlClientModels.h"
 #include "QmlImageProvider.h"
 #include "QmlAccessibilitySnapshot.h"
@@ -24,6 +26,8 @@
 #include "Net.h"
 #include "OSInfo.h"
 #include "PersistentChatController.h"
+#include "Settings.h"
+#include "ScreenShareViewBackend.h"
 #include "Version.h"
 #include "VersionCheck.h"
 
@@ -47,7 +51,9 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 #include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QPainter>
+#include <QtGui/QWindow>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
 #include <QtQuick/QQuickItem>
@@ -56,6 +62,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -677,76 +684,14 @@ namespace {
 		}
 		if (variant == QLatin1String("voiceRecorder") || variant == QLatin1String("voiceRecorderActive")) {
 			const bool active = variant == QLatin1String("voiceRecorderActive");
-			const QVariantList formatOptions {
-				automationSelectOption(QObject::tr("WAV"), 0),
-				automationSelectOption(QObject::tr("FLAC"), 1),
-				automationSelectOption(QObject::tr("Ogg Opus"), 2)
-			};
-			const QVariantList modeOptions {
-				automationSelectOption(QObject::tr("Mixdown"), 0),
-				automationSelectOption(QObject::tr("Multichannel"), 1),
-				automationSelectOption(QObject::tr("Multichannel + transport"), 2, false),
-				automationSelectOption(QObject::tr("Transport only"), 3, false)
-			};
-			QVariantMap formatField =
-				automationSelectField(QStringLiteral("recording.format"), QObject::tr("Format"), 0, formatOptions);
-			QVariantMap modeField =
-				automationSelectField(QStringLiteral("recording.mode"), QObject::tr("Mode"), 0, modeOptions);
-			if (active) {
-				formatField.insert(QStringLiteral("enabled"), false);
-				modeField.insert(QStringLiteral("enabled"), false);
-			}
-			QVariantList recorderFields;
-			if (active) {
-				recorderFields = QVariantList {
-					automationReadonlyField(QObject::tr("Status"), QObject::tr("Recording")),
-					automationReadonlyField(QObject::tr("Elapsed"), QStringLiteral("00:03:42")),
-					automationReadonlyField(QObject::tr("Current file"),
-											QStringLiteral("Landing-2026-05-31-033746.wav")),
-					automationReadonlyField(QObject::tr("Size"), QObject::tr("18.4 MB")),
-					automationNoteField(QObject::tr("Recording mixdown audio from the current voice session."))
-				};
-			} else {
-				recorderFields = QVariantList {
-					automationReadonlyField(QObject::tr("Status"), QObject::tr("Idle")),
-					automationReadonlyField(QObject::tr("Elapsed"), QStringLiteral("00:00:00")),
-					automationNoteField(QObject::tr("Unable to start recording. Not connected to a server."))
-				};
-			}
-			QVariantList actions { automationDialogAction(QStringLiteral("close"), QObject::tr("Close"), QString(),
-														  true),
-								   automationDialogAction(QStringLiteral("refreshRecorder"), QObject::tr("Refresh"),
-														  QString(), false) };
-			if (active) {
-				actions.push_back(automationDialogAction(QStringLiteral("pauseRecording"), QObject::tr("Pause"),
-														 QString(), false));
-				actions.push_back(automationDialogAction(QStringLiteral("stopRecording"), QObject::tr("Stop"),
-														 QStringLiteral("danger"), false));
-			} else {
-				actions.push_back(automationDialogAction(QStringLiteral("startRecording"), QObject::tr("Start"),
-														 QStringLiteral("accent"), false));
-			}
-			return automationDialogFromSections(
-				active ? QStringLiteral("voiceRecorderActive") : QStringLiteral("voiceRecorder"),
-				QStringLiteral("form"), QObject::tr("Voice recorder"),
-				active ? QObject::tr("Recording is in progress from the Modern shell.")
-					   : QObject::tr("Record the current session from the Modern shell."),
-				QVariantList {
-					automationSection(QObject::tr("Recorder"), recorderFields),
-					automationSection(
-						QObject::tr("Output"),
-						QVariantList {
-							automationPathPickerField(QStringLiteral("recording.path"),
-													  QObject::tr("Target directory"),
-													  QStringLiteral("C:/Recordings"),
-													  QStringLiteral("browseRecordingDirectory"),
-													  QObject::tr("Browse"), !active),
-							automationDialogField(QStringLiteral("recording.file"), QObject::tr("Filename"),
-												  QStringLiteral("text"), QStringLiteral("%user-%date"), !active),
-							formatField,
-							modeField }) },
-				actions, active ? QStringLiteral("stopRecording") : QStringLiteral("startRecording"), QString(),
-				active ? QSize(760, 700) : QSize(760, 620));
+			QVariantMap dialog = automationDialogFromSections(
+				QStringLiteral("voiceRecorder"), QStringLiteral("recorder"), QObject::tr("Voice recorder"),
+				QObject::tr("Record the current voice session."), QVariantList(),
+				QVariantList { automationDialogAction(QStringLiteral("close"), QObject::tr("Close"),
+					QString(), true) }, QStringLiteral("close"), QString(), QSize(760, 700));
+			dialog.insert(QStringLiteral("initialFocusId"), active
+				? QStringLiteral("recorderPauseButton") : QStringLiteral("recording.path"));
+			return dialog;
 		}
 		if (variant == QLatin1String("selfComment")) {
 			const QString displayName =
@@ -771,128 +716,28 @@ namespace {
 			|| variant == QLatin1String("certificateImportError")) {
 			const bool emailError  = variant == QLatin1String("certificateEmailError");
 			const bool importError = variant == QLatin1String("certificateImportError");
-			const QVariantList createModeOptions {
-				automationSelectOption(QObject::tr("Create with name and email"), 0),
-				automationSelectOption(QObject::tr("Quick create"), 1),
-				automationSelectOption(QObject::tr("Import PKCS#12"), 2),
-				automationSelectOption(QObject::tr("Export current certificate"), 3),
-			};
-			const QVariantList importModeOptions {
-				automationSelectOption(QObject::tr("Import PKCS#12"), 0),
-				automationSelectOption(QObject::tr("Quick create"), 1),
-				automationSelectOption(QObject::tr("Create with name and email"), 2),
-				automationSelectOption(QObject::tr("Export current certificate"), 3),
-			};
-			const QVariantList exportModeOptions {
-				automationSelectOption(QObject::tr("Export current certificate"), 0),
-				automationSelectOption(QObject::tr("Quick create"), 1),
-				automationSelectOption(QObject::tr("Create with name and email"), 2),
-				automationSelectOption(QObject::tr("Import PKCS#12"), 3),
-			};
-
-			QVariantMap fingerprint =
-				automationDialogField(QStringLiteral("cert.fingerprint"),
-									  QObject::tr("SHA-1 fingerprint"), QStringLiteral("readonly"),
-									  QStringLiteral("7B:51:90:1E:3A:76:44:9C:DA:EE:20:78:33:8F:99:91:2D:14:5E:A4"),
-									  false);
-			fingerprint.insert(QStringLiteral("monospace"), true);
-
-			QVariantList actionFields;
+			Mumble::ModernProductDialogs::CertificateDialogInput input;
+			input.certificate = { true, QObject::tr("You"), QObject::tr("None"), QObject::tr("You"),
+				QStringLiteral("2042-04-06T11:51:48"),
+				QStringLiteral("7B:51:90:1E:3A:76:44:9C:DA:EE:20:78:33:8F:99:91:2D:14:5E:A4"),
+				QStringLiteral("2042-04-06") };
 			if (emailError) {
-				actionFields = QVariantList {
-					automationSelectField(QStringLiteral("cert.mode"), QObject::tr("Action"),
-										  0, createModeOptions),
-					automationDialogField(QStringLiteral("cert.name"), QObject::tr("Name"),
-										  QStringLiteral("text"), QObject::tr("Design Review")),
-					automationDialogField(QStringLiteral("cert.email"), QObject::tr("Email"),
-										  QStringLiteral("text"), QStringLiteral("not an email address"))
-				};
+				input.fieldValues = { { QStringLiteral("cert.mode"), QStringLiteral("create") },
+					{ QStringLiteral("cert.name"), QObject::tr("Design Review") },
+					{ QStringLiteral("cert.email"), QStringLiteral("not an email address") } };
+				input.errors = { { QStringLiteral("cert.email"),
+					QObject::tr("Enter a valid email address or leave it blank.") } };
 			} else if (importError) {
-				actionFields = QVariantList {
-					automationSelectField(QStringLiteral("cert.mode"), QObject::tr("Action"),
-										  0, importModeOptions),
-					automationPathPickerField(QStringLiteral("cert.importPath"),
-											  QObject::tr("Import file"),
-											  QStringLiteral("C:/missing/mumble-cert.p12"),
-											  QStringLiteral("browseCertificateImport"),
-											  QObject::tr("Browse")),
-					automationDialogField(QStringLiteral("cert.password"), QObject::tr("Import password"),
-										  QStringLiteral("password"), QString())
-				};
+				input.fieldValues = { { QStringLiteral("cert.mode"), QStringLiteral("import") },
+					{ QStringLiteral("cert.importPath"), QStringLiteral("C:/missing/mumble-cert.p12") },
+					{ QStringLiteral("cert.password"), QString() } };
+				input.errors = { { QStringLiteral("cert.importPath"),
+					QObject::tr("Choose a readable PKCS#12 certificate file.") } };
 			} else {
-				actionFields = QVariantList {
-					automationSelectField(QStringLiteral("cert.mode"), QObject::tr("Action"),
-										  0, exportModeOptions),
-					automationPathPickerField(QStringLiteral("cert.exportPath"),
-											  QObject::tr("Export file"),
-											  QStringLiteral("C:/Users/You/Desktop/mumble-cert.p12"),
-											  QStringLiteral("browseCertificateExport"),
-											  QObject::tr("Browse"))
-				};
+				input.fieldValues = { { QStringLiteral("cert.mode"), QStringLiteral("export") },
+					{ QStringLiteral("cert.exportPath"), QStringLiteral("C:/Users/You/Desktop/mumble-cert.p12") } };
 			}
-
-			const QString dialogID = emailError  ? QStringLiteral("certificateEmailError")
-									 : importError ? QStringLiteral("certificateImportError")
-												   : QStringLiteral("certificate");
-			QVariantMap dialog = automationDialogFromSections(
-				dialogID, QStringLiteral("certificate"), QObject::tr("Certificate"),
-				emailError  ? QObject::tr("Review the certificate details before generating a new identity.")
-				: importError ? QObject::tr("Choose a readable PKCS#12 certificate before importing.")
-							  : QObject::tr("Manage the client certificate used for account identity and server authentication."),
-				QVariantList {
-					automationSection(
-						QObject::tr("Current certificate"),
-						QVariantList {
-							automationDialogField(QStringLiteral("cert.status"), QObject::tr("Status"),
-												  QStringLiteral("readonly"),
-												  QObject::tr("A valid certificate is installed."), false),
-							automationDialogField(QStringLiteral("cert.name"), QObject::tr("Name"),
-												  QStringLiteral("readonly"), QObject::tr("You"), false),
-							automationDialogField(QStringLiteral("cert.email"), QObject::tr("Email"),
-												  QStringLiteral("readonly"), QObject::tr("None"), false),
-							automationDialogField(QStringLiteral("cert.issuer"), QObject::tr("Issuer"),
-												  QStringLiteral("readonly"), QObject::tr("You"), false),
-							automationDialogField(QStringLiteral("cert.expires"), QObject::tr("Expires"),
-												  QStringLiteral("readonly"),
-												  QStringLiteral("2042-04-06T11:51:48"), false),
-							fingerprint },
-						QStringLiteral("certificate-current")),
-					automationSection(
-						QObject::tr("Certificate action"),
-						actionFields,
-						QStringLiteral("certificate-action"),
-						QObject::tr("Choose one operation. The form only shows fields needed for that operation.")) },
-				QVariantList { automationDialogAction(QStringLiteral("close"), QObject::tr("Close"), QString(), true),
-							   automationDialogAction(QStringLiteral("applyCertificate"), QObject::tr("Apply"),
-													  QStringLiteral("accent"), true) },
-				QStringLiteral("applyCertificate"), QString(), QSize(820, 680));
-			dialog.insert(QStringLiteral("highlights"),
-						  QVariantList { automationHighlight(QObject::tr("Status"), QObject::tr("Installed"),
-															 QStringLiteral("good")),
-										 automationHighlight(QObject::tr("Action"), QObject::tr("Export")),
-										 automationHighlight(QObject::tr("Expires"), QStringLiteral("2042-04-06")) });
-			if (emailError) {
-				dialog.insert(QStringLiteral("errors"),
-							  QVariantMap { { QStringLiteral("cert.email"),
-											  QObject::tr("Enter a valid email address or leave it blank.") } });
-				dialog.insert(QStringLiteral("highlights"),
-							  QVariantList { automationHighlight(QObject::tr("Status"), QObject::tr("Installed"),
-																 QStringLiteral("good")),
-											 automationHighlight(QObject::tr("Action"), QObject::tr("Create")),
-											 automationHighlight(QObject::tr("Validation"), QObject::tr("Email"),
-																 QStringLiteral("warning")) });
-			} else if (importError) {
-				dialog.insert(QStringLiteral("errors"),
-							  QVariantMap { { QStringLiteral("cert.importPath"),
-											  QObject::tr("Choose a readable PKCS#12 certificate file.") } });
-				dialog.insert(QStringLiteral("highlights"),
-							  QVariantList { automationHighlight(QObject::tr("Status"), QObject::tr("Installed"),
-																 QStringLiteral("good")),
-											 automationHighlight(QObject::tr("Action"), QObject::tr("Import")),
-											 automationHighlight(QObject::tr("Validation"), QObject::tr("File"),
-																 QStringLiteral("warning")) });
-			}
-			return dialog;
+			return Mumble::ModernProductDialogs::certificateDialog(input);
 		}
 		if (variant == QLatin1String("audioStats") || variant == QLatin1String("audioStatsDisconnected")
 			|| variant == QLatin1String("audioStatsNoInput")) {
@@ -1021,24 +866,6 @@ namespace {
 			}
 			return dialog;
 		}
-		if (variant == QLatin1String("manualPlugin")) {
-			return automationDialogFromSections(
-				QStringLiteral("manualPlugin"), QStringLiteral("form"), QObject::tr("Manual positional audio"),
-				QObject::tr("Inspect and reset the manually supplied positional state."),
-				QVariantList { automationSection(QObject::tr("Position"), QVariantList {
-					automationDialogField(QStringLiteral("manual.x"), QStringLiteral("X"), QStringLiteral("number"), 1.25),
-					automationDialogField(QStringLiteral("manual.y"), QStringLiteral("Y"), QStringLiteral("number"), 0.5),
-					automationDialogField(QStringLiteral("manual.z"), QStringLiteral("Z"), QStringLiteral("number"), -2.0),
-					automationReadonlyField(QObject::tr("Context"), QStringLiteral("automation-room")),
-					automationReadonlyField(QObject::tr("Identity"), QStringLiteral("automation-user")),
-					automationDialogField(QStringLiteral("manual.active"), QObject::tr("Active"), QStringLiteral("checkbox"), true),
-					QVariantMap { { QStringLiteral("id"), QStringLiteral("manual.preview") },
-								  { QStringLiteral("type"), QStringLiteral("manualPositionPreview") } } }) },
-				QVariantList { automationDialogAction(QStringLiteral("reset"), QObject::tr("Reset"), QStringLiteral("warning"), false),
-							   automationDialogAction(QStringLiteral("close"), QObject::tr("Close"), QString(), true) },
-				QStringLiteral("close"), QString(), QSize(760, 660));
-		}
-
 		return {};
 	}
 
@@ -2224,6 +2051,9 @@ namespace {
 		state.insert(QStringLiteral("leaderboardUpdatedAt"), QVariant::fromValue< qulonglong >(1779926400ULL));
 		state.insert(QStringLiteral("leaderboardDescription"),
 					 QObject::tr("Probe leaderboard comparing latest portfolio saves over 30 days."));
+		state.insert(QStringLiteral("tickerBannerEnabled"), true);
+		state.insert(QStringLiteral("tickerBannerAlwaysScroll"), false);
+		state.insert(QStringLiteral("disableTickerAnimation"), true);
 		state.insert(QStringLiteral("automationHeaderVisible"), true);
 		state.insert(QStringLiteral("disableQuoteLookup"), true);
 
@@ -2880,8 +2710,11 @@ namespace {
 		Global::get().s.qsModernShellMotdDismissedSignature = dismissedSignature;
 		Global::get().s.qsModernShellMotdLastSeenSignature = lastSeenSignature;
 		Global::get().s.save();
-		if (window) {
-			window->scheduleQmlShellStateSyncImmediate();
+		if (window && window->qmlShellHost()) {
+			ClientSessionController *session = window->qmlShellHost()->sessionController();
+			session->setMotdExpanded(expanded);
+			session->setMotdDismissedSignature(dismissedSignature);
+			session->setMotdLastSeenSignature(lastSeenSignature);
 		}
 	}
 
@@ -4372,6 +4205,298 @@ namespace {
 		return true;
 	}
 
+	QObject *automationFindMediaSurface(QmlShellHost *host, const QString &surfaceId) {
+		if (!host || !host->window() || surfaceId.isEmpty()) {
+			return nullptr;
+		}
+
+		if (surfaceId == QLatin1String("mediaSession.window")) {
+			QWindow *fallback = nullptr;
+			for (QWindow *candidate : QGuiApplication::topLevelWindows()) {
+				if (!candidate || candidate->property("surfaceId").toString() != surfaceId) {
+					continue;
+				}
+				if (!fallback) {
+					fallback = candidate;
+				}
+				if (candidate->isVisible() && candidate->isExposed()) {
+					return candidate;
+				}
+			}
+			return fallback;
+		}
+
+		QQuickItem *fallback = nullptr;
+		for (QQuickItem *candidate : automationQuickItemSubtree(host->window()->contentItem())) {
+			if (!candidate || candidate->property("surfaceId").toString() != surfaceId) {
+				continue;
+			}
+			if (!fallback) {
+				fallback = candidate;
+			}
+			if (automationQuickItemHasVisibleAncestry(candidate)) {
+				return candidate;
+			}
+		}
+		return fallback;
+	}
+
+	QVariantList automationModelRows(StableListModel *model, const bool unwrapSource) {
+		QVariantList rows;
+		if (!model) return rows;
+		rows.reserve(model->rowCount());
+		for (int row = 0; row < model->rowCount(); ++row) {
+			const QVariantMap modelRow = model->get(row);
+			QVariantMap source = unwrapSource ? modelRow.value(QStringLiteral("source")).toMap() : QVariantMap();
+			if (!source.isEmpty()) {
+				// Automation must be able to route the rendered row back through the
+				// typed controller even when the protocol DTO uses a different ID.
+				source.insert(QStringLiteral("stableId"), modelRow.value(QStringLiteral("id")));
+			}
+			rows.push_back(source.isEmpty() ? modelRow : source);
+		}
+		return rows;
+	}
+
+	QVariantMap automationDirectMessageState(DirectMessageController *directMessages) {
+		if (!directMessages) return {};
+		return QVariantMap {
+			{ QStringLiteral("available"), directMessages->available() },
+			{ QStringLiteral("title"), directMessages->title() },
+			{ QStringLiteral("description"), directMessages->description() },
+			{ QStringLiteral("unreadTotal"), directMessages->unreadTotal() },
+			{ QStringLiteral("hasUnread"), directMessages->hasUnread() },
+			{ QStringLiteral("trayOpen"), directMessages->trayOpen() },
+			{ QStringLiteral("conversationOpen"), directMessages->conversationOpen() },
+			{ QStringLiteral("activeSessionId"), directMessages->activeSessionId() },
+			{ QStringLiteral("activeScopeToken"), directMessages->activeScopeToken() },
+			{ QStringLiteral("activeLabel"), directMessages->activeLabel() },
+			{ QStringLiteral("activeSubtitle"), directMessages->activeSubtitle() },
+			{ QStringLiteral("activeAvatarUrl"), directMessages->activeAvatarUrl() },
+			{ QStringLiteral("activeUnreadCount"), directMessages->activeUnreadCount() },
+			{ QStringLiteral("canSend"), directMessages->canSend() },
+			{ QStringLiteral("mode"), directMessages->mode() },
+			{ QStringLiteral("persistentHistoryAvailable"), directMessages->persistentHistoryAvailable() },
+			{ QStringLiteral("historyLoading"), directMessages->historyLoading() },
+			{ QStringLiteral("historyError"), directMessages->historyError() },
+			{ QStringLiteral("canAttachImages"), directMessages->canAttachImages() },
+			{ QStringLiteral("canAttachFiles"), directMessages->canAttachFiles() },
+			{ QStringLiteral("hasPendingReply"), directMessages->hasPendingReply() },
+			{ QStringLiteral("pendingReplyMessageId"), directMessages->pendingReplyMessageId() },
+			{ QStringLiteral("pendingReplyActor"), directMessages->pendingReplyActor() },
+			{ QStringLiteral("pendingReplySnippet"), directMessages->pendingReplySnippet() },
+			{ QStringLiteral("draft"), directMessages->draft() },
+			{ QStringLiteral("draftAttachments"), directMessages->draftAttachments() },
+			{ QStringLiteral("windowDocked"), directMessages->windowDocked() },
+			{ QStringLiteral("windowMinimized"), directMessages->windowMinimized() },
+			{ QStringLiteral("conversations"), automationModelRows(directMessages->summaryModel(), true) },
+			{ QStringLiteral("messages"), automationModelRows(directMessages->timelineModel(), true) }
+		};
+	}
+
+	QVariantMap automationToastState(ToastController *toast) {
+		if (!toast) return QVariantMap { { QStringLiteral("available"), false } };
+		return QVariantMap {
+			{ QStringLiteral("available"), true },
+			{ QStringLiteral("visible"), toast->visible() },
+			{ QStringLiteral("tone"), toast->tone() },
+			{ QStringLiteral("title"), toast->title() },
+			{ QStringLiteral("message"), toast->message() },
+			{ QStringLiteral("actionId"), toast->actionId() },
+			{ QStringLiteral("actionLabel"), toast->actionLabel() },
+			{ QStringLiteral("repeatCount"), toast->repeatCount() },
+			{ QStringLiteral("revision"), QVariant::fromValue< qulonglong >(toast->revision()) }
+		};
+	}
+
+	QVariantMap automationMediaControllerState(MediaSessionBackend *media) {
+		const bool active   = media && media->active();
+		const bool detached = active && media->detached();
+		QVariantMap state;
+		state.insert(QStringLiteral("active"), active);
+		state.insert(QStringLiteral("state"), media ? media->state() : QStringLiteral("idle"));
+		state.insert(QStringLiteral("errorCode"), media ? media->errorCode() : QString());
+		state.insert(QStringLiteral("error"), media ? media->error() : QString());
+		state.insert(QStringLiteral("detached"), detached);
+		state.insert(QStringLiteral("provider"), media ? media->provider() : QString());
+		state.insert(QStringLiteral("url"), media ? media->url() : QUrl());
+		state.insert(QStringLiteral("audioUrl"), media ? media->audioUrl() : QUrl());
+		state.insert(QStringLiteral("mediaMime"), media ? media->mediaMime() : QString());
+		state.insert(QStringLiteral("audioMime"), media ? media->audioMime() : QString());
+		state.insert(QStringLiteral("sessionId"), media ? media->sessionId() : QString());
+		state.insert(QStringLiteral("position"), media ? media->position() : 0.0);
+		state.insert(QStringLiteral("duration"), media ? media->duration() : 0.0);
+		state.insert(QStringLiteral("syncGeneration"), media ? media->syncGeneration() : 0);
+		state.insert(QStringLiteral("loadProgress"), media ? media->loadProgress() : 0);
+		state.insert(QStringLiteral("playbackControllable"), media && media->playbackControllable());
+		state.insert(QStringLiteral("playbackControlAllowed"), media && media->playbackControlAllowed());
+		state.insert(QStringLiteral("sharedAvailable"), media && media->sharedAvailable());
+		state.insert(QStringLiteral("sharedJoined"), media && media->sharedJoined());
+		state.insert(QStringLiteral("sharedHost"), media && media->sharedHost());
+		state.insert(QStringLiteral("sharedTitle"), media ? media->sharedTitle() : QString());
+		state.insert(QStringLiteral("sharedSessionId"), media ? media->sharedSessionId() : QString());
+		state.insert(QStringLiteral("sharedScopeId"), media ? media->sharedScopeId() : 0);
+		state.insert(QStringLiteral("sharedHostSession"), media ? media->sharedHostSession() : 0);
+		state.insert(QStringLiteral("sharedParticipantCount"), media ? media->sharedParticipantCount() : 0);
+		state.insert(QStringLiteral("sharedParticipantSessions"),
+			media ? media->sharedParticipantSessions() : QVariantList());
+		state.insert(QStringLiteral("sharedOperationStatus"),
+			media ? media->sharedOperationStatus() : QStringLiteral("idle"));
+		state.insert(QStringLiteral("sharedOperationError"),
+			media ? media->sharedOperationError() : QString());
+		state.insert(QStringLiteral("presentation"),
+			active ? (detached ? QStringLiteral("window") : QStringLiteral("inline")) : QStringLiteral("none"));
+		return state;
+	}
+
+	QVariantMap automationMediaLifecycleState(QmlShellHost *host) {
+		MediaSessionBackend *media = host ? host->mediaSession() : nullptr;
+		const bool active          = media && media->active();
+		const bool detached        = active && media->detached();
+		const bool componentFailed = host && host->window()
+			&& host->window()->property("mediaSessionWindowComponentFailed").toBool();
+
+		QObject *inlineSurface = automationFindMediaSurface(host, QStringLiteral("mediaSession.inline"));
+		QObject *windowSurface = automationFindMediaSurface(host, QStringLiteral("mediaSession.window"));
+		QObject *surface       = active ? (detached ? windowSurface : inlineSurface)
+									: (windowSurface ? windowSurface : inlineSurface);
+
+		const bool rendererPresent = surface != nullptr;
+		const bool webSurfaceActive = rendererPresent && surface->property("webSurfaceActive").toBool();
+		const bool nativeSurfaceActive = rendererPresent
+			&& surface->property("nativeSurfaceActive").toBool();
+		const bool rendererActive = webSurfaceActive || nativeSurfaceActive;
+		const QVariant backendValue = rendererPresent ? surface->property("rendererBackend") : QVariant();
+		const QString rendererBackend = backendValue.isValid() && !backendValue.toString().isEmpty()
+			? backendValue.toString()
+			: nativeSurfaceActive ? QStringLiteral("native")
+			: webSurfaceActive ? QStringLiteral("webengine") : QStringLiteral("none");
+		const QVariant rendererValue = rendererPresent ? surface->property("rendererState") : QVariant();
+		const QString rendererState  = rendererValue.isValid() && !rendererValue.toString().isEmpty()
+			? rendererValue.toString()
+			: componentFailed ? QStringLiteral("component-error")
+			: active && media ? media->state() : QStringLiteral("inactive");
+		const QVariant healthyValue = rendererPresent ? surface->property("rendererHealthy") : QVariant();
+		const bool rendererHealthy  = rendererPresent
+			&& (healthyValue.isValid() ? healthyValue.toBool() : rendererState == QLatin1String("active"));
+		const QVariant documentValue = rendererPresent ? surface->property("documentReady") : QVariant();
+		const bool documentReady     = rendererPresent
+			&& (documentValue.isValid() ? documentValue.toBool() : rendererState == QLatin1String("active"));
+		const bool rendererReady = active && rendererActive && rendererHealthy && documentReady
+			&& rendererState == QLatin1String("active");
+
+		QWindow *presentationWindow = nullptr;
+		QString windowKind           = QStringLiteral("none");
+		if (active && detached) {
+			presentationWindow = qobject_cast< QWindow * >(windowSurface);
+			windowKind         = QStringLiteral("detached");
+		} else if (active) {
+			presentationWindow = host ? host->window() : nullptr;
+			windowKind         = QStringLiteral("main");
+		} else if (windowSurface) {
+			// Keep a detached surface observable after close so the lifecycle gate
+			// can fail on a window that outlives its backend session.
+			presentationWindow = qobject_cast< QWindow * >(windowSurface);
+			windowKind         = QStringLiteral("detached");
+		}
+
+		QVariantMap state = automationMediaControllerState(media);
+		state.insert(QStringLiteral("rendererExpected"), active);
+		state.insert(QStringLiteral("rendererPresent"), rendererPresent);
+		state.insert(QStringLiteral("rendererActive"), rendererActive);
+		state.insert(QStringLiteral("rendererBackend"), rendererBackend);
+		state.insert(QStringLiteral("webSurfaceActive"), webSurfaceActive);
+		state.insert(QStringLiteral("nativeSurfaceActive"), nativeSurfaceActive);
+		state.insert(QStringLiteral("rendererState"), rendererState);
+		state.insert(QStringLiteral("rendererHealthy"), rendererHealthy);
+		state.insert(QStringLiteral("rendererReady"), rendererReady);
+		state.insert(QStringLiteral("rendererProbeAttempts"),
+			rendererPresent ? surface->property("documentReadyProbeAttempts").toInt() : 0);
+		state.insert(QStringLiteral("rendererProbeState"),
+			rendererPresent ? surface->property("documentReadyProbeState").toString() : QString());
+		state.insert(QStringLiteral("rendererSurfaceId"),
+			rendererPresent ? surface->property("surfaceId").toString() : QString());
+		state.insert(QStringLiteral("windowRequired"), active);
+		state.insert(QStringLiteral("windowKind"), windowKind);
+		state.insert(QStringLiteral("windowPresent"), presentationWindow != nullptr);
+		state.insert(QStringLiteral("windowVisible"), presentationWindow && presentationWindow->isVisible());
+		state.insert(QStringLiteral("windowExposed"), presentationWindow && presentationWindow->isExposed());
+		state.insert(QStringLiteral("windowReady"), active && presentationWindow
+			&& presentationWindow->isVisible() && presentationWindow->isExposed());
+		state.insert(QStringLiteral("windowComponentFailed"), componentFailed);
+		return state;
+	}
+
+	struct AutomationScreenShareViewer {
+		QQuickWindow *window = nullptr;
+		ScreenShareViewBackend *backend = nullptr;
+	};
+
+	QList< AutomationScreenShareViewer > automationScreenShareViewers() {
+		QList< AutomationScreenShareViewer > viewers;
+		for (QWindow *topLevel : QGuiApplication::topLevelWindows()) {
+			QQuickWindow *window = qobject_cast< QQuickWindow * >(topLevel);
+			if (!window || window->property("surfaceId").toString() != QLatin1String("screenShare.viewer")) continue;
+			QObject *backendObject = window->property("backend").value< QObject * >();
+			ScreenShareViewBackend *backend = qobject_cast< ScreenShareViewBackend * >(backendObject);
+			if (backend) viewers.push_back({ window, backend });
+		}
+		return viewers;
+	}
+
+	AutomationScreenShareViewer automationScreenShareViewer(const QString &streamId) {
+		const QString requestedId = streamId.trimmed();
+		const QList< AutomationScreenShareViewer > viewers = automationScreenShareViewers();
+		if (requestedId.isEmpty()) return viewers.size() == 1 ? viewers.constFirst() : AutomationScreenShareViewer {};
+		for (const AutomationScreenShareViewer &viewer : viewers) {
+			if (viewer.backend && viewer.backend->streamId() == requestedId) return viewer;
+		}
+		return {};
+	}
+
+	QVariantMap automationScreenShareViewerState(const AutomationScreenShareViewer &viewer) {
+		QVariantMap state { { QStringLiteral("available"), viewer.window && viewer.backend } };
+		if (!viewer.window || !viewer.backend) return state;
+		ScreenShareViewBackend *backend = viewer.backend;
+		QQuickWindow *window = viewer.window;
+		state.insert(QStringLiteral("streamId"), backend->streamId());
+		state.insert(QStringLiteral("title"), backend->title());
+		state.insert(QStringLiteral("detail"), backend->detail());
+		state.insert(QStringLiteral("status"), backend->status());
+		state.insert(QStringLiteral("paused"), backend->paused());
+		state.insert(QStringLiteral("audioAvailable"), backend->audioAvailable());
+		state.insert(QStringLiteral("audioMuted"), backend->audioMuted());
+		state.insert(QStringLiteral("audioVolume"), backend->audioVolume());
+		state.insert(QStringLiteral("processId"), backend->processId());
+		state.insert(QStringLiteral("renderTransport"), backend->renderTransport());
+		state.insert(QStringLiteral("nativeFrameTransportAvailable"), backend->nativeFrameTransportAvailable());
+		state.insert(QStringLiteral("nativeFrameTransportBlocker"), backend->nativeFrameTransportBlocker());
+		state.insert(QStringLiteral("nativeFrameActive"), backend->nativeFrameActive());
+		state.insert(QStringLiteral("hasCurrentFrame"), backend->hasCurrentFrame());
+		state.insert(QStringLiteral("externalVideoWindowPresent"), backend->videoWindow() != nullptr);
+		state.insert(QStringLiteral("operationStatus"), backend->operationStatus());
+		state.insert(QStringLiteral("operationError"), backend->operationError());
+		state.insert(QStringLiteral("operationCancellable"), backend->operationCancellable());
+		state.insert(QStringLiteral("displayState"), window->property("displayState"));
+		state.insert(QStringLiteral("playbackSurfaceReady"), window->property("playbackSurfaceReady"));
+		state.insert(QStringLiteral("hasShownLiveFrame"), window->property("hasShownLiveFrame"));
+		state.insert(QStringLiteral("windowVisible"), window->isVisible());
+		state.insert(QStringLiteral("windowExposed"), window->isExposed());
+		state.insert(QStringLiteral("windowReady"), window->isVisible() && window->isExposed());
+		state.insert(QStringLiteral("windowFullscreen"), window->visibility() == QWindow::FullScreen);
+		return state;
+	}
+
+	QVariantList automationScreenShareViewerStates() {
+		QVariantList states;
+		const QList< AutomationScreenShareViewer > viewers = automationScreenShareViewers();
+		states.reserve(viewers.size());
+		for (const AutomationScreenShareViewer &viewer : viewers) {
+			states.push_back(automationScreenShareViewerState(viewer));
+		}
+		return states;
+	}
+
 	QObject *automationFindRichPreviewCard(QQuickWindow *window, const QString &messageId) {
 		if (!window || messageId.trimmed().isEmpty()) {
 			return nullptr;
@@ -4487,6 +4612,11 @@ namespace {
 			card->property("sensitiveMediaRevealed").toBool());
 		state.insert(QStringLiteral("mediaRequiresReveal"), card->property("mediaRequiresReveal").toBool());
 		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
+		state.insert(QStringLiteral("renderActive"), card->property("renderActive").toBool());
+		state.insert(QStringLiteral("inlinePlaybackActive"), card->property("inlinePlaybackActive").toBool());
+		state.insert(QStringLiteral("localPlaybackSupported"), card->property("localPlaybackSupported").toBool());
+		state.insert(QStringLiteral("mediaSessionId"), card->property("mediaSessionId").toString());
+		state.insert(QStringLiteral("embedPosterSource"), card->property("embedPosterSource").toString());
 		state.insert(QStringLiteral("playAccessibilityName"),
 			card->property("playAccessibilityName").toString());
 		QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
@@ -4516,11 +4646,17 @@ namespace {
 		appendSceneRect(QStringLiteral("media"), mediaPanel);
 		QObject *playButton = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewPlayButton")) : nullptr;
+		QObject *embedPoster = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewEmbedPoster")) : nullptr;
 		QObject *openSurface = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewCardOpenSurface")) : nullptr;
 		QObject *providerDetails = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("providerDetails")) : nullptr;
 		state.insert(QStringLiteral("playVisible"), playButton && playButton->property("visible").toBool());
+		state.insert(QStringLiteral("embedPosterStatus"),
+			embedPoster ? embedPoster->property("status").toInt() : -1);
+		state.insert(QStringLiteral("embedPosterRenderedSource"),
+			embedPoster ? embedPoster->property("source").toString() : QString());
 		state.insert(QStringLiteral("openSurfaceVisible"),
 			openSurface && openSurface->property("visible").toBool());
 		state.insert(QStringLiteral("providerDetailsVisible"),
@@ -4602,6 +4738,150 @@ namespace {
 		return state;
 	}
 
+	QVariantMap automationLiveRichPreviewState(QmlShellHost *host, const QString &messageId) {
+		const QString stableId = messageId.trimmed();
+		QVariantMap state {
+			{ QStringLiteral("messageId"), stableId },
+			{ QStringLiteral("modelPresent"), false },
+			{ QStringLiteral("rowIndex"), -1 },
+			{ QStringLiteral("previewState"), QStringLiteral("none") },
+			{ QStringLiteral("preview"), QVariantMap() },
+			{ QStringLiteral("card"), QVariantMap() }
+		};
+		if (!host || stableId.isEmpty()) return state;
+
+		ChatTimelineModel *timeline = host->chatModel();
+		const int row = timeline ? timeline->rowForStableId(stableId) : -1;
+		state.insert(QStringLiteral("rowIndex"), row);
+		if (row < 0) return state;
+
+		const QVariantMap modelRow = timeline->get(row);
+		const QVariantMap preview = modelRow.value(QStringLiteral("preview")).toMap();
+		QString previewState = preview.value(QStringLiteral("state")).toString().trimmed().toLower();
+		if (previewState.isEmpty()) {
+			previewState = preview.value(QStringLiteral("failed")).toBool() ? QStringLiteral("error")
+				: preview.value(QStringLiteral("loading")).toBool() ? QStringLiteral("loading")
+				: preview.isEmpty() ? QStringLiteral("none") : QStringLiteral("ready");
+		}
+		state.insert(QStringLiteral("modelPresent"), true);
+		state.insert(QStringLiteral("actor"), modelRow.value(QStringLiteral("title")));
+		state.insert(QStringLiteral("bodyText"), modelRow.value(QStringLiteral("subtitle")));
+		state.insert(QStringLiteral("deliveryState"), modelRow.value(QStringLiteral("status")));
+		state.insert(QStringLiteral("timestamp"), modelRow.value(QStringLiteral("timestamp")));
+		state.insert(QStringLiteral("previewState"), previewState);
+		state.insert(QStringLiteral("preview"), preview);
+		state.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), stableId));
+		return state;
+	}
+
+	QVariantMap automationRichMessageBodyState(QmlShellHost *host, QQuickWindow *window,
+											 const QString &messageId) {
+		QVariantMap state {
+			{ QStringLiteral("messageId"), messageId },
+			{ QStringLiteral("modelPresent"), false },
+			{ QStringLiteral("modelSegmentCount"), 0 },
+			{ QStringLiteral("modelImageCount"), 0 },
+			{ QStringLiteral("modelImages"), QVariantList() },
+			{ QStringLiteral("rendered"), false },
+			{ QStringLiteral("cardVisible"), false },
+			{ QStringLiteral("cardX"), 0.0 },
+			{ QStringLiteral("cardY"), 0.0 },
+			{ QStringLiteral("cardWidth"), 0.0 },
+			{ QStringLiteral("cardHeight"), 0.0 },
+			{ QStringLiteral("cardHref"), QString() },
+			{ QStringLiteral("cardLabel"), QString() },
+			{ QStringLiteral("timelineVisible"), false },
+			{ QStringLiteral("timelineX"), 0.0 },
+			{ QStringLiteral("timelineY"), 0.0 },
+			{ QStringLiteral("timelineWidth"), 0.0 },
+			{ QStringLiteral("timelineHeight"), 0.0 },
+			{ QStringLiteral("imagePresent"), false },
+			{ QStringLiteral("imageEffectiveVisible"), false },
+			{ QStringLiteral("imageSource"), QString() },
+			{ QStringLiteral("imageStatus"), 0 },
+			{ QStringLiteral("imageStatusName"), QStringLiteral("null") },
+			{ QStringLiteral("imageSceneRect"), automationSceneRectState({}) },
+			{ QStringLiteral("imageVisibleSceneRect"), automationSceneRectState({}) }
+		};
+
+		if (host && host->chatModel()) {
+			const int row = host->chatModel()->rowForStableId(messageId);
+			if (row >= 0) {
+				const QVariantList segments = host->chatModel()->get(row)
+					.value(QStringLiteral("bodySegments")).toList();
+				QVariantList modelImages;
+				for (const QVariant &entry : segments) {
+					const QVariantMap segment = entry.toMap();
+					if (segment.value(QStringLiteral("kind")).toString() == QLatin1String("image")) {
+						modelImages.push_back(segment);
+					}
+				}
+				state.insert(QStringLiteral("modelPresent"), true);
+				state.insert(QStringLiteral("modelSegmentCount"), segments.size());
+				state.insert(QStringLiteral("modelImageCount"), modelImages.size());
+				state.insert(QStringLiteral("modelImages"), modelImages);
+			}
+		}
+
+		if (!window || !window->contentItem()) return state;
+		const auto belongsToMessage = [&messageId](QQuickItem *item) {
+			for (QQuickItem *current = item; current; current = current->parentItem()) {
+				const QVariant stableId = current->property("stableId");
+				if (stableId.isValid() && stableId.toString() == messageId) return true;
+			}
+			return false;
+		};
+		QQuickItem *card = nullptr;
+		for (QQuickItem *candidate : automationQuickItemSubtree(window->contentItem())) {
+			if (candidate->objectName().startsWith(QLatin1String("richMessageImageCard_"))
+				&& belongsToMessage(candidate) && automationQuickItemHasVisibleAncestry(candidate)) {
+				card = candidate;
+				break;
+			}
+		}
+
+		const auto appendSceneRect = [&state](const QString &prefix, QQuickItem *item) {
+			state.insert(prefix + QStringLiteral("Visible"),
+				item && automationQuickItemHasVisibleAncestry(item));
+			const QRectF rect = automationQuickItemSceneRect(item);
+			state.insert(prefix + QStringLiteral("X"), rect.x());
+			state.insert(prefix + QStringLiteral("Y"), rect.y());
+			state.insert(prefix + QStringLiteral("Width"), rect.width());
+			state.insert(prefix + QStringLiteral("Height"), rect.height());
+		};
+		appendSceneRect(QStringLiteral("card"), card);
+		QQuickItem *timeline = qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+			window->contentItem(), QStringLiteral("chatTimeline")));
+		appendSceneRect(QStringLiteral("timeline"), timeline);
+		state.insert(QStringLiteral("rendered"), card != nullptr);
+		if (!card) return state;
+		state.insert(QStringLiteral("cardHref"), card->property("safeHref").toString());
+		state.insert(QStringLiteral("cardLabel"), card->property("accessibleLabel").toString());
+
+		QQuickItem *image = nullptr;
+		for (QQuickItem *candidate : automationQuickItemSubtree(card)) {
+			if (candidate->objectName().startsWith(QLatin1String("richMessageInlineImage_"))) {
+				image = candidate;
+				break;
+			}
+		}
+		state.insert(QStringLiteral("imagePresent"), image != nullptr);
+		if (!image) return state;
+		QRectF imageSceneRect;
+		QRectF imageVisibleSceneRect;
+		const bool imageEffectiveVisible = automationEffectiveImageRects(
+			image, card, &imageSceneRect, &imageVisibleSceneRect);
+		const int imageStatus = image->property("status").toInt();
+		state.insert(QStringLiteral("imageEffectiveVisible"), imageEffectiveVisible);
+		state.insert(QStringLiteral("imageSource"), image->property("source").toString());
+		state.insert(QStringLiteral("imageStatus"), imageStatus);
+		state.insert(QStringLiteral("imageStatusName"), automationImageStatusName(imageStatus));
+		state.insert(QStringLiteral("imageSceneRect"), automationSceneRectState(imageSceneRect));
+		state.insert(QStringLiteral("imageVisibleSceneRect"),
+			automationSceneRectState(imageVisibleSceneRect));
+		return state;
+	}
+
 } // namespace
 
 ModernUiAutomationServer::ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent)
@@ -4623,10 +4903,16 @@ QVariantMap ModernUiAutomationServer::finalizeChatPerformanceWorkload(QmlShellHo
 		response.insert(QStringLiteral("restored"), true);
 		return response;
 	}
+	QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+	m_chatPerformanceWorkload.running = false;
 	if (!host || !host->chatModel()) {
 		response.insert(QStringLiteral("ok"), false);
 		response.insert(QStringLiteral("error"), tr("The Qt Quick chat fixture host disappeared before restore."));
+		m_chatPerformanceWorkload = {};
 		return response;
+	}
+	if (host->window()) {
+		QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload");
 	}
 	host->setVisualFixtureMutationActive(true);
 	host->chatModel()->replaceMessages(m_chatPerformanceWorkload.liveMessages);
@@ -4638,15 +4924,67 @@ QVariantMap ModernUiAutomationServer::finalizeChatPerformanceWorkload(QmlShellHo
 	return response;
 }
 
+void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
+	if (!m_chatPerformanceWorkload.active || !m_chatPerformanceWorkload.running || !m_mainWindow) return;
+	QmlShellHost *host = m_mainWindow->qmlShellHost();
+	if (!host || !host->window() || !host->performanceMonitor()) {
+		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceWorkload.running = false;
+		m_chatPerformanceWorkload.failureReason =
+			tr("The Qt Quick chat performance host disappeared while scrolling.");
+		return;
+	}
+
+	QmlPerformanceMonitor *monitor = host->performanceMonitor();
+	if (!m_chatPerformanceWorkload.primed) {
+		// Establish one presented-frame baseline before the first scroll input.
+		// Each following frame then retires exactly one input and schedules the
+		// next real ListView contentY mutation, independent of automation/TCP
+		// cadence and timer coalescing.
+		m_chatPerformanceWorkload.primed = true;
+		m_chatPerformanceWorkload.presentedFramesBeforeRun =
+			monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+	}
+	if (m_chatPerformanceWorkload.stepCount >= m_chatPerformanceWorkload.targetSteps) {
+		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceWorkload.running = false;
+		if (!QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload")) {
+			m_chatPerformanceWorkload.failureReason =
+				tr("The Qt Quick root could not finish the chat-scroll workload.");
+		}
+		return;
+	}
+
+	const int nextStep = m_chatPerformanceWorkload.stepCount + 1;
+	monitor->markInput(QStringLiteral("chat-scroll:%1").arg(++m_performanceInputSequence));
+	QVariant advanced;
+	if (!QMetaObject::invokeMethod(host->window(), "advancePerformanceChatScrollWorkload",
+			Q_RETURN_ARG(QVariant, advanced), Q_ARG(QVariant, nextStep),
+			Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps))
+		|| !advanced.toMap().value(QStringLiteral("advanced")).toBool()) {
+		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceWorkload.running = false;
+		m_chatPerformanceWorkload.failureReason =
+			tr("The Qt Quick root could not advance chat-scroll step %1.").arg(nextStep);
+		return;
+	}
+
+	m_chatPerformanceWorkload.stepCount = nextStep;
+	host->window()->update();
+}
+
 QVariantMap ModernUiAutomationServer::finalizeTalkPerformanceWorkload(QmlShellHost *host) {
 	QVariantMap response = okResponse();
 	if (!m_talkPerformanceWorkload.active) {
 		response.insert(QStringLiteral("restored"), true);
 		return response;
 	}
+	QObject::disconnect(m_talkPerformanceWorkload.frameConnection);
+	m_talkPerformanceWorkload.running = false;
 	if (!host || !host->participantModel()) {
 		response.insert(QStringLiteral("ok"), false);
 		response.insert(QStringLiteral("error"), tr("The Qt Quick talk fixture host disappeared before restore."));
+		m_talkPerformanceWorkload = {};
 		return response;
 	}
 	host->setVisualFixtureMutationActive(true);
@@ -4659,6 +4997,46 @@ QVariantMap ModernUiAutomationServer::finalizeTalkPerformanceWorkload(QmlShellHo
 	response.insert(QStringLiteral("transitionCount"), m_talkPerformanceWorkload.transitionCount);
 	m_talkPerformanceWorkload = {};
 	return response;
+}
+
+void ModernUiAutomationServer::advanceTalkPerformanceWorkload() {
+	if (!m_talkPerformanceWorkload.active || !m_talkPerformanceWorkload.running || !m_mainWindow) return;
+	QmlShellHost *host = m_mainWindow->qmlShellHost();
+	if (!host || !host->window() || !host->participantModel() || !host->performanceMonitor()) {
+		QObject::disconnect(m_talkPerformanceWorkload.frameConnection);
+		m_talkPerformanceWorkload.running = false;
+		return;
+	}
+
+	QmlPerformanceMonitor *monitor = host->performanceMonitor();
+	if (!m_talkPerformanceWorkload.primed) {
+		// The first presented frame establishes the interval baseline. Every
+		// subsequent frame completes exactly one typed talk-state transition, so
+		// N transitions yield N input samples and N frame-interval samples without
+		// depending on automation transport or PowerShell timer cadence.
+		m_talkPerformanceWorkload.primed = true;
+		m_talkPerformanceWorkload.presentedFramesBefore =
+			monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+	}
+	if (m_talkPerformanceWorkload.transitionCount >= m_talkPerformanceWorkload.targetTransitions) {
+		QObject::disconnect(m_talkPerformanceWorkload.frameConnection);
+		m_talkPerformanceWorkload.running = false;
+		return;
+	}
+
+	m_talkPerformanceWorkload.talking = !m_talkPerformanceWorkload.talking;
+	const bool talking = m_talkPerformanceWorkload.talking;
+	monitor->markInput(QStringLiteral("talk-state:%1").arg(++m_performanceInputSequence));
+	{
+		mumble::chatperf::ScopedDuration trace("qml.participant.talk_state_update");
+		host->participantModel()->updatePresence(
+			m_talkPerformanceWorkload.sessionId,
+			talking ? QStringLiteral("talking") : QStringLiteral("passive"),
+			talking ? tr("Talking") : tr("Listening"),
+			talking ? QStringLiteral("accent") : QString(), talking, false, {}, {});
+	}
+	++m_talkPerformanceWorkload.transitionCount;
+	host->window()->update();
 }
 
 bool ModernUiAutomationServer::start(QString *errorMessage) {
@@ -4837,6 +5215,149 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return buildStateResponse();
 	}
 
+	if (command == QLatin1String("toastState") || command == QLatin1String("publishToast")
+		|| command == QLatin1String("dismissToast")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->toastController()) {
+			return errorResponse(tr("The typed toast controller is not active."));
+		}
+		ToastController *toast = host->toastController();
+		if (command == QLatin1String("publishToast")) {
+			const QString title = request.value(QStringLiteral("title")).toString().left(512);
+			const QString message = request.value(QStringLiteral("message")).toString().left(2048);
+			if (title.trimmed().isEmpty() && message.trimmed().isEmpty()) {
+				return errorResponse(tr("A toast title or message is required."));
+			}
+			toast->publish(request.value(QStringLiteral("tone"), QStringLiteral("info")).toString(),
+				title, message, request.value(QStringLiteral("actionId")).toString().left(256),
+				request.value(QStringLiteral("actionLabel")).toString().left(256),
+				qBound(250, request.value(QStringLiteral("timeoutMs"), 4500).toInt(), 60000));
+		} else if (command == QLatin1String("dismissToast")) {
+			toast->dismiss();
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("toast"), automationToastState(toast));
+		return response;
+	}
+
+	const QStringList richDirectMessageCommands {
+		QStringLiteral("directMessageReply"), QStringLiteral("directMessageCancelReply"),
+		QStringLiteral("directMessageRetry"), QStringLiteral("directMessageDelete"),
+		QStringLiteral("directMessageToggleReaction"), QStringLiteral("directMessageChooseAttachment"),
+		QStringLiteral("directMessageRemoveAttachment"), QStringLiteral("directMessageRetryAttachment"),
+		QStringLiteral("directMessageOpenAttachment"), QStringLiteral("directMessageDownloadAttachment"),
+		QStringLiteral("directMessageHydrateContent")
+	};
+	if (richDirectMessageCommands.contains(command)) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		DirectMessageController *directMessages = host ? host->directMessageController() : nullptr;
+		if (!directMessages || !directMessages->conversationOpen()) {
+			return errorResponse(tr("Open a direct-message conversation before invoking a rich-message action."));
+		}
+
+		const QString stableId = request.value(QStringLiteral("messageId"),
+			request.value(QStringLiteral("stableId"))).toString().trimmed();
+		const int rowIndex = stableId.isEmpty() ? -1
+			: directMessages->timelineModel()->rowForStableId(stableId);
+		const QVariantMap row = rowIndex >= 0 ? directMessages->timelineModel()->get(rowIndex) : QVariantMap();
+		const QString attachmentId = request.value(QStringLiteral("attachmentId")).toString().trimmed();
+		bool accepted = false;
+		bool requiresNativeDialog = false;
+
+		if (command == QLatin1String("directMessageReply")) {
+			accepted = !row.isEmpty() && row.value(QStringLiteral("canReply")).toBool();
+			if (accepted) {
+				directMessages->replyToMessage(stableId);
+				accepted = directMessages->hasPendingReply();
+			}
+		} else if (command == QLatin1String("directMessageCancelReply")) {
+			accepted = directMessages->hasPendingReply();
+			directMessages->cancelPendingReply();
+		} else if (command == QLatin1String("directMessageRetry")) {
+			accepted = !row.isEmpty() && row.value(QStringLiteral("source")).toMap()
+				.value(QStringLiteral("deliveryCanRetry")).toBool();
+			if (accepted) directMessages->retryMessage(stableId);
+		} else if (command == QLatin1String("directMessageDelete")) {
+			accepted = !row.isEmpty() && row.value(QStringLiteral("canDelete")).toBool();
+			if (accepted) directMessages->deleteMessage(stableId);
+		} else if (command == QLatin1String("directMessageToggleReaction")) {
+			const QString emoji = request.value(QStringLiteral("emoji")).toString().trimmed().left(64);
+			accepted = !emoji.isEmpty() && !row.isEmpty() && row.value(QStringLiteral("canReact")).toBool();
+			if (accepted) directMessages->toggleMessageReaction(stableId, emoji);
+		} else if (command == QLatin1String("directMessageChooseAttachment")) {
+			requiresNativeDialog = true;
+			accepted = request.value(QStringLiteral("allowNativeDialog")).toBool()
+				&& (directMessages->canAttachImages() || directMessages->canAttachFiles());
+			if (accepted) directMessages->chooseAttachment();
+		} else if (command == QLatin1String("directMessageRemoveAttachment")
+			|| command == QLatin1String("directMessageRetryAttachment")) {
+			for (const QVariant &value : directMessages->draftAttachments()) {
+				const QVariantMap attachment = value.toMap();
+				if (attachment.value(QStringLiteral("id")).toString() == attachmentId) {
+					accepted = true;
+					break;
+				}
+			}
+			if (accepted && command == QLatin1String("directMessageRemoveAttachment"))
+				directMessages->removeDraftAttachment(attachmentId);
+			else if (accepted)
+				directMessages->retryDraftAttachment(attachmentId);
+		} else if (command == QLatin1String("directMessageOpenAttachment")
+			|| command == QLatin1String("directMessageDownloadAttachment")) {
+			requiresNativeDialog = command == QLatin1String("directMessageDownloadAttachment");
+			const QString assetId = request.value(QStringLiteral("assetId")).toString().trimmed();
+			const QString fileName = request.value(QStringLiteral("fileName")).toString();
+			accepted = !assetId.isEmpty() && (!requiresNativeDialog
+				|| request.value(QStringLiteral("allowNativeDialog")).toBool());
+			if (accepted && command == QLatin1String("directMessageOpenAttachment"))
+				directMessages->openAttachment(assetId, fileName);
+			else if (accepted)
+				directMessages->downloadAttachment(assetId, fileName);
+		} else if (command == QLatin1String("directMessageHydrateContent")) {
+			accepted = !row.isEmpty();
+			if (accepted) directMessages->requestContentHydration(stableId,
+				request.value(QStringLiteral("highPriority")).toBool());
+		}
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("accepted"), accepted);
+		response.insert(QStringLiteral("requiresNativeDialog"), requiresNativeDialog);
+		response.insert(QStringLiteral("directMessages"), automationDirectMessageState(directMessages));
+		return response;
+	}
+
+	if (command == QLatin1String("recorderAction")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->recorderController()) {
+			return errorResponse(tr("The typed recorder controller is not active."));
+		}
+		Mumble::ModernRecorderController *recorder = host->recorderController();
+		const QString action = request.value(QStringLiteral("action")).toString().trimmed();
+		bool accepted = false;
+		if (action == QLatin1String("start")) accepted = recorder->start();
+		else if (action == QLatin1String("pause")) accepted = recorder->pause();
+		else if (action == QLatin1String("resume")) accepted = recorder->resume();
+		else if (action == QLatin1String("stop")) accepted = recorder->stop();
+		else if (action == QLatin1String("clearError")) {
+			recorder->clearError();
+			accepted = true;
+		} else if (action == QLatin1String("refresh")) {
+			recorder->refreshCapabilities();
+			recorder->refreshElapsed();
+			accepted = true;
+		} else {
+			return errorResponse(tr("Unknown recorder action '%1'.").arg(action));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("accepted"), accepted);
+		response.insert(QStringLiteral("state"), recorder->state());
+		response.insert(QStringLiteral("operationId"), recorder->operationId());
+		response.insert(QStringLiteral("operationStatus"), recorder->operationStatus());
+		response.insert(QStringLiteral("errorCode"), recorder->errorCode());
+		response.insert(QStringLiteral("errorMessage"), recorder->errorMessage());
+		return response;
+	}
+
 	if (command.startsWith(QLatin1String("qmlPerformance"))) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host || !host->performanceMonitor())
@@ -4851,6 +5372,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 				return errorResponse(tr("A chat performance fixture is already active."));
 			if (m_talkPerformanceWorkload.active)
 				return errorResponse(tr("A talk-state performance fixture is already active."));
+			if (host->mediaSession()->active())
+				return errorResponse(tr("Close the active media session before starting the chat performance fixture."));
 			ChatTimelineModel *chat = host->chatModel();
 			m_chatPerformanceWorkload.liveMessages = chat->messages();
 			m_chatPerformanceWorkload.previousFixtureOverride = host->visualFixtureOverrideActive();
@@ -4858,14 +5381,54 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			m_chatPerformanceWorkload.active = true;
 			QVariantList messages;
 			messages.reserve(96);
+			const auto dormantMediaPreview = [](const int fixtureIndex) {
+				const QString previewSize = fixtureIndex % 3 == 0 ? QStringLiteral("compact")
+					: fixtureIndex % 3 == 1 ? QStringLiteral("default") : QStringLiteral("large");
+				if (fixtureIndex % 2 == 0) {
+					return QVariantMap {
+						{ QStringLiteral("kind"), QStringLiteral("link") },
+						{ QStringLiteral("url"), QStringLiteral("https://www.youtube.com/watch?v=qmlperf0001") },
+						{ QStringLiteral("title"), QStringLiteral("Deterministic YouTube performance fixture") },
+						{ QStringLiteral("subtitle"), QStringLiteral("YouTube") },
+						{ QStringLiteral("description"), QStringLiteral("Dormant inline-playback card; no provider hydration.") },
+						{ QStringLiteral("openLabel"), QStringLiteral("Open on YouTube") },
+						{ QStringLiteral("embedKind"), QStringLiteral("youtube") },
+						{ QStringLiteral("embedUrl"), QStringLiteral("https://www.youtube-nocookie.com/embed/qmlperf0001") },
+						{ QStringLiteral("embedAspect"), QStringLiteral("wide") },
+						{ QStringLiteral("previewSize"), previewSize },
+						{ QStringLiteral("loading"), false },
+						{ QStringLiteral("failed"), false },
+						{ QStringLiteral("autoplay"), false }
+					};
+				}
+
+				return QVariantMap {
+					{ QStringLiteral("kind"), QStringLiteral("link") },
+					{ QStringLiteral("url"), QStringLiteral("mumble://performance-fixture/local-audio") },
+					{ QStringLiteral("title"), QStringLiteral("Deterministic local audio performance fixture") },
+					{ QStringLiteral("subtitle"), QStringLiteral("Local audio") },
+					{ QStringLiteral("description"), QStringLiteral("Dormant data-URL audio card; no network source.") },
+					{ QStringLiteral("openLabel"), QStringLiteral("Open audio") },
+					{ QStringLiteral("mediaKind"), QStringLiteral("audio") },
+					{ QStringLiteral("mediaMime"), QStringLiteral("audio/wav") },
+					{ QStringLiteral("mediaUrl"), QStringLiteral("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=") },
+					{ QStringLiteral("embedAspect"), QStringLiteral("compact-audio") },
+					{ QStringLiteral("previewSize"), previewSize },
+					{ QStringLiteral("loading"), false },
+					{ QStringLiteral("failed"), false },
+					{ QStringLiteral("autoplay"), false }
+				};
+			};
 			for (int index = 0; index < 96; ++index) {
-				messages.push_back(QVariantMap {
+				QVariantMap message {
 					{ QStringLiteral("messageKey"), QStringLiteral("qml-perf-message-%1").arg(index) },
 					{ QStringLiteral("actor"), index % 2 ? QStringLiteral("Performance peer") : QStringLiteral("Performance self") },
 					{ QStringLiteral("bodyText"), QStringLiteral("Deterministic chat workload row %1 %2").arg(index).arg(QString(80, QLatin1Char('x'))) },
 					{ QStringLiteral("timeLabel"), QStringLiteral("12:%1").arg(index % 60, 2, 10, QLatin1Char('0')) },
 					{ QStringLiteral("deliveryState"), QStringLiteral("sent") }, { QStringLiteral("own"), index % 2 == 0 }
-				});
+				};
+				if (index % 16 == 15) message.insert(QStringLiteral("preview"), dormantMediaPreview(index / 16));
+				messages.push_back(message);
 			}
 			host->setVisualFixtureMutationActive(true);
 			chat->replaceMessages(messages);
@@ -4890,22 +5453,62 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			response.insert(QStringLiteral("ready"), invoked && host->chatModel()->rowCount() == 96
 									 && layout.value(QStringLiteral("count")).toInt() == 96
 									 && layout.value(QStringLiteral("scrollable")).toBool()
+									 && layout.value(QStringLiteral("settled")).toBool()
+									 && !layout.value(QStringLiteral("firstVisibleId")).toString().isEmpty()
 									 && frames > m_chatPerformanceWorkload.presentedFramesBeforeSeed);
 			return response;
-		} else if (command == QLatin1String("qmlPerformanceChatScrollStart")) {
+		} else if (command == QLatin1String("qmlPerformanceChatScrollRun")) {
 			if (!m_chatPerformanceWorkload.active) return errorResponse(tr("No chat performance fixture is active."));
+			if (m_chatPerformanceWorkload.running)
+				return errorResponse(tr("The chat-scroll performance fixture is already running."));
+			if (m_chatPerformanceWorkload.stepCount != 0)
+				return errorResponse(tr("The chat-scroll performance fixture has already been consumed."));
+			m_chatPerformanceWorkload.targetSteps =
+				qBound(1, request.value(QStringLiteral("stepCount"), 20).toInt(), 240);
 			QVariant started;
-			if (!QMetaObject::invokeMethod(host->window(), "runPerformanceChatScrollWorkload", Q_RETURN_ARG(QVariant, started)))
+			if (!QMetaObject::invokeMethod(host->window(), "preparePerformanceChatScrollWorkload",
+					Q_RETURN_ARG(QVariant, started),
+					Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps))) {
 				return errorResponse(tr("The Qt Quick root does not expose the chat-scroll workload."));
+			}
+			const QVariantMap startedState = started.toMap();
+			if (!startedState.value(QStringLiteral("started")).toBool()) {
+				return errorResponse(startedState.value(QStringLiteral("reason"),
+					tr("The chat timeline is not scrollable.")).toString());
+			}
+			m_chatPerformanceWorkload.primed = false;
+			m_chatPerformanceWorkload.running = true;
+			m_chatPerformanceWorkload.failureReason.clear();
+			m_chatPerformanceWorkload.frameConnection = QObject::connect(
+				host->window(), &QQuickWindow::frameSwapped, this,
+				[this]() { advanceChatPerformanceWorkload(); }, Qt::QueuedConnection);
+			// Prime one presentation. The frame-driven continuation applies one
+			// scroll input per subsequently requested scene-graph frame.
+			host->window()->update();
 			QVariantMap response = okResponse();
-			response.insert(QStringLiteral("scroll"), started.toMap());
+			response.insert(QStringLiteral("running"), true);
+			response.insert(QStringLiteral("targetSteps"), m_chatPerformanceWorkload.targetSteps);
+			response.insert(QStringLiteral("scroll"), startedState);
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatScrollStatus")) {
+			if (!m_chatPerformanceWorkload.active)
+				return errorResponse(tr("No chat performance fixture is active."));
 			QVariant state;
 			if (!QMetaObject::invokeMethod(host->window(), "performanceChatScrollState", Q_RETURN_ARG(QVariant, state)))
 				return errorResponse(tr("The Qt Quick root does not expose chat-scroll status."));
+			const int frames = monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
 			QVariantMap response = okResponse();
 			response.insert(QStringLiteral("scroll"), state.toMap());
+			response.insert(QStringLiteral("stepCount"), m_chatPerformanceWorkload.stepCount);
+			response.insert(QStringLiteral("targetSteps"), m_chatPerformanceWorkload.targetSteps);
+			response.insert(QStringLiteral("running"), m_chatPerformanceWorkload.running);
+			response.insert(QStringLiteral("primed"), m_chatPerformanceWorkload.primed);
+			response.insert(QStringLiteral("failureReason"), m_chatPerformanceWorkload.failureReason);
+			response.insert(QStringLiteral("presentedFramesBefore"),
+				m_chatPerformanceWorkload.presentedFramesBeforeRun);
+			response.insert(QStringLiteral("presentedFramesAfter"), frames);
+			response.insert(QStringLiteral("presentedFrameDelta"),
+				frames - m_chatPerformanceWorkload.presentedFramesBeforeRun);
 			response.insert(QStringLiteral("performance"), monitor->snapshot());
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatFinalize")) {
@@ -4938,11 +5541,36 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			response.insert(QStringLiteral("session"), m_talkPerformanceWorkload.sessionId);
 			response.insert(QStringLiteral("presentedFramesBefore"), m_talkPerformanceWorkload.presentedFramesBefore);
 			return response;
+		} else if (command == QLatin1String("qmlPerformanceTalkRun")) {
+			if (!m_talkPerformanceWorkload.active)
+				return errorResponse(tr("No talk-state performance fixture is active."));
+			if (m_talkPerformanceWorkload.running)
+				return errorResponse(tr("The talk-state performance fixture is already running."));
+			if (m_talkPerformanceWorkload.transitionCount != 0)
+				return errorResponse(tr("The talk-state performance fixture has already been consumed."));
+			m_talkPerformanceWorkload.targetTransitions =
+				qBound(1, request.value(QStringLiteral("transitionCount"), 40).toInt(), 240);
+			m_talkPerformanceWorkload.primed = false;
+			m_talkPerformanceWorkload.running = true;
+			m_talkPerformanceWorkload.frameConnection = QObject::connect(
+				host->window(), &QQuickWindow::frameSwapped, this,
+				[this]() { advanceTalkPerformanceWorkload(); }, Qt::QueuedConnection);
+			// Prime one measured presentation before the first state change. The
+			// frame-driven continuation then applies exactly one transition per frame.
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("running"), true);
+			response.insert(QStringLiteral("targetTransitions"), m_talkPerformanceWorkload.targetTransitions);
+			return response;
 		} else if (command == QLatin1String("qmlPerformanceTalkTransition")) {
 			if (!m_talkPerformanceWorkload.active)
 				return errorResponse(tr("No talk-state performance fixture is active."));
+			if (m_talkPerformanceWorkload.running)
+				return errorResponse(tr("The frame-driven talk-state performance fixture is running."));
 			m_talkPerformanceWorkload.talking = !m_talkPerformanceWorkload.talking;
 			const bool talking = m_talkPerformanceWorkload.talking;
+			const QString operationId = monitor->markInput(
+				QStringLiteral("talk-state:%1").arg(++m_performanceInputSequence));
 			{
 				mumble::chatperf::ScopedDuration trace("qml.participant.talk_state_update");
 				host->participantModel()->updatePresence(
@@ -4954,6 +5582,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			++m_talkPerformanceWorkload.transitionCount;
 			host->window()->update();
 			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("operationId"), operationId);
 			response.insert(QStringLiteral("transitionCount"), m_talkPerformanceWorkload.transitionCount);
 			response.insert(QStringLiteral("talking"), talking);
 			return response;
@@ -4967,6 +5596,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			response.insert(QStringLiteral("presentedFramesAfter"), frames);
 			response.insert(QStringLiteral("presentedFrameDelta"), frames - m_talkPerformanceWorkload.presentedFramesBefore);
 			response.insert(QStringLiteral("talking"), m_talkPerformanceWorkload.talking);
+			response.insert(QStringLiteral("running"), m_talkPerformanceWorkload.running);
+			response.insert(QStringLiteral("primed"), m_talkPerformanceWorkload.primed);
+			response.insert(QStringLiteral("targetTransitions"), m_talkPerformanceWorkload.targetTransitions);
 			response.insert(QStringLiteral("performance"), monitor->snapshot());
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceTalkFinalize")) {
@@ -5029,12 +5661,23 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
-		const QVariantMap snapshot = QmlAccessibilitySnapshot::serialize(host->window());
+		const QString windowId = request.value(QStringLiteral("window"), QStringLiteral("main"))
+			.toString().trimmed();
+		QString targetError;
+		QQuickWindow *targetWindow = host->captureWindowTarget(windowId, &targetError);
+		if (!targetWindow || !targetWindow->isVisible() || !targetWindow->isExposed()) {
+			return errorResponse(targetError.isEmpty()
+				? tr("The requested Qt Quick window is not ready for accessibility capture.") : targetError);
+		}
+		QString focusError;
+		if (!fixture->ensureFocus(windowId, &focusError)) return errorResponse(focusError);
+		const QVariantMap snapshot = QmlAccessibilitySnapshot::serialize(targetWindow);
 		if (!snapshot.value(QStringLiteral("ok")).toBool()) {
 			return errorResponse(snapshot.value(QStringLiteral("error")).toString());
 		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("generation"), requestedGeneration);
+		response.insert(QStringLiteral("window"), windowId.isEmpty() ? QStringLiteral("main") : windowId);
 		response.insert(QStringLiteral("snapshot"), snapshot.value(QStringLiteral("tree")));
 		response.insert(QStringLiteral("nodeCount"), snapshot.value(QStringLiteral("nodeCount")));
 		response.insert(QStringLiteral("truncated"), snapshot.value(QStringLiteral("truncated")));
@@ -5057,6 +5700,26 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("generation"), requestedGeneration);
 		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
 		response.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), messageId));
+		return response;
+	}
+
+	if (command == QLatin1String("qmlVisualGateRichBodyState")) {
+		QmlVisualFixtureController *fixture = visualFixtureController();
+		bool parsedGeneration = false;
+		const qulonglong requestedGeneration =
+			unsignedLongLongValue(request.value(QStringLiteral("generation")), &parsedGeneration);
+		if (!parsedGeneration || requestedGeneration == 0 || requestedGeneration != fixture->generation()) {
+			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
+		}
+		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
+		if (messageId.isEmpty()) return errorResponse(tr("Missing rich-message body id."));
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("generation"), requestedGeneration);
+		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
+		response.insert(QStringLiteral("body"),
+			automationRichMessageBodyState(host, host->window(), messageId));
 		return response;
 	}
 
@@ -5103,6 +5766,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			&& (!parsedGeneration || requestedGeneration == 0
 				|| requestedGeneration != visualFixtureController()->generation())) {
 			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
+		}
+		if (request.contains(QStringLiteral("generation"))) {
+			QString focusError;
+			if (!visualFixtureController()->ensureFocus(windowId, &focusError)) return errorResponse(focusError);
 		}
 		QString captureError;
 		if (!m_mainWindow->m_qmlShellHost->captureWindow(path, &captureError, windowId)) {
@@ -5157,16 +5824,134 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
 			return errorResponse(tr("The Qt Quick frontend is not active."));
 		}
-		const bool opened = m_mainWindow->m_qmlShellHost->mediaSession()->open(
-			QUrl(request.value(QStringLiteral("url")).toString()),
-			request.value(QStringLiteral("provider")).toString(),
-			request.value(QStringLiteral("sessionId")).toString());
-		return opened ? okResponse() : errorResponse(m_mainWindow->m_qmlShellHost->mediaSession()->error());
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		MediaSessionBackend *media = host->mediaSession();
+		const QString presentation = request.value(QStringLiteral("presentation")).toString().trimmed().toLower();
+		if (!presentation.isEmpty() && presentation != QLatin1String("detached")
+			&& presentation != QLatin1String("inline")) {
+			return errorResponse(tr("Unknown media presentation: %1").arg(presentation));
+		}
+
+		const QUrl url(request.value(QStringLiteral("url")).toString());
+		const QString provider = request.value(QStringLiteral("provider")).toString();
+		const QString sessionId = request.value(QStringLiteral("sessionId")).toString();
+		const QString mediaMime = request.value(QStringLiteral("mediaMime")).toString().trimmed();
+		const QUrl audioUrl(request.value(QStringLiteral("audioUrl")).toString());
+		const QString audioMime = request.value(QStringLiteral("audioMime")).toString().trimmed();
+		const bool inlinePresentation = presentation == QLatin1String("inline");
+
+		bool opened = false;
+		if (!mediaMime.isEmpty()) {
+			opened = inlinePresentation ? media->openDirectInline(url, mediaMime, audioUrl, audioMime, sessionId)
+										: media->openDirect(url, mediaMime, audioUrl, audioMime, sessionId);
+		} else {
+			opened = inlinePresentation ? media->openInline(url, provider, sessionId)
+										: media->open(url, provider, sessionId);
+		}
+		if (!opened) return errorResponse(media->error());
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
 	}
 
 	if (command == QLatin1String("closeQmlMediaSession")) {
 		if (m_mainWindow->m_qmlShellHost) m_mainWindow->m_qmlShellHost->mediaSession()->close();
 		return okResponse();
+	}
+
+	if (command == QLatin1String("watchTogetherState")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
+	}
+
+	if (command == QLatin1String("startWatchTogether")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		const QUrl url(request.value(QStringLiteral("url")).toString().trimmed());
+		const QString provider = request.value(QStringLiteral("provider")).toString().trimmed();
+		const QString title = request.value(QStringLiteral("title")).toString().trimmed();
+		if (url.isEmpty()) return errorResponse(tr("Missing watch-together URL."));
+
+		MediaSessionBackend *media = host->mediaSession();
+		if (!media->startShared(url, provider, title)) return errorResponse(media->error());
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
+	}
+
+	if (command == QLatin1String("watchTogetherAction")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		MediaSessionBackend *media = host->mediaSession();
+		QString action = request.value(QStringLiteral("action")).toString().trimmed().toLower();
+		action.replace(QLatin1Char('_'), QLatin1Char('-'));
+		bool handled = true;
+
+		if (action == QLatin1String("join")) {
+			if (!media->sharedAvailable() || media->sharedJoined()) handled = false;
+			else media->joinShared();
+		} else if (action == QLatin1String("leave")) {
+			if (!media->sharedJoined()) handled = false;
+			else media->leaveShared();
+		} else if (action == QLatin1String("end")) {
+			if (!media->sharedHost()) handled = false;
+			else media->endShared();
+		} else if (action == QLatin1String("transfer-host")) {
+			const QString sessionId = request.value(QStringLiteral("sessionId")).toString().trimmed();
+			bool validSession = false;
+			const qulonglong targetSession = sessionId.toULongLong(&validSession);
+			if (!media->sharedHost() || !validSession || targetSession == 0
+				|| targetSession > std::numeric_limits< unsigned int >::max()
+				|| targetSession == media->sharedHostSession()) {
+				handled = false;
+			} else {
+				media->transferSharedHost(sessionId);
+			}
+		} else if (action == QLatin1String("reopen") || action == QLatin1String("reopen-player")) {
+			handled = media->reopenSharedPlayer();
+		} else if (action == QLatin1String("retry")) {
+			if (!media->active()) handled = false;
+			else media->retry();
+		} else if (action == QLatin1String("play")) {
+			if (!media->active() || !media->playbackControlAllowed()) handled = false;
+			else media->play();
+		} else if (action == QLatin1String("pause")) {
+			if (!media->active() || !media->playbackControlAllowed()) handled = false;
+			else media->pause();
+		} else if (action == QLatin1String("seek")) {
+			bool validPosition = false;
+			const double position = request.value(QStringLiteral("position")).toDouble(&validPosition);
+			if (!media->active() || !media->playbackControlAllowed() || !validPosition
+				|| !std::isfinite(position) || position < 0.0) {
+				handled = false;
+			} else {
+				media->seek(position);
+			}
+		} else if (action == QLatin1String("detach")) {
+			if (!media->active() || media->detached()) handled = false;
+			else media->detach();
+		} else if (action == QLatin1String("attach")) {
+			if (!media->active() || !media->detached()) handled = false;
+			else media->attach();
+		} else if (action == QLatin1String("close-player")) {
+			if (!media->active()) handled = false;
+			else media->closePlayer();
+		} else if (action == QLatin1String("close")) {
+			if (!media->active() && !media->sharedAvailable()) handled = false;
+			else media->close();
+		} else {
+			return errorResponse(tr("Unknown watch-together action: %1").arg(action));
+		}
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), handled);
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
 	}
 
 	if (command == QLatin1String("qmlReadinessState")) {
@@ -5175,6 +5960,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
 		response.insert(QStringLiteral("windowReady"), true);
+		response.insert(QStringLiteral("windowVisible"), host->window()->isVisible());
+		response.insert(QStringLiteral("windowExposed"), host->window()->isExposed());
+		response.insert(QStringLiteral("windowVisibility"), static_cast< int >(host->window()->visibility()));
 		response.insert(QStringLiteral("connected"), host->sessionController()->connected());
 		response.insert(QStringLiteral("activeScopeToken"), host->activeScopeController()->scopeToken());
 		response.insert(QStringLiteral("roomCount"), host->roomModel()->rowCount());
@@ -5191,6 +5979,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			host->captureWindowReady(QStringLiteral("manual-plugin")));
 #endif
 		response.insert(QStringLiteral("mediaActive"), host->mediaSession()->active());
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
 		return response;
 	}
 
@@ -5210,21 +5999,34 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("watchTogetherLifecycleProbe")) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
-		MediaSessionBackend *media = host->mediaSession();
-		media->close();
-		const QUrl url(QStringLiteral("https://example.com/watch-together"));
-		if (!media->open(url, QStringLiteral("direct"), QStringLiteral("automation-room")))
-			return errorResponse(media->error());
-		const qulonglong openedGeneration = media->syncGeneration();
-		media->applyRemoteState(url, QStringLiteral("direct"), QStringLiteral("automation-room"), 12.5, false,
-							 openedGeneration + 1);
+
+		// Exercise the typed backend in isolation. The allowlisted embed is never attached
+		// to a QML loader, so this probe cannot create a renderer or perform network I/O.
+		MediaSessionBackend media;
+		const QUrl url(QStringLiteral("https://www.youtube-nocookie.com/embed/automation-lifecycle"));
+		const QString provider = QStringLiteral("youtube");
+		const QString sessionID = QStringLiteral("automation-room");
+		const qulonglong baselineGeneration = media.syncGeneration();
+		if (!media.openInline(url, provider, sessionID)) return errorResponse(media.error());
+		const qulonglong openedGeneration = media.syncGeneration();
+		const bool opened = media.active();
+		const bool inlinePresentation = !media.detached();
+		const QString canonicalProvider = media.provider();
+		media.applyRemoteState(url, provider, sessionID, 12.5, false, openedGeneration + 1);
 		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("opened"), media->active());
-		response.insert(QStringLiteral("state"), media->state());
-		response.insert(QStringLiteral("position"), media->position());
-		response.insert(QStringLiteral("generationAdvanced"), media->syncGeneration() > openedGeneration);
-		media->close();
-		response.insert(QStringLiteral("closed"), !media->active());
+		response.insert(QStringLiteral("opened"), opened);
+		response.insert(QStringLiteral("inlinePresentation"), inlinePresentation);
+		response.insert(QStringLiteral("rendererActivated"), false);
+		response.insert(QStringLiteral("provider"), canonicalProvider);
+		response.insert(QStringLiteral("url"), media.url());
+		response.insert(QStringLiteral("remoteApplied"), media.state() == QLatin1String("playing"));
+		response.insert(QStringLiteral("state"), media.state());
+		response.insert(QStringLiteral("position"), media.position());
+		response.insert(QStringLiteral("generationAdvanced"),
+						 media.syncGeneration() > openedGeneration && openedGeneration > baselineGeneration);
+		media.close();
+		response.insert(QStringLiteral("closed"), !media.active());
+		response.insert(QStringLiteral("closedState"), media.state());
 		return response;
 	}
 
@@ -5353,6 +6155,248 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("handled"),
 						m_mainWindow->handleModernShellParticipantSelection(session, openConversation));
+		return response;
+	}
+
+	if (command == QLatin1String("directMessageState")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariantMap directMessageState = automationDirectMessageState(host->directMessageController());
+		directMessageState.insert(QStringLiteral("windowCaptureReady"),
+			host->captureWindowReady(QStringLiteral("direct-message")));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("directMessages"), directMessageState);
+		return response;
+	}
+
+	if (command == QLatin1String("sendDirectMessage")) {
+		const QString message = request.value(QStringLiteral("message")).toString();
+		if (message.trimmed().isEmpty()) return errorResponse(tr("Missing message."));
+		const QString requestedSession = request.value(QStringLiteral("sessionId")).toString().trimmed();
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		DirectMessageController *directMessages = host->directMessageController();
+		if (!directMessages->conversationOpen())
+			return errorResponse(tr("Open a direct-message conversation before sending."));
+		if (!requestedSession.isEmpty() && requestedSession != directMessages->activeSessionId())
+			return errorResponse(tr("The requested direct-message conversation is not active."));
+		if (!directMessages->canSend())
+			return errorResponse(tr("The active direct-message conversation cannot send messages."));
+		directMessages->setDraft(message);
+		directMessages->sendDraft();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		response.insert(QStringLiteral("sessionId"), directMessages->activeSessionId());
+		return response;
+	}
+
+	if (command == QLatin1String("closeDirectMessage")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		DirectMessageController *directMessages = host->directMessageController();
+		const bool handled = directMessages->conversationOpen();
+		if (handled) directMessages->closeConversation();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), handled);
+		return response;
+	}
+
+	if (command == QLatin1String("setDirectMessageMode")) {
+		const QString mode = request.value(QStringLiteral("mode")).toString().trimmed().toLower();
+		if (mode != QLatin1String("history") && mode != QLatin1String("private"))
+			return errorResponse(tr("Direct-message mode must be history or private."));
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		DirectMessageController *directMessages = host->directMessageController();
+		if (!directMessages->conversationOpen())
+			return errorResponse(tr("Open a direct-message conversation before changing its mode."));
+		directMessages->setMode(mode);
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		return response;
+	}
+
+	if (command == QLatin1String("markDirectMessageRead")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		DirectMessageController *directMessages = host->directMessageController();
+		const QString session = request.value(QStringLiteral("sessionId"), directMessages->activeSessionId())
+			.toString().trimmed();
+		if (session.isEmpty()) return errorResponse(tr("Missing direct-message sessionId."));
+		directMessages->markRead(session);
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		return response;
+	}
+
+	if (command == QLatin1String("requestPreviewHydration")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QString scopeToken = request.value(QStringLiteral("scopeToken")).toString().trimmed();
+		if (scopeToken.isEmpty()) scopeToken = host->activeScopeController()->scopeToken();
+		if (scopeToken.isEmpty()) return errorResponse(tr("Missing preview hydration scopeToken."));
+
+		QVariantList requestedIds = request.value(QStringLiteral("messageIds")).toList();
+		if (requestedIds.isEmpty() && request.contains(QStringLiteral("messageId"))) {
+			requestedIds.push_back(request.value(QStringLiteral("messageId")));
+		}
+		QVariantList messageIds;
+		QSet< qulonglong > seenIds;
+		for (const QVariant &requestedId : requestedIds) {
+			bool validId = false;
+			const qulonglong messageId = unsignedLongLongValue(requestedId, &validId);
+			if (!validId || messageId == 0 || seenIds.contains(messageId)) continue;
+			seenIds.insert(messageId);
+			messageIds.push_back(QVariant::fromValue(messageId));
+		}
+		if (messageIds.isEmpty()) return errorResponse(tr("Missing valid preview messageIds."));
+
+		const bool highPriority = request.value(QStringLiteral("highPriority"), true).toBool();
+		host->commandController()->requestPreviewHydration(scopeToken, messageIds, highPriority);
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		response.insert(QStringLiteral("scopeToken"), scopeToken);
+		response.insert(QStringLiteral("messageIds"), messageIds);
+		response.insert(QStringLiteral("highPriority"), highPriority);
+		return response;
+	}
+
+	if (command == QLatin1String("richPreviewState")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
+		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
+		if (messageId.isEmpty()) return errorResponse(tr("Missing preview messageId."));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("richPreview"), automationLiveRichPreviewState(host, messageId));
+		return response;
+	}
+
+	if (command == QLatin1String("invokeRichPreviewAction")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
+		QString action = request.value(QStringLiteral("action")).toString().trimmed().toLower();
+		action.replace(QLatin1Char('_'), QLatin1Char('-'));
+		if (messageId.isEmpty()) return errorResponse(tr("Missing preview messageId."));
+		if (action.isEmpty()) return errorResponse(tr("Missing preview action."));
+		QObject *card = automationFindRichPreviewCard(host->window(), messageId);
+		if (!card) return errorResponse(tr("The requested preview card is not currently rendered."));
+
+		bool handled = false;
+		if (action == QLatin1String("inline") || action == QLatin1String("play-inline")) {
+			const char *method = card->property("hasEmbedPreview").toBool()
+				? "requestInlinePlaybackWithFocus" : "requestCurrentMediaWithFocus";
+			handled = QMetaObject::invokeMethod(card, method, Qt::DirectConnection);
+		} else if (action == QLatin1String("popout") || action == QLatin1String("open-popout")) {
+			if (card->property("hasEmbedPreview").toBool()) {
+				const QString url = card->property("safeEmbedUrl").toString();
+				const QString provider = card->property("safeEmbedProvider").toString();
+				handled = !url.isEmpty() && !provider.isEmpty()
+					&& QMetaObject::invokeMethod(card, "popoutPlayRequested", Qt::DirectConnection,
+						Q_ARG(QString, url), Q_ARG(QString, provider));
+			} else {
+				handled = QMetaObject::invokeMethod(card, "requestCurrentDirectMediaPopout", Qt::DirectConnection);
+			}
+		} else if (action == QLatin1String("watch-together")) {
+			const QString url = card->property("safeEmbedUrl").toString();
+			const QString provider = card->property("safeEmbedProvider").toString();
+			const QString title = card->property("displayTitle").toString();
+			handled = card->property("sharedPlaybackSupported").toBool()
+				&& card->property("watchTogetherAvailable").toBool()
+				&& QMetaObject::invokeMethod(card, "watchTogetherRequested", Qt::DirectConnection,
+					Q_ARG(QString, url), Q_ARG(QString, provider), Q_ARG(QString, title));
+		} else if (action == QLatin1String("open") || action == QLatin1String("open-external")) {
+			const QString url = card->property("originalProviderUrl").toString();
+			const QUrl parsedUrl(url);
+			handled = parsedUrl.isValid() && parsedUrl.scheme() == QLatin1String("https")
+				&& parsedUrl.userInfo().isEmpty()
+				&& QMetaObject::invokeMethod(card, "externalOpenRequested", Qt::DirectConnection,
+					Q_ARG(QString, url));
+		} else if (action == QLatin1String("reveal")) {
+			handled = card->property("mediaRequiresReveal").toBool()
+				&& card->setProperty("sensitiveMediaRevealed", true);
+		} else if (action == QLatin1String("expand")) {
+			handled = card->setProperty("userExpanded", true);
+		} else if (action == QLatin1String("collapse")) {
+			handled = card->setProperty("userExpanded", false);
+		} else if (action == QLatin1String("size-compact") || action == QLatin1String("size-default")
+			|| action == QLatin1String("size-large")) {
+			const QVariant preset(action.mid(5));
+			handled = QMetaObject::invokeMethod(card, "setSizePreset", Qt::DirectConnection,
+				Q_ARG(QVariant, preset));
+		} else {
+			return errorResponse(tr("Unknown preview action: %1").arg(action));
+		}
+		if (!handled) return errorResponse(tr("The requested preview action is not available."));
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		response.insert(QStringLiteral("richPreview"), automationLiveRichPreviewState(host, messageId));
+		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
+	}
+
+	if (command == QLatin1String("screenShareViewerState")) {
+		const QString streamId = request.value(QStringLiteral("streamId")).toString().trimmed();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("viewer"),
+			automationScreenShareViewerState(automationScreenShareViewer(streamId)));
+		response.insert(QStringLiteral("viewers"), automationScreenShareViewerStates());
+		return response;
+	}
+
+	if (command == QLatin1String("screenShareViewerAction")) {
+		const QString streamId = request.value(QStringLiteral("streamId")).toString().trimmed();
+		QString action = request.value(QStringLiteral("action")).toString().trimmed().toLower();
+		action.replace(QLatin1Char('_'), QLatin1Char('-'));
+		if (action.isEmpty()) return errorResponse(tr("Missing screen-share viewer action."));
+		const AutomationScreenShareViewer viewer = automationScreenShareViewer(streamId);
+		QPointer< ScreenShareViewBackend > backend = viewer.backend;
+		QPointer< QQuickWindow > window = viewer.window;
+		if (!backend || !window) return errorResponse(tr("The requested screen-share viewer is not open."));
+
+		if (action == QLatin1String("pause")) {
+			backend->setPaused(true);
+		} else if (action == QLatin1String("resume")) {
+			backend->setPaused(false);
+		} else if (action == QLatin1String("set-paused")) {
+			backend->setPaused(request.value(QStringLiteral("paused")).toBool());
+		} else if (action == QLatin1String("mute")) {
+			if (!backend->audioAvailable()) return errorResponse(tr("This screen share has no audio stream."));
+			backend->setAudioMuted(true);
+		} else if (action == QLatin1String("unmute")) {
+			if (!backend->audioAvailable()) return errorResponse(tr("This screen share has no audio stream."));
+			backend->setAudioMuted(false);
+		} else if (action == QLatin1String("set-muted")) {
+			if (!backend->audioAvailable()) return errorResponse(tr("This screen share has no audio stream."));
+			backend->setAudioMuted(request.value(QStringLiteral("muted")).toBool());
+		} else if (action == QLatin1String("set-volume")) {
+			bool validVolume = false;
+			const int volume = request.value(QStringLiteral("volume")).toInt(&validVolume);
+			if (!backend->audioAvailable()) return errorResponse(tr("This screen share has no audio stream."));
+			if (!validVolume || volume < 0 || volume > 100)
+				return errorResponse(tr("Screen-share volume must be between 0 and 100."));
+			backend->setAudioVolume(volume);
+		} else if (action == QLatin1String("retry")) {
+			backend->requestRetry();
+		} else if (action == QLatin1String("stop")) {
+			backend->requestStop();
+		} else if (action == QLatin1String("close")) {
+			backend->requestClose();
+		} else if (action == QLatin1String("fullscreen")) {
+			window->showFullScreen();
+		} else if (action == QLatin1String("restore")) {
+			window->showNormal();
+		} else {
+			return errorResponse(tr("Unknown screen-share viewer action: %1").arg(action));
+		}
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"), true);
+		response.insert(QStringLiteral("streamId"), streamId.isEmpty() && backend ? backend->streamId() : streamId);
+		response.insert(QStringLiteral("viewer"),
+			automationScreenShareViewerState(automationScreenShareViewer(streamId)));
+		response.insert(QStringLiteral("viewers"), automationScreenShareViewerStates());
 		return response;
 	}
 
@@ -5486,6 +6530,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("viewportWidth"), result.value(QStringLiteral("viewportWidth")).toInt());
 		response.insert(QStringLiteral("viewportHeight"), result.value(QStringLiteral("viewportHeight")).toInt());
 		response.insert(QStringLiteral("labels"), result.value(QStringLiteral("labels")).toList());
+		response.insert(QStringLiteral("fixtureUsed"), result.value(QStringLiteral("fixtureUsed")).toBool());
 		return response;
 	}
 
@@ -5753,9 +6798,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return okResponse();
 	}
 
-	if (command == QLatin1String("openAppDialogProbe") || command == QLatin1String("openLifecycleDialogProbe")) {
-		const QString variant  = request.value(command == QLatin1String("openLifecycleDialogProbe")
-												 ? QStringLiteral("flow") : QStringLiteral("variant")).toString().trimmed();
+	if (command == QLatin1String("openAppDialogProbe")) {
+		const QString variant  = request.value(QStringLiteral("variant")).toString().trimmed();
 		const QString userName = request.value(QStringLiteral("userName")).toString().trimmed();
 		if (variant.isEmpty()) {
 			return errorResponse(tr("Missing variant."));
@@ -5765,7 +6809,24 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return errorResponse(tr("Unknown app dialog probe '%1'.").arg(variant));
 		}
 
-		const auto openProbe = [dialog](MainWindow *window) {
+		const auto openProbe = [dialog, variant](MainWindow *window) {
+			if (QmlShellHost *host = window->qmlShellHost()) {
+				Mumble::ModernRecorderController *recorder = host->recorderController();
+				if (variant == QLatin1String("voiceRecorder")
+					|| variant == QLatin1String("voiceRecorderActive")) {
+					const bool active = variant == QLatin1String("voiceRecorderActive");
+					int format = 0;
+					if (!recorder->formatOptions().isEmpty()) {
+						format = recorder->formatOptions().constFirst().toMap().value(QStringLiteral("value")).toInt();
+					}
+					recorder->applyVisualFixtureState(
+						active ? QStringLiteral("recording") : QStringLiteral("idle"), active ? 222000 : 0,
+						QStringLiteral("C:/Recordings"), QStringLiteral("%user-%date"), format,
+						Mumble::ModernRecorderController::Mixdown, false);
+				} else {
+					recorder->clearVisualFixtureState();
+				}
+			}
 			if (!window->m_modernDialogController) {
 				window->m_modernDialogController = std::make_unique< ModernDialogController >();
 			}
@@ -5893,23 +6954,33 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 
 		const auto applyProbe = [state](MainWindow *window) {
-			window->m_stonksState = state;
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlStonksProbeState(state);
 		};
 
 		if (async) {
 			scheduleAction(applyProbe);
-			return asyncResponse();
+			QVariantMap response = asyncResponse();
+			response.insert(QStringLiteral("variant"), variant);
+			response.insert(QStringLiteral("tickerBannerEnabled"),
+							state.value(QStringLiteral("tickerBannerEnabled")).toBool());
+			response.insert(QStringLiteral("automationHeaderVisible"),
+							state.value(QStringLiteral("automationHeaderVisible")).toBool());
+			return response;
 		}
 
 		applyProbe(m_mainWindow);
-		return okResponse();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("variant"), variant);
+		response.insert(QStringLiteral("tickerBannerEnabled"),
+						state.value(QStringLiteral("tickerBannerEnabled")).toBool());
+		response.insert(QStringLiteral("automationHeaderVisible"),
+						state.value(QStringLiteral("automationHeaderVisible")).toBool());
+		return response;
 	}
 
 	if (command == QLatin1String("clearStonksProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
-			window->m_stonksState.clear();
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlStonksProbeState({});
 		};
 
 		if (async) {
@@ -5929,8 +7000,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 
 		const auto applyProbe = [state](MainWindow *window) {
-			window->m_modernConnectionStateProbe = state;
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlConnectionStateProbe(state);
 		};
 
 		if (async) {
@@ -5946,8 +7016,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("clearConnectionStateProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
-			window->m_modernConnectionStateProbe.clear();
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlConnectionStateProbe({});
 		};
 
 		if (async) {
@@ -5968,8 +7037,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 
 		const auto applyProbe = [state](MainWindow *window) {
-			window->m_modernScreenShareStateProbe = state;
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlScreenShareStateProbe(state);
 		};
 
 		if (async) {
@@ -5986,8 +7054,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("clearScreenShareProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
-			window->m_modernScreenShareStateProbe.clear();
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlScreenShareStateProbe({});
 		};
 
 		if (async) {
@@ -6037,9 +7104,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			if (!window || !host || !host->imagePipeline()) {
 				return;
 			}
-			window->m_modernRichPreviewProbeMessages = automationRegisterPreviewImages(
-				messages, host->imagePipeline(), variant);
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlRichPreviewProbeMessages(
+				automationRegisterPreviewImages(messages, host->imagePipeline(), variant));
 		};
 
 		if (async) {
@@ -6191,8 +7257,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearRichPreviewProbe")
 		|| command == QLatin1String("clearQmlRichPreviewProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
-			window->m_modernRichPreviewProbeMessages.clear();
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlRichPreviewProbeMessages({});
 		};
 
 		if (async) {
@@ -6207,8 +7272,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("setMessageDeliveryProbe")) {
 		const QVariantList messages = automationMessageDeliveryProbeMessages();
 		const auto applyProbe = [messages](MainWindow *window) {
-			window->m_modernMessageDeliveryProbeMessages = messages;
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlMessageDeliveryProbeMessages(messages);
 		};
 
 		if (async) {
@@ -6224,8 +7288,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("clearMessageDeliveryProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
-			window->m_modernMessageDeliveryProbeMessages.clear();
-			window->scheduleQmlShellStateSyncImmediate();
+			window->applyQmlMessageDeliveryProbeMessages({});
 		};
 
 		if (async) {
@@ -6325,7 +7388,6 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			const bool selected = window->handleModernShellScopeSelection(scopeToken);
 			window->publishQmlDirectMessagesState();
 			window->publishQmlActiveScopeState();
-			window->scheduleQmlShellStateSyncImmediate();
 			return selected;
 		};
 		const auto inspectProbeSurface = [variant](MainWindow *window) {
@@ -6397,7 +7459,6 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 			window->handleModernShellScopeSelection(QStringLiteral("-1:0"));
 			window->publishQmlDirectMessagesState();
-			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -6863,18 +7924,40 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 		state.insert(QStringLiteral("voiceRooms"), voiceRooms);
 		state.insert(QStringLiteral("textRooms"), textRooms);
 
-		const auto modelRows = [](StableListModel *model, const bool unwrapSource) {
-			QVariantList rows;
-			for (int row = 0; row < model->rowCount(); ++row) {
-				const QVariantMap modelRow = model->get(row);
-				const QVariantMap source = unwrapSource ? modelRow.value(QStringLiteral("source")).toMap() : QVariantMap();
-				rows.push_back(source.isEmpty() ? modelRow : source);
-			}
-			return rows;
-		};
-		state.insert(QStringLiteral("participants"), modelRows(host->participantModel(), true));
-		state.insert(QStringLiteral("messages"), modelRows(host->chatModel(), true));
-		state.insert(QStringLiteral("actions"), modelRows(host->actionModel(), false));
+		state.insert(QStringLiteral("participants"), automationModelRows(host->participantModel(), true));
+		state.insert(QStringLiteral("messages"), automationModelRows(host->chatModel(), true));
+		state.insert(QStringLiteral("actions"), automationModelRows(host->actionModel(), false));
+		QVariantMap directMessages = automationDirectMessageState(host->directMessageController());
+		directMessages.insert(QStringLiteral("windowCaptureReady"),
+			host->captureWindowReady(QStringLiteral("direct-message")));
+		state.insert(QStringLiteral("directMessages"), directMessages);
+		state.insert(QStringLiteral("toast"), automationToastState(host->toastController()));
+		state.insert(QStringLiteral("media"), automationMediaControllerState(host->mediaSession()));
+		state.insert(QStringLiteral("screenShareViewers"), automationScreenShareViewerStates());
+		const Mumble::ModernRecorderController *recorder = host->recorderController();
+		state.insert(QStringLiteral("recorder"), QVariantMap {
+			{ QStringLiteral("state"), recorder->state() },
+			{ QStringLiteral("busy"), recorder->busy() },
+			{ QStringLiteral("canEdit"), recorder->canEdit() },
+			{ QStringLiteral("canStart"), recorder->canStart() },
+			{ QStringLiteral("canPause"), recorder->canPause() },
+			{ QStringLiteral("canResume"), recorder->canResume() },
+			{ QStringLiteral("canStop"), recorder->canStop() },
+			{ QStringLiteral("transportSupported"), recorder->transportSupported() },
+			{ QStringLiteral("elapsedMilliseconds"), recorder->elapsedMilliseconds() },
+			{ QStringLiteral("elapsedText"), recorder->elapsedText() },
+			{ QStringLiteral("outputDirectory"), recorder->outputDirectory() },
+			{ QStringLiteral("fileName"), recorder->fileName() },
+			{ QStringLiteral("resolvedOutputPath"), recorder->resolvedOutputPath() },
+			{ QStringLiteral("format"), recorder->format() },
+			{ QStringLiteral("mode"), recorder->mode() },
+			{ QStringLiteral("errorCode"), recorder->errorCode() },
+			{ QStringLiteral("errorMessage"), recorder->errorMessage() },
+			{ QStringLiteral("operationId"), recorder->operationId() },
+			{ QStringLiteral("operationAction"), recorder->operationAction() },
+			{ QStringLiteral("operationStatus"), recorder->operationStatus() },
+			{ QStringLiteral("operationPhase"), recorder->operationPhase() }
+		});
 		state.insert(QStringLiteral("dialog"), host->dialogController()->state());
 		const QVariantMap themeState = host->themeController() ? host->themeController()->state() : QVariantMap();
 		state.insert(QStringLiteral("themeState"), themeState);

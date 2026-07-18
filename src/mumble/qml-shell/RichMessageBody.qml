@@ -3,17 +3,25 @@ import Mumble.Theme 1.0
 
 Item {
     id: root
+	objectName: "richMessageBody"
 
     required property var segments
     property color textColor: Theme.textMain
-    property int pixelSize: 12
+	property int pixelSize: 12
+	property real lineHeight: Theme.chatBodyLineHeight
 	property int textHorizontalAlignment: Text.AlignLeft
 	property real maximumImageHeight: 320
 	property real maximumImageWidth: 1000000
 	property real imagePadding: Theme.space2
-	property color imageSurfaceColor: Theme.strip
-	property color imageBorderColor: Theme.divider
+	property color imageSurfaceColor: Theme.embedSurface
+	property color imageBorderColor: Theme.embedBorder
 	property real imageBorderWidth: 1
+	// Preserve metadata-derived image geometry while pooled, but release the
+	// decoded image/texture until the delegate becomes active again.
+	property bool resourceActive: true
+	// Modal parents keep the product surface visible behind drawers/dialogs, but
+	// their promoted semantic children must leave the accessibility tree.
+	property bool accessibilitySuppressed: false
     readonly property string plainText: root.plainTextForSegments(root.segments)
     readonly property string renderedHtml: root.htmlForSegments(root.segments)
 	readonly property var renderBlocks: root.blocksForSegments(root.segments)
@@ -24,30 +32,56 @@ Item {
 		return !!segment && (!!segment.bold || !!segment.italic || !!segment.strike
 			|| !!segment.code || root.safeExternalUrl(segment.href).length > 0)
 	})
-	readonly property var keyboardLinks: root.linksForSegments(root.segments)
+	readonly property var keyboardLinkEntries: root.linkEntriesForSegments(root.segments)
+	readonly property var keyboardLinks: root.urlsForLinkEntries(root.keyboardLinkEntries)
+	readonly property var currentKeyboardLinkEntry: keyboardLinkEntries.length > 0
+		? keyboardLinkEntries[Math.max(0, Math.min(keyboardLinkIndex, keyboardLinkEntries.length - 1))]
+		: ({})
 	property int keyboardLinkIndex: 0
 
     signal linkRequested(string url)
 
 	implicitWidth: body.implicitWidth
 	implicitHeight: root.hasImages ? structuredBody.implicitHeight : body.implicitHeight
-	activeFocusOnTab: keyboardLinks.length > 0
-	Accessible.role: keyboardLinks.length > 0 ? Accessible.Link : Accessible.StaticText
-	Accessible.name: plainText
-	Accessible.description: keyboardLinks.length > 1
-		? qsTr("Press Enter to open the selected link. Use Left and Right to choose a link.")
-		: (keyboardLinks.length > 0 ? qsTr("Press Enter to open the link.") : "")
-	Accessible.onPressAction: root.activateKeyboardLink()
-	onSegmentsChanged: keyboardLinkIndex = Math.min(keyboardLinkIndex, Math.max(0, keyboardLinks.length - 1))
+	Accessible.ignored: true
+	onSegmentsChanged: {
+		keyboardLinkIndex = Math.min(keyboardLinkIndex, Math.max(0, keyboardLinks.length - 1))
+		if (keyboardLinks.length === 0 && plainLinkTarget.activeFocus)
+			plainLinkTarget.focus = false
+	}
 
-	function linksForSegments(values) {
+	function linkEntriesForSegments(values) {
 		const result = []
 		for (const segment of (values || [])) {
+			if (!segment || segment.text === undefined)
+				continue
 			const href = root.safeExternalUrl(segment ? segment.href : "")
-			if (href.length > 0 && result.indexOf(href) < 0)
-				result.push(href)
+			if (href.length === 0)
+				continue
+			let duplicate = false
+			for (const entry of result) {
+				if (entry.url === href) {
+					duplicate = true
+					break
+				}
+			}
+			if (duplicate)
+				continue
+			const visibleLabel = String(segment.text || "").replace(/\s+/g, " ").trim().slice(0, 512)
+			result.push({ "url": href, "label": visibleLabel.length > 0 ? visibleLabel : href })
 		}
 		return result
+	}
+
+	function urlsForLinkEntries(entries) {
+		const result = []
+		for (const entry of (entries || []))
+			result.push(String(entry.url || ""))
+		return result
+	}
+
+	function linksForSegments(values) {
+		return urlsForLinkEntries(linkEntriesForSegments(values))
 	}
 
 	function activateKeyboardLink() {
@@ -55,21 +89,6 @@ Item {
 			return
 		const index = Math.max(0, Math.min(keyboardLinkIndex, keyboardLinks.length - 1))
 		root.linkRequested(keyboardLinks[index])
-	}
-
-	Keys.onPressed: event => {
-		if (keyboardLinks.length === 0)
-			return
-		if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-			activateKeyboardLink()
-			event.accepted = true
-		} else if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
-			keyboardLinkIndex = (keyboardLinkIndex + keyboardLinks.length - 1) % keyboardLinks.length
-			event.accepted = true
-		} else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
-			keyboardLinkIndex = (keyboardLinkIndex + 1) % keyboardLinks.length
-			event.accepted = true
-		}
 	}
 
     function escapeHtml(value) {
@@ -89,6 +108,25 @@ Item {
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+	}
+
+	function accessibleText(value) {
+		return String(value === undefined || value === null ? "" : value)
+			.replace(/\s+/g, " ").trim().slice(0, 4096)
+	}
+
+	function accessibleLinkDescription(entries, currentIndex) {
+		if (!entries || entries.length === 0)
+			return ""
+		const index = Math.max(0, Math.min(Number(currentIndex || 0), entries.length - 1))
+		const entry = entries[index] || ({})
+		const label = accessibleText(entry.label || entry.url || "")
+		const selection = entries.length > 1
+			? qsTr("Link %1 of %2: %3.").arg(index + 1).arg(entries.length).arg(label)
+			: qsTr("Link: %1.").arg(label)
+		return entries.length > 1
+			? selection + " " + qsTr("Press Enter to open it. Use Left and Right to choose a link.")
+			: selection + " " + qsTr("Press Enter to open it.")
 	}
 
 	function plainTextForSegments(values) {
@@ -136,7 +174,8 @@ Item {
 			blocks.push({
 				"kind": "text",
 				"html": root.htmlForSegments(textSegments),
-				"plainText": root.plainTextForSegments(textSegments)
+				"plainText": root.plainTextForSegments(textSegments),
+				"links": root.linkEntriesForSegments(textSegments)
 			})
 			textSegments = []
 		}
@@ -174,14 +213,54 @@ Item {
 		horizontalAlignment: root.textHorizontalAlignment
         color: root.textColor
         font.pixelSize: root.pixelSize
+		lineHeightMode: Text.ProportionalHeight
+		lineHeight: root.lineHeight
         linkColor: Theme.accent
 		visible: !root.hasImages
+		Accessible.ignored: true
         onLinkActivated: link => {
             const safeLink = root.safeExternalUrl(link)
             if (safeLink.length > 0)
                 root.linkRequested(safeLink)
         }
     }
+
+	Item {
+		id: plainLinkTarget
+		objectName: "richMessageBodyLinkTarget"
+		anchors.fill: body
+		visible: !root.hasImages
+		// Keep the tab-stop property true while focus is being transferred away.
+		// QQuickItem rejects changing activeFocusOnTab on the active focus item.
+		activeFocusOnTab: activeFocus || (visible && !root.accessibilitySuppressed
+			&& root.keyboardLinks.length > 0)
+		onVisibleChanged: if (!visible && activeFocus) focus = false
+		Accessible.ignored: root.accessibilitySuppressed
+		Accessible.role: root.keyboardLinks.length > 0 ? Accessible.Link : Accessible.StaticText
+		// A message containing a link is still a message. Announce the complete
+		// visible text as its name and keep the currently selected link in the
+		// action description so surrounding context is never lost.
+		Accessible.name: root.accessibleText(root.plainText)
+			|| String(root.currentKeyboardLinkEntry.label || root.currentKeyboardLinkEntry.url || "")
+		Accessible.description: root.accessibleLinkDescription(
+			root.keyboardLinkEntries, root.keyboardLinkIndex)
+		Accessible.onPressAction: root.activateKeyboardLink()
+		Keys.onPressed: event => {
+			if (root.keyboardLinks.length === 0)
+				return
+			if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+				root.activateKeyboardLink()
+				event.accepted = true
+			} else if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+				root.keyboardLinkIndex = (root.keyboardLinkIndex + root.keyboardLinks.length - 1)
+					% root.keyboardLinks.length
+				event.accepted = true
+			} else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
+				root.keyboardLinkIndex = (root.keyboardLinkIndex + 1) % root.keyboardLinks.length
+				event.accepted = true
+			}
+		}
+	}
 
 	Column {
 		id: structuredBody
@@ -204,6 +283,12 @@ Item {
 					id: textBlock
 					objectName: "richMessageTextBlock_" + index
 					width: parent.width
+					property int keyboardLinkIndex: 0
+					readonly property var keyboardLinkEntries: parent.imageBlock
+						? [] : (parent.modelData.links || [])
+					readonly property var currentKeyboardLinkEntry: keyboardLinkEntries.length > 0
+						? keyboardLinkEntries[Math.max(0,
+							Math.min(keyboardLinkIndex, keyboardLinkEntries.length - 1))] : ({})
 					visible: !parent.imageBlock
 					text: parent.imageBlock ? "" : String(parent.modelData.html || "")
 					textFormat: Text.RichText
@@ -211,12 +296,62 @@ Item {
 					horizontalAlignment: root.textHorizontalAlignment
 					color: root.textColor
 					font.pixelSize: root.pixelSize
+					lineHeightMode: Text.ProportionalHeight
+					lineHeight: root.lineHeight
 					linkColor: Theme.accent
+					activeFocusOnTab: activeFocus || (visible && !root.accessibilitySuppressed
+						&& keyboardLinkEntries.length > 0)
+					onVisibleChanged: if (!visible && activeFocus) focus = false
+					Accessible.ignored: parent.imageBlock || root.accessibilitySuppressed
+					Accessible.role: keyboardLinkEntries.length > 0
+						? Accessible.Link : Accessible.StaticText
+					Accessible.name: root.accessibleText(parent.modelData.plainText)
+						|| String(currentKeyboardLinkEntry.label || currentKeyboardLinkEntry.url || "")
+					Accessible.description: root.accessibleLinkDescription(
+						keyboardLinkEntries, keyboardLinkIndex)
+					Accessible.onPressAction: {
+						if (keyboardLinkEntries.length > 0)
+							root.linkRequested(String(currentKeyboardLinkEntry.url || ""))
+					}
+					onKeyboardLinkEntriesChanged: {
+						keyboardLinkIndex = Math.min(keyboardLinkIndex,
+							Math.max(0, keyboardLinkEntries.length - 1))
+						if (keyboardLinkEntries.length === 0 && activeFocus)
+							focus = false
+					}
 					onLinkActivated: link => {
 						const safeLink = root.safeExternalUrl(link)
 						if (safeLink.length > 0)
 							root.linkRequested(safeLink)
 					}
+					Keys.onPressed: event => {
+						if (keyboardLinkEntries.length === 0)
+							return
+						if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+								|| event.key === Qt.Key_Space) {
+							root.linkRequested(String(currentKeyboardLinkEntry.url || ""))
+							event.accepted = true
+						} else if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+							keyboardLinkIndex = (keyboardLinkIndex + keyboardLinkEntries.length - 1)
+								% keyboardLinkEntries.length
+							event.accepted = true
+						} else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
+							keyboardLinkIndex = (keyboardLinkIndex + 1) % keyboardLinkEntries.length
+							event.accepted = true
+						}
+					}
+				}
+
+				Rectangle {
+					objectName: "richMessageTextBlockFocus_" + parent.index
+					anchors.fill: textBlock
+					anchors.margins: -3
+					visible: textBlock.visible && textBlock.activeFocus
+					color: "transparent"
+					border.color: Theme.focus
+					border.width: Theme.focusRingWidth
+					radius: Theme.innerRadius
+					Accessible.ignored: true
 				}
 
 				Rectangle {
@@ -225,6 +360,11 @@ Item {
 					readonly property string safeHref: root.safeExternalUrl(parent.modelData.href)
 					readonly property string accessibleLabel: String(
 						parent.modelData.alt || qsTr("Server image")).trim().slice(0, 512)
+					readonly property string imageStateDescription: inlineImage.status === Image.Loading
+						? qsTr("Image loading") : inlineImage.status === Image.Error
+							? qsTr("Image unavailable") : ""
+					readonly property string interactionDescription: safeHref.length > 0
+						? qsTr("Press Enter to open this image link.") : ""
 					readonly property real imageMargin: Math.max(0, root.imagePadding)
 					readonly property real availableImageWidth: Math.max(1,
 						Math.min(parent.width - imageMargin * 2, root.maximumImageWidth))
@@ -246,12 +386,14 @@ Item {
 					border.color: root.imageBorderColor
 					border.width: root.imageBorderWidth
 					clip: true
-					activeFocusOnTab: safeHref.length > 0
+					activeFocusOnTab: activeFocus || (!root.accessibilitySuppressed && safeHref.length > 0)
+					onSafeHrefChanged: if (safeHref.length === 0 && activeFocus) focus = false
+					Accessible.ignored: root.accessibilitySuppressed
 					Accessible.role: safeHref.length > 0 ? Accessible.Link : Accessible.Graphic
 					Accessible.name: accessibleLabel
 					Accessible.focused: activeFocus
-					Accessible.description: safeHref.length > 0
-						? qsTr("Press Enter to open this image link.") : ""
+					Accessible.description: [imageStateDescription, interactionDescription]
+						.filter(function(value) { return value.length > 0 }).join(". ")
 					Accessible.onPressAction: {
 						if (safeHref.length > 0)
 							root.linkRequested(safeHref)
@@ -269,27 +411,31 @@ Item {
 						anchors.centerIn: parent
 						width: imageCard.displayWidth
 						height: imageCard.displayHeight
-						source: parent.parent.imageBlock ? String(parent.parent.modelData.source || "") : ""
+						source: root.resourceActive && parent.parent.imageBlock
+							? String(parent.parent.modelData.source || "") : ""
 						asynchronous: true
 						cache: false
 						smooth: true
 						fillMode: Image.PreserveAspectFit
-						Accessible.name: imageCard.accessibleLabel
+						Accessible.ignored: true
 					}
 
 					ModernBusyIndicator {
 						anchors.centerIn: parent
 						visible: inlineImage.status === Image.Loading
 						running: visible
+						Accessible.ignored: root.accessibilitySuppressed
 						Accessible.name: qsTr("Loading server image")
 					}
 
 					Text {
+						objectName: "richMessageImageError_" + index
 						anchors.centerIn: parent
 						visible: inlineImage.status === Image.Error
 						text: qsTr("Image unavailable")
 						color: Theme.textMuted
 						font.pixelSize: Theme.fontCaption
+						Accessible.ignored: true
 					}
 
 					Rectangle {
@@ -313,6 +459,7 @@ Item {
 						hoverEnabled: true
 						acceptedButtons: Qt.LeftButton
 						cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+						Accessible.ignored: true
 						onClicked: root.linkRequested(imageCard.safeHref)
 					}
 				}
@@ -321,9 +468,10 @@ Item {
 	}
 
 	Rectangle {
+		objectName: "richMessageBodyFocusRing"
 		anchors.fill: parent
 		anchors.margins: -3
-		visible: root.activeFocus && root.keyboardLinks.length > 0
+		visible: plainLinkTarget.visible && plainLinkTarget.activeFocus
 		color: "transparent"
 		border.color: Theme.focus
 		border.width: Theme.focusRingWidth

@@ -26,7 +26,6 @@
 #include <QtCore/QProcessEnvironment>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
-#include <QtCore/QTimer>
 #include <QtConcurrent>
 #include <QtNetwork/QLocalSocket>
 
@@ -321,7 +320,6 @@ QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *
 
 ScreenShareHelperClient::ScreenShareHelperClient(QObject *parent)
 	: QObject(parent), m_capabilities(advertisedCapabilities()) {
-	QTimer::singleShot(0, this, &ScreenShareHelperClient::refreshCapabilities);
 }
 
 QString ScreenShareHelperClient::defaultHelperExecutablePath() {

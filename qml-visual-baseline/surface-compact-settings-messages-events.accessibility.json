@@ -1,0 +1,3062 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 16,
+            "y": 21
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "INTERACTION",
+              "rect": {
+                "height": 12,
+                "width": 70,
+                "x": 270,
+                "y": 82
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 22,
+                "width": 476,
+                "x": 270,
+                "y": 95
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Messages & Sounds",
+          "rect": {
+            "height": 62,
+            "width": 546,
+            "x": 214,
+            "y": 68
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 198,
+            "x": 8,
+            "y": 76
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 109
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 96
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 147
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 134
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 185
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 172
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 223
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 210
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 261
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 248
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 299
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 286
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 337
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 324
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 375
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 362
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 413
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 400
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 451
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 438
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 740,
+            "width": 198,
+            "x": 8,
+            "y": 96
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Transmit cue off file",
+                  "rect": {
+                    "height": 15,
+                    "width": 95,
+                    "x": 238,
+                    "y": 174
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 194
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Transmit cue off file",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 194
+                  },
+                  "role": "EditableText",
+                  "states": [
+                    "editable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 498,
+                "x": 238,
+                "y": 174
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 52,
+            "width": 498,
+            "x": 238,
+            "y": 174
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 20,
+                        "width": 486,
+                        "x": 244,
+                        "y": 238
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 17,
+                            "width": 13,
+                            "x": 247,
+                            "y": 240
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 19,
+                        "width": 19,
+                        "x": 244,
+                        "y": 239
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Play mute cue",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 232
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "checked",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 232
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 32,
+            "width": 498,
+            "x": 238,
+            "y": 232
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Mute cue file",
+                  "rect": {
+                    "height": 15,
+                    "width": 64,
+                    "x": 238,
+                    "y": 270
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 290
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Mute cue file",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 290
+                  },
+                  "role": "EditableText",
+                  "states": [
+                    "editable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 52,
+                "width": 498,
+                "x": 238,
+                "y": 270
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 52,
+            "width": 498,
+            "x": 238,
+            "y": 270
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Per-event behavior",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 354
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 459,
+                                "width": 12,
+                                "x": 724,
+                                "y": 377
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 93,
+                                "width": 6,
+                                "x": 727,
+                                "y": 380
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 459,
+                            "width": 12,
+                            "x": 724,
+                            "y": 377
+                          },
+                          "role": "ScrollBar",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 411
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Debug",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 415
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 453
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 454
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 454
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Debug: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 447
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 432
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 453
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 454
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Debug: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 447
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 432
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 453
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 454
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Debug: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 447
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 432
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 453
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 454
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Debug: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 447
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 432
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 453
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 454
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Debug: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 447
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 432
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 432
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 415
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Debug",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 411
+                              },
+                              "role": "ListItem",
+                              "states": [
+                                "focused"
+                              ]
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Critical",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 486
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 524
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 525
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 525
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Critical: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 518
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 503
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 524
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 373,
+                                                        "y": 525
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 525
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Critical: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 518
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 503
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 524
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 525
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Critical: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 518
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 503
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 524
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 583,
+                                                        "y": 525
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 525
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Critical: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 518
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 503
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 524
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 525
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Critical: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 518
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 503
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 503
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 486
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Critical",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 482
+                              },
+                              "role": "ListItem",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Warning",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 557
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 595
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 596
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 596
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Warning: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 589
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 574
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 595
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 373,
+                                                        "y": 596
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 596
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Warning: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 589
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 574
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 595
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 478,
+                                                        "y": 596
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 596
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Warning: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 589
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 574
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 595
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 596
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Warning: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 589
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 574
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 595
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 596
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Warning: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 589
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 574
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 574
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 557
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Warning",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 553
+                              },
+                              "role": "ListItem",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Information",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 628
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 666
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 667
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 667
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Information: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 660
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 645
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 666
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 667
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Information: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 660
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 645
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 666
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 667
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Information: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 660
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 645
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 666
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 667
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Information: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 660
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 645
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 666
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 667
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Information: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 660
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 645
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 645
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 628
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Information",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 624
+                              },
+                              "role": "ListItem",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Server connected",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 699
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 737
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 738
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 738
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server connected: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 731
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 716
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 737
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 373,
+                                                        "y": 738
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 738
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server connected: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 731
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 716
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 737
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 738
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server connected: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 731
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 716
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 737
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 583,
+                                                        "y": 738
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 738
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server connected: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 731
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 716
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 737
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 738
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server connected: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 731
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 716
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 716
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 699
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Server connected",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 695
+                              },
+                              "role": "ListItem",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Server disconnected",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 770
+                                      },
+                                      "role": "StaticText",
+                                      "states": [
+                                        "readOnly"
+                                      ]
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 279,
+                                                    "y": 808
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 281,
+                                                        "y": 809
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 279,
+                                                    "y": 809
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server disconnected: log",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 273,
+                                                "y": 802
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 246,
+                                            "y": 787
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 371,
+                                                    "y": 808
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 373,
+                                                        "y": 809
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 371,
+                                                    "y": 809
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server disconnected: notification",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 365,
+                                                "y": 802
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 338,
+                                            "y": 787
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 476,
+                                                    "y": 808
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 476,
+                                                    "y": 809
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server disconnected: highlight",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 470,
+                                                "y": 802
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 114,
+                                            "x": 430,
+                                            "y": 787
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 581,
+                                                    "y": 808
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 581,
+                                                    "y": 809
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server disconnected: text to speech",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 575,
+                                                "y": 802
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 548,
+                                            "y": 787
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        },
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 18,
+                                                    "width": 23,
+                                                    "x": 673,
+                                                    "y": 808
+                                                  },
+                                                  "role": "StaticText",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 17,
+                                                        "width": 13,
+                                                        "x": 675,
+                                                        "y": 809
+                                                      },
+                                                      "role": "StaticText",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 17,
+                                                    "width": 17,
+                                                    "x": 673,
+                                                    "y": 809
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "Server disconnected: sound",
+                                              "rect": {
+                                                "height": 30,
+                                                "width": 35,
+                                                "x": 667,
+                                                "y": 802
+                                              },
+                                              "role": "CheckBox",
+                                              "states": [
+                                                "checkable",
+                                                "checked",
+                                                "focusable"
+                                              ]
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 45,
+                                            "width": 88,
+                                            "x": 640,
+                                            "y": 787
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 45,
+                                        "width": 482,
+                                        "x": 246,
+                                        "y": 787
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 62,
+                                    "width": 482,
+                                    "x": 246,
+                                    "y": 770
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Server disconnected",
+                              "rect": {
+                                "height": 70,
+                                "width": 498,
+                                "x": 238,
+                                "y": 766
+                              },
+                              "role": "ListItem",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 2234,
+                            "width": 498,
+                            "x": 238,
+                            "y": 411
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Event behavior",
+                      "rect": {
+                        "height": 459,
+                        "width": 498,
+                        "x": 238,
+                        "y": 377
+                      },
+                      "role": "List",
+                      "states": [
+                        "focusable",
+                        "focused"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 459,
+                    "width": 498,
+                    "x": 238,
+                    "y": 377
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 459,
+                "width": 498,
+                "x": 238,
+                "y": 377
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            }
+          ],
+          "description": "form",
+          "name": "Per-event behavior",
+          "rect": {
+            "height": 502,
+            "width": 518,
+            "x": 228,
+            "y": 344
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 28,
+            "width": 47,
+            "x": 609,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 28,
+            "width": 43,
+            "x": 662,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 28,
+            "width": 41,
+            "x": 711,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 900,
+        "width": 760,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 900,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

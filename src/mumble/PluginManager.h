@@ -79,6 +79,8 @@ private:
 	QString m_asyncRescanOperationID;
 	std::shared_ptr< PluginCancellationGate > m_asyncRescanCancellation;
 	std::atomic_bool m_positionalSelectionPending { false };
+	/// Coalesces the periodic server-sync sample while plugin ABI work or the owner-thread publication is pending.
+	std::atomic_bool m_positionalServerSyncPending { false };
 	std::atomic_bool m_transmitPositionForSelection { false };
 	/// Fail-closed permission checked on audio/timer paths before invoking or publishing active positional data.
 	/// Revocation is immediate even when the serialized plugin worker is delayed by third-party code.
@@ -141,6 +143,10 @@ private:
 									 std::optional< PluginAbiWorker::RuntimeQueueClass > boundedClass = std::nullopt,
 									 QByteArray coalescingKey = {}, qsizetype payloadBytes = 0) const;
 	void reportPluginRuntimeNotificationOverflow(PluginAbiWorker::RuntimeQueueClass queueClass) const;
+	/// Publishes an immutable positional identity/context snapshot on the QObject owner thread. Privacy and session
+	/// state are rechecked here so a delayed worker result cannot publish after positional transmission is disabled.
+	void publishPositionalDataSnapshot(bool valid, const QString &context, const QString &identity);
+
 protected:
 	/// Lock for pluginHashMap. This lock has to be acquired when accessing pluginHashMap
 	mutable QReadWriteLock m_pluginCollectionLock;
@@ -398,8 +404,7 @@ public slots:
 	/// @param isPress True if the key has been pressed, false if it has been released
 	void on_keyEvent(unsigned int key, Qt::KeyboardModifiers modifiers, bool isPress) const;
 
-	/// Slot that gets called whenever the positional data should be synchronized with the server. Before it does that,
-	/// it tries to fetch new data.
+	/// Schedules a coalesced positional fetch on the plugin ABI worker and publishes its snapshot on the owner thread.
 	void on_syncPositionalData();
 	/// Slot called if there are plugin updates available
 	void on_updatesAvailable();

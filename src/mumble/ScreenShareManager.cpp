@@ -6,6 +6,8 @@
 #include "ScreenShareManager.h"
 
 #include "ClientUser.h"
+#include "Channel.h"
+#include "Database.h"
 #include "MainWindow.h"
 #include "QmlShellHost.h"
 #include "ScreenShareViewBackend.h"
@@ -244,11 +246,15 @@ ScreenShareManager::ScreenShareManager(QObject *parent) : QObject(parent) {
 	m_helperOperationPool.setExpiryTimeout(-1);
 	m_helperClient = new ScreenShareHelperClient(this);
 	connect(m_helperClient, &ScreenShareHelperClient::capabilitiesChanged, this,
-			[this]() { logLocalShareAvailabilityDiagnostic(QStringLiteral("helper-capabilities")); });
+			&ScreenShareManager::reconcileSessionsAfterCapabilityRefresh);
 	m_externalRuntimeWatchdogTimer.setInterval(kExternalRuntimeWatchdogIntervalMsec);
 	m_externalRuntimeWatchdogTimer.setSingleShot(false);
 	connect(&m_externalRuntimeWatchdogTimer, &QTimer::timeout, this,
 			&ScreenShareManager::checkExternalRuntimeLiveness);
+	m_externalViewAudioPreferenceSaveTimer.setInterval(250);
+	m_externalViewAudioPreferenceSaveTimer.setSingleShot(true);
+	connect(&m_externalViewAudioPreferenceSaveTimer, &QTimer::timeout, this,
+			&ScreenShareManager::flushExternalViewAudioPreferenceSaves);
 }
 
 ScreenShareHelperClient::CapabilitySnapshot ScreenShareManager::detectAdvertisedCapabilities() {
@@ -317,6 +323,22 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 
 bool ScreenShareManager::canRequestLocalShare() const {
 	return localShareUnavailableReason().isEmpty();
+}
+
+bool ScreenShareManager::canOpenLocalShareSetup() const {
+	if (!Global::get().serverHandlerSnapshot() || !Global::get().bScreenShareEnabled
+		|| !Mumble::ScreenShare::isValidRelayUrl(Global::get().qsScreenShareRelayUrl)) {
+		return false;
+	}
+
+	// Capability detection is intentionally lazy. The picker is the foreground
+	// action that starts it, so an incomplete probe must never disable that same
+	// action and create a deadlock in the product flow.
+	if (!m_helperClient->capabilities().probeComplete) {
+		return true;
+	}
+
+	return canRequestLocalShare();
 }
 
 QString ScreenShareManager::localShareUnavailableReason() const {
@@ -635,6 +657,7 @@ bool ScreenShareManager::hasSession(const QString &streamID) const {
 }
 
 void ScreenShareManager::resetState() {
+	flushExternalViewAudioPreferenceSaves();
 	m_publishStopRetries.clear();
 	m_viewStopRetries.clear();
 	QSet< QString > helperStreamIDs = m_publishOperationTracker.streamIDs();
@@ -662,6 +685,8 @@ void ScreenShareManager::resetState() {
 	}
 	m_viewBackends.clear();
 	m_externalViewAudioMuted.clear();
+	m_externalViewAudioPreferenceKeys.clear();
+	m_pendingExternalViewAudioPreferenceSaves.clear();
 	m_pausedExternalViewSessions.clear();
 	m_manualViewRetryRequired.clear();
 
@@ -1052,13 +1077,18 @@ void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult 
 	const ScreenShareSession currentSession = m_sessions.value(result.streamID);
 	m_manualViewRetryRequired.remove(result.streamID);
 	m_activeViewSessions.insert(result.streamID);
-	m_pausedExternalViewSessions.remove(result.streamID);
 	m_externalViewProcessIDs.insert(result.streamID, result.processID);
 	showExternalViewWindow(currentSession, result.processID);
 	backend = m_viewBackends.value(result.streamID);
 	if (backend) {
-		if (result.frameTransport.feedAvailable)
+		if (result.frameTransport.feedAvailable) {
 			backend->setNativeFrameTransport(result.frameTransport.sharedMemoryKey, result.frameTransport.generation);
+		} else {
+			// A successful replacement viewer may legitimately expose only its
+			// external process window. Clear any frame transport retained from
+			// the previous helper generation before QML chooses its renderer.
+			backend->setNativeFrameTransport({}, 0);
+		}
 		backend->setOperationState(QStringLiteral("ready"), {}, false);
 	}
 	updateExternalRuntimeWatchdog();
@@ -1123,7 +1153,21 @@ void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &sessio
 	ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID, nullptr);
 	if (!backend) {
 		backend = new ScreenShareViewBackend(session, this);
+		updateViewBackendIdentity(backend, session);
 		m_viewBackends.insert(session.streamID, backend);
+		const QString preferenceKey = externalViewAudioPreferenceKey(session);
+		if (!preferenceKey.isEmpty()) {
+			m_externalViewAudioPreferenceKeys.insert(session.streamID, preferenceKey);
+			if (Global::get().db) {
+				const std::optional< ScreenShareAudioPreference > preference =
+					Global::get().db->getScreenShareAudioPreference(preferenceKey);
+				if (preference.has_value()) {
+					backend->setAudioVolume(preference->volume);
+					backend->setAudioMuted(preference->muted);
+					if (preference->muted) m_externalViewAudioMuted.insert(session.streamID);
+				}
+			}
+		}
 
 		connect(backend, &ScreenShareViewBackend::stopRequested, this, &ScreenShareManager::requestStopViewing);
 		connect(backend, &ScreenShareViewBackend::closeRequested, this, &ScreenShareManager::requestStopViewing);
@@ -1133,16 +1177,28 @@ void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &sessio
 				&ScreenShareManager::setExternalViewPaused);
 		connect(backend, &ScreenShareViewBackend::audioMuteToggled, this,
 				&ScreenShareManager::setExternalViewAudioMuted);
+		connect(backend, &ScreenShareViewBackend::audioVolumeAdjusted, this,
+				&ScreenShareManager::setExternalViewAudioVolume);
 		QmlShellHost *qmlHost = Global::get().mw ? Global::get().mw->qmlShellHost() : nullptr;
 		QObject *view = qmlHost ? qmlHost->createScreenShareView(backend) : nullptr;
 		m_qmlViewWindows.insert(session.streamID, view);
 	} else {
 		backend->updateSession(session);
+		updateViewBackendIdentity(backend, session);
 	}
 
 	backend->setProcessId(processID);
 	backend->setAudioMuted(m_externalViewAudioMuted.contains(session.streamID));
 	backend->setPaused(m_pausedExternalViewSessions.contains(session.streamID));
+}
+
+void ScreenShareManager::updateViewBackendIdentity(ScreenShareViewBackend *backend,
+													const ScreenShareSession &session) const {
+	if (!backend) return;
+	const ClientUser *owner = ClientUser::get(session.ownerSession);
+	const Channel *room = session.scope == MumbleProto::ScreenShareScopeChannel
+		? Channel::get(session.scopeID) : nullptr;
+	backend->setIdentity(owner ? owner->qsName : QString(), room ? room->qsName : QString());
 }
 
 void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &session) {
@@ -1190,6 +1246,8 @@ void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
 }
 
 void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
+	persistExternalViewAudioPreference(streamID);
+	m_pendingExternalViewAudioPreferenceSaves.remove(streamID);
 	m_pendingViewSessions.remove(streamID);
 	m_pendingViewRestarts.remove(streamID);
 	if (QObject *view = m_qmlViewWindows.take(streamID)) {
@@ -1198,6 +1256,7 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	}
 	if (ScreenShareViewBackend *backend = m_viewBackends.take(streamID)) backend->deleteLater();
 	m_externalViewAudioMuted.remove(streamID);
+	m_externalViewAudioPreferenceKeys.remove(streamID);
 	m_pausedExternalViewSessions.remove(streamID);
 	m_manualViewRetryRequired.remove(streamID);
 
@@ -1342,8 +1401,53 @@ void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, cons
 	}
 
 	if (ScreenShareViewBackend *backend = m_viewBackends.value(streamID, nullptr)) backend->setAudioMuted(muted);
+	scheduleExternalViewAudioPreferenceSave(streamID);
 
 	emit sessionUpdated(streamID);
+}
+
+void ScreenShareManager::setExternalViewAudioVolume(const QString &streamID, const int percent) {
+	Q_UNUSED(percent);
+	if (!m_sessions.contains(streamID) || !m_viewBackends.contains(streamID)) return;
+
+	scheduleExternalViewAudioPreferenceSave(streamID);
+	emit sessionUpdated(streamID);
+}
+
+QString ScreenShareManager::externalViewAudioPreferenceKey(const ScreenShareSession &session) const {
+	const ClientUser *owner = ClientUser::get(session.ownerSession);
+	if (!owner) return {};
+
+	QByteArray serverDigest;
+	if (const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot()) {
+		serverDigest = serverHandler->serverDigest();
+	}
+	return Mumble::ScreenShare::viewerAudioPreferenceKey(owner->qsHash, serverDigest, owner->qsName);
+}
+
+void ScreenShareManager::scheduleExternalViewAudioPreferenceSave(const QString &streamID) {
+	if (!m_externalViewAudioPreferenceKeys.contains(streamID)) return;
+	m_pendingExternalViewAudioPreferenceSaves.insert(streamID);
+	m_externalViewAudioPreferenceSaveTimer.start();
+}
+
+void ScreenShareManager::persistExternalViewAudioPreference(const QString &streamID) {
+	if (!Global::get().db) return;
+	const QString preferenceKey = m_externalViewAudioPreferenceKeys.value(streamID);
+	ScreenShareViewBackend *backend = m_viewBackends.value(streamID, nullptr);
+	if (preferenceKey.isEmpty() || !backend) return;
+
+	ScreenShareAudioPreference preference;
+	preference.volume = backend->audioVolume();
+	preference.muted  = backend->audioMuted();
+	Global::get().db->setScreenShareAudioPreference(preferenceKey, preference);
+}
+
+void ScreenShareManager::flushExternalViewAudioPreferenceSaves() {
+	m_externalViewAudioPreferenceSaveTimer.stop();
+	const QSet< QString > pendingSaves = m_pendingExternalViewAudioPreferenceSaves;
+	m_pendingExternalViewAudioPreferenceSaves.clear();
+	for (const QString &streamID : pendingSaves) persistExternalViewAudioPreference(streamID);
 }
 
 void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bool paused) {
@@ -1353,35 +1457,18 @@ void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bo
 	}
 
 	ScreenShareViewBackend *host = m_viewBackends.value(streamID, nullptr);
+	const bool pauseStateAlreadyStored = m_pausedExternalViewSessions.contains(streamID) == paused;
+	if (pauseStateAlreadyStored && (!host || host->paused() == paused)) return;
 	if (paused) {
 		m_pausedExternalViewSessions.insert(streamID);
-		const bool wasStarting = m_pendingViewSessions.remove(streamID);
-		if (wasStarting || m_activeViewSessions.remove(streamID)) {
-			ScreenShareSession stopSession;
-			stopSession.streamID = streamID;
-			scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
-									nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
-		}
-		m_externalViewProcessIDs.remove(streamID);
-		updateExternalRuntimeWatchdog();
-		if (host) {
-			host->setProcessId(0);
-			host->setPaused(true);
-		}
-		emit sessionUpdated(streamID);
-		return;
+	} else {
+		m_pausedExternalViewSessions.remove(streamID);
 	}
 
-	m_pausedExternalViewSessions.remove(streamID);
-	if (host) {
-		host->setPaused(false);
-	}
-	if (!m_activeViewSessions.contains(streamID)) {
-		if (!canViewSession(it.value()) || !restartExternalViewSession(it.value())) {
-			requestStopViewing(streamID);
-			return;
-		}
-	}
+	// Pause is presentation-only. Keep the helper operation, receiver process,
+	// native frame transport, external window, and watchdog registration intact
+	// so resume cannot race a stop/start cycle or change surface identity.
+	if (host) host->setPaused(paused);
 	emit sessionUpdated(streamID);
 }
 
@@ -1416,8 +1503,23 @@ void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareSt
 	m_sessions.insert(session.streamID, session);
 	if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID, nullptr)) {
 		backend->updateSession(session);
+		updateViewBackendIdentity(backend, session);
+	}
+	if (!m_helperClient->capabilities().probeComplete) {
+		// A real share is the first background reason to inspect the bundled
+		// runtime. Keep the newest server state and reconcile it when the
+		// asynchronous probe completes instead of treating unknown capabilities
+		// as a reason to stop publishing/viewing.
+		m_helperClient->refreshCapabilities();
+		emit sessionUpdated(session.streamID);
+		return;
 	}
 
+	reconcileSession(session);
+	emit sessionUpdated(session.streamID);
+}
+
+void ScreenShareManager::reconcileSession(const ScreenShareSession &session) {
 	if (canPublishSession(session)) {
 		startLocalPublishSession(session);
 	} else {
@@ -1438,8 +1540,20 @@ void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareSt
 		stopLocalViewSession(session.streamID);
 		m_announcedViewableSessions.remove(session.streamID);
 	}
+}
 
-	emit sessionUpdated(session.streamID);
+void ScreenShareManager::reconcileSessionsAfterCapabilityRefresh() {
+	logLocalShareAvailabilityDiagnostic(QStringLiteral("helper-capabilities"));
+
+	// Work from stable IDs because reconciliation can schedule asynchronous
+	// helper operations and emit observers that update product state.
+	const QStringList streamIDs = m_sessions.keys();
+	for (const QString &streamID : streamIDs) {
+		const auto sessionIt = m_sessions.constFind(streamID);
+		if (sessionIt == m_sessions.cend()) continue;
+		reconcileSession(sessionIt.value());
+		emit sessionUpdated(streamID);
+	}
 }
 
 void ScreenShareManager::handleScreenShareOffer(const MumbleProto::ScreenShareOffer &) {

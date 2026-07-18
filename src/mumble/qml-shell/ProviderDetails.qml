@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Mumble.Theme 1.0
+import Mumble.ProviderPresentation 1.0
 
 FocusScope {
 	id: root
@@ -14,17 +15,21 @@ FocusScope {
 	property string previewTitle: ""
 	property string previewSubtitle: ""
 	property string previewDescription: ""
+	property string previewImageSource: ""
 	property bool expanded: false
 	readonly property bool compactLayout: width < 440
 	readonly property string stableKind: normalizedStableKind()
 	readonly property string stableProvider: normalizedStableProvider()
 	readonly property string providerToken: normalizedVisualProvider()
+	readonly property var providerPresentation: ProviderPresentation.resolve(providerToken)
 	readonly property string providerDisplayName: buildProviderDisplayName()
 	readonly property color providerAccent: buildProviderAccent()
 	readonly property color providerAccentSubtle: withAlpha(providerAccent, 0.14)
 	readonly property color providerAccentBorder: withAlpha(providerAccent, 0.46)
+	readonly property color providerForeground: contrastSafeForeground(providerAccent)
 	readonly property string providerStateLabel: buildProviderStateLabel()
 	readonly property color providerStateColor: buildProviderStateColor()
+	readonly property color providerStateForeground: contrastSafeForeground(providerStateColor)
 	readonly property string family: detectFamily()
 	readonly property string variant: detectVariant()
 	readonly property bool financeLayout: family === "finance"
@@ -38,21 +43,38 @@ FocusScope {
 	readonly property bool twitchPresentation: variant === "twitch"
 	readonly property bool socialBespokePresentation: xPresentation || instagramPresentation
 		|| githubPresentation || twitchPresentation
+	readonly property bool genericSocialPostPresentation: family === "social"
+		&& ["bluesky", "mastodon", "reddit"].indexOf(providerToken) >= 0
+		&& !socialBespokePresentation
 	readonly property bool bespokeSemanticOwner: steamPresentation || googlePresentation
 		|| flashbackPresentation || socialBespokePresentation
+	readonly property bool dedicatedSemanticOwner: bespokeSemanticOwner
+		|| genericSocialPostPresentation
+	readonly property bool ownsHeader: dedicatedSemanticOwner || identityOwnsGenericHeader()
 	readonly property string flashbackAuthorAvatarSource: safeManagedImageSource(firstValue([
 		"forumPostAuthorAvatarUrl"
 	]))
+	readonly property string xAvatarSource: safeManagedImageSource(firstValue(["xAvatarUrl"]))
+	readonly property string instagramAvatarSource: safeManagedImageSource(firstValue([
+		"instagramAvatarUrl"
+	]))
+	readonly property string githubOwnerAvatarSource: safeManagedImageSource(firstValue([
+		"githubOwnerAvatarUrl"
+	]))
 	readonly property bool identityPresentation: ["audio", "x", "instagram", "github", "twitch"]
 		.indexOf(variant) >= 0
-	readonly property string presentation: financeLayout ? "market"
+	readonly property string presentation: genericSocialPostPresentation ? "socialPost"
+		: financeLayout ? "market"
 		: commerceLayout ? "commerce" : identityPresentation ? "identity" : "details"
 	readonly property string heading: familyHeading()
 	readonly property string primaryValue: buildPrimaryValue()
 	readonly property string secondaryValue: buildSecondaryValue()
 	readonly property string identityTitle: buildIdentityTitle()
 	readonly property string identitySubtitle: buildIdentitySubtitle()
-	readonly property string bodyText: buildBodyText()
+	readonly property string socialPostAuthor: buildSocialPostAuthor()
+	readonly property string socialPostText: buildSocialPostText()
+	readonly property string socialPostDescription: buildSocialPostDescription()
+	readonly property string bodyText: genericSocialPostPresentation ? socialPostText : buildBodyText()
 	readonly property string providerMark: buildProviderMark()
 	readonly property string summaryTitle: buildSummaryTitle()
 	readonly property string summarySubtitle: buildSummarySubtitle()
@@ -70,9 +92,14 @@ FocusScope {
 	readonly property string warningText: safeText(firstValue([
 		"contentWarning", "vehicleWarning"
 	]), 512)
-	readonly property var allStats: buildStats()
-	readonly property var visibleStats: allStats.slice(0, expanded ? 8 : (compactLayout ? 2 : 3))
-	readonly property var allChips: buildChips()
+	readonly property var rawStats: buildStats()
+	readonly property var rawChips: buildChips()
+	readonly property var allStats: deduplicatedStats(rawStats, rawChips)
+	readonly property var githubMetrics: buildGithubMetrics()
+	readonly property int maximumExpandedStatCount: 24
+	readonly property var visibleStats: allStats.slice(0,
+		expanded ? maximumExpandedStatCount : (compactLayout ? 2 : 3))
+	readonly property var allChips: deduplicatedChips(rawChips, allStats)
 	readonly property var visibleChips: allChips.slice(0, expanded ? 8 : 4)
 	readonly property var contextPosts: buildContextPosts()
 	readonly property var sparklinePoints: buildSparklinePoints()
@@ -80,6 +107,11 @@ FocusScope {
 	readonly property var githubTopics: buildGithubTopics()
 	readonly property int collapsedStatCount: compactLayout ? 2 : 3
 	readonly property int collapsedChipCount: 4
+	readonly property int collapsedBodyCharacterBudget: compactLayout ? 96
+		: commerceLayout ? 160 : 220
+	readonly property bool bodyTextCanExpand: bodyText.length > collapsedBodyCharacterBudget
+	readonly property bool socialPostCanExpand: genericSocialPostPresentation
+		&& socialPostText.length + socialPostDescription.length > collapsedBodyCharacterBudget
 	readonly property bool releaseCanExpand: releaseInfo.notes.length > 0
 		|| releaseInfo.url.length > 0 || releaseInfo.assetUrl.length > 0
 		|| releaseInfo.assetName.length > 0 || releaseInfo.assetCount.length > 0
@@ -88,17 +120,19 @@ FocusScope {
 		|| allStats.length > 0 || allChips.length > 0 || contextPosts.length > 0
 		|| sparklinePoints.length > 1 || identityTitle.length > 0
 		|| identitySubtitle.length > 0 || bodyText.length > 0 || releaseInfo.hasSummary
+		|| genericSocialPostPresentation
 	readonly property bool canExpand: allStats.length > collapsedStatCount
 		|| allChips.length > collapsedChipCount || contextPosts.length > 0
-		|| releaseCanExpand || socialCanExpand
+		|| releaseCanExpand || socialCanExpand || bodyTextCanExpand || socialPostCanExpand
 	readonly property bool socialCanExpand: xPresentation
 		? allStats.length > 3 || contextPosts.length > 0
-		: instagramPresentation ? allStats.length > 2
-		: githubPresentation ? allStats.length > 3 || githubTopics.length > 0
+		: instagramPresentation ? allStats.length > 2 || hasValue("instagramMediaKind")
+		: githubPresentation ? githubExpandedMeta().length > 0 || githubTopics.length > 0
 			|| releaseInfo.hasSummary || (metadata
 				&& (metadata.githubArchived === true || metadata.githubFork === true))
 		: twitchPresentation ? allStats.length > 2 || bodyText.length > 0 : false
-	readonly property bool ownsDescription: bodyText.length > 0
+	readonly property bool ownsDescription: genericSocialPostPresentation || bodyText.length > 0
+		|| structuredDescriptionCoversPreview()
 	readonly property string steamReviewSummary: safeText(firstValue([
 		"steamReviewSummary", "gameStoreRating"
 	]), 128)
@@ -125,7 +159,10 @@ FocusScope {
 	Accessible.role: Accessible.Grouping
 	Accessible.name: heading.length > 0 ? heading : qsTr("Provider details")
 	Accessible.description: accessibleSummary()
-	Accessible.ignored: bespokeSemanticOwner
+	// Sparse link previews do not have a visible details surface. Keeping their
+	// zero-height helper in the platform tree creates an empty duplicate group.
+	// Bespoke cards own their own single semantic group for the same reason.
+	Accessible.ignored: !hasDetails || dedicatedSemanticOwner
 
 	function hasValue(key) {
 		if (!metadata || metadata[key] === undefined || metadata[key] === null)
@@ -162,8 +199,72 @@ FocusScope {
 		return source.indexOf("image://mumble/") === 0 ? source : ""
 	}
 
+	function identityInitials(value, fallback) {
+		const words = safeText(value, 256).replace(/^@/, "").split(/\s+/).filter(function(word) {
+			return word.length > 0
+		})
+		if (words.length === 0)
+			return safeText(fallback, 2).toUpperCase()
+		if (words.length === 1)
+			return words[0].slice(0, 2).toUpperCase()
+		return (words[0].slice(0, 1) + words[words.length - 1].slice(0, 1)).toUpperCase()
+	}
+
 	function withAlpha(color, alpha) {
 		return Qt.rgba(color.r, color.g, color.b, alpha)
+	}
+
+	function compositeOver(foreground, background) {
+		const alpha = Math.max(0, Math.min(1, foreground.a))
+		return Qt.rgba(foreground.r * alpha + background.r * (1 - alpha),
+			foreground.g * alpha + background.g * (1 - alpha),
+			foreground.b * alpha + background.b * (1 - alpha), 1)
+	}
+
+	function contrastRatio(foreground, background) {
+		const foregroundLuminance = Theme.relativeLuminance(foreground)
+		const backgroundLuminance = Theme.relativeLuminance(background)
+		const lighter = Math.max(foregroundLuminance, backgroundLuminance)
+		const darker = Math.min(foregroundLuminance, backgroundLuminance)
+		return (lighter + 0.05) / (darker + 0.05)
+	}
+
+	function minimumProviderContrast(foreground, accent) {
+		const backgrounds = [Theme.panel, Theme.previewCardBackground,
+			Theme.embedRevealSurface, compositeOver(withAlpha(accent, 0.14), Theme.panel)]
+		let minimum = Number.POSITIVE_INFINITY
+		for (let index = 0; index < backgrounds.length; ++index)
+			minimum = Math.min(minimum, contrastRatio(foreground, backgrounds[index]))
+		return minimum
+	}
+
+	function contrastSafeForeground(accent) {
+		if (minimumProviderContrast(accent, accent) >= 4.5)
+			return accent
+		const dark = Qt.rgba(16 / 255, 21 / 255, 28 / 255, 1)
+		const light = Qt.rgba(1, 1, 1, 1)
+		const target = minimumProviderContrast(dark, accent)
+			>= minimumProviderContrast(light, accent) ? dark : light
+		for (let step = 1; step <= 20; ++step) {
+			const candidate = Theme.mixColors(accent, target, step / 20)
+			if (minimumProviderContrast(candidate, accent) >= 4.5)
+				return candidate
+		}
+		return target
+	}
+
+	function chipForeground(tone) {
+		if (tone === "accent")
+			return providerForeground
+		if (tone === "warning")
+			return contrastSafeForeground(Theme.warning)
+		if (tone === "success")
+			return contrastSafeForeground(Theme.success)
+		if (tone === "danger")
+			return contrastSafeForeground(Theme.danger)
+		if (commerceLayout)
+			return providerForeground
+		return Theme.textMain
 	}
 
 	function normalizedToken(value) {
@@ -220,40 +321,13 @@ FocusScope {
 	function buildProviderDisplayName() {
 		const explicitName = safeText(firstValue(["gameStoreName", "providerName", "productProvider",
 			"vehicleProvider", "articlePublisher", "audioProvider", "marketplaceProvider"]), 128)
-		const names = {
-			"youtube": "YouTube", "spotify": "Spotify", "tiktok": "TikTok",
-			"x": "X", "instagram": "Instagram", "github": "GitHub",
-			"twitch": "Twitch", "google": "Google",
-			"steam": "Steam", "yahoofinance": "Yahoo Finance", "blocket": "Blocket",
-			"tradera": "Tradera", "bytbil": "Bytbil", "bilweb": "Bilweb",
-			"booli": "Booli", "hemnet": "Hemnet", "flashback": "Flashback",
-			"existenz": "Existenz", "sverigesradio": "Sveriges Radio",
-			"systembolaget": "Systembolaget", "sweclockers": "SweClockers",
-			"webhallen": "Webhallen", "elgiganten": "Elgiganten", "komplett": "Komplett",
-			"prisjakt": "Prisjakt", "pricerunner": "PriceRunner", "amazon": "Amazon",
-			"power": "POWER", "svt": "SVT", "gp": "GP", "omni": "Omni",
-			"aftonbladet": "Aftonbladet", "expressen": "Expressen", "dn": "DN"
-		}
-		return names[providerToken]
+		return providerPresentation.label
 			|| (normalizedToken(explicitName) !== "gamestore" ? explicitName : "")
 			|| safeText(providerHint, 128)
 	}
 
 	function buildProviderAccent() {
-		const colors = {
-			"youtube": "#ff5a5f", "spotify": "#1ed760", "tiktok": "#25f4ee",
-			"x": "#8fa3b8", "instagram": "#e45aa5", "github": "#8fa3b8",
-			"twitch": "#a970ff", "google": "#4285f4",
-			"steam": "#66c0f4", "yahoofinance": "#78d6a3", "blocket": "#ff6b61",
-			"tradera": "#ffd64c", "bytbil": "#f4c95d", "bilweb": "#f4c95d",
-			"booli": "#72d7a3", "hemnet": "#72d7a3", "flashback": "#f2c36e",
-			"existenz": "#ff9a54", "sverigesradio": "#f4a3c1",
-			"systembolaget": "#85c34a", "sweclockers": "#f08b2c",
-			"webhallen": "#ef7a32", "power": "#ffd84d", "amazon": "#ffb454",
-			"gp": "#62b3ff", "svt": "#ff5a5f", "aftonbladet": "#ff5a5f",
-			"omni": "#ffd447", "expressen": "#71b8ff", "dn": "#e7edf3"
-		}
-		return colors[providerToken] || colors[variant] || Theme.accent
+		return providerPresentation.accent || Theme.accent
 	}
 
 	function buildProviderStateLabel() {
@@ -284,6 +358,51 @@ FocusScope {
 		if (state === "unavailable")
 			return Theme.danger
 		return Theme.textMuted
+	}
+
+	function canonicalFamilyForPresentation() {
+		const presentationFamily = providerPresentation && providerPresentation.known
+			? String(providerPresentation.family || "") : ""
+		switch (presentationFamily) {
+		case "finance": return "finance"
+		case "marketplace":
+		case "vehicle":
+		case "property":
+		case "product":
+		case "game": return "commerce"
+		case "article":
+		case "forum":
+		case "audio":
+		case "links": return "editorial"
+		case "social": return "social"
+		case "search": return "search"
+		case "weather":
+		case "place":
+		case "traffic": return "geo"
+		default: return ""
+		}
+	}
+
+	function canonicalVariantForPresentation() {
+		const presentationFamily = providerPresentation && providerPresentation.known
+			? String(providerPresentation.family || "") : ""
+		switch (presentationFamily) {
+		case "finance": return "finance"
+		case "marketplace": return "marketplace"
+		case "vehicle": return "vehicle"
+		case "property": return "realEstate"
+		case "product": return "product"
+		case "game": return "game"
+		case "article": return "article"
+		case "forum": return "forum"
+		case "audio": return "audio"
+		case "links": return "linkDigest"
+		case "search": return "googleSearch"
+		case "weather": return "weather"
+		case "place": return "place"
+		case "traffic": return "traffic"
+		default: return ""
+		}
 	}
 
 	function detectFamily() {
@@ -324,6 +443,9 @@ FocusScope {
 			return "search"
 		if (hasAny(["locationLabel", "statusLabel"]))
 			return "geo"
+		const presentationFamily = canonicalFamilyForPresentation()
+		if (presentationFamily.length > 0)
+			return presentationFamily
 		return warningText.length > 0 ? "warning" : ""
 	}
 
@@ -355,6 +477,7 @@ FocusScope {
 			if (stableProvider === "google" || stableProvider === "googlesearch") return "googleSearch"
 			return stableProvider
 		}
+		const presentationVariant = canonicalVariantForPresentation()
 		if (family === "commerce") {
 			if (hasAny(["vehiclePrice", "vehicleSpecs", "vehicleKind"]))
 				return "vehicle"
@@ -365,14 +488,14 @@ FocusScope {
 				return "game"
 			if (hasAny(["listingPrice", "listingSpecs", "listingCondition"]))
 				return "marketplace"
-			return "product"
+			return presentationVariant.length > 0 ? presentationVariant : "product"
 		}
 		if (family === "editorial") {
 			if (hasAny(["forumProvider", "forumThreadId", "forumPostAuthor"]))
 				return "forum"
 			if (hasAny(["audioProvider", "audioProgram"]))
 				return "audio"
-			return "article"
+			return presentationVariant.length > 0 ? presentationVariant : "article"
 		}
 		if (family === "social") {
 			if (hasAny(["twitchLiveState", "twitchBadge", "twitchChannel"]))
@@ -381,17 +504,22 @@ FocusScope {
 				return "github"
 			if (hasAny(["instagramHandle", "instagramLikeCount"]))
 				return "instagram"
-			return "x"
+			return presentationVariant.length > 0 ? presentationVariant
+				: providerToken.length > 0 ? providerToken : "x"
 		}
 		if (family === "geo") {
-			return "weather"
+			return presentationVariant.length > 0 ? presentationVariant : "weather"
 		}
 		if (family === "search")
-			return "googleSearch"
+			return presentationVariant.length > 0 ? presentationVariant : "googleSearch"
+		if (family === "finance" && presentationVariant.length > 0)
+			return presentationVariant
 		return family
 	}
 
 	function familyHeading() {
+		if (genericSocialPostPresentation)
+			return qsTr("Social post")
 		switch (variant) {
 		case "finance": return qsTr("Market snapshot")
 		case "product": return qsTr("Product details")
@@ -426,6 +554,143 @@ FocusScope {
 		return parts.join(separator || " · ")
 	}
 
+	function normalizedPresentationText(value) {
+		return safeText(value, 2048).toLocaleLowerCase()
+			.replace(/[\s·:;,.#\/\\_()\[\]{}|\-\u2013\u2014]+/g, " ").trim()
+	}
+
+	function appendPresentationFact(result, value) {
+		const text = safeText(value, 2048)
+		const normalized = normalizedPresentationText(text)
+		if (normalized.length === 0)
+			return
+		for (let index = 0; index < result.length; ++index) {
+			if (normalizedPresentationText(result[index]) === normalized)
+				return
+		}
+		result.push(text)
+	}
+
+	function joinedPresentationFact(values) {
+		const result = []
+		for (let index = 0; index < values.length; ++index) {
+			const text = safeText(values[index], 1024)
+			if (text.length > 0)
+				result.push(text)
+		}
+		return result.join(" · ")
+	}
+
+	function presentationDatumCovered(facts, value) {
+		const datum = normalizedPresentationText(value)
+		if (datum.length === 0)
+			return true
+		for (let index = 0; index < facts.length; ++index) {
+			const existing = normalizedPresentationText(facts[index])
+			if (existing === datum)
+				return true
+			if (datum.length >= 5 && (" " + existing + " ").indexOf(" " + datum + " ") >= 0)
+				return true
+		}
+		return false
+	}
+
+	function structuredPresentationFacts() {
+		const result = []
+		const fields = [heading, summaryTitle, summarySubtitle, primaryValue, secondaryValue,
+			commerceStatus, identityTitle, identitySubtitle, bodyText]
+		for (let index = 0; index < fields.length; ++index)
+			appendPresentationFact(result, fields[index])
+		appendPresentationFact(result, joinedPresentationFact([summaryTitle, summarySubtitle]))
+		appendPresentationFact(result, joinedPresentationFact([primaryValue, secondaryValue]))
+		appendPresentationFact(result, joinedPresentationFact([
+			summaryTitle, summarySubtitle, primaryValue, secondaryValue
+		]))
+		appendPresentationFact(result, joinedPresentationFact([identityTitle, identitySubtitle]))
+		appendPresentationFact(result, joinedPresentationFact([commerceStatus, bodyText]))
+		if (financeLayout && sparklinePoints.length > 1) {
+			const rangeLabel = safeText(firstValue(["financeRangeLabel"]), 32)
+			appendPresentationFact(result, rangeLabel)
+			appendPresentationFact(result, financeRangeSummary)
+			appendPresentationFact(result, joinedPresentationFact([rangeLabel, financeRangeSummary]))
+			appendPresentationFact(result, joinedValue([
+				"financeRangeLabel", "financeRangeChangePercent"
+			]))
+		}
+		return result
+	}
+
+	function presentationLevelFacts() {
+		const result = structuredPresentationFacts()
+		appendPresentationFact(result, providerDisplayName)
+		if (!ownsHeader) {
+			appendPresentationFact(result, previewTitle)
+			appendPresentationFact(result, previewSubtitle)
+			appendPresentationFact(result, joinedPresentationFact([
+				providerDisplayName, previewTitle, previewSubtitle
+			]))
+		}
+		return result
+	}
+
+	function identityOwnsGenericHeader() {
+		if (variant !== "audio" && variant !== "linkDigest")
+			return false
+		if (identityTitle.length === 0 || safeText(previewImageSource, 2048).length > 0)
+			return false
+		const facts = [heading, identityTitle, identitySubtitle,
+			joinedPresentationFact([identitySubtitle, heading])]
+		if (!presentationDatumCovered(facts, previewTitle))
+			return false
+		if (safeText(previewSubtitle, 512).length > 0
+				&& !presentationDatumCovered(facts, previewSubtitle))
+			return false
+		const provider = safeText(providerDisplayName, 256)
+		return provider.length === 0 || presentationDatumCovered(facts, provider)
+	}
+
+	function structuredDescriptionCoversPreview() {
+		if (!financeLayout && family !== "geo")
+			return false
+		const description = safeText(previewDescription, 2048)
+		return description.length > 0
+			&& presentationDatumCovered(structuredPresentationFacts(), description)
+	}
+
+	function deduplicatedStats(source, preferredChips) {
+		const result = []
+		const facts = presentationLevelFacts()
+		if (variant === "marketplace") {
+			for (let index = 0; index < preferredChips.length; ++index)
+				appendPresentationFact(facts, preferredChips[index].text)
+		}
+		for (let index = 0; index < source.length; ++index) {
+			const stat = source[index]
+			if (!stat || presentationDatumCovered(facts, stat.value))
+				continue
+			result.push(stat)
+		}
+		return result
+	}
+
+	function deduplicatedChips(source, stats) {
+		const result = []
+		const facts = presentationLevelFacts()
+		for (let index = 0; index < stats.length; ++index) {
+			const stat = stats[index]
+			appendPresentationFact(facts, stat.value)
+			appendPresentationFact(facts, joinedPresentationFact([stat.label, stat.value]))
+		}
+		for (let index = 0; index < source.length; ++index) {
+			const chip = source[index]
+			if (!chip || presentationDatumCovered(facts, chip.text))
+				continue
+			result.push(chip)
+			appendPresentationFact(facts, chip.text)
+		}
+		return result
+	}
+
 	function safeExternalUrl(value) {
 		const url = safeText(value, 2048)
 		return /^https:\/\//i.test(url) ? url : ""
@@ -440,6 +705,47 @@ FocusScope {
 		if (expanded && releaseInfo.notes.length > 0)
 			parts.push(releaseInfo.notes)
 		return parts.filter(function(value) { return value.length > 0 }).join(". ")
+	}
+
+	function socialPostValueIsProvider(value) {
+		const text = safeText(value, 512)
+		if (text.length === 0)
+			return false
+		const identity = ProviderPresentation.resolve(text)
+		if (identity.known && identity.token === providerToken)
+			return true
+		return presentationDatumCovered([providerDisplayName, providerHint], text)
+	}
+
+	function buildSocialPostAuthor() {
+		if (!genericSocialPostPresentation)
+			return ""
+		const author = safeText(previewSubtitle, 512)
+		return socialPostValueIsProvider(author) ? "" : author
+	}
+
+	function buildSocialPostText() {
+		return genericSocialPostPresentation ? safeText(previewTitle, 2048) : ""
+	}
+
+	function buildSocialPostDescription() {
+		if (!genericSocialPostPresentation)
+			return ""
+		const description = safeText(previewDescription, 2048)
+		if (socialPostValueIsProvider(description)
+				|| presentationDatumCovered([socialPostText, socialPostAuthor], description))
+			return ""
+		return description
+	}
+
+	function genericSocialAccessibleSummary() {
+		const parts = []
+		for (const value of [providerDisplayName, socialPostAuthor,
+				socialPostText, socialPostDescription]) {
+			if (!presentationDatumCovered(parts, value))
+				parts.push(value)
+		}
+		return joinAccessibleSentences(parts)
 	}
 
 	function buildIdentityTitle() {
@@ -528,17 +834,8 @@ FocusScope {
 	}
 
 	function buildProviderMark() {
-		const marks = {
-			"youtube": "YT", "spotify": "SP", "tiktok": "TT", "instagram": "IG",
-			"twitch": "TV", "google": "G", "steam": "S", "yahoofinance": "YF",
-			"blocket": "B", "tradera": "T", "bytbil": "BB", "bilweb": "BW",
-			"booli": "B", "hemnet": "H", "flashback": "FB", "existenz": "E",
-			"sverigesradio": "SR", "systembolaget": "SB", "sweclockers": "SC",
-			"webhallen": "W", "elgiganten": "E", "komplett": "K", "prisjakt": "PJ",
-			"pricerunner": "PR", "amazon": "A", "power": "P", "svt": "SVT"
-		}
-		if (marks[providerToken])
-			return marks[providerToken]
+		if (providerPresentation.mark)
+			return providerPresentation.mark
 		switch (variant) {
 		case "audio": return qsTr("Audio")
 		case "x": return "X"
@@ -690,6 +987,18 @@ FocusScope {
 		return parts.filter(function(value) { return value.length > 0 }).join(" · ")
 	}
 
+	function buildGithubMetrics() {
+		if (variant !== "github")
+			return []
+		const result = []
+		const identityMetadata = [identitySubtitle, githubExpandedMeta()]
+		for (let index = 0; index < allStats.length; ++index) {
+			if (!accessibleDatumCovered(identityMetadata, allStats[index].value))
+				result.push(allStats[index])
+		}
+		return result
+	}
+
 	function buildPrimaryValue() {
 		if (family === "finance") {
 			const price = safeText(firstValue(["financePrice"]), 128)
@@ -722,14 +1031,14 @@ FocusScope {
 
 	function addStat(result, label, value, tone) {
 		const text = safeText(value, 512)
-		if (text.length === 0 || result.length >= 8)
+		if (text.length === 0 || result.length >= maximumExpandedStatCount)
 			return
 		result.push({ "label": label, "value": text, "tone": tone || "normal" })
 	}
 
 	function addSpecStats(result, key) {
 		const source = metadata && Array.isArray(metadata[key]) ? metadata[key] : []
-		for (let index = 0; index < source.length && result.length < 8; ++index) {
+		for (let index = 0; index < source.length && result.length < maximumExpandedStatCount; ++index) {
 			const entry = source[index] || {}
 			addStat(result, safeText(entry.label, 128), safeText(entry.value, 256))
 		}
@@ -819,9 +1128,16 @@ FocusScope {
 			addStat(result, qsTr("Quoted"), firstValue(["forumQuoteAuthor"]))
 			addStat(result, qsTr("Thread"), firstValue(["forumThreadId", "threadId"]))
 		} else if (variant === "audio") {
-			addStat(result, qsTr("Provider"), firstValue(["audioProvider"]))
-			addStat(result, qsTr("Program"), firstValue(["audioProgram"]))
-			addStat(result, qsTr("Published"), firstValue(["articlePublishedAt"]))
+			const identityMetadata = [identityTitle, identitySubtitle]
+			const provider = firstValue(["audioProvider"])
+			const program = firstValue(["audioProgram"])
+			const published = firstValue(["articlePublishedAt"])
+			if (!accessibleDatumCovered(identityMetadata, provider))
+				addStat(result, qsTr("Provider"), provider)
+			if (!accessibleDatumCovered(identityMetadata, program))
+				addStat(result, qsTr("Program"), program)
+			if (!accessibleDatumCovered(identityMetadata, published))
+				addStat(result, qsTr("Published"), published)
 		} else if (variant === "x") {
 			addStat(result, qsTr("Replies"), countLabel(firstValue(["xReplyCount"])))
 			addStat(result, qsTr("Reposts"), countLabel(firstValue(["xRepostCount"])))
@@ -851,7 +1167,7 @@ FocusScope {
 		} else if (family === "geo") {
 			addStat(result, qsTr("Provider"), firstValue(["providerName"]))
 		}
-		return result.slice(0, 8)
+		return result.slice(0, maximumExpandedStatCount)
 	}
 
 	function addChip(result, value, tone) {
@@ -990,8 +1306,6 @@ FocusScope {
 
 	function accessibleSummary() {
 		const parts = []
-		if (warningText.length > 0)
-			parts.push(warningText)
 		if (primaryValue.length > 0)
 			parts.push(primaryValue)
 		if (secondaryValue.length > 0)
@@ -1002,12 +1316,29 @@ FocusScope {
 			parts.push(identitySubtitle)
 		if (bodyText.length > 0)
 			parts.push(bodyText)
-		for (let index = 0; index < visibleStats.length; ++index)
-			parts.push(visibleStats[index].label + ": " + visibleStats[index].value)
-		if (releaseInfo.hasSummary)
-			parts.push([releaseInfo.name, releaseInfo.tag, releaseInfo.publishedAt]
-				.filter(function(value) { return value.length > 0 }).join(" "))
+		for (let index = 0; index < visibleStats.length; ++index) {
+			if (!accessibleDatumCovered(parts, visibleStats[index].value))
+				parts.push(visibleStats[index].label + ": " + visibleStats[index].value)
+		}
+		for (let index = 0; index < visibleChips.length; ++index) {
+			if (!accessibleDatumCovered(parts, visibleChips[index].text))
+				parts.push(visibleChips[index].text)
+		}
 		return joinAccessibleSentences(parts)
+	}
+
+	function accessibleDatumCovered(parts, value) {
+		const datum = safeText(value, 512).toLocaleLowerCase()
+			.replace(/[\s·:;,.#\/_-]+/g, " ").trim()
+		if (datum.length === 0)
+			return true
+		for (let index = 0; index < parts.length; ++index) {
+			const existing = safeText(parts[index], 1024).toLocaleLowerCase()
+				.replace(/[\s·:;,.#\/_-]+/g, " ").trim()
+			if (existing === datum || existing.indexOf(datum) >= 0)
+				return true
+		}
+		return false
 	}
 
 	function joinAccessibleSentences(values) {
@@ -1051,8 +1382,8 @@ FocusScope {
 			if (expanded && hasValue("instagramMediaKind"))
 				parts.push(qsTr("Media: %1").arg(safeText(firstValue(["instagramMediaKind"]), 64)))
 		} else if (variant === "github") {
-			for (let index = 0; index < allStats.length && index < 3; ++index)
-				parts.push(allStats[index].label + ": " + allStats[index].value)
+			for (let index = 0; index < githubMetrics.length && index < 3; ++index)
+				parts.push(githubMetrics[index].label + ": " + githubMetrics[index].value)
 			if (expanded)
 				parts.push(githubExpandedMeta())
 		} else if (variant === "twitch") {
@@ -1155,7 +1486,7 @@ FocusScope {
 							Layout.fillWidth: true
 							text: qsTr("STEAM STORE")
 							textFormat: Text.PlainText
-							color: root.providerAccent
+							color: root.providerForeground
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							font.letterSpacing: 0.8
@@ -1173,6 +1504,36 @@ FocusScope {
 							elide: Text.ElideRight
 							Accessible.ignored: true
 						}
+					}
+				}
+
+				Rectangle {
+					objectName: "providerSteamHero"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? (root.compactLayout ? 132 : 176) : 0
+					visible: root.safeManagedImageSource(root.previewImageSource).length > 0
+					radius: Theme.innerRadius
+					color: Theme.embedSurface
+					border.color: Theme.embedBorder
+					clip: true
+					Accessible.ignored: true
+
+					Image {
+						objectName: "providerSteamHeroImage"
+						anchors.fill: parent
+						source: root.safeManagedImageSource(root.previewImageSource)
+						asynchronous: true
+						cache: false
+						sourceSize: Qt.size(Math.min(960, width * Screen.devicePixelRatio),
+							Math.min(540, height * Screen.devicePixelRatio))
+						fillMode: Image.PreserveAspectCrop
+						visible: status === Image.Ready
+						Accessible.ignored: true
+					}
+					Rectangle {
+						anchors.fill: parent
+						color: root.withAlpha(Theme.mediaCanvas, 0.08)
+						Accessible.ignored: true
 					}
 				}
 
@@ -1358,7 +1719,7 @@ FocusScope {
 						ModernIcon {
 							name: "external"
 							size: Theme.avatarSmall
-							color: root.providerAccent
+							color: root.providerForeground
 							Accessible.ignored: true
 						}
 					}
@@ -1437,7 +1798,7 @@ FocusScope {
 							anchors.centerIn: parent
 							text: root.googleModeLabel
 							textFormat: Text.PlainText
-							color: root.providerAccent
+							color: root.providerForeground
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							Accessible.ignored: true
@@ -1471,7 +1832,7 @@ FocusScope {
 						ModernIcon {
 							name: "search"
 							size: Theme.avatarSmall
-							color: root.providerAccent
+							color: root.providerForeground
 							Accessible.ignored: true
 						}
 					}
@@ -1494,7 +1855,7 @@ FocusScope {
 							Label {
 								text: parent.modelData
 								textFormat: Text.PlainText
-								color: parent.active ? root.providerAccent : Theme.textMuted
+								color: parent.active ? root.providerForeground : Theme.textMuted
 								font.pixelSize: Theme.fontCaption
 								font.bold: parent.active
 								Accessible.ignored: true
@@ -1518,8 +1879,8 @@ FocusScope {
 			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight : 0
 			visible: root.flashbackPresentation
 			radius: Theme.innerRadius
-			color: "#101010"
-			border.color: "#2c2c2c"
+			color: Theme.embedSurface
+			border.color: Theme.embedBorder
 			clip: true
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
@@ -1535,7 +1896,7 @@ FocusScope {
 					objectName: "providerFlashbackMasthead"
 					Layout.fillWidth: true
 					Layout.preferredHeight: 52
-					color: "#1f1f1f"
+					color: Theme.embedRevealSurface
 					RowLayout {
 						anchors.fill: parent
 						anchors.leftMargin: Theme.space3
@@ -1545,7 +1906,7 @@ FocusScope {
 							objectName: "providerFlashbackLogo"
 							text: "FLASHBACK"
 							textFormat: Text.PlainText
-							color: "#f1f4fa"
+							color: Theme.textStrong
 							font.pixelSize: Theme.fontHeading
 							font.bold: true
 							font.letterSpacing: -0.6
@@ -1554,13 +1915,13 @@ FocusScope {
 						Rectangle {
 							Layout.preferredWidth: 1
 							Layout.preferredHeight: 24
-							color: "#3a3a3a"
+							color: Theme.quietBorder
 						}
 						Label {
 							Layout.fillWidth: true
 							text: qsTr("Forum · Aktuellt · Populärt")
 							textFormat: Text.PlainText
-							color: "#9ca8b6"
+							color: Theme.secondaryText
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							elide: Text.ElideRight
@@ -1578,7 +1939,7 @@ FocusScope {
 						Layout.fillWidth: true
 						text: root.identityTitle.length > 0 ? root.identityTitle : root.previewTitle
 						textFormat: Text.PlainText
-						color: "#f1f4fa"
+						color: Theme.textStrong
 						font.pixelSize: Theme.fontTitle
 						font.bold: true
 						wrapMode: Text.Wrap
@@ -1592,7 +1953,7 @@ FocusScope {
 						visible: root.identitySubtitle.length > 0
 						text: root.identitySubtitle
 						textFormat: Text.PlainText
-						color: "#aeb8c5"
+						color: Theme.secondaryText
 						font.pixelSize: Theme.fontCaption
 						font.bold: true
 						elide: Text.ElideRight
@@ -1604,16 +1965,17 @@ FocusScope {
 						visible: root.hasAny(["forumPostAuthor", "forumPostAuthorAvatarUrl"])
 						spacing: Theme.space2
 						Rectangle {
+							objectName: "providerFlashbackAuthorAvatarBackground"
 							Layout.preferredWidth: 30
 							Layout.preferredHeight: 30
 							radius: width / 2
-							color: "#4a3327"
+							color: root.providerAccent
 							clip: true
 							Label {
 								anchors.centerIn: parent
 								text: root.safeText(root.firstValue(["forumPostAuthor"]), 2).toUpperCase()
 								textFormat: Text.PlainText
-								color: "#f1f4fa"
+								color: Theme.contrastText(parent.color)
 								font.pixelSize: Theme.fontCaption
 								font.bold: true
 								Accessible.ignored: true
@@ -1624,6 +1986,8 @@ FocusScope {
 								source: root.flashbackAuthorAvatarSource
 								asynchronous: true
 								cache: false
+								sourceSize.width: 128
+								sourceSize.height: 128
 								fillMode: Image.PreserveAspectCrop
 								visible: status === Image.Ready
 								Accessible.ignored: true
@@ -1638,7 +2002,7 @@ FocusScope {
 								Layout.fillWidth: true
 								text: root.safeText(root.firstValue(["forumPostAuthor"]), 256)
 								textFormat: Text.PlainText
-								color: "#f1f4fa"
+								color: Theme.textStrong
 								font.pixelSize: Theme.fontLabel
 								font.bold: true
 								elide: Text.ElideRight
@@ -1649,7 +2013,7 @@ FocusScope {
 								text: root.joinedValue(["forumPostAuthorTitle", "forumPostTime",
 									"forumPostNumber"], " · ")
 								textFormat: Text.PlainText
-								color: "#8f9aa7"
+								color: Theme.secondaryText
 								font.pixelSize: Theme.fontCaption
 								elide: Text.ElideRight
 								Accessible.ignored: true
@@ -1663,14 +2027,14 @@ FocusScope {
 						Layout.preferredHeight: visible ? flashbackQuoteLayout.implicitHeight + Theme.space2 * 2 : 0
 						visible: root.hasAny(["forumQuoteAuthor", "forumQuoteExcerpt", "forumQuotePostNumber"])
 						radius: Theme.space1
-						color: "#171717"
-						border.color: "#2c2c2c"
+						color: Theme.embedRevealSurface
+						border.color: Theme.embedBorder
 						Rectangle {
 							anchors.left: parent.left
 							anchors.top: parent.top
 							anchors.bottom: parent.bottom
 							width: 3
-							color: "#c58a36"
+							color: root.providerAccent
 						}
 						ColumnLayout {
 							id: flashbackQuoteLayout
@@ -1685,7 +2049,7 @@ FocusScope {
 									root.safeText(root.firstValue(["forumQuoteAuthor"]), 256)
 								].filter(function(value) { return value.length > 0 }).join(" · "))
 								textFormat: Text.PlainText
-								color: "#f0c783"
+								color: root.providerForeground
 								font.pixelSize: Theme.fontCaption
 								font.bold: true
 								elide: Text.ElideRight
@@ -1697,7 +2061,7 @@ FocusScope {
 								visible: text.length > 0
 								text: root.safeText(root.firstValue(["forumQuoteExcerpt"]), 1024)
 								textFormat: Text.PlainText
-								color: "#bfc9d5"
+								color: Theme.secondaryText
 								font.pixelSize: Theme.fontCaption
 								wrapMode: Text.Wrap
 								maximumLineCount: root.expanded ? 4 : 2
@@ -1715,7 +2079,7 @@ FocusScope {
 							"forumPostExcerpt", "forumFirstPostExcerpt"
 						]), 1024) || root.bodyText
 						textFormat: Text.PlainText
-						color: "#dce4ee"
+						color: Theme.textMain
 						font.pixelSize: Theme.fontLabel
 						lineHeight: 1.35
 						wrapMode: Text.Wrap
@@ -1726,10 +2090,11 @@ FocusScope {
 				}
 
 				Rectangle {
+					objectName: "providerFlashbackFooter"
 					Layout.fillWidth: true
 					Layout.preferredHeight: 38
-					color: "#111111"
-					border.color: "#202020"
+					color: Theme.embedRevealSurface
+					border.color: Theme.embedBorder
 					RowLayout {
 						anchors.fill: parent
 						anchors.leftMargin: Theme.space3
@@ -1743,7 +2108,7 @@ FocusScope {
 								root.safeText(root.firstValue(["forumPostCount"]), 64)]
 								.filter(function(value) { return value.length > 0 }).join(" · ")
 							textFormat: Text.PlainText
-							color: "#8c97a5"
+							color: Theme.secondaryText
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							elide: Text.ElideRight
@@ -1753,7 +2118,7 @@ FocusScope {
 							objectName: "providerFlashbackLinkContext"
 							text: root.hasValue("postId") ? qsTr("Linked post") : qsTr("Thread")
 							textFormat: Text.PlainText
-							color: "#ffc069"
+							color: root.providerForeground
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							Accessible.ignored: true
@@ -1786,17 +2151,32 @@ FocusScope {
 					Layout.fillWidth: true
 					spacing: Theme.space2
 					Rectangle {
+						objectName: "providerXAvatarBackground"
 						Layout.preferredWidth: 38
 						Layout.preferredHeight: 38
 						radius: width / 2
 						color: Theme.textStrong
+						clip: true
 						Label {
+							objectName: "providerXAvatarFallback"
 							anchors.centerIn: parent
-							text: "X"
+							text: root.identityInitials(root.identityTitle || root.identitySubtitle, "X")
 							textFormat: Text.PlainText
 							color: Theme.contrastText(parent.color)
-							font.pixelSize: Theme.fontTitle
+							font.pixelSize: Theme.fontLabel
 							font.bold: true
+							Accessible.ignored: true
+						}
+						Image {
+							objectName: "providerXAvatar"
+							anchors.fill: parent
+							source: root.xAvatarSource
+							asynchronous: true
+							cache: false
+							sourceSize.width: 128
+							sourceSize.height: 128
+							fillMode: Image.PreserveAspectCrop
+							visible: status === Image.Ready
 							Accessible.ignored: true
 						}
 					}
@@ -1923,18 +2303,33 @@ FocusScope {
 					Layout.fillWidth: true
 					spacing: Theme.space2
 					Rectangle {
+						objectName: "providerInstagramAvatarBackground"
 						Layout.preferredWidth: 42
 						Layout.preferredHeight: 42
 						radius: width / 2
 						color: root.providerAccentSubtle
 						border.color: root.providerAccentBorder
+						clip: true
 						Label {
+							objectName: "providerInstagramMarkLabel"
 							anchors.centerIn: parent
-							text: "IG"
+							text: root.identityInitials(root.identityTitle || root.identitySubtitle, "IG")
 							textFormat: Text.PlainText
-							color: root.providerAccent
+							color: root.providerForeground
 							font.pixelSize: Theme.fontLabel
 							font.bold: true
+							Accessible.ignored: true
+						}
+						Image {
+							objectName: "providerInstagramAvatar"
+							anchors.fill: parent
+							source: root.instagramAvatarSource
+							asynchronous: true
+							cache: false
+							sourceSize.width: 128
+							sourceSize.height: 128
+							fillMode: Image.PreserveAspectCrop
+							visible: status === Image.Ready
 							Accessible.ignored: true
 						}
 					}
@@ -1968,7 +2363,7 @@ FocusScope {
 						objectName: "providerInstagramBrand"
 						text: "Instagram"
 						textFormat: Text.PlainText
-						color: root.providerAccent
+						color: root.providerForeground
 						font.pixelSize: Theme.fontCaption
 						font.bold: true
 						font.capitalization: Font.AllUppercase
@@ -2043,7 +2438,7 @@ FocusScope {
 			color: Theme.panel
 			border.color: Theme.surfaceBorder
 			Accessible.role: Accessible.Grouping
-			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("GitHub repository")
+			Accessible.name: qsTr("Repository details")
 			Accessible.description: root.socialAccessibleSummary()
 
 			ColumnLayout {
@@ -2056,18 +2451,35 @@ FocusScope {
 					Layout.fillWidth: true
 					spacing: Theme.space2
 					Rectangle {
+						objectName: "providerGitHubOwnerAvatarBackground"
 						Layout.preferredWidth: 34
 						Layout.preferredHeight: 34
 						radius: Theme.innerRadius
 						color: Theme.surfaceRaised
 						border.color: Theme.surfaceBorder
+						clip: true
 						Label {
+							objectName: "providerGitHubOwnerAvatarFallback"
 							anchors.centerIn: parent
-							text: "GH"
+							text: root.identityInitials(root.firstValue([
+								"githubOwnerLogin", "githubOwner"
+							]), "GH")
 							textFormat: Text.PlainText
 							color: Theme.textStrong
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
+							Accessible.ignored: true
+						}
+						Image {
+							objectName: "providerGitHubOwnerAvatar"
+							anchors.fill: parent
+							source: root.githubOwnerAvatarSource
+							asynchronous: true
+							cache: false
+							sourceSize.width: 128
+							sourceSize.height: 128
+							fillMode: Image.PreserveAspectCrop
+							visible: status === Image.Ready
 							Accessible.ignored: true
 						}
 					}
@@ -2094,6 +2506,17 @@ FocusScope {
 							elide: Text.ElideRight
 							Accessible.ignored: true
 						}
+						Label {
+							objectName: "providerGitHubIdentitySubtitle"
+							Layout.fillWidth: true
+							visible: root.identitySubtitle.length > 0
+							text: root.identitySubtitle
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
 					}
 					Rectangle {
 						Layout.preferredWidth: githubVisibility.implicitWidth + Theme.space2 * 2
@@ -2109,7 +2532,7 @@ FocusScope {
 								? qsTr("Private") : qsTr("Public")
 							textFormat: Text.PlainText
 							color: root.metadata && root.metadata.githubPrivate === true
-								? Theme.warning : Theme.textMuted
+								? root.contrastSafeForeground(Theme.warning) : Theme.textMuted
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							Accessible.ignored: true
@@ -2138,7 +2561,7 @@ FocusScope {
 					Layout.preferredHeight: implicitHeight
 					spacing: Theme.space3
 					Repeater {
-						model: root.allStats.slice(0, 3)
+						model: root.githubMetrics.slice(0, 3)
 						delegate: Label {
 							required property var modelData
 							required property int index
@@ -2184,10 +2607,11 @@ FocusScope {
 							border.color: root.providerAccentBorder
 							Label {
 								id: githubTopicLabel
+								objectName: "providerGitHubTopicLabel_" + parent.index
 								anchors.centerIn: parent
 								text: root.safeText(parent.modelData, 64)
 								textFormat: Text.PlainText
-								color: Theme.textMain
+								color: root.providerForeground
 								font.pixelSize: Theme.fontCaption
 								Accessible.ignored: true
 							}
@@ -2212,7 +2636,8 @@ FocusScope {
 				? root.withAlpha(Theme.danger, 0.6) : root.providerAccentBorder
 			Accessible.role: root.providerErrorText.length > 0
 				? Accessible.AlertMessage : Accessible.Grouping
-			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("Twitch stream")
+			Accessible.name: root.identityTitle.length > 0
+				? qsTr("Twitch stream: %1").arg(root.identityTitle) : qsTr("Twitch stream")
 			Accessible.description: root.socialAccessibleSummary()
 
 			Rectangle {
@@ -2284,10 +2709,11 @@ FocusScope {
 						border.color: root.withAlpha(root.providerStateColor, 0.55)
 						Label {
 							id: twitchStateText
+							objectName: "providerTwitchStateLabel"
 							anchors.centerIn: parent
 							text: root.providerStateLabel
 							textFormat: Text.PlainText
-							color: root.providerStateColor
+							color: root.providerStateForeground
 							font.pixelSize: Theme.fontCaption
 							font.bold: true
 							Accessible.ignored: true
@@ -2301,7 +2727,7 @@ FocusScope {
 					visible: root.hasValue("twitchViewerCount")
 					text: qsTr("%1 watching now").arg(root.countLabel(root.firstValue(["twitchViewerCount"])))
 					textFormat: Text.PlainText
-					color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+					color: root.providerErrorText.length > 0 ? Theme.danger : root.providerForeground
 					font.pixelSize: Theme.fontLabel
 					font.bold: true
 					Accessible.ignored: true
@@ -2349,12 +2775,97 @@ FocusScope {
 				: root.twitchPresentation ? twitchCardComponent : null
 		}
 
+		Rectangle {
+			id: genericSocialPostCard
+			objectName: "providerSocialPost"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? genericSocialPostLayout.implicitHeight
+				+ Theme.space3 * 2 : 0
+			visible: root.genericSocialPostPresentation
+			radius: Theme.innerRadius
+			color: root.withAlpha(root.providerAccent, 0.06)
+			border.color: root.withAlpha(root.providerAccent, 0.32)
+			Accessible.role: Accessible.Grouping
+			Accessible.name: qsTr("Social post")
+			Accessible.description: root.genericSocialAccessibleSummary()
+
+			ColumnLayout {
+				id: genericSocialPostLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space2
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+
+					ProviderIdentityBadge {
+						objectName: "providerSocialIdentityBadge"
+						labelObjectName: "providerSocialIdentityLabel"
+						providerToken: root.providerToken
+						badgeText: root.providerDisplayName
+						presentation: "inline"
+						accent: root.providerAccent
+						foreground: root.providerForeground
+						Layout.maximumWidth: genericSocialPostCard.width - Theme.space3 * 2
+					}
+
+					Label {
+						objectName: "providerSocialAuthor"
+						Layout.fillWidth: true
+						visible: root.socialPostAuthor.length > 0
+						text: root.socialPostAuthor
+						textFormat: Text.PlainText
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						wrapMode: Text.Wrap
+						maximumLineCount: 2
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+				}
+
+				Label {
+					objectName: "providerSocialPostText"
+					Layout.fillWidth: true
+					visible: root.socialPostText.length > 0
+					text: root.socialPostText
+					textFormat: Text.PlainText
+					color: Theme.textStrong
+					font.pixelSize: Theme.fontLabel
+					font.bold: true
+					lineHeight: 1.3
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 10 : 4
+					elide: root.expanded ? Text.ElideNone : Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Label {
+					objectName: "providerSocialPostDescription"
+					Layout.fillWidth: true
+					visible: root.socialPostDescription.length > 0
+					text: root.socialPostDescription
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontCaption
+					lineHeight: 1.25
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 8 : 2
+					elide: root.expanded ? Text.ElideNone : Text.ElideRight
+					Accessible.ignored: true
+				}
+			}
+		}
+
 		ColumnLayout {
 			id: summaryBlock
 			objectName: "providerSummary"
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
 			visible: !root.steamPresentation && !root.googlePresentation
+				&& !root.genericSocialPostPresentation
 				&& !root.flashbackPresentation && (root.financeLayout || root.commerceLayout
 				|| (root.identityTitle.length === 0 && root.identitySubtitle.length === 0
 					&& root.bodyText.length === 0))
@@ -2373,6 +2884,7 @@ FocusScope {
 				font.capitalization: Font.AllUppercase
 				font.letterSpacing: 0.7
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 
 			GridLayout {
@@ -2396,6 +2908,7 @@ FocusScope {
 						font.pixelSize: Theme.fontHeading
 						font.bold: true
 						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
 					Label {
 						objectName: "providerSummarySubtitle"
@@ -2407,6 +2920,7 @@ FocusScope {
 						font.pixelSize: Theme.fontCaption
 						font.bold: true
 						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
 				}
 
@@ -2423,7 +2937,7 @@ FocusScope {
 						visible: root.primaryValue.length > 0
 						text: root.primaryValue
 						textFormat: Text.PlainText
-					color: root.commerceLayout ? root.providerAccent : Theme.textStrong
+						color: root.commerceLayout ? root.providerForeground : Theme.textStrong
 						font.pixelSize: root.compactLayout ? Theme.fontTitle
 							: (root.financeLayout || root.commerceLayout ? Theme.fontHeading + 2 : Theme.fontHeading)
 						font.bold: true
@@ -2432,6 +2946,7 @@ FocusScope {
 						elide: Text.ElideRight
 						horizontalAlignment: root.financeLayout && !root.compactLayout
 							? Text.AlignRight : Text.AlignLeft
+						Accessible.ignored: true
 					}
 					Label {
 						objectName: "providerDetailsSecondary"
@@ -2446,6 +2961,7 @@ FocusScope {
 						wrapMode: Text.Wrap
 						horizontalAlignment: root.financeLayout && !root.compactLayout
 							? Text.AlignRight : Text.AlignLeft
+						Accessible.ignored: true
 					}
 					Label {
 						objectName: "providerCommerceStatus"
@@ -2457,6 +2973,7 @@ FocusScope {
 						font.pixelSize: Theme.fontCaption
 						font.bold: true
 						wrapMode: Text.Wrap
+						Accessible.ignored: true
 					}
 				}
 			}
@@ -2474,6 +2991,7 @@ FocusScope {
 				wrapMode: Text.Wrap
 				maximumLineCount: root.expanded ? 5 : 2
 				elide: Text.ElideRight
+				Accessible.ignored: true
 			}
 		}
 
@@ -2484,7 +3002,7 @@ FocusScope {
 			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: !root.financeLayout && !root.commerceLayout
 				&& !root.googlePresentation && !root.flashbackPresentation
-				&& !root.socialBespokePresentation
+				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 				&& (root.identityTitle.length > 0
 				|| root.identitySubtitle.length > 0 || root.bodyText.length > 0)
 			radius: Theme.innerRadius
@@ -2496,6 +3014,7 @@ FocusScope {
 				? Accessible.AlertMessage : Accessible.StaticText
 			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : root.heading
 			Accessible.description: root.joinAccessibleSentences([root.identitySubtitle, root.bodyText])
+			Accessible.ignored: true
 
 			RowLayout {
 				id: identityLayout
@@ -2503,34 +3022,21 @@ FocusScope {
 				anchors.margins: Theme.space3
 				spacing: Theme.space3
 
-				Rectangle {
+				ProviderIdentityBadge {
 					objectName: "providerIdentityMark"
 					Layout.preferredWidth: root.variant === "audio" ? 48 : 42
 					Layout.preferredHeight: Layout.preferredWidth
 					Layout.alignment: Qt.AlignTop
 					visible: root.providerMark.length > 0
-					radius: root.variant === "x" || root.variant === "instagram"
-						? width / 2 : Theme.innerRadius
-					color: root.providerErrorText.length > 0
-						? root.withAlpha(Theme.danger, 0.12) : root.providerAccentSubtle
-					border.color: root.providerErrorText.length > 0
-						? root.withAlpha(Theme.danger, 0.5) : root.providerAccentBorder
-
-					Label {
-						id: identityMarkLabel
-						objectName: "providerIdentityMarkLabel"
-						anchors.fill: parent
-						anchors.margins: Theme.space1
-						text: root.providerMark
-						textFormat: Text.PlainText
-						color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
-						font.pixelSize: Theme.fontCaption
-						font.bold: true
-						font.capitalization: Font.AllUppercase
-						horizontalAlignment: Text.AlignHCenter
-						verticalAlignment: Text.AlignVCenter
-						elide: Text.ElideRight
-					}
+					providerToken: root.providerToken
+					badgeText: root.providerMark
+					presentation: "mark"
+					labelObjectName: "providerIdentityMarkLabel"
+					markExtent: root.variant === "audio" ? 48 : 42
+					accent: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+					foreground: root.providerErrorText.length > 0 ? Theme.danger : root.providerForeground
+					fillOpacity: root.providerErrorText.length > 0 ? 0.12 : 0.14
+					borderOpacity: root.providerErrorText.length > 0 ? 0.5 : 0.46
 				}
 
 				ColumnLayout {
@@ -2549,6 +3055,7 @@ FocusScope {
 						font.capitalization: Font.AllUppercase
 						font.letterSpacing: 0.7
 						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
 					RowLayout {
 						Layout.fillWidth: true
@@ -2563,6 +3070,7 @@ FocusScope {
 							font.pixelSize: Theme.fontTitle
 							font.bold: true
 							wrapMode: Text.Wrap
+							Accessible.ignored: true
 						}
 						Rectangle {
 							objectName: "providerVerifiedBadge"
@@ -2573,6 +3081,7 @@ FocusScope {
 									&& root.metadata.twitchLiveState === "live")
 							radius: width / 2
 							color: root.variant === "twitch" ? Theme.success : root.providerAccent
+							Accessible.ignored: true
 							Label {
 								anchors.centerIn: parent
 								text: "✓"
@@ -2580,6 +3089,7 @@ FocusScope {
 								color: Theme.contrastText(parent.color)
 								font.pixelSize: 11
 								font.bold: true
+								Accessible.ignored: true
 							}
 						}
 					}
@@ -2592,6 +3102,7 @@ FocusScope {
 						color: Theme.textMuted
 						font.pixelSize: Theme.fontCaption
 						wrapMode: Text.Wrap
+						Accessible.ignored: true
 					}
 					Label {
 						objectName: "providerIdentityBody"
@@ -2605,6 +3116,7 @@ FocusScope {
 						wrapMode: Text.Wrap
 						maximumLineCount: root.expanded ? 6 : 3
 						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
 				}
 			}
@@ -2629,6 +3141,7 @@ FocusScope {
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				font.bold: true
+				Accessible.ignored: true
 			}
 			Label {
 				anchors.right: parent.right
@@ -2640,6 +3153,7 @@ FocusScope {
 				color: root.trendColor
 				font.pixelSize: Theme.fontCaption
 				font.bold: true
+				Accessible.ignored: true
 			}
 
 			Canvas {
@@ -2708,6 +3222,10 @@ FocusScope {
 				}
 				Accessible.role: Accessible.Chart
 				Accessible.name: qsTr("Price trend with %1 points").arg(sparkline.pointCount)
+				Accessible.description: [
+					root.safeText(root.firstValue(["financeRangeLabel"]), 32) || qsTr("Trend"),
+					root.financeRangeSummary
+				].filter(function(value) { return value.length > 0 }).join(" · ")
 			}
 		}
 
@@ -2718,7 +3236,7 @@ FocusScope {
 			Layout.preferredHeight: statsFlow.visible ? statsFlow.implicitHeight : 0
 			visible: root.visibleStats.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
-				&& !root.socialBespokePresentation
+				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 			columns: root.statColumnCount(width)
 			columnSpacing: Theme.space2
 			rowSpacing: Theme.space2
@@ -2743,6 +3261,7 @@ FocusScope {
 					Accessible.role: Accessible.StaticText
 					Accessible.name: statTile.modelData.label
 					Accessible.description: statTile.modelData.value
+					Accessible.ignored: true
 
 					ColumnLayout {
 						id: statColumn
@@ -2767,6 +3286,7 @@ FocusScope {
 							elide: Text.ElideRight
 							horizontalAlignment: statTile.presentation === "metric"
 								? Text.AlignHCenter : Text.AlignLeft
+							Accessible.ignored: true
 						}
 						Label {
 							objectName: "providerStatValue_" + statTile.index
@@ -2783,6 +3303,7 @@ FocusScope {
 							elide: Text.ElideRight
 							horizontalAlignment: statTile.presentation === "metric"
 								? Text.AlignHCenter : Text.AlignLeft
+							Accessible.ignored: true
 						}
 					}
 
@@ -2805,7 +3326,7 @@ FocusScope {
 			Layout.preferredHeight: chipFlow.visible ? chipFlow.implicitHeight : 0
 			visible: root.visibleChips.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
-				&& !root.socialBespokePresentation
+				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 			spacing: Theme.space1
 
 			Repeater {
@@ -2830,6 +3351,7 @@ FocusScope {
 						: Theme.surfaceBorder
 					Accessible.role: Accessible.StaticText
 					Accessible.name: chip.modelData.text
+					Accessible.ignored: true
 
 					Label {
 						id: chipLabel
@@ -2839,12 +3361,12 @@ FocusScope {
 						anchors.rightMargin: Theme.space2
 						text: chip.modelData.text
 						textFormat: Text.PlainText
-						color: chip.modelData.tone === "accent" ? root.providerAccent
-							: chip.modelData.tone === "danger" ? Theme.danger : Theme.textMain
+						color: root.chipForeground(chip.modelData.tone)
 						font.pixelSize: Theme.fontCaption
 						font.bold: chip.modelData.tone !== "normal"
 						elide: Text.ElideRight
 						verticalAlignment: Text.AlignVCenter
+						Accessible.ignored: true
 					}
 				}
 			}

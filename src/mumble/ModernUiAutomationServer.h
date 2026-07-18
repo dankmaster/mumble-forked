@@ -7,6 +7,7 @@
 #define MUMBLE_MUMBLE_MODERNUIAUTOMATIONSERVER_H_
 
 #include <QtCore/QObject>
+#include <QtCore/QMetaObject>
 #include <QtCore/QString>
 #include <QtCore/QVariantMap>
 #include <QtCore/QVariantList>
@@ -47,6 +48,8 @@ private:
 	void prepareTopLevelWidgetForAutomation(QWidget *widget) const;
 	QVariantMap finalizeChatPerformanceWorkload(QmlShellHost *host);
 	QVariantMap finalizeTalkPerformanceWorkload(QmlShellHost *host);
+	void advanceChatPerformanceWorkload();
+	void advanceTalkPerformanceWorkload();
 
 	MainWindow *m_mainWindow = nullptr;
 	QTcpServer *m_server     = nullptr;
@@ -57,11 +60,19 @@ private:
 	QString m_automationDialogDraftFieldId;
 	QVariant m_automationDialogDraftValue;
 	bool m_automationDialogDraftActive = false;
+	qulonglong m_performanceInputSequence = 0;
 	struct ChatPerformanceWorkloadState {
 		bool active = false;
 		bool previousFixtureOverride = false;
 		QVariantList liveMessages;
+		bool running = false;
+		bool primed = false;
+		int stepCount = 0;
+		int targetSteps = 0;
 		int presentedFramesBeforeSeed = 0;
+		int presentedFramesBeforeRun = 0;
+		QString failureReason;
+		QMetaObject::Connection frameConnection;
 	} m_chatPerformanceWorkload;
 	struct TalkPerformanceWorkloadState {
 		bool active = false;
@@ -69,8 +80,12 @@ private:
 		QVariantList liveParticipants;
 		QString sessionId;
 		bool talking = false;
+		bool running = false;
+		bool primed = false;
 		int transitionCount = 0;
+		int targetTransitions = 0;
 		int presentedFramesBefore = 0;
+		QMetaObject::Connection frameConnection;
 	} m_talkPerformanceWorkload;
 };
 

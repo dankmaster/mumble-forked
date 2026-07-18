@@ -6,6 +6,7 @@
 add_executable(TestScreenShare TestScreenShare.cpp ../../mumble/ScreenShareViewBackend.cpp)
 
 set_target_properties(TestScreenShare PROPERTIES AUTOMOC ON)
+target_compile_definitions(TestScreenShare PRIVATE MUMBLE_HAS_MODERN_UI_MOCKUPS)
 
 find_pkg(Qt6 COMPONENTS Gui REQUIRED)
 

@@ -1,0 +1,494 @@
+{
+  "schema_version": 1,
+  "gate_id": "windows-qml-connected-product",
+  "frontend_contract": "typed-controllers-and-models",
+  "default_policy_id": "community-candidate",
+  "policies": [
+    {
+      "id": "community-candidate",
+      "required_classifications": [
+        "required"
+      ]
+    },
+    {
+      "id": "community-release",
+      "required_classifications": [
+        "required",
+        "extended",
+        "manual"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "connect.saved-server",
+      "classification": "required",
+      "commands": [
+        "ping",
+        "qmlReadinessState",
+        "snapshot"
+      ],
+      "assertions": [
+        {
+          "id": "qml-window-ready",
+          "path": "readiness.windowReady",
+          "operator": "truthy"
+        },
+        {
+          "id": "qml-frontend",
+          "path": "readiness.frontend",
+          "operator": "equal",
+          "expected": "qml"
+        },
+        {
+          "id": "connected",
+          "path": "snapshot.app.connected",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "ping",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "connect.restart-reconnect",
+      "classification": "required",
+      "commands": [
+        "qmlReadinessState",
+        "snapshot"
+      ],
+      "assertions": [
+        {
+          "id": "new-process-generation",
+          "path": "harness.processGeneration",
+          "operator": "countAtLeast",
+          "expected": 2
+        },
+        {
+          "id": "reconnected",
+          "path": "snapshot.app.connected",
+          "operator": "truthy"
+        },
+        {
+          "id": "same-saved-server",
+          "path": "harness.savedServerIdentityPreserved",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "ping",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "rooms.text-selection-chat",
+      "classification": "required",
+      "commands": [
+        "snapshot",
+        "selectScope",
+        "sendMessage"
+      ],
+      "assertions": [
+        {
+          "id": "stable-text-scope",
+          "path": "snapshot.activeScope.scopeToken",
+          "operator": "equal",
+          "expected": "$selected_scope_token"
+        },
+        {
+          "id": "bidirectional-delivery",
+          "path": "harness.bidirectionalMessagesDelivered",
+          "operator": "truthy"
+        },
+        {
+          "id": "timeline-model-state",
+          "path": "harness.verificationSource",
+          "operator": "equal",
+          "expected": "qml-model-state"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "snapshot",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "rooms.voice-join-session-map",
+      "classification": "required",
+      "commands": [
+        "snapshot",
+        "selectScope",
+        "joinVoice"
+      ],
+      "assertions": [
+        {
+          "id": "both-clients-joined",
+          "path": "harness.clientsJoinedVoiceScope",
+          "operator": "truthy"
+        },
+        {
+          "id": "stable-peer-session-map",
+          "path": "harness.peerSessionMapConsistent",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "snapshot",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "direct-message.bidirectional",
+      "classification": "required",
+      "commands": [
+        "openDirectMessage",
+        "directMessageState",
+        "setDirectMessageMode",
+        "sendDirectMessage",
+        "markDirectMessageRead",
+        "closeDirectMessage"
+      ],
+      "assertions": [
+        {
+          "id": "bidirectional-message",
+          "path": "harness.bidirectionalMessagesDelivered",
+          "operator": "truthy"
+        },
+        {
+          "id": "stable-message-id",
+          "path": "harness.stableMessageId",
+          "operator": "exists"
+        },
+        {
+          "id": "read-state-cleared",
+          "path": "harness.readStateCleared",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "closeDirectMessage",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "direct-message.rich-capabilities",
+      "classification": "extended",
+      "commands": [
+        "directMessageHydrateContent",
+        "directMessageReply",
+        "directMessageCancelReply",
+        "directMessageToggleReaction",
+        "closeDirectMessage"
+      ],
+      "assertions": [
+        {
+          "id": "content-hydration-available",
+          "path": "harness.contentHydrationCapabilityAvailable",
+          "operator": "truthy"
+        },
+        {
+          "id": "reply-available",
+          "path": "harness.replyCapabilityAvailable",
+          "operator": "truthy"
+        },
+        {
+          "id": "reaction-available",
+          "path": "harness.reactionCapabilityAvailable",
+          "operator": "truthy"
+        },
+        {
+          "id": "rich-operations-passed",
+          "path": "harness.supportedRichOperationsPassed",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "closeDirectMessage",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "voice.self-controls-ptt-release",
+      "classification": "required",
+      "commands": [
+        "invokeAppAction",
+        "setQmlPttPressed",
+        "snapshot"
+      ],
+      "assertions": [
+        {
+          "id": "mute-round-trip",
+          "path": "harness.selfMuteRoundTripPassed",
+          "operator": "truthy"
+        },
+        {
+          "id": "deafen-round-trip",
+          "path": "harness.selfDeafenRoundTripPassed",
+          "operator": "truthy"
+        },
+        {
+          "id": "ptt-released",
+          "path": "snapshot.app.pttPressed",
+          "operator": "falsy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "setQmlPttPressed",
+          "arguments": {
+            "pressed": false
+          },
+          "when": "always",
+          "best_effort": false
+        }
+      ]
+    },
+    {
+      "id": "media.connected-rich-preview",
+      "classification": "extended",
+      "commands": [
+        "requestPreviewHydration",
+        "richPreviewState",
+        "invokeRichPreviewAction",
+        "closeQmlMediaSession"
+      ],
+      "assertions": [
+        {
+          "id": "server-message-hydrated",
+          "path": "harness.previewHydratedFromConnectedTimeline",
+          "operator": "truthy"
+        },
+        {
+          "id": "inline-detached-continuity",
+          "path": "harness.inlineDetachedContinuityPassed",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "closeQmlMediaSession",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "media.watch-together",
+      "classification": "extended",
+      "commands": [
+        "watchTogetherState",
+        "startWatchTogether",
+        "watchTogetherAction"
+      ],
+      "assertions": [
+        {
+          "id": "shared-lifecycle",
+          "path": "harness.startJoinPlayPauseSeekTransferLeaveEndPassed",
+          "operator": "truthy"
+        },
+        {
+          "id": "session-cleared",
+          "path": "harness.sharedSessionClearedOnBothClients",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "watchTogetherAction",
+          "arguments": {
+            "action": "end-or-leave-if-owned"
+          },
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "screen-share.publish-view",
+      "classification": "extended",
+      "commands": [
+        "invokeScopeAction",
+        "dialogAction",
+        "screenShareViewerState",
+        "screenShareViewerAction",
+        "snapshot"
+      ],
+      "assertions": [
+        {
+          "id": "publisher-viewer-live",
+          "path": "harness.publisherViewerLive",
+          "operator": "truthy"
+        },
+        {
+          "id": "native-viewer-frame",
+          "path": "harness.viewerHasCurrentFrame",
+          "operator": "truthy"
+        },
+        {
+          "id": "viewer-lifecycle",
+          "path": "harness.pauseResumeRetryCloseStopPassed",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "screenShareViewerAction",
+          "arguments": {
+            "action": "stop"
+          },
+          "when": "always",
+          "best_effort": true
+        },
+        {
+          "command": "invokeScopeAction",
+          "arguments": {
+            "actionId": "screenShareStop"
+          },
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "admin.registered-users-ban-list-read-only",
+      "classification": "extended",
+      "commands": [
+        "invokeAppAction",
+        "snapshot",
+        "closeDialog"
+      ],
+      "assertions": [
+        {
+          "id": "registered-users-loaded",
+          "path": "snapshot.serverAdmin.registeredUsers.state",
+          "operator": "equal",
+          "expected": "ready"
+        },
+        {
+          "id": "ban-list-loaded",
+          "path": "snapshot.serverAdmin.bans.state",
+          "operator": "equal",
+          "expected": "ready"
+        },
+        {
+          "id": "no-admin-mutation",
+          "path": "harness.serverAdminMutationCount",
+          "operator": "equal",
+          "expected": 0
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "closeDialog",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "admin.acl-read-only",
+      "classification": "extended",
+      "commands": [
+        "invokeAppAction",
+        "snapshot",
+        "closeDialog"
+      ],
+      "assertions": [
+        {
+          "id": "acl-model-loaded",
+          "path": "snapshot.dialog.fields.acl.model",
+          "operator": "exists"
+        },
+        {
+          "id": "no-acl-mutation",
+          "path": "harness.aclMutationCount",
+          "operator": "equal",
+          "expected": 0
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "closeDialog",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "update.routing-dry-run",
+      "classification": "extended",
+      "commands": [
+        "updateHandoffDryRun",
+        "versionCheckModernRoutingDryRun"
+      ],
+      "assertions": [
+        {
+          "id": "external-effects-suppressed",
+          "path": "harness.externalEffectsSuppressed",
+          "operator": "truthy"
+        },
+        {
+          "id": "verified-package-routing",
+          "path": "harness.verifiedPackageRoutingPassed",
+          "operator": "truthy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "ping",
+          "when": "always",
+          "best_effort": true
+        }
+      ]
+    },
+    {
+      "id": "voice.audible-manual",
+      "classification": "manual",
+      "commands": [
+        "setQmlPttPressed",
+        "snapshot"
+      ],
+      "assertions": [
+        {
+          "id": "peer-heard-voice",
+          "path": "attestation.peerHeardVoice",
+          "operator": "truthy"
+        },
+        {
+          "id": "ptt-ended-cleanly",
+          "path": "snapshot.app.pttPressed",
+          "operator": "falsy"
+        }
+      ],
+      "cleanup": [
+        {
+          "command": "setQmlPttPressed",
+          "arguments": {
+            "pressed": false
+          },
+          "when": "always",
+          "best_effort": false
+        }
+      ]
+    }
+  ]
+}

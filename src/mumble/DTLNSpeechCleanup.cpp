@@ -18,7 +18,9 @@
 #include <QFileInfo>
 #include <QString>
 
+#define ORT_API_MANUAL_INIT
 #include <onnxruntime_cxx_api.h>
+#undef ORT_API_MANUAL_INIT
 
 #include <algorithm>
 #include <array>
@@ -27,6 +29,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -51,6 +54,14 @@ namespace {
 	constexpr unsigned int DTLN_MAX_UPSAMPLED_BLOCK  = 768;
 	constexpr unsigned int DTLN_OUTPUT_QUEUE_CAP     = 8192;
 	constexpr float DTLN_TIME_DOMAIN_CLAMP           = 1.0f;
+
+	class OrtApiFirstUse final {
+	public:
+		OrtApiFirstUse() {
+			static std::once_flag initialized;
+			std::call_once(initialized, []() { Ort::InitApi(); });
+		}
+	};
 
 	float finiteNormalizedSample(float sample) {
 		return std::isfinite(sample) ? std::clamp(sample, -DTLN_TIME_DOMAIN_CLAMP, DTLN_TIME_DOMAIN_CLAMP) : 0.0f;
@@ -269,6 +280,9 @@ namespace {
 		}
 
 		QString m_modelDirectory;
+		// Declared before every Ort C++ wrapper so its construction performs the
+		// first delay-loaded API lookup before those wrappers dereference GetApi().
+		OrtApiFirstUse m_ortApiFirstUse;
 		Ort::Env m_env;
 		Ort::MemoryInfo m_memoryInfo;
 		std::unique_ptr< Ort::Session > m_model1Session;

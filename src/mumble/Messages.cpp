@@ -39,16 +39,27 @@
 #include "Global.h"
 
 #include <algorithm>
+#include <functional>
 #include <utility>
 #include <QBuffer>
 #include <QDateTime>
 #include <QCryptographicHash>
+#include <QDesktopServices>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSaveFile>
 #include <QImageReader>
+#include <QRegularExpression>
+#include <QTemporaryDir>
 #include <QTextDocumentFragment>
-#include <QTextStream>
+#include <QFutureWatcher>
+#include <QPointer>
+#include <QReadLocker>
+#include <QTimer>
 #include <QUrl>
+#include <QUuid>
+#include <QtConcurrent/QtConcurrentRun>
 
 #define ACTOR_INIT                           \
 	ClientUser *pSrc = nullptr;              \
@@ -71,6 +82,448 @@
 	}
 
 namespace {
+	struct UserLocalPreferenceRequest {
+		unsigned int session = 0;
+		QString hash;
+		QPointer< ClientUser > user;
+	};
+
+	struct UserLocalPreferenceSnapshot {
+		unsigned int session = 0;
+		QString hash;
+		bool valid = false;
+		QString friendName;
+		bool localMuted = false;
+		bool localIgnored = false;
+		bool localIgnoredTts = false;
+		std::optional< bool > remoteSpeechCleanup;
+		float localVolume = 1.0f;
+		QString localNickname;
+	};
+
+	class UserLocalPreferenceLoader final : public QObject {
+	public:
+		UserLocalPreferenceLoader(QString databasePath, UserModel *userModel, QObject *parent)
+			: QObject(parent), m_databasePath(std::move(databasePath)), m_userModel(userModel) {
+		}
+
+		void request(ClientUser *user) {
+			if (!user || user->qsHash.isEmpty() || m_databasePath.isEmpty()) return;
+			const QString hash = user->qsHash;
+			if (user->property(LoadedHashProperty).toString() == hash) return;
+
+			m_pending.insert(user->uiSession, UserLocalPreferenceRequest { user->uiSession, hash, user });
+			if (!m_workerActive && !m_launchScheduled) {
+				m_launchScheduled = true;
+				QTimer::singleShot(0, this, [this]() {
+					m_launchScheduled = false;
+					launchNextBatch();
+				});
+			}
+		}
+
+	private:
+		static constexpr auto LoadedHashProperty = "_mumbleLoadedLocalPreferenceHash";
+		static constexpr int MaxBatchSize = 64;
+
+		void launchNextBatch() {
+			if (m_workerActive || m_pending.isEmpty()) return;
+
+			QList< UserLocalPreferenceRequest > requests;
+			requests.reserve(std::min(MaxBatchSize, static_cast< int >(m_pending.size())));
+			auto iterator = m_pending.begin();
+			while (iterator != m_pending.end() && requests.size() < MaxBatchSize) {
+				requests.append(iterator.value());
+				iterator = m_pending.erase(iterator);
+			}
+
+			QList< QPair< unsigned int, QString > > workerRequests;
+			workerRequests.reserve(requests.size());
+			for (const UserLocalPreferenceRequest &request : std::as_const(requests)) {
+				workerRequests.append({ request.session, request.hash });
+			}
+
+			m_workerActive = true;
+			auto *watcher = new QFutureWatcher< QList< UserLocalPreferenceSnapshot > >(this);
+			connect(watcher, &QFutureWatcher< QList< UserLocalPreferenceSnapshot > >::finished, this,
+				[this, watcher, requests = std::move(requests)]() {
+					const QList< UserLocalPreferenceSnapshot > snapshots = watcher->result();
+					watcher->deleteLater();
+					m_workerActive = false;
+
+					for (int index = 0; index < requests.size() && index < snapshots.size(); ++index) {
+						const UserLocalPreferenceRequest &request = requests.at(index);
+						const UserLocalPreferenceSnapshot &snapshot = snapshots.at(index);
+						ClientUser *user = request.user.data();
+						if (!snapshot.valid || !user || user->uiSession != request.session
+							|| user->qsHash != request.hash || snapshot.session != request.session
+							|| snapshot.hash != request.hash || m_pending.contains(request.session)) {
+							continue;
+						}
+
+						user->setProperty(LoadedHashProperty, request.hash);
+						if (!snapshot.friendName.isEmpty() && m_userModel) {
+							m_userModel->setFriendName(user, snapshot.friendName);
+						}
+						if (snapshot.localMuted) user->setLocalMute(true);
+						if (snapshot.localIgnored) user->setLocalIgnore(true);
+						if (snapshot.localIgnoredTts) user->setLocalIgnoreTTS(true);
+						if (snapshot.remoteSpeechCleanup.has_value()) {
+							user->setRemoteSpeechCleanupOverride(snapshot.remoteSpeechCleanup);
+						}
+						user->setLocalVolumeAdjustment(snapshot.localVolume);
+						user->setLocalNickname(snapshot.localNickname);
+					}
+
+					launchNextBatch();
+				});
+
+			const QString databasePath = m_databasePath;
+			watcher->setFuture(QtConcurrent::run(
+				[databasePath, workerRequests = std::move(workerRequests)]() {
+					QList< UserLocalPreferenceSnapshot > snapshots;
+					snapshots.reserve(workerRequests.size());
+					Database database(
+						QStringLiteral("user-local-preferences-%1")
+							.arg(QUuid::createUuid().toString(QUuid::WithoutBraces)),
+						databasePath, false);
+					for (const auto &workerRequest : workerRequests) {
+						UserLocalPreferenceSnapshot snapshot;
+						snapshot.session = workerRequest.first;
+						snapshot.hash = workerRequest.second;
+						if (database.isValid()) {
+							snapshot.friendName = database.getFriend(snapshot.hash);
+							snapshot.localMuted = database.isLocalMuted(snapshot.hash);
+							snapshot.localIgnored = database.isLocalIgnored(snapshot.hash);
+							snapshot.localIgnoredTts = database.isLocalIgnoredTTS(snapshot.hash);
+							snapshot.remoteSpeechCleanup = database.getUserRemoteSpeechCleanup(snapshot.hash);
+							snapshot.localVolume = database.getUserLocalVolume(snapshot.hash);
+							snapshot.localNickname = database.getUserLocalNickname(snapshot.hash);
+							snapshot.valid = true;
+						}
+						snapshots.append(std::move(snapshot));
+					}
+					return snapshots;
+				}));
+		}
+
+		QString m_databasePath;
+		QPointer< UserModel > m_userModel;
+		QHash< unsigned int, UserLocalPreferenceRequest > m_pending;
+		bool m_workerActive = false;
+		bool m_launchScheduled = false;
+	};
+
+	UserLocalPreferenceLoader *userLocalPreferenceLoader(MainWindow *owner, UserModel *userModel) {
+		static constexpr auto LoaderProperty = "_mumbleUserLocalPreferenceLoader";
+		if (!owner) return nullptr;
+		QObject *loaderObject = owner->property(LoaderProperty).value< QObject * >();
+		auto *loader = static_cast< UserLocalPreferenceLoader * >(loaderObject);
+		if (!loader) {
+			loader = new UserLocalPreferenceLoader(Global::get().s.qsDatabaseLocation, userModel, owner);
+			owner->setProperty(LoaderProperty, QVariant::fromValue(static_cast< QObject * >(loader)));
+		}
+		return loader;
+	}
+
+	struct ServerShortcutReadRequest {
+		QByteArray digest;
+		unsigned int session = 0;
+		quint64 serial = 0;
+		QPointer< ServerHandler > handler;
+		std::function< void() > completion;
+	};
+
+	struct ChannelFilterReadRequest {
+		QByteArray digest;
+		unsigned int channelID = 0;
+		ChannelFilterMode initialFilterMode = ChannelFilterMode::NORMAL;
+		QPointer< Channel > channel;
+		QPointer< ServerHandler > handler;
+	};
+
+	struct ServerScopedDatabaseSnapshot {
+		bool valid = false;
+		QList< Shortcut > shortcuts;
+		QList< ChannelFilterMode > channelFilterModes;
+	};
+
+	/// Serializes server-scoped UI database reads onto one worker at a time. Channel
+	/// reads are coalesced by ID and dispatched in bounded batches. If a server
+	/// publishes more channels than the bounded queue can hold, a dynamic property
+	/// on the Channel object records the deferred request without growing another
+	/// container; subsequent batches discover and drain those markers.
+	class ServerScopedDatabaseLoader final : public QObject {
+	public:
+		ServerScopedDatabaseLoader(QString databasePath, MainWindow *owner, UserModel *userModel)
+			: QObject(owner), m_databasePath(std::move(databasePath)), m_owner(owner), m_userModel(userModel) {
+		}
+
+		bool requestShortcuts(const ServerHandlerPtr &handler, const unsigned int session,
+							  std::function< void() > completion) {
+			if (!handler || m_databasePath.isEmpty()) {
+				return false;
+			}
+
+			const QByteArray digest = handler->serverDigest();
+			if (digest.isEmpty()) {
+				return false;
+			}
+
+			ServerShortcutReadRequest request;
+			request.digest     = digest;
+			request.session    = session;
+			request.serial     = ++m_latestShortcutSerial;
+			request.handler    = handler.get();
+			request.completion = std::move(completion);
+			m_pendingShortcut  = std::move(request);
+			scheduleLaunch();
+			return true;
+		}
+
+		void requestChannelFilter(const ServerHandlerPtr &handler, Channel *channel) {
+			if (!handler || !channel || m_databasePath.isEmpty()) {
+				return;
+			}
+
+			const QByteArray digest = handler->serverDigest();
+			if (digest.isEmpty()
+				|| channel->property(ChannelFilterPendingDigestProperty).toByteArray() == digest) {
+				return;
+			}
+
+			if (m_pendingChannelFilters.size() >= MaxPendingChannelFilters) {
+				channel->setProperty(ChannelFilterDeferredDigestProperty, digest);
+				m_hasDeferredChannelFilters = true;
+				return;
+			}
+
+			enqueueChannelFilter(handler.get(), channel, digest);
+			scheduleLaunch();
+		}
+
+	private:
+		static constexpr auto ChannelFilterPendingDigestProperty = "_mumbleChannelFilterPendingDigest";
+		static constexpr auto ChannelFilterDeferredDigestProperty = "_mumbleChannelFilterDeferredDigest";
+		static constexpr int MaxPendingChannelFilters = 256;
+		static constexpr int MaxChannelFiltersPerBatch = 64;
+
+		void scheduleLaunch() {
+			if (m_workerActive || m_launchScheduled) {
+				return;
+			}
+			m_launchScheduled = true;
+			QTimer::singleShot(0, this, [this]() {
+				m_launchScheduled = false;
+				launchNextBatch();
+			});
+		}
+
+		void enqueueChannelFilter(ServerHandler *handler, Channel *channel, const QByteArray &digest) {
+			ChannelFilterReadRequest request;
+			request.digest            = digest;
+			request.channelID         = channel->iId;
+			request.initialFilterMode = channel->m_filterMode;
+			request.channel           = channel;
+			request.handler           = handler;
+			m_pendingChannelFilters.insert(channel->iId, std::move(request));
+			channel->setProperty(ChannelFilterPendingDigestProperty, digest);
+			channel->setProperty(ChannelFilterDeferredDigestProperty, QVariant());
+		}
+
+		void refillDeferredChannelFilters() {
+			if (!m_hasDeferredChannelFilters || m_pendingChannelFilters.size() >= MaxPendingChannelFilters) {
+				return;
+			}
+
+			const ServerHandlerPtr handler = Global::get().sh;
+			if (!handler) {
+				m_hasDeferredChannelFilters = false;
+				return;
+			}
+			const QByteArray digest = handler->serverDigest();
+			if (digest.isEmpty()) {
+				m_hasDeferredChannelFilters = false;
+				return;
+			}
+
+			QList< QPointer< Channel > > deferredChannels;
+			{
+				QReadLocker lock(&Channel::c_qrwlChannels);
+				for (Channel *channel : std::as_const(Channel::c_qhChannels)) {
+					if (channel
+						&& channel->property(ChannelFilterDeferredDigestProperty).toByteArray() == digest) {
+						deferredChannels.append(channel);
+					}
+				}
+			}
+
+			m_hasDeferredChannelFilters = false;
+			for (const QPointer< Channel > &guardedChannel : std::as_const(deferredChannels)) {
+				Channel *channel = guardedChannel.data();
+				if (!channel) {
+					continue;
+				}
+				if (m_pendingChannelFilters.size() >= MaxPendingChannelFilters) {
+					m_hasDeferredChannelFilters = true;
+					break;
+				}
+				enqueueChannelFilter(handler.get(), channel, digest);
+			}
+		}
+
+		void launchNextBatch() {
+			if (m_workerActive) {
+				return;
+			}
+
+			refillDeferredChannelFilters();
+			if (!m_pendingShortcut.has_value() && m_pendingChannelFilters.isEmpty()) {
+				return;
+			}
+
+			std::optional< ServerShortcutReadRequest > shortcutRequest = std::move(m_pendingShortcut);
+			m_pendingShortcut.reset();
+
+			QList< ChannelFilterReadRequest > channelFilterRequests;
+			channelFilterRequests.reserve(
+				std::min(MaxChannelFiltersPerBatch, static_cast< int >(m_pendingChannelFilters.size())));
+			auto iterator = m_pendingChannelFilters.begin();
+			while (iterator != m_pendingChannelFilters.end()
+				   && channelFilterRequests.size() < MaxChannelFiltersPerBatch) {
+				channelFilterRequests.append(iterator.value());
+				iterator = m_pendingChannelFilters.erase(iterator);
+			}
+
+			const std::optional< QByteArray > workerShortcutDigest =
+				shortcutRequest.has_value() ? std::optional< QByteArray >(shortcutRequest->digest) : std::nullopt;
+			QList< QPair< QByteArray, unsigned int > > workerChannelFilters;
+			workerChannelFilters.reserve(channelFilterRequests.size());
+			for (const ChannelFilterReadRequest &request : std::as_const(channelFilterRequests)) {
+				workerChannelFilters.append({ request.digest, request.channelID });
+			}
+
+			m_workerActive = true;
+			auto *watcher = new QFutureWatcher< ServerScopedDatabaseSnapshot >(this);
+			connect(watcher, &QFutureWatcher< ServerScopedDatabaseSnapshot >::finished, this,
+				[this, watcher, shortcutRequest = std::move(shortcutRequest),
+				 channelFilterRequests = std::move(channelFilterRequests)]() {
+					const ServerScopedDatabaseSnapshot snapshot = watcher->result();
+					watcher->deleteLater();
+					m_workerActive = false;
+
+					if (shortcutRequest.has_value() && shortcutRequest->serial == m_latestShortcutSerial) {
+						const ServerHandlerPtr currentHandler = Global::get().sh;
+						if (currentHandler && currentHandler.get() == shortcutRequest->handler.data()
+							&& currentHandler->stateSnapshot() == ServerHandlerState::ConnectionEstablished
+							&& currentHandler->serverDigest() == shortcutRequest->digest
+							&& Global::get().uiSession == shortcutRequest->session
+							&& ClientUser::get(shortcutRequest->session)) {
+							if (snapshot.valid && !snapshot.shortcuts.isEmpty()) {
+								Global::get().s.qlShortcuts << snapshot.shortcuts;
+								if (GlobalShortcutEngine::engine) {
+									GlobalShortcutEngine::engine->bNeedRemap = true;
+								}
+							}
+							if (shortcutRequest->completion) {
+								shortcutRequest->completion();
+							}
+						}
+					}
+
+					for (int index = 0;
+						 index < channelFilterRequests.size() && index < snapshot.channelFilterModes.size(); ++index) {
+						const ChannelFilterReadRequest &request = channelFilterRequests.at(index);
+						Channel *channel = request.channel.data();
+						if (channel
+							&& channel->property(ChannelFilterPendingDigestProperty).toByteArray() == request.digest) {
+							channel->setProperty(ChannelFilterPendingDigestProperty, QVariant());
+						}
+
+						const ServerHandlerPtr currentHandler = Global::get().sh;
+						if (!snapshot.valid || !channel || !currentHandler
+							|| currentHandler.get() != request.handler.data()
+							|| currentHandler->stateSnapshot() != ServerHandlerState::ConnectionEstablished
+							|| !currentHandler->isConnected()
+							|| currentHandler->serverDigest() != request.digest
+							|| Channel::get(request.channelID) != channel || channel->iId != request.channelID) {
+							continue;
+						}
+
+						const ChannelFilterMode filterMode = snapshot.channelFilterModes.at(index);
+						// A local filter action that happened while the read was in flight is
+						// authoritative; never replace it with the older snapshot.
+						if (channel->m_filterMode != request.initialFilterMode) {
+							continue;
+						}
+						if (channel->m_filterMode == filterMode) {
+							continue;
+						}
+						channel->m_filterMode = filterMode;
+						if (m_userModel) {
+							const QModelIndex modelIndex = m_userModel->index(channel);
+							if (modelIndex.isValid()) {
+								emit m_userModel->dataChanged(modelIndex, modelIndex);
+							}
+						}
+						if (m_owner) {
+							emit m_owner->channelStateChanged(channel, false);
+						}
+					}
+
+					refillDeferredChannelFilters();
+					launchNextBatch();
+				});
+
+			const QString databasePath = m_databasePath;
+			watcher->setFuture(QtConcurrent::run(
+				[databasePath, workerShortcutDigest,
+				 workerChannelFilters = std::move(workerChannelFilters)]() {
+					ServerScopedDatabaseSnapshot snapshot;
+					Database database(
+						QStringLiteral("server-scoped-ui-reads-%1")
+							.arg(QUuid::createUuid().toString(QUuid::WithoutBraces)),
+						databasePath, false);
+					snapshot.valid = database.isValid();
+					if (snapshot.valid && workerShortcutDigest.has_value()) {
+						snapshot.shortcuts = database.getShortcuts(*workerShortcutDigest);
+					}
+					snapshot.channelFilterModes.reserve(workerChannelFilters.size());
+					for (const auto &workerRequest : workerChannelFilters) {
+						snapshot.channelFilterModes.append(
+							snapshot.valid
+								? database.getChannelFilterMode(workerRequest.first, workerRequest.second)
+								: ChannelFilterMode::NORMAL);
+					}
+					return snapshot;
+				}));
+		}
+
+		QString m_databasePath;
+		QPointer< MainWindow > m_owner;
+		QPointer< UserModel > m_userModel;
+		std::optional< ServerShortcutReadRequest > m_pendingShortcut;
+		QHash< unsigned int, ChannelFilterReadRequest > m_pendingChannelFilters;
+		quint64 m_latestShortcutSerial = 0;
+		bool m_hasDeferredChannelFilters = false;
+		bool m_workerActive = false;
+		bool m_launchScheduled = false;
+	};
+
+	ServerScopedDatabaseLoader *serverScopedDatabaseLoader(MainWindow *owner, UserModel *userModel) {
+		static constexpr auto LoaderProperty = "_mumbleServerScopedDatabaseLoader";
+		if (!owner) {
+			return nullptr;
+		}
+		QObject *loaderObject = owner->property(LoaderProperty).value< QObject * >();
+		auto *loader = static_cast< ServerScopedDatabaseLoader * >(loaderObject);
+		if (!loader) {
+			loader = new ServerScopedDatabaseLoader(Global::get().s.qsDatabaseLocation, owner, userModel);
+			owner->setProperty(LoaderProperty, QVariant::fromValue(static_cast< QObject * >(loader)));
+		}
+		return loader;
+	}
+
 	QString normalizedChatAssetMime(const QString &mime) {
 		return mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
 	}
@@ -102,6 +555,45 @@ namespace {
 		}
 
 		return QString::fromLatin1("data:%1;base64,%2").arg(normalized, QString::fromLatin1(bytes.toBase64()));
+	}
+
+	QString trustedChatAttachmentOpenExtension(const QString &mime, const MumbleProto::ChatAssetKind kind,
+											 const QString &fileName) {
+		const QString normalized = normalizedChatAssetMime(mime);
+		if (normalized == QLatin1String("application/pdf")) return QStringLiteral("pdf");
+		if (normalized == QLatin1String("text/plain")) return QStringLiteral("txt");
+		if (normalized == QLatin1String("text/markdown")) return QStringLiteral("md");
+		if (normalized == QLatin1String("audio/mpeg") || normalized == QLatin1String("audio/mp3")) return QStringLiteral("mp3");
+		if (normalized == QLatin1String("audio/wav") || normalized == QLatin1String("audio/x-wav")) return QStringLiteral("wav");
+		if (normalized == QLatin1String("audio/ogg")) return QStringLiteral("ogg");
+		if (normalized == QLatin1String("audio/flac") || normalized == QLatin1String("audio/x-flac")) return QStringLiteral("flac");
+		if (normalized == QLatin1String("audio/aac")) return QStringLiteral("aac");
+		if (normalized == QLatin1String("audio/mp4")) return QStringLiteral("m4a");
+		if (normalized == QLatin1String("audio/webm")) return QStringLiteral("webm");
+		if (normalized == QLatin1String("video/mp4")) return QStringLiteral("mp4");
+		if (normalized == QLatin1String("video/webm")) return QStringLiteral("webm");
+		if (normalized == QLatin1String("video/quicktime")) return QStringLiteral("mov");
+
+		// Older attachment producers may omit MIME metadata. Accept only a small,
+		// non-executable extension set that also agrees with the protocol kind.
+		if (!normalized.isEmpty() && normalized != QLatin1String("application/octet-stream")) return QString();
+		const QString suffix = QFileInfo(fileName).suffix().toLower();
+		if (kind == MumbleProto::ChatAssetKindDocument
+			&& (suffix == QLatin1String("pdf") || suffix == QLatin1String("txt") || suffix == QLatin1String("md"))) {
+			return suffix;
+		}
+		if (kind == MumbleProto::ChatAssetKindAudio
+			&& QStringList { QStringLiteral("mp3"), QStringLiteral("wav"), QStringLiteral("ogg"),
+				QStringLiteral("flac"), QStringLiteral("aac"), QStringLiteral("m4a"),
+				QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("weba") }.contains(suffix)) {
+			return suffix == QLatin1String("mp4") ? QStringLiteral("m4a")
+				 : suffix == QLatin1String("weba") ? QStringLiteral("webm") : suffix;
+		}
+		if (kind == MumbleProto::ChatAssetKindVideo
+			&& QStringList { QStringLiteral("mp4"), QStringLiteral("webm"), QStringLiteral("mov") }.contains(suffix)) {
+			return suffix;
+		}
+		return QString();
 	}
 
 	QString normalizedPreviewHost(QString host) {
@@ -207,14 +699,10 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 			return;
 		}
 
-		QFile traceFile(Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")));
-		if (!traceFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-			return;
-		}
-
-		QTextStream stream(&traceFile);
-		stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) << QLatin1Char('Z')
-			   << " ServerSync session=" << session << QLatin1Char(' ') << phase << Qt::endl;
+		const QByteArray line = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toUtf8() + 'Z'
+			+ " ServerSync session=" + QByteArray::number(session) + ' ' + phase.toUtf8() + '\n';
+		mumble::chatperf::appendFileLineAsync(
+			Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")), line);
 	};
 	appendServerSyncTrace(QStringLiteral("enter"));
 	if (!user) {
@@ -224,6 +712,10 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	}
 	appendServerSyncTrace(QStringLiteral("user-found"));
 	Global::get().uiSession = msg.session();
+	if (m_qmlShellHost) {
+		m_qmlShellHost->mediaSession()->setCurrentVoiceScopeId(
+			user->cChannel ? static_cast< qulonglong >(user->cChannel->iId) : 0);
+	}
 	Global::get().bScreenShareEnabled = false;
 	Global::get().bScreenShareRecordingEnabled = false;
 	Global::get().bScreenShareHelperRequired = true;
@@ -243,6 +735,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	appendServerSyncTrace(QStringLiteral("sent-ping"));
 
 	Global::get().pPermissions = ChanACL::Permissions(static_cast< unsigned int >(msg.permissions()));
+	syncModernServerAdminPermissions();
 	Global::get().l->clearIgnore();
 	if (msg.has_welcome_text()) {
 		QString str = u8(msg.welcome_text());
@@ -273,13 +766,39 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 	Global::get().sh->getConnectionInfo(host, port, uname, pw);
 
-	QList< Shortcut > sc = Global::get().db->getShortcuts(Global::get().sh->serverDigest());
-	if (!sc.isEmpty()) {
-		Global::get().s.qlShortcuts << sc;
-		GlobalShortcutEngine::engine->bNeedRemap = true;
-	}
-	appendServerSyncTrace(QStringLiteral("post-shortcuts"));
+	const ServerHandlerPtr synchronizedHandler = Global::get().sh;
+	const QByteArray synchronizedDigest = synchronizedHandler ? synchronizedHandler->serverDigest() : QByteArray();
+	const unsigned int synchronizedSession = msg.session();
+	const auto completeServerSync =
+		[guardedThis = QPointer< MainWindow >(this), synchronizedHandler, synchronizedDigest, synchronizedSession,
+		 appendServerSyncTrace]() {
+			if (!guardedThis || !synchronizedHandler) {
+				return;
+			}
+			const ServerHandlerPtr currentHandler = Global::get().sh;
+			if (!currentHandler || currentHandler.get() != synchronizedHandler.get()
+				|| currentHandler->stateSnapshot() != ServerHandlerState::ConnectionEstablished
+				|| currentHandler->serverDigest() != synchronizedDigest
+				|| Global::get().uiSession != synchronizedSession || !ClientUser::get(synchronizedSession)) {
+				return;
+			}
 
+			appendServerSyncTrace(QStringLiteral("post-shortcuts"));
+			currentHandler->setServerSynchronized(true);
+			guardedThis->enterQmlShellSteadyState();
+			guardedThis->updateChatBar();
+			guardedThis->warmupPersistentChatHistory();
+			appendServerSyncTrace(QStringLiteral("exit"));
+
+			emit guardedThis->serverSynchronized();
+		};
+
+	bool shortcutLoadQueued = false;
+	if (ServerScopedDatabaseLoader *loader = serverScopedDatabaseLoader(this, pmModel)) {
+		shortcutLoadQueued =
+			loader->requestShortcuts(synchronizedHandler, synchronizedSession, completeServerSync);
+	}
+	appendServerSyncTrace(QStringLiteral("shortcut-load-dispatched"));
 
 	connect(user, SIGNAL(talkingStateChanged()), this, SLOT(userStateChanged()));
 	connect(user, SIGNAL(muteDeafStateChanged()), this, SLOT(userStateChanged()));
@@ -307,14 +826,9 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	}
 	appendServerSyncTrace(QStringLiteral("post-menu-update"));
 
-
-	Global::get().sh->setServerSynchronized(true);
-	enterQmlShellSteadyState();
-	updateChatBar();
-	warmupPersistentChatHistory();
-	appendServerSyncTrace(QStringLiteral("exit"));
-
-	emit serverSynchronized();
+	if (!shortcutLoadQueued) {
+		completeServerSync();
+	}
 }
 
 /// This message is being received when the server informs this client about server configuration details. This contains
@@ -496,6 +1010,22 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 ///
 /// @param msg The message object containing further details as to why and what Permission has been denied
 void MainWindow::msgPermissionDenied(const MumbleProto::PermissionDenied &msg) {
+	QString adminError = msg.has_reason() && !u8(msg.reason()).trimmed().isEmpty()
+		? u8(msg.reason()).trimmed() : tr("The server rejected this administrative change.");
+	if (msg.type() == MumbleProto::PermissionDenied_DenyType_UserName) {
+		adminError = tr("The server rejected the registered username.");
+		failPendingModernServerAdminOperations(adminError, true, false);
+	} else if (msg.type() == MumbleProto::PermissionDenied_DenyType_SuperUser) {
+		adminError = tr("The SuperUser account cannot be changed this way.");
+		failPendingModernServerAdminOperations(adminError, true, false);
+	} else if (msg.type() == MumbleProto::PermissionDenied_DenyType_Permission) {
+		const ChanACL::Permissions denied = static_cast< ChanACL::Permissions >(msg.permission());
+		const bool users = denied & (ChanACL::Register | ChanACL::Write);
+		const bool bans = denied & (ChanACL::Ban | ChanACL::Write);
+		// Some older servers omit the exact permission. Failing both is safe here:
+		// only a controller with a matching pending operation performs a rollback.
+		failPendingModernServerAdminOperations(adminError, users || (!users && !bans), bans || (!users && !bans));
+	}
 	switch (msg.type()) {
 		case MumbleProto::PermissionDenied_DenyType_Permission: {
 			VICTIM_INIT;
@@ -627,14 +1157,10 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			return;
 		}
 
-		QFile traceFile(Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")));
-		if (!traceFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-			return;
-		}
-
-		QTextStream stream(&traceFile);
-		stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) << QLatin1Char('Z')
-			   << " UserState session=" << session << QLatin1Char(' ') << phase << Qt::endl;
+		const QByteArray line = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toUtf8() + 'Z'
+			+ " UserState session=" + QByteArray::number(session) + ' ' + phase.toUtf8() + '\n';
+		mumble::chatperf::appendFileLineAsync(
+			Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")), line);
 	};
 	appendUserStateTrace(QStringLiteral("enter"));
 	bool createdUser                             = false;
@@ -753,6 +1279,10 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			}
 		}
 	}
+	if (movedChannels && pDst->uiSession == Global::get().uiSession && m_qmlShellHost) {
+		m_qmlShellHost->mediaSession()->setCurrentVoiceScopeId(
+			pDst->cChannel ? static_cast< qulonglong >(pDst->cChannel->iId) : 0);
+	}
 	appendUserStateTrace(QStringLiteral("post-channel"));
 
 	// Handle channel listening
@@ -839,24 +1369,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	}
 	appendUserStateTrace(QStringLiteral("post-name"));
 
-	if (!pDst->qsHash.isEmpty()) {
-		const QString &name = Global::get().db->getFriend(pDst->qsHash);
-		if (!name.isEmpty()) {
-			pmModel->setFriendName(pDst, name);
-		}
-		if (Global::get().db->isLocalMuted(pDst->qsHash))
-			pDst->setLocalMute(true);
-		if (Global::get().db->isLocalIgnored(pDst->qsHash))
-			pDst->setLocalIgnore(true);
-		if (Global::get().db->isLocalIgnoredTTS(pDst->qsHash))
-			pDst->setLocalIgnoreTTS(true);
-		const std::optional< bool > remoteSpeechCleanup = Global::get().db->getUserRemoteSpeechCleanup(pDst->qsHash);
-		if (remoteSpeechCleanup.has_value()) {
-			pDst->setRemoteSpeechCleanupOverride(remoteSpeechCleanup);
-		}
-		pDst->setLocalVolumeAdjustment(Global::get().db->getUserLocalVolume(pDst->qsHash));
-		pDst->setLocalNickname(Global::get().db->getUserLocalNickname(pDst->qsHash));
-	}
+	if (UserLocalPreferenceLoader *loader = userLocalPreferenceLoader(this, pmModel)) loader->request(pDst);
 	appendUserStateTrace(QStringLiteral("post-local-flags"));
 
 	if (msg.has_self_deaf() || msg.has_self_mute()) {
@@ -1222,8 +1735,8 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 			p             = nullptr; // No need to move it later
 
 			ServerHandlerPtr sh = Global::get().sh;
-			if (sh) {
-				c->m_filterMode = Global::get().db->getChannelFilterMode(sh->serverDigest(), c->iId);
+			if (ServerScopedDatabaseLoader *loader = serverScopedDatabaseLoader(this, pmModel)) {
+				loader->requestChannelFilter(sh, c);
 			}
 
 		} else {
@@ -1541,6 +2054,7 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 		c->uiPermissions = msg.permissions();
 		if (c->iId == 0)
 			Global::get().pPermissions = static_cast< ChanACL::Permissions >(c->uiPermissions);
+		if (c->iId == 0) syncModernServerAdminPermissions();
 		if (c == current) updateMenuPermissions();
 		scheduleQmlRoomStateUpdate();
 		if (activeChatTargetMatchesPermissionChannel && activeChatTarget.channel == c
@@ -1714,12 +2228,24 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 	const quint64 transferLimit = it->maximumBytes > 0 ? it->maximumBytes : configuredLimit;
 	const quint64 memoryLimit = std::min< quint64 >(transferLimit, 64ULL * 1024ULL * 1024ULL);
 	const auto rejectDownload = [this, &it](const QString &reason) {
-		const bool userRequested = !it->savePaths.isEmpty();
+		const bool userRequested = !it->savePaths.isEmpty() || !it->openFileName.isEmpty();
 		const QSet< unsigned int > attachmentAssetIDs = it->attachmentAssetIDs;
 		const QSet< QString > attachmentMessageKeys = it->attachmentMessageKeys;
+		const QHash< QString, QString > saveOperationIDsByPath = it->saveOperationIDsByPath;
+		const QString openOperationID = it->openOperationID;
 		m_persistentChatAssetDownloads.erase(it);
+		if (m_qmlShellHost && m_qmlShellHost->operationModel()) {
+			AsyncOperationModel *operations = m_qmlShellHost->operationModel();
+			for (const QString &operationID : saveOperationIDsByPath) {
+				operations->finishOperation(operationID, false, QStringLiteral("download-error"), reason);
+			}
+			if (!openOperationID.isEmpty()) {
+				operations->finishOperation(openOperationID, false, QStringLiteral("download-error"), reason);
+			}
+		}
 		m_persistentChatAttachmentPreviewFailures.unite(attachmentAssetIDs);
 		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+		schedulePendingPersistentChatAttachmentImageDownloads();
 		if (userRequested) {
 			publishModernToast(QStringLiteral("error"), tr("Attachment download failed"), reason);
 		}
@@ -1761,6 +2287,17 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		it->bytes.append(msg.data().data(), static_cast< int >(msg.data().size()));
 	}
 	it->nextOffset = static_cast< quint64 >(it->bytes.size());
+	if (m_qmlShellHost && m_qmlShellHost->operationModel()) {
+		AsyncOperationModel *operations = m_qmlShellHost->operationModel();
+		const qint64 received = it->bytes.size();
+		const qint64 total = static_cast< qint64 >(it->totalSize);
+		for (const QString &operationID : std::as_const(it->saveOperationIDsByPath)) {
+			operations->updateProgress(operationID, received, total);
+		}
+		if (!it->openOperationID.isEmpty()) {
+			operations->updateProgress(it->openOperationID, received, total);
+		}
+	}
 
 	const bool complete = (msg.has_eof() && msg.eof())
 						  || (it->totalSize > 0 && static_cast< quint64 >(it->bytes.size()) >= it->totalSize);
@@ -1787,105 +2324,240 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 
 	mumble::chatperf::recordValue("chat.asset_chunk.bytes", it->bytes.size());
 	mumble::chatperf::recordValue("chat.asset_chunk.preview_keys", it->previewKeys.size());
-	QImage image;
-	const bool imageConsumer = !it->attachmentAssetIDs.isEmpty() || !it->previewKeys.isEmpty();
-	if (imageConsumer && it->mime.startsWith(QLatin1String("image/"))) {
-		mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
-		QBuffer buffer(&it->bytes);
-		buffer.open(QIODevice::ReadOnly);
-		QImageReader reader(&buffer);
-		const QSize sourceSize = reader.size();
-		constexpr qint64 maximumPixels = 40LL * 1024LL * 1024LL;
-		if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
-			&& sourceSize.width() <= 16384 && sourceSize.height() <= 16384
-			&& static_cast< qint64 >(sourceSize.width()) * static_cast< qint64 >(sourceSize.height())
-				   <= maximumPixels) {
-			image = reader.read();
-		}
-	}
-	const bool playableMedia = isPersistentChatPlayableMediaMime(it->mime);
-	const QString mediaDataUrl =
-		playableMedia ? persistentChatPlayableMediaDataUrl(it->mime, it->bytes) : QString();
-	if (!it->attachmentAssetIDs.isEmpty() && !image.isNull() && m_qmlShellHost
-		&& m_qmlShellHost->imagePipeline()) {
-		const QString stableKey = QStringLiteral("chat-attachment:%1:%2")
-			.arg(msg.asset_id())
-			.arg(QString::fromLatin1(QCryptographicHash::hash(it->bytes, QCryptographicHash::Sha256).toHex()));
-		const QString providerUrl = m_qmlShellHost->imagePipeline()->registerImage(image, stableKey);
-		if (!providerUrl.isEmpty()) {
-			for (const unsigned int attachmentAssetID : std::as_const(it->attachmentAssetIDs)) {
-				m_persistentChatAttachmentProviderUrls.insert(attachmentAssetID, providerUrl);
-				m_persistentChatAttachmentPreviewFailures.remove(attachmentAssetID);
-			}
-		}
-	}
-	if (!it->attachmentAssetIDs.isEmpty()) {
-		for (const unsigned int attachmentAssetID : std::as_const(it->attachmentAssetIDs)) {
-			if (!m_persistentChatAttachmentProviderUrls.contains(attachmentAssetID)) {
-				m_persistentChatAttachmentPreviewFailures.insert(attachmentAssetID);
-			}
-		}
-	}
-	int savedCount = 0;
-	for (const QString &savePath : std::as_const(it->savePaths)) {
-		QSaveFile destination(savePath);
-		if (!destination.open(QIODevice::WriteOnly)
-			|| destination.write(it->bytes) != it->bytes.size() || !destination.commit()) {
-			destination.cancelWriting();
-			continue;
-		}
-		++savedCount;
-	}
-	for (const QString &previewKey : it->previewKeys) {
-		auto previewIt = m_persistentChatPreviews.find(previewKey);
-		if (previewIt == m_persistentChatPreviews.end()) {
-			continue;
-		}
 
-		previewIt->thumbnailFinished = true;
-		const QString incomingKind = persistentChatPlayableMediaKind(it->mime, it->kind);
-		const bool decorativeSocialGif =
-			incomingKind == QLatin1String("gif") && isSocialVideoPreviewUrl(previewIt->canonicalUrl);
-		if (!mediaDataUrl.isEmpty()) {
-			const bool keepExistingVideo =
-				previewIt->mediaKind == QLatin1String("video") && incomingKind != QLatin1String("video")
-				&& previewIt->mediaDataUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive);
-			if (!keepExistingVideo && !decorativeSocialGif) {
-				previewIt->mediaDataUrl = mediaDataUrl;
-				previewIt->mediaMime    = it->mime;
-				previewIt->mediaKind    = incomingKind;
-				previewIt->autoplay     = false;
-			}
-			previewIt->failed = false;
-			if (!image.isNull()) {
-				previewIt->thumbnailImage = image;
-			}
-		} else if (!image.isNull()) {
-			previewIt->thumbnailImage = image;
-			previewIt->failed         = false;
-		} else {
-			previewIt->failed = true;
-			ensurePersistentChatPreviewSiteSnapshot(previewKey);
-		}
-		ensurePersistentChatPreviewSiteSnapshot(previewKey);
-		storePersistentChatPreviewDiskCache(previewKey);
-	}
-
-	const int requestedSaveCount = it->savePaths.size();
-	const QSet< QString > attachmentMessageKeys = it->attachmentMessageKeys;
+	// Move the completed transfer out of the GUI-owned map before submitting any
+	// asynchronous work. This releases the network slot immediately and prevents
+	// callbacks from retaining an iterator across model/scope changes.
+	PersistentChatAssetDownload download = std::move(*it);
 	m_persistentChatAssetDownloads.erase(it);
-	if (!attachmentMessageKeys.isEmpty()) {
-		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+
+	const unsigned int assetID = msg.asset_id();
+	const QString mime = download.mime;
+	const MumbleProto::ChatAssetKind kind = download.kind;
+	const QSet< QString > previewKeys = download.previewKeys;
+	const QSet< unsigned int > attachmentAssetIDs = download.attachmentAssetIDs;
+	const QSet< QString > attachmentMessageKeys = download.attachmentMessageKeys;
+	const QStringList savePaths = download.savePaths;
+	const QHash< QString, QString > saveOperationIDsByPath = download.saveOperationIDsByPath;
+	const QString openFileName = download.openFileName;
+	const QString openOperationID = download.openOperationID;
+	QByteArray bytes = std::move(download.bytes);
+	const qint64 estimatedBytes = std::max< qint64 >(1, bytes.size());
+	const quint64 connectionGeneration = m_persistentChatAssetConnectionGeneration;
+	QSet< QString > ioOperationIDs;
+	for (const QString &operationID : saveOperationIDsByPath) {
+		if (!operationID.isEmpty()) ioOperationIDs.insert(operationID);
 	}
-	if (requestedSaveCount > 0) {
-		if (savedCount == requestedSaveCount) {
-			publishModernToast(QStringLiteral("success"), tr("Attachment saved"),
-				tr("The chat attachment was saved successfully."));
-		} else {
-			publishModernToast(QStringLiteral("error"), tr("Attachment download failed"),
-				tr("The attachment could not be written to the selected location."));
-		}
-	}
+	if (!openOperationID.isEmpty()) ioOperationIDs.insert(openOperationID);
+	m_persistentChatAttachmentIoOperationIDs.unite(ioOperationIDs);
+	const QString workerGroup = QStringLiteral("attachment-io:%1:%2")
+		.arg(assetID)
+		.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+	queuePersistentChatAssetIo(
+		workerGroup, QStringLiteral("finalize"), estimatedBytes,
+		[bytes = std::move(bytes), mime, kind, attachmentAssetIDs, previewKeys, savePaths, openFileName,
+		 assetID]() mutable {
+			PersistentChatAssetIoResult result;
+			const bool imageConsumer = !attachmentAssetIDs.isEmpty() || !previewKeys.isEmpty();
+			if (imageConsumer && mime.startsWith(QLatin1String("image/"))) {
+				mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
+				QBuffer buffer;
+				buffer.setData(bytes);
+				if (buffer.open(QIODevice::ReadOnly)) {
+					QImageReader reader(&buffer);
+					reader.setAutoTransform(true);
+					reader.setDecideFormatFromContent(true);
+					const QSize sourceSize = reader.size();
+					constexpr qint64 maximumPixels = 40LL * 1024LL * 1024LL;
+					if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
+						&& sourceSize.width() <= 16384 && sourceSize.height() <= 16384
+						&& static_cast< qint64 >(sourceSize.width()) * sourceSize.height() <= maximumPixels) {
+						result.image = reader.read();
+					}
+				}
+			}
+			if (!previewKeys.isEmpty() && isPersistentChatPlayableMediaMime(mime)) {
+				result.mediaDataUrl = persistentChatPlayableMediaDataUrl(mime, bytes);
+			}
+			if (!result.image.isNull()) {
+				result.contentHash = QString::fromLatin1(
+					QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+			}
+			for (const QString &savePath : savePaths) {
+				QSaveFile destination(savePath);
+				if (!destination.open(QIODevice::WriteOnly)
+					|| destination.write(bytes) != bytes.size() || !destination.commit()) {
+					destination.cancelWriting();
+					continue;
+				}
+				result.savedPaths.insert(savePath);
+			}
+			if (!openFileName.isEmpty()) {
+				const QString trustedExtension = trustedChatAttachmentOpenExtension(mime, kind, openFileName);
+				if (trustedExtension.isEmpty()) {
+					result.openFailureCode = QStringLiteral("unsafe-type");
+				} else {
+					result.openDirectoryLease =
+						mumble::chatattachmentio::TemporaryDirectoryLease::create(
+							QDir::temp().filePath(QStringLiteral("mumble-chat-attachments-XXXXXX")),
+							static_cast< quint64 >(bytes.size()));
+					if (!result.openDirectoryLease) {
+						result.openFailureCode = QStringLiteral("temporary-directory-error");
+					} else {
+						QString baseName = QFileInfo(openFileName).completeBaseName().trimmed();
+						baseName.replace(QRegularExpression(QStringLiteral("[\\x00-\\x1f<>:\"/\\\\|?*]+")),
+							QStringLiteral("_"));
+						if (baseName.isEmpty() || baseName == QLatin1String(".") || baseName == QLatin1String("..")) {
+							baseName = QStringLiteral("attachment-%1").arg(assetID);
+						}
+						result.openPath = QDir(result.openDirectoryLease->path()).filePath(
+							QStringLiteral("%1.%2").arg(baseName.left(180), trustedExtension));
+						QSaveFile temporaryFile(result.openPath);
+						if (!temporaryFile.open(QIODevice::WriteOnly)
+							|| temporaryFile.write(bytes) != bytes.size() || !temporaryFile.commit()) {
+							temporaryFile.cancelWriting();
+							result.openPath.clear();
+							result.openDirectoryLease.reset();
+							result.openFailureCode = QStringLiteral("temporary-write-error");
+						}
+					}
+				}
+			}
+			return result;
+		},
+		[this, assetID, mime, kind, previewKeys, attachmentAssetIDs, attachmentMessageKeys, savePaths,
+		 saveOperationIDsByPath, openFileName, openOperationID, connectionGeneration, ioOperationIDs](
+			std::optional< PersistentChatAssetIoResult > result) {
+			if (connectionGeneration != m_persistentChatAssetConnectionGeneration) return;
+			for (const QString &operationID : ioOperationIDs) {
+				m_persistentChatAttachmentIoOperationIDs.remove(operationID);
+			}
+			const QImage image = result ? result->image : QImage();
+			const QString mediaDataUrl = result ? result->mediaDataUrl : QString();
+			if (!attachmentAssetIDs.isEmpty() && !image.isNull() && result
+				&& !result->contentHash.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
+				const QString stableKey = QStringLiteral("chat-attachment:%1:%2")
+					.arg(assetID)
+					.arg(result->contentHash);
+				const QString providerUrl = m_qmlShellHost->imagePipeline()->registerImage(image, stableKey);
+				if (!providerUrl.isEmpty()) {
+					for (const unsigned int attachmentAssetID : attachmentAssetIDs) {
+						m_persistentChatAttachmentProviderUrls.insert(attachmentAssetID, providerUrl);
+						m_persistentChatAttachmentPreviewFailures.remove(attachmentAssetID);
+					}
+				}
+			}
+			for (const unsigned int attachmentAssetID : attachmentAssetIDs) {
+				if (!m_persistentChatAttachmentProviderUrls.contains(attachmentAssetID)) {
+					m_persistentChatAttachmentPreviewFailures.insert(attachmentAssetID);
+				}
+			}
+
+			for (const QString &previewKey : previewKeys) {
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) continue;
+				previewIt->thumbnailFinished = true;
+				const QString incomingKind = persistentChatPlayableMediaKind(mime, kind);
+				const bool decorativeSocialGif =
+					incomingKind == QLatin1String("gif") && isSocialVideoPreviewUrl(previewIt->canonicalUrl);
+				if (!mediaDataUrl.isEmpty()) {
+					const bool keepExistingVideo =
+						previewIt->mediaKind == QLatin1String("video") && incomingKind != QLatin1String("video")
+						&& previewIt->mediaDataUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive);
+					if (!keepExistingVideo && !decorativeSocialGif) {
+						previewIt->mediaDataUrl = mediaDataUrl;
+						previewIt->mediaMime    = mime;
+						previewIt->mediaKind    = incomingKind;
+						previewIt->autoplay     = false;
+					}
+					previewIt->failed = false;
+					if (!image.isNull()) previewIt->thumbnailImage = image;
+				} else if (!image.isNull()) {
+					previewIt->thumbnailImage = image;
+					previewIt->failed         = false;
+				} else {
+					previewIt->failed = true;
+					ensurePersistentChatPreviewSiteSnapshot(previewKey);
+				}
+				ensurePersistentChatPreviewSiteSnapshot(previewKey);
+				storePersistentChatPreviewDiskCache(previewKey);
+			}
+
+			if (!attachmentMessageKeys.isEmpty()) {
+				publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+			}
+			schedulePendingPersistentChatAttachmentImageDownloads();
+
+			AsyncOperationModel *operations =
+				m_qmlShellHost ? m_qmlShellHost->operationModel() : nullptr;
+			int savedCount = 0;
+			for (const QString &savePath : savePaths) {
+				const bool saved = result && result->savedPaths.contains(savePath);
+				if (saved) ++savedCount;
+				const QString operationID = saveOperationIDsByPath.value(savePath);
+				if (operations && !operationID.isEmpty()) {
+					operations->finishOperation(operationID, saved,
+						saved ? QString() : result ? QStringLiteral("write-error")
+											 : QStringLiteral("worker-unavailable"),
+						saved ? tr("The chat attachment was saved successfully.")
+							  : tr("The attachment could not be written to the selected location."));
+				}
+			}
+			if (!savePaths.isEmpty()) {
+				if (savedCount == savePaths.size()) {
+					publishModernToast(QStringLiteral("success"), tr("Attachment saved"),
+						tr("The chat attachment was saved successfully."));
+				} else {
+					publishModernToast(QStringLiteral("error"), tr("Attachment download failed"),
+						tr("The attachment could not be written to the selected location."));
+				}
+			}
+
+			if (!openFileName.isEmpty()) {
+				bool opened = false;
+				QString failureCode = result ? result->openFailureCode : QStringLiteral("worker-unavailable");
+				if (result && !result->openPath.isEmpty() && result->openDirectoryLease) {
+					opened = QDesktopServices::openUrl(QUrl::fromLocalFile(result->openPath));
+					if (opened) {
+						m_persistentChatOpenAttachmentDirectoryBytes +=
+							result->openDirectoryLease->retainedBytes();
+						m_persistentChatOpenAttachmentDirectories.push_back(result->openDirectoryLease);
+						constexpr std::size_t maximumRetainedDirectories = 8;
+						constexpr quint64 maximumRetainedBytes = 256ULL * 1024ULL * 1024ULL;
+						while (m_persistentChatOpenAttachmentDirectories.size() > maximumRetainedDirectories
+							|| m_persistentChatOpenAttachmentDirectoryBytes > maximumRetainedBytes) {
+							const quint64 evictedBytes =
+								m_persistentChatOpenAttachmentDirectories.front()->retainedBytes();
+							m_persistentChatOpenAttachmentDirectoryBytes =
+								m_persistentChatOpenAttachmentDirectoryBytes > evictedBytes
+								? m_persistentChatOpenAttachmentDirectoryBytes - evictedBytes : 0;
+							m_persistentChatOpenAttachmentDirectories.erase(
+								m_persistentChatOpenAttachmentDirectories.begin());
+						}
+					} else {
+						failureCode = QStringLiteral("no-handler");
+					}
+				}
+				QString failureMessage;
+				if (failureCode == QLatin1String("unsafe-type")) {
+					failureMessage = tr("This attachment type cannot be opened safely. Save it first instead.");
+				} else if (failureCode == QLatin1String("temporary-directory-error")) {
+					failureMessage = tr("A temporary folder for the attachment could not be created.");
+				} else if (failureCode == QLatin1String("no-handler")) {
+					failureMessage = tr("No application is available to open this attachment type.");
+				} else if (!opened) {
+					failureMessage = tr("The downloaded attachment could not be prepared for opening.");
+				}
+				if (operations && !openOperationID.isEmpty()) {
+					operations->finishOperation(openOperationID, opened, opened ? QString() : failureCode,
+						opened ? tr("The attachment was opened successfully.") : failureMessage);
+				}
+				if (!opened) {
+					publishModernToast(QStringLiteral("error"), tr("Attachment could not be opened"), failureMessage);
+				}
+			}
+		});
 }
 
 void MainWindow::msgChatEmbedState(const MumbleProto::ChatEmbedState &msg) {
@@ -1914,6 +2586,9 @@ void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &msg)
 
 	MediaSessionBackend *media = m_qmlShellHost->mediaSession();
 	if (!media) return;
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	media->setCurrentVoiceScopeId(
+		self && self->cChannel ? static_cast< qulonglong >(self->cChannel->iId) : 0);
 
 	QString provider = QStringLiteral("direct");
 	switch (msg.source_kind()) {

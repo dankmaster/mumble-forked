@@ -1,5 +1,7 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
+import Mumble.ProviderPresentation 1.0
 
 TestCase {
 	id: testCase
@@ -20,7 +22,13 @@ TestCase {
 		property bool sharedHost: false
 		property int sharedParticipantCount: 0
 		property string provider: "youtube"
+		property string mediaMime: ""
 		property string url: "https://www.youtube.com/embed/test"
+		property string audioUrl: ""
+		property var playbackUrl: undefined
+		property var playbackAudioUrl: undefined
+		property var playbackAudioWarning: undefined
+		property bool playbackSourcePreparing: false
 		property string state: "paused"
 		property string error: ""
 		property real position: 0
@@ -29,19 +37,46 @@ TestCase {
 		property int volume: 100
 		property bool muted: false
 		property int retryCalls: 0
+		property int pauseCalls: 0
+		property int errorReports: 0
+		property int loadReports: 0
+		property int lastLoadProgress: -1
+		signal sourceChanged()
+		signal playRequested()
+		signal pauseRequested()
+		signal seekRequested(real seconds)
+		signal volumeRequested(int value)
+		signal mutedRequested(bool value)
+		signal retryRequested()
 
 		function play() {}
-		function pause() {}
+		function pause() { pauseCalls += 1 }
 		function seek(value) {}
 		function setVolume(value) {}
 		function toggleMuted() {}
-		function retry() { retryCalls += 1 }
-		function reportLoadProgress(value) {}
-		function reportError(value) {}
+		function retry() {
+			retryCalls += 1
+			state = "loading"
+			error = ""
+			retryRequested()
+		}
+		function reportLoadProgress(value) {
+			loadReports += 1
+			lastLoadProgress = value
+		}
+		function reportError(value) { errorReports += 1 }
+		function reportTypedError(code, value) { errorReports += 1 }
 		function reportPlaybackState(position, duration, paused) {}
 		function isNavigationAllowed(url) { return true }
 		function detach() {}
 		function closePlayer() {}
+	}
+
+	QtObject {
+		id: mediaRuntime
+		property var videoProfile: null
+		property string videoDocumentUrl: ""
+		function isNavigationRequestAllowed(requestUrl, firstPartyUrl) { return true }
 	}
 
 	Loader {
@@ -54,14 +89,249 @@ TestCase {
 
 	function init() {
 		tryVerify(function() { return playerLoader.item !== null })
+		testCase.width = 800
+		testCase.height = 700
 		playerLoader.item.invalidateMediaDocument()
 		playerLoader.item.aspect = "wide"
+		playerLoader.item.mediaProfileFactory = null
+		mediaRuntime.videoDocumentUrl = ""
+		playerLoader.item.statePollTimeoutMs = 3000
 		session.active = false
+		playerLoader.item.visualFixtureMode = ""
 		session.detached = false
+		session.playbackControlAllowed = true
+		session.sharedAvailable = false
+		session.sharedJoined = false
+		session.sharedHost = false
 		session.state = "paused"
 		session.error = ""
+		session.provider = "youtube"
+		session.mediaMime = ""
+		session.url = "https://www.youtube.com/embed/test"
+		session.audioUrl = ""
+		session.playbackUrl = undefined
+		session.playbackAudioUrl = undefined
+		session.playbackAudioWarning = undefined
+		session.playbackSourcePreparing = false
 		session.retryCalls = 0
+		session.pauseCalls = 0
+		session.errorReports = 0
+		session.loadReports = 0
+		session.lastLoadProgress = -1
 		wait(0)
+	}
+
+	function test_adaptive_manifest_uses_local_profile_document() {
+		const player = playerLoader.item
+		player.visualFixtureMode = "active"
+		player.mediaProfileFactory = mediaRuntime
+		session.active = true
+		session.provider = "direct"
+		session.mediaMime = "application/vnd.apple.mpegurl"
+		session.url = "https://video.akamai.steamstatic.com/store_trailers/test/master.m3u8"
+		mediaRuntime.videoDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#manifest"
+		wait(0)
+
+		verify(player.adaptiveManifest)
+		compare(player.rendererDocumentUrl, mediaRuntime.videoDocumentUrl)
+		compare(player.externalMediaUrl(), session.url)
+	}
+
+	function test_non_adaptive_direct_media_uses_native_surface_without_webengine() {
+		const player = playerLoader.item
+		session.provider = "direct"
+		session.mediaMime = "audio/wav"
+		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.active = true
+		wait(0)
+
+		verify(player.nativeDirectMedia)
+		verify(player.nativeSurfaceActive)
+		verify(!player.webSurfaceActive)
+		compare(player.rendererBackend, "native")
+		verify(findChild(player, "inlineMediaNativeSurface") !== null)
+
+		session.active = false
+		wait(0)
+		verify(!player.nativeSurfaceActive)
+	}
+
+	function test_native_direct_media_waits_for_prepared_playback_source() {
+		const player = playerLoader.item
+		const originalSource = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		const preparedSource = "file:///C:/private-cache/native-a.wav"
+		session.provider = "direct"
+		session.mediaMime = "audio/wav"
+		session.url = originalSource
+		session.playbackUrl = ""
+		session.playbackSourcePreparing = true
+		session.active = true
+		wait(0)
+
+		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
+		verify(nativeLoader !== null)
+		tryVerify(function() { return nativeLoader.item !== null })
+		const nativePlayer = nativeLoader.item
+		compare(nativePlayer.sourceUrl, "")
+		compare(nativePlayer.rendererState, "loading")
+		verify(nativePlayer.primaryPlayer === null)
+
+		const preparingGeneration = nativePlayer.mediaGeneration
+		session.playbackUrl = preparedSource
+		session.playbackSourcePreparing = false
+		tryCompare(nativePlayer, "sourceUrl", preparedSource)
+		tryVerify(function() { return nativePlayer.mediaGeneration > preparingGeneration })
+		tryVerify(function() { return nativePlayer.primaryPlayer !== null })
+		compare(session.url, originalSource)
+
+		session.active = false
+	}
+
+	function test_native_direct_media_ignores_late_callbacks_from_replaced_source() {
+		const player = playerLoader.item
+		session.provider = "direct"
+		session.mediaMime = "audio/wav"
+		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.active = true
+		wait(0)
+
+		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
+		verify(nativeLoader !== null)
+		tryVerify(function() { return nativeLoader.item !== null })
+		const nativePlayer = nativeLoader.item
+		const replacedGeneration = nativePlayer.mediaGeneration
+		session.errorReports = 0
+		nativePlayer.sourceUrl = session.url + "#replacement"
+
+		verify(nativePlayer.mediaGeneration > replacedGeneration)
+		verify(!nativePlayer.reportMainError("late source A error", replacedGeneration))
+		verify(!nativePlayer.acceptMainReady(replacedGeneration, 100))
+		verify(nativePlayer.rendererHealthy)
+		compare(session.errorReports, 0)
+
+		session.active = false
+	}
+
+	function test_secondary_audio_hang_degrades_and_restores_primary_audio() {
+		const player = playerLoader.item
+		session.provider = "direct"
+		session.mediaMime = "audio/wav"
+		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.active = true
+		wait(0)
+
+		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
+		verify(nativeLoader !== null)
+		tryVerify(function() { return nativeLoader.item !== null })
+		const nativePlayer = nativeLoader.item
+		nativePlayer.secondaryAudioUrl = "data:audio/mp4;base64,AAAA"
+		nativePlayer.setMuted(false)
+		verify(!nativePlayer.primaryAudioMuted)
+		const readyGeneration = nativePlayer.secondaryAudioGeneration
+		verify(nativePlayer.acceptSecondaryReady(readyGeneration))
+		verify(nativePlayer.primaryAudioMuted)
+
+		verify(nativePlayer.beginSecondaryPending(readyGeneration))
+		const audioGeneration = readyGeneration
+		verify(!nativePlayer.primaryAudioMuted)
+
+		verify(nativePlayer.expireSecondaryAudioLoad(audioGeneration))
+		verify(nativePlayer.secondaryAudioDegraded)
+		compare(nativePlayer.secondaryAudioState, "degraded")
+		verify(nativePlayer.secondaryAudioWarning.indexOf("timed out") >= 0)
+		verify(!nativePlayer.primaryAudioMuted)
+		verify(!nativePlayer.acceptSecondaryReady(audioGeneration))
+
+		session.active = false
+	}
+
+	function test_secondary_audio_preparation_failure_keeps_primary_playback_available() {
+		const player = playerLoader.item
+		session.provider = "direct"
+		session.mediaMime = "video/mp4"
+		session.url = "data:video/mp4;base64,AAAA"
+		session.audioUrl = "data:audio/mp4;base64,INVALID"
+		session.playbackUrl = "file:///C:/private-cache/native-video.mp4"
+		session.playbackAudioUrl = ""
+		session.playbackAudioWarning = "The separate audio track could not be prepared."
+		session.muted = false
+		session.active = true
+		wait(0)
+
+		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
+		verify(nativeLoader !== null)
+		tryVerify(function() { return nativeLoader.item !== null })
+		const nativePlayer = nativeLoader.item
+		tryVerify(function() { return nativePlayer.secondaryAudioDegraded })
+		compare(nativePlayer.secondaryAudioState, "degraded")
+		compare(nativePlayer.secondaryAudioWarning,
+			"The separate audio track could not be prepared.")
+		verify(!nativePlayer.primaryAudioMuted)
+		verify(nativePlayer.secondaryPlayer === null)
+
+		session.active = false
+	}
+
+	function test_watch_together_guest_blocks_provider_input_but_keeps_local_audio_controls() {
+		const player = playerLoader.item
+		player.visualFixtureMode = "active"
+		session.active = true
+		session.sharedAvailable = true
+		session.sharedJoined = true
+		session.sharedHost = false
+		session.playbackControlAllowed = false
+		wait(0)
+
+		verify(player.sharedGuestPlaybackLocked)
+		verify(!player.providerInputEnabled)
+		const guard = findChild(player, "inlineMediaGuestPlaybackGuard")
+		const playButton = findChild(player, "mediaPlayButton")
+		const muteButton = findChild(player, "mediaMuteButton")
+		const volumeButton = findChild(player, "mediaCompactVolumeButton")
+		verify(guard !== null && guard.visible)
+		compare(guard.Accessible.name, "Playback controlled by the host")
+		verify(playButton !== null && !playButton.enabled)
+		verify(muteButton !== null && muteButton.enabled)
+		verify(volumeButton !== null && volumeButton.enabled)
+
+		session.sharedHost = true
+		session.playbackControlAllowed = true
+		wait(0)
+		verify(!player.sharedGuestPlaybackLocked)
+		verify(player.providerInputEnabled)
+		verify(!guard.visible)
+	}
+
+	function test_secondary_audio_failure_degrades_to_primary_video_warning() {
+		const player = playerLoader.item
+		player.visualFixtureMode = "active"
+		session.active = true
+		session.provider = "direct"
+		session.audioUrl = "data:audio/mp4;base64,AAAA"
+		const mediaGeneration = player.beginMediaDocumentLoad("about:blank")
+		verify(player.markMediaDocumentReady(mediaGeneration))
+		const audioGeneration = player.beginAudioDocumentLoad()
+		verify(player.markAudioDocumentReady(audioGeneration))
+
+		verify(player.reportSecondaryAudioError(audioGeneration, "Audio decoder stopped"))
+		verify(player.documentReady)
+		compare(player.rendererState, "active")
+		verify(player.secondaryAudioDegraded)
+		compare(player.secondaryAudioState, "degraded")
+		verify(player.secondaryAudioWarning.indexOf("Audio decoder stopped") >= 0)
+		compare(session.errorReports, 0)
+		compare(session.error, "")
+		const warning = findChild(player, "inlineMediaSecondaryAudioWarning")
+		const failure = findChild(player, "inlineMediaFailureOverlay")
+		verify(warning !== null && warning.visible)
+		compare(warning.Accessible.name, "Video continues without the separate audio track")
+		verify(failure !== null && !failure.visible)
+
+		const replacementGeneration = player.beginMediaDocumentLoad("about:blank#retry")
+		verify(replacementGeneration > mediaGeneration)
+		verify(!player.secondaryAudioDegraded)
+		compare(player.secondaryAudioWarning, "")
+		verify(!warning.visible)
 	}
 
 	function test_document_readiness_gates_state_polling() {
@@ -79,6 +349,36 @@ TestCase {
 		verify(!player.claimStatePoll(generation))
 		verify(player.cancelStatePoll(generation))
 		verify(!player.statePollInFlight)
+	}
+
+	function test_playing_session_stays_in_loading_state_until_document_is_ready() {
+		const player = playerLoader.item
+		session.state = "playing"
+		session.active = true
+		const generation = player.beginMediaDocumentLoad("about:blank")
+		compare(player.rendererState, "loading")
+		verify(player.markMediaDocumentReady(generation))
+		compare(player.rendererState, "active")
+		session.active = false
+	}
+
+	function test_verified_document_completion_is_generation_bound() {
+		const player = playerLoader.item
+		session.active = true
+		const firstGeneration = player.beginMediaDocumentLoad("about:blank")
+		verify(player.completeMediaDocumentLoad(firstGeneration))
+		verify(player.documentReady)
+		compare(session.loadReports, 1)
+		compare(session.lastLoadProgress, 100)
+
+		const secondGeneration = player.beginMediaDocumentLoad("about:blank#second")
+		verify(!player.completeMediaDocumentLoad(firstGeneration))
+		verify(!player.documentReady)
+		compare(session.loadReports, 1)
+		verify(player.completeMediaDocumentLoad(secondGeneration))
+		verify(player.documentReady)
+		compare(session.loadReports, 2)
+		session.active = false
 	}
 
 	function test_late_poll_callback_cannot_mutate_new_document_generation() {
@@ -99,6 +399,51 @@ TestCase {
 		verify(player.documentReady)
 		verify(player.statePollInFlight)
 		verify(player.cancelStatePoll(secondGeneration))
+	}
+
+	function test_state_poll_watchdog_releases_only_its_own_poll_attempt() {
+		const player = playerLoader.item
+		session.active = true
+		const generation = player.beginMediaDocumentLoad("about:blank")
+		verify(player.markMediaDocumentReady(generation))
+		player.statePollTimeoutMs = 25
+
+		verify(player.claimStatePoll(generation))
+		const expiredToken = player.statePollToken
+		tryVerify(function() { return !player.statePollInFlight }, 1000)
+		compare(player._missingStatePolls, 1)
+
+		verify(player.claimStatePoll(generation))
+		const currentToken = player.statePollToken
+		verify(currentToken > expiredToken)
+		verify(!player.expireStatePoll(generation, expiredToken))
+		verify(player.statePollInFlight)
+		verify(!player.completeStatePoll(generation,
+			{ "position": 9, "duration": 30, "paused": false }, expiredToken))
+		verify(player.statePollInFlight)
+		verify(player.cancelStatePoll(generation, currentToken))
+		session.active = false
+	}
+
+	function test_secondary_audio_poll_watchdog_is_generation_and_attempt_bound() {
+		const player = playerLoader.item
+		session.active = true
+		player.statePollTimeoutMs = 25
+		const generation = player.beginAudioDocumentLoad()
+
+		verify(player.claimAudioStatePoll(generation))
+		const expiredToken = player.secondaryAudioStatePollToken
+		tryVerify(function() { return !player.secondaryAudioStatePollInFlight }, 1000)
+		compare(player._audioMissingStatePolls, 1)
+
+		verify(player.claimAudioStatePoll(generation))
+		const currentToken = player.secondaryAudioStatePollToken
+		verify(currentToken > expiredToken)
+		verify(!player.expireAudioStatePoll(generation, expiredToken))
+		verify(!player.cancelAudioStatePoll(generation, expiredToken))
+		verify(player.secondaryAudioStatePollInFlight)
+		verify(player.cancelAudioStatePoll(generation, currentToken))
+		session.active = false
 	}
 
 	function test_renderer_failure_invalidates_document_and_pending_poll() {
@@ -126,7 +471,7 @@ TestCase {
 		tryCompare(player, "normalizedAspect", "short")
 	}
 
-	function test_visual_surface_preserves_wide_short_and_square_geometry() {
+	function test_visual_surface_preserves_wide_short_square_and_twitch_geometry() {
 		const player = playerLoader.item
 		const canvas = findChild(player, "inlineMediaCanvas")
 		const surface = findChild(player, "inlineMediaWebSurface")
@@ -150,6 +495,85 @@ TestCase {
 		verify(Math.abs(surface.width - surface.height) < 0.01)
 		compare(surface.x, Math.round((canvas.width - surface.width) / 2))
 		compare(surface.y, Math.round((canvas.height - surface.height) / 2))
+
+		player.aspect = "twitch"
+		wait(0)
+		verify(Math.abs(surface.width / surface.height - 4 / 3) < 0.01)
+		compare(surface.x, Math.round((canvas.width - surface.width) / 2))
+		compare(surface.y, Math.round((canvas.height - surface.height) / 2))
+	}
+
+	function test_source_change_invalidates_both_renderer_generations() {
+		const player = playerLoader.item
+		session.active = true
+		const mediaGeneration = player.beginMediaDocumentLoad("https://www.youtube.com/embed/old")
+		const audioGeneration = player.beginAudioDocumentLoad()
+		verify(player.markMediaDocumentReady(mediaGeneration))
+		verify(player.markAudioDocumentReady(audioGeneration))
+		verify(player.documentReady)
+		compare(player._audioDocumentReadyGeneration, audioGeneration)
+
+		session.sourceChanged()
+		verify(player.mediaGeneration > mediaGeneration)
+		verify(player._audioGeneration > audioGeneration)
+		verify(!player.documentReady)
+		compare(player._audioDocumentReadyGeneration, -1)
+	}
+
+	function test_error_state_invalidates_primary_and_secondary_audio_lifecycles() {
+		const player = playerLoader.item
+		const mediaGeneration = player.beginMediaDocumentLoad("https://example.com/video")
+		verify(player.markMediaDocumentReady(mediaGeneration))
+		const audioGeneration = player.beginAudioDocumentLoad()
+
+		session.error = "The renderer stopped."
+		session.state = "error"
+		verify(player.mediaGeneration > mediaGeneration)
+		verify(player._audioGeneration > audioGeneration)
+		verify(!player.documentReady)
+		compare(player._audioDocumentReadyGeneration, -1)
+	}
+
+	function test_secondary_audio_surface_cannot_activate_behind_error_ui() {
+		const player = playerLoader.item
+		session.error = "The primary renderer failed."
+		session.provider = "direct"
+		session.audioUrl = "about:blank"
+		session.active = true
+		const generation = player.beginMediaDocumentLoad("about:blank")
+		verify(player.markMediaDocumentReady(generation))
+		verify(player.ready)
+		verify(player.documentReady)
+		wait(0)
+		verify(!player.secondaryAudioActive)
+		session.active = false
+	}
+
+	function test_card_sized_player_keeps_a_full_width_viewport_above_one_control_row() {
+		const player = playerLoader.item
+		const canvas = findChild(player, "inlineMediaCanvas")
+		const surface = findChild(player, "inlineMediaWebSurface")
+		const controls = findChild(player, "mediaTransportActions")
+		verify(canvas !== null && surface !== null && controls !== null)
+
+		for (const width of [ 460, 580, 720 ]) {
+			testCase.width = width
+			wait(0)
+			testCase.height = Math.ceil(player.implicitHeight)
+			wait(0)
+			verify(Math.abs(canvas.height - player.mediaViewportHeight) < 1)
+			verify(surface.width >= canvas.width * 0.99)
+			verify(Math.abs(surface.width / surface.height - 16 / 9) < 0.01)
+			verify(controls.height <= 64)
+		}
+
+		testCase.width = 340
+		wait(0)
+		testCase.height = Math.ceil(player.implicitHeight)
+		wait(0)
+		verify(canvas.height >= 190)
+		verify(surface.width >= canvas.width * 0.99)
+		verify(player.height >= canvas.height + 40)
 	}
 
 	function test_audio_surfaces_stay_low_and_controls_keep_full_width() {
@@ -174,7 +598,7 @@ TestCase {
 	function test_accessibility_exposes_one_named_player_and_toolbar_actions() {
 		const player = playerLoader.item
 		compare(player.Accessible.role, Accessible.Pane)
-		compare(player.Accessible.name, "Inline media player")
+		compare(player.Accessible.name, "YouTube inline media player")
 		compare(player.surfaceId, "mediaSession.inline")
 		verify(player.captureRect.width > 0)
 		verify(!player.webSurfaceActive)
@@ -187,6 +611,107 @@ TestCase {
 		compare(popoutButton.Accessible.name, "Pop out")
 		compare(externalButton.Accessible.role, Accessible.Button)
 		compare(externalButton.Accessible.name, "Browser")
+	}
+
+	function test_dark_media_surfaces_use_overlay_contrast_tokens() {
+		const player = playerLoader.item
+		const strongLabels = [
+			findChild(player, "inlineMediaStatusLabel"),
+			findChild(player, "inlineMediaFixtureHeading"),
+			findChild(player, "inlineMediaLoadingHeading"),
+			findChild(player, "inlineMediaFailureHeading")
+		]
+		const mutedLabels = [
+			findChild(player, "inlineMediaFixtureDetail"),
+			findChild(player, "inlineMediaLoadingDetail"),
+			findChild(player, "inlineMediaFailureDetail")
+		]
+		for (const label of strongLabels) {
+			verify(label !== null)
+			compare(String(label.color), String(Theme.mediaOverlayTextStrong))
+		}
+		for (const label of mutedLabels) {
+			verify(label !== null)
+			compare(String(label.color), String(Theme.mediaOverlayTextMuted))
+		}
+
+		const progressTrack = findChild(player, "inlineMediaLoadingProgressTrack")
+		const popoutButton = findChild(player, "inlineMediaPopoutButton")
+		const externalButton = findChild(player, "inlineMediaExternalButton")
+		verify(progressTrack !== null && popoutButton !== null && externalButton !== null)
+		compare(String(progressTrack.color),
+			String(Theme.withAlpha(Theme.mediaOverlayTextStrong, 0.20)))
+		compare(popoutButton.overlay, true)
+		compare(externalButton.overlay, true)
+	}
+
+	function test_provider_presentation_styles_active_loading_error_and_compact_states() {
+		const player = playerLoader.item
+		const presentation = ProviderPresentation.resolve("youtube")
+		session.provider = "youtube"
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
+
+		compare(player.providerLabel, presentation.label)
+		compare(player.providerMark, presentation.mark)
+		compare(String(player.providerAccent), String(presentation.accent))
+		compare(String(player.providerOnAccent), String(Theme.contrastText(player.providerAccent)))
+		compare(player.Accessible.name, "YouTube inline media player")
+
+		const badge = findChild(player, "inlineMediaProviderBadge")
+		const badgeMark = findChild(player, "inlineMediaProviderMark")
+		const badgeLabel = findChild(player, "inlineMediaProviderLabel")
+		verify(badge !== null && badgeMark !== null && badgeLabel !== null)
+		compare(String(badge.color), String(player.providerAccent))
+		compare(badge.Accessible.name, "YouTube media player")
+		compare(badgeMark.text, "YT")
+		compare(badgeLabel.text, "YouTube")
+		compare(String(badgeMark.color), String(player.providerOnAccent))
+		compare(String(badgeLabel.color), String(player.providerOnAccent))
+
+		testCase.width = 420
+		wait(0)
+		verify(player.compactProviderChrome)
+		verify(!badgeLabel.visible)
+		verify(badgeMark.visible)
+
+		player.visualFixtureMode = "loading"
+		wait(0)
+		const loadingBadge = findChild(player, "inlineMediaLoadingProviderBadge")
+		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
+		const loadingBusy = findChild(player, "inlineMediaBusyIndicator")
+		const loadingMark = findChild(player, "inlineMediaLoadingProviderMark")
+		const loadingHeading = findChild(player, "inlineMediaLoadingHeading")
+		verify(loadingSurface !== null && loadingBadge !== null && loadingBadge.visible
+			&& loadingBusy !== null && loadingBusy.visible)
+		compare(loadingBusy.animated, false)
+		compare(loadingBusy.rotation, 0)
+		compare(loadingSurface.Accessible.name, "Loading YouTube inline media")
+		compare(String(loadingBadge.color), String(player.providerAccent))
+		compare(loadingBadge.Accessible.name, "YouTube")
+		compare(loadingMark.text, "YT")
+		compare(loadingHeading.text, "Loading YouTube")
+
+		player.visualFixtureMode = "error"
+		session.error = "Renderer stopped"
+		session.state = "error"
+		wait(0)
+		const failureBadge = findChild(player, "inlineMediaFailureProviderBadge")
+		const failureSurface = findChild(player, "inlineMediaFailureOverlay")
+		const failureMark = findChild(player, "inlineMediaFailureProviderMark")
+		const failureHeading = findChild(player, "inlineMediaFailureHeading")
+		verify(failureSurface !== null && failureBadge !== null && failureBadge.visible)
+		compare(failureSurface.Accessible.name, "YouTube playback failed")
+		compare(String(failureBadge.color), String(player.providerAccent))
+		compare(failureMark.text, "YT")
+		compare(failureHeading.text, "YouTube playback failed")
+
+		session.provider = "Acme Video"
+		wait(0)
+		compare(player.providerLabel, "Acme Video")
+		compare(player.providerMark, "AV")
+		compare(String(player.providerAccent), String(Theme.accent))
 	}
 
 	function test_focus_handoff_targets_first_transport_control() {

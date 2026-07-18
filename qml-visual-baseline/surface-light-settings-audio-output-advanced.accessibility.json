@@ -1,0 +1,1014 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 20,
+            "y": 25
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "AUDIO",
+              "rect": {
+                "height": 12,
+                "width": 35,
+                "x": 278,
+                "y": 90
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 22,
+                "width": 1144,
+                "x": 278,
+                "y": 103
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Audio Output",
+          "rect": {
+            "height": 62,
+            "width": 1226,
+            "x": 214,
+            "y": 76
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 190,
+            "x": 12,
+            "y": 88
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 123
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 110
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 166
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 153
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 209
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 196
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 252
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 239
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 295
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 282
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 338
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 325
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 381
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 368
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 424
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 411
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 467
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 454
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 145,
+                    "x": 47,
+                    "y": 510
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 40,
+                "width": 194,
+                "x": 10,
+                "y": 497
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 816,
+            "width": 194,
+            "x": 10,
+            "y": 110
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Device",
+              "rect": {
+                "height": 17,
+                "width": 1162,
+                "x": 246,
+                "y": 152
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Output system",
+                  "rect": {
+                    "height": 15,
+                    "width": 71,
+                    "x": 246,
+                    "y": 179
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Output system",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 199
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 1162,
+                "x": 246,
+                "y": 179
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Output device",
+                  "rect": {
+                    "height": 15,
+                    "width": 68,
+                    "x": 246,
+                    "y": 245
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Output device",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 265
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 1162,
+                "x": 246,
+                "y": 245
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Use exclusive output mode",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 311
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 1162,
+                "x": 246,
+                "y": 311
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Device",
+          "rect": {
+            "height": 223,
+            "width": 1190,
+            "x": 232,
+            "y": 138
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Playback",
+              "rect": {
+                "height": 17,
+                "width": 1162,
+                "x": 246,
+                "y": 391
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Incoming speech volume",
+                  "rect": {
+                    "height": 15,
+                    "width": 1128,
+                    "x": 246,
+                    "y": 419
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "100%; minimum 0%; maximum 200%",
+                  "name": "Incoming speech volume",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 438
+                  },
+                  "role": "Slider",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 1162,
+                "x": 246,
+                "y": 418
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Output delay",
+                  "rect": {
+                    "height": 15,
+                    "width": 63,
+                    "x": 246,
+                    "y": 484
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Output delay",
+                      "rect": {
+                        "height": 36,
+                        "width": 52,
+                        "x": 258,
+                        "y": 503
+                      },
+                      "role": "SpinBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "Output delay",
+                  "rect": {
+                    "height": 36,
+                    "width": 98,
+                    "x": 246,
+                    "y": 503
+                  },
+                  "role": "SpinBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 55,
+                "width": 1162,
+                "x": 246,
+                "y": 484
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Jitter buffer",
+                  "rect": {
+                    "height": 15,
+                    "width": 56,
+                    "x": 246,
+                    "y": 549
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Jitter buffer",
+                      "rect": {
+                        "height": 36,
+                        "width": 42,
+                        "x": 258,
+                        "y": 568
+                      },
+                      "role": "SpinBox",
+                      "states": [
+                        "focusable",
+                        "focused"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "Jitter buffer",
+                  "rect": {
+                    "height": 36,
+                    "width": 88,
+                    "x": 246,
+                    "y": 568
+                  },
+                  "role": "SpinBox",
+                  "states": [
+                    "focusable",
+                    "focused"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 55,
+                "width": 1162,
+                "x": 246,
+                "y": 549
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Loopback mode",
+                  "rect": {
+                    "height": 15,
+                    "width": 75,
+                    "x": 246,
+                    "y": 614
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Loopback mode",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 634
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 1162,
+                "x": 246,
+                "y": 614
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Loopback packet delay",
+                  "rect": {
+                    "height": 15,
+                    "width": 109,
+                    "x": 246,
+                    "y": 680
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Loopback packet delay",
+                      "rect": {
+                        "height": 36,
+                        "width": 410,
+                        "x": 258,
+                        "y": 699
+                      },
+                      "role": "SpinBox",
+                      "states": [
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "Loopback packet delay",
+                  "rect": {
+                    "height": 36,
+                    "width": 456,
+                    "x": 246,
+                    "y": 699
+                  },
+                  "role": "SpinBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 55,
+                "width": 1162,
+                "x": 246,
+                "y": 680
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Loopback packet loss",
+                  "rect": {
+                    "height": 15,
+                    "width": 1140,
+                    "x": 246,
+                    "y": 746
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "0%; minimum 0%; maximum 100%",
+                  "name": "Loopback packet loss",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 765
+                  },
+                  "role": "Slider",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 1162,
+                "x": 246,
+                "y": 745
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Playback",
+          "rect": {
+            "height": 438,
+            "width": 1190,
+            "x": 232,
+            "y": 377
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Attenuation",
+          "rect": {
+            "height": 17,
+            "width": 1162,
+            "x": 246,
+            "y": 845
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 24,
+                        "width": 1150,
+                        "x": 252,
+                        "y": 878
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 19,
+                        "width": 19,
+                        "x": 252,
+                        "y": 881
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Attenuate external applications while others talk",
+                  "rect": {
+                    "height": 36,
+                    "width": 1162,
+                    "x": 246,
+                    "y": 872
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 1162,
+                "x": 246,
+                "y": 872
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 36,
+            "width": 1162,
+            "x": 246,
+            "y": 872
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Hide advanced settings",
+              "rect": {
+                "height": 32,
+                "width": 95,
+                "x": 129,
+                "y": 952
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Advanced settings are visible",
+          "rect": {
+            "height": 32,
+            "width": 212,
+            "x": 12,
+            "y": 952
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 32,
+            "width": 51,
+            "x": 1273,
+            "y": 952
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 32,
+            "width": 47,
+            "x": 1330,
+            "y": 952
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 32,
+            "width": 45,
+            "x": 1383,
+            "y": 952
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 1000,
+        "width": 1440,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 1000,
+    "width": 1440,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

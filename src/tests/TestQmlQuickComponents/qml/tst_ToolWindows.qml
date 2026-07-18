@@ -176,7 +176,7 @@ TestCase {
 		verify(surface.y >= 0 && surface.y + surface.height <= tool.height)
 		tool.beginHold()
 		tryCompare(button.Accessible, "pressed", true)
-		verify(button.Accessible.name.indexOf("Transmitting") >= 0)
+		compare(button.Accessible.name, "Transmitting, release push to talk")
 		tool.hide()
 		tryCompare(uiCommands, "pttPressed", false)
 		compare(tool.holding, false)
@@ -301,15 +301,103 @@ TestCase {
 		tool.destroy()
 	}
 
+	function test_manualPluginInitialFocusAndDirtyCloseGuard() {
+		manualPlugin.clearCounts()
+		const tool = createTool("qrc:/qml-shell/ManualPluginWindow.qml")
+		try {
+			tool.show()
+			tool.requestActivate()
+			const xField = findChild(tool.contentItem, "manualXField")
+			const contextField = findChild(tool.contentItem, "manualContextField")
+			const dirtyStatus = findChild(tool.contentItem, "manualPluginDirtyStatus")
+			const discardDialog = findChild(tool.contentItem, "manualDiscardDialog")
+			const keepEditing = findChild(tool.contentItem, "manualKeepEditingButton")
+			const discardChanges = findChild(tool.contentItem, "manualDiscardChangesButton")
+			const applyButton = findChild(tool.contentItem, "manualApplyButton")
+			const barrier = findChild(tool.contentItem, "manualDiscardAccessibilityBarrier")
+			tryVerify(function() {
+				return xField !== null && contextField !== null && dirtyStatus !== null
+					&& discardDialog !== null && keepEditing !== null && discardChanges !== null
+					&& applyButton !== null && barrier !== null
+			})
+			tryCompare(xField, "activeFocus", true)
+			tryCompare(tool, "dirty", false)
+			compare(dirtyStatus.visible, false)
+
+			const baselineContext = contextField.text
+			contextField.forceActiveFocus()
+			tryCompare(contextField, "activeFocus", true)
+			contextField.text = baselineContext + "-draft"
+			tryCompare(tool, "dirty", true)
+			tryCompare(dirtyStatus, "visible", true)
+
+			tool.requestClose()
+			tryCompare(discardDialog, "opened", true)
+			compare(tool.visible, true)
+			tryCompare(keepEditing, "activeFocus", true)
+			tryCompare(contextField.Accessible, "ignored", true)
+			tryCompare(applyButton.Accessible, "ignored", true)
+			tryCompare(barrier, "active", true)
+			verify(!discardDialog.contentItem.Accessible.ignored)
+			verify(!keepEditing.Accessible.ignored)
+			keepEditing.clicked()
+			tryCompare(discardDialog, "opened", false)
+			tryCompare(contextField.Accessible, "ignored", false)
+			tryCompare(applyButton.Accessible, "ignored", false)
+			tryCompare(barrier, "active", false)
+			tryCompare(contextField, "activeFocus", true)
+			compare(tool.dirty, true)
+
+			// The native title-bar close path must use the same guard.
+			tool.close()
+			tryCompare(discardDialog, "opened", true)
+			compare(tool.visible, true)
+			discardChanges.clicked()
+			tryCompare(tool, "visible", false)
+			compare(manualPlugin.context, baselineContext)
+
+			tool.show()
+			tool.requestActivate()
+			tryCompare(tool, "dirty", false)
+			tryCompare(xField, "activeFocus", true)
+		} finally {
+			tool.hide()
+			tool.destroy()
+		}
+	}
+
+	function test_manualPluginVisualFixtureKeepsTextFocusWithoutBlinkingCaret() {
+		const tool = createTool("qrc:/qml-shell/ManualPluginWindow.qml", {
+			"visualFixtureMode": true
+		})
+		try {
+			tool.show()
+			const xField = findChild(tool.contentItem, "manualXField")
+			verify(xField !== null)
+			xField.forceActiveFocus()
+			tryCompare(xField, "activeFocus", true)
+			compare(xField.readOnly, true)
+			compare(xField.cursorVisible, false)
+		} finally {
+			tool.hide()
+			tool.destroy()
+		}
+	}
+
 	function test_attachmentViewerAcceptsOnlyManagedAnimatedFiles() {
 		const digest = "a".repeat(64)
 		const managed = "file:///C:/Temp/mumble-qml-images-a1/" + digest
 			+ "-12345678-1234-1234-1234-123456789abc.gif"
 		const tool = createTool("qrc:/qml-shell/AttachmentViewer.qml", {
-			"attachment": { "url": "", "alt": "Managed animation" }
+			"attachment": { "url": "", "alt": "Managed animation", "assetId": "42" }
 		})
+		let saveRequests = 0
+		let refreshRequests = 0
+		tool.saveRequested.connect(function() { saveRequests += 1 })
+		tool.refreshRequested.connect(function() { refreshRequests += 1 })
 		compare(tool.safeRenderImageSource(managed), managed)
 		compare(tool.safeRenderImageSource("file:///C:/Temp/unmanaged.gif"), "")
+		tool.attachment = { "url": managed, "alt": "Managed animation", "assetId": "42" }
 		tool.width = 420
 		tool.height = 320
 		tryCompare(tool, "compactLayout", true)
@@ -317,10 +405,33 @@ TestCase {
 		verify(closeButton !== null)
 		verify(closeButton.x >= 0 && closeButton.x + closeButton.width <= tool.width)
 		compare(closeButton.Accessible.name, "Close attachment viewer")
+		const saveButton = findChild(tool.contentItem, "attachmentViewerSaveButton")
+		verify(saveButton !== null)
+		tryCompare(saveButton, "visible", true)
+		compare(saveButton.Accessible.name, "Save original Managed animation")
 		const errorLabel = findChild(tool.contentItem, "attachmentViewerError")
 		verify(errorLabel !== null && errorLabel.visible)
 		compare(errorLabel.textFormat, Text.PlainText)
 		compare(errorLabel.Accessible.role, Accessible.AlertMessage)
+		tryVerify(function() { return refreshRequests === 1 })
+		const retryButton = findChild(tool.contentItem, "attachmentViewerRetryButton")
+		verify(retryButton !== null)
+		tool.requestActivate()
+		tryCompare(tool, "active", true)
+		tryCompare(retryButton, "activeFocus", true)
+		compare(retryButton.Accessible.name, "Retry loading Managed animation")
+		mouseClick(saveButton)
+		compare(saveRequests, 1)
+		mouseClick(retryButton)
+		tryVerify(function() { return refreshRequests === 2 })
+		tryCompare(tool, "retryingSource", false)
+		const animation = findChild(tool.contentItem, "attachmentViewerAnimation")
+		verify(animation !== null)
+		compare(String(animation.source), managed,
+			"Retry must only reload the viewer's current sanitized source")
+		wait(50)
+		compare(refreshRequests, 2,
+			"A failed local retry must not enqueue a duplicate hydration request")
 		tool.destroy()
 	}
 
@@ -337,6 +448,7 @@ TestCase {
 			"width": 420,
 			"height": 320
 		})
+		compare(tool.modality, Qt.WindowModal)
 		tryCompare(tool, "compactLayout", true)
 		const errorLabel = findChild(tool.contentItem, "imageViewerError")
 		verify(errorLabel !== null && errorLabel.visible)
@@ -344,6 +456,9 @@ TestCase {
 		compare(errorLabel.Accessible.role, Accessible.AlertMessage)
 		const stage = findChild(tool.contentItem, "imageViewerStage")
 		verify(stage !== null)
+		const minimizeButton = findChild(tool.contentItem, "imageViewerMinimize")
+		verify(minimizeButton !== null)
+		compare(minimizeButton.iconName, "minimize")
 		stage.forceActiveFocus()
 		tryCompare(stage, "activeFocus", true)
 		const toolbar = findChild(tool.contentItem, "imageViewerZoomToolbar")

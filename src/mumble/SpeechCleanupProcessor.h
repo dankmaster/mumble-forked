@@ -39,4 +39,17 @@ public:
 std::unique_ptr< SpeechCleanupProcessor > createSpeechCleanupProcessor(
 	const Mumble::SpeechCleanup::Selection &selection);
 
+/// Returns whether the selected noise-cancellation mode consumes a neural
+/// speech-cleanup processor. Off and Speex must remain allocation-free even if
+/// a neural backend/model remains selected in settings.
+bool noiseCancelUsesSpeechCleanup(Settings::NoiseCancel mode) noexcept;
+
+/// Keeps the normalized selection available for diagnostics while lazily
+/// owning the heavyweight processor only for RNN/Both modes. Switching to Off
+/// or Speex releases an existing processor immediately.
+void reconcileSpeechCleanupProcessor(
+	Settings::NoiseCancel mode, const Mumble::SpeechCleanup::Selection &requestedSelection,
+	Mumble::SpeechCleanup::Selection &activeSelection,
+	std::unique_ptr< SpeechCleanupProcessor > &processor);
+
 #endif // MUMBLE_MUMBLE_SPEECHCLEANUPPROCESSOR_H_

@@ -22,6 +22,12 @@ TestCase {
 		signalName: "dismissRequested"
 	}
 
+	SignalSpy {
+		id: actionSpy
+		target: testCase.currentCard
+		signalName: "actionRequested"
+	}
+
 	function loadCard(overrides) {
 		const properties = {
 			"stableId": "plugin-update:test",
@@ -51,6 +57,7 @@ TestCase {
 		currentCard.y = Math.round((testCase.height - currentCard.height) / 2)
 		cancelSpy.clear()
 		dismissSpy.clear()
+		actionSpy.clear()
 		return currentCard
 	}
 
@@ -73,6 +80,24 @@ TestCase {
 		tryVerify(function() { return card.height > compactHeight })
 		verify(card.height <= card.maximumHeight)
 		compare(expandButton.Accessible.name, "Collapse Updating plugins")
+	}
+
+	function test_progress_animation_binding_defaults_on_and_can_be_frozen() {
+		const card = loadCard({})
+		const progress = findChild(card, "operationProgressBar")
+		const heightBehavior = findChild(card, "operationHeightBehavior")
+		verify(progress !== null)
+		verify(heightBehavior !== null)
+		compare(card.animationsEnabled, true)
+		compare(progress.animated, true)
+		compare(heightBehavior.enabled, true)
+
+		card.animationsEnabled = false
+		tryCompare(progress, "animated", false)
+		tryCompare(heightBehavior, "enabled", false)
+		card.animationsEnabled = true
+		tryCompare(progress, "animated", true)
+		tryCompare(heightBehavior, "enabled", true)
 	}
 
 	function test_successful_terminal_card_starts_compact_on_wide_layout() {
@@ -189,6 +214,34 @@ TestCase {
 		mouseClick(dismissButton)
 		compare(dismissSpy.count, 1)
 		compare(dismissSpy.signalArguments[0][0], "plugin-update:test")
+	}
+
+	function test_notification_action_preserves_typed_cta_contract() {
+		const card = loadCard({
+			"title": "Plugin update available",
+			"subtitle": "A newer version can be installed.",
+			"status": "succeeded",
+			"payload": {
+				"tone": "info",
+				"actionId": "configure.plugins",
+				"actionLabel": "Review plugins",
+				"actionPayload": { "section": "updates" }
+			}
+		})
+		verify(card.notification)
+		verify(card.actionAvailable)
+		const actionButton = findChild(card, "operationNotificationActionButton")
+		verify(actionButton !== null && actionButton.visible)
+		compare(actionButton.text, "Review plugins")
+		compare(actionButton.Accessible.name, "Plugin update available: Review plugins")
+		compare(card.visualFixtureFocusTarget, actionButton)
+		actionButton.forceActiveFocus()
+		tryCompare(actionButton, "activeFocus", true)
+		keyClick(Qt.Key_Return)
+		compare(actionSpy.count, 1)
+		compare(actionSpy.signalArguments[0][0], "plugin-update:test")
+		compare(actionSpy.signalArguments[0][1], "configure.plugins")
+		compare(actionSpy.signalArguments[0][2].section, "updates")
 	}
 
 	function test_item_results_scroll_inside_bounded_details() {

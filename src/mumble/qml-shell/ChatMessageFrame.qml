@@ -18,25 +18,40 @@ Item {
 	// Quick to first promote its children and then expose them below the frame as
 	// well, leaving duplicate active nodes in the platform tree after reuse.
 	property bool accessibilityPooled: false
+	// ListView deliberately materializes a cache buffer beyond the clipped
+	// viewport. Keep those rows laid out in the cache but absent from UIA until
+	// they actually intersect the conversation viewport. The accessibility
+	// barrier below performs that semantic-only suppression; hiding the visual
+	// subtree here would collapse its implicit height and break prepend anchoring.
+	property bool accessibilityViewportVisible: true
+	property bool accessibilitySuppressed: false
+	// Visual fixtures must remain stable while the automation layer traverses
+	// accessibility bounds. That traversal can move the native pointer over a
+	// message between captures, so allow fixture hosts to suppress hover-only
+	// chrome without changing normal product interaction.
+	property bool hoverEffectsEnabled: true
 	readonly property bool accessibilityFrameIgnored: true
-	readonly property bool accessibilitySubtreeActive: !accessibilityPooled
-	readonly property bool hovered: messageHover.hovered
+	readonly property bool accessibilitySubtreeActive: !accessibilityPooled && accessibilityViewportVisible
+	readonly property bool hovered: hoverEffectsEnabled && messageHover.hovered
 
 	// The conversation lane is centered independently of the message surface.
 	// Regular incoming messages occupy the lane without looking like bubbles,
 	// while short outgoing messages can hug their content at the trailing edge.
 	property real laneAvailableWidth: 0
-	property real laneMaximumWidth: 840
+	property real laneMaximumWidth: Theme.chatLaneMaximumWidth
 	property real systemMaximumWidth: 680
 	property real preferredOwnWidth: 260
 	// Plain incoming messages should stay visually connected to their author,
 	// timestamp and actions. Rich content can still opt into the complete lane
 	// through wideContent/preferredWideContentWidth.
 	property real preferredIncomingWidth: 520
-	property real preferredWideContentWidth: laneMaximumWidth
+	property real preferredWideContentWidth: Theme.chatRichMaximumWidth
 	property real minimumOwnWidth: 176
 	property real minimumIncomingWidth: 220
 	property bool wideContent: false
+	// Conversation search highlights one stable message without changing the
+	// delegate's layout or filtering unrelated rows out of the virtualized list.
+	property bool searchCurrent: false
 	readonly property real laneWidth: Math.max(1, Math.min(root.laneMaximumWidth,
 		root.laneAvailableWidth > 0 ? root.laneAvailableWidth : root.laneMaximumWidth))
 	readonly property real messageWidth: {
@@ -62,15 +77,15 @@ Item {
 	}
 
 	property real groupGap: Theme.space3
-	property real continuationGap: Theme.space1
+	property real continuationGap: Theme.chatMetadataSpacing
 	readonly property real topGap: root.startsGroup ? root.groupGap : root.continuationGap
 	readonly property bool hasDateSeparator: root.dateSeparatorLabel.length > 0
 	readonly property real dateSeparatorHeight: root.hasDateSeparator
 		? Theme.space5 + Theme.fontCaption : 0
-	property real horizontalPadding: root.systemMessage ? Theme.space3
-		: root.own ? Theme.space2 : 0
-	property real verticalPadding: root.systemMessage ? Theme.space2
-		: root.own ? Theme.space2 : 0
+	property real horizontalPadding: root.systemMessage || root.own
+		? Theme.chatBubbleHorizontalPadding : 0
+	property real verticalPadding: root.systemMessage || root.own
+		? Theme.chatBubbleVerticalPadding : 0
 	property real compactMinimumHeight: root.own ? 32 : 28
 	property real groupMinimumHeight: root.own ? 40 : Theme.avatarMedium
 	readonly property real surfaceHeight: Math.max(
@@ -94,6 +109,22 @@ Item {
 	default property alias contentData: contentHost.data
 	readonly property alias contentItem: contentHost
 
+	Timer {
+		id: accessibilityReassertTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (root.visible)
+				root.reassertAccessibilitySuppression()
+		}
+	}
+
+	function reassertAccessibilitySuppression() {
+		if (!messageAccessibilityBarrier.active)
+			return false
+		return messageAccessibilityBarrier.reassertItem(root)
+	}
+
 	implicitWidth: laneAvailableWidth > 0 ? laneAvailableWidth : messageWidth
 	implicitHeight: dateSeparatorHeight + topGap + surfaceHeight
 	height: implicitHeight
@@ -102,14 +133,21 @@ Item {
 	// ListView.onReused on every model replacement path. Visibility is the final
 	// authority: an active delegate must always restore its semantic subtree.
 	onVisibleChanged: {
-		if (visible)
+		if (visible) {
 			accessibilityPooled = false
+			if (messageAccessibilityBarrier.active)
+				accessibilityReassertTimer.restart()
+		}
+	}
+	onAccessibilitySuppressedChanged: {
+		if (messageAccessibilityBarrier.active)
+			accessibilityReassertTimer.restart()
+	}
+	onAccessibilityViewportVisibleChanged: {
+		if (messageAccessibilityBarrier.active)
+			accessibilityReassertTimer.restart()
 	}
 	ListView.onAdd: accessibilityPooled = false
-
-	HoverHandler {
-		id: messageHover
-	}
 
 	Item {
 		id: dateSeparator
@@ -137,6 +175,7 @@ Item {
 
 			Text {
 				id: separatorText
+				objectName: "chatDateSeparatorText"
 				text: root.dateSeparatorLabel
 				textFormat: Text.PlainText
 				color: Theme.textFaint
@@ -145,6 +184,9 @@ Item {
 				font.letterSpacing: 0.7
 				Accessible.role: Accessible.StaticText
 				Accessible.name: text
+				// The ignored date-separator host promotes this leaf. Suppress the
+				// semantic owner directly when another modal owns the application.
+				Accessible.ignored: root.accessibilitySuppressed
 			}
 
 			Rectangle {
@@ -167,7 +209,7 @@ Item {
 		// ListView retains released delegates in its reuse pool. Explicitly hide the
 		// complete semantic subtree while pooled; relying on the delegate's effective
 		// visibility leaves stale QAccessible children active after a model reset.
-		visible: root.accessibilitySubtreeActive
+		visible: !root.accessibilityPooled
 		x: root.messageX
 		y: root.dateSeparatorHeight + root.topGap
 		width: root.messageWidth
@@ -177,13 +219,53 @@ Item {
 		border.color: root.surfaceBorderColor
 		border.width: root.surfaceBorderWidth
 
+		HoverHandler {
+			id: messageHover
+			objectName: "chatMessageHoverArea"
+		}
+
 		Item {
 			id: contentHost
+			objectName: "chatMessageContentHost"
 			anchors.fill: parent
 			anchors.leftMargin: root.horizontalPadding
 			anchors.rightMargin: root.horizontalPadding
 			anchors.topMargin: root.verticalPadding
 			anchors.bottomMargin: root.verticalPadding
+			// messageSurface is intentionally ignored. Keep this layout-only host
+			// ignored from creation as well so Windows UIA never materializes the
+			// empty Client provider that otherwise survives later modal suppression.
+			// Semantic descendants are promoted and remain governed by the barrier.
+			Accessible.ignored: true
 		}
+	}
+
+	Rectangle {
+		id: searchHighlight
+		objectName: "conversationSearchHighlight"
+		x: messageSurface.x - 3
+		y: messageSurface.y - 3
+		width: messageSurface.width + 6
+		height: messageSurface.height + 6
+		visible: root.searchCurrent && !root.accessibilityPooled
+		radius: Math.max(Theme.innerRadius, messageSurface.radius + 3)
+		color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.07)
+		border.color: Theme.accent
+		border.width: Theme.focusRingWidth
+		z: 20
+		Accessible.ignored: true
+	}
+
+	ModalAccessibilityBarrier {
+		id: messageAccessibilityBarrier
+		objectName: "chatMessageAccessibilityBarrier"
+		active: root.accessibilitySuppressed || !root.accessibilitySubtreeActive
+		// QQuickItemView may re-enable the delegate frame's private accessibility
+		// bit while materializing or reusing a row, even though its public
+		// Accessible.ignored binding remains true. Own the complete delegate while
+		// a product modal is active or the cached row is outside the viewport so
+		// neither that empty Client wrapper nor any promoted semantic descendant can
+		// escape into UIA. This leaves visual geometry untouched.
+		targets: [ root ]
 	}
 }

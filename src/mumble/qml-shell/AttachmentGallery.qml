@@ -6,9 +6,14 @@ import Mumble.Theme 1.0
 Item {
     id: root
 
-    required property var attachments
+	required property var attachments
+	property bool animationsEnabled: true
+	// Pooled chat delegates keep their geometry so ListView scroll anchoring stays
+	// stable, but they must release decoded image resources until reused.
+	property bool resourceActive: true
     signal attachmentRequested(var attachment)
 	signal attachmentDownloadRequested(var attachment)
+	signal attachmentRetryRequested(var attachment)
     signal attachmentRefreshRequested()
     readonly property bool compactLayout: width < 360
 	readonly property var visibleAttachments: boundedAttachments()
@@ -33,7 +38,11 @@ Item {
 
     function safeRenderImageSource(value) {
         const source = String(value === undefined || value === null ? "" : value).trim()
-        return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+		if (/^(image:\/\/mumble\/|qrc:\/)/i.test(source))
+			return source
+		return /^file:\/\//i.test(source)
+			&& /\/mumble-qml-images-[A-Za-z0-9]+\/[0-9a-f]{64}-[0-9a-f-]{36}\.gif$/i.test(source)
+			? source : ""
     }
 
 	function attachmentKindLabel(kind, mime) {
@@ -85,7 +94,33 @@ Item {
 		if (kind.length > 0 || mime.length > 0)
 			return false
 		// Backward compatibility for messages created before attachment kinds were exposed.
-		return safeRenderImageSource(attachment.thumbnailUrl || attachment.url || "").length > 0
+		return safeRenderImageSource(attachment.thumbnailUrl).length > 0
+			|| safeRenderImageSource(attachment.url).length > 0
+	}
+
+	function canOpenExternally(attachment) {
+		if (!attachment || isImageAttachment(attachment))
+			return false
+		const mime = safeText(attachment.mime, 128).toLowerCase()
+		const supportedMimes = [
+			"application/pdf", "text/plain", "text/markdown",
+			"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg",
+			"audio/flac", "audio/x-flac", "audio/aac", "audio/mp4", "audio/webm",
+			"video/mp4", "video/webm", "video/quicktime"
+		]
+		if (supportedMimes.indexOf(mime) >= 0)
+			return true
+		if (mime.length > 0 && mime !== "application/octet-stream")
+			return false
+		const kind = safeText(attachment.kind, 64).toLowerCase()
+		const fileName = safeText(attachment.fileName || attachment.name, 1024)
+		if (kind === "document")
+			return /\.(pdf|txt|md)$/i.test(fileName)
+		if (kind === "audio")
+			return /\.(mp3|m4a|mp4|wav|ogg|flac|aac|webm|weba)$/i.test(fileName)
+		if (kind === "video")
+			return /\.(mp4|webm|mov)$/i.test(fileName)
+		return false
 	}
 
     implicitHeight: gallery.implicitHeight
@@ -113,12 +148,19 @@ Item {
 				readonly property string attachmentState: root.safeText(modelData.state, 32).toLowerCase()
 				readonly property bool previewLoading: imageAttachment && attachmentState === "loading"
 				readonly property bool previewFailed: imageAttachment && attachmentState === "error"
+				readonly property bool previewCanRetry: previewFailed && !!modelData.previewCanRetry
 				readonly property string assetId: root.safeText(
 					modelData.assetId !== undefined ? modelData.assetId : modelData.assetID, 128)
-				readonly property string sourceUrl: root.safeText(
-					modelData.thumbnailUrl || modelData.url || "", 2048)
+				readonly property string inlineToken: root.safeText(modelData.inlineToken, 128)
+				readonly property string thumbnailSource: root.safeRenderImageSource(modelData.thumbnailUrl)
+				readonly property string fullSource: root.safeRenderImageSource(modelData.url)
+				readonly property string sourceUrl: thumbnailSource || fullSource
 				readonly property string fileName: root.safeText(
 					modelData.fileName || modelData.name || "", 1024)
+				readonly property bool openExternally: root.canOpenExternally(modelData)
+				readonly property bool saveActionAvailable: assetId.length > 0 || inlineToken.length > 0
+				readonly property bool primaryActionAvailable: imageAttachment
+					? sourceUrl.length > 0 || saveActionAvailable : assetId.length > 0
 				readonly property string kindLabel: root.attachmentKindLabel(normalizedKind, normalizedMime)
 				readonly property string metadataText: root.attachmentMetadata(normalizedKind,
 					normalizedMime, modelData.byteSize !== undefined ? modelData.byteSize : modelData.size)
@@ -126,6 +168,8 @@ Item {
 					modelData.alt || fileName || (imageAttachment ? qsTr("Image attachment")
 						: qsTr("%1 attachment").arg(kindLabel)), 512)
 					|| (imageAttachment ? qsTr("Image attachment") : qsTr("File attachment"))
+				readonly property string previewErrorText: root.safeText(modelData.previewError, 512)
+					|| qsTr("Preview unavailable")
 				readonly property string stableId: root.safeText(
 					modelData.id !== undefined ? modelData.id : modelData.assetId, 128)
 					|| String(attachmentTile.index)
@@ -153,10 +197,11 @@ Item {
                 clip: true
                 Image {
                     id: attachmentImage
+					objectName: "attachmentImage_" + attachmentTile.stableId
                     anchors.fill: parent
 					anchors.margins: attachmentTile.border.width
 					visible: attachmentTile.imageAttachment
-					source: attachmentTile.imageAttachment
+				source: root.resourceActive && attachmentTile.imageAttachment
 						? root.safeRenderImageSource(attachmentTile.sourceUrl) : ""
                     asynchronous: true
                     cache: false
@@ -172,32 +217,55 @@ Item {
                     anchors.centerIn: parent
 					running: attachmentTile.previewLoading
 						|| (attachmentTile.imageAttachment && attachmentImage.status === Image.Loading)
+					animated: root.animationsEnabled
                     visible: running
 					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
                 }
 
-                Label {
-					objectName: "attachmentError_" + attachmentTile.stableId
-					textFormat: Text.PlainText
+				ColumnLayout {
+					id: attachmentErrorContent
 					anchors.centerIn: parent
 					width: Math.max(1, parent.width - Theme.space3 * 2)
+					spacing: Theme.space2
+					z: 4
 					visible: attachmentTile.imageAttachment && !attachmentTile.previewLoading
 						&& (attachmentTile.previewFailed || attachmentImage.status === Image.Error
 							|| root.safeRenderImageSource(attachmentTile.sourceUrl).length === 0)
-                    text: qsTr("Attachment unavailable")
-                    color: Theme.textMuted
-					font.pixelSize: Theme.fontLabel
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-					Accessible.role: Accessible.AlertMessage
-					Accessible.name: text
-					Accessible.description: attachmentTile.label
-                }
+
+					Label {
+						objectName: "attachmentError_" + attachmentTile.stableId
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: attachmentTile.previewErrorText
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontLabel
+						horizontalAlignment: Text.AlignHCenter
+						wrapMode: Text.Wrap
+						Accessible.role: Accessible.AlertMessage
+						Accessible.name: text
+						Accessible.description: attachmentTile.label
+					}
+
+					ModernButton {
+						objectName: "attachmentRetry_" + attachmentTile.stableId
+						Layout.alignment: Qt.AlignHCenter
+						visible: attachmentTile.previewCanRetry
+						dense: true
+						tone: "retry"
+						text: qsTr("Retry preview")
+						Accessible.name: qsTr("Retry preview for %1").arg(attachmentTile.label)
+						onClicked: root.attachmentRetryRequested(attachmentTile.modelData)
+					}
+				}
 
 				RowLayout {
 					objectName: "attachmentFileDetails_" + attachmentTile.stableId
 					anchors.fill: parent
-					anchors.margins: Theme.space3
+					anchors.leftMargin: Theme.space3
+					anchors.topMargin: Theme.space3
+					anchors.bottomMargin: Theme.space3
+					anchors.rightMargin: attachmentTile.openExternally && attachmentTile.saveActionAvailable
+						? Theme.space6 : Theme.space3
 					spacing: Theme.space3
 					visible: !attachmentTile.imageAttachment
 					Accessible.ignored: true
@@ -208,10 +276,7 @@ Item {
 						color: Theme.panel
 						ModernIcon {
 							anchors.centerIn: parent
-							name: attachmentTile.normalizedKind === "video"
-								|| attachmentTile.normalizedKind === "audio"
-								|| /^(video|audio)\//.test(attachmentTile.normalizedMime)
-								? "play" : "attach"
+							name: "attach"
 							size: 21
 							color: Theme.accent
 						}
@@ -243,7 +308,7 @@ Item {
 					ModernIcon {
 						Layout.preferredWidth: 18
 						Layout.preferredHeight: 18
-						name: "external"
+						name: attachmentTile.openExternally ? "external" : "download"
 						size: 18
 						color: Theme.textMuted
 					}
@@ -268,34 +333,36 @@ Item {
 					objectName: "attachmentAction_" + attachmentTile.stableId
                     anchors.fill: parent
                     hoverEnabled: true
-					enabled: attachmentTile.modelData.enabled === undefined
+					enabled: attachmentTile.primaryActionAvailable && (attachmentTile.modelData.enabled === undefined
 						? !attachmentTile.previewLoading
-						: !!attachmentTile.modelData.enabled && !attachmentTile.previewLoading
+						: !!attachmentTile.modelData.enabled && !attachmentTile.previewLoading)
                     background: null
                     contentItem: Item {}
-                    Accessible.name: attachmentTile.label
-					Accessible.description: attachmentTile.imageAttachment
-						? qsTr("Attachment %1 of %2")
-							.arg(attachmentTile.index + 1).arg(root.visibleAttachments.length)
-						: qsTr("Download %1. Attachment %2 of %3")
-							.arg(attachmentTile.label).arg(attachmentTile.index + 1)
-							.arg(root.visibleAttachments.length)
-					ToolTip.visible: hovered && !attachmentTile.imageAttachment
-					ToolTip.text: qsTr("Download %1").arg(attachmentTile.label)
+					readonly property string actionVerb: attachmentTile.imageAttachment
+						&& attachmentTile.sourceUrl.length > 0 ? qsTr("View preview")
+						: attachmentTile.openExternally ? qsTr("Open") : qsTr("Save")
+					Accessible.name: attachmentTile.imageAttachment ? attachmentTile.label
+						: qsTr("%1 %2").arg(actionVerb).arg(attachmentTile.label)
+					Accessible.description: qsTr("Attachment %1 of %2")
+						.arg(attachmentTile.index + 1).arg(root.visibleAttachments.length)
+					ToolTip.visible: hovered
+					ToolTip.text: qsTr("%1 %2").arg(actionVerb).arg(attachmentTile.label)
                     onClicked: root.attachmentRequested(attachmentTile.modelData)
                 }
 
 				ModernIconButton {
 					objectName: "attachmentDownload_" + attachmentTile.stableId
-					anchors.top: parent.top
+					anchors.top: attachmentTile.imageAttachment ? parent.top : undefined
+					anchors.verticalCenter: attachmentTile.imageAttachment ? undefined : parent.verticalCenter
 					anchors.right: parent.right
 					anchors.margins: Theme.space2
 					z: 3
 					dense: true
-					visible: attachmentTile.imageAttachment && attachmentTile.assetId.length > 0
+					visible: attachmentTile.saveActionAvailable
+						&& (attachmentTile.imageAttachment || attachmentTile.openExternally)
 					enabled: attachmentTile.modelData.enabled === undefined
 						|| !!attachmentTile.modelData.enabled
-					iconName: "external"
+					iconName: "download"
 					text: qsTr("Save original")
 					Accessible.name: qsTr("Save original %1").arg(attachmentTile.label)
 					ToolTip.visible: hovered

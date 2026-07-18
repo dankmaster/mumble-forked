@@ -404,6 +404,7 @@ function Copy-SharedEnvironmentRuntime {
 	# environment runtime DLL set so Qt/WebEngine and Mumble's shared third-party
 	# dependencies resolve without depending on a developer PATH.
 	$excludedRuntimeDlls = @(
+		"Qt6MultimediaWidgets.dll",
 		"Qt6QuickWidgets.dll",
 		"Qt6WebEngineWidgets.dll"
 	)
@@ -522,6 +523,46 @@ function Assert-NoPendingReboot {
 	}
 }
 
+function Get-PeRuntimeDependencies {
+	param(
+		[Parameter(Mandatory = $true)]
+		[AllowEmptyString()]
+		[string[]]$DumpbinOutput
+	)
+
+	$direct = [System.Collections.Generic.List[string]]::new()
+	$delayLoad = [System.Collections.Generic.List[string]]::new()
+	$section = ""
+	foreach ($line in $DumpbinOutput) {
+		$trimmed = ([string]$line).Trim()
+		if ($trimmed -eq "Image has the following dependencies:") {
+			$section = "direct"
+			continue
+		}
+		if ($trimmed -eq "Image has the following delay load dependencies:") {
+			$section = "delay"
+			continue
+		}
+		if ($trimmed -eq "Summary") {
+			$section = ""
+			continue
+		}
+		if ($trimmed -notmatch '^[A-Za-z0-9_.+-]+\.(?:dll|drv|cpl)$') {
+			continue
+		}
+		if ($section -eq "direct") {
+			$direct.Add($trimmed)
+		} elseif ($section -eq "delay") {
+			$delayLoad.Add($trimmed)
+		}
+	}
+
+	return [pscustomobject]@{
+		Direct = @($direct | Sort-Object -Unique)
+		DelayLoad = @($delayLoad | Sort-Object -Unique)
+	}
+}
+
 function Assert-QtQuickDesktopDeployment {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -538,7 +579,11 @@ function Assert-QtQuickDesktopDeployment {
 		@{ Description = "Qt Quick Layouts QML plugin"; Filter = "qquicklayoutsplugin.dll"; Directory = $false },
 		@{ Description = "Qt Quick Dialogs QML plugin"; Filter = "*quickdialogs*plugin.dll"; Directory = $false },
 		@{ Description = "Qt Quick Shapes QML plugin"; Filter = "qmlshapesplugin.dll"; Directory = $false },
+		@{ Description = "Qt Multimedia QML plugin"; Filter = "quickmultimediaplugin.dll"; Directory = $false },
+		@{ Description = "Qt Windows Media Foundation backend"; Filter = "windowsmediaplugin.dll"; Directory = $false },
 		@{ Description = "Qt WebEngineQuick QML plugin"; Filter = "qtwebenginequickplugin.dll"; Directory = $false },
+		@{ Description = "Qt Multimedia runtime"; Filter = "Qt6Multimedia.dll"; Directory = $false },
+		@{ Description = "Qt Multimedia Quick runtime"; Filter = "Qt6MultimediaQuick.dll"; Directory = $false },
 		@{ Description = "Qt Quick runtime"; Filter = "Qt6Quick.dll"; Directory = $false },
 		@{ Description = "Qt QML runtime"; Filter = "Qt6Qml.dll"; Directory = $false },
 		@{ Description = "Qt Quick Shapes runtime"; Filter = "Qt6QuickShapes.dll"; Directory = $false },
@@ -570,6 +615,8 @@ function Assert-QtQuickDesktopDeployment {
 		"mumble-updater.exe",
 		"Qt6Core.dll",
 		"Qt6Gui.dll",
+		"Qt6Multimedia.dll",
+		"Qt6MultimediaQuick.dll",
 		"Qt6Qml.dll",
 		"Qt6Quick.dll",
 		"Qt6QuickControls2.dll",
@@ -585,7 +632,12 @@ function Assert-QtQuickDesktopDeployment {
 		"Qt6WebEngineQuick.dll",
 		"QtWebEngineProcess.exe",
 		"platforms\qwindows.dll",
+		"multimedia\windowsmediaplugin.dll",
 		"tls\qopensslbackend.dll",
+		"qml\QtMultimedia\qmldir",
+		"qml\QtMultimedia\plugins.qmltypes",
+		"qml\QtMultimedia\quickmultimediaplugin.dll",
+		"qml\QtMultimedia\Video.qml",
 		"qml\QtQuick\qmldir",
 		"qml\QtQuick\Controls\qmldir",
 		"qml\QtQuick\Controls\qtquickcontrols2plugin.dll",
@@ -620,7 +672,7 @@ function Assert-QtQuickDesktopDeployment {
 	}
 
 	$forbiddenRuntime = @(
-		@("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
+		@("Qt6MultimediaWidgets.dll", "Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
 			Where-Object { Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter $_ -ErrorAction SilentlyContinue }
 	)
 	if ($forbiddenRuntime.Count -gt 0) {
@@ -642,38 +694,49 @@ function Assert-QtQuickDesktopDeployment {
 	if ($LASTEXITCODE -ne 0) {
 		throw "dumpbin failed while inspecting the staged Qt Quick client at '$stageExe'."
 	}
-	$directDependencies = @($directDependencyLines |
-		ForEach-Object { ([string]$_).Trim() } |
-		Where-Object { $_ -match '(?i)\.(?:dll|drv|cpl)$' } |
-		Sort-Object -Unique)
+	$dependencyReport = Get-PeRuntimeDependencies -DumpbinOutput $directDependencyLines
+	$directDependencies = @($dependencyReport.Direct)
+	$delayLoadDependencies = @($dependencyReport.DelayLoad)
 	if ($directDependencies.Count -eq 0) {
 		throw "dumpbin returned no direct runtime dependencies for '$stageExe'."
 	}
-	$directDependencyReport = $directDependencies -join [Environment]::NewLine
 	$directDependencyPath = Join-Path $StageRoot "direct-runtime-dependencies.txt"
-	Set-Content -LiteralPath $directDependencyPath -Value $directDependencyReport -Encoding utf8
+	Set-Content -LiteralPath $directDependencyPath -Value ($directDependencies -join [Environment]::NewLine) -Encoding utf8
+	$delayLoadDependencyPath = Join-Path $StageRoot "delay-load-runtime-dependencies.txt"
+	Set-Content -LiteralPath $delayLoadDependencyPath -Value ($delayLoadDependencies -join [Environment]::NewLine) -Encoding utf8
 
-	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "Qt6WebEngineCore.dll")) {
-		if ($directDependencyReport -notmatch [regex]::Escape($requiredDirectRuntime)) {
+	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll")) {
+		if ($directDependencies -notcontains $requiredDirectRuntime) {
 			throw "The staged client does not directly import required Qt Quick runtime '$requiredDirectRuntime'."
 		}
 	}
+	$requiredDelayLoadRuntimes = [Collections.Generic.List[string]]::new()
+	$requiredDelayLoadRuntimes.Add("Qt6WebEngineQuick.dll")
+	$requiredDelayLoadRuntimes.Add("Qt6WebEngineCore.dll")
+	foreach ($optionalNeuralRuntime in @("rnnoise.dll", "onnxruntime.dll")) {
+		if (Test-Path -LiteralPath (Join-Path $StageRoot $optionalNeuralRuntime) -PathType Leaf) {
+			$requiredDelayLoadRuntimes.Add($optionalNeuralRuntime)
+		}
+	}
+	foreach ($requiredDelayLoadRuntime in $requiredDelayLoadRuntimes) {
+		if ($delayLoadDependencies -notcontains $requiredDelayLoadRuntime) {
+			throw "The staged client does not delay-load isolated media runtime '$requiredDelayLoadRuntime'."
+		}
+	}
 	$forbiddenDirectRuntimes = @(
+		"Qt6MultimediaWidgets.dll",
 		"Qt6QuickWidgets.dll",
 		"Qt6WebEngineWidgets.dll",
 		"Qt6WebChannel.dll",
-		"Qt6WebChannelQuick.dll"
+		"Qt6WebChannelQuick.dll",
+		"Qt6WebEngineQuick.dll",
+		"Qt6WebEngineCore.dll",
+		"rnnoise.dll",
+		"onnxruntime.dll"
 	)
-	# WebEngineQuick/Core are the explicit isolated media exception. Their DLLs
-	# may be imported by the executable because Qt requires WebEngineQuick to be
-	# initialized before QGuiApplication; the runtime gate separately verifies
-	# that no Chromium renderer process starts before explicit media activation.
-	# Product compatibility widgets and an app-owned WebChannel remain forbidden.
-	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object {
-		$directDependencyReport -match [regex]::Escape($_)
-	})
+	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object { $directDependencies -contains $_ })
 	if ($forbiddenDirectImports.Count -gt 0) {
-		throw "The staged client directly imports compatibility or app-bridge runtimes: $($forbiddenDirectImports -join ', ')."
+		throw "The staged client directly imports compatibility, app-bridge, or media-only runtimes: $($forbiddenDirectImports -join ', ')."
 	}
 }
 
@@ -1163,6 +1226,12 @@ function Test-SharedEnvironmentReady {
 	$requiredPaths = @(
 		(Join-Path $EnvironmentDir "vcpkg.exe"),
 		(Join-Path $EnvironmentDir "scripts\buildsystems\vcpkg.cmake"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6Multimedia\Qt6MultimediaTargets.cmake"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\bin\Qt6Multimedia.dll"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\bin\Qt6MultimediaQuick.dll"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\Qt6\qml\QtMultimedia\qmldir"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\Qt6\qml\QtMultimedia\quickmultimediaplugin.dll"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\Qt6\plugins\multimedia\windowsmediaplugin.dll"),
 		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"),
 		(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe"),
 		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\icudtl.dat"),

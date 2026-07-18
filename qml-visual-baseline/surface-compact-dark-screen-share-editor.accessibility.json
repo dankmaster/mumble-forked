@@ -1,0 +1,284 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Start screen share",
+          "rect": {
+            "height": 26,
+            "width": 153,
+            "x": 36,
+            "y": 83
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 700,
+            "y": 89
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Share to Lobby",
+          "rect": {
+            "height": 15,
+            "width": 659,
+            "x": 36,
+            "y": 112
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Choose what to share",
+          "rect": {
+            "height": 20,
+            "width": 692,
+            "x": 34,
+            "y": 139
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Screens",
+          "rect": {
+            "height": 15,
+            "width": 39,
+            "x": 34,
+            "y": 171
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "DISPLAY1 - 2560x1440 - Primary display",
+          "name": "Screen 1",
+          "rect": {
+            "height": 114,
+            "width": 692,
+            "x": 34,
+            "y": 192
+          },
+          "role": "RadioButton",
+          "states": [
+            "checkable",
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Open windows",
+          "rect": {
+            "height": 15,
+            "width": 78,
+            "x": 34,
+            "y": 318
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Mumble",
+          "name": "Qt Quick Design Review",
+          "rect": {
+            "height": 114,
+            "width": 692,
+            "x": 34,
+            "y": 339
+          },
+          "role": "RadioButton",
+          "states": [
+            "checkable",
+            "checked",
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Resolution",
+          "rect": {
+            "height": 14,
+            "width": 46,
+            "x": 34,
+            "y": 465
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Frame rate",
+          "rect": {
+            "height": 14,
+            "width": 46,
+            "x": 277,
+            "y": 465
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Audio",
+          "rect": {
+            "height": 14,
+            "width": 26,
+            "x": 398,
+            "y": 465
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 32,
+            "width": 231,
+            "x": 34,
+            "y": 484
+          },
+          "role": "ComboBox",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 32,
+            "width": 109,
+            "x": 277,
+            "y": 484
+          },
+          "role": "ComboBox",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 32,
+            "width": 328,
+            "x": 398,
+            "y": 484
+          },
+          "role": "ComboBox",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Server limit: 2560x1440@60",
+          "rect": {
+            "height": 14,
+            "width": 692,
+            "x": 34,
+            "y": 528
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "System and output-device audio exclude this Mumble client to avoid voice feedback.",
+          "rect": {
+            "height": 14,
+            "width": 692,
+            "x": 34,
+            "y": 554
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 32,
+            "width": 51,
+            "x": 28,
+            "y": 606
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Start sharing",
+          "rect": {
+            "height": 32,
+            "width": 83,
+            "x": 85,
+            "y": 606
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Share to Lobby",
+      "name": "Start screen share",
+      "rect": {
+        "height": 579,
+        "width": 720,
+        "x": 20,
+        "y": 71
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 720,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

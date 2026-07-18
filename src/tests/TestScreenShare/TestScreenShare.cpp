@@ -6,6 +6,8 @@
 #include <QtTest>
 #include <QtCore/QUuid>
 #include <QtCore/QSharedMemory>
+#include <QtCore/QThread>
+#include <QtGui/QColor>
 
 #include <limits>
 
@@ -37,9 +39,15 @@ private slots:
 	void normalizesSecureRelayUrls();
 	void rejectsUnsafeRelayUrls();
 	void qmlViewBackendPublishesLifecycleState();
+	void viewerAudioPreferencesUseStableSharerIdentity();
+	void viewerAudioControlsCoalesceLatestStateOffGuiThread();
 	void qmlViewBackendReportsExternalWindowTransportHonestly();
+	void visualFixtureFrameInjectionActivatesNativeRendering();
+	void qmlViewBackendKeepsReceiverAndFrameIdentityWhenPaused();
+	void qmlViewBackendClearsNativeFrameForExternalFallback();
 	void nativeFrameTransportIsBoundedAndTracksDrops();
 	void qmlViewBackendConsumesNativeFramesOffThread();
+	void qmlViewBackendCoalescesFramesWhileGuiThreadIsBusy();
 	void rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog();
 	void nativeFrameDecoderArgumentsKeepStdoutBinaryAndBounded();
 	void helperOperationGenerationsRejectStaleAndCancelledResults();
@@ -64,15 +72,26 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	ScreenShareSession session;
 	session.streamID = QStringLiteral("stream:7");
 	session.ownerSession = 42;
+	session.scopeID = 9;
 	session.captureAudio = true;
 	ScreenShareViewBackend backend(session);
+	QSignalSpy sessionSpy(&backend, &ScreenShareViewBackend::sessionChanged);
 	QSignalSpy pauseSpy(&backend, &ScreenShareViewBackend::pauseToggled);
 	QSignalSpy muteSpy(&backend, &ScreenShareViewBackend::audioMuteToggled);
+	QSignalSpy volumeSpy(&backend, &ScreenShareViewBackend::audioVolumeAdjusted);
 	QSignalSpy retrySpy(&backend, &ScreenShareViewBackend::retryRequested);
 	QSignalSpy stopSpy(&backend, &ScreenShareViewBackend::stopRequested);
 	QSignalSpy operationSpy(&backend, &ScreenShareViewBackend::operationStateChanged);
 
 	QCOMPARE(backend.streamId(), QStringLiteral("stream:7"));
+	QCOMPARE(backend.ownerLabel(), QStringLiteral("Session 42"));
+	QCOMPARE(backend.roomLabel(), QStringLiteral("Voice room 9"));
+	backend.setIdentity(QStringLiteral(" Alice "), QStringLiteral(" Lobby "));
+	QCOMPARE(sessionSpy.count(), 1);
+	QCOMPARE(backend.ownerLabel(), QStringLiteral("Alice"));
+	QCOMPARE(backend.roomLabel(), QStringLiteral("Lobby"));
+	QCOMPARE(backend.title(), QStringLiteral("Alice's screen share"));
+	QCOMPARE(backend.detail(), QStringLiteral("Alice · Lobby"));
 	QVERIFY(backend.audioAvailable());
 	backend.setPaused(true);
 	backend.setAudioMuted(true);
@@ -85,6 +104,7 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QCOMPARE(backend.audioVolume(), 100);
 	QCOMPARE(pauseSpy.count(), 1);
 	QCOMPARE(muteSpy.count(), 1);
+	QCOMPARE(volumeSpy.count(), 0);
 	QCOMPARE(retrySpy.count(), 1);
 	QCOMPARE(retrySpy.constFirst().constFirst().toString(), QStringLiteral("stream:7"));
 	QCOMPARE(stopSpy.count(), 1);
@@ -100,6 +120,77 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QVERIFY(!backend.operationCancellable());
 }
 
+void TestScreenShare::viewerAudioPreferencesUseStableSharerIdentity() {
+	const QString certificateKey = Mumble::ScreenShare::viewerAudioPreferenceKey(
+		QStringLiteral(" A1B2C3 "), QByteArray::fromHex("0102"), QStringLiteral("First name"));
+	QCOMPARE(certificateKey, QStringLiteral("certificate:a1b2c3"));
+	QCOMPARE(certificateKey,
+			 Mumble::ScreenShare::viewerAudioPreferenceKey(QStringLiteral("a1b2c3"), QByteArray::fromHex("ffff"),
+													 QStringLiteral("Renamed user")));
+
+	const QString fallbackKey = Mumble::ScreenShare::viewerAudioPreferenceKey(
+		{}, QByteArray::fromHex("0102"), QStringLiteral(" Guest "));
+	QVERIFY(fallbackKey.startsWith(QStringLiteral("server-user:")));
+	QCOMPARE(fallbackKey,
+			 Mumble::ScreenShare::viewerAudioPreferenceKey({}, QByteArray::fromHex("0102"), QStringLiteral("guest")));
+	QVERIFY(fallbackKey != Mumble::ScreenShare::viewerAudioPreferenceKey(
+		{}, QByteArray::fromHex("0304"), QStringLiteral("guest")));
+	QVERIFY(Mumble::ScreenShare::viewerAudioPreferenceKey({}, QByteArray::fromHex("0102"), {}).isEmpty());
+
+	ScreenShareSession session;
+	session.streamID = QStringLiteral("stream:volume");
+	ScreenShareViewBackend backend(session);
+	QSignalSpy volumeSpy(&backend, &ScreenShareViewBackend::audioVolumeAdjusted);
+	backend.setAudioVolume(37);
+	QCOMPARE(volumeSpy.count(), 1);
+	QCOMPARE(volumeSpy.constFirst().at(0).toString(), QStringLiteral("stream:volume"));
+	QCOMPARE(volumeSpy.constFirst().at(1).toInt(), 37);
+}
+
+void TestScreenShare::viewerAudioControlsCoalesceLatestStateOffGuiThread() {
+#ifdef Q_OS_WIN
+	ScreenShareSession session;
+	session.streamID = QStringLiteral("stream:audio-coalescing");
+	session.captureAudio = true;
+	ScreenShareViewBackend backend(session);
+	QSignalSpy dispatchSpy(&backend, &ScreenShareViewBackend::audioControlsDispatchedForTest);
+	QSignalSpy stateSpy(&backend, &ScreenShareViewBackend::audioControlStateChanged);
+
+	backend.setProcessId(7331);
+	backend.setAudioVolume(12);
+	backend.setAudioVolume(38);
+	backend.setAudioVolume(64);
+	// No Core Audio enumeration or worker dispatch occurs inline with the GUI
+	// setters. The single-shot debounce owns the first dispatch.
+	QCOMPARE(dispatchSpy.count(), 0);
+	QTRY_COMPARE_WITH_TIMEOUT(dispatchSpy.count(), 1, 300);
+	QCOMPARE(dispatchSpy.at(0).at(0).toLongLong(), 7331);
+	QVERIFY(!dispatchSpy.at(0).at(1).toBool());
+	QCOMPARE(dispatchSpy.at(0).at(2).toInt(), 64);
+	QVERIFY(stateSpy.count() > 0);
+	QVERIFY(backend.audioControlStatus() != QStringLiteral("idle"));
+
+	backend.setPaused(true);
+	backend.setAudioVolume(71);
+	backend.setAudioVolume(83);
+	QCOMPARE(backend.processId(), 7331);
+	QCOMPARE(dispatchSpy.count(), 1);
+	QTRY_COMPARE_WITH_TIMEOUT(dispatchSpy.count(), 2, 300);
+	QCOMPARE(dispatchSpy.at(1).at(0).toLongLong(), 7331);
+	QVERIFY(dispatchSpy.at(1).at(1).toBool());
+	QCOMPARE(dispatchSpy.at(1).at(2).toInt(), 83);
+
+	backend.setPaused(false);
+	QCOMPARE(backend.processId(), 7331);
+	QTRY_COMPARE_WITH_TIMEOUT(dispatchSpy.count(), 3, 300);
+	QCOMPARE(dispatchSpy.at(2).at(0).toLongLong(), 7331);
+	QVERIFY(!dispatchSpy.at(2).at(1).toBool());
+	QCOMPARE(dispatchSpy.at(2).at(2).toInt(), 83);
+#else
+	QSKIP("Windows Core Audio coalescing is only active in the Windows client.");
+#endif
+}
+
 void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
 	ScreenShareSession session;
 	ScreenShareViewBackend backend(session);
@@ -108,6 +199,70 @@ void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
 	QCOMPARE(backend.renderTransport(), QStringLiteral("external-process-window"));
 	QVERIFY(backend.nativeFrameTransportAvailable());
 	QVERIFY(backend.nativeFrameTransportBlocker().isEmpty());
+}
+
+void TestScreenShare::visualFixtureFrameInjectionActivatesNativeRendering() {
+	ScreenShareSession session;
+	ScreenShareViewBackend backend(session);
+	QSignalSpy activeSpy(&backend, &ScreenShareViewBackend::nativeFrameActiveChanged);
+	QSignalSpy frameSpy(&backend, &ScreenShareViewBackend::frameChanged);
+	QImage fixtureFrame(3, 2, QImage::Format_RGBA8888);
+	fixtureFrame.fill(QColor(32, 96, 192));
+
+	backend.setVisualFixtureFrame(fixtureFrame);
+
+	QVERIFY(backend.nativeFrameActive());
+	QVERIFY(backend.hasCurrentFrame());
+	QCOMPARE(backend.currentFrame().size(), QSize(3, 2));
+	QCOMPARE(backend.currentFrame().pixelColor(1, 1), QColor(32, 96, 192));
+	QCOMPARE(backend.renderTransport(), QStringLiteral("native-shared-memory-bgra"));
+	QCOMPARE(activeSpy.count(), 1);
+	QCOMPARE(frameSpy.count(), 1);
+}
+
+void TestScreenShare::qmlViewBackendKeepsReceiverAndFrameIdentityWhenPaused() {
+	ScreenShareSession session;
+	session.streamID = QStringLiteral("stream:pause");
+	ScreenShareViewBackend backend(session);
+	QImage fixtureFrame(3, 2, QImage::Format_RGBA8888);
+	fixtureFrame.fill(QColor(32, 96, 192));
+	backend.setVisualFixtureFrame(fixtureFrame);
+	backend.setProcessId(7331);
+	QVERIFY(backend.nativeFrameActive());
+	QVERIFY(backend.hasCurrentFrame());
+	QSignalSpy frameSpy(&backend, &ScreenShareViewBackend::frameChanged);
+	QSignalSpy transportSpy(&backend, &ScreenShareViewBackend::nativeFrameActiveChanged);
+
+	backend.setPaused(true);
+
+	QVERIFY(backend.paused());
+	QCOMPARE(backend.processId(), 7331);
+	QVERIFY(backend.hasCurrentFrame());
+	QVERIFY(backend.nativeFrameActive());
+	QCOMPARE(backend.currentFrame().size(), QSize(3, 2));
+	QCOMPARE(backend.renderTransport(), QStringLiteral("native-shared-memory-bgra"));
+	QCOMPARE(frameSpy.count(), 0);
+	QCOMPARE(transportSpy.count(), 0);
+	backend.setPaused(false);
+	QCOMPARE(backend.processId(), 7331);
+	QVERIFY(backend.hasCurrentFrame());
+	QVERIFY(backend.nativeFrameActive());
+}
+
+void TestScreenShare::qmlViewBackendClearsNativeFrameForExternalFallback() {
+	ScreenShareSession session;
+	ScreenShareViewBackend backend(session);
+	QImage fixtureFrame(3, 2, QImage::Format_RGBA8888);
+	fixtureFrame.fill(QColor(32, 96, 192));
+	backend.setVisualFixtureFrame(fixtureFrame);
+	QVERIFY(backend.nativeFrameActive());
+	QVERIFY(backend.hasCurrentFrame());
+
+	backend.setNativeFrameTransport({}, 0);
+
+	QVERIFY(!backend.hasCurrentFrame());
+	QTRY_VERIFY(!backend.nativeFrameActive());
+	QCOMPARE(backend.renderTransport(), QStringLiteral("external-process-window"));
 }
 
 void TestScreenShare::nativeFrameTransportIsBoundedAndTracksDrops() {
@@ -173,6 +328,48 @@ void TestScreenShare::qmlViewBackendConsumesNativeFramesOffThread() {
 	backend.setNativeFrameTransport({}, 0);
 	QTRY_VERIFY(!backend.nativeFrameActive());
 	QVERIFY(!backend.hasCurrentFrame());
+}
+
+void TestScreenShare::qmlViewBackendCoalescesFramesWhileGuiThreadIsBusy() {
+	const QString key = QStringLiteral("mumble-frame-coalesce-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	Mumble::ScreenShare::FrameTransport producer;
+	QVERIFY(producer.create(key, 64));
+	ScreenShareSession session;
+	ScreenShareViewBackend backend(session);
+	backend.setNativeFrameTransport(key, 12);
+	QTRY_VERIFY(backend.nativeFrameActive());
+	QSignalSpy frameSpy(&backend, &ScreenShareViewBackend::frameChanged);
+
+	auto publishFrame = [&producer](const quint64 sequence, const quint8 red) {
+		Mumble::ScreenShare::NativeFrame frame;
+		frame.generation = 12;
+		frame.sequence = sequence;
+		frame.width = 2;
+		frame.height = 2;
+		frame.stride = 8;
+		frame.bgra.resize(16);
+		for (int offset = 0; offset < frame.bgra.size(); offset += 4) {
+			frame.bgra[offset] = 0;
+			frame.bgra[offset + 1] = 0;
+			frame.bgra[offset + 2] = static_cast< char >(red);
+			frame.bgra[offset + 3] = static_cast< char >(0xff);
+		}
+		return producer.publish(frame);
+	};
+
+	QVERIFY(publishFrame(1, 16));
+	QThread::msleep(40);
+	for (quint64 sequence = 2; sequence <= 20; ++sequence) {
+		QVERIFY(publishFrame(sequence, sequence == 20 ? 224 : 32));
+		QThread::msleep(2);
+	}
+	QThread::msleep(40);
+
+	QTRY_VERIFY(backend.hasCurrentFrame());
+	QTRY_COMPARE(backend.currentFrame().pixelColor(0, 0).red(), 224);
+	QVERIFY2(frameSpy.count() <= 2,
+			 qPrintable(QStringLiteral("Expected at most one in-flight and one latest frame, got %1")
+						.arg(frameSpy.count())));
 }
 
 void TestScreenShare::rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog() {

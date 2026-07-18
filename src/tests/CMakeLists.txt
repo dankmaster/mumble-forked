@@ -56,6 +56,8 @@ endif()
 
 if(client)
 	add_subdirectory("TestModernDialogControllers")
+	add_subdirectory("TestModernRecorderController")
+	add_subdirectory("TestModernServerAdminController")
 	add_subdirectory("TestModernShellMenuSerializer")
 	add_subdirectory("TestModernTheme")
 	add_subdirectory("TestQmlClientModels")
@@ -90,6 +92,7 @@ endif()
 if(server)
 	add_subdirectory("TestCrypt")
 	add_subdirectory("TestAudioReceiverBuffer")
+	add_subdirectory("TestWatchTogetherSession")
 endif()
 
 # Shared tests

@@ -231,6 +231,12 @@ Rectangle {
 			anchors.rightMargin: Theme.space3
 			height: root.contentVisible && root.expanded
 				? Math.min(structuredBody.implicitHeight, root.maximumBodyHeight) : 0
+			// ScrollView otherwise derives its internal content width from the
+			// unwrapped text's implicit width. The body is visually stretched, but
+			// Windows UIA then reports a narrow ancestor around a full-width text
+			// leaf. Keep layout and semantic bounds on the same fixed viewport width.
+			contentWidth: Math.max(1, availableWidth)
+			contentHeight: structuredBody.implicitHeight
 			visible: root.contentVisible && root.expanded
 			clip: true
 			ScrollBar.horizontal.policy: ScrollBar.AlwaysOff

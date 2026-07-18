@@ -25,7 +25,8 @@ AbstractButton {
 	readonly property bool hasVisibleState: loading || errorText.length > 0 || tickerRows.length > 0
 	readonly property bool shouldShow: tickerBannerEnabled && supported && enabledForServer
 		&& hasVisibleState
-	readonly property bool marqueeShouldRun: tickerRows.length > 0
+	readonly property bool automationAnimationDisabled: stonks.disableTickerAnimation === true
+	readonly property bool marqueeShouldRun: !automationAnimationDisabled && tickerRows.length > 0
 		&& (tickerBannerAlwaysScroll || marqueePrimary.width > tickerViewport.width)
 	readonly property bool marqueeRunning: marqueeAnimation.running && !marqueeAnimation.paused
 

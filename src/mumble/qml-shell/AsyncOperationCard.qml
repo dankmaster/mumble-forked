@@ -13,6 +13,7 @@ Rectangle {
 	required property var payload
 
 	property bool narrowLayout: false
+	property bool animationsEnabled: true
 	property int maximumHeight: 420
 	property var itemResultPageProvider: null
 	property int expansionOverride: -1
@@ -21,6 +22,9 @@ Rectangle {
 	property int successfulAutoDismissDelay: 8000
 
 	readonly property bool notification: String(payload.tone || "").length > 0
+	readonly property string actionId: String(payload.actionId || "").trim()
+	readonly property string actionLabel: String(payload.actionLabel || "").trim()
+	readonly property bool actionAvailable: actionId.length > 0 && actionLabel.length > 0
 	readonly property bool terminal: status === "succeeded" || status === "partial"
 		|| status === "failed" || status === "cancelled"
 	readonly property bool userInteracting: operationHover.hovered
@@ -44,11 +48,14 @@ Rectangle {
 		return resultDetailsExpanded && terminal && revision >= 0
 			? itemResultPage(resultPageIndex * resultPageSize, resultPageSize, false) : []
 	}
-	readonly property Item visualFixtureFocusTarget: dismissOperationButton.visible
-		? dismissOperationButton : expandOperationButton
+	readonly property Item visualFixtureFocusTarget: notificationActionButton.visible
+		? notificationActionButton : cancelOperationButton.visible
+			? cancelOperationButton : dismissOperationButton.visible
+				? dismissOperationButton : expandOperationButton
 
 	signal cancelRequested(string operationId)
 	signal dismissRequested(string operationId)
+	signal actionRequested(string operationId, string actionId, var actionPayload)
 
 	function ownsItem(item) {
 		let current = item
@@ -105,6 +112,8 @@ Rectangle {
 	}
 
 	Behavior on height {
+		objectName: "operationHeightBehavior"
+		enabled: root.animationsEnabled
 		NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic }
 	}
 
@@ -160,6 +169,19 @@ Rectangle {
 				text: qsTr("Cancel")
 				Accessible.name: qsTr("Cancel %1").arg(root.title)
 				onClicked: root.cancelRequested(root.stableId)
+			}
+
+			ModernButton {
+				id: notificationActionButton
+				objectName: "operationNotificationActionButton"
+				visible: root.actionAvailable
+				dense: true
+				tone: "accent"
+				text: root.actionLabel
+				Layout.maximumWidth: root.narrowLayout ? 132 : 180
+				Accessible.name: qsTr("%1: %2").arg(root.title).arg(root.actionLabel)
+				onClicked: root.actionRequested(root.stableId, root.actionId,
+					root.payload.actionPayload || ({}))
 			}
 
 			ModernButton {
@@ -238,7 +260,9 @@ Rectangle {
 				}
 
 				ModernProgressBar {
+					objectName: "operationProgressBar"
 					Layout.fillWidth: true
+					animated: root.animationsEnabled
 					visible: !root.notification && (root.status === "running"
 						|| root.status === "cancelling" || Number(root.payload.progress) >= 0)
 					indeterminate: !!root.payload.indeterminate

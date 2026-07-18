@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import Mumble.Theme 1.0
+import Mumble.ProviderPresentation 1.0
 
 TestCase {
 	id: testCase
@@ -27,6 +28,42 @@ TestCase {
 		return detailsLoader.item
 	}
 
+	function test_provider_presentation_catalog_covers_native_provider_families() {
+		const emittedProviders = [
+			"direct", "youtube", "spotify", "tiktok", "instagram", "twitch", "streamable",
+			"vimeo", "dailymotion", "soundcloud", "bandcamp", "giphy", "bluesky",
+			"mastodon", "reddit", "x", "github", "google", "googlefinance", "yahoofinance",
+			"avanza", "nordnet", "interactivebrokers", "tenor", "threads", "patreon",
+			"facebook", "imgur", "4chan",
+			"tradera", "blocket", "bytbil", "bilweb", "flashback", "sweclockers",
+			"existenz", "hemnet", "booli", "prisjakt", "pricerunner", "gp", "svt",
+			"omni", "aftonbladet", "expressen", "dn", "sverigesradio", "inet",
+			"webhallen", "elgiganten", "power", "komplett", "systembolaget", "amazon",
+			"smhi", "klart", "yr", "hitta", "eniro", "googlemaps", "sj", "sl",
+			"vasttrafik", "steam", "gamestore", "g2a", "kinguin", "epic", "gog",
+			"ubisoft", "ea", "humble", "fanatical", "greenmangaming", "itch",
+			"battlenet", "xbox"
+		]
+		const missing = []
+		for (const token of emittedProviders) {
+			const presentation = ProviderPresentation.resolve(token)
+			if (!presentation.known || presentation.label.length === 0
+					|| presentation.mark.length === 0 || presentation.accent.length === 0
+					|| presentation.family.length === 0)
+				missing.push(token)
+		}
+		compare(missing.length, 0, "Missing provider presentations: " + missing.join(", "))
+		compare(ProviderPresentation.resolve("twitter").token, "x")
+		compare(ProviderPresentation.resolve("Twitter/X").token, "x")
+		compare(ProviderPresentation.resolve("google-search").token, "google")
+		compare(ProviderPresentation.resolve("Epic Games Store").token, "epic")
+		compare(ProviderPresentation.resolve("Västtrafik").token, "vasttrafik")
+		compare(ProviderPresentation.resolve("Ubisoft Store").token, "ubisoft")
+		compare(ProviderPresentation.resolve("Humble Store").token, "humble")
+		compare(ProviderPresentation.resolve("itch.io").token, "itch")
+		compare(ProviderPresentation.resolve("Xbox Store").token, "xbox")
+	}
+
 	function setFixture(metadata, kind, expanded, provider, title, subtitle, description) {
 		const item = details()
 		item.metadata = metadata
@@ -35,6 +72,7 @@ TestCase {
 		item.previewTitle = title || ""
 		item.previewSubtitle = subtitle || ""
 		item.previewDescription = description || ""
+		item.previewImageSource = ""
 		item.expanded = expanded === undefined ? true : expanded
 		wait(0)
 		return item
@@ -62,6 +100,19 @@ TestCase {
 		for (let index = 0; index < cardNames.length; ++index) {
 			if (findChild(item, cardNames[index]) !== null)
 				++count
+		}
+		return count
+	}
+
+	function occurrenceCount(value, needle) {
+		let count = 0
+		let offset = 0
+		while (needle.length > 0) {
+			const found = value.indexOf(needle, offset)
+			if (found < 0)
+				break
+			++count
+			offset = found + needle.length
 		}
 		return count
 	}
@@ -151,7 +202,8 @@ TestCase {
 			"financeDayTrend": "up", "financeRangeLabel": "1M",
 			"financeRangeChangePercent": "+2.85%", "tickerSymbol": "MSFT",
 			"financeName": "Microsoft Corporation", "financeExchange": "NasdaqGS",
-			"financeInstrument": "EQUITY", "financeSparkline": [435, 438, 436, 442, 448]
+			"financeInstrument": "EQUITY", "financeUpdatedAt": "15:42",
+			"financeSparkline": [435, 438, 436, 442, 448]
 		}, "finance", true)
 		compare(item.presentation, "market")
 		compare(findChild(item, "providerSummaryTitle").text, "MSFT")
@@ -187,12 +239,17 @@ TestCase {
 		compare(item.identityTitle, "Vetenskapsradion")
 		verify(item.identitySubtitle.indexOf("Sveriges Radio") >= 0)
 		compare(findChild(item, "providerIdentityMarkLabel").text, "SR")
+		compare(findChild(item, "providerIdentityMark").presentation, "mark")
 		compare(findChild(item, "providerIdentityBody").text,
 			"A conversation about measurable performance.")
 		compare(findChild(item, "providerIdentity").color.a, 0)
 		verify(findChild(item, "providerIdentityMark").color.a > 0)
 		verify(findChild(item, "providerIdentityMark").width <= 48)
-		compare(findChild(item, "providerStat_0").presentation, "metric")
+		compare(item.allStats.length, 0)
+		compare(findChild(item, "providerDetailsStats").visible, false)
+		compare(occurrenceCount(item.Accessible.description, "Sveriges Radio"), 1)
+		compare(occurrenceCount(item.Accessible.description, "Vetenskapsradion"), 1)
+		compare(occurrenceCount(item.Accessible.description, "08:30"), 1)
 
 		item = setFixture({
 			"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
@@ -251,6 +308,101 @@ TestCase {
 			"link", true, "", "Google search", "Google", "native qml")
 		compare(item.family, "search")
 		compare(item.variant, "googleSearch")
+	}
+
+	function test_sparse_details_do_not_create_empty_accessibility_groups() {
+		const item = setFixture({}, "", false, "", "", "", "")
+		compare(item.hasDetails, false)
+		compare(item.implicitHeight, 0)
+		compare(item.Accessible.ignored, true)
+
+		setFixture({
+			"previewKind": "audio", "audioProvider": "Sveriges Radio",
+			"audioProgram": "Vetenskapsradion"
+		}, "audio", false, "Sveriges Radio", "Vetenskapsradion", "Sveriges Radio", "")
+		compare(item.hasDetails, true)
+		compare(item.bespokeSemanticOwner, false)
+		compare(item.Accessible.ignored, false)
+		compare(findChild(item, "providerIdentityMarkLabel").Accessible.ignored, true)
+	}
+
+	function test_sparse_known_providers_keep_their_product_family_and_variant() {
+		const fixtures = [
+			{ "provider": "yahoo-finance", "family": "finance", "variant": "finance" },
+			{ "provider": "tradera", "family": "commerce", "variant": "marketplace" },
+			{ "provider": "hemnet", "family": "commerce", "variant": "realEstate" },
+			{ "provider": "inet", "family": "commerce", "variant": "product" },
+			{ "provider": "steam", "family": "commerce", "variant": "game" },
+			{ "provider": "sweclockers", "family": "editorial", "variant": "article" },
+			{ "provider": "sveriges-radio", "family": "editorial", "variant": "audio" },
+			{ "provider": "smhi", "family": "geo", "variant": "weather" },
+			{ "provider": "hitta", "family": "geo", "variant": "place" },
+			{ "provider": "sj", "family": "geo", "variant": "traffic" },
+			{ "provider": "reddit", "family": "social", "variant": "reddit" }
+		]
+		for (const fixture of fixtures) {
+			const item = setFixture({ "previewProvider": fixture.provider }, "", false,
+				fixture.provider, "Sparse provider", "", "")
+			compare(item.family, fixture.family, fixture.provider + " family")
+			compare(item.variant, fixture.variant, fixture.provider + " variant")
+		}
+	}
+
+	function test_generic_social_posts_have_one_visual_and_semantic_owner() {
+		const fixtures = [
+			{ "provider": "bluesky", "name": "Bluesky",
+			  "author": "Ada (@ada.bsky.social)", "post": "Bounded delegates stay smooth.",
+			  "description": "Bluesky", "expectedDescription": "" },
+			{ "provider": "mastodon", "name": "Mastodon",
+			  "author": "@ada@social.example", "post": "Native previews keep their identity.",
+			  "description": "Mastodon", "expectedDescription": "" },
+			{ "provider": "reddit", "name": "Reddit",
+			  "author": "r/mumble", "post": "Modern client preview parity",
+			  "description": "A focused discussion excerpt.",
+			  "expectedDescription": "A focused discussion excerpt." }
+		]
+
+		for (const fixture of fixtures) {
+			const item = setFixture({ "previewProvider": fixture.provider }, "link", false,
+				fixture.provider, fixture.post, fixture.author, fixture.description)
+			const card = findChild(item, "providerSocialPost")
+			const badge = findChild(item, "providerSocialIdentityBadge")
+			const badgeLabel = findChild(item, "providerSocialIdentityLabel")
+			const author = findChild(item, "providerSocialAuthor")
+			const post = findChild(item, "providerSocialPostText")
+			const description = findChild(item, "providerSocialPostDescription")
+
+			compare(item.genericSocialPostPresentation, true, fixture.provider)
+			compare(item.presentation, "socialPost", fixture.provider)
+			compare(item.ownsHeader, true, fixture.provider)
+			compare(item.ownsDescription, true, fixture.provider)
+			compare(item.Accessible.ignored, true, fixture.provider)
+			verify(card !== null && card.visible, fixture.provider)
+			compare(card.Accessible.role, Accessible.Grouping)
+			compare(card.Accessible.name, "Social post")
+			compare(badge.presentation, "inline")
+			compare(badgeLabel.text, fixture.name.toUpperCase())
+			compare(author.text, fixture.author)
+			compare(post.text, fixture.post)
+			compare(description.text, fixture.expectedDescription)
+			compare(description.visible, fixture.expectedDescription.length > 0)
+			compare(findChild(item, "providerIdentity").visible, false)
+			compare(findChild(item, "providerSummary").visible, false)
+			compare(findChild(item, "providerSocialPresentationLoader").active, false)
+			compare(occurrenceCount(card.Accessible.description, fixture.name), 1)
+			compare(occurrenceCount(card.Accessible.description, fixture.author), 1)
+			compare(occurrenceCount(card.Accessible.description, fixture.post), 1)
+			if (fixture.expectedDescription.length > 0)
+				compare(occurrenceCount(card.Accessible.description, fixture.expectedDescription), 1)
+			compare(badgeLabel.Accessible.ignored, true)
+			compare(author.Accessible.ignored, true)
+			compare(post.Accessible.ignored, true)
+		}
+
+		const item = setFixture({ "previewProvider": "bluesky" }, "link", false,
+			"bluesky", "Fallback post", "Bluesky", "Bluesky")
+		compare(item.socialPostAuthor, "")
+		compare(findChild(item, "providerSocialAuthor").visible, false)
 	}
 
 	function test_visual_provider_identity_matrix_data() {
@@ -406,6 +558,8 @@ TestCase {
 				|| card.Accessible.role === Accessible.AlertMessage)
 			compare(exposedProviderGroupingCount(item), 1)
 			verify(card.Accessible.name.length > 0)
+			if (fixture.kind === "github")
+				compare(card.Accessible.name, "Repository details")
 			verify(card.Accessible.description.indexOf("..") < 0)
 		}
 
@@ -468,18 +622,17 @@ TestCase {
 		compare(findChild(item, "providerIdentity").visible, false)
 	}
 
-	function test_marketplace_identity_keeps_sale_end_and_listing_chips() {
+	function test_marketplace_prefers_scannable_chips_over_repeated_listing_stats() {
 		const item = setFixture({
 			"previewProvider": "tradera", "previewKind": "marketplaceListing",
 			"listingPrice": "450 kr", "listingSaleType": "Auction",
 			"listingEndsAt": "18:30", "listingId": "123456789"
 		}, "marketplaceListing", true)
 		compare(item.providerToken, "tradera")
-		compare(item.allChips.length, 3)
-		compare(item.allChips[0].text, "Auction")
-		compare(item.allChips[0].tone, "accent")
-		compare(item.allChips[1].text, "Ends 18:30")
-		compare(item.allChips[2].text, "#123456789")
+		compare(item.rawChips.length, 3)
+		compare(item.allStats.length, 0)
+		compare(item.allChips.map(function(entry) { return entry.text }).join("|"),
+			"Auction|Ends 18:30|#123456789")
 	}
 
 	function test_structured_surfaces_are_bounded_and_unknown_metadata_is_ignored() {
@@ -502,8 +655,8 @@ TestCase {
 		compare(findChild(item, "providerDetailsSparkline").pointCount, 64)
 
 		item = setFixture({ "productPrice": "10 kr", "productSpecs": specs }, "product", true)
-		verify(item.allStats.length <= 8)
-		compare(item.visibleStats.length, 8)
+		compare(item.allStats.length, 24)
+		compare(item.visibleStats.length, 24)
 
 		item = setFixture({ "githubRepo": "repo", "githubTopics": topics }, "social", true)
 		compare(item.allChips.length, 8)
@@ -555,24 +708,26 @@ TestCase {
 
 	function test_provider_chips_reserve_their_shared_horizontal_padding() {
 		const item = setFixture({
-			"financePrice": "448.37", "tickerSymbol": "MSFT"
-		}, "finance", true)
+			"vehiclePrice": "245 000 kr", "vehicleHighlights": ["CarPlay"]
+		}, "vehicleListing", true)
 		detailsLoader.width = 680
 		tryCompare(item, "width", 680)
 		const chip = findChild(item, "providerChip_0")
 		const label = findChild(item, "providerChipLabel_0")
 		verify(chip !== null && label !== null)
-		compare(label.text, "MSFT")
+		compare(label.text, "CarPlay")
 		verify(chip.width >= label.implicitWidth + Theme.space2 * 2,
 			"provider chip must reserve both shared token margins")
 		verify(chip.width <= detailsLoader.width)
 	}
 
 	function test_can_expand_only_when_renderable_content_is_hidden() {
+		detailsLoader.width = 680
 		let item = setFixture({ "productPrice": "10 kr", "productAvailability": "In stock" },
 			"product", false)
 		verify(item.hasDetails)
-		compare(item.allStats.length, 1)
+		compare(item.rawStats.length, 1)
+		compare(item.allStats.length, 0)
 		compare(item.commerceStatus, "In stock")
 		compare(item.canExpand, false)
 
@@ -593,6 +748,29 @@ TestCase {
 		item = setFixture({ "rawDiagnostic": "ignored" }, "link", false)
 		compare(item.hasDetails, false)
 		compare(item.canExpand, false)
+
+		const longDescription = Array(18).join(
+			"A long product description that needs a deliberate expanded reading state. ")
+		item = setFixture({ "previewKind": "product", "productDescription": longDescription },
+			"product", false, "inet")
+		verify(item.bodyTextCanExpand)
+		verify(item.canExpand)
+		const summaryBody = findChild(item, "providerSummaryBody")
+		verify(summaryBody !== null && summaryBody.visible)
+		compare(summaryBody.maximumLineCount, 2)
+		item.expanded = true
+		compare(item.canExpand, true, "expanded cards must retain the collapse action")
+		compare(summaryBody.maximumLineCount, 5)
+
+		item = setFixture({ "previewKind": "instagram", "instagramHandle": "@mumble",
+			"instagramMediaKind": "Carousel" }, "instagram", false, "instagram")
+		verify(item.socialCanExpand)
+		verify(item.canExpand)
+		const instagramMeta = findChild(item, "providerInstagramExpandedMeta")
+		verify(instagramMeta !== null && !instagramMeta.visible)
+		item.expanded = true
+		tryCompare(instagramMeta, "visible", true)
+		compare(instagramMeta.text, "Media: Carousel")
 	}
 
 	function test_primary_secondary_stack_and_finance_geo_values_are_not_duplicated() {
@@ -614,14 +792,164 @@ TestCase {
 			return secondaryPosition.y >= primaryPosition.y + primary.height - 0.5
 		}, 1000, "compact primary and secondary values stack after responsive relayout")
 		compare(item.allStats.some(function(entry) { return entry.label === "Symbol" }), false)
-		compare(item.allChips.length, 1)
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+			"Exchange|Range")
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"), "Range")
+		compare(item.rawChips.length, 1)
+		compare(item.allChips.length, 0)
 
 		item = setFixture({ "previewKind": "weather", "locationLabel": "Stockholm",
 			"statusLabel": "12 °C and clear", "providerName": "SMHI" }, "link", true)
 		compare(item.primaryValue, "Stockholm")
 		compare(item.secondaryValue, "12 °C and clear")
-		compare(item.allStats.length, 1)
-		compare(item.allStats[0].label, "Provider")
+		compare(item.rawStats.length, 1)
+		compare(item.rawStats[0].label, "Provider")
+		compare(item.allStats.length, 0)
+	}
+
+	function test_presentation_level_dedupe_and_ownership_cover_product_families() {
+		let item = setFixture({
+			"financePrice": "448.37", "financeCurrency": "USD",
+			"financeDayChange": "+5.21", "financeDayChangePercent": "+1.18%",
+			"tickerSymbol": "MSFT", "financeName": "Microsoft Corporation",
+			"financeExchange": "NasdaqGS", "financeInstrument": "EQUITY",
+			"financeRangeLabel": "1M", "financeRangeChangePercent": "+2.85%",
+			"financeUpdatedAt": "15:42", "financeSparkline": [435, 448]
+		}, "finance", true, "", "MSFT", "NasdaqGS",
+			"448.37 USD · +5.21 +1.18%")
+		compare(item.ownsHeader, false)
+		compare(item.ownsDescription, true)
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+			"Exchange|Instrument|Range|Updated")
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"), "Updated")
+		compare(item.rawChips.length, 1)
+		compare(item.allChips.length, 0)
+		item.previewDescription = "A unique analyst note"
+		wait(0)
+		compare(item.ownsDescription, false)
+
+		item = setFixture({
+			"previewKind": "weather", "locationLabel": "Stockholm",
+			"statusLabel": "12 °C and clear", "providerName": "SMHI"
+		}, "weather", true, "", "Stockholm weather", "SMHI",
+			"Stockholm · 12 °C and clear")
+		compare(item.ownsHeader, false)
+		compare(item.ownsDescription, true)
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"), "Provider")
+		compare(item.allStats.length, 0)
+		item.previewDescription = "A unique local forecast note"
+		wait(0)
+		compare(item.ownsDescription, false)
+
+		item = setFixture({
+			"previewProvider": "tradera", "previewKind": "marketplaceListing",
+			"listingPrice": "450 kr", "listingCondition": "Used",
+			"listingLocation": "Uppsala", "listingSaleType": "Auction",
+			"listingEndsAt": "18:30", "listingId": "123456789",
+			"listingSpecs": [{ "label": "Size", "value": "M" }]
+		}, "marketplaceListing", true, "", "Road bike")
+		compare(item.ownsHeader, false)
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+			"Condition|Location|Sale|Ends|Listing|Size")
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"),
+			"Location|Size")
+		compare(item.rawChips.length, 3)
+		compare(item.allChips.map(function(entry) { return entry.text }).join("|"),
+			"Auction|Ends 18:30|#123456789")
+
+		item = setFixture({
+			"previewKind": "product", "providerName": "Acme", "productPrice": "1 499 kr",
+			"productAvailability": "In stock", "productDelivery": "Tomorrow",
+			"productBrand": "Acme",
+			"productSpecs": [{ "label": "Memory", "value": "32 GB" }]
+		}, "product", true, "", "Acme Workstation")
+		item.previewImageSource = "image://mumble/product-thumb?g=1"
+		wait(0)
+		compare(item.ownsHeader, false)
+		compare(item.previewImageSource, "image://mumble/product-thumb?g=1")
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+			"Availability|Delivery|Brand|Memory")
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"),
+			"Delivery|Memory")
+
+		item = setFixture({
+			"previewKind": "vehicleListing", "vehiclePrice": "245 000 kr",
+			"vehicleKind": "SUV", "vehicleYear": "2024",
+			"vehicleHighlights": ["CarPlay", "SUV"]
+		}, "vehicleListing", true, "", "Example SUV")
+		compare(item.ownsHeader, false)
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"), "Year")
+		compare(item.rawChips.map(function(entry) { return entry.text }).join("|"), "CarPlay|SUV")
+		compare(item.allChips.map(function(entry) { return entry.text }).join("|"), "CarPlay")
+
+		item = setFixture({
+			"previewKind": "realEstate", "realEstatePrice": "4 250 000 kr",
+			"realEstateArea": "82 m²", "realEstateRooms": "3 rooms",
+			"realEstateFee": "4 200 kr/month", "listingLocation": "Uppsala"
+		}, "realEstate", true, "", "Central apartment")
+		compare(item.ownsHeader, false)
+		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+			"Area|Rooms|Fee|Location")
+		compare(item.allStats.map(function(entry) { return entry.label }).join("|"),
+			"Fee|Location")
+
+		const geoFixtures = [
+			{ "kind": "place", "location": "KTH", "status": "Open now",
+				"provider": "Hitta", "title": "KTH place" },
+			{ "kind": "traffic", "location": "Blue line", "status": "Minor delays",
+				"provider": "SL", "title": "Blue line traffic" }
+		]
+		for (let index = 0; index < geoFixtures.length; ++index) {
+			const fixture = geoFixtures[index]
+			item = setFixture({
+				"previewKind": fixture.kind, "locationLabel": fixture.location,
+				"statusLabel": fixture.status, "providerName": fixture.provider
+			}, fixture.kind, true, "", fixture.title, fixture.provider,
+				fixture.location + " · " + fixture.status)
+			compare(item.family, "geo")
+			compare(item.ownsHeader, false)
+			compare(item.ownsDescription, true)
+			compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
+				"Provider")
+			compare(item.allStats.length, 0)
+		}
+	}
+
+	function test_audio_and_link_digest_only_own_complete_identity_headers() {
+		let item = setFixture({
+			"previewKind": "audio", "audioProvider": "Sveriges Radio",
+			"audioProgram": "Vetenskapsradion", "articlePublishedAt": "08:30"
+		}, "audio", true, "Sveriges Radio", "Vetenskapsradion", "Sveriges Radio",
+			"A conversation about measurable performance.")
+		compare(item.ownsHeader, true)
+		compare(item.rawStats.length, 0)
+		compare(item.allStats.length, 0)
+		item.previewTitle = "Episode 42"
+		wait(0)
+		compare(item.ownsHeader, false)
+		item.previewTitle = "Vetenskapsradion"
+		item.previewImageSource = "image://mumble/audio-cover?g=1"
+		wait(0)
+		compare(item.ownsHeader, false)
+
+		item = setFixture({
+			"provider": "existenz", "previewKind": "linkDigest",
+			"linkDigestTitle": "Daily links", "linkDigestSource": "Existenz",
+			"linkDigestCaption": "A bounded plain-text digest"
+		}, "linkDigest", true, "existenz", "Daily links", "Existenz")
+		compare(item.ownsHeader, true)
+		compare(item.allStats.length, 0)
+		compare(item.allChips.length, 0)
+		item.previewSubtitle = "Existenz · Link digest"
+		wait(0)
+		compare(item.ownsHeader, true)
+		item.previewTitle = "Existenz · 15 July"
+		wait(0)
+		compare(item.ownsHeader, false)
+		item.previewTitle = "Daily links"
+		item.previewImageSource = "image://mumble/digest-thumb?g=1"
+		wait(0)
+		compare(item.ownsHeader, false)
 	}
 
 	function test_twitch_state_and_identity_use_shared_token_surfaces() {
@@ -728,6 +1056,17 @@ TestCase {
 		verify(card.visible)
 		compare(findChild(item, "providerGitHubRepoName").text, "dankmaster/mumble")
 		verify(item.identitySubtitle.indexOf("dankmaster") < 0)
+		const githubSubtitle = findChild(item, "providerGitHubIdentitySubtitle")
+		compare(githubSubtitle.visible, true)
+		compare(githubSubtitle.text, "C++ · BSD-3-Clause")
+		compare(githubSubtitle.textFormat, Text.PlainText)
+		compare(githubSubtitle.Accessible.ignored, true)
+		compare(item.githubMetrics.length, 3)
+		verify(item.githubMetrics.every(function(entry) {
+			return entry.value !== "C++" && entry.value !== "BSD-3-Clause"
+		}))
+		compare(occurrenceCount(card.Accessible.description, "C++"), 1)
+		compare(occurrenceCount(card.Accessible.description, "BSD-3-Clause"), 1)
 		compare(findChild(item, "providerGitHubTopics").visible, false)
 		compare(findChild(item, "providerGitHubRelease").visible, false)
 		item.expanded = true
@@ -744,6 +1083,8 @@ TestCase {
 		verify(card.visible)
 		compare(findChild(item, "providerTwitchDisplayName").text, "Mumble Dev")
 		verify(findChild(item, "providerTwitchByline").text.indexOf("Mumble Dev") < 0)
+		compare(findChild(item, "providerTwitchStream").Accessible.name,
+			"Twitch stream: Mumble Dev")
 		compare(findChild(item, "providerTwitchPlayback").visible, false)
 		compare(findChild(item, "providerTwitchNote").visible, false)
 		item.expanded = true
@@ -830,6 +1171,73 @@ TestCase {
 		}
 	}
 
+	function test_social_provider_avatars_use_managed_sources_and_initial_fallbacks() {
+		const xManaged = "image://mumble/x-avatar?g=21"
+		let item = setFixture({
+			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
+			"xHandle": "@mumbledesign", "xAvatarUrl": xManaged
+		}, "x", false)
+		let avatar = findChild(item, "providerXAvatar")
+		verify(avatar !== null)
+		compare(item.xAvatarSource, xManaged)
+		compare(avatar.source.toString(), xManaged)
+		compare(avatar.asynchronous, true)
+		compare(avatar.cache, false)
+		compare(findChild(item, "providerXAvatarFallback").text, "MD")
+		item.metadata = {
+			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
+			"xHandle": "@mumbledesign", "xAvatarUrl": "https://cdn.example.test/x.png"
+		}
+		wait(0)
+		compare(item.xAvatarSource, "")
+		compare(avatar.source.toString(), "")
+
+		const instagramManaged = "image://mumble/instagram-avatar?g=22"
+		item = setFixture({
+			"provider": "instagram", "previewKind": "instagram",
+			"instagramDisplayName": "Mumble Quick", "instagramHandle": "@mumblequick",
+			"instagramAvatarUrl": instagramManaged
+		}, "instagram", false)
+		avatar = findChild(item, "providerInstagramAvatar")
+		verify(avatar !== null)
+		compare(item.instagramAvatarSource, instagramManaged)
+		compare(avatar.source.toString(), instagramManaged)
+		compare(avatar.asynchronous, true)
+		compare(avatar.cache, false)
+		compare(findChild(item, "providerInstagramMarkLabel").text, "MQ")
+		item.metadata = {
+			"provider": "instagram", "previewKind": "instagram",
+			"instagramDisplayName": "Mumble Quick", "instagramHandle": "@mumblequick",
+			"instagramAvatarUrl": "https://cdn.example.test/instagram.png"
+		}
+		wait(0)
+		compare(item.instagramAvatarSource, "")
+		compare(avatar.source.toString(), "")
+
+		const githubManaged = "image://mumble/github-owner?g=23"
+		item = setFixture({
+			"provider": "github", "previewKind": "github",
+			"githubFullName": "dankmaster/mumble", "githubOwnerLogin": "dankmaster",
+			"githubOwnerAvatarUrl": githubManaged
+		}, "github", false)
+		avatar = findChild(item, "providerGitHubOwnerAvatar")
+		verify(avatar !== null)
+		compare(item.githubOwnerAvatarSource, githubManaged)
+		compare(avatar.source.toString(), githubManaged)
+		compare(avatar.asynchronous, true)
+		compare(avatar.cache, false)
+		compare(findChild(item, "providerGitHubOwnerAvatarFallback").text, "DA")
+
+		item.metadata = {
+			"provider": "github", "previewKind": "github",
+			"githubFullName": "dankmaster/mumble", "githubOwnerLogin": "dankmaster",
+			"githubOwnerAvatarUrl": "https://avatars.githubusercontent.com/u/1"
+		}
+		wait(0)
+		compare(item.githubOwnerAvatarSource, "")
+		compare(avatar.source.toString(), "")
+	}
+
 	function test_release_actions_require_https_and_loading_states_are_accessible() {
 		let item = setFixture({
 			"provider": "github", "previewKind": "github", "githubRepo": "mumble",
@@ -893,7 +1301,8 @@ TestCase {
 		const item = setFixture({
 			"contentWarning": "<b>Do not parse this</b>",
 			"productPrice": "<script>10 kr</script>",
-			"productAvailability": "<img src=x>"
+			"productAvailability": "<img src=x>",
+			"productDelivery": "<a>Tomorrow</a>"
 		}, "product", true)
 		compare(findChild(item, "providerWarningText").textFormat, Text.PlainText)
 		compare(findChild(item, "providerDetailsPrimary").textFormat, Text.PlainText)
@@ -903,5 +1312,114 @@ TestCase {
 		compare(item.activeFocus, false)
 		compare(item.Accessible.role, Accessible.Grouping)
 		verify(item.Accessible.description.indexOf("<script>") >= 0)
+	}
+
+	function test_provider_foregrounds_are_contrast_safe_on_token_surfaces() {
+		detailsLoader.width = 680
+		let item = setFixture({
+			"previewProvider": "bytbil", "previewKind": "vehicleListing",
+			"vehiclePrice": "245 000 kr", "vehicleHighlights": ["CarPlay"]
+		}, "vehicleListing", true)
+		verify(item.minimumProviderContrast(item.providerForeground, item.providerAccent) >= 4.5)
+		compare(String(findChild(item, "providerDetailsPrimary").color),
+			String(item.providerForeground))
+		compare(String(findChild(item, "providerChipLabel_0").color),
+			String(item.providerForeground))
+
+		item = setFixture({
+			"provider": "google-search", "previewKind": "search",
+			"googleSearchMode": "images", "googleSearchModeLabel": "Images",
+			"googleSearchQuery": "Qt Quick"
+		}, "search", true, "google-search")
+		compare(String(findChild(item, "providerGoogleModeLabel").color),
+			String(item.providerForeground))
+
+		item = setFixture({
+			"provider": "instagram", "instagramDisplayName": "Mumble Quick",
+			"instagramHandle": "@mumblequick"
+		}, "instagram", true)
+		compare(String(findChild(item, "providerInstagramMarkLabel").color),
+			String(item.providerForeground))
+		compare(String(findChild(item, "providerInstagramBrand").color),
+			String(item.providerForeground))
+
+		item = setFixture({
+			"provider": "twitch", "twitchChannel": "mumbledev",
+			"twitchLiveState": "live", "twitchBadge": "Live"
+		}, "twitch", true)
+		verify(item.minimumProviderContrast(item.providerStateForeground,
+			item.providerStateColor) >= 4.5)
+		compare(String(findChild(item, "providerTwitchStateLabel").color),
+			String(item.providerStateForeground))
+	}
+
+	function test_generic_details_expose_each_stat_and_chip_once() {
+		detailsLoader.width = 680
+		const item = setFixture({
+			"previewProvider": "bytbil", "previewKind": "vehicleListing",
+			"vehiclePrice": "245 000 kr", "vehicleYear": "2024",
+			"vehicleHighlights": ["CarPlay"]
+		}, "vehicleListing", true)
+		compare(item.ownsHeader, false)
+		compare(occurrenceCount(item.Accessible.description, "245 000 kr"), 1)
+		compare(occurrenceCount(item.Accessible.description, "2024"), 1)
+		compare(occurrenceCount(item.Accessible.description, "CarPlay"), 1)
+		compare(findChild(item, "providerDetailsPrimary").Accessible.ignored, true)
+		compare(findChild(item, "providerStat_0").Accessible.ignored, true)
+		compare(findChild(item, "providerStatLabel_0").Accessible.ignored, true)
+		compare(findChild(item, "providerStatValue_0").Accessible.ignored, true)
+		compare(findChild(item, "providerChip_0").Accessible.ignored, true)
+		compare(findChild(item, "providerChipLabel_0").Accessible.ignored, true)
+	}
+
+	function test_flashback_uses_theme_surfaces_with_gold_brand_accent() {
+		detailsLoader.width = 680
+		const item = setFixture({
+			"provider": "flashback", "previewKind": "forum",
+			"forumThreadTitle": "Renderloopar", "forumPostAuthor": "rendernisse",
+			"forumPostExcerpt": "The linked post body.",
+			"forumQuoteAuthor": "qmlvän", "forumQuoteExcerpt": "Quoted context."
+		}, "forum", true, "flashback")
+		const card = findChild(item, "providerFlashbackThread")
+		compare(String(card.color), String(Theme.embedSurface))
+		compare(String(card.border.color), String(Theme.embedBorder))
+		compare(String(findChild(item, "providerFlashbackMasthead").color),
+			String(Theme.embedRevealSurface))
+		compare(String(findChild(item, "providerFlashbackQuote").color),
+			String(Theme.embedRevealSurface))
+		compare(String(findChild(item, "providerFlashbackFooter").color),
+			String(Theme.embedRevealSurface))
+		compare(String(findChild(item, "providerFlashbackLogo").color),
+			String(Theme.textStrong))
+		compare(String(findChild(item, "providerFlashbackReply").color),
+			String(Theme.textMain))
+		compare(String(findChild(item, "providerFlashbackAuthorAvatarBackground").color),
+			String(item.providerAccent))
+		compare(String(item.providerAccent).toLowerCase(), "#f2c36e")
+	}
+
+	function test_bespoke_variants_report_header_ownership() {
+		const fixtures = [
+			{ "kind": "gameStoreProduct", "provider": "", "metadata": {
+				"previewProvider": "game-store", "previewKind": "gameStoreProduct",
+				"gameStoreProvider": "steam", "steamPrice": "29,99 €" } },
+			{ "kind": "search", "provider": "google-search", "metadata": {
+				"provider": "google-search", "googleSearchQuery": "Qt Quick" } },
+			{ "kind": "forum", "provider": "flashback", "metadata": {
+				"provider": "flashback", "forumThreadTitle": "Renderloopar" } },
+			{ "kind": "x", "provider": "", "metadata": {
+				"previewKind": "x", "xHandle": "@mumble" } },
+			{ "kind": "instagram", "provider": "instagram", "metadata": {
+				"provider": "instagram", "instagramHandle": "@mumble" } },
+			{ "kind": "github", "provider": "github", "metadata": {
+				"provider": "github", "githubRepo": "mumble" } },
+			{ "kind": "twitch", "provider": "twitch", "metadata": {
+				"provider": "twitch", "twitchChannel": "mumbledev" } }
+		]
+		for (let index = 0; index < fixtures.length; ++index) {
+			const fixture = fixtures[index]
+			const item = setFixture(fixture.metadata, fixture.kind, true, fixture.provider)
+			compare(item.ownsHeader, true, fixture.kind + " owns its bespoke header")
+		}
 	}
 }

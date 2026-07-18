@@ -7,10 +7,11 @@ layout with an HTML/CSS/JavaScript shell hosted in Qt WebEngine. That
 architecture was an intermediate migration stage and no longer describes the
 Windows client.
 
-The completed direction is a direct Qt Quick/QML product UI with typed C++
-controllers and models. It has no classic compatibility view, WebChannel,
-browser snapshot/patch transport, or WebEngine product shell. WebEngine remains
-only as a lazy, isolated Qt Quick media-player surface.
+The completed architectural cutover is a direct Qt Quick/QML product UI with
+typed C++ controllers and models. It has no classic compatibility view,
+WebChannel, browser snapshot/patch transport, or WebEngine product shell.
+WebEngine remains only as a lazy, isolated Qt Quick media-player surface. This
+does not claim finished visual or interaction parity.
 
 Do not use historical statements from this file as current architecture or as
 implementation instructions. The current source boundary, compatibility

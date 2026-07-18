@@ -1,6 +1,6 @@
 # Current Status And Roadmap
 
-Status snapshot: 2026-07-13.
+Status snapshot: 2026-07-15.
 
 This document is the short public handoff for the fork's current product state.
 It describes the Windows Qt Quick desktop client, not the retired WebEngine or
@@ -33,10 +33,12 @@ that are broadly useful should still be considered for upstream first.
 
 The main feature surface today is:
 
-- **Windows Qt Quick client:** native room and participant navigation, a virtualized
-  chat timeline and composer, direct-message windows, themed dialogs and
-  menus, Settings, plugins, certificates, recorder, ACL/admin flows, Manual
-  Plugin, PTT tool, updater state, and frontend-neutral UI automation.
+- **Windows Qt Quick client:** the structural cutover covers native room and
+  participant navigation, a virtualized chat timeline and composer,
+  direct-message windows, dialogs and menus, Settings, plugins, certificates,
+  recorder, ACL/admin flows, Manual Plugin, PTT tool, updater state, and
+  frontend-neutral UI automation. Visual and interaction parity is still being
+  refined across these surfaces.
 - **Direct state binding:** stable session/channel/scope/message IDs connect
   QML to typed models. Incremental row changes and role-level updates replace
   the retired full-shell snapshot and hydration transport.
@@ -80,18 +82,21 @@ The main feature surface today is:
 
 ## Runtime And Verification Scope
 
-Windows is the first production gate and has the local build, connected-review,
-packaging, installer, automation, screenshot, and performance harnesses. The
-production scope for this delivery is the Windows Qt Quick client plus the Linux
-Murmur/relay deployment. Linux and macOS desktop-client porting, capture,
-shortcuts, packaging, and runtime claims are explicitly outside this delivery.
+Windows is the supported desktop production gate for this delivery and has the
+local build, connected-review, packaging, installer, automation, screenshot,
+and performance harnesses. The production scope is the Windows Qt Quick client
+plus the Linux Murmur/relay deployment. Linux and macOS desktop-client porting,
+capture, shortcuts, packaging, and runtime claims are explicitly outside this
+delivery.
 
-The 2026-07-13 Windows reference pass includes the strict source inventory,
-controller/component tests, connected room and two-client chat checks, a
-deterministic 11-case screenshot/accessibility matrix, five-run performance
-measurements, staged-runtime validation, and MSI/bootstrapper generation. The
-Linux server lane is configured client-off and screen-helper-off; its native CI
-run is the release authority after changes are pushed.
+The checked-in visual manifest is the source of truth for the current fixture
+matrix; results are evidence only for the recorded source and executable hashes.
+Automated Windows CI covers focused tests, staged binary checks, and the visual
+and accessibility matrix. Connected review, performance/media lifecycle, and
+installer-upgrade checks remain release-checklist work for each candidate. The
+Linux server lane is client-off and screen-helper-off; its CI run is the server
+release authority after changes are pushed. The separate manual Linux/macOS
+client workflow is diagnostic and non-gating.
 
 Screen sharing as a whole remains experimental until real packaged publish/view
 sessions, relay failure recovery, helper restart, and target quality profiles
@@ -99,8 +104,13 @@ are proven for the Windows client against the deployed Linux relay.
 
 ## Near-Term Direction
 
-The remaining work is release hardening rather than another frontend migration:
+The architectural cutover is complete, but substantial product-parity and
+release work remains:
 
+- refine 1:1 visual and interaction parity across the shell, Settings, dialogs,
+  menus, and tools
+- apply the same design tokens and polish standards to rich previews, provider
+  embeddings, media chrome, and their loading, empty, error, and fallback states
 - keep the Modern-only source inventory strict: no `.ui` forms, WebChannel,
   browser product shell, compatibility widgets, or unallowlisted widget prompts
 - keep WebEngine lazy, off-the-record, isolated to explicit media playback, and

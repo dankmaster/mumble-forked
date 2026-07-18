@@ -35,6 +35,14 @@ Button {
 	font.weight: emphasized ? Font.DemiBold : Font.Medium
     palette.buttonText: Theme.textStrong
 	scale: down ? 0.98 : 1.0
+	Keys.onReturnPressed: event => {
+		if (control.enabled) control.clicked()
+		event.accepted = true
+	}
+	Keys.onEnterPressed: event => {
+		if (control.enabled) control.clicked()
+		event.accepted = true
+	}
 	Behavior on scale { NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic } }
 	contentItem: Text {
 		text: control.text

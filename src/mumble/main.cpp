@@ -50,12 +50,17 @@
 #include <QLocale>
 #include <QScreen>
 #include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QList>
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
-#include <QtWebEngineQuick/qtwebenginequickglobal.h>
+#if defined(Q_OS_WIN) && defined(MUMBLE_DELAYLOAD_WEBENGINE_QUICK)
+#	include <QtQuick/QQuickWindow>
+#else
+#	include <QtWebEngineQuick/qtwebenginequickglobal.h>
+#endif
 #include <iostream>
 #include <map>
 #include <memory>
@@ -172,6 +177,30 @@ void configureQtWebEngineGraphicsWorkarounds() {
 		qputenv("QTWEBENGINE_CHROMIUM_FLAGS", chromiumFlags);
 	}
 }
+
+// Qt 6.9.1's QtWebEngineQuick::initialize() performs this graphics setup plus
+// a currently empty QtWebEngineCore::initialize(). Revalidate this mirror when
+// upgrading Qt before keeping WebEngine delay-loaded.
+#ifdef MUMBLE_DELAYLOAD_WEBENGINE_QUICK
+void configureLazyQtWebEngineQuickGraphics() {
+	// QtWebEngineQuick::initialize() documents AA_ShareOpenGLContexts as its
+	// supported equivalent. Apply that contract without touching a WebEngine
+	// import so the media-only runtime can remain delay-loaded on Windows.
+	QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+
+	// Keep explicit renderer choices untouched. The native Windows shell should
+	// use Qt Quick's D3D11 path by default; selecting OpenGL here made the complete
+	// product UI pay the GL driver/context cost before the delay-loaded media-only
+	// WebEngine runtime was ever requested. WebEngineQuick supports an explicitly
+	// selected D3D11 backend on Windows.
+	const QSGRendererInterface::GraphicsApi api = QQuickWindow::graphicsApi();
+	if (api != QSGRendererInterface::OpenGL && api != QSGRendererInterface::Vulkan
+		&& api != QSGRendererInterface::Metal && api != QSGRendererInterface::Direct3D11
+		&& api != QSGRendererInterface::Software) {
+		QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+	}
+}
+#endif
 #endif
 } // namespace
 
@@ -395,16 +424,19 @@ int main(int argc, char **argv) {
 	SetDllDirectory(L"");
 	configureBundledQtWebEnginePaths(QString::fromLocal8Bit(argv[0]));
 	configureQtWebEngineGraphicsWorkarounds();
+#	ifdef MUMBLE_DELAYLOAD_WEBENGINE_QUICK
+	configureLazyQtWebEngineQuickGraphics();
+#	else
+	QtWebEngineQuick::initialize();
+#	endif
 #else
 #	ifndef Q_OS_MAC
 	EnvUtils::setenv(QLatin1String("AVAHI_COMPAT_NOWARN"), QLatin1String("1"));
 #	endif
-#endif
-
-	// WebEngine Quick configures graphics-context sharing here but does not
-	// create a renderer. The isolated player itself remains lazy-loaded after an
-	// explicit media action.
+	// Non-Windows clients retain Qt's regular eager graphics setup. The Windows
+	// product lane delay-loads WebEngine until an explicit media action.
 	QtWebEngineQuick::initialize();
+#endif
 
 	// Initialize application object.
 	MumbleApplication a(argc, argv);

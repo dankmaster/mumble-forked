@@ -628,7 +628,7 @@ install_mumble_vcpkg_dependencies() {
 		seen_dependencies["mdnsresponder"]=1
 	fi
 
-	for shared_dependency in "qtwebengine[webengine,proprietary-codecs]"; do
+	for shared_dependency in "qtwebengine[webengine,proprietary-codecs]" "qtmultimedia[qml]"; do
 		if [[ "$triplet" == "x64-windows" && -z "${seen_dependencies[$shared_dependency]:-}" ]]; then
 			dependencies+=( "$shared_dependency" )
 			seen_dependencies["$shared_dependency"]=1

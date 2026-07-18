@@ -1,0 +1,404 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 932,
+            "y": 194
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connect to a server",
+          "rect": {
+            "height": 26,
+            "width": 170,
+            "x": 140,
+            "y": 198
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Choose a saved server or add one.",
+          "rect": {
+            "height": 15,
+            "width": 787,
+            "x": 140,
+            "y": 227
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Favorites",
+                  "rect": {
+                    "height": 32,
+                    "width": 100,
+                    "x": 152,
+                    "y": 264
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "checked",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Public",
+                  "rect": {
+                    "height": 32,
+                    "width": 100,
+                    "x": 254,
+                    "y": 264
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "LAN",
+                  "rect": {
+                    "height": 32,
+                    "width": 102,
+                    "x": 356,
+                    "y": 264
+                  },
+                  "role": "RadioButton",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Choose saved, public, or local network servers",
+              "name": "Server source",
+              "rect": {
+                "height": 36,
+                "width": 310,
+                "x": 150,
+                "y": 262
+              },
+              "role": "Grouping",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Filter servers",
+              "rect": {
+                "height": 36,
+                "width": 478,
+                "x": 472,
+                "y": 262
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Server sources",
+          "rect": {
+            "height": 60,
+            "width": 824,
+            "x": 138,
+            "y": 250
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Add server",
+          "rect": {
+            "height": 36,
+            "width": 80,
+            "x": 212,
+            "y": 340
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Favorites",
+          "rect": {
+            "height": 17,
+            "width": 55,
+            "x": 152,
+            "y": 342
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "2 server(s)",
+          "rect": {
+            "height": 15,
+            "width": 50,
+            "x": 152,
+            "y": 360
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Mumble Community",
+                  "rect": {
+                    "height": 16,
+                    "width": 655,
+                    "x": 164,
+                    "y": 401
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Users: 18/128",
+                  "rect": {
+                    "height": 16,
+                    "width": 35,
+                    "x": 831,
+                    "y": 409
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Ping: 28 ms",
+                  "rect": {
+                    "height": 16,
+                    "width": 30,
+                    "x": 878,
+                    "y": 409
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "voice.example.invalid:64738 / Demo User",
+                  "rect": {
+                    "height": 14,
+                    "width": 655,
+                    "x": 164,
+                    "y": 419
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "voice.example.invalid:64738 / Demo User",
+              "name": "Mumble Community",
+              "rect": {
+                "height": 62,
+                "width": 796,
+                "x": 152,
+                "y": 386
+              },
+              "role": "ListItem",
+              "states": [
+                "focused",
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Studio",
+                  "rect": {
+                    "height": 16,
+                    "width": 667,
+                    "x": 164,
+                    "y": 468
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Users: 6/64",
+                  "rect": {
+                    "height": 16,
+                    "width": 23,
+                    "x": 843,
+                    "y": 476
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Ping: 41 ms",
+                  "rect": {
+                    "height": 16,
+                    "width": 30,
+                    "x": 878,
+                    "y": 476
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "studio.example.invalid:64739 / Producer",
+                  "rect": {
+                    "height": 14,
+                    "width": 667,
+                    "x": 164,
+                    "y": 486
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "studio.example.invalid:64739 / Producer",
+              "name": "Studio",
+              "rect": {
+                "height": 62,
+                "width": 796,
+                "x": 152,
+                "y": 453
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Saved servers",
+          "rect": {
+            "height": 129,
+            "width": 796,
+            "x": 152,
+            "y": 386
+          },
+          "role": "List",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 132,
+            "y": 577
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Edit",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 412,
+            "y": 577
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Connect",
+          "rect": {
+            "height": 36,
+            "width": 274,
+            "x": 692,
+            "y": 577
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Choose a saved server or add one.",
+      "name": "Connect to a server",
+      "rect": {
+        "height": 453,
+        "width": 860,
+        "x": 120,
+        "y": 174
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble",
+  "rect": {
+    "height": 800,
+    "width": 1100,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

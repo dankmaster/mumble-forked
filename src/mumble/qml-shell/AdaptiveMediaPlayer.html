@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' qrc:; connect-src https:; media-src https: blob:; style-src 'unsafe-inline'; img-src data:">
+  <title>Mumble adaptive media player</title>
+  <style>
+    html, body, video {
+      background: #05070b;
+      border: 0;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      padding: 0;
+      width: 100%;
+    }
+    video { object-fit: contain; }
+  </style>
+</head>
+<body>
+  <video id="mumble-adaptive-media" playsinline preload="auto"></video>
+  <script src="qrc:/media-player/shaka-player.compiled.js"></script>
+  <script src="qrc:/media-player/AdaptiveMediaPlayer.js"></script>
+</body>
+</html>

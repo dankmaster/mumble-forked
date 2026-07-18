@@ -22,6 +22,7 @@ class DialogStateController;
 class DirectMessageController;
 class MediaSessionBackend;
 class ManualPluginController;
+class ModernServerAdminController;
 class NavigationRailModel;
 class ParticipantModel;
 enum class PttSafetyReason;
@@ -36,7 +37,13 @@ class QmlWindowStateController;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
+class ToastController;
 class UiCommandController;
+
+namespace Mumble {
+class ModernRecorderController;
+class ModernRecorderRuntimeAdapter;
+}
 
 class QmlShellHost final : public QObject {
 	Q_OBJECT
@@ -56,11 +63,14 @@ public:
 	ParticipantModel *participantModel() const;
 	ChatTimelineModel *chatModel() const;
 	ComposerController *composerController() const;
+	ToastController *toastController() const;
 	AsyncOperationModel *operationModel() const;
 	ActionModel *actionModel() const;
 	DialogStateController *dialogController() const;
 	DirectMessageController *directMessageController() const;
 	MediaSessionBackend *mediaSession() const;
+	ModernServerAdminController *serverAdminController() const;
+	Mumble::ModernRecorderController *recorderController() const;
 	QmlSelectionState *selectionState() const;
 	QmlPerformanceMonitor *performanceMonitor() const;
 	std::shared_ptr< QmlImagePipeline > imagePipeline() const;
@@ -71,6 +81,7 @@ public:
 	bool captureWindow(const QString &path, QString *error = nullptr,
 					   const QString &windowId = QString()) const;
 	bool captureWindowReady(const QString &windowId = QString()) const;
+	QQuickWindow *captureWindowTarget(const QString &windowId = QString(), QString *error = nullptr) const;
 	void showPttTool(bool visible);
 	bool pttToolVisible() const;
 #ifdef USE_MANUAL_PLUGIN
@@ -88,7 +99,6 @@ protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-	QQuickWindow *captureTargetWindow(const QString &windowId, QString *error = nullptr) const;
 	void registerCaptureWindow(QQuickWindow *window);
 	bool ensurePttToolWindow();
 #ifdef USE_MANUAL_PLUGIN
@@ -108,11 +118,15 @@ private:
 	std::unique_ptr< NavigationRailModel > m_navigationModel;
 	std::unique_ptr< ParticipantModel > m_participantModel;
 	std::unique_ptr< ChatTimelineModel > m_chatModel;
+	std::unique_ptr< ToastController > m_toastController;
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
 	std::unique_ptr< ActionModel > m_actionModel;
 	std::unique_ptr< DialogStateController > m_dialogController;
 	std::unique_ptr< DirectMessageController > m_directMessageController;
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
+	std::unique_ptr< ModernServerAdminController > m_serverAdminController;
+	std::unique_ptr< Mumble::ModernRecorderRuntimeAdapter > m_recorderRuntime;
+	std::unique_ptr< Mumble::ModernRecorderController > m_recorderController;
 	std::unique_ptr< QmlMediaProfileFactory > m_mediaProfileFactory;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;

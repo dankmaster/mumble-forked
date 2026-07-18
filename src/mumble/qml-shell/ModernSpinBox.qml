@@ -6,6 +6,20 @@ SpinBox {
 	id: control
 	property bool invalid: false
 	property bool dense: false
+	property bool cursorPaintEnabled: true
+
+	Component {
+		id: spinBoxCursorDelegate
+		Item {
+			width: 1
+			Rectangle {
+				objectName: "modernSpinBoxCursorPaint"
+				anchors.fill: parent
+				visible: control.cursorPaintEnabled
+				color: Theme.textStrong
+			}
+		}
+	}
 
 	Accessible.role: Accessible.SpinBox
 	implicitHeight: dense ? Math.max(30, Theme.controlHeight - 4) : Theme.controlHeight
@@ -15,6 +29,13 @@ SpinBox {
 
 	contentItem: TextInput {
 		z: 2
+		// Editable SpinBox focus is owned by this internal TextInput on Windows.
+		// Mirror the product semantics onto that focus leaf so UI Automation and
+		// screen readers never encounter an unnamed focused Client node.
+		Accessible.role: Accessible.SpinBox
+		Accessible.name: control.Accessible.name
+		Accessible.description: control.Accessible.description
+		cursorDelegate: spinBoxCursorDelegate
 		text: control.displayText
 		font: control.font
 		color: control.enabled ? Theme.textStrong : Theme.textMuted

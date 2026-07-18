@@ -175,14 +175,55 @@ TestCase {
 		const editor = loader.item
 		editor.selectTab("portfolio")
 		const clearButton = findChild(editor, "stonksPortfolioClear")
+		const background = findChild(editor, "stonksBackgroundContent")
+		const popup = findChild(editor, "stonksConfirmationPopup")
+		const barrier = findChild(editor, "stonksConfirmationAccessibilityBarrier")
+		const refreshButton = findChild(editor, "stonksRefresh")
 		verify(clearButton !== null && clearButton.enabled)
+		verify(background !== null && popup !== null && barrier !== null && refreshButton !== null)
+		clearButton.forceActiveFocus()
+		tryCompare(clearButton, "activeFocus", true)
 		clearButton.clicked()
 		compare(editor.pendingAction, "clearPortfolio")
 		compare(editor.pendingPayload.userId, 1)
-		editor.confirmDestructiveAction()
+		const cancelButton = findChild(editor, "stonksConfirmCancel")
+		const confirmButton = findChild(editor, "stonksConfirmAction")
+		tryCompare(popup, "opened", true)
+		verify(cancelButton !== null && confirmButton !== null)
+		tryCompare(cancelButton, "activeFocus", true)
+		tryCompare(barrier, "active", true)
+		compare(popup.contentItem.Accessible.role, Accessible.Dialog)
+		compare(popup.contentItem.Accessible.name, "Clear portfolio")
+		verify(!background.enabled)
+		tryVerify(function() {
+			return background.Accessible.ignored && refreshButton.Accessible.ignored
+				&& clearButton.Accessible.ignored;
+		})
+		verify(!cancelButton.Accessible.ignored)
+
+		keyClick(Qt.Key_Tab)
+		tryCompare(confirmButton, "activeFocus", true)
+		keyClick(Qt.Key_Backtab)
+		tryCompare(cancelButton, "activeFocus", true)
+		keyClick(Qt.Key_Escape)
+		tryCompare(popup, "opened", false)
+		compare(editor.pendingAction, "")
+		tryVerify(function() {
+			return background.enabled && !background.Accessible.ignored
+				&& !refreshButton.Accessible.ignored && !clearButton.Accessible.ignored;
+		})
+		tryCompare(clearButton, "activeFocus", true)
+
+		clearButton.clicked()
+		tryVerify(function() { return popup.opened && cancelButton.activeFocus })
+		keyClick(Qt.Key_Tab)
+		tryCompare(editor.Window.window.activeFocusItem, "objectName", "stonksConfirmAction")
+		verify(confirmButton.activeFocus)
+		keyClick(Qt.Key_Return)
 		compare(dialogState.lastAction, "clearPortfolio")
 		compare(dialogState.lastPayload.userId, 1)
 		compare(editor.pendingAction, "")
+		tryCompare(popup, "opened", false)
 
 		editor.selectTab("audit")
 		const deleteButton = findChild(editor, "stonksAuditDelete_77")

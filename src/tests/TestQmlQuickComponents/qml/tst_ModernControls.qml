@@ -51,6 +51,23 @@ TestCase {
 		iconLoader.item.selected = false
 	}
 
+	function test_icon_button_overlay_opt_in_uses_media_foreground_tokens() {
+		const button = iconLoader.item
+		button.overlay = true
+		button.enabled = true
+		button.selected = true
+		compare(String(button.contentItem.foreground), String(Theme.mediaOverlayTextStrong))
+
+		button.enabled = false
+		compare(String(button.contentItem.foreground), String(Theme.mediaOverlayTextMuted))
+		tryCompare(button.background, "color", Qt.rgba(0, 0, 0, 0), 500)
+		compare(String(button.background.border.color), String(Qt.rgba(0, 0, 0, 0)))
+
+		button.enabled = true
+		button.selected = false
+		button.overlay = false
+	}
+
 	function test_text_field_validation_state() {
 		fieldLoader.item.invalid = true
 		tryCompare(fieldLoader.item.background.border, "color", Theme.danger, 500)
@@ -78,6 +95,19 @@ TestCase {
 		spinLoader.item.value = 4
 		compare(spinLoader.item.value, 4)
 		compare(spinLoader.item.background.color, Theme.surfaceRaised)
+	}
+
+	function test_spin_box_focus_leaf_inherits_product_semantics() {
+		const spin = spinLoader.item
+		spin.Accessible.name = "Jitter buffer"
+		spin.Accessible.description = "Playback buffering steps"
+		spin.editable = true
+		spin.forceActiveFocus()
+		tryCompare(spin, "activeFocus", true)
+		tryCompare(spin.contentItem, "activeFocus", true)
+		compare(spin.contentItem.Accessible.role, Accessible.SpinBox)
+		compare(spin.contentItem.Accessible.name, "Jitter buffer")
+		compare(spin.contentItem.Accessible.description, "Playback buffering steps")
 	}
 
 	function test_combo_popup_delegate_enables_explicit_hover_state() {
@@ -140,5 +170,41 @@ TestCase {
 		verify(pill.width <= 72, "The indeterminate indicator must stay bounded")
 		compare(pill.color, Theme.warning)
 		compare(progress.Accessible.role, Accessible.ProgressBar)
+	}
+
+	function test_progress_animation_defaults_on_and_fixture_mode_is_deterministic() {
+		const progress = progressLoader.item
+		const pill = findChild(progress, "modernProgressIndeterminatePill")
+		verify(pill !== null)
+		compare(progress.animated, true)
+
+		progress.indeterminate = true
+		tryCompare(pill, "visible", true)
+		progress.animated = false
+		const expectedCenter = Math.round((pill.parent.width - pill.width) / 2)
+		tryCompare(pill, "x", expectedCenter)
+		const frozenX = pill.x
+		wait(120)
+		compare(pill.x, frozenX)
+
+		progress.indeterminate = false
+		progress.value = 75
+		const fill = findChild(progress, "modernProgressDeterminateFill")
+		verify(fill !== null)
+		tryVerify(function() {
+			return Math.abs(fill.width - fill.parent.width * progress.visualPosition) < 0.5
+		})
+		progress.animated = true
+	}
+
+	function test_density_tokens_define_three_distinct_product_rhythms() {
+		compare(Theme.densityMetricFor("compact", 31, 36, 42), 31)
+		compare(Theme.densityMetricFor("comfortable", 31, 36, 42), 36)
+		compare(Theme.densityMetricFor("spacious", 31, 36, 42), 42)
+		compare(Theme.densityMetricFor("unknown", 31, 36, 42), 36)
+		verify(Theme.densityMetricFor("compact", 32, 36, 40)
+			< Theme.densityMetricFor("comfortable", 32, 36, 40))
+		verify(Theme.densityMetricFor("comfortable", 32, 36, 40)
+			< Theme.densityMetricFor("spacious", 32, 36, 40))
 	}
 }

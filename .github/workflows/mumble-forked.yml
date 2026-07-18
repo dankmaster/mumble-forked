@@ -141,6 +141,8 @@ jobs:
             -RequireGStreamerRuntime `
             -RequireClientInstaller `
             -RequireEnglishOnlyInstallers `
+            -CandidateExecutablePath .\build-shared-webengine\shared-webengine-stage\mumble.exe `
+            -MsiPayloadEvidencePath .\build-shared-webengine\windows-msi-payload-evidence.json `
             -ArtifactListPath .\build-shared-webengine\mumble-forked-artifacts.txt
 
       - name: Prepare release assets
@@ -453,6 +455,7 @@ jobs:
             build-shared-webengine/mumble-forked-release/release-notes.md
             build-shared-webengine/mumble-forked-release/update-announcement-preview.txt
             build-shared-webengine/mumble-forked-artifacts.txt
+            build-shared-webengine/windows-msi-payload-evidence.json
 
       - if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5

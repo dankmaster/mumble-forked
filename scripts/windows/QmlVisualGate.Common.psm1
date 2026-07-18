@@ -39,6 +39,15 @@ public sealed class QmlVisualPngCoverageResult {
     public double NonBlackFraction { get; set; }
 }
 
+public sealed class QmlVisualPngGridCoverageResult {
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int Columns { get; set; }
+    public int Rows { get; set; }
+    public double MinimumNonBlackFraction { get; set; }
+    public double[] CellNonBlackFractions { get; set; }
+}
+
 public static class QmlVisualPngComparer {
     private static Bitmap LoadCanonical(string path) {
         using (Image decoded = Image.FromFile(path, true)) {
@@ -131,6 +140,59 @@ public static class QmlVisualPngComparer {
             }
         }
     }
+
+    public static QmlVisualPngGridCoverageResult AnalyzeGridCoverage(
+        string path, int blackThreshold, int columns, int rows) {
+        if (blackThreshold < 0 || blackThreshold > 255)
+            throw new ArgumentOutOfRangeException("blackThreshold");
+        if (columns < 1)
+            throw new ArgumentOutOfRangeException("columns");
+        if (rows < 1)
+            throw new ArgumentOutOfRangeException("rows");
+        using (Bitmap image = LoadCanonical(path)) {
+            if (columns > image.Width || rows > image.Height)
+                throw new ArgumentOutOfRangeException("Grid dimensions exceed the image dimensions.");
+            var rect = new Rectangle(0, 0, image.Width, image.Height);
+            BitmapData imageData = null;
+            try {
+                imageData = image.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                int rowBytes = checked(image.Width * 4);
+                byte[] row = new byte[rowBytes];
+                long[] cellPixels = new long[checked(columns * rows)];
+                long[] nonBlackPixels = new long[cellPixels.Length];
+                for (int y = 0; y < image.Height; ++y) {
+                    Marshal.Copy(IntPtr.Add(imageData.Scan0, y * imageData.Stride), row, 0, rowBytes);
+                    int cellY = Math.Min(rows - 1, checked(y * rows / image.Height));
+                    for (int x = 0; x < image.Width; ++x) {
+                        int cellX = Math.Min(columns - 1, checked(x * columns / image.Width));
+                        int cellIndex = checked(cellY * columns + cellX);
+                        ++cellPixels[cellIndex];
+                        int offset = checked(x * 4);
+                        if (row[offset + 3] != 0 && (row[offset] > blackThreshold
+                                || row[offset + 1] > blackThreshold || row[offset + 2] > blackThreshold))
+                            ++nonBlackPixels[cellIndex];
+                    }
+                }
+                double[] fractions = new double[cellPixels.Length];
+                double minimum = 1.0d;
+                for (int index = 0; index < fractions.Length; ++index) {
+                    fractions[index] = cellPixels[index] == 0 ? 0.0d
+                        : (double)nonBlackPixels[index] / cellPixels[index];
+                    minimum = Math.Min(minimum, fractions[index]);
+                }
+                return new QmlVisualPngGridCoverageResult {
+                    Width = image.Width,
+                    Height = image.Height,
+                    Columns = columns,
+                    Rows = rows,
+                    MinimumNonBlackFraction = minimum,
+                    CellNonBlackFractions = fractions
+                };
+            } finally {
+                if (imageData != null) image.UnlockBits(imageData);
+            }
+        }
+    }
 }
 '@ -ReferencedAssemblies $drawingReferences
 }
@@ -182,6 +244,23 @@ function Get-QmlVisualPngCoverage {
 		width = [int]$result.Width; height = [int]$result.Height
 		pixel_count = [long]$result.PixelCount; non_black_pixels = [long]$result.NonBlackPixels
 		non_black_fraction = [double]$result.NonBlackFraction
+	}
+}
+
+function Get-QmlVisualPngGridCoverage {
+	param(
+		[Parameter(Mandatory = $true)][string]$Path,
+		[ValidateRange(1, 16)][int]$Columns = 3,
+		[ValidateRange(1, 16)][int]$Rows = 3,
+		[ValidateRange(0, 255)][int]$BlackThreshold = 8
+	)
+	$result = [QmlVisualPngComparer]::AnalyzeGridCoverage(
+		(Resolve-Path -LiteralPath $Path).Path, $BlackThreshold, $Columns, $Rows)
+	return [pscustomobject]@{
+		width = [int]$result.Width; height = [int]$result.Height
+		columns = [int]$result.Columns; rows = [int]$result.Rows
+		minimum_non_black_fraction = [double]$result.MinimumNonBlackFraction
+		cell_non_black_fractions = @($result.CellNonBlackFractions)
 	}
 }
 
@@ -276,4 +355,4 @@ function Assert-QmlVisualManifestMatchesMatrix {
 	return $true
 }
 
-Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Get-QmlVisualPngCoverage, Assert-QmlVisualManifest, Assert-QmlVisualManifestMatchesMatrix
+Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Get-QmlVisualPngCoverage, Get-QmlVisualPngGridCoverage, Assert-QmlVisualManifest, Assert-QmlVisualManifestMatchesMatrix

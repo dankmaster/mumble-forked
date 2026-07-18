@@ -7,11 +7,20 @@ ColumnLayout {
     id: root
     property var shareState: ({})
     property string selectedSourceId: String(shareState.selectedSourceId || "")
+	readonly property string sourceError: String(shareState.sourceError || "").trim()
+	readonly property bool runtimeProbePending: !!shareState.runtimeProbePending
+	readonly property string runtimeError: String(shareState.runtimeError || "").trim()
+	readonly property bool hasValidSelectedSource: sourceExists(selectedSourceId)
 	property bool controlsInitialized: false
 	property string selectedResolutionValue: ""
 	property string selectedFrameRateValue: ""
 	property string selectedAudioValue: ""
+	// App-window discovery publishes audioAuto/processId when the helper can
+	// capture that application's audio directly. Keep the convenience automatic
+	// until the user deliberately chooses a different audio source.
+	property bool audioSelectionExplicit: false
 	signal thumbnailRequested(string sourceId)
+	signal sourceSelected(string sourceId)
 
 	function optionIndex(options, value) {
 		const target = String(value ?? "")
@@ -26,6 +35,49 @@ ColumnLayout {
         const source = String(value === undefined || value === null ? "" : value).trim()
         return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
     }
+
+	function sourceExists(sourceId) {
+		const normalized = String(sourceId || "").trim()
+		if (normalized.length === 0)
+			return false
+		const sections = shareState.sources || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const items = sections[sectionIndex].items || []
+			for (let itemIndex = 0; itemIndex < items.length; ++itemIndex) {
+				if (String(items[itemIndex].id || "").trim() === normalized)
+					return true
+			}
+		}
+		return false
+	}
+
+	function sourceState(sourceId) {
+		const normalized = String(sourceId || "").trim()
+		const sections = shareState.sources || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const items = sections[sectionIndex].items || []
+			for (let itemIndex = 0; itemIndex < items.length; ++itemIndex) {
+				if (String(items[itemIndex].id || "").trim() === normalized)
+					return items[itemIndex]
+			}
+		}
+		return ({})
+	}
+
+	function applyAutomaticAudioForSource(sourceId) {
+		if (audioSelectionExplicit)
+			return false
+		const source = sourceState(sourceId)
+		const processId = Number(source.processId || 0)
+		if (!source.audioAuto || !Number.isFinite(processId) || processId <= 0)
+			return false
+		const preferred = "process:" + String(Math.floor(processId))
+		if (optionIndex(shareState.audioOptions || [], preferred) < 0)
+			return false
+		selectedAudioValue = preferred
+		audio.currentIndex = optionIndex(shareState.audioOptions || [], preferred)
+		return true
+	}
 
     function actionPayload() {
         return {
@@ -58,9 +110,13 @@ ColumnLayout {
 		audio.currentIndex = optionIndex(audioOptions, selectedAudioValue)
 	}
 
-	onShareStateChanged: Qt.callLater(synchronizeControls)
+	onShareStateChanged: {
+		if (!sourceExists(selectedSourceId))
+			selectedSourceId = String(shareState.selectedSourceId || "")
+		Qt.callLater(synchronizeControls)
+	}
 
-    spacing: 16
+	spacing: Theme.space4
 
     Label {
 		textFormat: Text.PlainText
@@ -68,27 +124,91 @@ ColumnLayout {
         text: qsTr("Choose what to share")
         color: Theme.textStrong
         font.bold: true
-        font.pixelSize: 14
+		font.pixelSize: Theme.fontTitle
     }
+
+	Rectangle {
+		id: runtimeStatus
+		objectName: "screenShareRuntimeStatus"
+		Layout.fillWidth: true
+		Layout.preferredHeight: runtimeStatusRow.implicitHeight + Theme.space4
+		visible: root.runtimeProbePending || root.runtimeError.length > 0
+		radius: Theme.innerRadius
+		color: root.runtimeError.length > 0
+			? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.12) : Theme.accentSubtle
+		border.color: root.runtimeError.length > 0 ? Theme.danger : Theme.accent
+		border.width: 1
+		Accessible.role: root.runtimeError.length > 0 ? Accessible.AlertMessage : Accessible.ProgressBar
+		Accessible.name: runtimeStatusLabel.text
+
+		RowLayout {
+			id: runtimeStatusRow
+			anchors.fill: parent
+			anchors.margins: Theme.space2
+			spacing: Theme.space2
+
+			ModernBusyIndicator {
+				objectName: "screenShareRuntimeBusy"
+				Layout.preferredWidth: Theme.rowHeight - Theme.space2
+				Layout.preferredHeight: Layout.preferredWidth
+				visible: root.runtimeProbePending
+				running: visible
+				Accessible.ignored: true
+			}
+
+			ModernIcon {
+				Layout.preferredWidth: Theme.iconSize
+				Layout.preferredHeight: Theme.iconSize
+				visible: root.runtimeError.length > 0
+				name: "warning"
+				color: Theme.danger
+				Accessible.ignored: true
+			}
+
+			Label {
+				id: runtimeStatusLabel
+				objectName: "screenShareRuntimeStatusLabel"
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: root.runtimeProbePending
+					? qsTr("Checking the local screen-share runtime…") : root.runtimeError
+				color: root.runtimeError.length > 0 ? Theme.danger : Theme.textStrong
+				wrapMode: Text.Wrap
+				Accessible.ignored: true
+			}
+		}
+	}
+
+	Label {
+		objectName: "screenShareSourceError"
+		Layout.fillWidth: true
+		visible: root.sourceError.length > 0
+		textFormat: Text.PlainText
+		text: root.sourceError
+		color: Theme.danger
+		wrapMode: Text.Wrap
+		Accessible.role: Accessible.AlertMessage
+		Accessible.name: text
+	}
 
     Repeater {
         model: root.shareState.sources || []
         delegate: ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
-            spacing: 8
+			spacing: Theme.space2
             Label {
 				textFormat: Text.PlainText
                 text: modelData.section || ""
                 color: Theme.textMuted
-                font.pixelSize: 10
+				font.pixelSize: Theme.fontCaption
                 font.bold: true
             }
             GridLayout {
                 Layout.fillWidth: true
                 columns: width >= 680 ? 3 : 2
-                columnSpacing: 10
-                rowSpacing: 10
+				columnSpacing: Theme.space2
+				rowSpacing: Theme.space2
                 Repeater {
                     model: modelData.items || []
                     delegate: Rectangle {
@@ -109,10 +229,16 @@ ColumnLayout {
 						}
 						function selectSource() {
 							root.selectedSourceId = sourceId
+							root.applyAutomaticAudioForSource(sourceId)
 							requestThumbnailIfNeeded()
+							// Keep native source validation as the final semantic result of
+							// the user's selection. Thumbnail hydration is opportunistic and
+							// must not obscure the selection intent for automation or focus
+							// restoration when both signals are delivered synchronously.
+							root.sourceSelected(sourceId)
 						}
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 132
+						Layout.preferredHeight: Theme.rowHeight * 3
                         radius: Theme.innerRadius
 						color: sourceHover.pressed ? Theme.accentSubtle
 							: root.selectedSourceId === sourceId ? Theme.selected
@@ -156,26 +282,49 @@ ColumnLayout {
 							}
 						}
 
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 5
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: "#05070a"
-                                radius: 5
-                                clip: true
+						ColumnLayout {
+							anchors.fill: parent
+							anchors.margins: Theme.space2
+							spacing: Theme.space1
+							Rectangle {
+								objectName: "screenShareSourceThumbnail_" + sourceTile.sourceId
+								Layout.fillWidth: true
+								Layout.fillHeight: true
+								color: Theme.mediaCanvas
+								radius: Theme.space1
+								clip: true
+								Accessible.ignored: true
                                 Image {
                                     anchors.fill: parent
                                     source: root.safeThumbnailSource(modelData.thumbnail)
                                     asynchronous: true
                                     cache: false
                                     fillMode: Image.PreserveAspectFit
+									Accessible.ignored: true
                                 }
                             }
-                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.title || ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
-                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.detail || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight; visible: text.length > 0 }
+							Label {
+								objectName: "screenShareSourceTitle_" + sourceTile.sourceId
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: modelData.title || ""
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "screenShareSourceDetail_" + sourceTile.sourceId
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: modelData.detail || ""
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								visible: text.length > 0
+								Accessible.ignored: true
+							}
                         }
 						MouseArea {
 							id: sourceHover
@@ -244,7 +393,10 @@ ColumnLayout {
 				model: root.shareState.audioOptions || []
 				textRole: "label"
 				valueRole: "value"
-				onActivated: root.selectedAudioValue = String(currentValue)
+				onActivated: {
+					root.selectedAudioValue = String(currentValue)
+					root.audioSelectionExplicit = true
+				}
 			}
         }
     }

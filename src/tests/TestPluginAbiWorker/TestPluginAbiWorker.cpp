@@ -18,6 +18,7 @@ private slots:
 	void runtimeFamiliesHaveIndependentBounds();
 	void shutdownClosesAdmissionAndRunsFinalWorkLast();
 	void managerDeepCopiesPointerPayloadsAndLeavesRealtimeAudioDirect();
+	void managerQueuesTimerPositionalFetchOffUiThread();
 };
 
 void TestPluginAbiWorker::uiOriginatedWorkRunsOffThreadInFifoOrder() {
@@ -159,6 +160,28 @@ void TestPluginAbiWorker::managerDeepCopiesPointerPayloadsAndLeavesRealtimeAudio
 	const QByteArray audioCallbacks = code.mid(audioStart, dataStart - audioStart);
 	QVERIFY(audioCallbacks.contains("foreachPlugin("));
 	QVERIFY(!audioCallbacks.contains("enqueuePluginRuntimeNotification"));
+}
+
+void TestPluginAbiWorker::managerQueuesTimerPositionalFetchOffUiThread() {
+	QFile source(QString::fromUtf8(PLUGIN_MANAGER_SOURCE_PATH));
+	QVERIFY2(source.open(QFile::ReadOnly), qPrintable(source.errorString()));
+	const QByteArray code = source.readAll();
+
+	const qsizetype syncStart = code.indexOf("void PluginManager::on_syncPositionalData()");
+	const qsizetype nextMethod = code.indexOf("void PluginManager::on_updatesAvailable()", syncStart);
+	QVERIFY(syncStart >= 0 && nextMethod > syncStart);
+	const QByteArray syncMethod = code.mid(syncStart, nextMethod - syncStart);
+	const qsizetype pendingGuard = syncMethod.indexOf("m_positionalServerSyncPending.exchange(true)");
+	const qsizetype enqueue      = syncMethod.indexOf("sharedPluginAbiWorker().enqueue", pendingGuard);
+	const qsizetype fetch        = syncMethod.indexOf("fetchPositionalData()", enqueue);
+	const qsizetype snapshotPost = syncMethod.indexOf("QMetaObject::invokeMethod", fetch);
+	QVERIFY(pendingGuard >= 0);
+	QVERIFY(enqueue > pendingGuard);
+	QVERIFY(fetch > enqueue);
+	QCOMPARE(syncMethod.indexOf("fetchPositionalData()"), fetch);
+	QVERIFY(snapshotPost > fetch);
+	QVERIFY(syncMethod.contains("QReadLocker lock(&m_positionalData.m_lock)"));
+	QVERIFY(syncMethod.contains("publishPositionalDataSnapshot(valid, context, identity)"));
 }
 
 QTEST_MAIN(TestPluginAbiWorker)

@@ -12,11 +12,16 @@ FocusScope {
 	readonly property var captureRect: Qt.rect(x, y, width, height)
 	readonly property bool hasRows: controller && controller.summaryModel
 		&& Number(controller.summaryModel.count) > 0
+	readonly property int visibleRowCount: hasRows
+		? Math.min(Number(controller.summaryModel.count), 5) : 0
+	readonly property real visibleRowsHeight: visibleRowCount > 0
+		? visibleRowCount * 56 + Math.max(0, visibleRowCount - 1) * Theme.space1 : 56
+	readonly property real chromeHeight: headerColumn.implicitHeight + Theme.space3 * 2
+		+ Theme.space2 * 2 + 1
 
 	implicitWidth: 310
 	implicitHeight: Math.min(410, Math.max(118,
-		headerColumn.implicitHeight + Theme.space4 * 2
-		+ (hasRows ? Math.min(Number(controller.summaryModel.count), 5) * 58 : 56)))
+		chromeHeight + visibleRowsHeight))
 	activeFocusOnTab: true
 	Accessible.role: Accessible.Pane
 	Accessible.name: controller ? String(controller.title || qsTr("Direct messages")) : qsTr("Direct messages")
@@ -83,7 +88,8 @@ FocusScope {
 					objectName: "directMessageTrayMarkAllRead"
 					visible: controller && controller.hasUnread
 					dense: true
-					text: qsTr("Mark read")
+					text: qsTr("Mark all read")
+					Accessible.name: qsTr("Mark all read")
 					onClicked: root.markAllRead()
 				}
 
@@ -163,7 +169,8 @@ FocusScope {
 				Accessible.role: Accessible.ListItem
 				Accessible.name: title + (subtitle.length > 0 ? ": " + subtitle : "")
 				Accessible.description: unreadCount > 0
-					? qsTr("%1 unread messages").arg(unreadCount) : qsTr("No unread messages")
+					? (unreadCount === 1 ? qsTr("1 unread message")
+						: qsTr("%1 unread messages").arg(unreadCount)) : qsTr("No unread messages")
 				Accessible.onPressAction: activate()
 				Keys.onReturnPressed: activate()
 				Keys.onEnterPressed: activate()

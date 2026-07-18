@@ -1,0 +1,114 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "In progress",
+          "name": "Connecting to the live share",
+          "rect": {
+            "height": 28,
+            "width": 28,
+            "x": 546,
+            "y": 288
+          },
+          "role": "ProgressBar",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connecting to the live share",
+          "rect": {
+            "height": 27,
+            "width": 520,
+            "x": 300,
+            "y": 328
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Waiting for the live viewer to start.",
+          "rect": {
+            "height": 17,
+            "width": 520,
+            "x": 300,
+            "y": 367
+          },
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "Waiting for the live viewer to start.",
+      "name": "Connecting to the live share",
+      "rect": {
+        "height": 671,
+        "width": 1120,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "Stop receiving this screen share",
+          "name": "Close viewer",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 1078,
+            "y": 681
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connecting",
+          "rect": {
+            "height": 24,
+            "width": 69,
+            "x": 993,
+            "y": 684
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "Alex's screen share, Shared by Alex · in Lobby, Connecting",
+      "name": "Screen share viewer controls",
+      "rect": {
+        "height": 49,
+        "width": 1120,
+        "x": 0,
+        "y": 671
+      },
+      "role": "ToolBar",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Screen Share — Shared by Alex · in Lobby",
+  "rect": {
+    "height": 720,
+    "width": 1120,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

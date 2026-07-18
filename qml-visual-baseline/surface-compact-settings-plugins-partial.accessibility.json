@@ -1,0 +1,1210 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 16,
+            "y": 21
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "CONNECTIVITY",
+              "rect": {
+                "height": 12,
+                "width": 76,
+                "x": 270,
+                "y": 82
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 22,
+                "width": 476,
+                "x": 270,
+                "y": 95
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Plugins",
+          "rect": {
+            "height": 62,
+            "width": 546,
+            "x": 214,
+            "y": 68
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 198,
+            "x": 8,
+            "y": 76
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 109
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 96
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 147
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 134
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 185
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 172
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 223
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 210
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 261
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 248
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 299
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 286
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 337
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 324
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 375
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 362
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 413
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 400
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 451
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 438
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 740,
+            "width": 198,
+            "x": 8,
+            "y": 96
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Positional audio",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 140
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 169
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 170
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Transmit positional information to the server",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 163
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 163
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 163
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Each plugin can additionally be granted positional-audio and keyboard-monitoring permissions below.",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 201
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 201
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Positional audio",
+          "rect": {
+            "height": 113,
+            "width": 518,
+            "x": 228,
+            "y": 130
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Plugin manager",
+          "rect": {
+            "height": 17,
+            "width": 498,
+            "x": 238,
+            "y": 265
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Installed plugins",
+                          "rect": {
+                            "height": 20,
+                            "width": 498,
+                            "x": 238,
+                            "y": 288
+                          },
+                          "role": "Heading",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "3 plugins available",
+                          "rect": {
+                            "height": 15,
+                            "width": 498,
+                            "x": 238,
+                            "y": 310
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 37,
+                        "width": 498,
+                        "x": 238,
+                        "y": 288
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 37,
+                    "width": 498,
+                    "x": 238,
+                    "y": 288
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Install plugin…",
+                  "rect": {
+                    "height": 32,
+                    "width": 94,
+                    "x": 238,
+                    "y": 329
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Rescan",
+                  "rect": {
+                    "height": 32,
+                    "width": 53,
+                    "x": 338,
+                    "y": 329
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Check for updates",
+                  "rect": {
+                    "height": 32,
+                    "width": 111,
+                    "x": 397,
+                    "y": 329
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable",
+                    "focused"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "100 percent complete",
+                      "name": "Plugin update progress",
+                      "rect": {
+                        "height": 6,
+                        "width": 474,
+                        "x": 250,
+                        "y": 430
+                      },
+                      "role": "ProgressBar",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Updated: Manual placement — Already current",
+                      "rect": {
+                        "height": 44,
+                        "width": 474,
+                        "x": 250,
+                        "y": 463
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "Error code: signature-invalid",
+                      "name": "Failed: Game telemetry — Signature verification failed",
+                      "rect": {
+                        "height": 44,
+                        "width": 474,
+                        "x": 250,
+                        "y": 511
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Updated: Stream Deck controls — Updated to 0.9.9",
+                      "rect": {
+                        "height": 44,
+                        "width": 474,
+                        "x": 250,
+                        "y": 559
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "Plugin operation finished with 3 item results",
+                  "name": "Plugin update finished: 2 updated · 1 failed",
+                  "rect": {
+                    "height": 242,
+                    "width": 498,
+                    "x": 238,
+                    "y": 373
+                  },
+                  "role": "StatusBar",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "M",
+                                      "rect": {
+                                        "height": 20,
+                                        "width": 14,
+                                        "x": 262,
+                                        "y": 648
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 38,
+                                    "width": 38,
+                                    "x": 250,
+                                    "y": 639
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Manual placement",
+                                      "rect": {
+                                        "height": 20,
+                                        "width": 367,
+                                        "x": 296,
+                                        "y": 640
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Mumble · 1.2.0",
+                                      "rect": {
+                                        "height": 15,
+                                        "width": 367,
+                                        "x": 296,
+                                        "y": 662
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 37,
+                                    "width": 367,
+                                    "x": 296,
+                                    "y": 640
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "Loaded",
+                                      "rect": {
+                                        "height": 15,
+                                        "width": 37,
+                                        "x": 679,
+                                        "y": 650
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 26,
+                                    "width": 53,
+                                    "x": 671,
+                                    "y": 645
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 38,
+                                "width": 474,
+                                "x": 250,
+                                "y": 639
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "Place your positional-audio avatar manually when no game plugin is active.",
+                              "rect": {
+                                "height": 17,
+                                "width": 474,
+                                "x": 250,
+                                "y": 685
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "Plugin path: Built in",
+                              "rect": {
+                                "height": 15,
+                                "width": 474,
+                                "x": 250,
+                                "y": 710
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 18,
+                                        "width": 70,
+                                        "x": 256,
+                                        "y": 739
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 17,
+                                            "width": 13,
+                                            "x": 258,
+                                            "y": 740
+                                          },
+                                          "role": "StaticText",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 17,
+                                        "x": 256,
+                                        "y": 740
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "Enabled",
+                                  "rect": {
+                                    "height": 30,
+                                    "width": 82,
+                                    "x": 250,
+                                    "y": 733
+                                  },
+                                  "role": "CheckBox",
+                                  "states": [
+                                    "checkable",
+                                    "checked",
+                                    "focusable"
+                                  ]
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 18,
+                                        "width": 116,
+                                        "x": 344,
+                                        "y": 739
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 17,
+                                            "width": 13,
+                                            "x": 346,
+                                            "y": 740
+                                          },
+                                          "role": "StaticText",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 17,
+                                        "x": 344,
+                                        "y": 740
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "Positional audio",
+                                  "rect": {
+                                    "height": 30,
+                                    "width": 128,
+                                    "x": 338,
+                                    "y": 733
+                                  },
+                                  "role": "CheckBox",
+                                  "states": [
+                                    "checkable",
+                                    "checked",
+                                    "focusable"
+                                  ]
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 18,
+                                        "width": 147,
+                                        "x": 478,
+                                        "y": 739
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 17,
+                                        "x": 478,
+                                        "y": 740
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "Allow this plugin to observe keyboard input",
+                                  "name": "Keyboard monitoring",
+                                  "rect": {
+                                    "height": 30,
+                                    "width": 159,
+                                    "x": 472,
+                                    "y": 733
+                                  },
+                                  "role": "CheckBox",
+                                  "states": [
+                                    "checkable",
+                                    "focusable"
+                                  ]
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 474,
+                                "x": 250,
+                                "y": 733
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 28,
+                                        "width": 64,
+                                        "x": 250,
+                                        "y": 777
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 20,
+                                        "width": 52,
+                                        "x": 256,
+                                        "y": 781
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "Configure",
+                                  "rect": {
+                                    "height": 28,
+                                    "width": 64,
+                                    "x": 250,
+                                    "y": 777
+                                  },
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 28,
+                                        "width": 45,
+                                        "x": 320,
+                                        "y": 777
+                                      },
+                                      "role": "Client",
+                                      "states": []
+                                    },
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 20,
+                                        "width": 33,
+                                        "x": 326,
+                                        "y": 781
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "About",
+                                  "rect": {
+                                    "height": 28,
+                                    "width": 45,
+                                    "x": 320,
+                                    "y": 777
+                                  },
+                                  "role": "Button",
+                                  "states": [
+                                    "focusable"
+                                  ]
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 474,
+                                "x": 250,
+                                "y": 777
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 166,
+                            "width": 474,
+                            "x": 250,
+                            "y": 639
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "Loaded plugin",
+                      "name": "Manual placement",
+                      "rect": {
+                        "height": 190,
+                        "width": 498,
+                        "x": 238,
+                        "y": 627
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Installed plugins",
+                  "rect": {
+                    "height": 586,
+                    "width": 498,
+                    "x": 238,
+                    "y": 627
+                  },
+                  "role": "List",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Installed plugins",
+              "rect": {
+                "height": 925,
+                "width": 498,
+                "x": 238,
+                "y": 288
+              },
+              "role": "Pane",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 925,
+            "width": 498,
+            "x": 238,
+            "y": 288
+          },
+          "role": "Client",
+          "states": [
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 28,
+            "width": 47,
+            "x": 609,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 28,
+            "width": 43,
+            "x": 662,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 28,
+            "width": 41,
+            "x": 711,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 900,
+        "width": 760,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 900,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

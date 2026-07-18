@@ -1,0 +1,131 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "YouTube",
+              "rect": {
+                "height": 24,
+                "width": 32,
+                "x": 504,
+                "y": 249
+              },
+              "role": "StaticText",
+              "states": [
+                "readOnly"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "YouTube playback failed",
+              "rect": {
+                "height": 27,
+                "width": 520,
+                "x": 260,
+                "y": 349
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "The provider renderer stopped. Retry here or continue in your browser.",
+              "rect": {
+                "height": 16,
+                "width": 520,
+                "x": 260,
+                "y": 388
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Restart provider playback",
+              "name": "Retry",
+              "rect": {
+                "height": 36,
+                "width": 52,
+                "x": 407,
+                "y": 416
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Open externally",
+              "rect": {
+                "height": 36,
+                "width": 107,
+                "x": 467,
+                "y": 416
+              },
+              "role": "Button",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Close",
+              "rect": {
+                "height": 36,
+                "width": 52,
+                "x": 582,
+                "y": 416
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "The provider renderer stopped. Retry here or continue in your browser.",
+          "name": "YouTube playback failed",
+          "rect": {
+            "height": 585,
+            "width": 1040,
+            "x": 0,
+            "y": 58
+          },
+          "role": "AlertMessage",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "YouTube detached media player",
+      "rect": {
+        "height": 700,
+        "width": 1040,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "YouTube player",
+  "rect": {
+    "height": 700,
+    "width": 1040,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

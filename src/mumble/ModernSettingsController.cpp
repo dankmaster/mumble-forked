@@ -2631,11 +2631,14 @@ QString ModernSettingsController::activePage() const {
 }
 
 QVariantList ModernSettingsController::pages() const {
-	const auto page = [this](const QString &id, const QString &label) {
+	const auto page = [this](const QString &id, const QString &label, const bool contentFitCompact = false) {
 		QVariantMap item;
 		item.insert(QStringLiteral("id"), id);
 		item.insert(QStringLiteral("label"), label);
 		item.insert(QStringLiteral("selected"), id == m_activePage);
+		if (contentFitCompact) {
+			item.insert(QStringLiteral("contentFitCompact"), true);
+		}
 		return item;
 	};
 
@@ -2646,7 +2649,7 @@ QVariantList ModernSettingsController::pages() const {
 						  page(QStringLiteral("messages"), QObject::tr("Messages & Sounds")),
 						  page(QStringLiteral("keys"), QObject::tr("Key Bindings")),
 						  page(QStringLiteral("network"), QObject::tr("Network")),
-						  page(QStringLiteral("screenShare"), QObject::tr("Screen Sharing")),
+						  page(QStringLiteral("screenShare"), QObject::tr("Screen Sharing"), true),
 						  page(QStringLiteral("plugins"), QObject::tr("Plugins")),
 						  page(QStringLiteral("about"), QObject::tr("About")) };
 }
@@ -2810,10 +2813,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																			 m_draft.bTCPCompat)),
 													 advancedField(boolField(QStringLiteral("network.qos"),
 																			 QObject::tr("Use Quality of Service"),
-																			 m_draft.bQoS)),
-													 boolField(QStringLiteral("network.linkPreviews"),
-															   QObject::tr("Enable link previews"),
-															   m_draft.bEnableLinkPreviews) }),
+																			 m_draft.bQoS)) }),
 			advancedSection(sectionItem(QObject::tr("Chat media cache"), QVariantList {
 														   hintedField(
 															   tooltippedField(
@@ -3225,8 +3225,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		normalizedModernShellAccent(m_draft.qsModernShellAccent) == Mumble::ModernTheme::customAccentId();
 
 	return QVariantList {
-		sectionItem(QObject::tr("Modern layout"), QVariantList {
-											 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
+		sectionItem(QObject::tr("Native interface"), QVariantList {
+											 noteField(QObject::tr("Mumble uses the native Qt Quick interface for all product surfaces.")) }),
 		sectionItem(QObject::tr("Tweaks"), QVariantList {
 										hintedField(
 											presentationField(

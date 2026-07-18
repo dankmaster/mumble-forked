@@ -57,18 +57,25 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Qt Quick visual gate script tests
+      - name: Run Qt Quick and community release gate script tests
         shell: pwsh
         run: |
           $testFiles = @(
+            '.\scripts\windows\tests\CommunityReleaseCandidate.Tests.ps1',
+            '.\scripts\windows\tests\CommunityReleaseReadinessGate.Tests.ps1',
+            '.\scripts\windows\tests\ConnectedProductReleaseGate.Tests.ps1',
+            '.\scripts\windows\tests\QmlPerformanceContract.Tests.ps1',
+            '.\scripts\windows\tests\ScreenShareLazyCapabilitiesContract.Tests.ps1',
             '.\scripts\windows\tests\QmlVisualGate.Tests.ps1',
-            '.\scripts\windows\tests\QmlVisualBaselineIntegrity.Tests.ps1'
+            '.\scripts\windows\tests\QmlVisualBaselineIntegrity.Tests.ps1',
+            '.\scripts\windows\tests\WindowsCommunityReleaseGate.Tests.ps1',
+            '.\scripts\windows\tests\WindowsInstallerUpgradeContract.Tests.ps1'
           )
           $pester = Get-Module -ListAvailable Pester |
             Sort-Object Version -Descending |
             Select-Object -First 1
           if ($null -eq $pester) {
-            throw 'Pester is required for the Qt Quick visual gate script tests.'
+            throw 'Pester is required for the Qt Quick and community release gate script tests.'
           }
           Import-Module $pester.Path -Force
           if ($pester.Version.Major -ge 5) {
@@ -77,7 +84,7 @@ jobs:
             $result = Invoke-Pester -Script $testFiles -PassThru
           }
           if ($result.FailedCount -ne 0) {
-            throw "$($result.FailedCount) Qt Quick visual gate script test(s) failed."
+            throw "$($result.FailedCount) Qt Quick/community release gate script test(s) failed."
           }
 
       - name: Initialize submodules with retry
@@ -252,6 +259,8 @@ jobs:
             -RequireClient `
             -RequireClientInstaller `
             -RequireEnglishOnlyInstallers `
+            -CandidateExecutablePath .\build-shared-webengine\shared-webengine-stage\mumble.exe `
+            -MsiPayloadEvidencePath .\build-shared-webengine\windows-msi-payload-evidence.json `
             -ArtifactListPath .\build-shared-webengine\windows-installer-artifacts.txt
 
       - name: Publish Shared Client Artifacts
@@ -266,6 +275,7 @@ jobs:
             build-shared-webengine/windows-screen-share-self-test.json
             build-shared-webengine/windows-binary-artifacts.txt
             build-shared-webengine/windows-installer-artifacts.txt
+            build-shared-webengine/windows-msi-payload-evidence.json
             build-shared-webengine/windows-client-artifacts.txt
             build-shared-webengine/**/mumble*.msi
             build-shared-webengine/**/mumble*.exe
@@ -295,7 +305,8 @@ jobs:
             -AllowPendingReboot
 
           New-Item -ItemType Directory -Force -Path .\.tmp | Out-Null
-          '{}' | Set-Content -LiteralPath .\.tmp\qml-visual-settings.json -Encoding utf8NoBOM
+          '{ "settings_version": 1 }' |
+            Set-Content -LiteralPath .\.tmp\qml-visual-settings.json -Encoding utf8NoBOM
           $fixtureExecutable = '.\build-shared-webengine\shared-webengine-stage\mumble-visual-fixture.exe'
           Copy-Item -LiteralPath .\build-shared-webengine\mumble.exe `
             -Destination $fixtureExecutable -Force

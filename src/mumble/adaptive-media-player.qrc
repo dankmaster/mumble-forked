@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="/media-player">
+    <file alias="AdaptiveMediaPlayer.html">qml-shell/AdaptiveMediaPlayer.html</file>
+    <file alias="AdaptiveMediaPlayer.js">qml-shell/AdaptiveMediaPlayer.js</file>
+    <file alias="shaka-player.compiled.js">qml-shell/vendor/shaka-player/shaka-player.compiled.js</file>
+    <file alias="shaka-player.LICENSE">qml-shell/vendor/shaka-player/LICENSE</file>
+    <file alias="shaka-player.README.md">qml-shell/vendor/shaka-player/README.md</file>
+  </qresource>
+</RCC>

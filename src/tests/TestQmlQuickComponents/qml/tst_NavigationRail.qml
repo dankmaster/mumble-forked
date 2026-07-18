@@ -19,7 +19,11 @@ TestCase {
 				"subtitle": "Welcome", "kind": "voice", "sectionKind": "voice", "selected": false,
 				"depth": 0, "unreadCount": 0, "status": "",
 				"payload": { "rowKind": "room", "joined": true, "canJoin": false, "badges": ["Pinned"],
-					"screenShare": { "visible": true, "mode": "publishing", "badgeLabel": "Live",
+					"participantCount": 1, "talkingParticipantCount": 1,
+					"screenShare": { "visible": true, "mode": "publishing", "streamId": "stream:1",
+						"ownerLabel": "Tester", "statusLabel": "You are sharing in this room",
+						"resolutionLabel": "1920x1080 @ 30 fps", "runtimeLabel": "GStreamer GPU",
+						"badgeLabel": "Live",
 						"badgeTone": "success", "primaryActionId": "screenShareOpenWindow",
 						"primaryLabel": "Manage share", "primaryEnabled": true, "primaryTone": "success" },
 					"source": { "actions": [
@@ -47,7 +51,8 @@ TestCase {
 				"stableId": "room-games", "scopeToken": "channel:2", "title": "Games",
 				"subtitle": "Playing", "kind": "voice", "sectionKind": "voice", "selected": false,
 				"depth": 0, "unreadCount": 0, "status": "",
-				"payload": { "rowKind": "room", "joined": false, "canJoin": true, "screenShare": { "visible": true,
+				"payload": { "rowKind": "room", "joined": false, "canJoin": true,
+					"participantCount": 1, "talkingParticipantCount": 0, "screenShare": { "visible": true,
 					"mode": "idle", "primaryActionId": "screenShareStart", "primaryEnabled": false },
 					"source": { "actions": [] } }
 			})
@@ -78,10 +83,12 @@ TestCase {
 		}
     }
 
-    QtObject {
-        id: selection
-        property var selectedUserSession: undefined
-    }
+	QtObject {
+		id: selection
+		property string scopeToken: ""
+		property var selectedUserSession: undefined
+		property var selectedVoiceChannelId: undefined
+	}
 
     QtObject {
         id: session
@@ -203,6 +210,12 @@ TestCase {
 		signalName: "profileMenuRequested"
 	}
 
+	SignalSpy {
+		id: settingsSpy
+		target: loader.item
+		signalName: "settingsRequested"
+	}
+
     function init() {
 		tryVerify(function() { return loader.item !== null })
 		// Drain delegate rebind/reuse work from the previous test before resetting
@@ -221,6 +234,7 @@ TestCase {
 		scopeMenuSpy.clear()
 		participantMenuSpy.clear()
 		profileMenuSpy.clear()
+		settingsSpy.clear()
         commands.selectedScope = ""
 		commands.selectedRailKind = ""
         commands.selectedParticipant = ""
@@ -243,12 +257,184 @@ TestCase {
 		commands.participantActionsRequestCount = 0
 		commands.participantActionsRequestKey = ""
 		selection.selectedUserSession = undefined
+		selection.selectedVoiceChannelId = undefined
+		selection.scopeToken = ""
+		loader.item.localRoomExpansion = ({})
+		loader.item.setNavigationFilter("")
 		loader.item.activeScopeMenuToken = ""
 		loader.item.activeParticipantMenuKey = ""
+		loader.item.accessibilitySuppressed = false
+		loader.item.settingsEnabled = true
 		const profile = findChild(loader.item, "profileMenuButton")
 		if (profile !== null)
 			profile.forceActiveFocus()
-    }
+	}
+
+	function test_modal_suppression_covers_virtualized_room_and_participant_rows() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const barrier = findChild(loader.item, "navigationRailAccessibilityBarrier")
+		verify(navigationList !== null && barrier !== null)
+		navigationList.positionViewAtBeginning()
+		navigationList.forceLayout()
+		const room = navigationList.itemAtIndex(0)
+		const participant = navigationList.itemAtIndex(1)
+		verify(room !== null && participant !== null)
+		verify(!room.Accessible.ignored && !participant.Accessible.ignored)
+
+		loader.item.accessibilitySuppressed = true
+		tryCompare(barrier, "active", true)
+		tryCompare(room.Accessible, "ignored", true)
+		tryCompare(participant.Accessible, "ignored", true)
+		verify(room.visible && participant.visible,
+			"Modal accessibility suppression must not hide visual navigation rows")
+
+		loader.item.accessibilitySuppressed = false
+		tryCompare(barrier, "active", false)
+		tryCompare(room.Accessible, "ignored", false)
+		tryCompare(participant.Accessible, "ignored", false)
+	}
+
+	function test_cached_rows_outside_viewport_withdraw_complete_accessibility_subtree() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		verify(navigationList !== null)
+		const originalCount = navigationRows.count
+		try {
+			for (let index = 0; index < 16; ++index) {
+				navigationRows.append({
+					"stableId": "cache-room-" + index,
+					"scopeToken": "cache:" + index,
+					"title": "Cached room " + index,
+					"subtitle": "Outside viewport",
+					"kind": "text", "sectionKind": "text", "selected": false,
+					"depth": 0, "unreadCount": 0, "status": "",
+					"payload": { "rowKind": "room", "source": { "actions": [] } }
+				})
+			}
+			navigationList.positionViewAtBeginning()
+			navigationList.forceLayout()
+			wait(0)
+
+			let cachedRow = null
+			for (let index = 0; index < navigationList.count; ++index) {
+				const candidate = navigationList.itemAtIndex(index)
+				if (candidate && candidate.navigationVisible
+						&& !candidate.accessibilityViewportVisible) {
+					cachedRow = candidate
+					break
+				}
+			}
+			verify(cachedRow !== null,
+				"The bounded ListView cache should materialize at least one clipped row")
+			const stableId = String(cachedRow.stableId)
+			const cachedAction = findChild(cachedRow, "navigationRoomActions_" + stableId)
+			const cachedBarrier = findChild(cachedRow,
+				"navigationRoomAccessibilityBarrier_" + stableId)
+			verify(cachedAction !== null && cachedBarrier !== null)
+			tryCompare(cachedBarrier, "active", true)
+			tryCompare(cachedRow.Accessible, "ignored", true)
+			tryCompare(cachedAction.Accessible, "ignored", true)
+			verify(cachedRow.visible,
+				"Accessibility suppression must not remove the cached visual delegate")
+
+			navigationList.positionViewAtIndex(cachedRow.index, ListView.Contain)
+			navigationList.forceLayout()
+			wait(0)
+			const exposedRow = findChild(loader.item, "navigationRoom_" + stableId)
+			verify(exposedRow !== null)
+			tryCompare(exposedRow, "accessibilityViewportVisible", true)
+			tryCompare(exposedRow.Accessible, "ignored", false)
+		} finally {
+			while (navigationRows.count > originalCount)
+				navigationRows.remove(originalCount)
+			navigationList.positionViewAtBeginning()
+			navigationList.forceLayout()
+			wait(0)
+		}
+	}
+
+	function test_visual_fixture_ignores_workstation_hover_without_disabling_product_hover() {
+		const room = findChild(loader.item, "navigationRoom_room-games")
+		const participantActions = findChild(loader.item, "navigationParticipantActions_42")
+		verify(room !== null && participantActions !== null)
+		const expectedIdleColor = String(room.color)
+		try {
+			loader.item.visualFixtureMode = true
+			mouseMove(room, room.width / 2, room.height / 2)
+			wait(Theme.motionFast + 20)
+			compare(String(room.color), expectedIdleColor)
+			compare(room.revealActions, false)
+			mousePress(room, room.width / 2, room.height / 2, Qt.LeftButton)
+			compare(String(room.color), expectedIdleColor)
+			mouseRelease(room, room.width / 2, room.height / 2, Qt.LeftButton)
+			compare(participantActions.hoverEnabled, false)
+			mouseMove(participantActions, participantActions.width / 2,
+				participantActions.height / 2)
+			wait(Theme.motionFast + 20)
+			compare(participantActions.hovered, false)
+
+			loader.item.visualFixtureMode = false
+			compare(participantActions.hoverEnabled, true)
+			tryCompare(participantActions, "hovered", true)
+			mouseMove(room, room.width / 2, room.height / 2)
+			tryCompare(room, "revealActions", true)
+			tryCompare(room, "color", Theme.surfaceHover)
+		} finally {
+			loader.item.visualFixtureMode = false
+			mouseMove(loader.item, loader.item.width - 2, 2)
+		}
+	}
+
+	function test_virtualized_semantic_owners_bind_modal_suppression_directly() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const barrier = findChild(loader.item, "navigationRailAccessibilityBarrier")
+		verify(navigationList !== null && barrier !== null)
+		navigationList.positionViewAtBeginning()
+		navigationList.forceLayout()
+		const room = navigationList.itemAtIndex(0)
+		const participant = navigationList.itemAtIndex(1)
+		const voiceSection = findChild(loader.item, "navigationSection_voice")
+		const reassertionTimer = findChild(loader.item, "navigationAccessibilityReassertionTimer")
+		verify(room !== null && participant !== null && voiceSection !== null
+			&& reassertionTimer !== null)
+		const originalTargets = barrier.targets
+		try {
+			// Remove generic traversal, then simulate Qt 6.9 ItemView's private
+			// isAccessible=visible overwrite after the modal has suppressed rows.
+			barrier.targets = []
+			loader.item.accessibilitySuppressed = true
+			tryCompare(reassertionTimer, "running", true)
+			tryCompare(room.Accessible, "ignored", true)
+			tryCompare(participant.Accessible, "ignored", true)
+			tryCompare(voiceSection.Accessible, "ignored", true)
+
+			room.Accessible.ignored = false
+			participant.Accessible.ignored = false
+			voiceSection.Accessible.ignored = false
+			compare(room.Accessible.ignored, false)
+			compare(participant.Accessible.ignored, false)
+			compare(voiceSection.Accessible.ignored, false)
+			tryCompare(room.Accessible, "ignored", true)
+			tryCompare(participant.Accessible, "ignored", true)
+			tryCompare(voiceSection.Accessible, "ignored", true)
+			verify(room.visible && participant.visible && voiceSection.visible)
+
+			loader.item.accessibilitySuppressed = false
+			tryCompare(reassertionTimer, "running", false)
+			tryCompare(room.Accessible, "ignored", false)
+			tryCompare(participant.Accessible, "ignored", false)
+			tryCompare(voiceSection.Accessible, "ignored", false)
+
+			// Closing the modal must restore the delegate's original pooled-state
+			// binding rather than leave behind the temporary override.
+			room.accessibilityPooled = true
+			tryCompare(room.Accessible, "ignored", true)
+			room.accessibilityPooled = false
+			tryCompare(room.Accessible, "ignored", false)
+		} finally {
+			loader.item.accessibilitySuppressed = false
+			barrier.targets = originalTargets
+		}
+	}
 
 	function test_header_restores_server_identity_and_connection_pill() {
 		const header = findChild(loader.item, "navigationServerHeader")
@@ -270,6 +456,16 @@ TestCase {
 		compare(header.Accessible.name, "Test server")
 		verify(header.Accessible.description.indexOf("Current ping: 12 ms") >= 0)
 		compare(pill.Accessible.name, "Connected")
+	}
+
+	function test_desktop_chrome_heights_can_share_exact_divider_geometry() {
+		const header = findChild(loader.item, "navigationServerHeader")
+		const dock = findChild(loader.item, "navigationSelfDock")
+		verify(header !== null && dock !== null)
+		loader.item.alignedHeaderHeight = 104
+		loader.item.alignedFooterHeight = 82
+		tryCompare(header, "height", 104)
+		tryCompare(dock, "height", 82)
 	}
 
 	function test_voice_room_return_selects_and_commits_navigation() {
@@ -369,6 +565,95 @@ TestCase {
 		selection.selectedUserSession = undefined
 	}
 
+	function test_voice_room_disclosure_preserves_collapsed_activity_summary() {
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+		const disclosure = findChild(loader.item, "navigationRoomDisclosure_room-lobby")
+		const countBadge = findChild(loader.item, "navigationRoomParticipantCount_room-lobby")
+		const countLabel = findChild(loader.item, "navigationRoomParticipantCountLabel_room-lobby")
+		verify(lobby !== null && participant !== null && disclosure !== null
+			&& countBadge !== null && countLabel !== null)
+		verify(disclosure.visible)
+		verify(disclosure.Accessible.name.indexOf("Collapse") >= 0)
+		verify(disclosure.Accessible.description.indexOf("1 participant") >= 0)
+		compare(countBadge.visible, true)
+		compare(countLabel.text, "1/1")
+		verify(lobby.Accessible.description.indexOf("1 participant") >= 0)
+		verify(lobby.Accessible.description.indexOf("1 person speaking") >= 0)
+
+		lobby.focusRow()
+		keyClick(Qt.Key_Left)
+		tryCompare(participant, "visible", false)
+		compare(participant.height, 0)
+		verify(disclosure.Accessible.name.indexOf("Expand") >= 0)
+		verify(lobby.Accessible.description.indexOf("Collapsed") >= 0)
+		verify(countBadge.visible)
+		compare(commands.selectScopeFromRailCount, 0)
+		compare(commands.joinVoiceCount, 0)
+
+		keyClick(Qt.Key_Right)
+		tryCompare(participant, "visible", true)
+		verify(participant.height > 0)
+		verify(disclosure.Accessible.name.indexOf("Collapse") >= 0)
+	}
+
+	function test_room_filter_is_keyboard_accessible_and_keeps_stable_rows() {
+		const field = findChild(loader.item, "navigationFilterField")
+		const clear = findChild(loader.item, "navigationFilterClear")
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		const lobbyParticipant = findChild(loader.item, "navigationParticipantSemantic_42")
+		const games = findChild(loader.item, "navigationRoom_room-games")
+		const gamesListener = findChild(loader.item, "navigationParticipantSemantic_listener:2:42")
+		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		verify(field !== null && clear !== null && navigationList !== null)
+		verify(lobby !== null && lobbyParticipant !== null && games !== null
+			&& gamesListener !== null && activity !== null)
+		compare(navigationList.count, 6)
+
+		field.forceActiveFocus()
+		tryCompare(field, "activeFocus", true)
+		loader.item.setNavigationFilter("Games")
+		tryCompare(field, "text", "Games")
+		tryCompare(games, "visible", true)
+		tryCompare(gamesListener, "visible", true)
+		tryCompare(lobby, "visible", false)
+		tryCompare(lobbyParticipant, "visible", false)
+		tryCompare(activity, "visible", false)
+		compare(navigationList.count, 6)
+		compare(field.Accessible.role, Accessible.EditableText)
+
+		keyClick(Qt.Key_Down)
+		tryCompare(games, "activeFocus", true)
+		compare(commands.selectScopeFromRailCount, 0)
+		field.forceActiveFocus()
+		keyClick(Qt.Key_Escape)
+		tryCompare(field, "text", "")
+		tryCompare(lobby, "visible", true)
+		tryCompare(activity, "visible", true)
+		compare(navigationList.count, 6)
+	}
+
+	function test_filter_and_collapse_never_hide_current_user_or_voice_selection() {
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+		const games = findChild(loader.item, "navigationRoom_room-games")
+		verify(lobby !== null && participant !== null && games !== null)
+
+		loader.item.setRoomExpanded("channel:1", false)
+		loader.item.setNavigationFilter("no matching room")
+		selection.selectedUserSession = "42"
+		tryCompare(lobby, "visible", true)
+		tryCompare(participant, "visible", true)
+		verify(participant.height > 0)
+
+		selection.selectedUserSession = undefined
+		selection.selectedVoiceChannelId = 2
+		tryCompare(games, "visible", true)
+		selection.scopeToken = "channel:1"
+		tryCompare(lobby, "visible", true)
+	}
+
 	function test_navigation_rows_use_one_roving_tab_stop() {
 		const navigationList = findChild(loader.item, "navigationRooms")
 		const scrollBar = findChild(loader.item, "navigationScrollBar")
@@ -436,6 +721,38 @@ TestCase {
 		compare(commands.selectParticipantCount, 0)
 		compare(commands.joinVoiceCount, 0)
 		compare(commands.directMessageCount, 0)
+		compare(committedSpy.count, 0)
+	}
+
+	function test_page_keys_move_a_viewport_without_activating_rows() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		verify(navigationList !== null && lobby !== null)
+		lobby.focusRow()
+		keyClick(Qt.Key_PageDown)
+		tryCompare(navigationList, "currentIndex", Math.min(navigationList.count - 1,
+			loader.item.navigationPageStep()))
+		tryVerify(function() { return navigationList.currentItem.activeFocus })
+		keyClick(Qt.Key_PageUp)
+		tryCompare(navigationList, "currentIndex", 0)
+		compare(commands.selectScopeFromRailCount, 0)
+		compare(commands.selectParticipantCount, 0)
+		compare(commands.joinVoiceCount, 0)
+		compare(commands.directMessageCount, 0)
+		compare(committedSpy.count, 0)
+	}
+
+	function test_external_scope_transition_reveals_selection_without_stealing_focus() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const profile = findChild(loader.item, "profileMenuButton")
+		verify(navigationList !== null && profile !== null)
+		profile.forceActiveFocus()
+		tryVerify(function() { return profile.activeFocus })
+		selection.scopeToken = "-1:42"
+		tryCompare(navigationList, "currentIndex", 5)
+		verify(profile.activeFocus)
+		compare(commands.selectScopeFromRailCount, 0)
+		compare(commands.selectParticipantCount, 0)
 		compare(committedSpy.count, 0)
 	}
 
@@ -511,7 +828,7 @@ TestCase {
 		compare(alice.height, 36)
 		compare(alice.mapToItem(navigationList, 0, 0).x,
 			listener.mapToItem(navigationList, 0, 0).x)
-		compare(details.text, "You are here")
+		compare(details.text, "You are here · You are sharing in this room")
 		verify(String(room.color) !== String(Theme.selected))
 		verify(String(room.border.color) !== String(Theme.accent))
 	}
@@ -626,6 +943,9 @@ TestCase {
 
 	function test_sections_and_keyboard_focus_are_visually_explicit() {
 		compare(loader.item.activeFocusOnTab, false)
+		const navigationList = findChild(loader.item, "navigationRooms")
+		verify(navigationList !== null)
+		compare(navigationList.section.property, "")
 		const voiceSection = findChild(loader.item, "navigationSection_voice")
 		const textSection = findChild(loader.item, "navigationSection_text")
 		const directSection = findChild(loader.item, "navigationSection_direct")
@@ -661,7 +981,8 @@ TestCase {
 		verify(participantDetails.Accessible.ignored)
 		verify(room.Accessible.description.indexOf("You are here") >= 0)
 		verify(room.Accessible.description.indexOf("Pinned") >= 0)
-		verify(room.Accessible.description.indexOf("Live") >= 0)
+		verify(room.Accessible.description.indexOf("You are sharing in this room") >= 0)
+		verify(room.Accessible.description.indexOf("1920x1080 @ 30 fps") >= 0)
 		verify(semanticParticipant.Accessible.description.indexOf("Talking") >= 0)
 		verify(semanticParticipant.Accessible.description.indexOf("Muted") >= 0)
 		verify(semanticParticipant.Accessible.description.indexOf("Local volume -6 dB") >= 0)
@@ -673,6 +994,26 @@ TestCase {
 		tryCompare(semanticParticipant, "activeFocus", true)
 		compare(participant.border.width, Theme.focusRingWidth)
 		compare(participant.border.color, Theme.focus)
+	}
+
+	function test_section_geometry_recovers_after_hidden_layout_change() {
+		const rail = loader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		const voiceSection = findChild(rail, "navigationSection_voice")
+		const textSection = findChild(rail, "navigationSection_text")
+		verify(navigationList !== null && voiceSection !== null && textSection !== null)
+
+		rail.visible = false
+		testCase.width = 420
+		testCase.height = 520
+		rail.visible = true
+		tryVerify(function() {
+			const voiceOrigin = voiceSection.mapToItem(navigationList, 0, 0)
+			const textOrigin = textSection.mapToItem(navigationList, 0, 0)
+			return textOrigin.y >= voiceOrigin.y + voiceSection.height
+		}, 5000, "Section headings remained stacked after the rail was restored")
+		testCase.width = 340
+		testCase.height = 620
 	}
 
 	function test_room_context_key_uses_typed_scope_payload() {
@@ -722,7 +1063,7 @@ TestCase {
 		compare(commands.selectScopeCount, 0)
 	}
 
-	function test_room_join_share_and_overflow_take_priority_over_badge_noise() {
+	function test_room_join_share_and_overflow_expose_live_share_state() {
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const games = findChild(loader.item, "navigationRoom_room-games")
 		const joined = findChild(loader.item, "navigationRoomJoined_room-lobby")
@@ -738,7 +1079,7 @@ TestCase {
 		mouseMove(loader.item, loader.item.width - 2, 2)
 		wait(0)
 		verify(joined !== null && !joined.visible)
-		verify(liveBadge !== null && !liveBadge.visible)
+		verify(liveBadge !== null && liveBadge.visible)
 		verify(roomBadge !== null && !roomBadge.visible)
 		verify(share !== null && share.visible && share.enabled)
 		verify(room !== null && games !== null && actions !== null && join !== null)
@@ -747,7 +1088,13 @@ TestCase {
 		verify(join.contentItem.Accessible.ignored)
 		compare(join.Accessible.name, "Join")
 		verify(share.contentItem.Accessible.ignored)
-		compare(share.Accessible.name, "Live")
+		compare(share.Accessible.name, "Manage share")
+		compare(share.Accessible.description, "You are sharing in this room")
+		const detail = findChild(loader.item, "navigationRoomDetails_room-lobby")
+		verify(detail !== null && detail.visible)
+		compare(detail.text, "You are here · You are sharing in this room")
+		verify(room.Accessible.description.indexOf("Tester") >= 0)
+		verify(room.Accessible.description.indexOf("1920x1080 @ 30 fps") >= 0)
 		verify(actions.opacity >= 0.62 && actions.opacity <= 1)
 		verify(join.opacity >= 0.68 && join.opacity <= 1)
 		verify(share.opacity >= 0.82 && share.opacity <= 1)
@@ -919,6 +1266,31 @@ TestCase {
 		compare(profileMenuSpy.count, 1)
 	}
 
+	function test_settings_is_a_direct_pointer_keyboard_and_accessibility_action() {
+		const button = findChild(loader.item, "settingsButton")
+		verify(button !== null)
+		compare(button.iconName, "settings")
+		compare(button.Accessible.role, Accessible.Button)
+		compare(button.Accessible.name, "Settings")
+		verify(button.Accessible.description.indexOf("Audio") >= 0)
+		verify(button.Accessible.description.indexOf("plugins") >= 0)
+
+		mouseClick(button)
+		compare(settingsSpy.count, 1)
+		compare(profileMenuSpy.count, 0)
+
+		button.forceActiveFocus()
+		tryCompare(button, "activeFocus", true)
+		keyClick(Qt.Key_Return)
+		compare(settingsSpy.count, 2)
+		compare(profileMenuSpy.count, 0)
+
+		loader.item.settingsEnabled = false
+		tryCompare(button, "enabled", false)
+		mouseClick(button)
+		compare(settingsSpy.count, 2)
+	}
+
 	function test_self_controls_expose_mute_and_deafen_without_opening_profile_menu() {
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")
@@ -942,25 +1314,31 @@ TestCase {
 		const statusLabel = findChild(loader.item, "selfStatusLabel")
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")
+		const settingsButton = findChild(loader.item, "settingsButton")
 		const profileButton = findChild(loader.item, "profileMenuButton")
 		verify(dock !== null && avatar !== null && presence !== null)
 		verify(nameLabel !== null && statusLabel !== null)
-		verify(muteButton !== null && deafenButton !== null && profileButton !== null)
+		verify(muteButton !== null && deafenButton !== null && settingsButton !== null
+			&& profileButton !== null)
 		compare(dock.Accessible.role, Accessible.Grouping)
 		verify(dock.Accessible.name.indexOf("Tester") >= 0)
 		verify(dock.Accessible.description.indexOf("Online") >= 0)
 		verify(nameLabel.Accessible.ignored)
 		verify(statusLabel.Accessible.ignored)
-		compare(String(statusLabel.color), String(Theme.textFaint))
+		compare(String(statusLabel.color), String(Theme.microLabelText))
 		compare(String(presence.color), String(Theme.success))
-		compare(String(dock.color), String(Theme.selfCardHover))
+		tryCompare(dock, "color", Theme.selfCardHover)
 
 		muteButton.forceActiveFocus()
 		tryCompare(muteButton, "activeFocus", true)
 		keyClick(Qt.Key_Tab)
 		tryCompare(deafenButton, "activeFocus", true)
 		keyClick(Qt.Key_Tab)
+		tryCompare(settingsButton, "activeFocus", true)
+		keyClick(Qt.Key_Tab)
 		tryCompare(profileButton, "activeFocus", true)
+		keyClick(Qt.Key_Backtab)
+		tryCompare(settingsButton, "activeFocus", true)
 		keyClick(Qt.Key_Backtab)
 		tryCompare(deafenButton, "activeFocus", true)
 

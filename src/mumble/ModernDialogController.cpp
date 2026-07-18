@@ -9,6 +9,8 @@
 
 #include <QtCore/QObject>
 
+#include <utility>
+
 namespace {
 	QVariantMap closedState() {
 		QVariantMap state;
@@ -160,19 +162,19 @@ namespace {
 QVariantMap ModernDialogController::openConnect(const QList< FavoriteServer > &favorites, const Settings &settings,
 												const QMap< UnresolvedServerAddress, unsigned int > &pingCache) {
 	m_connect.open(favorites, settings, pingCache);
-	m_activeDialogID = QStringLiteral("connect");
+	beginRootDialog(QStringLiteral("connect"));
 	return state();
 }
 
 QVariantMap ModernDialogController::openSettings(const Settings &settings, const QString &pageName) {
 	m_settings.open(settings, pageName);
-	m_activeDialogID = QStringLiteral("settings");
+	beginRootDialog(QStringLiteral("settings"));
 	return state();
 }
 
 QVariantMap ModernDialogController::openFailedConnection(const QVariantMap &context) {
 	m_failedConnection = context;
-	m_activeDialogID   = QStringLiteral("failedConnection");
+	beginRootDialog(QStringLiteral("failedConnection"));
 	return state();
 }
 
@@ -317,23 +319,43 @@ QVariantMap ModernDialogController::openMigrationNotice(const QString &dialogID,
 }
 
 QVariantMap ModernDialogController::openGenericDialog(const QVariantMap &dialog) {
-	m_genericDialog = dialog;
-	QString id      = m_genericDialog.value(QStringLiteral("id")).toString().trimmed();
+	QVariantMap nextDialog = dialog;
+	QString id             = nextDialog.value(QStringLiteral("id")).toString().trimmed();
 	if (id.isEmpty()) {
 		id = QStringLiteral("modernDialog");
 	}
-	m_genericDialog.insert(QStringLiteral("id"), id);
-	m_genericDialog.insert(QStringLiteral("open"), true);
-	if (m_genericDialog.value(QStringLiteral("kind")).toString().trimmed().isEmpty()) {
-		m_genericDialog.insert(QStringLiteral("kind"), QStringLiteral("info"));
+	nextDialog.insert(QStringLiteral("id"), id);
+	nextDialog.insert(QStringLiteral("open"), true);
+	if (nextDialog.value(QStringLiteral("kind")).toString().trimmed().isEmpty()) {
+		nextDialog.insert(QStringLiteral("kind"), QStringLiteral("info"));
 	}
+
+	// Generic dialogs can be opened asynchronously while a product surface is
+	// active (plugin update discovery and overwrite confirmation are the common
+	// cases). Treat a different dialog as a transient child instead of replacing
+	// the parent's controller state. Re-publishing the same dialog ID remains an
+	// in-place refresh so live validation and result hydration do not grow the
+	// stack.
+	if (m_activeDialogID.isEmpty()) {
+		m_parentDialogs.clear();
+	} else if (m_activeDialogID != id) {
+		DialogFrame parent;
+		parent.activeDialogID = m_activeDialogID;
+		if (m_activeDialogID == m_genericDialog.value(QStringLiteral("id")).toString()) {
+			parent.genericDialog = m_genericDialog;
+		}
+		m_parentDialogs.push_back(std::move(parent));
+	}
+
+	m_genericDialog = std::move(nextDialog);
 	m_activeDialogID = id;
 	return state();
 }
 
 QVariantMap ModernDialogController::close(const QString &dialogID) {
-	if (dialogID.trimmed().isEmpty() || dialogID == m_activeDialogID) {
-		m_activeDialogID.clear();
+	const QString requestedDialogID = dialogID.trimmed();
+	if (requestedDialogID.isEmpty() || requestedDialogID == m_activeDialogID) {
+		dismissActiveDialog();
 	}
 	return state();
 }
@@ -374,6 +396,8 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 		result.closeDialog                                       = connectResult.closeDialog;
 		result.connectionRequest                                 = connectResult.connectionRequest;
 		result.favoritesToSave                                   = connectResult.favoritesToSave;
+		result.connectSourceOperation                            = connectResult.sourceOperation;
+		result.publicListDisabledSetting                         = connectResult.publicListDisabledSetting;
 	} else if (dialogID == QLatin1String("settings")) {
 		const ModernSettingsController::ActionResult settingsResult = m_settings.invokeAction(actionID, payload);
 		result.stateChanged                                         = settingsResult.stateChanged;
@@ -398,7 +422,7 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 	}
 
 	if (result.closeDialog) {
-		m_activeDialogID.clear();
+		dismissActiveDialog();
 	}
 
 	return result;
@@ -432,6 +456,52 @@ bool ModernDialogController::setConnectFavoritePing(const QString &host, const u
 	}
 
 	return m_connect.setFavoritePing(host, port, ping, users, maxUsers);
+}
+
+quint64 ModernDialogController::beginConnectSourceRefresh(const QString &sourceID) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return 0;
+	}
+	return m_connect.beginSourceRefresh(sourceID);
+}
+
+bool ModernDialogController::applyConnectSourceServers(
+	const QString &sourceID, const quint64 generation,
+	const QList< ModernConnectController::ServerEntry > &servers) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+	return m_connect.applySourceServers(sourceID, generation, servers);
+}
+
+bool ModernDialogController::applyConnectSourceError(const QString &sourceID, const quint64 generation,
+												 const QString &message, const bool retryable) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+	return m_connect.applySourceError(sourceID, generation, message, retryable);
+}
+
+bool ModernDialogController::applyConnectSourceUnavailable(const QString &sourceID, const quint64 generation,
+													   const QString &message) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+	return m_connect.applySourceUnavailable(sourceID, generation, message);
+}
+
+bool ModernDialogController::setConnectSourceUnavailable(const QString &sourceID, const QString &message) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+	return m_connect.setSourceUnavailable(sourceID, message);
+}
+
+bool ModernDialogController::requestConnectPublicListConsent(const quint64 generation) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+	return m_connect.requestPublicListConsent(generation);
 }
 
 QVariantMap ModernDialogController::failedConnectionState() const {
@@ -468,6 +538,24 @@ QVariantMap ModernDialogController::genericDialogState() const {
 	QVariantMap dialog = m_genericDialog;
 	dialog.insert(QStringLiteral("open"), true);
 	return dialog;
+}
+
+void ModernDialogController::beginRootDialog(const QString &dialogID) {
+	m_parentDialogs.clear();
+	m_activeDialogID = dialogID;
+}
+
+void ModernDialogController::dismissActiveDialog() {
+	if (m_parentDialogs.isEmpty()) {
+		m_activeDialogID.clear();
+		return;
+	}
+
+	DialogFrame parent = m_parentDialogs.takeLast();
+	m_activeDialogID   = parent.activeDialogID;
+	if (!parent.genericDialog.isEmpty()) {
+		m_genericDialog = std::move(parent.genericDialog);
+	}
 }
 
 ModernDialogController::ActionResult ModernDialogController::invokeFailedConnectionAction(const QString &actionID) {

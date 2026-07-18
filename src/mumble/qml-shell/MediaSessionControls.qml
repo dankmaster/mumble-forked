@@ -10,18 +10,36 @@ Rectangle {
 	property bool fullscreen: false
 	property bool fullscreenAvailable: true
 	property bool externalAvailable: false
+	property bool embedded: false
+	property Item focusBeforeClosePrompt: null
+	property bool confirmedClosePending: false
 	readonly property bool sharedPlayback: Boolean(session.sharedAvailable && session.sharedJoined)
 	readonly property bool canControl: session.playbackControlAllowed !== undefined
 		? Boolean(session.playbackControlAllowed)
 		: Boolean(session.playbackControllable && (!session.sharedAvailable || session.sharedHost))
 	readonly property bool providerControlled: !Boolean(session.playbackControllable)
-	readonly property bool compactControls: width < 720
+	readonly property bool compactControls: embedded || width < 720
+	readonly property bool embeddedNarrow: embedded && width < 420
 	readonly property bool controlsWrapped: transportActions.childrenRect.height > Theme.controlHeight
 	readonly property bool externalActionAvailable: externalAvailable
 		&& (session.state === "error" || providerControlled)
 	readonly property bool confirmationVisible: closeDialog.opened
 	readonly property bool compactVolumeVisible: compactControls
 	readonly property bool volumePopupVisible: volumePopup.opened
+	readonly property real embeddedTransportReservedWidth: {
+		const controls = [ playButton, embeddedTimeLabel, stateLabel, externalButton,
+			muteButton, compactVolumeButton, fullscreenButton, closeButton ]
+		let total = 0
+		let count = 0
+		for (let index = 0; index < controls.length; ++index) {
+			const control = controls[index]
+			if (!control || !control.visible)
+				continue
+			total += Number(control.width || 0)
+			count += 1
+		}
+		return total + Math.max(0, count) * transportActions.spacing
+	}
 	readonly property string surfaceId: "mediaSession.controls"
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 	readonly property color stateTone: session.state === "error" ? Theme.danger
@@ -58,6 +76,9 @@ Rectangle {
 
 	function requestClose() {
 		if (sharedPlayback) {
+			volumePopup.close()
+			rememberClosePromptFocus()
+			confirmedClosePending = false
 			closeDialog.open()
 			return false
 		}
@@ -66,19 +87,42 @@ Rectangle {
 	}
 
 	function confirmClosePlayer() {
+		confirmedClosePending = true
 		closeDialog.close()
 		exitConfirmed("close-player")
 	}
 
 	function confirmSharedExit() {
 		const disposition = session.sharedHost ? "end-shared" : "leave-shared"
+		confirmedClosePending = true
 		closeDialog.close()
 		exitConfirmed(disposition)
 	}
 
 	function dismissClosePrompt() {
+		confirmedClosePending = false
 		closeDialog.close()
-		closeButton.forceActiveFocus()
+	}
+
+	function rememberClosePromptFocus() {
+		const window = root.Window.window
+		const candidate = window ? window.activeFocusItem : null
+		focusBeforeClosePrompt = candidate && candidate.forceActiveFocus ? candidate : null
+	}
+
+	function handleClosePromptClosed() {
+		const shouldRestore = !confirmedClosePending
+		const candidate = focusBeforeClosePrompt
+		confirmedClosePending = false
+		focusBeforeClosePrompt = null
+		if (!shouldRestore)
+			return
+		Qt.callLater(function() {
+			const target = candidate && candidate.forceActiveFocus && candidate.visible
+				&& candidate.enabled ? candidate : closeButton
+			if (target && target.visible && target.enabled)
+				target.forceActiveFocus(Qt.PopupFocusReason)
+		})
 	}
 
 	function focusInitialControl() {
@@ -86,7 +130,7 @@ Rectangle {
 			volumeSlider, fullscreenButton, closeButton ]
 		for (let index = 0; index < candidates.length; ++index) {
 			const candidate = candidates[index]
-			if (!candidate || !candidate.enabled)
+			if (!candidate || !candidate.enabled || !candidate.visible)
 				continue
 			candidate.forceActiveFocus()
 			if (candidate.activeFocus)
@@ -95,11 +139,14 @@ Rectangle {
 		return false
 	}
 
-	implicitHeight: controlsLayout.implicitHeight + Theme.space4
-	color: Theme.chatSurface
-	border.color: Theme.surfaceBorder
+	implicitHeight: embedded
+		? Math.max(Theme.controlHeight, transportActions.childrenRect.height) + Theme.space2
+		: controlsLayout.implicitHeight + Theme.space4
+	color: embedded ? Theme.embedSurface : Theme.chatSurface
+	border.color: embedded ? Theme.embedBorder : Theme.surfaceBorder
 	Accessible.role: Accessible.ToolBar
 	Accessible.name: qsTr("Media playback controls")
+	Accessible.ignored: closeDialog.visible
 
 	Connections {
 		target: session
@@ -113,17 +160,29 @@ Rectangle {
 			volumePopup.close()
 	}
 
+	ModalAccessibilityBarrier {
+		id: closePromptAccessibilityBarrier
+		objectName: "mediaCloseAccessibilityBarrier"
+		active: closeDialog.visible
+		// Ignoring only the toolbar owner promotes its controls. Suppress the full
+		// transport branch while the overlay-hosted close dialog owns semantics.
+		targets: [ controlsLayout ]
+	}
+
 	ColumnLayout {
 		id: controlsLayout
 		anchors.fill: parent
 		anchors.leftMargin: Theme.space3
 		anchors.rightMargin: Theme.space3
-		anchors.topMargin: Theme.space2
-		anchors.bottomMargin: Theme.space2
-		spacing: Theme.space1
+		anchors.topMargin: embedded ? Theme.space1 : Theme.space2
+		anchors.bottomMargin: embedded ? Theme.space1 : Theme.space2
+		spacing: embedded ? 0 : Theme.space1
 
 		RowLayout {
+			id: seekRow
 			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? implicitHeight : 0
+			visible: !root.embedded
 			spacing: Theme.space2
 
 			ModernSlider {
@@ -162,8 +221,8 @@ Rectangle {
 			ModernIconButton {
 				id: playButton
 				objectName: "mediaPlayButton"
-				text: session.state === "playing" ? "Ⅱ" : "▶"
-				iconName: session.state === "playing" ? "" : "play"
+				text: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
+				iconName: session.state === "playing" ? "pause" : "play"
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
 				visible: !root.providerControlled
 				Accessible.name: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
@@ -173,9 +232,41 @@ Rectangle {
 			}
 
 			Label {
+				id: embeddedTimeLabel
+				objectName: "mediaEmbeddedTimeLabel"
+				visible: root.embedded && !root.providerControlled && !root.embeddedNarrow
+				width: session.duration >= 3600 ? 108 : 82
+				height: Theme.controlHeight
+				textFormat: Text.PlainText
+				text: root.formatTime(session.position) + " / " + root.formatTime(session.duration)
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+				horizontalAlignment: Text.AlignRight
+				verticalAlignment: Text.AlignVCenter
+			}
+
+			ModernSlider {
+				id: embeddedSeekSlider
+				objectName: "mediaEmbeddedSeekSlider"
+				visible: root.embedded && !root.providerControlled
+				// Give seeking the space left by the visible transport cluster. This
+				// keeps the card player on one row without relying on translated label
+				// widths or a brittle per-breakpoint estimate.
+				width: Math.max(72, transportActions.width - root.embeddedTransportReservedWidth)
+				from: 0
+				to: Math.max(1, Number(session.duration || 0))
+				value: Number(session.position || 0)
+				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
+				onMoved: session.seek(value)
+				Accessible.name: qsTr("Playback position")
+				Accessible.description: qsTr("%1 of %2").arg(root.formatTime(value)).arg(root.formatTime(session.duration))
+			}
+
+			Label {
 				id: stateLabel
 				objectName: "mediaStateLabel"
-				width: Math.min(190, Math.max(Theme.controlHeight, transportActions.width))
+				width: root.embedded ? Math.min(130, Math.max(Theme.controlHeight, transportActions.width))
+					: Math.min(190, Math.max(Theme.controlHeight, transportActions.width))
 				height: Theme.controlHeight
 				textFormat: Text.PlainText
 				text: root.stateLabel()
@@ -184,6 +275,7 @@ Rectangle {
 				font.weight: session.sharedHost ? Font.DemiBold : Font.Normal
 				elide: Text.ElideRight
 				verticalAlignment: Text.AlignVCenter
+				visible: !root.embedded || root.providerControlled
 			}
 
 			ModernButton {
@@ -202,9 +294,9 @@ Rectangle {
 			ModernIconButton {
 				id: muteButton
 				objectName: "mediaMuteButton"
-				text: session.muted || session.volume === 0 ? "M" : "A"
-				iconName: session.muted || session.volume === 0 ? "" : "volume"
-				selected: session.muted
+				text: session.muted ? qsTr("Unmute media") : qsTr("Mute media")
+				iconName: session.muted || session.volume === 0 ? "volume-off" : "volume"
+				selected: !!session.muted
 				visible: !root.providerControlled
 				Accessible.name: session.muted ? qsTr("Unmute media") : qsTr("Mute media")
 				onClicked: session.toggleMuted()
@@ -240,7 +332,8 @@ Rectangle {
 				id: fullscreenButton
 				objectName: "mediaFullscreenButton"
 				visible: root.fullscreenAvailable
-				text: root.fullscreen ? "↙" : "⛶"
+				text: root.fullscreen ? qsTr("Exit full screen") : qsTr("Enter full screen")
+				iconName: root.fullscreen ? "fullscreen-exit" : "fullscreen"
 				selected: root.fullscreen
 				Accessible.name: root.fullscreen ? qsTr("Exit full screen") : qsTr("Enter full screen")
 				onClicked: root.fullscreenRequested(!root.fullscreen)
@@ -250,14 +343,44 @@ Rectangle {
 				id: closeButton
 				objectName: "mediaCloseButton"
 				dense: true
-				width: Math.min(implicitWidth, Math.max(Theme.controlHeight, transportActions.width))
+				width: root.embedded ? Theme.controlHeight
+					: Math.min(implicitWidth, Math.max(Theme.controlHeight, transportActions.width))
 				tone: session.sharedHost ? "danger" : "neutral"
 				text: session.sharedHost ? qsTr("End session")
+					: (session.sharedJoined ? qsTr("Leave") : qsTr("Close"))
+				Accessible.name: session.sharedHost ? qsTr("End session")
 					: (session.sharedJoined ? qsTr("Leave") : qsTr("Close"))
 				Accessible.description: session.sharedHost
 					? qsTr("Choose whether to close only this player or end playback for everyone")
 					: (session.sharedJoined
 						? qsTr("Choose whether to close only this player or leave synchronized playback") : "")
+				contentItem: Item {
+					implicitWidth: root.embedded ? closeIcon.implicitWidth : closeLabel.implicitWidth
+					implicitHeight: Math.max(closeIcon.implicitHeight, closeLabel.implicitHeight)
+					readonly property color foreground: !closeButton.enabled ? Theme.textMuted
+						: closeButton.emphasized ? Theme.contrastText(closeButton.toneColor) : Theme.textStrong
+
+					ModernIcon {
+						id: closeIcon
+						objectName: "mediaCloseIcon"
+						anchors.centerIn: parent
+						visible: root.embedded
+						name: "close"
+						size: 18
+						color: parent.foreground
+					}
+					Text {
+						id: closeLabel
+						anchors.fill: parent
+						visible: !root.embedded
+						text: closeButton.text
+						font: closeButton.font
+						color: parent.foreground
+						horizontalAlignment: Text.AlignHCenter
+						verticalAlignment: Text.AlignVCenter
+						elide: Text.ElideRight
+					}
+				}
 				onClicked: root.requestClose()
 			}
 		}
@@ -377,6 +500,11 @@ Rectangle {
 		padding: Theme.space5
 		width: Math.min(460, parent ? parent.width - Theme.space5 * 2 : 460)
 		title: session.sharedHost ? qsTr("End this shared session?") : qsTr("Leave shared playback?")
+		onAboutToShow: if (!root.focusBeforeClosePrompt) root.rememberClosePromptFocus()
+		onOpened: Qt.callLater(function() {
+			mediaCloseCancelButton.forceActiveFocus(Qt.PopupFocusReason)
+		})
+		onClosed: root.handleClosePromptClosed()
 		header: null
 		footer: null
 		palette.window: Theme.panel
@@ -473,6 +601,7 @@ Rectangle {
 				Layout.preferredHeight: Math.max(Theme.controlHeight, childrenRect.height)
 				spacing: Theme.space2
 				ModernButton {
+					id: mediaCloseCancelButton
 					objectName: "mediaCloseCancelButton"
 					width: Math.min(implicitWidth, Math.max(Theme.controlHeight, closeActionFlow.width))
 					text: qsTr("Cancel")

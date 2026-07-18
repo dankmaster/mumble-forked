@@ -12,11 +12,23 @@ param(
 	[switch]$RequireEnglishOnlyInstallers,
 	[switch]$RequireUpdaterRuntime,
 	[switch]$RequireSpeechCleanup,
-	[switch]$RequireGStreamerRuntime
+	[switch]$RequireGStreamerRuntime,
+	[string]$CandidateExecutablePath = "",
+	[string]$MsiPayloadEvidencePath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$msiPayloadVerificationRequested = -not [string]::IsNullOrWhiteSpace($CandidateExecutablePath) -or
+	-not [string]::IsNullOrWhiteSpace($MsiPayloadEvidencePath)
+if ($msiPayloadVerificationRequested -and
+	([string]::IsNullOrWhiteSpace($CandidateExecutablePath) -or [string]::IsNullOrWhiteSpace($MsiPayloadEvidencePath))) {
+	throw "CandidateExecutablePath and MsiPayloadEvidencePath must be supplied together."
+}
+if ($msiPayloadVerificationRequested -and -not $RequireClientInstaller) {
+	throw "Candidate MSI payload verification requires RequireClientInstaller."
+}
 
 function Resolve-ExistingPath {
 	param(
@@ -375,6 +387,8 @@ function Assert-QmlRuntimeManifest {
 		"mumble-updater.exe",
 		"Qt6Core.dll",
 		"Qt6Gui.dll",
+		"Qt6Multimedia.dll",
+		"Qt6MultimediaQuick.dll",
 		"Qt6Qml.dll",
 		"Qt6Quick.dll",
 		"Qt6QuickControls2.dll",
@@ -390,7 +404,12 @@ function Assert-QmlRuntimeManifest {
 		"Qt6WebEngineQuick.dll",
 		"QtWebEngineProcess.exe",
 		"platforms/qwindows.dll",
+		"multimedia/windowsmediaplugin.dll",
 		"tls/qopensslbackend.dll",
+		"qml/QtMultimedia/qmldir",
+		"qml/QtMultimedia/plugins.qmltypes",
+		"qml/QtMultimedia/quickmultimediaplugin.dll",
+		"qml/QtMultimedia/Video.qml",
 		"qml/QtQuick/qmldir",
 		"qml/QtQuick/Controls/qmldir",
 		"qml/QtQuick/Controls/qtquickcontrols2plugin.dll",
@@ -416,7 +435,8 @@ function Assert-QmlRuntimeManifest {
 		"resources/qtwebengine_resources.pak",
 		"translations/qtwebengine_locales/en-US.pak",
 		"qt.conf",
-		"direct-runtime-dependencies.txt"
+		"direct-runtime-dependencies.txt",
+		"delay-load-runtime-dependencies.txt"
 	)
 	foreach ($requiredRuntimePath in $requiredRuntimePaths) {
 		if ($manifestPaths -notcontains $requiredRuntimePath) {
@@ -450,23 +470,48 @@ function Assert-QmlRuntimeManifest {
 	if ($invalidDirectDependencies.Count -gt 0) {
 		throw "$Label direct runtime dependency report contains invalid entries: $($invalidDirectDependencies -join ', ')."
 	}
-	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "Qt6WebEngineCore.dll")) {
+	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll")) {
 		if ($directDependencies -notcontains $requiredDirectRuntime) {
 			throw "$Label direct runtime dependency report is missing '$requiredDirectRuntime'."
 		}
 	}
+	$delayLoadDependencies = @(Get-Content -LiteralPath (Join-Path $Root "delay-load-runtime-dependencies.txt") |
+		ForEach-Object { ([string]$_).Trim() } |
+		Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+	$invalidDelayLoadDependencies = @($delayLoadDependencies | Where-Object { $_ -notmatch '^[A-Za-z0-9_.+-]+\.(?:dll|drv|cpl)$' })
+	if ($invalidDelayLoadDependencies.Count -gt 0) {
+		throw "$Label delay-load runtime dependency report contains invalid entries: $($invalidDelayLoadDependencies -join ', ')."
+	}
+	$requiredDelayLoadRuntimes = [Collections.Generic.List[string]]::new()
+	$requiredDelayLoadRuntimes.Add("Qt6WebEngineQuick.dll")
+	$requiredDelayLoadRuntimes.Add("Qt6WebEngineCore.dll")
+	foreach ($optionalNeuralRuntime in @("rnnoise.dll", "onnxruntime.dll")) {
+		if (Test-Path -LiteralPath (Join-Path $Root $optionalNeuralRuntime) -PathType Leaf) {
+			$requiredDelayLoadRuntimes.Add($optionalNeuralRuntime)
+		}
+	}
+	foreach ($requiredDelayLoadRuntime in $requiredDelayLoadRuntimes) {
+		if ($delayLoadDependencies -notcontains $requiredDelayLoadRuntime) {
+			throw "$Label delay-load runtime dependency report is missing '$requiredDelayLoadRuntime'."
+		}
+	}
 	$forbiddenDirectRuntimes = @(
+		"Qt6MultimediaWidgets.dll",
 		"Qt6QuickWidgets.dll",
 		"Qt6WebEngineWidgets.dll",
 		"Qt6WebChannel.dll",
-		"Qt6WebChannelQuick.dll"
+		"Qt6WebChannelQuick.dll",
+		"Qt6WebEngineQuick.dll",
+		"Qt6WebEngineCore.dll",
+		"rnnoise.dll",
+		"onnxruntime.dll"
 	)
 	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object { $directDependencies -contains $_ })
 	if ($forbiddenDirectImports.Count -gt 0) {
-		throw "$Label directly imports compatibility or app-bridge runtimes: $($forbiddenDirectImports -join ', ')."
+		throw "$Label directly imports compatibility, app-bridge, or media-only runtimes: $($forbiddenDirectImports -join ', ')."
 	}
 	$forbiddenPayloadRuntimes = @($manifestPaths | Where-Object {
-		[System.IO.Path]::GetFileName($_) -in @("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll")
+		[System.IO.Path]::GetFileName($_) -in @("Qt6MultimediaWidgets.dll", "Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll")
 	})
 	if ($forbiddenPayloadRuntimes.Count -gt 0) {
 		throw "$Label contains forbidden compatibility runtimes: $($forbiddenPayloadRuntimes -join ', ')."
@@ -583,8 +628,19 @@ if ($RequireClientInstaller) {
 	foreach ($artifactPath in Assert-InstallerPattern -Label "Build root '$buildRootPath'" -Root $buildRootPath -Pattern "*_client-*.exe" -Description "client installer bootstrapper") {
 		$allArtifacts.Add($artifactPath)
 	}
-	foreach ($artifactPath in Assert-InstallerPattern -Label "Build root '$buildRootPath'" -Root $buildRootPath -Pattern "*client*.msi" -Description "client installer MSI") {
+	$clientMsiPaths = @(Assert-InstallerPattern -Label "Build root '$buildRootPath'" -Root $buildRootPath -Pattern "*client*.msi" -Description "client installer MSI")
+	foreach ($artifactPath in $clientMsiPaths) {
 		$allArtifacts.Add($artifactPath)
+	}
+	if ($msiPayloadVerificationRequested) {
+		if ($clientMsiPaths.Count -ne 1) {
+			throw "Candidate MSI payload verification requires exactly one client MSI; found $($clientMsiPaths.Count)."
+		}
+		& "$PSScriptRoot\verify-windows-msi-payload.ps1" `
+			-CandidateClientMsi $clientMsiPaths[0] `
+			-CandidateExecutable $CandidateExecutablePath `
+			-OutputPath $MsiPayloadEvidencePath | Out-Host
+		$allArtifacts.Add((Resolve-Path -LiteralPath $MsiPayloadEvidencePath).Path)
 	}
 }
 

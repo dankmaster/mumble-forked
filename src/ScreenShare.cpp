@@ -7,6 +7,7 @@
 
 #include <algorithm>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QRegularExpression>
 #include <QStringList>
@@ -14,6 +15,20 @@
 
 namespace Mumble {
 namespace ScreenShare {
+	QString viewerAudioPreferenceKey(const QString &ownerCertificateHash,
+									 const QByteArray &serverCertificateDigest, const QString &ownerName) {
+		const QString certificateHash = ownerCertificateHash.trimmed().toLower();
+		if (!certificateHash.isEmpty()) return QStringLiteral("certificate:%1").arg(certificateHash);
+
+		const QString normalizedName = ownerName.trimmed().toCaseFolded();
+		if (normalizedName.isEmpty()) return {};
+
+		QByteArray fallbackInput = serverCertificateDigest.toHex();
+		fallbackInput.append('\0');
+		fallbackInput.append(normalizedName.toUtf8());
+		const QByteArray fallbackHash = QCryptographicHash::hash(fallbackInput, QCryptographicHash::Sha256);
+		return QStringLiteral("server-user:%1").arg(QString::fromLatin1(fallbackHash.toHex()));
+	}
 
 	bool isValidCodec(const MumbleProto::ScreenShareCodec codec) {
 		switch (codec) {

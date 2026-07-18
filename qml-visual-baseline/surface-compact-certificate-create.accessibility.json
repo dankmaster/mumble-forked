@@ -1,0 +1,464 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 644,
+            "y": 76
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Certificate",
+          "rect": {
+            "height": 26,
+            "width": 90,
+            "x": 32,
+            "y": 78
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Manage the client certificate used for account identity and server authentication.",
+          "rect": {
+            "height": 15,
+            "width": 607,
+            "x": 32,
+            "y": 107
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Status: Installed",
+              "rect": {
+                "height": 66,
+                "width": 209,
+                "x": 30,
+                "y": 126
+              },
+              "role": "Pane",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Action: Create",
+              "rect": {
+                "height": 66,
+                "width": 210,
+                "x": 245,
+                "y": 126
+              },
+              "role": "Pane",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Expires: 2034-05-16",
+              "rect": {
+                "height": 66,
+                "width": 209,
+                "x": 461,
+                "y": 126
+              },
+              "role": "Pane",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Certificate summary",
+          "rect": {
+            "height": 66,
+            "width": 640,
+            "x": 30,
+            "y": 126
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Current certificate",
+              "rect": {
+                "height": 17,
+                "width": 620,
+                "x": 40,
+                "y": 214
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Status",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 237
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "A valid certificate is installed",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 237
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Name",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 260
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Demo User",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 260
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Email",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 283
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "demo@example.com",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 283
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Issuer",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 306
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Mumble Demo CA",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 306
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Expires",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 329
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "2034-05-16T10:30:00+02:00",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 329
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "SHA-1 fingerprint",
+              "rect": {
+                "height": 12,
+                "width": 100,
+                "x": 40,
+                "y": 352
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "7a:18:93:24:df:8a:61:4b:15:8d:7c:60:9f:42:aa:b1:43:5c:de:72",
+              "rect": {
+                "height": 17,
+                "width": 512,
+                "x": 148,
+                "y": 352
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "certificate-current",
+          "name": "Current certificate",
+          "rect": {
+            "height": 175,
+            "width": 640,
+            "x": 30,
+            "y": 204
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Certificate action",
+              "rect": {
+                "height": 17,
+                "width": 620,
+                "x": 40,
+                "y": 401
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Choose one operation. The form only shows fields needed for that operation.",
+              "rect": {
+                "height": 15,
+                "width": 620,
+                "x": 40,
+                "y": 424
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Action",
+              "rect": {
+                "height": 15,
+                "width": 31,
+                "x": 40,
+                "y": 445
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Action",
+              "rect": {
+                "height": 32,
+                "width": 620,
+                "x": 40,
+                "y": 465
+              },
+              "role": "ComboBox",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Name",
+              "rect": {
+                "height": 15,
+                "width": 29,
+                "x": 40,
+                "y": 503
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Optional display name stored in the certificate.",
+              "name": "Name",
+              "rect": {
+                "height": 32,
+                "width": 620,
+                "x": 40,
+                "y": 523
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Email",
+              "rect": {
+                "height": 15,
+                "width": 27,
+                "x": 40,
+                "y": 580
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Optional. Leave blank if you do not want an email address in the certificate.",
+              "name": "Email",
+              "rect": {
+                "height": 32,
+                "width": 620,
+                "x": 40,
+                "y": 600
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable"
+              ]
+            }
+          ],
+          "description": "certificate-action",
+          "name": "Certificate action",
+          "rect": {
+            "height": 270,
+            "width": 640,
+            "x": 30,
+            "y": 391
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close",
+          "rect": {
+            "height": 32,
+            "width": 44,
+            "x": 24,
+            "y": 699
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Apply",
+          "rect": {
+            "height": 32,
+            "width": 47,
+            "x": 74,
+            "y": 699
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Manage the client certificate used for account identity and server authentication.",
+      "name": "Certificate",
+      "rect": {
+        "height": 685,
+        "width": 668,
+        "x": 16,
+        "y": 58
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble",
+  "rect": {
+    "height": 800,
+    "width": 700,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

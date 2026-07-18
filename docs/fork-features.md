@@ -1,12 +1,12 @@
 # Fork Feature Inventory
 
-Status snapshot: 2026-06-05.
+Status snapshot: 2026-07-15.
 
 This document describes the fork-specific surface area in this repository. It
 is not an official Mumble roadmap, and several features are intentionally scoped
-to this community fork. The intended fork client path is now modern-only, but
-core Mumble compatibility remains a protocol constraint: unsupported fork
-features should degrade without breaking normal voice and basic text chat.
+to this community fork. The supported Windows client is modern-only, but core
+Mumble compatibility remains a protocol constraint: unsupported fork features
+should degrade without breaking normal voice and basic text chat.
 
 For the short current-state handoff, see
 [`status-and-roadmap.md`](status-and-roadmap.md).
@@ -24,11 +24,12 @@ The fork keeps the normal Mumble foundation:
 
 ## Modern Client Shell
 
-The Modern shell is the visible fork client path. It is a native Qt Quick client
+The Modern shell is the supported Windows client path. It is a native Qt Quick
 surface built around persistent chat, rich media, direct messages, and modern
 dialogs. No classic Qt Widgets product layout or hidden compatibility view is
 created. Qt Widgets remains linked only for documented operating-system and
-third-party-plugin surfaces.
+third-party-plugin surfaces. Structural cutover is complete; visual and
+interaction parity is still being refined.
 
 Current capabilities:
 
@@ -46,7 +47,8 @@ Current capabilities:
 - playable YouTube/video preview controls through a lazy, isolated WebEngineQuick media surface
 - image, GIF, video, product, Steam/game-store, social posts including X/Twitter, GitHub, finance, forum, article, map, place, traffic, and weather card layouts
 - local disk preview cache with selective session refresh for richer providers
-- theme, accent, density, dialog, and context-menu polish for the Modern shell
+- theme, accent, and density support with ongoing dialog, context-menu, rich
+  preview, provider-embedding, and media-state polish
 - update banners, feedback, and crash-report handoff flows that avoid publishing private local context by default
 - a minimal Qt Quick startup failure notice instead of a classic client fallback
 
@@ -301,15 +303,18 @@ offline corpus comparison and packaged-model smoke coverage.
 
 ## Windows Builds And Fork Releases
 
-The fork keeps separate lanes for normal PR validation and the heavier
-shared/WebEngine Windows client payload. The shared/WebEngine lane is the
-canonical fork client lane because it carries the Modern shell.
+The fork keeps separate lanes for normal PR validation and the heavier shared
+Qt Quick Windows client payload with its lazy WebEngineQuick media runtime. That
+lane is the canonical fork client lane because it carries the Modern shell.
 
 Current build/release features:
 
 - static Windows server validation in `CI`
 - Linux server build and one practical Linux `ctest` lane in `CI`
-- separate `Windows Shared Client Installer` workflow for the WebEngine payload
+- manual Linux/macOS Qt Quick client reference jobs for diagnostics only; they
+  are not product or release gates
+- separate `Windows Shared Client Installer` workflow for the Qt Quick payload
+  and lazy WebEngineQuick media runtime
 - reusable `Windows Shared Build Environment` workflow/archive
 - manual `mumble-forked MSI Release` workflow for a stable unsigned convenience MSI
 - generated `changelog.md`
@@ -363,16 +368,17 @@ Fork-only behavior should be capability-gated:
   baseline voice, channel, ACL, registration/certificate, and basic text
   behavior
 - those clients are not expected to receive full persistent rich chat or screen-share parity
-- fork desktop clients use the Qt Quick Modern shell as the visible layout;
-  classic layout is not a user-facing compatibility promise
+- the supported Windows fork client uses the Qt Quick Modern shell as its
+  visible layout; classic layout is not a user-facing compatibility promise
 
 ## Known Gaps
 
 The feature set is still moving. Current known gaps include:
 
-- remaining Qt Widgets/native dialog surfaces such as plugin settings, plugin
-  install/update, Search, Voice Recorder, and selected certificate flows need a
-  final modernize-or-keep decision
+- visual and interaction parity still needs connected review across Settings,
+  dialogs, menus, tools, rich previews, provider embeddings, and media states
+- Windows performance, media lifecycle, packaged-runtime, MSI, and upgrade
+  evidence must be refreshed for each release candidate
 - no full production promise for screen sharing
 - screen-share publish/view needs more live validation across the target Windows
   runtime before it should be called stable

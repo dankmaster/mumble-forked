@@ -3199,6 +3199,7 @@ void Server::removeChannel(Channel *chan, Channel *dest) {
 		mpus.set_channel_id(target->iId);
 		userEnterChannel(p, target, mpus);
 		sendAll(mpus);
+		syncWatchTogetherStateForUser(static_cast< ServerUser * >(p));
 		emit userStateChanged(p);
 	}
 
@@ -3359,7 +3360,8 @@ void Server::userEnterChannel(User *p, Channel *c, MumbleProto::UserState &mpus)
 		sendClientPermission(serverUser, c->cParent);
 
 	syncScreenShareStateForUser(serverUser, old);
-	syncWatchTogetherStateForUser(serverUser);
+	// Watch Together state is synchronized by the caller after broadcasting the
+	// UserState move, so clients can validate the session against their new room.
 }
 
 bool Server::hasPermission(ServerUser *p, Channel *c, QFlags< ChanACL::Perm > perm) {

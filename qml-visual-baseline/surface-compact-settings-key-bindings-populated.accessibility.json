@@ -1,0 +1,953 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings",
+          "rect": {
+            "height": 26,
+            "width": 71,
+            "x": 16,
+            "y": 21
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "INTERACTION",
+              "rect": {
+                "height": 12,
+                "width": 70,
+                "x": 270,
+                "y": 82
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 22,
+                "width": 476,
+                "x": 270,
+                "y": 95
+              },
+              "role": "Heading",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Key Bindings",
+          "rect": {
+            "height": 62,
+            "width": 546,
+            "x": 214,
+            "y": 68
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Settings categories",
+          "rect": {
+            "height": 14,
+            "width": 198,
+            "x": 8,
+            "y": 76
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Input",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 109
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Input",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 96
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Audio Output",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 147
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Audio Output",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 134
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Appearance",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 185
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Appearance",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 172
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "User Interface",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 223
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "User Interface",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 210
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Messages & Sounds",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 261
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Messages & Sounds",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 248
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Key Bindings",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 299
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Key Bindings",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 286
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Network",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 337
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Network",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 324
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Screen Sharing",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 375
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Screen Sharing",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 362
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Plugins",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 413
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Plugins",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 400
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "About",
+                  "rect": {
+                    "height": 16,
+                    "width": 151,
+                    "x": 43,
+                    "y": 451
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "About",
+              "rect": {
+                "height": 36,
+                "width": 198,
+                "x": 8,
+                "y": 438
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Settings pages",
+          "rect": {
+            "height": 740,
+            "width": 198,
+            "x": 8,
+            "y": 96
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Shortcut controls",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 140
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 20,
+                            "width": 486,
+                            "x": 244,
+                            "y": 169
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 247,
+                                "y": 171
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 244,
+                            "y": 170
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Enable global shortcuts",
+                      "rect": {
+                        "height": 32,
+                        "width": 498,
+                        "x": 238,
+                        "y": 163
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 32,
+                    "width": 498,
+                    "x": 238,
+                    "y": 163
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 32,
+                "width": 498,
+                "x": 238,
+                "y": 163
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Shortcut controls",
+          "rect": {
+            "height": 75,
+            "width": 518,
+            "x": 228,
+            "y": 130
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Configured shortcuts",
+              "rect": {
+                "height": 17,
+                "width": 498,
+                "x": 238,
+                "y": 227
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Shortcuts",
+                  "rect": {
+                    "height": 20,
+                    "width": 64,
+                    "x": 238,
+                    "y": 250
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Add shortcut",
+                  "rect": {
+                    "height": 32,
+                    "width": 86,
+                    "x": 338,
+                    "y": 253
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "0 assigned · 2 total",
+                  "rect": {
+                    "height": 15,
+                    "width": 92,
+                    "x": 238,
+                    "y": 272
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Function",
+                          "rect": {
+                            "height": 15,
+                            "width": 43,
+                            "x": 250,
+                            "y": 307
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Function",
+                          "rect": {
+                            "height": 32,
+                            "width": 474,
+                            "x": 250,
+                            "y": 326
+                          },
+                          "role": "ComboBox",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Data",
+                          "rect": {
+                            "height": 15,
+                            "width": 24,
+                            "x": 250,
+                            "y": 364
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "No data",
+                          "rect": {
+                            "height": 32,
+                            "width": 458,
+                            "x": 258,
+                            "y": 383
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Shortcut",
+                          "rect": {
+                            "height": 15,
+                            "width": 42,
+                            "x": 250,
+                            "y": 421
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Press the shortcut now…",
+                          "rect": {
+                            "height": 32,
+                            "width": 458,
+                            "x": 258,
+                            "y": 440
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Cancel capture",
+                          "rect": {
+                            "height": 32,
+                            "width": 94,
+                            "x": 250,
+                            "y": 480
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Clear",
+                          "rect": {
+                            "height": 32,
+                            "width": 42,
+                            "x": 350,
+                            "y": 480
+                          },
+                          "role": "Button",
+                          "states": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Remove",
+                          "rect": {
+                            "height": 32,
+                            "width": 59,
+                            "x": 398,
+                            "y": 480
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "Push-to-Talk shortcut",
+                      "rect": {
+                        "height": 229,
+                        "width": 498,
+                        "x": 238,
+                        "y": 295
+                      },
+                      "role": "ListItem",
+                      "states": [
+                        "focused"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Function",
+                          "rect": {
+                            "height": 15,
+                            "width": 43,
+                            "x": 250,
+                            "y": 542
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Function",
+                          "rect": {
+                            "height": 32,
+                            "width": 474,
+                            "x": 250,
+                            "y": 561
+                          },
+                          "role": "ComboBox",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Data",
+                          "rect": {
+                            "height": 15,
+                            "width": 24,
+                            "x": 250,
+                            "y": 599
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Shortcut data",
+                          "rect": {
+                            "height": 32,
+                            "width": 474,
+                            "x": 250,
+                            "y": 618
+                          },
+                          "role": "ComboBox",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Shortcut",
+                          "rect": {
+                            "height": 15,
+                            "width": 42,
+                            "x": 250,
+                            "y": 656
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Not assigned",
+                          "rect": {
+                            "height": 32,
+                            "width": 458,
+                            "x": 258,
+                            "y": 675
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Capture",
+                          "rect": {
+                            "height": 32,
+                            "width": 57,
+                            "x": 250,
+                            "y": 715
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Clear",
+                          "rect": {
+                            "height": 32,
+                            "width": 42,
+                            "x": 313,
+                            "y": 715
+                          },
+                          "role": "Button",
+                          "states": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Remove",
+                          "rect": {
+                            "height": 32,
+                            "width": 59,
+                            "x": 361,
+                            "y": 715
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "Mute Self shortcut",
+                      "rect": {
+                        "height": 229,
+                        "width": 498,
+                        "x": 238,
+                        "y": 530
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Configured shortcuts",
+                  "rect": {
+                    "height": 464,
+                    "width": 498,
+                    "x": 238,
+                    "y": 295
+                  },
+                  "role": "List",
+                  "states": [
+                    "focused"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 509,
+                "width": 498,
+                "x": 238,
+                "y": 250
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            }
+          ],
+          "description": "form",
+          "name": "Configured shortcuts",
+          "rect": {
+            "height": 552,
+            "width": 518,
+            "x": 228,
+            "y": 217
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Show advanced settings",
+              "rect": {
+                "height": 28,
+                "width": 95,
+                "x": 141,
+                "y": 858
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Advanced settings are hidden",
+          "rect": {
+            "height": 28,
+            "width": 228,
+            "x": 8,
+            "y": 858
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 28,
+            "width": 47,
+            "x": 609,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Apply",
+          "rect": {
+            "height": 28,
+            "width": 43,
+            "x": 662,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Done",
+          "rect": {
+            "height": 28,
+            "width": 41,
+            "x": 711,
+            "y": 858
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Settings",
+      "rect": {
+        "height": 900,
+        "width": 760,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Settings",
+  "rect": {
+    "height": 900,
+    "width": 760,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

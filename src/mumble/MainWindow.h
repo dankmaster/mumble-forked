@@ -8,6 +8,7 @@
 
 #include <QtCore/QVariantMap>
 
+#include <QtCore/QByteArray>
 #include <QtCore/QHash>
 #include <QtCore/QEvent>
 #include <QtCore/QJsonObject>
@@ -38,6 +39,7 @@
 
 #include <memory>
 #include <atomic>
+#include <functional>
 #include <optional>
 #include <stack>
 #include <vector>
@@ -67,11 +69,14 @@ class PluginCancellationGate;
 class ModernUiAutomationServer;
 #	endif
 struct ModernConnectPingState;
+class ModernConnectDiscoveryService;
 class QCloseEvent;
 class QObject;
 class QFrame;
 class QModelIndex;
 class QTimer;
+class QTemporaryDir;
+class QLockFile;
 class QHostAddress;
 class QNetworkReply;
 class QNetworkRequest;
@@ -102,6 +107,46 @@ struct PendingFeedbackSubmission {
 	QUrl fallbackUrl;
 	bool fromModernShell = false;
 };
+
+namespace mumble::chatattachmentio {
+class TemporaryDirectoryLease final {
+public:
+	static std::shared_ptr< TemporaryDirectoryLease > create(const QString &templatePath, quint64 retainedBytes = 0);
+	~TemporaryDirectoryLease();
+
+	TemporaryDirectoryLease(const TemporaryDirectoryLease &) = delete;
+	TemporaryDirectoryLease &operator=(const TemporaryDirectoryLease &) = delete;
+
+	const QString &path() const {
+		return m_path;
+	}
+	quint64 retainedBytes() const {
+		return m_retainedBytes;
+	}
+
+private:
+	TemporaryDirectoryLease(QString path, quint64 retainedBytes, std::unique_ptr< QLockFile > ownerLock);
+	QString m_path;
+	quint64 m_retainedBytes = 0;
+	std::unique_ptr< QLockFile > m_ownerLock;
+};
+
+struct InlineDataImagePayload {
+	QByteArray bytes;
+	QString mimeType;
+	QString fileExtension;
+	QString errorCode;
+
+	bool isValid() const {
+		return errorCode.isEmpty() && !bytes.isEmpty();
+	}
+};
+
+/// Strictly decodes and validates an inline data image without touching GUI state.
+/// This is intentionally frontend-neutral so the worker implementation can be
+/// covered without constructing MainWindow.
+InlineDataImagePayload decodeAndValidateInlineDataImage(const QString &source, qint64 maximumBytes);
+} // namespace mumble::chatattachmentio
 
 class MessageBoxEvent : public QEvent {
 public:
@@ -252,6 +297,13 @@ public:
 	void scheduleQmlShellStateSyncInternal(bool immediate);
 	void runQmlShellStateSync();
 	void enterQmlShellSteadyState();
+	void applyQmlStonksProbeState(QVariantMap state);
+	void applyQmlConnectionStateProbe(QVariantMap state);
+	void applyQmlScreenShareStateProbe(QVariantMap state);
+	void applyQmlRichPreviewProbeMessages(QVariantList messages);
+	void applyQmlMessageDeliveryProbeMessages(QVariantList messages);
+	QVariantMap buildQmlMessageDeliveryProbeScopeState() const;
+	void publishQmlAutomationChatProbeState();
 	void syncQmlShellState();
 	QmlSelectionState *qmlSelectionState() const;
 	void applyQmlRoomState(const QVariantMap &state);
@@ -301,17 +353,28 @@ public:
 	};
 
 	bool ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason);
-	bool ensureUserCommentAvailable(ClientUser *user);
-	bool normalizeUserTextureForDisplay(ClientUser *user, bool clearHashOnFailure = false);
+	bool ensureUserCommentAvailable(ClientUser *user, bool reopenModernDialog = false);
+	QString modernShellAvatarDataUrl(const ClientUser *user, int avatarSize);
 
 	struct PersistentChatPreviewMediaItem {
 		QString url;
 		QString mime;
 		QString kind;
+		QString title;
+		QString streamKind;
+		QString thumbnail;
+		QString poster;
 		QString imageProviderUrl;
 		bool imageProviderRequested = false;
 		bool imageProviderFinished  = false;
 		bool imageProviderAnimated  = false;
+	};
+
+	struct PersistentChatPreviewMetadataImage {
+		QString source;
+		QString providerUrl;
+		bool requested = false;
+		bool finished  = false;
 	};
 
 	struct PersistentChatPreview {
@@ -331,6 +394,7 @@ public:
 		QString mediaImageProviderSource;
 		std::vector< PersistentChatPreviewMediaItem > mediaItems;
 		QVariantMap metadata;
+		QHash< QString, PersistentChatPreviewMetadataImage > metadataImages;
 		QString openLabel;
 		unsigned int previewAssetID = 0;
 		bool autoplay               = false;
@@ -357,9 +421,27 @@ public:
 		QSet< unsigned int > attachmentAssetIDs;
 		QSet< QString > attachmentMessageKeys;
 		QStringList savePaths;
+		QString openFileName;
+		QHash< QString, QString > saveOperationIDsByPath;
+		QString openOperationID;
 		quint64 maximumBytes = 0;
 		quint64 timeoutToken = 0;
 		bool requestPending = false;
+	};
+
+	struct PendingPersistentChatAttachmentHydration {
+		unsigned int transferAssetID = 0;
+		QHash< unsigned int, QSet< QString > > messageKeysByAttachmentAssetID;
+	};
+
+	struct PersistentChatAssetIoResult {
+		QImage image;
+		QString mediaDataUrl;
+		QString contentHash;
+		QSet< QString > savedPaths;
+		QString openPath;
+		QString openFailureCode;
+		std::shared_ptr< mumble::chatattachmentio::TemporaryDirectoryLease > openDirectoryLease;
 	};
 
 	struct PendingChatEmbedAssist {
@@ -378,6 +460,7 @@ public:
 
 	struct ModernDirectMessageEntry {
 		quint64 localID = 0;
+		QString stableID;
 		unsigned int peerSession  = 0;
 		unsigned int actorSession = 0;
 		QString actorName;
@@ -388,6 +471,15 @@ public:
 		bool persistent    = false;
 		unsigned int threadID  = 0;
 		unsigned int messageID = 0;
+		std::optional< MumbleProto::ChatMessage > persistentMessage;
+		std::optional< unsigned int > replyMessageID;
+		QList< unsigned int > attachmentAssetIDs;
+		QStringList attachmentFileNames;
+		QString deliveryState;
+		QString deliveryLabel;
+		QString deliveryError;
+		bool deliveryCanRetry = false;
+		quint64 deliveryAttempt = 0;
 	};
 
 	struct ModernDirectMessageConversation {
@@ -440,7 +532,10 @@ public:
 											 const QString &messageKey);
 	void downloadPersistentChatAttachment(unsigned int assetID, const QString &fileName);
 	void publishPersistentChatAttachmentImageUpdate(const QSet< QString > &messageKeys);
+	void schedulePendingPersistentChatAttachmentImageDownloads();
 	void armPersistentChatAssetDownloadTimeout(unsigned int assetID);
+	void finishPersistentChatAssetDownloadOperations(const PersistentChatAssetDownload &download,
+		const QString &errorCode, const QString &message);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
 	void restorePersistentChatPreviewDiskCache(const QString &previewKey);
 	bool refreshRestoredPersistentChatPreview(const QString &previewKey);
@@ -487,8 +582,13 @@ public:
 	void registerPersistentChatPreviewDataImageProvider(const QString &previewKey, int mediaItemIndex,
 												 const QString &sourceIdentity, const QString &mime);
 	void completePersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
-												  const QString &sourceIdentity, const QString &providerUrl,
-												  bool animated);
+										  const QString &sourceIdentity, const QString &providerUrl,
+										  bool animated);
+	void requestPersistentChatPreviewMetadataImageProvider(const QString &previewKey, const QString &metadataKey,
+											 const QString &sourceIdentity, const QUrl &requestUrl,
+											 const QString &suggestedMime = QString(), int redirectCount = 0);
+	void completePersistentChatPreviewMetadataImageProvider(const QString &previewKey, const QString &metadataKey,
+											  const QString &sourceIdentity, const QString &providerUrl);
 	QNetworkReply *startPersistentChatPreviewGet(const QNetworkRequest &request, const QString &previewKey);
 	QNetworkReply *startPersistentChatPreviewPost(const QNetworkRequest &request, const QByteArray &body,
 												 const QString &previewKey);
@@ -541,6 +641,7 @@ public:
 	QString persistentChatInlineDataImageThumbnailSourceForToken(const QString &token, const QImage &previewImage);
 	QImage persistentChatInlineDataImageFromSource(const QString &source) const;
 	QImage persistentChatInlineDataImageFromUrl(const QUrl &url) const;
+	void savePersistentChatInlineDataImage(const QString &token, const QString &fileName);
 	void warmupPersistentChatInlineDataImages(const MumbleProto::ChatMessage &message);
 	void queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey = QString());
 	void flushPersistentChatInlineDataImageWarmups();
@@ -596,7 +697,9 @@ public:
 											   bool includeAvatar, bool includeActions = true);
 	std::optional< QVariantMap > buildCurrentQmlParticipantState(const ClientUser *user);
 	QVariantList buildQmlChannelParticipantStates(const Channel *channel, int avatarSize,
-														   bool includeAvatar, bool includeActions = true);
+												   bool includeAvatar, bool includeActions = true);
+	QString qmlVoiceRoomTopicSummary(const Channel *channel);
+	void flushQmlChannelTopicReads();
 	QVariantMap buildQmlRoomState();
 	QVariantList buildQmlScopeActions(const QString &scopeToken, const QString &kind);
 	QVariantList buildQmlParticipantActions(const QString &sessionId, const QString &entryKind,
@@ -605,6 +708,12 @@ public:
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishPersistentChatInlineDataImageProviderUpdate(const QString &token);
+	void openPersistentChatAttachment(unsigned int assetID, const QString &fileName);
+	void queuePersistentChatAssetIo(
+		const QString &group, const QString &key, qint64 estimatedBytes,
+		std::function< PersistentChatAssetIoResult() > work,
+		std::function< void(std::optional< PersistentChatAssetIoResult >) > completion);
+	void cancelPersistentChatAttachmentWork(const QString &errorCode, const QString &reason);
 	void publishQmlActiveScopeState();
 	void scheduleQmlRoomStateUpdate();
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
@@ -626,11 +735,18 @@ public:
 	QString modernShellMessageTimelineMode(std::size_t beginIndex) const;
 	void handleModernShellPreviewHydrationRequest(const QString &scopeToken, const QVariantList &messageIds,
 												  bool highPriority);
+	void retryPersistentChatAttachmentPreview(const QString &scopeToken, const QString &messageId,
+											 unsigned int assetID);
 	void flushModernShellPreviewHydrationQueue();
 	QVariantMap buildModernShellDirectMessagesState() const;
 	QVariantMap buildModernShellDirectMessageConversationState(const ModernDirectMessageConversation &conversation,
 															   bool includeMessages) const;
 	QVariantMap buildModernShellDirectMessageEntryState(const ModernDirectMessageEntry &entry) const;
+	ModernDirectMessageEntry *modernDirectMessageEntry(unsigned int session, unsigned int messageID);
+	const ModernDirectMessageEntry *modernDirectMessageEntry(unsigned int session, unsigned int messageID) const;
+	bool modernDirectMessageContainsAsset(unsigned int session, unsigned int assetID) const;
+	void publishQmlDirectMessageEntryUpdate(unsigned int session, const ModernDirectMessageEntry &entry);
+	void armModernDirectMessageDeliveryTimeout(unsigned int session, quint64 localID, quint64 attempt);
 	std::optional< unsigned int > persistentUserIDForClientUser(const ClientUser *user) const;
 	ClientUser *clientUserByPersistentUserID(unsigned int userID) const;
 	QString modernDirectMessagePersistentHistoryUnavailableReason(const ClientUser *peer) const;
@@ -645,7 +761,10 @@ public:
 	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
 	void requestModernDirectMessageHistory(unsigned int session);
 	void warmupModernDirectMessageHistory();
-	bool sendModernDirectMessage(unsigned int session, const QString &message);
+	bool sendModernDirectMessage(unsigned int session, const QString &message,
+								 std::optional< unsigned int > replyMessageID = std::nullopt,
+								 const QList< unsigned int > &assetIDs = {}, const QStringList &fileNames = {},
+								 quint64 retryLocalID = 0);
 	void publishQmlDirectMessagesState();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellScopeRailSelection(const QString &scopeToken, const QString &railKind);
@@ -704,6 +823,9 @@ public:
 	void startModernConnectServerPing(const QList< FavoriteServer > &favorites,
 									  const QMap< UnresolvedServerAddress, unsigned int > &pingCache);
 	void stopModernConnectServerPing();
+	void ensureModernConnectDiscoveryService();
+	void handleModernConnectSourceOperation(const QString &sourceID, const QString &operation, quint64 generation);
+	void stopModernConnectDiscovery();
 	void sendNextModernConnectServerPing();
 	void handleModernConnectServerPingReply();
 	void publishModernConnectServerPingState();
@@ -740,6 +862,14 @@ public:
 	void flushUserTextureRequests();
 	void handleUserTextureHash(ClientUser *user, const QByteArray &hash);
 	void handleUserTextureBlob(ClientUser *user, const QByteArray &texture);
+	void queueQmlAvatarHydration(const QByteArray &textureHash, QByteArray sourceBytes,
+								 unsigned int subscriberSession = 0, bool persistSource = false);
+	bool applyCachedQmlAvatarTexture(ClientUser *user);
+	void cacheQmlAvatarTexture(const QByteArray &textureHash, const QByteArray &bytes, const QByteArray &format);
+	QString qmlAvatarDataUrl(const QByteArray &textureHash, const QByteArray &bytes, const QByteArray &format,
+						 int avatarSize);
+	void publishQmlAvatarUpdateForHash(const QByteArray &textureHash);
+	void clearQmlAssetHydrations();
 	void refreshUserTextureViews(ClientUser *user);
 	void clearUserTextureRequest(unsigned int session);
 	void clearUserTextureRequests();
@@ -747,6 +877,15 @@ public:
 	void flushUserCommentRequests();
 	void clearUserCommentRequest(unsigned int session);
 	void clearUserCommentRequests();
+	void queueMainWindowBlobRead(const QByteArray &hash);
+	void scheduleMainWindowBlobReadFlush();
+	void flushMainWindowBlobReads();
+	void resolveMainWindowBlobRead(const QByteArray &hash, const QByteArray &bytes);
+	void cacheMainWindowBlob(const QByteArray &hash, const QByteArray &bytes);
+	void queueChannelAclDescriptionRead(Channel *channel, bool modernDialog);
+	void continueChannelAclRequest(unsigned int channelID, const QByteArray &expectedHash, bool modernDialog,
+								   const QByteArray &descriptionBytes);
+	void clearMainWindowBlobReads();
 
 #ifdef Q_OS_WIN
 	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result);
@@ -786,10 +925,32 @@ protected:
 	QSet< unsigned int > m_inFlightUserTextureSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserTextureHashBySession;
 	QHash< QByteArray, qint64 > m_failedUserTextureHashCooldownUntilMs;
+	QHash< QByteArray, QByteArray > m_qmlAvatarTextureBytesCache;
+	QHash< QByteArray, QByteArray > m_qmlAvatarTextureFormatCache;
+	QList< QByteArray > m_qmlAvatarTextureLru;
+	qint64 m_qmlAvatarTextureCacheBytes = 0;
+	QSet< QByteArray > m_qmlAvatarDatabaseMisses;
+	QSet< QByteArray > m_qmlAvatarHydrationsInFlight;
+	QHash< QByteArray, QSet< unsigned int > > m_qmlAvatarSubscriberSessions;
+	QHash< QByteArray, QSet< QString > > m_qmlAvatarMessageKeys;
+	QHash< QString, QString > m_qmlAvatarDataUrls;
+	QList< QString > m_qmlAvatarDataUrlLru;
 	QTimer *m_userCommentRequestTimer = nullptr;
 	QSet< unsigned int > m_queuedUserCommentSessions;
 	QSet< unsigned int > m_inFlightUserCommentSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserCommentHashBySession;
+	QHash< QByteArray, QByteArray > m_mainWindowBlobCache;
+	QList< QByteArray > m_mainWindowBlobCacheLru;
+	qint64 m_mainWindowBlobCacheBytes = 0;
+	QSet< QByteArray > m_mainWindowBlobCacheMisses;
+	QSet< QByteArray > m_mainWindowBlobReadsQueued;
+	QSet< QByteArray > m_mainWindowBlobReadsInFlight;
+	quint64 m_mainWindowBlobBatchSerial = 0;
+	bool m_mainWindowBlobReadFlushScheduled = false;
+	QHash< QByteArray, QSet< unsigned int > > m_mainWindowBlobUserSubscribers;
+	QSet< unsigned int > m_mainWindowBlobDialogSubscribers;
+	QHash< QByteArray, QSet< unsigned int > > m_mainWindowBlobModernAclSubscribers;
+	QHash< QByteArray, QSet< unsigned int > > m_mainWindowBlobLegacyAclSubscribers;
 
 	QAction *qaTransmitMode;
 	QAction *qaTransmitModeSeparator;
@@ -818,6 +979,8 @@ protected:
 	QHash< unsigned int, PersistentTextChannel > m_persistentTextChannels;
 	QHash< unsigned int, unsigned int > m_userIdleSeconds;
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
+	QHash< QString, std::size_t > m_persistentChatMessageIndexByKey;
+	bool m_persistentChatMessageIndexValid = false;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
 	QHash< QNetworkReply *, QString > m_persistentChatPreviewNetworkReplies;
 	QSet< QString > m_persistentChatPreviewCacheWritesInFlight;
@@ -829,7 +992,15 @@ protected:
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< unsigned int, QString > m_persistentChatAttachmentProviderUrls;
 	QSet< unsigned int > m_persistentChatAttachmentPreviewFailures;
+	QHash< unsigned int, PendingPersistentChatAttachmentHydration >
+		m_persistentChatPendingAttachmentHydrations;
+	QList< unsigned int > m_persistentChatPendingAttachmentHydrationOrder;
+	std::vector< std::shared_ptr< mumble::chatattachmentio::TemporaryDirectoryLease > >
+		m_persistentChatOpenAttachmentDirectories;
+	quint64 m_persistentChatOpenAttachmentDirectoryBytes = 0;
 	quint64 m_persistentChatAssetDownloadTimeoutSerial = 0;
+	quint64 m_persistentChatAssetConnectionGeneration = 1;
+	QSet< QString > m_persistentChatAttachmentIoOperationIDs;
 	QPointer< ChatAttachmentUploader > m_chatAttachmentUploader;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
@@ -843,6 +1014,7 @@ protected:
 	QHash< QString, qint64 > m_persistentChatQueuedInlineDataImageWarmupCosts;
 	qint64 m_persistentChatQueuedInlineDataImageWarmupBytes = 0;
 	QHash< QString, quint64 > m_persistentChatActiveInlineDataImageWarmups;
+	QSet< QString > m_persistentChatInlineDataImageWarmupFailures;
 	QHash< QString, QString > m_persistentChatInlineDataImageProviderUrls;
 	QHash< QString, QSet< QString > > m_persistentChatInlineDataImageProviderMessageKeys;
 	QHash< QString, quint64 > m_persistentChatInlineDataImageProviderRequests;
@@ -914,6 +1086,7 @@ protected:
 	QHash< quint64, PendingScreenShareThumbnailJob > m_pendingScreenShareThumbnailJobs;
 	QHash< QString, quint64 > m_pendingScreenShareThumbnailJobBySource;
 	bool m_screenSharePickerShuttingDown = false;
+	std::optional< unsigned int > m_pendingScreenShareDialogChannelID;
 	QVariantList m_modernRichPreviewProbeMessages;
 	QVariantList m_modernMessageDeliveryProbeMessages;
 	QString m_stonksSelectedPeriod;
@@ -934,10 +1107,13 @@ protected:
 	bool m_modernShortcutCaptureRestoreEnabled = false;
 	bool m_modernShortcutCaptureHasRestore     = false;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
+	std::unique_ptr< ModernConnectDiscoveryService > m_modernConnectDiscoveryService;
+	quint64 m_modernDialogFocusRequestSerial                = 0;
 	quint64 m_qmlOperationRevision                         = 0;
 	quint64 m_qmlMessageGeneration                         = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
+	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
 	quint64 m_modernDirectMessageLocalID = 0;
@@ -949,9 +1125,17 @@ protected:
 	bool m_modernShellPreviewHydrationLinkDense = false;
 	QTimer *m_qmlRoomStateFlushTimer                = nullptr;
 	bool m_qmlRoomStateDirty               = false;
+	QHash< QByteArray, QString > m_qmlChannelTopicSummaryCache;
+	QList< QByteArray > m_qmlChannelTopicSummaryLru;
+	QSet< QByteArray > m_qmlChannelTopicCacheMisses;
+	QSet< QByteArray > m_qmlChannelTopicReadsQueued;
+	QSet< QByteArray > m_qmlChannelTopicReadsInFlight;
+	quint64 m_qmlChannelTopicBatchSerial = 0;
 	bool m_qmlStatePendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;
+	qulonglong m_pendingModernRegisteredUsersOperationId = 0;
+	qulonglong m_pendingModernBanListOperationId = 0;
 	bool m_shellLayoutInitialized              = false;
 	Settings::WindowLayout m_activeShellLayout = Settings::LayoutModern;
 	bool m_modernLayoutCompatibleServer        = false;
@@ -985,11 +1169,15 @@ protected:
 	void openModernGenericDialog(const QVariantMap &dialog);
 	void openModernDeveloperConsoleDialog();
 	void openModernServerInformationDialog();
-	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false);
+	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false,
+									 int initialFocusTokenIndex = -1);
+	void openModernServerAdminDialog(bool users);
 	void openModernServerUserListLoadingDialog();
 	void openModernServerUserListDialog(const MumbleProto::UserList &msg);
 	void openModernServerBanListLoadingDialog();
 	void openModernServerBanListDialog(const MumbleProto::BanList &msg);
+	void syncModernServerAdminPermissions();
+	void failPendingModernServerAdminOperations(const QString &error, bool users = true, bool bans = true);
 	void openModernAclRequestDialog(Channel *channel);
 	void openModernAclDialog(const MumbleProto::ACL &msg);
 	bool handleModernAclQueryUsers(const MumbleProto::QueryUsers &msg);
@@ -999,9 +1187,7 @@ protected:
 									 const QString &statusMessage = QString());
 	void openModernSearchDialog(const QVariantMap &fieldValues = QVariantMap(),
 								const QVariantMap &errors = QVariantMap());
-	void openModernVoiceRecorderDialog(const QVariantMap &fieldValues = QVariantMap(),
-									   const QVariantMap &errors = QVariantMap(),
-									   const QString &statusMessage = QString());
+	void openModernVoiceRecorderDialog();
 	void openModernCreateRoomDialog(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr,
 									const QVariantMap &fieldValues = QVariantMap(),
 									const QVariantMap &errors = QVariantMap());

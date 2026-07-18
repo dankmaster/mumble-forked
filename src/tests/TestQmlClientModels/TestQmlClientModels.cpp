@@ -2,12 +2,16 @@
 
 #include "QmlClientModels.h"
 #include "ChatPerfTrace.h"
+#include <QtCore/QDateTime>
+#include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QRegularExpression>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
 
 #include <limits>
+#include <tuple>
 
 Q_DECLARE_METATYPE(PttSafetyReason)
 
@@ -20,27 +24,39 @@ private slots:
 	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
 	void navigationRailFlattensRoomsAndParticipantsIncrementally();
+	void navigationRailPresentationStateStaysStableAndIncremental();
 	void roomRowsExposeActionsOnlySource();
 	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
 	void directMessageHistoryMergePublishesOnce();
+	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
+	void mainWindowDatabaseBlobReadsStayAsync();
 	void directMessageSummariesStayTypedAndIncremental();
 	void directMessageControllerKeepsConversationDraftsSeparate();
+	void directMessageControllerRoutesRichMessageIntents();
+	void directMessageBackendUsesPrivateRichGateway();
+	void directMessageTargetedUpdatesStayIncremental();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
+	void chatTimelineSearchesConversationFields();
+	void chatTimelineSearchStateTracksIncrementalMutations();
 	void chatTimelineBoundsReactionDelegates();
 	void chatTimelineSanitizesStructuredRichText();
+	void chatTimelineParsesLinkedManagedImage();
+	void chatTimelineCompletesOwnedRichParseUnderVisualOverride();
 	void chatTimelineDrainsBoundedRichTextBacklog();
 	void chatTimelineNormalizesPreviewAndAttachments();
+	void chatTimelinePreservesStreamingManifestsAndManagedArtwork();
 	void chatTimelineNormalizesProviderMetadata();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void participantUpsertsAndRemovalsStayResetFree();
 	void workloadSourceStateRoundTripsExactly();
 	void steadyStateRejectsFullBootstrap();
 	void pendingBootstrapCompletesBeforeSteadyState();
+	void automationProbesStayIncrementalInSteadyState();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
@@ -63,19 +79,30 @@ private slots:
 	void dialogPresentationValuesStayBoundedAndTransient();
 	void imageViewerStateRemainsStructured();
 	void stonksStateAndActionsRemainStructured();
+	void toastControllerCoalescesReplacesAndPausesTimeout();
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void asyncOperationsExposeStructuredPluginResults();
 	void asyncOperationItemResultsAreLosslessAndPaginated();
 	void mediaSessionLocalPlaybackControlsRemainTyped();
 	void mediaSessionSwitchesBetweenInlineAndDetachedPresentation();
+	void mediaSessionAutomationLifecycleStaysInlineAndAllowlisted();
 	void mediaSessionValidatesAndPublishesTypedState();
 	void mediaSessionValidatesDirectMedia();
+	void mediaSessionMaterializesDataSourcesWithoutStaleGenerationLeaks();
 	void mediaSessionProviderAllowlist_data();
 	void mediaSessionProviderAllowlist();
 	void mediaSessionNavigationAndErrorLifecycle();
+	void mediaSessionPublishesTypedRendererErrors();
+	void mediaSessionSharedStartRequiresVoiceScope();
 	void mediaSessionSharedHostLifecycle();
 	void mediaSessionRequiresExplicitJoinForRemoteSessions();
+	void mediaSessionRejectsStaleSharedScopeAfterRoomMove();
+	void mediaSessionSharedStartTimeoutRecoversToIdle();
+	void mediaSessionSharedJoinTimeoutRestoresAvailableSession();
+	void mediaSessionSharedSuccessCancelsAcknowledgementTimeout();
+	void mediaSessionStaleAcknowledgementTimeoutCannotAffectNewSession();
+	void mediaSessionSharedClockSkewUsesReceiveOrder();
 	void mediaSessionRejectsConflictingPlaybackDuringSharedSession();
 	void selectionStateOnlyNotifiesForRealChanges();
 	void selectionStateAcceptsAuthoritativeSelectionBeforeModelSync();
@@ -225,6 +252,7 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QSignalSpy labelSpy(&scope, &ActiveScopeController::labelChanged);
 	QSignalSpy sendSpy(&scope, &ActiveScopeController::canSendChanged);
 	QSignalSpy replySpy(&scope, &ActiveScopeController::hasPendingReplyChanged);
+	QSignalSpy attachFilesSpy(&scope, &ActiveScopeController::canAttachFilesChanged);
 	QSignalSpy olderSpy(&scope, &ActiveScopeController::canLoadOlderChanged);
 	QSignalSpy unreadSpy(&scope, &ActiveScopeController::unreadCountChanged);
 	QSignalSpy canMarkReadSpy(&scope, &ActiveScopeController::canMarkReadChanged);
@@ -240,7 +268,8 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
 					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
 					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
-					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canLoadOlder"), true },
+					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canAttachFiles"), true },
+					   { QStringLiteral("canLoadOlder"), true },
 					   { QStringLiteral("unreadCount"), 7 }, { QStringLiteral("canMarkRead"), true },
 					   { QStringLiteral("loading"), true },
 					   { QStringLiteral("loadingState"), QStringLiteral("older") },
@@ -252,6 +281,7 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QCOMPARE(scope.replyActor(), QStringLiteral("Alice"));
 	QCOMPARE(scope.replySnippet(), QStringLiteral("Hello"));
 	QVERIFY(scope.canAttachImages());
+	QVERIFY(scope.canAttachFiles());
 	QVERIFY(scope.canLoadOlder());
 	QCOMPARE(scope.unreadCount(), 7ULL);
 	QVERIFY(scope.canMarkRead());
@@ -261,6 +291,7 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QCOMPARE(labelSpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
 	QCOMPARE(replySpy.count(), 1);
+	QCOMPARE(attachFilesSpy.count(), 1);
 	QCOMPARE(olderSpy.count(), 1);
 	QCOMPARE(unreadSpy.count(), 1);
 	QCOMPARE(canMarkReadSpy.count(), 1);
@@ -275,13 +306,15 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
 					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
 					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
-					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canLoadOlder"), true },
+					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canAttachFiles"), true },
+					   { QStringLiteral("canLoadOlder"), true },
 					   { QStringLiteral("loading"), true },
 					   { QStringLiteral("loadingState"), QStringLiteral("older") },
 					   { QStringLiteral("screenShare"), screenShare } });
 	QCOMPARE(labelSpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
 	QCOMPARE(replySpy.count(), 1);
+	QCOMPARE(attachFilesSpy.count(), 1);
 	QCOMPARE(olderSpy.count(), 1);
 	QCOMPARE(loadingSpy.count(), 1);
 	QCOMPARE(screenShareSpy.count(), 1);
@@ -318,6 +351,15 @@ void TestQmlClientModels::largeSynchronizationsStayResetFree() {
 	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
 	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy prependSpy(&model, &StableListModel::rowsAboutToBePrepended);
+	QStringList prependSignalOrder;
+	connect(&model, &StableListModel::rowsAboutToBePrepended, this, [&prependSignalOrder](const int count) {
+		prependSignalOrder.push_back(QStringLiteral("pre:%1").arg(count));
+	});
+	connect(&model, &QAbstractItemModel::rowsAboutToBeInserted, this,
+		[&prependSignalOrder](const QModelIndex &, const int first, const int last) {
+			prependSignalOrder.push_back(QStringLiteral("insert:%1-%2").arg(first).arg(last));
+		});
 	QVariantList messages;
 	messages.reserve(10000);
 	for (int row = 0; row < 10000; ++row) {
@@ -339,9 +381,14 @@ void TestQmlClientModels::largeSynchronizationsStayResetFree() {
 	}
 	prepended.append(messages);
 	insertSpy.clear();
+	prependSignalOrder.clear();
 	model.replaceMessages(prepended);
 	QCOMPARE(model.rowCount(), 10128);
 	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(prependSpy.count(), 1);
+	QCOMPARE(prependSpy.constFirst().constFirst().toInt(), 128);
+	QCOMPARE(prependSignalOrder,
+		QStringList({ QStringLiteral("pre:128"), QStringLiteral("insert:0-127") }));
 	QCOMPARE(insertSpy.constFirst().at(1).toInt(), 0);
 	QCOMPARE(insertSpy.constFirst().at(2).toInt(), 127);
 	QCOMPARE(model.rowForStableId(QStringLiteral("message:0")), 128);
@@ -584,6 +631,96 @@ void TestQmlClientModels::navigationRailFlattensRoomsAndParticipantsIncrementall
 	QCOMPARE(resetSpy.count(), 0);
 }
 
+void TestQmlClientModels::navigationRailPresentationStateStaysStableAndIncremental() {
+	NavigationRailModel navigation;
+	QSignalSpy resetSpy(&navigation, &QAbstractItemModel::modelReset);
+	QSignalSpy changedSpy(&navigation, &QAbstractItemModel::dataChanged);
+	QSignalSpy insertedSpy(&navigation, &QAbstractItemModel::rowsInserted);
+	QSignalSpy removedSpy(&navigation, &QAbstractItemModel::rowsRemoved);
+	navigation.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby") },
+						{ QStringLiteral("unreadCount"), 4 },
+						{ QStringLiteral("participants"), QVariantList {
+							QVariantMap { { QStringLiteral("session"), 42 },
+								{ QStringLiteral("participantKey"), QStringLiteral("user:42") },
+								{ QStringLiteral("label"), QStringLiteral("Alice") },
+								{ QStringLiteral("talkState"), QStringLiteral("talking") },
+								{ QStringLiteral("talking"), true } },
+							QVariantMap { { QStringLiteral("session"), 77 },
+								{ QStringLiteral("participantKey"), QStringLiteral("user:77") },
+								{ QStringLiteral("label"), QStringLiteral("Bob") } }
+						} } },
+		  QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:2") },
+						{ QStringLiteral("label"), QStringLiteral("Games") },
+						{ QStringLiteral("participants"), QVariantList { QVariantMap {
+							{ QStringLiteral("session"), 9 },
+							{ QStringLiteral("participantKey"), QStringLiteral("user:9") },
+							{ QStringLiteral("label"), QStringLiteral("Carol") } } } } } },
+		{});
+	QCOMPARE(navigation.rowCount(), 5);
+	QVariantMap lobby = navigation.get(0);
+	QCOMPARE(lobby.value(QStringLiteral("participantCount")).toInt(), 2);
+	QCOMPARE(lobby.value(QStringLiteral("talkingParticipantCount")).toInt(), 1);
+	QCOMPARE(lobby.value(QStringLiteral("unreadCount")).toInt(), 4);
+	QVERIFY(lobby.value(QStringLiteral("expanded")).toBool());
+	QVERIFY(lobby.value(QStringLiteral("railVisible")).toBool());
+	QCOMPARE(resetSpy.count(), 0);
+
+	changedSpy.clear();
+	insertedSpy.clear();
+	removedSpy.clear();
+	navigation.setRoomExpanded(QStringLiteral("channel:1"), false);
+	QVERIFY(!navigation.isRoomExpanded(QStringLiteral("channel:1")));
+	QVERIFY(!navigation.get(0).value(QStringLiteral("expanded")).toBool());
+	QVERIFY(!navigation.get(1).value(QStringLiteral("railVisible")).toBool());
+	QVERIFY(!navigation.get(2).value(QStringLiteral("railVisible")).toBool());
+	QCOMPARE(navigation.get(0).value(QStringLiteral("participantCount")).toInt(), 2);
+	QCOMPARE(navigation.get(0).value(QStringLiteral("talkingParticipantCount")).toInt(), 1);
+	QCOMPARE(navigation.get(0).value(QStringLiteral("unreadCount")).toInt(), 4);
+	QVERIFY(changedSpy.count() >= 3);
+	QCOMPARE(insertedSpy.count(), 0);
+	QCOMPARE(removedSpy.count(), 0);
+	QCOMPARE(resetSpy.count(), 0);
+
+	changedSpy.clear();
+	navigation.updatePresence(QStringLiteral("77"), QStringLiteral("talking"), QStringLiteral("Talking"),
+		QStringLiteral("speaking"), true, false, {}, {});
+	QCOMPARE(navigation.get(0).value(QStringLiteral("talkingParticipantCount")).toInt(), 2);
+	QVERIFY(!navigation.get(2).value(QStringLiteral("railVisible")).toBool());
+	QVERIFY(changedSpy.count() >= 2);
+	QCOMPARE(resetSpy.count(), 0);
+
+	changedSpy.clear();
+	navigation.setFilterText(QStringLiteral(" Carol "));
+	QCOMPARE(navigation.filterText(), QStringLiteral(" Carol "));
+	QVERIFY(!navigation.get(0).value(QStringLiteral("railVisible")).toBool());
+	QVERIFY(navigation.get(3).value(QStringLiteral("railVisible")).toBool());
+	QVERIFY(navigation.get(4).value(QStringLiteral("railVisible")).toBool());
+	QVERIFY(changedSpy.count() > 0);
+	QCOMPARE(insertedSpy.count(), 0);
+	QCOMPARE(removedSpy.count(), 0);
+	QCOMPARE(resetSpy.count(), 0);
+
+	// Collapse/filter preferences are keyed by the stable scope token and survive
+	// a normal backend republish without changing row identity.
+	navigation.setFilterText({});
+	navigation.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby renamed") },
+						{ QStringLiteral("participants"), QVariantList {
+							QVariantMap { { QStringLiteral("session"), 42 },
+								{ QStringLiteral("participantKey"), QStringLiteral("user:42") },
+								{ QStringLiteral("label"), QStringLiteral("Alice") } } } } },
+		  QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:2") },
+						{ QStringLiteral("label"), QStringLiteral("Games") },
+						{ QStringLiteral("participants"), QVariantList {} } } }, {});
+	QVERIFY(!navigation.isRoomExpanded(QStringLiteral("channel:1")));
+	QVERIFY(!navigation.get(0).value(QStringLiteral("expanded")).toBool());
+	QCOMPARE(navigation.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Lobby renamed"));
+	QCOMPARE(resetSpy.count(), 0);
+}
+
 void TestQmlClientModels::participantRowsPreserveTypedVoiceStateAndListenerIdentity() {
 	ParticipantModel participants;
 	const QVariantList actions { QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
@@ -685,6 +822,135 @@ void TestQmlClientModels::directMessageHistoryMergePublishesOnce() {
 	QVERIFY(QRegularExpression(QStringLiteral(
 		R"(buildModernShellDirectMessageConversationState\s*\(\s*conversation\s*,\s*false\s*\))"))
 			.match(summariesBody).hasMatch());
+}
+
+void TestQmlClientModels::qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString topicHelper = methodBody(
+		QStringLiteral("QString voiceRoomTopicSummary"), QStringLiteral("QString voiceRoomChatDescription"));
+	QVERIFY(!topicHelper.isEmpty());
+	QVERIFY(!topicHelper.contains(QStringLiteral("Global::get().db")));
+	QVERIFY(!topicHelper.contains(QStringLiteral("->blob(")));
+
+	const QString roomBuilder = methodBody(
+		QStringLiteral("QVariantMap MainWindow::buildQmlRoomState"), QStringLiteral("QVariantMap modernServerLogMessageState"));
+	QVERIFY(!roomBuilder.isEmpty());
+	QVERIFY(roomBuilder.contains(QStringLiteral("qmlVoiceRoomTopicSummary(channel)")));
+	QVERIFY(roomBuilder.contains(QStringLiteral("flushQmlChannelTopicReads();")));
+	QVERIFY(!roomBuilder.contains(QStringLiteral("Global::get().db->blob")));
+
+	const QString avatarQueue = methodBody(
+		QStringLiteral("void MainWindow::queueQmlAvatarHydration"), QStringLiteral("bool MainWindow::ensureUserTextureAvailable"));
+	QVERIFY(!avatarQueue.isEmpty());
+	QVERIFY(avatarQueue.contains(QStringLiteral("persistentChatPreviewWorkerQueue().submit")));
+	QVERIFY(avatarQueue.contains(QStringLiteral("Database database(")));
+	QVERIFY(avatarQueue.contains(QStringLiteral("normalizeUserTextureBytes(sourceBytes)")));
+	QVERIFY(avatarQueue.contains(QStringLiteral("QStringLiteral(\"qml-database\")")));
+
+	const QString avatarEnsure = methodBody(
+		QStringLiteral("bool MainWindow::ensureUserTextureAvailable"), QStringLiteral("QString MainWindow::modernShellAvatarDataUrl"));
+	QVERIFY(!avatarEnsure.isEmpty());
+	QVERIFY(!avatarEnsure.contains(QStringLiteral("Global::get().db")));
+	QVERIFY(!avatarEnsure.contains(QStringLiteral("QImageReader")));
+	QVERIFY(!avatarEnsure.contains(QStringLiteral("QPainter")));
+
+	const QString textureBlob = methodBody(
+		QStringLiteral("void MainWindow::handleUserTextureBlob"), QStringLiteral("void MainWindow::refreshUserTextureViews"));
+	QVERIFY(!textureBlob.isEmpty());
+	QVERIFY(textureBlob.contains(QStringLiteral("queueQmlAvatarHydration")));
+	QVERIFY(!textureBlob.contains(QStringLiteral("Global::get().db")));
+	QVERIFY(!textureBlob.contains(QStringLiteral("normalizeUserTexture")));
+
+	const QString historicalAvatar = methodBody(
+		QStringLiteral("QString MainWindow::modernShellAvatarDataUrlForTextureHash"),
+		QStringLiteral("QString MainWindow::modernShellActorAvatarDataUrl"));
+	QVERIFY(!historicalAvatar.isEmpty());
+	QVERIFY(historicalAvatar.contains(QStringLiteral("queueQmlAvatarHydration")));
+	QVERIFY(!historicalAvatar.contains(QStringLiteral("Global::get().db")));
+	QVERIFY(!historicalAvatar.contains(QStringLiteral("normalizeUserTexture")));
+	QVERIFY(source.contains(QStringLiteral("publishPersistentChatAttachmentImageUpdate(m_qmlAvatarMessageKeys.take(textureHash))")));
+}
+
+void TestQmlClientModels::mainWindowDatabaseBlobReadsStayAsync() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	QVERIFY2(!source.contains(QStringLiteral("Global::get().db->blob(")),
+		"MainWindow must not read database blobs synchronously through the UI-owned Database instance");
+
+	const QString worker = methodBody(
+		QStringLiteral("void MainWindow::flushMainWindowBlobReads"),
+		QStringLiteral("void MainWindow::resolveMainWindowBlobRead"));
+	QVERIFY(!worker.isEmpty());
+	QVERIFY(worker.contains(QStringLiteral("persistentChatPreviewWorkerQueue().submit")));
+	QVERIFY(worker.contains(QStringLiteral("Database database(")));
+	QVERIFY(worker.contains(QStringLiteral("database.blob(hash)")));
+	QVERIFY(worker.contains(QStringLiteral("QStringLiteral(\"qml-database\")")));
+	QVERIFY(!worker.contains(QStringLiteral("QEventLoop")));
+	QVERIFY(!worker.contains(QStringLiteral("waitFor")));
+
+	const QString commentEnsure = methodBody(
+		QStringLiteral("bool MainWindow::ensureUserCommentAvailable"),
+		QStringLiteral("void MainWindow::cacheMainWindowBlob"));
+	QVERIFY(!commentEnsure.isEmpty());
+	QVERIFY(commentEnsure.contains(QStringLiteral("queueMainWindowBlobRead(expectedHash)")));
+	QVERIFY(commentEnsure.contains(QStringLiteral("queueUserCommentRequest(user, expectedHash)")));
+	QVERIFY(!commentEnsure.contains(QStringLiteral("->blob(")));
+
+	const QString modernAcl = methodBody(
+		QStringLiteral("void MainWindow::openModernAclRequestDialog"),
+		QStringLiteral("void MainWindow::openModernAclDialog"));
+	QVERIFY(!modernAcl.isEmpty());
+	QVERIFY(modernAcl.contains(QStringLiteral("queueChannelAclDescriptionRead(channel, true)")));
+	QVERIFY(!modernAcl.contains(QStringLiteral("->blob(")));
+
+	const QString selfComment = methodBody(
+		QStringLiteral("void MainWindow::openModernSelfCommentDialog"),
+		QStringLiteral("void MainWindow::openModernKickUserDialog"));
+	QVERIFY(!selfComment.isEmpty());
+	QVERIFY(selfComment.contains(QStringLiteral("ensureUserCommentAvailable(user, true)")));
+	QVERIFY(!selfComment.contains(QStringLiteral("->blob(")));
+
+	const QString userComment = methodBody(
+		QStringLiteral("void MainWindow::openModernUserCommentDialog"),
+		QStringLiteral("void MainWindow::openModernUserCommentResetDialog"));
+	QVERIFY(!userComment.isEmpty());
+	QVERIFY(userComment.contains(QStringLiteral("ensureUserCommentAvailable(user, true)")));
+	QVERIFY(!userComment.contains(QStringLiteral("->blob(")));
+
+	const QString legacyAcl = methodBody(
+		QStringLiteral("void MainWindow::on_qaChannelACL_triggered"),
+		QStringLiteral("void MainWindow::on_qaChannelLink_triggered"));
+	QVERIFY(!legacyAcl.isEmpty());
+	QVERIFY(legacyAcl.contains(QStringLiteral("queueChannelAclDescriptionRead(c, false)")));
+	QVERIFY(!legacyAcl.contains(QStringLiteral("->blob(")));
+
+	const QString resolver = methodBody(
+		QStringLiteral("void MainWindow::resolveMainWindowBlobRead"),
+		QStringLiteral("void MainWindow::queueChannelAclDescriptionRead"));
+	QVERIFY(!resolver.isEmpty());
+	QVERIFY(resolver.contains(QStringLiteral("user->qbaCommentHash != hash")));
+	QVERIFY(resolver.contains(QStringLiteral("m_modernDialogController->activeDialogID() != expectedDialogID")));
+	QVERIFY(resolver.contains(QStringLiteral("publishQmlParticipantState(user)")));
+	QVERIFY(!resolver.contains(QStringLiteral("modelReset")));
 }
 
 void TestQmlClientModels::directMessageSummariesStayTypedAndIncremental() {
@@ -799,6 +1065,180 @@ void TestQmlClientModels::directMessageControllerKeepsConversationDraftsSeparate
 	QCOMPARE(closeSpy.count(), 1);
 	controller.clearDraft();
 	QVERIFY(controller.draft().isEmpty());
+}
+
+void TestQmlClientModels::directMessageControllerRoutesRichMessageIntents() {
+	DirectMessageController controller;
+	QSignalSpy replySpy(&controller, &DirectMessageController::messageReplyRequested);
+	QSignalSpy retrySpy(&controller, &DirectMessageController::messageRetryRequested);
+	QSignalSpy deleteSpy(&controller, &DirectMessageController::messageDeleteRequested);
+	QSignalSpy reactionSpy(&controller, &DirectMessageController::messageReactionToggleRequested);
+	QSignalSpy chooseSpy(&controller, &DirectMessageController::attachmentChooseRequested);
+	QSignalSpy removeAttachmentSpy(&controller, &DirectMessageController::draftAttachmentRemoveRequested);
+	QSignalSpy retryAttachmentSpy(&controller, &DirectMessageController::draftAttachmentRetryRequested);
+	QSignalSpy openAttachmentSpy(&controller, &DirectMessageController::attachmentOpenRequested);
+	QSignalSpy downloadAttachmentSpy(&controller, &DirectMessageController::attachmentDownloadRequested);
+	QSignalSpy previewRetrySpy(&controller, &DirectMessageController::attachmentPreviewRetryRequested);
+	QSignalSpy hydrationSpy(&controller, &DirectMessageController::contentHydrationRequested);
+	QSignalSpy plainSendSpy(&controller, &DirectMessageController::sendRequested);
+	QSignalSpy richSendSpy(&controller, &DirectMessageController::richSendRequested);
+
+	const QVariantMap message {
+		{ QStringLiteral("messageId"), 41 },
+		{ QStringLiteral("actor"), QStringLiteral("Alice") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Earlier message") },
+		{ QStringLiteral("canReply"), true },
+		{ QStringLiteral("canReact"), true },
+		{ QStringLiteral("canDelete"), true },
+		{ QStringLiteral("deliveryState"), QStringLiteral("failed") },
+		{ QStringLiteral("deliveryCanRetry"), true },
+		{ QStringLiteral("attachments"), QVariantList { QVariantMap {
+			{ QStringLiteral("id"), QStringLiteral("asset:52") },
+			{ QStringLiteral("assetId"), 52 },
+			{ QStringLiteral("kind"), QStringLiteral("image") },
+			{ QStringLiteral("state"), QStringLiteral("error") },
+			{ QStringLiteral("previewCanRetry"), true }
+		} } }
+	};
+	QVariantMap conversation {
+		{ QStringLiteral("peerSession"), 7 },
+		{ QStringLiteral("token"), QStringLiteral("-1:7") },
+		{ QStringLiteral("label"), QStringLiteral("Alice") },
+		{ QStringLiteral("open"), true },
+		{ QStringLiteral("canSend"), true },
+		{ QStringLiteral("canAttachImages"), true },
+		{ QStringLiteral("canAttachFiles"), true },
+		{ QStringLiteral("draftAttachments"), QVariantList { QVariantMap {
+			{ QStringLiteral("id"), QStringLiteral("draft:1") },
+			{ QStringLiteral("fileName"), QStringLiteral("folder/report.pdf") },
+			{ QStringLiteral("kind"), QStringLiteral("file") },
+			{ QStringLiteral("status"), QStringLiteral("ready") },
+			{ QStringLiteral("progress"), 0.5 }
+		} } },
+		{ QStringLiteral("messages"), QVariantList { message } }
+	};
+	controller.applyState({ { QStringLiteral("available"), true },
+		{ QStringLiteral("conversations"), QVariantList { conversation } },
+		{ QStringLiteral("activeConversation"), conversation } });
+
+	QVERIFY(controller.canAttachImages());
+	QVERIFY(controller.canAttachFiles());
+	QCOMPARE(controller.draftAttachments().size(), 1);
+	QCOMPARE(controller.draftAttachments().constFirst().toMap().value(QStringLiteral("fileName")).toString(),
+		QStringLiteral("report.pdf"));
+
+	controller.replyToMessage(QStringLiteral("41"));
+	QVERIFY(controller.hasPendingReply());
+	QCOMPARE(controller.pendingReplyMessageId(), QStringLiteral("41"));
+	QCOMPARE(controller.pendingReplyActor(), QStringLiteral("Alice"));
+	QCOMPARE(controller.pendingReplySnippet(), QStringLiteral("Earlier message"));
+	QCOMPARE(replySpy.count(), 1);
+	QCOMPARE(replySpy.first().at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(replySpy.first().at(1).toString(), QStringLiteral("41"));
+
+	controller.retryMessage(QStringLiteral("41"));
+	controller.deleteMessage(QStringLiteral("41"));
+	controller.toggleMessageReaction(QStringLiteral("41"), QStringLiteral(" 👍 "));
+	controller.chooseAttachment();
+	controller.removeDraftAttachment(QStringLiteral("draft:1"));
+	controller.retryDraftAttachment(QStringLiteral("draft:1"));
+	controller.openAttachment(QStringLiteral("52"), QStringLiteral("folder/report.pdf"));
+	controller.downloadAttachment(QStringLiteral("52"), QStringLiteral("folder/report.pdf"));
+	controller.retryAttachmentPreview(QStringLiteral("41"), QStringLiteral("52"));
+	controller.requestContentHydration(QStringLiteral("41"), true);
+	QCOMPARE(retrySpy.count(), 1);
+	QCOMPARE(deleteSpy.count(), 1);
+	QCOMPARE(reactionSpy.count(), 1);
+	QCOMPARE(reactionSpy.first().at(2).toString(), QStringLiteral("👍"));
+	QCOMPARE(chooseSpy.count(), 1);
+	QCOMPARE(removeAttachmentSpy.count(), 1);
+	QCOMPARE(retryAttachmentSpy.count(), 1);
+	QCOMPARE(openAttachmentSpy.count(), 1);
+	QCOMPARE(openAttachmentSpy.first().at(1).toUInt(), 52U);
+	QCOMPARE(openAttachmentSpy.first().at(2).toString(), QStringLiteral("report.pdf"));
+	QCOMPARE(downloadAttachmentSpy.count(), 1);
+	QCOMPARE(previewRetrySpy.count(), 1);
+	QCOMPARE(previewRetrySpy.first().at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(previewRetrySpy.first().at(1).toString(), QStringLiteral("41"));
+	QCOMPARE(previewRetrySpy.first().at(2).toUInt(), 52U);
+	QCOMPARE(hydrationSpy.count(), 1);
+	QCOMPARE(hydrationSpy.first().at(1).toList(), QVariantList { QStringLiteral("41") });
+	QVERIFY(hydrationSpy.first().at(2).toBool());
+
+	controller.setDraft(QStringLiteral("A rich reply"));
+	controller.sendDraft();
+	QCOMPARE(richSendSpy.count(), 1);
+	QCOMPARE(plainSendSpy.count(), 0);
+	QCOMPARE(richSendSpy.first().at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(richSendSpy.first().at(1).toString(), QStringLiteral("A rich reply"));
+	QCOMPARE(richSendSpy.first().at(2).toString(), QStringLiteral("41"));
+	QCOMPARE(richSendSpy.first().at(3).toList().size(), 1);
+
+	controller.cancelPendingReply();
+	QVERIFY(!controller.hasPendingReply());
+	conversation.remove(QStringLiteral("draftAttachments"));
+	controller.applyState({ { QStringLiteral("available"), true },
+		{ QStringLiteral("conversations"), QVariantList { conversation } },
+		{ QStringLiteral("activeConversation"), conversation } });
+	controller.sendDraft();
+	QCOMPARE(plainSendSpy.count(), 1);
+
+	controller.replyToMessage(QStringLiteral("missing"));
+	controller.deleteMessage(QStringLiteral("missing"));
+	controller.toggleMessageReaction(QStringLiteral("missing"), QStringLiteral("👍"));
+	controller.openAttachment(QStringLiteral("0"), QStringLiteral("bad"));
+	QCOMPARE(replySpy.count(), 1);
+	QCOMPARE(deleteSpy.count(), 1);
+	QCOMPARE(reactionSpy.count(), 1);
+	QCOMPARE(openAttachmentSpy.count(), 1);
+}
+
+void TestQmlClientModels::directMessageBackendUsesPrivateRichGateway() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+
+	QVERIFY(source.contains(QStringLiteral("entry.persistentMessage = message")));
+	QVERIFY(source.contains(QStringLiteral("message, target, canReply, canReact, false);")));
+	QVERIFY(source.contains(QStringLiteral("&DirectMessageController::richSendRequested")));
+	QVERIFY(source.contains(QStringLiteral("m_persistentChatGateway->send(MumbleProto::Private")));
+	QVERIFY(source.contains(QStringLiteral("m_persistentChatGateway->toggleReaction(MumbleProto::Private")));
+	QVERIFY(source.contains(QStringLiteral("target.scope             = MumbleProto::Private")));
+	QVERIFY(source.contains(QStringLiteral("requestedScopeValue == LocalDirectMessageScope")));
+	QVERIFY(source.contains(QStringLiteral("publishQmlDirectMessagesState();")));
+	QVERIFY(source.contains(QStringLiteral("armModernDirectMessageDeliveryTimeout")));
+	QVERIFY(source.contains(QStringLiteral("deliveryCanRetry = true")));
+	QVERIFY(source.contains(QStringLiteral("publishQmlDirectMessageEntryUpdate")));
+}
+
+void TestQmlClientModels::directMessageTargetedUpdatesStayIncremental() {
+	DirectMessageController controller;
+	QVariantMap message { { QStringLiteral("id"), QStringLiteral("dm-local:7:1") },
+		{ QStringLiteral("messageId"), 0 }, { QStringLiteral("actor"), QStringLiteral("You") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Hello") }, { QStringLiteral("own"), true },
+		{ QStringLiteral("deliveryState"), QStringLiteral("sending") } };
+	QVariantMap conversation { { QStringLiteral("peerSession"), 7 }, { QStringLiteral("open"), true },
+		{ QStringLiteral("messages"), QVariantList { message } } };
+	controller.applyState({ { QStringLiteral("conversations"), QVariantList { conversation } },
+		{ QStringLiteral("activeConversation"), conversation } });
+	QSignalSpy resetSpy(controller.timelineModel(), &QAbstractItemModel::modelReset);
+	QSignalSpy changedSpy(controller.timelineModel(), &QAbstractItemModel::dataChanged);
+	QSignalSpy insertedSpy(controller.timelineModel(), &QAbstractItemModel::rowsInserted);
+
+	message.insert(QStringLiteral("deliveryState"), QStringLiteral("failed"));
+	message.insert(QStringLiteral("deliveryCanRetry"), true);
+	QVERIFY(controller.applyMessageState(QStringLiteral("7"), message));
+	QCOMPARE(resetSpy.count(), 0);
+	QVERIFY(changedSpy.count() > 0);
+
+	QVariantMap second = message;
+	second.insert(QStringLiteral("id"), QStringLiteral("dm-local:7:2"));
+	QVERIFY(controller.applyMessageState(QStringLiteral("7"), second));
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(insertedSpy.count(), 1);
+	QVERIFY(!controller.applyMessageState(QStringLiteral("8"), second));
 }
 
 void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
@@ -1064,6 +1504,190 @@ void TestQmlClientModels::chatTimelinePreservesTypedAttachments() {
 	QCOMPARE(model.rowCount(), 0);
 }
 
+void TestQmlClientModels::chatTimelineSearchesConversationFields() {
+	ChatTimelineModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy querySpy(&model, &ChatTimelineModel::queryChanged);
+	QSignalSpy matchCountSpy(&model, &ChatTimelineModel::matchCountChanged);
+	QSignalSpy currentMatchSpy(&model, &ChatTimelineModel::currentMatchChanged);
+
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("sender") },
+					  { QStringLiteral("actor"), QStringLiteral("Ålice") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Ordinary message") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("body") },
+					  { QStringLiteral("actor"), QStringLiteral("Bob") },
+					  { QStringLiteral("plainText"), QStringLiteral("Projekt Élan är klart") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("reply") },
+					  { QStringLiteral("actor"), QStringLiteral("Carol") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Following up") },
+					  { QStringLiteral("replyActor"), QStringLiteral("Zoë") },
+					  { QStringLiteral("replySnippet"), QStringLiteral("Résumé attached") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("attachment") },
+					  { QStringLiteral("actor"), QStringLiteral("Dora") },
+					  { QStringLiteral("attachments"), QVariantList { QVariantMap {
+						  { QStringLiteral("assetId"), 17 },
+						  { QStringLiteral("fileName"), QStringLiteral("Årsrapport.PDF") },
+						  { QStringLiteral("mime"), QStringLiteral("application/pdf") } } } } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("needle-1") },
+					  { QStringLiteral("bodyText"), QStringLiteral("First needle") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("needle-2") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Second NEEDLE") } }
+	});
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.query(), QString());
+	QCOMPARE(model.matchCount(), 0);
+	QCOMPARE(model.currentMatchIndex(), -1);
+	QCOMPARE(model.currentMatchRow(), -1);
+	QCOMPARE(model.currentMatchStableId(), QString());
+	QCOMPARE(querySpy.count(), 0);
+	QCOMPARE(matchCountSpy.count(), 0);
+	QCOMPARE(currentMatchSpy.count(), 0);
+
+	model.setQuery(QStringLiteral("åLICE"));
+	QCOMPARE(model.query(), QStringLiteral("åLICE"));
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchIndex(), 0);
+	QCOMPARE(model.currentMatchRow(), 0);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("sender"));
+	QCOMPARE(querySpy.count(), 1);
+	QCOMPARE(matchCountSpy.count(), 1);
+	QCOMPARE(currentMatchSpy.count(), 1);
+
+	model.setQuery(QStringLiteral("éLAN"));
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchRow(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("body"));
+	QCOMPARE(querySpy.count(), 2);
+	QCOMPARE(matchCountSpy.count(), 1);
+	QCOMPARE(currentMatchSpy.count(), 2);
+
+	model.setQuery(QStringLiteral("résumé"));
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchRow(), 2);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("reply"));
+
+	model.setQuery(QStringLiteral("ÅRSRAPPORT.pdf"));
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchRow(), 3);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("attachment"));
+
+	model.setQuery(QStringLiteral("needle"));
+	QCOMPARE(model.matchCount(), 2);
+	QCOMPARE(model.currentMatchIndex(), 0);
+	QCOMPARE(model.currentMatchRow(), 4);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("needle-1"));
+	QVERIFY(model.nextMatch());
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 5);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("needle-2"));
+	QVERIFY(model.nextMatch());
+	QCOMPARE(model.currentMatchIndex(), 0);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("needle-1"));
+	QVERIFY(model.previousMatch());
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("needle-2"));
+	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::chatTimelineSearchStateTracksIncrementalMutations() {
+	ChatTimelineModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy querySpy(&model, &ChatTimelineModel::queryChanged);
+	QSignalSpy matchCountSpy(&model, &ChatTimelineModel::matchCountChanged);
+	QSignalSpy currentMatchSpy(&model, &ChatTimelineModel::currentMatchChanged);
+
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("a") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit alpha") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("b") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit beta") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("c") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit gamma") } }
+	});
+	model.setQuery(QStringLiteral("hit"));
+	QCOMPARE(model.matchCount(), 3);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("a"));
+	QVERIFY(model.nextMatch());
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("b"));
+
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageKey"), QStringLiteral("b") },
+								 { QStringLiteral("bodyText"), QStringLiteral("no longer matching") } }),
+			 ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(model.matchCount(), 2);
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 2);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("c"));
+
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageKey"), QStringLiteral("d") },
+								 { QStringLiteral("bodyText"), QStringLiteral("another hit") } }),
+			 ChatTimelineModel::MessageMutation::Inserted);
+	QCOMPARE(model.matchCount(), 3);
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 2);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("c"));
+
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("x") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit prepended") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("c") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit gamma") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("a") },
+					  { QStringLiteral("bodyText"), QStringLiteral("hit alpha") } }
+	});
+	QCOMPARE(model.matchCount(), 3);
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("c"));
+	QVERIFY(model.removeMessage(QStringLiteral("c")));
+	QCOMPARE(model.matchCount(), 2);
+	QCOMPARE(model.currentMatchIndex(), 1);
+	QCOMPARE(model.currentMatchRow(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("a"));
+
+	model.replaceMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("z") },
+		{ QStringLiteral("bodyText"), QStringLiteral("hit replacement") } } });
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchIndex(), 0);
+	QCOMPARE(model.currentMatchRow(), 0);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("z"));
+
+	model.clear();
+	QCOMPARE(model.query(), QStringLiteral("hit"));
+	QCOMPARE(model.matchCount(), 0);
+	QCOMPARE(model.currentMatchIndex(), -1);
+	QCOMPARE(model.currentMatchRow(), -1);
+	QCOMPARE(model.currentMatchStableId(), QString());
+	QCOMPARE(querySpy.count(), 1);
+	QVERIFY(matchCountSpy.count() > 0);
+	QVERIFY(currentMatchSpy.count() > 0);
+
+	QVERIFY(model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("after-clear") },
+								  { QStringLiteral("bodyText"), QStringLiteral("hit restored") } }));
+	QCOMPARE(model.matchCount(), 1);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("after-clear"));
+	model.clearSearch();
+	QCOMPARE(model.query(), QString());
+	QCOMPARE(model.matchCount(), 0);
+	QCOMPARE(model.currentMatchIndex(), -1);
+	QCOMPARE(model.currentMatchRow(), -1);
+	QCOMPARE(model.currentMatchStableId(), QString());
+	QCOMPARE(querySpy.count(), 2);
+
+	const int matchSignalsAfterClear = matchCountSpy.count();
+	const int currentSignalsAfterClear = currentMatchSpy.count();
+	QVERIFY(model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("inactive") },
+								  { QStringLiteral("bodyText"), QStringLiteral("hit while inactive") } }));
+	QCOMPARE(model.matchCount(), 0);
+	QCOMPARE(model.currentMatchStableId(), QString());
+	QCOMPARE(matchCountSpy.count(), matchSignalsAfterClear);
+	QCOMPARE(currentMatchSpy.count(), currentSignalsAfterClear);
+	QCOMPARE(resetSpy.count(), 0);
+}
+
 void TestQmlClientModels::chatTimelineBoundsReactionDelegates() {
 	ChatTimelineModel model;
 	QVariantList reactions;
@@ -1146,6 +1770,67 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 	QCOMPARE(model.roleNames().value(StableListModel::BodySegmentsRole), QByteArray("bodySegments"));
 }
 
+void TestQmlClientModels::chatTimelineParsesLinkedManagedImage() {
+	ChatTimelineModel model;
+	QVERIFY(model.upsertMessage(
+		{ { QStringLiteral("messageKey"), QStringLiteral("rich-image:1") },
+		  { QStringLiteral("bodyText"), QStringLiteral("Open the linked release artwork.") },
+		  { QStringLiteral("bodyHtml"),
+			QStringLiteral("<p><a href=\"https://example.com/qt-quick-release\">"
+						   "<img src=\"image://mumble/fixture-inline?g=1\" "
+						   "alt=\"Qt Quick release artwork\" width=\"640\" height=\"360\"></a></p>") } }));
+
+	const auto parsedImage = [&model] {
+		for (const QVariant &entry : model.get(0).value(QStringLiteral("bodySegments")).toList()) {
+			const QVariantMap segment = entry.toMap();
+			if (segment.value(QStringLiteral("kind")).toString() == QLatin1String("image")) return segment;
+		}
+		return QVariantMap {};
+	};
+	QTRY_VERIFY_WITH_TIMEOUT(!parsedImage().isEmpty(), 5000);
+	const QVariantMap image = parsedImage();
+	QCOMPARE(image.value(QStringLiteral("source")).toString(),
+			 QStringLiteral("image://mumble/fixture-inline?g=1"));
+	QCOMPARE(image.value(QStringLiteral("href")).toString(),
+			 QStringLiteral("https://example.com/qt-quick-release"));
+	QCOMPARE(image.value(QStringLiteral("alt")).toString(), QStringLiteral("Qt Quick release artwork"));
+	QCOMPARE(image.value(QStringLiteral("width")).toInt(), 640);
+	QCOMPARE(image.value(QStringLiteral("height")).toInt(), 360);
+}
+
+void TestQmlClientModels::chatTimelineCompletesOwnedRichParseUnderVisualOverride() {
+	ChatTimelineModel model;
+	model.setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, true);
+	model.replaceMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("fixture-rich-image:1") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Fixture image fallback") },
+		{ QStringLiteral("bodyHtml"),
+		  QStringLiteral("<p><a href=\"https://example.com/fixture-owned\">"
+						 "<img src=\"image://mumble/fixture-owned?g=7\" "
+						 "alt=\"Fixture-owned image\"></a></p>") }
+	} });
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	QCOMPARE(model.rowCount(), 1);
+
+	const auto parsedImage = [&model] {
+		for (const QVariant &entry : model.get(0).value(QStringLiteral("bodySegments")).toList()) {
+			const QVariantMap segment = entry.toMap();
+			if (segment.value(QStringLiteral("kind")).toString() == QLatin1String("image")) return segment;
+		}
+		return QVariantMap {};
+	};
+	QTRY_VERIFY_WITH_TIMEOUT(!parsedImage().isEmpty(), 5000);
+	QCOMPARE(parsedImage().value(QStringLiteral("href")).toString(),
+			 QStringLiteral("https://example.com/fixture-owned"));
+
+	QVERIFY(!model.upsertMessage({
+		{ QStringLiteral("messageKey"), QStringLiteral("live-write") },
+		{ QStringLiteral("bodyText"), QStringLiteral("must remain rejected") }
+	}));
+	QCOMPARE(model.rowCount(), 1);
+}
+
 void TestQmlClientModels::chatTimelineDrainsBoundedRichTextBacklog() {
 	ChatTimelineModel model;
 	QVariantList messages;
@@ -1192,17 +1877,46 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 		{ QStringLiteral("fileName"), QStringLiteral("notes.pdf") },
 		{ QStringLiteral("byteSize"), 4096 }
 	};
+	const QVariantMap inlineAttachment {
+		{ QStringLiteral("id"), QStringLiteral("message:1:inline:0") },
+		{ QStringLiteral("kind"), QStringLiteral("image") },
+		{ QStringLiteral("mime"), QStringLiteral("image/png") },
+		{ QStringLiteral("fileName"), QStringLiteral("embedded-image.png") },
+		{ QStringLiteral("inlineToken"), QStringLiteral("abcdef0123456789abcdef01") },
+		{ QStringLiteral("state"), QStringLiteral("loading") },
+		{ QStringLiteral("byteSize"), 598100 }
+	};
+	const QVariantMap invalidInlineAttachment {
+		{ QStringLiteral("id"), QStringLiteral("message:1:inline:forged") },
+		{ QStringLiteral("kind"), QStringLiteral("image") },
+		{ QStringLiteral("inlineToken"), QStringLiteral("../../not-a-token") }
+	};
+	const QVariantMap retryableAttachment {
+		{ QStringLiteral("id"), QStringLiteral("asset:88") },
+		{ QStringLiteral("assetId"), 88 },
+		{ QStringLiteral("kind"), QStringLiteral("image") },
+		{ QStringLiteral("mime"), QStringLiteral("image/png") },
+		{ QStringLiteral("fileName"), QStringLiteral("retry.png") },
+		{ QStringLiteral("state"), QStringLiteral("error") },
+		{ QStringLiteral("previewCanRetry"), true },
+		{ QStringLiteral("previewErrorCode"), QStringLiteral("PREVIEW-TIMEOUT") },
+		{ QStringLiteral("previewError"), QStringLiteral("The preview timed out. You can try again.") }
+	};
 	QVERIFY(model.upsertMessage(
 		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
 		  { QStringLiteral("previewStub"),
 			QVariantMap { { QStringLiteral("url"), QStringLiteral("https://example.com/card") },
 						  { QStringLiteral("host"), QStringLiteral("example.com") },
 						  { QStringLiteral("loadingLabel"), QStringLiteral("Load preview") },
+						  { QStringLiteral("errorDescription"), QStringLiteral("Provider metadata timed out") },
 						  { QStringLiteral("embedKind"), QStringLiteral("youtube") },
 						  { QStringLiteral("embedUrl"), QStringLiteral("https://www.youtube.com/embed/test") },
-						  { QStringLiteral("embedAspect"), QStringLiteral("wide") } } },
+						  { QStringLiteral("embedAspect"), QStringLiteral("wide") },
+						  { QStringLiteral("presentationFamily"), QStringLiteral("embed") },
+						  { QStringLiteral("caseVariant"), QStringLiteral("youtube") } } },
 		  { QStringLiteral("attachments"),
-			QVariantList { validAttachment, invalidAttachment, fileAttachment } } }));
+			QVariantList { validAttachment, invalidAttachment, fileAttachment, inlineAttachment,
+				invalidInlineAttachment, retryableAttachment } } }));
 
 	QVariantMap row = model.get(0);
 	QVariantMap preview = row.value(QStringLiteral("preview")).toMap();
@@ -1212,8 +1926,12 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QCOMPARE(preview.value(QStringLiteral("embedUrl")).toString(),
 			 QStringLiteral("https://www.youtube.com/embed/test"));
 	QCOMPARE(preview.value(QStringLiteral("embedAspect")).toString(), QStringLiteral("wide"));
+	QCOMPARE(preview.value(QStringLiteral("presentationFamily")).toString(), QStringLiteral("embed"));
+	QCOMPARE(preview.value(QStringLiteral("caseVariant")).toString(), QStringLiteral("youtube"));
+	QCOMPARE(preview.value(QStringLiteral("errorDescription")).toString(),
+			 QStringLiteral("Provider metadata timed out"));
 	const QVariantList attachments = row.value(QStringLiteral("attachments")).toList();
-	QCOMPARE(attachments.size(), 2);
+	QCOMPARE(attachments.size(), 4);
 	QCOMPARE(attachments.first().toMap().value(QStringLiteral("url")).toString(),
 			 QStringLiteral("image://mumble/asset:1?g=1"));
 	const QVariantMap normalizedFile = attachments.at(1).toMap();
@@ -1222,6 +1940,19 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QCOMPARE(normalizedFile.value(QStringLiteral("fileName")).toString(), QStringLiteral("notes.pdf"));
 	QCOMPARE(normalizedFile.value(QStringLiteral("byteSize")).toULongLong(), 4096ULL);
 	QVERIFY(normalizedFile.value(QStringLiteral("url")).toString().isEmpty());
+	const QVariantMap normalizedInline = attachments.at(2).toMap();
+	QCOMPARE(normalizedInline.value(QStringLiteral("inlineToken")).toString(),
+		QStringLiteral("abcdef0123456789abcdef01"));
+	QCOMPARE(normalizedInline.value(QStringLiteral("state")).toString(), QStringLiteral("loading"));
+	QCOMPARE(normalizedInline.value(QStringLiteral("byteSize")).toULongLong(), 598100ULL);
+	const QVariantMap normalizedRetry = attachments.at(3).toMap();
+	QCOMPARE(normalizedRetry.value(QStringLiteral("assetId")).toULongLong(), 88ULL);
+	QCOMPARE(normalizedRetry.value(QStringLiteral("state")).toString(), QStringLiteral("error"));
+	QVERIFY(normalizedRetry.value(QStringLiteral("previewCanRetry")).toBool());
+	QCOMPARE(normalizedRetry.value(QStringLiteral("previewErrorCode")).toString(),
+		QStringLiteral("preview-timeout"));
+	QCOMPARE(normalizedRetry.value(QStringLiteral("previewError")).toString(),
+		QStringLiteral("The preview timed out. You can try again."));
 
 	QVERIFY(model.upsertMessage(
 		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
@@ -1398,11 +2129,68 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QCOMPARE(preview.value(QStringLiteral("mediaAudioUrl")).toString(), directAudio);
 	QCOMPARE(preview.value(QStringLiteral("mediaAudioMime")).toString(), QStringLiteral("audio/mp4"));
 	QCOMPARE(preview.value(QStringLiteral("mediaItems")).toList().size(), 16);
+	QVERIFY(!row.value(QStringLiteral("source")).toMap().contains(QStringLiteral("preview")));
 	const QVariantMap firstImageItem = preview.value(QStringLiteral("mediaItems")).toList().first().toMap();
 	QVERIFY(!firstImageItem.contains(QStringLiteral("url")));
 	QCOMPARE(firstImageItem.value(QStringLiteral("externalUrl")).toString(),
 			 QStringLiteral("https://cdn.example.com/image-0.jpg"));
 	QCOMPARE(row.value(QStringLiteral("attachments")).toList().size(), 16);
+}
+
+void TestQmlClientModels::chatTimelinePreservesStreamingManifestsAndManagedArtwork() {
+	ChatTimelineModel model;
+	const QVariantList mediaItems {
+		QVariantMap {
+			{ QStringLiteral("kind"), QStringLiteral("video") },
+			{ QStringLiteral("mime"), QStringLiteral("application/vnd.apple.mpegurl") },
+			{ QStringLiteral("streamKind"), QStringLiteral("hls") },
+			{ QStringLiteral("url"), QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/master.m3u8") },
+			{ QStringLiteral("thumbnail"), QStringLiteral("image://mumble/steam-hls-thumb?g=1") },
+			{ QStringLiteral("poster"), QStringLiteral("image://mumble/steam-hls-poster?g=2") }
+		},
+		QVariantMap {
+			{ QStringLiteral("kind"), QStringLiteral("video") },
+			{ QStringLiteral("mime"), QStringLiteral("application/dash+xml") },
+			{ QStringLiteral("streamKind"), QStringLiteral("untrusted-label") },
+			{ QStringLiteral("url"), QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/manifest.mpd") },
+			{ QStringLiteral("poster"), QStringLiteral("https://raw.example.test/not-managed.jpg") }
+		},
+		QVariantMap {
+			{ QStringLiteral("kind"), QStringLiteral("video") },
+			{ QStringLiteral("mime"), QStringLiteral("video/mp4") },
+			{ QStringLiteral("streamKind"), QStringLiteral("bogus") },
+			{ QStringLiteral("url"), QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/movie.mp4") }
+		}
+	};
+	QVERIFY(model.upsertMessage({
+		{ QStringLiteral("messageKey"), QStringLiteral("steam:manifest") },
+		{ QStringLiteral("preview"), QVariantMap {
+			{ QStringLiteral("title"), QStringLiteral("Steam manifest trailers") },
+			{ QStringLiteral("mediaItems"), mediaItems }
+		} }
+	}));
+	const QVariantList normalized = model.get(0).value(QStringLiteral("preview"))
+		.toMap().value(QStringLiteral("mediaItems")).toList();
+	QCOMPARE(normalized.size(), 3);
+	const QVariantMap hls = normalized.at(0).toMap();
+	QCOMPARE(hls.value(QStringLiteral("mime")).toString(),
+		QStringLiteral("application/vnd.apple.mpegurl"));
+	QCOMPARE(hls.value(QStringLiteral("streamKind")).toString(), QStringLiteral("hls"));
+	QCOMPARE(hls.value(QStringLiteral("thumbnail")).toString(),
+		QStringLiteral("image://mumble/steam-hls-thumb?g=1"));
+	QCOMPARE(hls.value(QStringLiteral("poster")).toString(),
+		QStringLiteral("image://mumble/steam-hls-poster?g=2"));
+	QVERIFY(hls.value(QStringLiteral("directPlayable")).toBool());
+
+	const QVariantMap dash = normalized.at(1).toMap();
+	QCOMPARE(dash.value(QStringLiteral("mime")).toString(), QStringLiteral("application/dash+xml"));
+	QCOMPARE(dash.value(QStringLiteral("streamKind")).toString(), QStringLiteral("dash"));
+	QVERIFY(!dash.contains(QStringLiteral("poster")));
+	QVERIFY(dash.value(QStringLiteral("directPlayable")).toBool());
+
+	const QVariantMap direct = normalized.at(2).toMap();
+	QCOMPARE(direct.value(QStringLiteral("mime")).toString(), QStringLiteral("video/mp4"));
+	QVERIFY(!direct.contains(QStringLiteral("streamKind")));
 }
 
 void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
@@ -1510,6 +2298,27 @@ void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
 	QCOMPARE(github.value(QStringLiteral("githubTopics")).toList().size(), 8);
 	QVERIFY(!github.contains(QStringLiteral("githubOwnerAvatarUrl")));
 	QVERIFY(!github.contains(QStringLiteral("githubDangerUrl")));
+	for (const auto &[provider, key, managedSource] : {
+			 std::tuple { QStringLiteral("x"), QStringLiteral("xAvatarUrl"),
+				 QStringLiteral("image://mumble/x-avatar?g=11") },
+			 std::tuple { QStringLiteral("instagram"), QStringLiteral("instagramAvatarUrl"),
+				 QStringLiteral("image://mumble/instagram-avatar?g=12") },
+			 std::tuple { QStringLiteral("github"), QStringLiteral("githubOwnerAvatarUrl"),
+				 QStringLiteral("image://mumble/github-avatar?g=13") },
+			 std::tuple { QStringLiteral("steam"), QStringLiteral("steamHeaderImage"),
+				 QStringLiteral("image://mumble/steam-header?g=14") },
+			 std::tuple { QStringLiteral("steam"), QStringLiteral("steamCapsuleImage"),
+				 QStringLiteral("image://mumble/steam-capsule?g=15") } }) {
+		const QVariantMap managed = normalize(withNoise({
+			{ QStringLiteral("provider"), provider }, { key, managedSource }
+		}));
+		QCOMPARE(managed.value(key).toString(), managedSource);
+		const QVariantMap rawRemote = normalize(withNoise({
+			{ QStringLiteral("provider"), provider },
+			{ key, QStringLiteral("https://cdn.example.test/raw-provider-image.png") }
+		}));
+		QVERIFY(!rawRemote.contains(key));
+	}
 
 	QVariantMap forumMetadata {
 		{ QStringLiteral("provider"), QStringLiteral("flashback") },
@@ -1642,6 +2451,39 @@ void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
 	QCOMPARE(google.value(QStringLiteral("googleSearchQuery")).toString().size(), 1024);
 	QCOMPARE(google.value(QStringLiteral("googleSearchMode")).toString(), QStringLiteral("images"));
 	QCOMPARE(google.value(QStringLiteral("googleSearchModeLabel")).toString(), QStringLiteral("Images"));
+
+	for (const QString &kind : { QStringLiteral("weather"), QStringLiteral("place"),
+			 QStringLiteral("traffic") }) {
+		const QVariantMap geo = normalize(withNoise({
+			{ QStringLiteral("provider"), QStringLiteral("fixture-geo") },
+			{ QStringLiteral("previewKind"), kind },
+			{ QStringLiteral("providerName"), QStringLiteral("Fixture Geo") },
+			{ QStringLiteral("locationLabel"), QStringLiteral("Stockholm, Sweden") },
+			{ QStringLiteral("statusLabel"), QStringLiteral("Deterministic status") }
+		}));
+		QCOMPARE(geo.size(), 32);
+		QCOMPARE(geo.value(QStringLiteral("previewKind")).toString(), kind);
+		QCOMPARE(geo.value(QStringLiteral("locationLabel")).toString(), QStringLiteral("Stockholm, Sweden"));
+		QCOMPARE(geo.value(QStringLiteral("statusLabel")).toString(), QStringLiteral("Deterministic status"));
+	}
+
+	const QVariantMap marketplace = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("blocket") },
+		{ QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") },
+		{ QStringLiteral("listingPrice"), QStringLiteral("8 500 kr") },
+		{ QStringLiteral("listingCondition"), QStringLiteral("Very good condition") },
+		{ QStringLiteral("listingLocation"), QStringLiteral("Stockholm") },
+		{ QStringLiteral("listingSaleType"), QStringLiteral("Buy now") },
+		{ QStringLiteral("listingEndsAt"), QStringLiteral("Tomorrow 18:00") },
+		{ QStringLiteral("listingId"), QStringLiteral("fixture-2048") }
+	}));
+	QCOMPARE(marketplace.size(), 32);
+	for (const QString &key : { QStringLiteral("listingPrice"), QStringLiteral("listingCondition"),
+			 QStringLiteral("listingLocation"), QStringLiteral("listingSaleType"),
+			 QStringLiteral("listingEndsAt"), QStringLiteral("listingId") }) {
+		QVERIFY2(marketplace.contains(key),
+			qPrintable(QStringLiteral("missing marketplace field %1").arg(key)));
+	}
 
 	const QVariantMap sparse = normalize({
 		{ QStringLiteral("githubLatestReleaseNotes"), QStringLiteral("Sparse release") },
@@ -1794,6 +2636,98 @@ void TestQmlClientModels::pendingBootstrapCompletesBeforeSteadyState() {
 	QVERIFY(synchronized >= 0);
 	QVERIFY(lifecycleTransition > synchronized);
 	QVERIFY(!serverSyncBody.contains(QStringLiteral("fullBootstrapMonitor().enterSteadyState()")));
+}
+
+void TestQmlClientModels::automationProbesStayIncrementalInSteadyState() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+
+	QFile mainWindowFile(mainWindowPath);
+	QFile automationFile(automationPath);
+	QVERIFY(mainWindowFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	QVERIFY(automationFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString mainWindowSource = QString::fromUtf8(mainWindowFile.readAll());
+	const QString automationSource = QString::fromUtf8(automationFile.readAll());
+	QVERIFY2(!automationSource.contains(QStringLiteral("scheduleQmlShellStateSync")),
+		"Automation probes must publish typed controller/model state without scheduling a full QML bootstrap");
+	QVERIFY2(!automationSource.contains(QStringLiteral("syncQmlShellState(")),
+		"Automation state/query/capture paths must never invoke the full QML bootstrap directly");
+	for (const QString &typedPublisher : {
+			 QStringLiteral("applyQmlStonksProbeState"),
+			 QStringLiteral("applyQmlConnectionStateProbe"),
+			 QStringLiteral("applyQmlScreenShareStateProbe"),
+			 QStringLiteral("applyQmlRichPreviewProbeMessages"),
+			 QStringLiteral("applyQmlMessageDeliveryProbeMessages"),
+			 QStringLiteral("publishQmlDirectMessagesState"),
+			 QStringLiteral("setMotdExpanded") }) {
+		QVERIFY2(automationSource.contains(typedPublisher), qPrintable(
+			QStringLiteral("missing typed automation publisher %1").arg(typedPublisher)));
+	}
+
+	const qsizetype helperStart =
+		mainWindowSource.indexOf(QStringLiteral("void MainWindow::publishQmlAutomationChatProbeState"));
+	const qsizetype helperEnd =
+		mainWindowSource.indexOf(QStringLiteral("void MainWindow::publishModernShellTalkState"), helperStart);
+	QVERIFY(helperStart >= 0);
+	QVERIFY(helperEnd > helperStart);
+	const QString helperBody = mainWindowSource.mid(helperStart, helperEnd - helperStart);
+	QVERIFY(helperBody.contains(QStringLiteral("chatModel()->replaceMessages")));
+	QVERIFY(!helperBody.contains(QStringLiteral("scheduleQmlShellStateSync")));
+	QVERIFY(!helperBody.contains(QStringLiteral("syncQmlShellState")));
+	QVERIFY(!helperBody.contains(QStringLiteral("buildQmlRoomState")));
+
+	const auto commandBody = [&automationSource](const QString &beginToken, const QString &endToken) {
+		const qsizetype start = automationSource.indexOf(beginToken);
+		const qsizetype end   = automationSource.indexOf(endToken, start);
+		return start >= 0 && end > start ? automationSource.mid(start, end - start) : QString();
+	};
+	const QString setProbeBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"setRichPreviewProbe\")"),
+		QStringLiteral("if (command == QLatin1String(\"getQmlRichPreviewProbeState\")"));
+	const QString queryBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"getQmlRichPreviewProbeState\")"),
+		QStringLiteral("if (command == QLatin1String(\"setQmlRichPreviewProbeCardState\")"));
+	const QString cardStateBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"setQmlRichPreviewProbeCardState\")"),
+		QStringLiteral("if (command == QLatin1String(\"clearRichPreviewProbe\")"));
+	const QString clearProbeBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"clearRichPreviewProbe\")"),
+		QStringLiteral("if (command == QLatin1String(\"setMessageDeliveryProbe\")"));
+	for (const QString &body : { setProbeBody, queryBody, cardStateBody, clearProbeBody }) {
+		QVERIFY(!body.isEmpty());
+		QVERIFY(!body.contains(QStringLiteral("scheduleQmlShellStateSync")));
+		QVERIFY(!body.contains(QStringLiteral("syncQmlShellState")));
+	}
+	QVERIFY(setProbeBody.contains(QStringLiteral("applyQmlRichPreviewProbeMessages")));
+	QVERIFY(clearProbeBody.contains(QStringLiteral("applyQmlRichPreviewProbeMessages")));
+
+	const QString viewportBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"setHostViewport\")"),
+		QStringLiteral("if (command == QLatin1String(\"captureQml\")"));
+	const QString captureBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"captureQml\")"),
+		QStringLiteral("if (command == QLatin1String(\"setQmlPttTool\")"));
+	const QString snapshotBody = commandBody(
+		QStringLiteral("if (command == QLatin1String(\"snapshot\")"),
+		QStringLiteral("if (command.startsWith(QLatin1String(\"qmlPerformance\"))"));
+	for (const QString &body : { viewportBody, captureBody, snapshotBody }) {
+		QVERIFY(!body.isEmpty());
+		QVERIFY(!body.contains(QStringLiteral("scheduleQmlShellStateSync")));
+		QVERIFY(!body.contains(QStringLiteral("syncQmlShellState")));
+	}
+	QVERIFY(snapshotBody.contains(QStringLiteral("return buildStateResponse()")));
+	const qsizetype stateResponseStart = automationSource.indexOf(
+		QStringLiteral("QVariantMap ModernUiAutomationServer::buildStateResponse() const"));
+	const qsizetype stateResponseEnd = automationSource.indexOf(
+		QStringLiteral("bool ModernUiAutomationServer::authorizeRequest"), stateResponseStart);
+	QVERIFY(stateResponseStart >= 0);
+	QVERIFY(stateResponseEnd > stateResponseStart);
+	const QString stateResponseBody =
+		automationSource.mid(stateResponseStart, stateResponseEnd - stateResponseStart);
+	QVERIFY(!stateResponseBody.contains(QStringLiteral("scheduleQmlShellStateSync")));
+	QVERIFY(!stateResponseBody.contains(QStringLiteral("syncQmlShellState")));
 }
 
 void TestQmlClientModels::duplicateStableIdsAreCoalesced() {
@@ -2098,7 +3032,11 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QSignalSpy reactionSpy(&commands, &UiCommandController::messageReactionToggleRequested);
 	QSignalSpy cancelReplySpy(&commands, &UiCommandController::pendingReplyCancelRequested);
 	QSignalSpy attachmentSpy(&commands, &UiCommandController::attachmentChooseRequested);
+	QSignalSpy attachmentOpenSpy(&commands, &UiCommandController::chatAttachmentOpenRequested);
 	QSignalSpy attachmentDownloadSpy(&commands, &UiCommandController::chatAttachmentDownloadRequested);
+	QSignalSpy attachmentPreviewRetrySpy(&commands,
+		&UiCommandController::chatAttachmentPreviewRetryRequested);
+	QSignalSpy inlineImageSaveSpy(&commands, &UiCommandController::chatInlineImageSaveRequested);
 	QSignalSpy olderSpy(&commands, &UiCommandController::olderMessagesRequested);
 	commands.selectScope(QStringLiteral("   "));
 	commands.selectScopeFromRail(QStringLiteral("   "), QStringLiteral("voice"));
@@ -2113,6 +3051,13 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.toggleMessageReaction(QStringLiteral("message:1"), QString());
 	commands.downloadChatAttachment(QStringLiteral("0"), QStringLiteral("ignored.bin"));
 	commands.downloadChatAttachment(QStringLiteral("4294967296"), QStringLiteral("ignored.bin"));
+	commands.openChatAttachment(QStringLiteral("0"), QStringLiteral("ignored.pdf"));
+	commands.openChatAttachment(QStringLiteral("4294967296"), QStringLiteral("ignored.pdf"));
+	commands.retryChatAttachmentPreview(QStringLiteral("channel:1"), QStringLiteral("0"), QStringLiteral("42"));
+	commands.retryChatAttachmentPreview(QString(), QStringLiteral("12"), QStringLiteral("42"));
+	commands.retryChatAttachmentPreview(QStringLiteral("channel:1"), QStringLiteral("12"),
+		QStringLiteral("4294967296"));
+	commands.saveChatInlineImage(QStringLiteral("../../bad"), QStringLiteral("ignored.png"));
 	QCOMPARE(scopeSpy.count(), 0);
 	QCOMPARE(railScopeSpy.count(), 0);
 	QCOMPARE(actionSpy.count(), 0);
@@ -2122,7 +3067,10 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(retrySpy.count(), 0);
 	QCOMPARE(deleteSpy.count(), 0);
 	QCOMPARE(reactionSpy.count(), 0);
+	QCOMPARE(attachmentOpenSpy.count(), 0);
 	QCOMPARE(attachmentDownloadSpy.count(), 0);
+	QCOMPARE(attachmentPreviewRetrySpy.count(), 0);
+	QCOMPARE(inlineImageSaveSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
 	commands.selectScopeFromRail(QStringLiteral(" channel:42 "), QStringLiteral(" Voice "));
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
@@ -2134,7 +3082,12 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.toggleMessageReaction(QStringLiteral(" message:4 "), QStringLiteral(" 👍 "));
 	commands.cancelPendingReply();
 	commands.chooseAttachment();
+	commands.openChatAttachment(QStringLiteral(" 78 "), QStringLiteral("folder/report.pdf"));
 	commands.downloadChatAttachment(QStringLiteral(" 77 "), QStringLiteral("folder/notes.pdf"));
+	commands.retryChatAttachmentPreview(QStringLiteral(" channel:42 "), QStringLiteral(" 12 "),
+		QStringLiteral(" 88 "));
+	commands.saveChatInlineImage(QStringLiteral(" ABCDEF0123456789ABCDEF01 "),
+		QStringLiteral("folder/embedded.png"));
 	commands.requestOlderMessages();
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	const QList< QVariant > railSelection = railScopeSpy.takeFirst();
@@ -2151,9 +3104,19 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(reaction.at(1).toString(), QStringLiteral("👍"));
 	QCOMPARE(cancelReplySpy.count(), 1);
 	QCOMPARE(attachmentSpy.count(), 1);
+	QCOMPARE(attachmentOpenSpy.count(), 1);
+	QCOMPARE(attachmentOpenSpy.first().at(0).toUInt(), 78U);
+	QCOMPARE(attachmentOpenSpy.first().at(1).toString(), QStringLiteral("report.pdf"));
 	QCOMPARE(attachmentDownloadSpy.count(), 1);
 	QCOMPARE(attachmentDownloadSpy.first().at(0).toUInt(), 77U);
 	QCOMPARE(attachmentDownloadSpy.first().at(1).toString(), QStringLiteral("notes.pdf"));
+	QCOMPARE(attachmentPreviewRetrySpy.count(), 1);
+	QCOMPARE(attachmentPreviewRetrySpy.first().at(0).toString(), QStringLiteral("channel:42"));
+	QCOMPARE(attachmentPreviewRetrySpy.first().at(1).toString(), QStringLiteral("12"));
+	QCOMPARE(attachmentPreviewRetrySpy.first().at(2).toUInt(), 88U);
+	QCOMPARE(inlineImageSaveSpy.count(), 1);
+	QCOMPARE(inlineImageSaveSpy.first().at(0).toString(), QStringLiteral("abcdef0123456789abcdef01"));
+	QCOMPARE(inlineImageSaveSpy.first().at(1).toString(), QStringLiteral("embedded.png"));
 	QCOMPARE(olderSpy.count(), 1);
 }
 
@@ -2559,6 +3522,46 @@ void TestQmlClientModels::stonksStateAndActionsRemainStructured() {
 	}
 }
 
+void TestQmlClientModels::toastControllerCoalescesReplacesAndPausesTimeout() {
+	ToastController toast;
+	QSignalSpy stateSpy(&toast, &ToastController::stateChanged);
+
+	toast.publish(QStringLiteral("error"), QStringLiteral("Upload failed"),
+		QStringLiteral("The network is unavailable."), QStringLiteral("retry"), QStringLiteral("Retry"), 300);
+	QVERIFY(toast.visible());
+	QCOMPARE(toast.tone(), QStringLiteral("danger"));
+	QCOMPARE(toast.title(), QStringLiteral("Upload failed"));
+	QCOMPARE(toast.message(), QStringLiteral("The network is unavailable."));
+	QCOMPARE(toast.actionId(), QStringLiteral("retry"));
+	QCOMPARE(toast.actionLabel(), QStringLiteral("Retry"));
+	QCOMPARE(toast.repeatCount(), 1);
+	const qulonglong firstRevision = toast.revision();
+
+	toast.publish(QStringLiteral("danger"), QStringLiteral("Upload failed"),
+		QStringLiteral("The network is unavailable."), QStringLiteral("retry"), QStringLiteral("Retry"), 300);
+	QCOMPARE(toast.repeatCount(), 2);
+	QVERIFY(toast.revision() > firstRevision);
+
+	toast.setInteractionActive(true);
+	QTest::qWait(350);
+	QVERIFY(toast.visible());
+	toast.setInteractionActive(false);
+	QTRY_VERIFY_WITH_TIMEOUT(!toast.visible(), 500);
+
+	toast.publish(QStringLiteral("unknown"), QStringLiteral("Connected"), QString(), {}, {}, 1000);
+	QVERIFY(toast.visible());
+	QCOMPARE(toast.tone(), QStringLiteral("info"));
+	QCOMPARE(toast.repeatCount(), 1);
+	toast.publish(QStringLiteral("success"), QStringLiteral("Saved"), QStringLiteral("Settings updated."));
+	QCOMPARE(toast.tone(), QStringLiteral("success"));
+	QCOMPARE(toast.title(), QStringLiteral("Saved"));
+	QCOMPARE(toast.repeatCount(), 1);
+	toast.dismiss();
+	QVERIFY(!toast.visible());
+	QCOMPARE(toast.repeatCount(), 0);
+	QVERIFY(stateSpy.count() >= 6);
+}
+
 void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
 	AsyncOperationModel operations;
 	QSignalSpy cancelSpy(&operations, &AsyncOperationModel::cancellationRequested);
@@ -2941,6 +3944,7 @@ void TestQmlClientModels::mediaSessionLocalPlaybackControlsRemainTyped() {
 
 	const QUrl sharedUrl(QStringLiteral("https://www.youtube.com/embed/shared-safe-close"));
 	MediaSessionBackend shared;
+	shared.setCurrentVoiceScopeId(42);
 	QSignalSpy sharedEventSpy(&shared, &MediaSessionBackend::sharedEventRequested);
 	QSignalSpy sharedPlaySpy(&shared, &MediaSessionBackend::playRequested);
 	QSignalSpy sharedSeekSpy(&shared, &MediaSessionBackend::seekRequested);
@@ -2983,22 +3987,62 @@ void TestQmlClientModels::mediaSessionLocalPlaybackControlsRemainTyped() {
 
 void TestQmlClientModels::mediaSessionSwitchesBetweenInlineAndDetachedPresentation() {
 	MediaSessionBackend media;
+	QSignalSpy sourceSpy(&media, &MediaSessionBackend::sourceChanged);
 	const QUrl url(QStringLiteral("https://www.youtube.com/embed/inline-test"));
 	QVERIFY(media.detached());
 	QVERIFY(media.openInline(url, QStringLiteral("youtube"), QStringLiteral("message:42")));
 	QVERIFY(media.active());
 	QVERIFY(!media.detached());
 	QCOMPARE(media.sessionId(), QStringLiteral("message:42"));
+	QCOMPARE(sourceSpy.count(), 1);
+	media.reportPlaybackState(23.5, 90.0, false);
 
 	media.detach();
 	QVERIFY(media.detached());
 	QVERIFY(media.active());
+	QCOMPARE(media.position(), 23.5);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
+	QCOMPARE(sourceSpy.count(), 2);
+	media.attach();
+	QVERIFY(!media.detached());
+	QVERIFY(media.active());
+	QCOMPARE(media.position(), 23.5);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
+	QCOMPARE(sourceSpy.count(), 3);
 	media.closePlayer();
 	QVERIFY(!media.active());
 	QVERIFY(media.detached());
 
 	QVERIFY(media.open(url, QStringLiteral("youtube"), QStringLiteral("message:43")));
 	QVERIFY(media.detached());
+}
+
+void TestQmlClientModels::mediaSessionAutomationLifecycleStaysInlineAndAllowlisted() {
+	MediaSessionBackend media;
+	const QUrl url(QStringLiteral("https://www.youtube-nocookie.com/embed/automation-lifecycle"));
+	QVERIFY(!media.openInline(QUrl(QStringLiteral("https://example.com/watch-together")),
+		QStringLiteral("direct"), QStringLiteral("automation-room")));
+	QVERIFY(!media.active());
+
+	const qulonglong baselineGeneration = media.syncGeneration();
+	QVERIFY(media.openInline(url, QStringLiteral("youtube"), QStringLiteral("automation-room")));
+	QVERIFY(media.active());
+	QVERIFY(!media.detached());
+	QCOMPARE(media.provider(), QStringLiteral("youtube"));
+	QCOMPARE(media.url(), url);
+	const qulonglong openedGeneration = media.syncGeneration();
+	QVERIFY(openedGeneration > baselineGeneration);
+
+	media.applyRemoteState(url, QStringLiteral("youtube"), QStringLiteral("automation-room"),
+		12.5, false, openedGeneration + 1);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
+	QCOMPARE(media.position(), 12.5);
+	QVERIFY(media.syncGeneration() > openedGeneration);
+	QVERIFY(!media.detached());
+
+	media.close();
+	QVERIFY(!media.active());
+	QCOMPARE(media.state(), QStringLiteral("idle"));
 }
 
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
@@ -3050,8 +4094,14 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	QCOMPARE(seekSpy.count(), 1);
 	QCOMPARE(pauseSpy.count(), 1);
 	media.applyRemoteState(QUrl(QStringLiteral("https://www.youtube.com/embed/stale")), QStringLiteral("youtube"),
-						   QStringLiteral("stale"), 1.0, false, 41);
+						   QStringLiteral("room:2"), 1.0, false, 41);
 	QCOMPARE(media.sessionId(), QStringLiteral("room:2"));
+	QCOMPARE(media.position(), 28.0);
+	media.applyRemoteState(QUrl(QStringLiteral("https://www.youtube.com/embed/fresh-session")),
+		QStringLiteral("youtube"), QStringLiteral("room:3"), 1.0, false, 2);
+	QCOMPARE(media.sessionId(), QStringLiteral("room:3"));
+	QCOMPARE(media.position(), 1.0);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
 	media.close();
 	QVERIFY(!media.active());
 	QCOMPARE(media.state(), QStringLiteral("idle"));
@@ -3059,6 +4109,7 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 
 void TestQmlClientModels::mediaSessionValidatesDirectMedia() {
 	MediaSessionBackend media;
+	QSignalSpy sourceSpy(&media, &MediaSessionBackend::sourceChanged);
 	const QUrl video(QStringLiteral("data:video/mp4;base64,AAAA"));
 	const QUrl audio(QStringLiteral("data:audio/mp4;base64,AAAA"));
 	QVERIFY(media.openDirect(video, QStringLiteral("video/mp4"), audio, QStringLiteral("audio/mp4"),
@@ -3067,12 +4118,24 @@ void TestQmlClientModels::mediaSessionValidatesDirectMedia() {
 	QCOMPARE(media.mediaMime(), QStringLiteral("video/mp4"));
 	QCOMPARE(media.audioMime(), QStringLiteral("audio/mp4"));
 	QCOMPARE(media.audioUrl(), audio);
+	QVERIFY(media.detached());
+	QCOMPARE(sourceSpy.count(), 1);
 	QVERIFY(media.isNavigationAllowed(video));
 	QVERIFY(media.isNavigationAllowed(audio));
 	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("data:text/html;base64,AAAA"))));
 	media.close();
+	QCOMPARE(sourceSpy.count(), 2);
 	QVERIFY(media.audioUrl().isEmpty());
 	QVERIFY(media.mediaMime().isEmpty());
+
+	QVERIFY(media.openDirectInline(video, QStringLiteral("video/mp4"), audio, QStringLiteral("audio/mp4"),
+									 QStringLiteral("message:inline-direct")));
+	QCOMPARE(media.provider(), QStringLiteral("direct"));
+	QVERIFY(!media.detached());
+	QCOMPARE(media.sessionId(), QStringLiteral("message:inline-direct"));
+	QCOMPARE(sourceSpy.count(), 3);
+	media.close();
+	QCOMPARE(sourceSpy.count(), 4);
 
 	QVERIFY(!media.openDirect(QUrl(QStringLiteral("data:video/mp4;base64,AAAA")),
 								 QStringLiteral("video/webm"), {}, {}, QStringLiteral("message:8")));
@@ -3080,8 +4143,113 @@ void TestQmlClientModels::mediaSessionValidatesDirectMedia() {
 								 QStringLiteral("video/mp4"), {}, {}, QStringLiteral("message:9")));
 	QVERIFY(media.openDirect(QUrl(QStringLiteral("https://cdn.example.com/video.mp4?token=one")),
 							   QStringLiteral("video/mp4"), {}, {}, QStringLiteral("message:10")));
+	QCOMPARE(sourceSpy.count(), 5);
 	QVERIFY(media.isNavigationAllowed(QUrl(QStringLiteral("https://cdn.example.com/video.mp4?token=one#fragment"))));
 	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("https://cdn.example.com/video.mp4?token=two"))));
+
+	const QUrl hls(QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/master.m3u8"));
+	QVERIFY(media.openDirect(hls, QStringLiteral("application/vnd.apple.mpegurl"), {}, {},
+		QStringLiteral("steam:hls")));
+	QCOMPARE(media.mediaMime(), QStringLiteral("application/vnd.apple.mpegurl"));
+	QCOMPARE(media.url(), hls);
+	QVERIFY(media.isNavigationAllowed(hls));
+	const QUrl dash(QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/manifest.mpd"));
+	QVERIFY(media.openDirectInline(dash, QStringLiteral("application/dash+xml"), {}, {},
+		QStringLiteral("steam:dash")));
+	QVERIFY(!media.detached());
+	QCOMPARE(media.mediaMime(), QStringLiteral("application/dash+xml"));
+	QVERIFY(!media.openDirect(QUrl(QStringLiteral("data:application/dash+xml;base64,AAAA")),
+		QStringLiteral("application/dash+xml"), {}, {}, QStringLiteral("steam:unsafe-manifest")));
+}
+
+void TestQmlClientModels::mediaSessionMaterializesDataSourcesWithoutStaleGenerationLeaks() {
+	MediaSessionBackend media;
+	QSignalSpy playbackSourceSpy(&media, &MediaSessionBackend::playbackSourceChanged);
+	const QByteArray wavBytes = QByteArray::fromBase64(
+		QByteArrayLiteral("UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="));
+	const QUrl wavDataUrl(QStringLiteral("data:audio/wav;base64,")
+		+ QString::fromLatin1(wavBytes.toBase64()));
+
+	QVERIFY(media.openDirectInline(wavDataUrl, QStringLiteral("audio/wav"), {}, {},
+		QStringLiteral("materialized-a")));
+	QVERIFY(media.playbackSourcePreparing());
+	QVERIFY(!media.playbackSourceReady());
+	QTRY_VERIFY_WITH_TIMEOUT(media.playbackSourceReady(), 10000);
+	QVERIFY(!media.playbackSourcePreparing());
+	QVERIFY(media.playbackUrl().isLocalFile());
+	QCOMPARE(media.url(), wavDataUrl);
+	const QString firstPath = media.playbackUrl().toLocalFile();
+	const QString sessionDirectory = QFileInfo(firstPath).absolutePath();
+	QFile firstFile(firstPath);
+	QVERIFY(firstFile.open(QIODevice::ReadOnly));
+	QCOMPARE(firstFile.readAll(), wavBytes);
+	firstFile.close();
+	const qulonglong firstGeneration = media.playbackSourceGeneration();
+
+	QByteArray stalePayload(2 * 1024 * 1024, '\x2a');
+	const QUrl staleDataUrl(QStringLiteral("data:video/mp4;base64,")
+		+ QString::fromLatin1(stalePayload.toBase64()));
+	QVERIFY(media.openDirectInline(staleDataUrl, QStringLiteral("video/mp4"), {}, {},
+		QStringLiteral("materialized-b")));
+	const qulonglong staleGeneration = media.playbackSourceGeneration();
+	QVERIFY(staleGeneration > firstGeneration);
+	QVERIFY(media.playbackSourcePreparing());
+
+	const QUrl finalHttpsUrl(QStringLiteral("https://cdn.example.com/final.mp4"));
+	QVERIFY(media.openDirectInline(finalHttpsUrl, QStringLiteral("video/mp4"), {}, {},
+		QStringLiteral("materialized-c")));
+	const qulonglong finalGeneration = media.playbackSourceGeneration();
+	QVERIFY(finalGeneration > staleGeneration);
+	QVERIFY(media.playbackSourceReady());
+	QVERIFY(!media.playbackSourcePreparing());
+	QCOMPARE(media.playbackUrl(), finalHttpsUrl);
+	const int signalsAfterFinalSource = playbackSourceSpy.count();
+
+	QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(firstPath), 10000);
+	QTRY_VERIFY_WITH_TIMEOUT(QDir(sessionDirectory).entryList(QDir::Files | QDir::NoDotAndDotDot).isEmpty(),
+		10000);
+	QTest::qWait(100);
+	QCOMPARE(media.playbackSourceGeneration(), finalGeneration);
+	QCOMPARE(media.playbackUrl(), finalHttpsUrl);
+	QCOMPARE(playbackSourceSpy.count(), signalsAfterFinalSource);
+
+	media.close();
+	QVERIFY(!media.playbackSourceReady());
+	QVERIFY(media.playbackUrl().isEmpty());
+
+	MediaSessionBackend degradedSecondary;
+	const QUrl originalSecondary(QStringLiteral("data:audio/mp4;base64,!!!!"));
+	QVERIFY(degradedSecondary.openDirectInline(
+		QUrl(QStringLiteral("data:video/mp4;base64,AAAA")), QStringLiteral("video/mp4"),
+		originalSecondary, QStringLiteral("audio/mp4"), QStringLiteral("degraded-secondary")));
+	QTRY_VERIFY_WITH_TIMEOUT(degradedSecondary.playbackSourceReady(), 10000);
+	QVERIFY(degradedSecondary.playbackUrl().isLocalFile());
+	QVERIFY(degradedSecondary.playbackAudioUrl().isEmpty());
+	QCOMPARE(degradedSecondary.audioUrl(), originalSecondary);
+	QVERIFY(!degradedSecondary.playbackAudioWarning().isEmpty());
+	QCOMPARE(degradedSecondary.state(), QStringLiteral("loading"));
+	const QString degradedPrimaryPath = degradedSecondary.playbackUrl().toLocalFile();
+	degradedSecondary.close();
+	QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(degradedPrimaryPath), 10000);
+
+	MediaSessionBackend invalidBase64;
+	QVERIFY(invalidBase64.openDirectInline(
+		QUrl(QStringLiteral("data:audio/wav;base64,!!!!")), QStringLiteral("audio/wav"), {}, {},
+		QStringLiteral("invalid-base64")));
+	QTRY_COMPARE_WITH_TIMEOUT(invalidBase64.state(), QStringLiteral("error"), 10000);
+	QCOMPARE(invalidBase64.errorCode(), QStringLiteral("native-source-prepare-failed"));
+	QVERIFY(!invalidBase64.playbackSourceReady());
+	QVERIFY(invalidBase64.playbackUrl().isEmpty());
+
+	constexpr qsizetype MaximumInlineMediaBytes = 24 * 1024 * 1024;
+	const qsizetype maximumBase64Characters = ((MaximumInlineMediaBytes + 2) / 3) * 4;
+	QString oversizedSource = QStringLiteral("data:audio/wav;base64,");
+	oversizedSource += QString(maximumBase64Characters + 1, QLatin1Char('A'));
+	MediaSessionBackend oversized;
+	QVERIFY(!oversized.openDirectInline(QUrl(oversizedSource), QStringLiteral("audio/wav"), {}, {},
+		QStringLiteral("oversized")));
+	QCOMPARE(oversized.errorCode(), QStringLiteral("source-rejected"));
+	QVERIFY(!oversized.active());
 }
 
 void TestQmlClientModels::mediaSessionProviderAllowlist_data() {
@@ -3090,6 +4258,7 @@ void TestQmlClientModels::mediaSessionProviderAllowlist_data() {
 	QTest::addColumn< bool >("allowed");
 	QTest::newRow("youtube") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << true;
 	QTest::newRow("twitch") << QStringLiteral("twitch") << QUrl(QStringLiteral("https://player.twitch.tv/?video=1")) << true;
+	QTest::newRow("twitch-clip") << QStringLiteral("twitch") << QUrl(QStringLiteral("https://clips.twitch.tv/embed?clip=SafeClip")) << true;
 	QTest::newRow("streamable") << QStringLiteral("streamable") << QUrl(QStringLiteral("https://streamable.com/e/a")) << true;
 	QTest::newRow("vimeo") << QStringLiteral("vimeo") << QUrl(QStringLiteral("https://player.vimeo.com/video/1")) << true;
 	QTest::newRow("dailymotion") << QStringLiteral("dailymotion") << QUrl(QStringLiteral("https://geo.dailymotion.com/player.html?video=x")) << true;
@@ -3115,9 +4284,8 @@ void TestQmlClientModels::mediaSessionProviderAllowlist() {
 	QCOMPARE(media.active(), allowed);
 	if (allowed) {
 		const QString canonicalProvider = media.provider();
-		const bool controllable = QSet< QString > { QStringLiteral("direct"), QStringLiteral("youtube"),
-			QStringLiteral("twitch"), QStringLiteral("streamable"), QStringLiteral("vimeo"),
-			QStringLiteral("dailymotion") }.contains(canonicalProvider);
+		const bool controllable = QSet< QString > { QStringLiteral("direct"), QStringLiteral("youtube") }
+			.contains(canonicalProvider);
 		QCOMPARE(media.playbackControllable(), controllable);
 		QCOMPARE(media.supportsSynchronizedPlayback(canonicalProvider), controllable);
 		media.reportLoadProgress(100);
@@ -3154,8 +4322,50 @@ void TestQmlClientModels::mediaSessionNavigationAndErrorLifecycle() {
 	QVERIFY(media.error().isEmpty());
 }
 
+void TestQmlClientModels::mediaSessionPublishesTypedRendererErrors() {
+	MediaSessionBackend media;
+	QVERIFY(!media.open(QUrl(QStringLiteral("https://example.com/embed/a")), QStringLiteral("youtube"),
+		QStringLiteral("rejected")));
+	QCOMPARE(media.errorCode(), QStringLiteral("source-rejected"));
+
+	QVERIFY(media.open(QUrl(QStringLiteral("https://www.youtube.com/embed/a")), QStringLiteral("youtube"),
+		QStringLiteral("room")));
+	QVERIFY(media.errorCode().isEmpty());
+	media.reportTypedError(QStringLiteral("renderer-component-unavailable"),
+		QStringLiteral("The isolated media player is unavailable."));
+	QCOMPARE(media.state(), QStringLiteral("error"));
+	QCOMPARE(media.errorCode(), QStringLiteral("renderer-component-unavailable"));
+	QCOMPARE(media.error(), QStringLiteral("The isolated media player is unavailable."));
+
+	media.retry();
+	QCOMPARE(media.state(), QStringLiteral("loading"));
+	QVERIFY(media.error().isEmpty());
+	QVERIFY(media.errorCode().isEmpty());
+
+	media.reportTypedError(QStringLiteral(" invalid code "), {});
+	QCOMPARE(media.errorCode(), QStringLiteral("playback-failed"));
+	QCOMPARE(media.error(), QStringLiteral("Media playback failed."));
+	media.close();
+	QVERIFY(media.errorCode().isEmpty());
+}
+
+void TestQmlClientModels::mediaSessionSharedStartRequiresVoiceScope() {
+	MediaSessionBackend media(nullptr, 25);
+	QSignalSpy startSpy(&media, &MediaSessionBackend::sharedStartRequested);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
+
+	QVERIFY(!media.startShared(QUrl(QStringLiteral("https://www.youtube.com/embed/no-room")),
+		QStringLiteral("youtube"), QStringLiteral("No room")));
+	QCOMPARE(startSpy.count(), 0);
+	QCOMPARE(rejectionSpy.count(), 1);
+	QVERIFY(!media.sharedAvailable());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("idle"));
+	QVERIFY(media.error().contains(QStringLiteral("voice room"), Qt::CaseInsensitive));
+}
+
 void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 	MediaSessionBackend media;
+	media.setCurrentVoiceScopeId(42);
 	QSignalSpy startSpy(&media, &MediaSessionBackend::sharedStartRequested);
 	QSignalSpy eventSpy(&media, &MediaSessionBackend::sharedEventRequested);
 	QSignalSpy stateSpy(&media, &MediaSessionBackend::sharedPlaybackStateRequested);
@@ -3210,6 +4420,7 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 
 void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
 	MediaSessionBackend media;
+	media.setCurrentVoiceScopeId(8);
 	QSignalSpy eventSpy(&media, &MediaSessionBackend::sharedEventRequested);
 	media.applySharedState(QStringLiteral("unsafe-session"),
 		QUrl(QStringLiteral("https://cdn.example.com/media/shared.mp4")), QStringLiteral("direct"),
@@ -3251,8 +4462,173 @@ void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("available"));
 }
 
+void TestQmlClientModels::mediaSessionRejectsStaleSharedScopeAfterRoomMove() {
+	MediaSessionBackend media;
+	QSignalSpy eventSpy(&media, &MediaSessionBackend::sharedEventRequested);
+	const QUrl oldRoomUrl(QStringLiteral("https://www.youtube.com/embed/old-room"));
+	const QString oldSessionId = QStringLiteral("old-room-session");
+
+	media.setCurrentVoiceScopeId(10);
+	media.applySharedState(oldSessionId, oldRoomUrl, QStringLiteral("youtube"), QStringLiteral("Old room"),
+		10, 9, 9, { 9 }, QStringLiteral("start"), 3.0, true, 100, 17);
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	media.joinShared();
+	QCOMPARE(eventSpy.count(), 1);
+	media.applySharedState(oldSessionId, oldRoomUrl, QStringLiteral("youtube"), QStringLiteral("Old room"),
+		10, 17, 9, { 9, 17 }, QStringLiteral("join"), 3.0, true, 200, 17);
+	QVERIFY(media.sharedJoined());
+	QVERIFY(media.active());
+
+	media.setCurrentVoiceScopeId(20);
+	QVERIFY(!media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	QVERIFY(!media.active());
+	QCOMPARE(media.state(), QStringLiteral("idle"));
+
+	// Delayed join/state traffic from the old room must neither restore the
+	// session nor make a stale join request possible after the move.
+	media.applySharedState(oldSessionId, oldRoomUrl, QStringLiteral("youtube"), QStringLiteral("Old room"),
+		10, 9, 9, { 9, 17 }, QStringLiteral("state"), 12.0, false, 300, 17);
+	QVERIFY(!media.sharedAvailable());
+	media.joinShared();
+	QCOMPARE(eventSpy.count(), 1);
+
+	const QUrl newRoomUrl(QStringLiteral("https://www.youtube.com/embed/new-room"));
+	media.applySharedState(QStringLiteral("new-room-session"), newRoomUrl, QStringLiteral("youtube"),
+		QStringLiteral("New room"), 20, 19, 19, { 19 }, QStringLiteral("state"), 0.0, true, 400, 17);
+	QVERIFY(media.sharedAvailable());
+	QCOMPARE(media.sharedScopeId(), 20ULL);
+	QVERIFY(!media.sharedJoined());
+}
+
+void TestQmlClientModels::mediaSessionSharedStartTimeoutRecoversToIdle() {
+	MediaSessionBackend media(nullptr, 25);
+	media.setCurrentVoiceScopeId(42);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
+
+	QVERIFY(media.startShared(QUrl(QStringLiteral("https://www.youtube.com/embed/start-timeout")),
+		QStringLiteral("youtube"), QStringLiteral("Unacknowledged start")));
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("starting"));
+	QTRY_COMPARE_WITH_TIMEOUT(media.sharedOperationStatus(), QStringLiteral("idle"), 1000);
+	QVERIFY(!media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	QCOMPARE(media.state(), QStringLiteral("idle"));
+	QVERIFY(!media.sharedOperationError().isEmpty());
+	QCOMPARE(rejectionSpy.count(), 1);
+	QCOMPARE(rejectionSpy.constFirst().constFirst().toString(), media.sharedOperationError());
+}
+
+void TestQmlClientModels::mediaSessionSharedJoinTimeoutRestoresAvailableSession() {
+	MediaSessionBackend media(nullptr, 25);
+	media.setCurrentVoiceScopeId(42);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
+	const QString sessionId = QStringLiteral("join-timeout-session");
+	const QUrl url(QStringLiteral("https://www.youtube.com/embed/join-timeout"));
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Remote session"),
+		42, 9, 9, { 9 }, QStringLiteral("start"), 0.0, true, 1, 17);
+
+	QVERIFY(media.sharedAvailable());
+	media.joinShared();
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("starting"));
+	QTRY_COMPARE_WITH_TIMEOUT(media.sharedOperationStatus(), QStringLiteral("available"), 1000);
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	QCOMPARE(media.sharedSessionId(), sessionId);
+	QCOMPARE(media.state(), QStringLiteral("available"));
+	QVERIFY(!media.sharedOperationError().isEmpty());
+	QCOMPARE(rejectionSpy.count(), 1);
+}
+
+void TestQmlClientModels::mediaSessionSharedSuccessCancelsAcknowledgementTimeout() {
+	MediaSessionBackend media(nullptr, 25);
+	media.setCurrentVoiceScopeId(42);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
+	const QUrl url(QStringLiteral("https://www.youtube.com/embed/acknowledged-start"));
+	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Acknowledged start")));
+	const QString sessionId = media.sharedSessionId();
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Acknowledged start"),
+		42, 17, 17, { 17 }, QStringLiteral("start"), 0.0, true, 1, 17);
+
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
+	QVERIFY(media.sharedJoined());
+	QTest::qWait(75);
+	QCOMPARE(media.sharedSessionId(), sessionId);
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
+	QVERIFY(media.sharedOperationError().isEmpty());
+	QCOMPARE(rejectionSpy.count(), 0);
+}
+
+void TestQmlClientModels::mediaSessionStaleAcknowledgementTimeoutCannotAffectNewSession() {
+	MediaSessionBackend media(nullptr, 30);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
+	media.setCurrentVoiceScopeId(10);
+	QVERIFY(media.startShared(QUrl(QStringLiteral("https://www.youtube.com/embed/old-attempt")),
+		QStringLiteral("youtube"), QStringLiteral("Old attempt")));
+	const QString oldSessionId = media.sharedSessionId();
+
+	media.setCurrentVoiceScopeId(20);
+	QVERIFY(!media.sharedAvailable());
+	const QUrl newUrl(QStringLiteral("https://www.youtube.com/embed/new-attempt"));
+	QVERIFY(media.startShared(newUrl, QStringLiteral("youtube"), QStringLiteral("New attempt")));
+	const QString newSessionId = media.sharedSessionId();
+	QVERIFY(newSessionId != oldSessionId);
+	media.applySharedState(newSessionId, newUrl, QStringLiteral("youtube"), QStringLiteral("New attempt"),
+		20, 17, 17, { 17 }, QStringLiteral("start"), 0.0, true, 2, 17);
+
+	QTest::qWait(90);
+	QCOMPARE(media.sharedSessionId(), newSessionId);
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(media.sharedJoined());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
+	QVERIFY(media.sharedOperationError().isEmpty());
+	QCOMPARE(rejectionSpy.count(), 0);
+}
+
+void TestQmlClientModels::mediaSessionSharedClockSkewUsesReceiveOrder() {
+	MediaSessionBackend media;
+	media.setCurrentVoiceScopeId(42);
+	QSignalSpy seekSpy(&media, &MediaSessionBackend::seekRequested);
+	const QUrl url(QStringLiteral("https://www.youtube.com/embed/clock-skew"));
+	const QString sessionId = QStringLiteral("clock-skew-session");
+	const qulonglong selfSession = 17;
+	const qulonglong hostSession = 9;
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const qulonglong serverOneHourAhead = static_cast< qulonglong >(now + 60 * 60 * 1000);
+	const qulonglong serverOneHourBehind = static_cast< qulonglong >(now - 60 * 60 * 1000);
+
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Clock-safe clip"),
+		42, hostSession, hostSession, { hostSession }, QStringLiteral("start"), 2.0, false,
+		serverOneHourAhead, selfSession);
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	media.joinShared();
+
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Clock-safe clip"),
+		42, selfSession, hostSession, { hostSession, selfSession }, QStringLiteral("join"), 12.0, false,
+		serverOneHourAhead + 1000, selfSession);
+	QVERIFY(media.sharedJoined());
+	QVERIFY(!media.sharedHost());
+	QCOMPARE(media.position(), 12.0);
+	const qulonglong firstLocalGeneration = media.syncGeneration();
+	seekSpy.clear();
+
+	// A new event with a drastically regressed server wall clock is still the
+	// next event on this connection. It must neither be rejected nor add decades
+	// of apparent playback age.
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Clock-safe clip"),
+		42, hostSession, hostSession, { hostSession, selfSession }, QStringLiteral("playback"), 20.0, false,
+		serverOneHourBehind, selfSession);
+	QCOMPARE(media.position(), 20.0);
+	QVERIFY(media.position() < 60.0);
+	QVERIFY(media.syncGeneration() > firstLocalGeneration);
+	QCOMPARE(seekSpy.count(), 1);
+	QCOMPARE(seekSpy.constFirst().constFirst().toDouble(), 20.0);
+}
+
 void TestQmlClientModels::mediaSessionRejectsConflictingPlaybackDuringSharedSession() {
 	MediaSessionBackend media;
+	media.setCurrentVoiceScopeId(42);
 	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
 	const QUrl sharedUrl(QStringLiteral("https://www.youtube.com/embed/shared"));
 	const QUrl otherUrl(QStringLiteral("https://player.vimeo.com/video/other"));
@@ -3282,6 +4658,9 @@ void TestQmlClientModels::mediaSessionRejectsConflictingPlaybackDuringSharedSess
 	QVERIFY(!media.openDirect(QUrl(QStringLiteral("data:video/mp4;base64,AAAA")),
 								 QStringLiteral("video/mp4"), {}, {}, QStringLiteral("message:direct")));
 	QCOMPARE(rejectionSpy.count(), 3);
+	QVERIFY(!media.openDirectInline(QUrl(QStringLiteral("data:video/mp4;base64,AAAA")),
+									   QStringLiteral("video/mp4"), {}, {}, QStringLiteral("message:inline-direct")));
+	QCOMPARE(rejectionSpy.count(), 4);
 	QCOMPARE(media.sessionId(), sharedSessionId);
 	QCOMPARE(media.url(), sharedUrl);
 	QCOMPARE(media.state(), QStringLiteral("paused"));
@@ -3291,7 +4670,7 @@ void TestQmlClientModels::mediaSessionRejectsConflictingPlaybackDuringSharedSess
 	QVERIFY(media.open(sharedUrl, QStringLiteral("youtube"), sharedSessionId));
 	QCOMPARE(media.sessionId(), sharedSessionId);
 	QCOMPARE(media.state(), QStringLiteral("loading"));
-	QCOMPARE(rejectionSpy.count(), 3);
+	QCOMPARE(rejectionSpy.count(), 4);
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

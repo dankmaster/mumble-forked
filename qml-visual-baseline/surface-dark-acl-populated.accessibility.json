@@ -1,0 +1,1115 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Edit room",
+          "rect": {
+            "height": 26,
+            "width": 87,
+            "x": 150,
+            "y": 40
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1002,
+            "y": 44
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Manage room details, groups, and access rules for Lobby.",
+          "rect": {
+            "height": 15,
+            "width": 847,
+            "x": 150,
+            "y": 69
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Access control",
+          "rect": {
+            "height": 17,
+            "width": 856,
+            "x": 162,
+            "y": 114
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Room password",
+              "rect": {
+                "height": 15,
+                "width": 76,
+                "x": 403,
+                "y": 141
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Inherit ACLs from parent room",
+              "rect": {
+                "height": 36,
+                "width": 217,
+                "x": 162,
+                "y": 151
+              },
+              "role": "CheckBox",
+              "states": [
+                "checkable",
+                "checked",
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Room password",
+              "rect": {
+                "height": 36,
+                "width": 615,
+                "x": 403,
+                "y": 160
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable",
+                "passwordEdit"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Groups",
+              "rect": {
+                "height": 17,
+                "width": 44,
+                "x": 162,
+                "y": 208
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Add group",
+              "rect": {
+                "height": 32,
+                "width": 73,
+                "x": 211,
+                "y": 209
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "1 group",
+              "rect": {
+                "height": 15,
+                "width": 37,
+                "x": 162,
+                "y": 226
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Editable group, 2 added and 0 removed members",
+                  "name": "scrim-team",
+                  "rect": {
+                    "height": 48,
+                    "width": 274,
+                    "x": 162,
+                    "y": 253
+                  },
+                  "role": "ListItem",
+                  "states": [
+                    "selected"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Access-control groups",
+              "rect": {
+                "height": 48,
+                "width": 274,
+                "x": 162,
+                "y": 253
+              },
+              "role": "List",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Group name",
+                  "rect": {
+                    "height": 36,
+                    "width": 490,
+                    "x": 456,
+                    "y": 261
+                  },
+                  "role": "EditableText",
+                  "states": [
+                    "editable",
+                    "focusable",
+                    "focused"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Remove",
+                  "rect": {
+                    "height": 32,
+                    "width": 59,
+                    "x": 951,
+                    "y": 263
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Inherit members",
+                  "rect": {
+                    "height": 36,
+                    "width": 134,
+                    "x": 456,
+                    "y": 307
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Available to child rooms",
+                  "rect": {
+                    "height": 36,
+                    "width": 180,
+                    "x": 600,
+                    "y": 307
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "checked",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Added members",
+                  "rect": {
+                    "height": 15,
+                    "width": 356,
+                    "x": 456,
+                    "y": 353
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Removed members",
+                  "rect": {
+                    "height": 15,
+                    "width": 172,
+                    "x": 838,
+                    "y": 365
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Kira (#2)",
+                          "rect": {
+                            "height": 16,
+                            "width": 58,
+                            "x": 488,
+                            "y": 376
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Remove Kira (#2) (ID 2) from Added members",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 554,
+                            "y": 377
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "ID 2",
+                          "rect": {
+                            "height": 15,
+                            "width": 58,
+                            "x": 488,
+                            "y": 392
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "Registered user",
+                      "name": "Kira (#2), ID 2",
+                      "rect": {
+                        "height": 39,
+                        "width": 132,
+                        "x": 456,
+                        "y": 372
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Nova (#7)",
+                          "rect": {
+                            "height": 16,
+                            "width": 58,
+                            "x": 624,
+                            "y": 376
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Remove Nova (#7) (ID 7) from Added members",
+                          "rect": {
+                            "height": 30,
+                            "width": 30,
+                            "x": 690,
+                            "y": 377
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "ID 7",
+                          "rect": {
+                            "height": 15,
+                            "width": 58,
+                            "x": 624,
+                            "y": 392
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "Registered user",
+                      "name": "Nova (#7), ID 7",
+                      "rect": {
+                        "height": 39,
+                        "width": 132,
+                        "x": 592,
+                        "y": 372
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Added members",
+                  "rect": {
+                    "height": 39,
+                    "width": 370,
+                    "x": 456,
+                    "y": 372
+                  },
+                  "role": "List",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Removed members",
+                  "rect": {
+                    "height": 15,
+                    "width": 172,
+                    "x": 838,
+                    "y": 384
+                  },
+                  "role": "List",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Add to removed members",
+                  "rect": {
+                    "height": 15,
+                    "width": 172,
+                    "x": 838,
+                    "y": 403
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Add to added members",
+                  "rect": {
+                    "height": 15,
+                    "width": 370,
+                    "x": 456,
+                    "y": 415
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "Choose a registered user by name and numeric ID",
+                  "name": "Add user to Removed members",
+                  "rect": {
+                    "height": 32,
+                    "width": 172,
+                    "x": 838,
+                    "y": 422
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "Choose a registered user by name and numeric ID",
+                  "name": "Add user to Added members",
+                  "rect": {
+                    "height": 32,
+                    "width": 370,
+                    "x": 456,
+                    "y": 434
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Edit group scrim-team",
+              "rect": {
+                "height": 221,
+                "width": 570,
+                "x": 448,
+                "y": 253
+              },
+              "role": "Pane",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Access rules",
+              "rect": {
+                "height": 17,
+                "width": 74,
+                "x": 162,
+                "y": 486
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Add rule",
+              "rect": {
+                "height": 32,
+                "width": 61,
+                "x": 241,
+                "y": 487
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "3 rules",
+              "rect": {
+                "height": 15,
+                "width": 33,
+                "x": 162,
+                "y": 504
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Inherited rule",
+                  "name": "Rule for all",
+                  "rect": {
+                    "height": 48,
+                    "width": 274,
+                    "x": 162,
+                    "y": 531
+                  },
+                  "role": "ListItem",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "Editable group rule",
+                  "name": "Rule for scrim-team",
+                  "rect": {
+                    "height": 48,
+                    "width": 274,
+                    "x": 162,
+                    "y": 583
+                  },
+                  "role": "ListItem",
+                  "states": [
+                    "selected"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "Editable user rule",
+                  "name": "Rule for Kira",
+                  "rect": {
+                    "height": 48,
+                    "width": 274,
+                    "x": 162,
+                    "y": 635
+                  },
+                  "role": "ListItem",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Access rules",
+              "rect": {
+                "height": 152,
+                "width": 274,
+                "x": 162,
+                "y": 531
+              },
+              "role": "List",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Applies to",
+                  "rect": {
+                    "height": 15,
+                    "width": 49,
+                    "x": 456,
+                    "y": 539
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Group",
+                  "rect": {
+                    "height": 15,
+                    "width": 30,
+                    "x": 699,
+                    "y": 539
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 231,
+                    "x": 456,
+                    "y": 557
+                  },
+                  "role": "ComboBox",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 311,
+                    "x": 699,
+                    "y": 557
+                  },
+                  "role": "EditableText",
+                  "states": [
+                    "editable",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "This room",
+                  "rect": {
+                    "height": 36,
+                    "width": 98,
+                    "x": 456,
+                    "y": 604
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "checked",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Child rooms",
+                  "rect": {
+                    "height": 36,
+                    "width": 110,
+                    "x": 564,
+                    "y": 604
+                  },
+                  "role": "CheckBox",
+                  "states": [
+                    "checkable",
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Remove rule",
+                  "rect": {
+                    "height": 32,
+                    "width": 82,
+                    "x": 684,
+                    "y": 604
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Permissions",
+                  "rect": {
+                    "height": 15,
+                    "width": 554,
+                    "x": 456,
+                    "y": 651
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Write",
+                          "rect": {
+                            "height": 15,
+                            "width": 260,
+                            "x": 462,
+                            "y": 683
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 58,
+                                    "x": 468,
+                                    "y": 707
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 13,
+                                        "x": 471,
+                                        "y": 711
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 19,
+                                    "width": 19,
+                                    "x": 468,
+                                    "y": 710
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Allow",
+                              "rect": {
+                                "height": 36,
+                                "width": 70,
+                                "x": 462,
+                                "y": 701
+                              },
+                              "role": "CheckBox",
+                              "states": [
+                                "checkable",
+                                "checked",
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 56,
+                                    "x": 543,
+                                    "y": 707
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 19,
+                                    "width": 19,
+                                    "x": 543,
+                                    "y": 710
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Deny",
+                              "rect": {
+                                "height": 36,
+                                "width": 68,
+                                "x": 537,
+                                "y": 701
+                              },
+                              "role": "CheckBox",
+                              "states": [
+                                "checkable",
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 260,
+                                "x": 610,
+                                "y": 719
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 36,
+                            "width": 260,
+                            "x": 462,
+                            "y": 701
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 54,
+                        "width": 260,
+                        "x": 462,
+                        "y": 683
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 66,
+                    "width": 272,
+                    "x": 456,
+                    "y": 677
+                  },
+                  "role": "Client",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Traverse",
+                          "rect": {
+                            "height": 15,
+                            "width": 260,
+                            "x": 744,
+                            "y": 683
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 58,
+                                    "x": 750,
+                                    "y": 707
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [],
+                                      "description": "",
+                                      "name": "",
+                                      "rect": {
+                                        "height": 17,
+                                        "width": 13,
+                                        "x": 753,
+                                        "y": 711
+                                      },
+                                      "role": "StaticText",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 19,
+                                    "width": 19,
+                                    "x": 750,
+                                    "y": 710
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Allow",
+                              "rect": {
+                                "height": 36,
+                                "width": 70,
+                                "x": 744,
+                                "y": 701
+                              },
+                              "role": "CheckBox",
+                              "states": [
+                                "checkable",
+                                "checked",
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 24,
+                                    "width": 56,
+                                    "x": 825,
+                                    "y": 707
+                                  },
+                                  "role": "StaticText",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 19,
+                                    "width": 19,
+                                    "x": 825,
+                                    "y": 710
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "Deny",
+                              "rect": {
+                                "height": 36,
+                                "width": 68,
+                                "x": 819,
+                                "y": 701
+                              },
+                              "role": "CheckBox",
+                              "states": [
+                                "checkable",
+                                "focusable"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 260,
+                                "x": 892,
+                                "y": 719
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 36,
+                            "width": 260,
+                            "x": 744,
+                            "y": 701
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 54,
+                        "width": 260,
+                        "x": 744,
+                        "y": 683
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 66,
+                    "width": 272,
+                    "x": 738,
+                    "y": 677
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Edit rule for scrim-team",
+              "rect": {
+                "height": 372,
+                "width": 570,
+                "x": 448,
+                "y": 531
+              },
+              "role": "Pane",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 762,
+            "width": 856,
+            "x": 162,
+            "y": 141
+          },
+          "role": "Client",
+          "states": [
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Cancel",
+          "rect": {
+            "height": 36,
+            "width": 59,
+            "x": 892,
+            "y": 826
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Save room",
+          "rect": {
+            "height": 36,
+            "width": 81,
+            "x": 957,
+            "y": 826
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Manage room details, groups, and access rules for Lobby.",
+      "name": "Edit room",
+      "rect": {
+        "height": 852,
+        "width": 920,
+        "x": 130,
+        "y": 24
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 900,
+    "width": 1180,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

@@ -96,6 +96,7 @@ TestCase {
 		session.volumeCalls = 0
 		session.muteCalls = 0
 		controlsLoader.item.externalAvailable = false
+		controlsLoader.item.embedded = false
 		controlsLoader.item.fullscreen = false
 		findChild(controlsLoader.item, "mediaExternalButton").text = "Open externally"
 		findChild(controlsLoader.item, "mediaCloseButton").text = "End session"
@@ -113,6 +114,41 @@ TestCase {
 		verify(controls.focusInitialControl())
 	}
 
+	function test_transport_actions_use_semantic_vector_icons_and_accessible_names() {
+		const controls = controlsLoader.item
+		const playButton = findChild(controls, "mediaPlayButton")
+		const muteButton = findChild(controls, "mediaMuteButton")
+		const fullscreenButton = findChild(controls, "mediaFullscreenButton")
+		const closeButton = findChild(controls, "mediaCloseButton")
+		const closeIcon = findChild(controls, "mediaCloseIcon")
+		verify(playButton !== null && muteButton !== null && fullscreenButton !== null)
+		verify(closeButton !== null && closeIcon !== null)
+
+		compare(playButton.iconName, "play")
+		compare(playButton.Accessible.name, "Play")
+		session.state = "playing"
+		tryCompare(playButton, "iconName", "pause")
+		compare(playButton.Accessible.name, "Pause")
+
+		compare(muteButton.iconName, "volume")
+		compare(muteButton.Accessible.name, "Mute media")
+		session.muted = true
+		tryCompare(muteButton, "iconName", "volume-off")
+		compare(muteButton.Accessible.name, "Unmute media")
+
+		compare(fullscreenButton.iconName, "fullscreen")
+		compare(fullscreenButton.Accessible.name, "Enter full screen")
+		controls.fullscreen = true
+		tryCompare(fullscreenButton, "iconName", "fullscreen-exit")
+		compare(fullscreenButton.Accessible.name, "Exit full screen")
+
+		verify(!closeIcon.visible)
+		controls.embedded = true
+		tryCompare(closeIcon, "visible", true)
+		compare(closeIcon.name, "close")
+		compare(closeButton.Accessible.name, "End session")
+	}
+
 	function test_nested_popups_keep_the_product_palette_and_custom_chrome() {
 		const volumePopup = findChild(controlsLoader.item, "mediaVolumePopup")
 		const closeDialog = findChild(controlsLoader.item, "mediaCloseConfirmation")
@@ -125,6 +161,37 @@ TestCase {
 		compare(closeDialog.palette.highlight, Theme.selected)
 		compare(closeDialog.palette.toolTipText, Theme.textStrong)
 		compare(closeDialog.palette.disabled.link, Theme.textMuted)
+	}
+
+	function test_close_confirmation_owns_accessibility_and_restores_the_opener() {
+		const controls = controlsLoader.item
+		const playButton = findChild(controls, "mediaPlayButton")
+		const closeButton = findChild(controls, "mediaCloseButton")
+		const closeDialog = findChild(controls, "mediaCloseConfirmation")
+		const cancelButton = findChild(controls, "mediaCloseCancelButton")
+		const barrier = findChild(controls, "mediaCloseAccessibilityBarrier")
+		verify(playButton !== null && closeButton !== null && closeDialog !== null)
+		verify(cancelButton !== null && barrier !== null)
+
+		playButton.forceActiveFocus()
+		tryCompare(playButton, "activeFocus", true)
+		compare(controls.requestClose(), false)
+		tryCompare(closeDialog, "opened", true)
+		tryCompare(cancelButton, "activeFocus", true)
+		tryCompare(controls.Accessible, "ignored", true)
+		tryCompare(playButton.Accessible, "ignored", true)
+		tryCompare(closeButton.Accessible, "ignored", true)
+		tryCompare(barrier, "active", true)
+		verify(!closeDialog.contentItem.Accessible.ignored)
+		verify(!cancelButton.Accessible.ignored)
+
+		controls.dismissClosePrompt()
+		tryCompare(closeDialog, "opened", false)
+		tryCompare(controls.Accessible, "ignored", false)
+		tryCompare(playButton.Accessible, "ignored", false)
+		tryCompare(closeButton.Accessible, "ignored", false)
+		tryCompare(barrier, "active", false)
+		tryCompare(playButton, "activeFocus", true)
 	}
 
 	function test_shared_window_close_requires_an_explicit_choice() {
@@ -203,6 +270,31 @@ TestCase {
 		compare(session.volume, 37)
 	}
 
+	function test_embedded_controls_use_one_compact_transport_row() {
+		testCase.width = 548
+		const controls = controlsLoader.item
+		controls.embedded = true
+		tryCompare(controls, "compactControls", true)
+		const seek = findChild(controls, "mediaSeekSlider")
+		const embeddedSeek = findChild(controls, "mediaEmbeddedSeekSlider")
+		const embeddedTime = findChild(controls, "mediaEmbeddedTimeLabel")
+		verify(seek !== null && embeddedSeek !== null && embeddedTime !== null)
+		verify(!seek.visible)
+		verify(embeddedSeek.visible)
+		verify(embeddedTime.visible)
+		verify(embeddedSeek.width >= 72)
+		verify(controls.implicitHeight <= 64,
+			"embedded controls height=" + controls.implicitHeight
+			+ " flowHeight=" + findChild(controls, "mediaTransportActions").height
+			+ " flowWidth=" + findChild(controls, "mediaTransportActions").width)
+		compare(controls.color, Theme.embedSurface)
+
+		testCase.width = 390
+		tryCompare(controls, "embeddedNarrow", true)
+		verify(!embeddedTime.visible)
+		verify(embeddedSeek.visible && embeddedSeek.width >= 72)
+	}
+
 	function test_long_action_labels_wrap_inside_the_minimum_width() {
 		testCase.width = 640
 		session.state = "error"
@@ -220,8 +312,9 @@ TestCase {
 			const control = findChild(controlsLoader.item, controlNames[i])
 			verify(control !== null, controlNames[i] + " exists")
 			if (control.visible)
-				verify(control.x >= -0.5 && control.x + control.width <= flow.width + 0.5,
-					controlNames[i] + " remains inside the responsive action flow")
+				tryVerify(function() {
+					return control.x >= -0.5 && control.x + control.width <= flow.width + 0.5
+				}, 1000, controlNames[i] + " remains inside the responsive action flow")
 		}
 	}
 

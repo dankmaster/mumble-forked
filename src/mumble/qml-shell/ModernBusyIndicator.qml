@@ -24,6 +24,7 @@ Item {
 	Accessible.ignored: !visible || !running
 
 	Behavior on opacity {
+		enabled: control.animated
 		NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic }
 	}
 
@@ -52,5 +53,10 @@ Item {
 		duration: Math.max(720, Theme.motionSlow * 4)
 		loops: Animation.Infinite
 		running: control.animated && control.running && control.visible
+		onRunningChanged: if (!running) control.rotation = 0
 	}
+
+	onAnimatedChanged: if (!animated) rotation = 0
+	onRunningChanged: if (!running) rotation = 0
+	onVisibleChanged: if (!visible) rotation = 0
 }

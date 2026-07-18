@@ -4,6 +4,8 @@ import Mumble.Theme 1.0
 
 ApplicationWindow {
     id: viewer
+	objectName: "imageViewerWindow"
+	readonly property string surfaceId: "imageViewer.window"
     required property var controller
     readonly property var imageState: controller.state.imageViewer || ({})
     property real zoom: 1.0
@@ -85,6 +87,7 @@ ApplicationWindow {
     minimumWidth: 420
     minimumHeight: 320
     visible: true
+	modality: Qt.WindowModal
     color: Theme.shellBackground
     flags: Qt.Window | Qt.FramelessWindowHint
 	title: displayTitle
@@ -171,7 +174,8 @@ ApplicationWindow {
                 anchors.top: parent.top
                 height: parent.height
                 ModernIconButton {
-					width: titleBar.height; height: parent.height; text: "−"
+					objectName: "imageViewerMinimize"
+					width: titleBar.height; height: parent.height; iconName: "minimize"
                     Accessible.name: qsTr("Minimize image viewer")
                     onClicked: viewer.showMinimized()
                 }
@@ -199,6 +203,7 @@ ApplicationWindow {
 
             Image {
                 id: picture
+				objectName: "imageViewerImage"
                 asynchronous: true
                 cache: false
                 smooth: true
@@ -207,6 +212,7 @@ ApplicationWindow {
                 height: Math.max(1, Number(viewer.imageState.height || sourceSize.height || 1)) * viewer.fitScale() * viewer.zoom
                 x: Math.round((stage.width - width) / 2 + viewer.panX)
                 y: Math.round((stage.height - height) / 2 + viewer.panY)
+				Accessible.role: Accessible.Graphic
                 Accessible.name: viewer.title
                 onStatusChanged: if (status === Image.Ready) viewer.resetZoom()
             }
@@ -217,6 +223,7 @@ ApplicationWindow {
 				running: picture.status === Image.Loading
 				visible: running
 				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
+				Accessible.ignored: !visible
 			}
 
 			Label {
@@ -233,6 +240,7 @@ ApplicationWindow {
 				Accessible.role: Accessible.AlertMessage
 				Accessible.name: text
 				Accessible.description: viewer.displayTitle
+				Accessible.ignored: !visible
 			}
 
             MouseArea {

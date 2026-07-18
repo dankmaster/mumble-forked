@@ -1,0 +1,459 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Ban list",
+          "rect": {
+            "height": 26,
+            "width": 63,
+            "x": 150,
+            "y": 80
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1002,
+            "y": 84
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Inspect and manage active server bans.",
+          "rect": {
+            "height": 15,
+            "width": 847,
+            "x": 150,
+            "y": 109
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Search user, address, hash or reason",
+                      "rect": {
+                        "height": 36,
+                        "width": 753,
+                        "x": 174,
+                        "y": 166
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable",
+                        "focused"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Refresh",
+                      "rect": {
+                        "height": 36,
+                        "width": 36,
+                        "x": 970,
+                        "y": 166
+                      },
+                      "role": "Button",
+                      "states": [
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "0 of 0",
+                      "rect": {
+                        "height": 15,
+                        "width": 27,
+                        "x": 935,
+                        "y": 177
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Add ban",
+                      "rect": {
+                        "height": 20,
+                        "width": 310,
+                        "x": 684,
+                        "y": 226
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "IP address",
+                      "rect": {
+                        "height": 15,
+                        "width": 50,
+                        "x": 684,
+                        "y": 254
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "IP address",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 277
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Subnet mask",
+                      "rect": {
+                        "height": 15,
+                        "width": 62,
+                        "x": 684,
+                        "y": 321
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "32",
+                          "name": "Subnet mask",
+                          "rect": {
+                            "height": 36,
+                            "width": 264,
+                            "x": 696,
+                            "y": 344
+                          },
+                          "role": "SpinBox",
+                          "states": [
+                            "disabled"
+                          ]
+                        }
+                      ],
+                      "description": "32",
+                      "name": "Subnet mask",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 344
+                      },
+                      "role": "SpinBox",
+                      "states": [
+                        "disabled"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "User label",
+                      "rect": {
+                        "height": 15,
+                        "width": 50,
+                        "x": 684,
+                        "y": 388
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "User label",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 411
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "No active bans",
+                      "rect": {
+                        "height": 17,
+                        "width": 87,
+                        "x": 373,
+                        "y": 434
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Certificate hash",
+                      "rect": {
+                        "height": 15,
+                        "width": 77,
+                        "x": 684,
+                        "y": 455
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Certificate hash",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 478
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Reason",
+                      "rect": {
+                        "height": 15,
+                        "width": 35,
+                        "x": 684,
+                        "y": 522
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Reason",
+                      "rect": {
+                        "height": 72,
+                        "width": 310,
+                        "x": 684,
+                        "y": 545
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 255,
+                                "x": 684,
+                                "y": 624
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 231,
+                                "x": 696,
+                                "y": 628
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Add ban",
+                          "rect": {
+                            "height": 36,
+                            "width": 255,
+                            "x": 684,
+                            "y": 624
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 50,
+                                "x": 944,
+                                "y": 624
+                              },
+                              "role": "Client",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 26,
+                                "x": 956,
+                                "y": 628
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "Clear",
+                          "rect": {
+                            "height": 36,
+                            "width": 50,
+                            "x": 944,
+                            "y": 624
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 624
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Ban list editor",
+                  "rect": {
+                    "height": 530,
+                    "width": 856,
+                    "x": 162,
+                    "y": 154
+                  },
+                  "role": "Pane",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 530,
+                "width": 856,
+                "x": 162,
+                "y": 154
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            }
+          ],
+          "description": "form",
+          "name": "Dialog section",
+          "rect": {
+            "height": 558,
+            "width": 884,
+            "x": 148,
+            "y": 140
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Close",
+          "rect": {
+            "height": 36,
+            "width": 52,
+            "x": 986,
+            "y": 746
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Inspect and manage active server bans.",
+      "name": "Ban list",
+      "rect": {
+        "height": 732,
+        "width": 920,
+        "x": 130,
+        "y": 64
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 860,
+    "width": 1180,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

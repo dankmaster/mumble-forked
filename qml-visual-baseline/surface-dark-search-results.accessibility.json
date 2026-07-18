@@ -1,0 +1,754 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Search",
+          "rect": {
+            "height": 26,
+            "width": 58,
+            "x": 110,
+            "y": 57
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 862,
+            "y": 61
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Find users and rooms on the current server.",
+          "rect": {
+            "height": 15,
+            "width": 747,
+            "x": 110,
+            "y": 86
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Search",
+              "rect": {
+                "height": 17,
+                "width": 756,
+                "x": 122,
+                "y": 131
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Search",
+                      "rect": {
+                        "height": 15,
+                        "width": 33,
+                        "x": 122,
+                        "y": 158
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 36,
+                            "width": 756,
+                            "x": 122,
+                            "y": 178
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 17,
+                            "width": 1,
+                            "x": 162,
+                            "y": 188
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Search",
+                      "rect": {
+                        "height": 36,
+                        "width": 756,
+                        "x": 122,
+                        "y": 178
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable",
+                        "focused"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 56,
+                    "width": 756,
+                    "x": 122,
+                    "y": 158
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 56,
+                "width": 756,
+                "x": 122,
+                "y": 158
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 24,
+                            "width": 744,
+                            "x": 128,
+                            "y": 230
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 131,
+                                "y": 234
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 128,
+                            "y": 233
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Users",
+                      "rect": {
+                        "height": 36,
+                        "width": 756,
+                        "x": 122,
+                        "y": 224
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 756,
+                    "x": 122,
+                    "y": 224
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 756,
+                "x": 122,
+                "y": 224
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 24,
+                            "width": 744,
+                            "x": 128,
+                            "y": 276
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 17,
+                                "width": 13,
+                                "x": 131,
+                                "y": 280
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 128,
+                            "y": 279
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Rooms",
+                      "rect": {
+                        "height": 36,
+                        "width": 756,
+                        "x": 122,
+                        "y": 270
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "checked",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 756,
+                    "x": 122,
+                    "y": 270
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 756,
+                "x": 122,
+                "y": 270
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 24,
+                            "width": 744,
+                            "x": 128,
+                            "y": 322
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 128,
+                            "y": 325
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Case sensitive",
+                      "rect": {
+                        "height": 36,
+                        "width": 756,
+                        "x": 122,
+                        "y": 316
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 756,
+                    "x": 122,
+                    "y": 316
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 756,
+                "x": 122,
+                "y": 316
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 24,
+                            "width": 744,
+                            "x": 128,
+                            "y": 368
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 19,
+                            "width": 19,
+                            "x": 128,
+                            "y": 371
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "Regular expression",
+                      "rect": {
+                        "height": 36,
+                        "width": 756,
+                        "x": 122,
+                        "y": 362
+                      },
+                      "role": "CheckBox",
+                      "states": [
+                        "checkable",
+                        "focusable"
+                      ]
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 36,
+                    "width": 756,
+                    "x": 122,
+                    "y": 362
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 36,
+                "width": 756,
+                "x": 122,
+                "y": 362
+              },
+              "role": "Client",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Results",
+                  "rect": {
+                    "height": 16,
+                    "width": 39,
+                    "x": 122,
+                    "y": 408
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Relay Ops",
+                          "rect": {
+                            "height": 16,
+                            "width": 630,
+                            "x": 134,
+                            "y": 446
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Open",
+                          "rect": {
+                            "height": 32,
+                            "width": 45,
+                            "x": 774,
+                            "y": 446
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Join",
+                          "rect": {
+                            "height": 32,
+                            "width": 37,
+                            "x": 829,
+                            "y": 446
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Root / Operations - room name match",
+                          "rect": {
+                            "height": 14,
+                            "width": 630,
+                            "x": 134,
+                            "y": 464
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "Root / Operations - room name match",
+                      "name": "Relay Ops",
+                      "rect": {
+                        "height": 54,
+                        "width": 756,
+                        "x": 122,
+                        "y": 434
+                      },
+                      "role": "ListItem",
+                      "states": [
+                        "selected"
+                      ]
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "#relay",
+                          "rect": {
+                            "height": 16,
+                            "width": 677,
+                            "x": 134,
+                            "y": 506
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Open",
+                          "rect": {
+                            "height": 32,
+                            "width": 45,
+                            "x": 821,
+                            "y": 506
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Text room - 4 matching messages",
+                          "rect": {
+                            "height": 14,
+                            "width": 677,
+                            "x": 134,
+                            "y": 524
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "Text room - 4 matching messages",
+                      "name": "#relay",
+                      "rect": {
+                        "height": 54,
+                        "width": 756,
+                        "x": 122,
+                        "y": 494
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Relay_Bot",
+                          "rect": {
+                            "height": 16,
+                            "width": 603,
+                            "x": 134,
+                            "y": 566
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Message",
+                          "rect": {
+                            "height": 32,
+                            "width": 62,
+                            "x": 747,
+                            "y": 566
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "Select",
+                          "rect": {
+                            "height": 32,
+                            "width": 47,
+                            "x": 819,
+                            "y": 566
+                          },
+                          "role": "Button",
+                          "states": [
+                            "focusable"
+                          ]
+                        },
+                        {
+                          "children": [],
+                          "description": "",
+                          "name": "User - Root / Operations",
+                          "rect": {
+                            "height": 14,
+                            "width": 603,
+                            "x": 134,
+                            "y": 584
+                          },
+                          "role": "StaticText",
+                          "states": []
+                        }
+                      ],
+                      "description": "User - Root / Operations",
+                      "name": "Relay_Bot",
+                      "rect": {
+                        "height": 54,
+                        "width": 756,
+                        "x": 122,
+                        "y": 554
+                      },
+                      "role": "ListItem",
+                      "states": []
+                    }
+                  ],
+                  "description": "3 result(s)",
+                  "name": "Results",
+                  "rect": {
+                    "height": 174,
+                    "width": 756,
+                    "x": 122,
+                    "y": 434
+                  },
+                  "role": "List",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 200,
+                "width": 756,
+                "x": 122,
+                "y": 408
+              },
+              "role": "Client",
+              "states": []
+            }
+          ],
+          "description": "form",
+          "name": "Search",
+          "rect": {
+            "height": 505,
+            "width": 784,
+            "x": 108,
+            "y": 117
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Close",
+          "rect": {
+            "height": 36,
+            "width": 52,
+            "x": 846,
+            "y": 670
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Find users and rooms on the current server.",
+      "name": "Search",
+      "rect": {
+        "height": 679,
+        "width": 820,
+        "x": 90,
+        "y": 41
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 760,
+    "width": 1000,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

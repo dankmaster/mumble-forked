@@ -80,7 +80,8 @@ public:
 							const QString &customAccent = QStringLiteral("#5ec8b0"), int customAccentStrength = 50);
 	void applyTokens(const UiThemeTokens &tokens, const Mumble::ModernTheme::ThemeMetrics &metrics = {},
 					 const QColor &shellBackground = {});
-	bool applyVisualGateAppearance(const QString &theme, const QString &layout);
+	bool applyVisualGateAppearance(const QString &theme, const QString &layout,
+							   const QString &density = {});
 
 signals:
 	void themeChanged();

@@ -48,10 +48,14 @@ namespace chatperf {
 #include <QtCore/QtGlobal>
 
 #include <algorithm>
+#include <condition_variable>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace mumble {
@@ -118,15 +122,184 @@ namespace chatperf {
 			return path;
 		}
 
-		inline void appendLineLocked(const QString &line) {
-			QFile file(logPath());
-			if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-				return;
+		class AsyncTraceWriter final {
+		public:
+			AsyncTraceWriter() : m_worker([this]() { run(); }) {}
+
+			~AsyncTraceWriter() {
+				{
+					std::lock_guard< std::mutex > lock(m_mutex);
+					m_stopping = true;
+				}
+				m_ready.notify_one();
+				if (m_worker.joinable()) {
+					m_worker.join();
+				}
 			}
 
-			file.write(line.toUtf8());
-			file.write("\n");
-			file.close();
+			void enqueue(const QString &path, const QString &line) {
+				enqueue(path, line.toUtf8());
+			}
+
+			void enqueue(const QString &path, QByteArray bytes) {
+				PendingItem pending;
+				pending.path  = path;
+				pending.bytes = std::move(bytes);
+				if (!pending.bytes.endsWith('\n')) {
+					pending.bytes.append('\n');
+				}
+				{
+					std::lock_guard< std::mutex > lock(m_mutex);
+					m_pending.push_back(std::move(pending));
+				}
+				m_ready.notify_one();
+			}
+
+			void enqueueSnapshot(const QString &path, qint64 windowMs,
+							 std::unordered_map< std::string, TimingStats > timings,
+							 std::unordered_map< std::string, ValueStats > values) {
+				PendingItem pending;
+				pending.path = path;
+				pending.windowMs = windowMs;
+				pending.timings = std::move(timings);
+				pending.values = std::move(values);
+				pending.isSnapshot = true;
+				{
+					std::lock_guard< std::mutex > lock(m_mutex);
+					m_pending.push_back(std::move(pending));
+				}
+				m_ready.notify_one();
+			}
+
+		private:
+			struct PendingItem {
+				QString path;
+				QByteArray bytes;
+				qint64 windowMs = 0;
+				std::unordered_map< std::string, TimingStats > timings;
+				std::unordered_map< std::string, ValueStats > values;
+				bool isSnapshot = false;
+			};
+
+			static QByteArray formatSnapshot(PendingItem &snapshot) {
+				struct SortedTimingEntry {
+					std::string name;
+					TimingStats stats;
+				};
+				struct SortedValueEntry {
+					std::string name;
+					ValueStats stats;
+				};
+
+				std::vector< SortedTimingEntry > sortedTimings;
+				sortedTimings.reserve(snapshot.timings.size());
+				for (const auto &entry : snapshot.timings) {
+					sortedTimings.push_back(SortedTimingEntry { entry.first, entry.second });
+				}
+				std::sort(sortedTimings.begin(), sortedTimings.end(),
+						  [](const SortedTimingEntry &lhs, const SortedTimingEntry &rhs) {
+							  return lhs.stats.totalNs > rhs.stats.totalNs;
+						  });
+
+				std::vector< SortedValueEntry > sortedValues;
+				sortedValues.reserve(snapshot.values.size());
+				for (const auto &entry : snapshot.values) {
+					sortedValues.push_back(SortedValueEntry { entry.first, entry.second });
+				}
+				std::sort(sortedValues.begin(), sortedValues.end(),
+						  [](const SortedValueEntry &lhs, const SortedValueEntry &rhs) {
+							  return lhs.stats.total > rhs.stats.total;
+						  });
+
+				QByteArray bytes;
+				auto appendLine = [&bytes](const QString &line) {
+					bytes.append(line.toUtf8());
+					bytes.append('\n');
+				};
+				appendLine(QString::fromLatin1("[chat-perf] window_ms=%1 timing_entries=%2 value_entries=%3")
+							   .arg(snapshot.windowMs)
+							   .arg(sortedTimings.size())
+							   .arg(sortedValues.size()));
+
+				const std::size_t maxTimingEntries = std::min< std::size_t >(sortedTimings.size(), 12);
+				for (std::size_t index = 0; index < maxTimingEntries; ++index) {
+					const SortedTimingEntry &entry = sortedTimings[index];
+					const double totalMs = static_cast< double >(entry.stats.totalNs) / 1000000.0;
+					const double averageMs = entry.stats.count > 0
+						? totalMs / static_cast< double >(entry.stats.count)
+						: 0.0;
+					const double maximumMs = static_cast< double >(entry.stats.maxNs) / 1000000.0;
+					appendLine(
+						QString::fromLatin1("[chat-perf][timing] %1 count=%2 total_ms=%3 avg_ms=%4 max_ms=%5")
+							.arg(QString::fromStdString(entry.name))
+							.arg(entry.stats.count)
+							.arg(totalMs, 0, 'f', 3)
+							.arg(averageMs, 0, 'f', 3)
+							.arg(maximumMs, 0, 'f', 3));
+				}
+
+				const std::size_t maxValueEntries = std::min< std::size_t >(sortedValues.size(), 12);
+				for (std::size_t index = 0; index < maxValueEntries; ++index) {
+					const SortedValueEntry &entry = sortedValues[index];
+					const double averageValue = entry.stats.count > 0
+						? static_cast< double >(entry.stats.total) / static_cast< double >(entry.stats.count)
+						: 0.0;
+					appendLine(QString::fromLatin1("[chat-perf][value] %1 count=%2 total=%3 avg=%4 max=%5")
+							   .arg(QString::fromStdString(entry.name))
+							   .arg(entry.stats.count)
+							   .arg(entry.stats.total)
+							   .arg(averageValue, 0, 'f', 2)
+							   .arg(entry.stats.max));
+				}
+				return bytes;
+			}
+
+			void run() {
+				for (;;) {
+					std::deque< PendingItem > pending;
+					{
+						std::unique_lock< std::mutex > lock(m_mutex);
+						m_ready.wait(lock, [this]() { return m_stopping || !m_pending.empty(); });
+						if (m_stopping && m_pending.empty()) {
+							return;
+						}
+						pending.swap(m_pending);
+					}
+
+					while (!pending.empty()) {
+						const QString path = pending.front().path;
+						QByteArray bytes;
+						do {
+							PendingItem item = std::move(pending.front());
+							pending.pop_front();
+							bytes.append(item.isSnapshot ? formatSnapshot(item) : item.bytes);
+						} while (!pending.empty() && pending.front().path == path);
+
+						QFile file(path);
+						if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+							file.write(bytes);
+							file.close();
+						}
+					}
+				}
+			}
+
+			std::mutex m_mutex;
+			std::condition_variable m_ready;
+			std::deque< PendingItem > m_pending;
+			bool m_stopping = false;
+			std::thread m_worker;
+		};
+
+		inline AsyncTraceWriter &traceWriter() {
+			static AsyncTraceWriter writer;
+			return writer;
+		}
+
+		inline void appendLineLocked(const QString &line) {
+			// Trace call sites run predominantly on the GUI thread. File creation,
+			// writes and flushes must never become part of the measured UI workload.
+			traceWriter().enqueue(logPath(), line);
 		}
 
 		inline void flushLocked(qint64 elapsedMs) {
@@ -135,87 +308,33 @@ namespace chatperf {
 				return;
 			}
 
-			auto &timings = timingStats();
-			auto &values  = valueStats();
-			if (timings.empty() && values.empty()) {
+			if (timingStats().empty() && valueStats().empty()) {
 				lastFlushMs() = elapsedMs;
 				pendingRecordCount() = 0;
 				return;
 			}
 
-			struct SortedTimingEntry {
-				std::string name;
-				TimingStats stats;
-			};
-			struct SortedValueEntry {
-				std::string name;
-				ValueStats stats;
-			};
-
-			std::vector< SortedTimingEntry > sortedTimings;
-			sortedTimings.reserve(timings.size());
-			for (const auto &entry : timings) {
-				sortedTimings.push_back(SortedTimingEntry { entry.first, entry.second });
-			}
-			std::sort(sortedTimings.begin(), sortedTimings.end(),
-					  [](const SortedTimingEntry &lhs, const SortedTimingEntry &rhs) {
-						  return lhs.stats.totalNs > rhs.stats.totalNs;
-					  });
-
-			std::vector< SortedValueEntry > sortedValues;
-			sortedValues.reserve(values.size());
-			for (const auto &entry : values) {
-				sortedValues.push_back(SortedValueEntry { entry.first, entry.second });
-			}
-			std::sort(sortedValues.begin(), sortedValues.end(),
-					  [](const SortedValueEntry &lhs, const SortedValueEntry &rhs) {
-						  return lhs.stats.total > rhs.stats.total;
-					  });
-
-			appendLineLocked(QString::fromLatin1("[chat-perf] window_ms=%1 timing_entries=%2 value_entries=%3")
-								 .arg(windowMs)
-								 .arg(sortedTimings.size())
-								 .arg(sortedValues.size()));
-
-			const std::size_t maxTimingEntries = std::min< std::size_t >(sortedTimings.size(), 12);
-			for (std::size_t i = 0; i < maxTimingEntries; ++i) {
-				const SortedTimingEntry &entry = sortedTimings[i];
-				const double totalMs = static_cast< double >(entry.stats.totalNs) / 1000000.0;
-				const double avgMs =
-					entry.stats.count > 0 ? totalMs / static_cast< double >(entry.stats.count ) : 0.0;
-				const double maxMs = static_cast< double >(entry.stats.maxNs) / 1000000.0;
-				appendLineLocked(QString::fromLatin1("[chat-perf][timing] %1 count=%2 total_ms=%3 avg_ms=%4 max_ms=%5")
-									 .arg(QString::fromStdString(entry.name))
-									 .arg(entry.stats.count)
-									 .arg(totalMs, 0, 'f', 3)
-									 .arg(avgMs, 0, 'f', 3)
-									 .arg(maxMs, 0, 'f', 3));
-			}
-
-			const std::size_t maxValueEntries = std::min< std::size_t >(sortedValues.size(), 12);
-			for (std::size_t i = 0; i < maxValueEntries; ++i) {
-				const SortedValueEntry &entry = sortedValues[i];
-				const double avgValue =
-					entry.stats.count > 0
-						? static_cast< double >(entry.stats.total) / static_cast< double >(entry.stats.count)
-						: 0.0;
-				appendLineLocked(QString::fromLatin1("[chat-perf][value] %1 count=%2 total=%3 avg=%4 max=%5")
-									 .arg(QString::fromStdString(entry.name))
-									 .arg(entry.stats.count)
-									 .arg(entry.stats.total)
-									 .arg(avgValue, 0, 'f', 2)
-									 .arg(entry.stats.max));
-			}
-
-			timings.clear();
-			values.clear();
+			std::unordered_map< std::string, TimingStats > timings;
+			std::unordered_map< std::string, ValueStats > values;
+			timings.swap(timingStats());
+			values.swap(valueStats());
 			lastFlushMs() = elapsedMs;
 			pendingRecordCount() = 0;
+			// Sorting, formatting and file access all happen on the writer thread. The
+			// measured caller only swaps two small maps and enqueues the immutable window.
+			traceWriter().enqueueSnapshot(logPath(), windowMs, std::move(timings), std::move(values));
 		}
 	} // namespace detail
 
 	inline bool enabled() {
 		return detail::enabled();
+	}
+
+	inline void appendFileLineAsync(const QString &path, QByteArray line) {
+		// This helper is also used by opt-in connection diagnostics. Keeping all
+		// diagnostic file access behind the same worker prevents an enabled trace
+		// from turning a GUI-thread code path into synchronous file I/O.
+		detail::traceWriter().enqueue(path, std::move(line));
 	}
 
 	inline void recordDuration(const char *name, qint64 elapsedNs) {
@@ -289,6 +408,7 @@ namespace chatperf {
 
 #else // MUMBLE_HAS_CHAT_PERF_TRACE
 
+#include <QtCore/QByteArray>
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
 
@@ -306,6 +426,7 @@ namespace chatperf {
 	inline void recordDuration(const char *, qint64) {}
 	inline void recordValue(const char *, qint64) {}
 	inline void recordNote(const char *, const QString &) {}
+	inline void appendFileLineAsync(const QString &, QByteArray) {}
 
 	class ScopedDuration {
 	public:

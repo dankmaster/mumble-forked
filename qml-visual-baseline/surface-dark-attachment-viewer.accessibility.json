@@ -1,0 +1,87 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Save original Qt Quick attachment artwork",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 876,
+            "y": 8
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close attachment viewer",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 916,
+            "y": 8
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick attachment artwork",
+          "rect": {
+            "height": 20,
+            "width": 852,
+            "x": 16,
+            "y": 16
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick attachment artwork",
+          "rect": {
+            "height": 636,
+            "width": 928,
+            "x": 16,
+            "y": 68
+          },
+          "role": "Graphic",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Qt Quick attachment artwork",
+      "rect": {
+        "height": 720,
+        "width": 960,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Qt Quick attachment artwork",
+  "rect": {
+    "height": 720,
+    "width": 960,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

@@ -1,0 +1,349 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Registered users",
+          "rect": {
+            "height": 26,
+            "width": 143,
+            "x": 150,
+            "y": 80
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close dialog",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1002,
+            "y": 84
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Inspect, rename, or unregister server accounts.",
+          "rect": {
+            "height": 15,
+            "width": 847,
+            "x": 150,
+            "y": 109
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Search name, ID or last room",
+                      "rect": {
+                        "height": 36,
+                        "width": 753,
+                        "x": 174,
+                        "y": 166
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "editable",
+                        "focusable",
+                        "focused"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Refresh",
+                      "rect": {
+                        "height": 36,
+                        "width": 36,
+                        "x": 970,
+                        "y": 166
+                      },
+                      "role": "Button",
+                      "states": [
+                        "disabled"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "0 of 0",
+                      "rect": {
+                        "height": 15,
+                        "width": 27,
+                        "x": 935,
+                        "y": 177
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Account",
+                      "rect": {
+                        "height": 20,
+                        "width": 310,
+                        "x": 684,
+                        "y": 226
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Select a user to rename or unregister.",
+                      "rect": {
+                        "height": 16,
+                        "width": 310,
+                        "x": 684,
+                        "y": 254
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "User name",
+                      "rect": {
+                        "height": 15,
+                        "width": 53,
+                        "x": 684,
+                        "y": 278
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "User name",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 301
+                      },
+                      "role": "EditableText",
+                      "states": [
+                        "disabled",
+                        "editable"
+                      ]
+                    },
+                    {
+                      "children": [],
+                      "description": "In progress",
+                      "name": "Loading registered users",
+                      "rect": {
+                        "height": 28,
+                        "width": 28,
+                        "x": 403,
+                        "y": 429
+                      },
+                      "role": "ProgressBar",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 227,
+                                "x": 684,
+                                "y": 624
+                              },
+                              "role": "Client",
+                              "states": [
+                                "disabled"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 203,
+                                "x": 696,
+                                "y": 628
+                              },
+                              "role": "StaticText",
+                              "states": [
+                                "disabled"
+                              ]
+                            }
+                          ],
+                          "description": "",
+                          "name": "Rename",
+                          "rect": {
+                            "height": 36,
+                            "width": 227,
+                            "x": 684,
+                            "y": 624
+                          },
+                          "role": "Button",
+                          "states": [
+                            "disabled"
+                          ]
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 36,
+                                "width": 78,
+                                "x": 916,
+                                "y": 624
+                              },
+                              "role": "Client",
+                              "states": [
+                                "disabled"
+                              ]
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 28,
+                                "width": 54,
+                                "x": 928,
+                                "y": 628
+                              },
+                              "role": "StaticText",
+                              "states": [
+                                "disabled"
+                              ]
+                            }
+                          ],
+                          "description": "",
+                          "name": "Unregister",
+                          "rect": {
+                            "height": 36,
+                            "width": 78,
+                            "x": 916,
+                            "y": 624
+                          },
+                          "role": "Button",
+                          "states": [
+                            "disabled"
+                          ]
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 36,
+                        "width": 310,
+                        "x": 684,
+                        "y": 624
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Registered users editor",
+                  "rect": {
+                    "height": 530,
+                    "width": 856,
+                    "x": 162,
+                    "y": 154
+                  },
+                  "role": "Pane",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "",
+              "rect": {
+                "height": 530,
+                "width": 856,
+                "x": 162,
+                "y": 154
+              },
+              "role": "Client",
+              "states": [
+                "focused"
+              ]
+            }
+          ],
+          "description": "form",
+          "name": "Dialog section",
+          "rect": {
+            "height": 558,
+            "width": 884,
+            "x": 148,
+            "y": 140
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Primary action",
+          "name": "Close",
+          "rect": {
+            "height": 36,
+            "width": 52,
+            "x": 986,
+            "y": 746
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Inspect, rename, or unregister server accounts.",
+      "name": "Registered users",
+      "rect": {
+        "height": 732,
+        "width": 920,
+        "x": 130,
+        "y": 64
+      },
+      "role": "Dialog",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 860,
+    "width": 1180,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

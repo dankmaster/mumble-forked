@@ -234,6 +234,9 @@ void Database::initialize(const QString &dbname, const QString &databaseLocation
 												"PRIMARY KEY AUTOINCREMENT, `hash` TEXT, `enabled` INTEGER NOT NULL)"));
 	execQueryAndLogFailure(query, QLatin1String("CREATE UNIQUE INDEX IF NOT EXISTS `remote_speech_cleanup_hash` ON "
 												"`remote_speech_cleanup`(`hash`)"));
+	execQueryAndLogFailure(query, QLatin1String("CREATE TABLE IF NOT EXISTS `screen_share_audio_preferences` ("
+												"`identity_key` TEXT PRIMARY KEY, `volume` INTEGER NOT NULL, "
+												"`muted` INTEGER NOT NULL)"));
 	execQueryAndLogFailure(query, QLatin1String("CREATE TABLE IF NOT EXISTS `nicknames` (`id` INTEGER PRIMARY KEY "
 												"AUTOINCREMENT, `hash` TEXT, `nickname` TEXT)"));
 	execQueryAndLogFailure(query,
@@ -463,6 +466,34 @@ void Database::setUserRemoteSpeechCleanup(const QString &hash, std::optional< bo
 		query.addBindValue(hash);
 	}
 
+	execQueryAndLogFailure(query);
+}
+
+std::optional< ScreenShareAudioPreference > Database::getScreenShareAudioPreference(const QString &identityKey) {
+	if (identityKey.isEmpty()) return std::nullopt;
+
+	QSqlQuery query(db);
+	query.prepare(QLatin1String("SELECT `volume`, `muted` FROM `screen_share_audio_preferences` "
+								 "WHERE `identity_key` = ?"));
+	query.addBindValue(identityKey);
+	if (!execQueryAndLogFailure(query) || !query.first()) return std::nullopt;
+
+	ScreenShareAudioPreference preference;
+	preference.volume = qBound(0, query.value(0).toInt(), 100);
+	preference.muted  = query.value(1).toInt() != 0;
+	return preference;
+}
+
+void Database::setScreenShareAudioPreference(const QString &identityKey,
+											 const ScreenShareAudioPreference &preference) {
+	if (identityKey.isEmpty()) return;
+
+	QSqlQuery query(db);
+	query.prepare(QLatin1String("INSERT OR REPLACE INTO `screen_share_audio_preferences` "
+								 "(`identity_key`, `volume`, `muted`) VALUES (?, ?, ?)"));
+	query.addBindValue(identityKey);
+	query.addBindValue(qBound(0, preference.volume, 100));
+	query.addBindValue(preference.muted ? 1 : 0);
 	execQueryAndLogFailure(query);
 }
 

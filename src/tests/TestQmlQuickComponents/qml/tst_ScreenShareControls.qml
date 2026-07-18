@@ -40,6 +40,11 @@ TestCase {
 		height: implicitHeight
 		backend: shareBackend
 	}
+	SignalSpy {
+		id: fullscreenSpy
+		target: controls
+		signalName: "fullscreenRequested"
+	}
 
 	function init() {
 		testCase.width = 640
@@ -55,9 +60,15 @@ TestCase {
 		shareBackend.muteCalls = 0
 		shareBackend.volumeCalls = 0
 		shareBackend.stopCalls = 0
+		controls.fullscreen = false
+		fullscreenSpy.clear()
 
-		findChild(controls, "screenSharePauseButton").text = "Pause view"
-		findChild(controls, "screenShareMuteButton").text = "Mute audio"
+		findChild(controls, "screenSharePauseButton").text = Qt.binding(function() {
+			return shareBackend.paused ? "Start playback" : "Stop playback"
+		})
+		findChild(controls, "screenShareMuteButton").text = Qt.binding(function() {
+			return shareBackend.audioMuted ? "Unmute audio" : "Mute audio"
+		})
 		findChild(controls, "screenShareStopButton").text = "Stop"
 	}
 
@@ -76,7 +87,47 @@ TestCase {
 		verifyControlFits(flow, findChild(controls, "screenSharePauseButton"), "pause")
 		verifyControlFits(flow, findChild(controls, "screenShareMuteButton"), "mute")
 		verifyControlFits(flow, findChild(controls, "screenShareVolumeSlider"), "volume")
+		verifyControlFits(flow, findChild(controls, "screenShareFullscreenButton"), "full screen")
 		verifyControlFits(flow, findChild(controls, "screenShareStopButton"), "stop")
+	}
+
+	function test_fullscreen_control_exposes_state_and_requests_both_transitions() {
+		const button = findChild(controls, "screenShareFullscreenButton")
+		verify(button !== null)
+		compare(button.Accessible.name, "Enter full screen")
+		button.clicked()
+		compare(fullscreenSpy.count, 1)
+		compare(fullscreenSpy.signalArguments[0][0], true)
+
+		controls.fullscreen = true
+		compare(button.Accessible.name, "Exit full screen")
+		verify(button.selected)
+		button.clicked()
+		compare(fullscreenSpy.count, 2)
+		compare(fullscreenSpy.signalArguments[1][0], false)
+	}
+
+	function test_playback_control_stops_and_starts_the_local_receiver() {
+		const button = findChild(controls, "screenSharePauseButton")
+		compare(button.text, "Stop playback")
+		button.clicked()
+		compare(shareBackend.pauseCalls, 1)
+		verify(shareBackend.paused)
+		compare(button.text, "Start playback")
+
+		button.clicked()
+		compare(shareBackend.pauseCalls, 2)
+		verify(!shareBackend.paused)
+		compare(button.text, "Stop playback")
+	}
+
+	function test_mute_control_is_local_to_the_stream_player() {
+		const button = findChild(controls, "screenShareMuteButton")
+		compare(button.text, "Mute audio")
+		button.clicked()
+		compare(shareBackend.muteCalls, 1)
+		verify(shareBackend.audioMuted)
+		compare(button.text, "Unmute audio")
 	}
 
 	function test_long_translations_wrap_without_hiding_actions() {
@@ -112,16 +163,23 @@ TestCase {
 		compare(shareBackend.audioVolume, 41)
 	}
 
-	function test_operation_states_disable_transport_but_keep_close_available() {
+	function test_operation_states_reduce_controls_to_the_only_available_actions() {
+		const flow = findChild(controls, "screenShareHeaderActions")
 		const pauseButton = findChild(controls, "screenSharePauseButton")
 		const muteButton = findChild(controls, "screenShareMuteButton")
 		const volumeSlider = findChild(controls, "screenShareVolumeSlider")
+		const fullscreenButton = findChild(controls, "screenShareFullscreenButton")
 		const stopButton = findChild(controls, "screenShareStopButton")
 		const badge = findChild(controls, "screenShareStateBadge")
 		verify(badge !== null)
 
 		shareBackend.operationStatus = "loading"
 		tryCompare(controls, "stateLabel", "Reconnecting")
+		verify(flow.visible)
+		verify(!pauseButton.visible)
+		verify(!muteButton.visible)
+		verify(!volumeSlider.visible)
+		verify(!fullscreenButton.visible)
 		verify(!pauseButton.enabled)
 		verify(!muteButton.enabled)
 		verify(!volumeSlider.enabled)
@@ -131,7 +189,7 @@ TestCase {
 		shareBackend.operationStatus = "error"
 		tryCompare(controls, "stateLabel", "Viewer unavailable")
 		compare(controls.stateTone, Theme.danger)
-		verify(controls.focusInitialControl())
-		tryCompare(stopButton, "activeFocus", true)
+		verify(!flow.visible)
+		verify(!controls.focusInitialControl())
 	}
 }

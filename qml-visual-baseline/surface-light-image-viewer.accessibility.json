@@ -1,0 +1,148 @@
+{
+  "children": [
+    {
+      "children": [],
+      "description": "",
+      "name": "Minimize image viewer",
+      "rect": {
+        "height": 44,
+        "width": 44,
+        "x": 872,
+        "y": 0
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Close image viewer",
+      "rect": {
+        "height": 44,
+        "width": 44,
+        "x": 916,
+        "y": 0
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Qt Quick image canvas",
+      "rect": {
+        "height": 15,
+        "width": 852,
+        "x": 12,
+        "y": 14
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick image canvas",
+          "rect": {
+            "height": 624,
+            "width": 936,
+            "x": 12,
+            "y": 70
+          },
+          "role": "Graphic",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Zoom out",
+              "rect": {
+                "height": 36,
+                "width": 36,
+                "x": 410,
+                "y": 660
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Fit image to window",
+              "rect": {
+                "height": 36,
+                "width": 60,
+                "x": 450,
+                "y": 660
+              },
+              "role": "Button",
+              "states": [
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Zoom in",
+              "rect": {
+                "height": 36,
+                "width": 36,
+                "x": 514,
+                "y": 660
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Image zoom controls",
+          "rect": {
+            "height": 44,
+            "width": 156,
+            "x": 402,
+            "y": 656
+          },
+          "role": "ToolBar",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Image viewer. Use plus and minus to zoom, arrow keys to pan, and zero to fit.",
+      "rect": {
+        "height": 652,
+        "width": 936,
+        "x": 12,
+        "y": 56
+      },
+      "role": "Pane",
+      "states": [
+        "focusable"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Qt Quick image canvas",
+  "rect": {
+    "height": 720,
+    "width": 960,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

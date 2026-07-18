@@ -1,0 +1,635 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Alex",
+          "rect": {
+            "height": 16,
+            "width": 266,
+            "x": 56,
+            "y": 16
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "Search message text, senders, replies, and attachments",
+          "name": "Search this direct message",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 330,
+            "y": 17
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Use persistent history",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 368,
+            "y": 17
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "Detached window",
+          "name": "Dock direct-message window",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 406,
+            "y": 17
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Minimize direct-message window",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 444,
+            "y": 17
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close direct-message window",
+          "rect": {
+            "height": 30,
+            "width": 30,
+            "x": 482,
+            "y": 17
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Private conversation · Lobby",
+          "rect": {
+            "height": 15,
+            "width": 266,
+            "x": 56,
+            "y": 33
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Private mode · Messages clear when this window closes.",
+          "rect": {
+            "height": 40,
+            "width": 520,
+            "x": 0,
+            "y": 64
+          },
+          "role": "StatusBar",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 36,
+                        "width": 36,
+                        "x": 12,
+                        "y": 128
+                      },
+                      "role": "Client",
+                      "states": []
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "Alex",
+                              "rect": {
+                                "height": 15,
+                                "width": 243,
+                                "x": 56,
+                                "y": 128
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "10:31",
+                              "rect": {
+                                "height": 15,
+                                "width": 26,
+                                "x": 303,
+                                "y": 128
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 15,
+                            "width": 273,
+                            "x": 56,
+                            "y": 128
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "The native DM surface feels fast.",
+                                  "rect": {
+                                    "height": 21,
+                                    "width": 249,
+                                    "x": 68,
+                                    "y": 155
+                                  },
+                                  "role": "StaticText",
+                                  "states": [
+                                    "readOnly"
+                                  ]
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 33,
+                                    "width": 249,
+                                    "x": 68,
+                                    "y": 182
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 33,
+                                    "width": 249,
+                                    "x": 68,
+                                    "y": 188
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 33,
+                                "width": 249,
+                                "x": 68,
+                                "y": 155
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 49,
+                            "width": 273,
+                            "x": 56,
+                            "y": 147
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 68,
+                        "width": 273,
+                        "x": 56,
+                        "y": 128
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 68,
+                    "width": 317,
+                    "x": 12,
+                    "y": 128
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Alex: The native DM surface feels fast.",
+              "rect": {
+                "height": 80,
+                "width": 496,
+                "x": 12,
+                "y": 116
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "You",
+                              "rect": {
+                                "height": 15,
+                                "width": 324,
+                                "x": 142,
+                                "y": 216
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            },
+                            {
+                              "children": [],
+                              "description": "",
+                              "name": "10:32",
+                              "rect": {
+                                "height": 15,
+                                "width": 26,
+                                "x": 470,
+                                "y": 216
+                              },
+                              "role": "StaticText",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 15,
+                            "width": 354,
+                            "x": 142,
+                            "y": 216
+                          },
+                          "role": "Client",
+                          "states": []
+                        },
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "And private mode keeps this conversation local.",
+                                  "rect": {
+                                    "height": 21,
+                                    "width": 354,
+                                    "x": 142,
+                                    "y": 235
+                                  },
+                                  "role": "StaticText",
+                                  "states": [
+                                    "readOnly"
+                                  ]
+                                },
+                                {
+                                  "children": [
+                                    {
+                                      "children": [
+                                        {
+                                          "children": [
+                                            {
+                                              "children": [
+                                                {
+                                                  "children": [
+                                                    {
+                                                      "children": [],
+                                                      "description": "",
+                                                      "name": "",
+                                                      "rect": {
+                                                        "height": 148,
+                                                        "width": 224,
+                                                        "x": 150,
+                                                        "y": 268
+                                                      },
+                                                      "role": "Client",
+                                                      "states": []
+                                                    }
+                                                  ],
+                                                  "description": "Attachment 1 of 1",
+                                                  "name": "Release checklist attachment",
+                                                  "rect": {
+                                                    "height": 160,
+                                                    "width": 240,
+                                                    "x": 142,
+                                                    "y": 262
+                                                  },
+                                                  "role": "Button",
+                                                  "states": [
+                                                    "focusable"
+                                                  ]
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 158,
+                                                    "width": 238,
+                                                    "x": 143,
+                                                    "y": 263
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                },
+                                                {
+                                                  "children": [],
+                                                  "description": "",
+                                                  "name": "",
+                                                  "rect": {
+                                                    "height": 158,
+                                                    "width": 238,
+                                                    "x": 143,
+                                                    "y": 263
+                                                  },
+                                                  "role": "Client",
+                                                  "states": []
+                                                }
+                                              ],
+                                              "description": "",
+                                              "name": "",
+                                              "rect": {
+                                                "height": 160,
+                                                "width": 240,
+                                                "x": 142,
+                                                "y": 262
+                                              },
+                                              "role": "Client",
+                                              "states": []
+                                            },
+                                            {
+                                              "children": [],
+                                              "description": "",
+                                              "name": "",
+                                              "rect": {
+                                                "height": 160,
+                                                "width": 354,
+                                                "x": 142,
+                                                "y": 262
+                                              },
+                                              "role": "Client",
+                                              "states": []
+                                            }
+                                          ],
+                                          "description": "",
+                                          "name": "",
+                                          "rect": {
+                                            "height": 160,
+                                            "width": 354,
+                                            "x": 142,
+                                            "y": 262
+                                          },
+                                          "role": "Client",
+                                          "states": []
+                                        }
+                                      ],
+                                      "description": "1 attachments",
+                                      "name": "Message attachments",
+                                      "rect": {
+                                        "height": 160,
+                                        "width": 354,
+                                        "x": 142,
+                                        "y": 262
+                                      },
+                                      "role": "List",
+                                      "states": []
+                                    }
+                                  ],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 160,
+                                    "width": 354,
+                                    "x": 142,
+                                    "y": 262
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                },
+                                {
+                                  "children": [],
+                                  "description": "",
+                                  "name": "",
+                                  "rect": {
+                                    "height": 193,
+                                    "width": 354,
+                                    "x": 142,
+                                    "y": 428
+                                  },
+                                  "role": "Client",
+                                  "states": []
+                                }
+                              ],
+                              "description": "",
+                              "name": "",
+                              "rect": {
+                                "height": 193,
+                                "width": 354,
+                                "x": 142,
+                                "y": 235
+                              },
+                              "role": "Client",
+                              "states": []
+                            }
+                          ],
+                          "description": "",
+                          "name": "",
+                          "rect": {
+                            "height": 193,
+                            "width": 354,
+                            "x": 142,
+                            "y": 235
+                          },
+                          "role": "Client",
+                          "states": []
+                        }
+                      ],
+                      "description": "",
+                      "name": "",
+                      "rect": {
+                        "height": 212,
+                        "width": 354,
+                        "x": 142,
+                        "y": 216
+                      },
+                      "role": "Client",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "",
+                  "rect": {
+                    "height": 212,
+                    "width": 354,
+                    "x": 142,
+                    "y": 216
+                  },
+                  "role": "Client",
+                  "states": []
+                }
+              ],
+              "description": "1 attachments. ",
+              "name": "You: And private mode keeps this conversation local.",
+              "rect": {
+                "height": 240,
+                "width": 496,
+                "x": 12,
+                "y": 196
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "2 messages. Use Home or End to move through the conversation.",
+          "name": "Messages with Alex",
+          "rect": {
+            "height": 440,
+            "width": 496,
+            "x": 12,
+            "y": 116
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Press Enter to send. Press Shift+Enter for a new line.",
+              "name": "Write to Alex...",
+              "rect": {
+                "height": 48,
+                "width": 437,
+                "x": 12,
+                "y": 580
+              },
+              "role": "EditableText",
+              "states": [
+                "editable",
+                "focusable",
+                "focused"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Send",
+              "rect": {
+                "height": 36,
+                "width": 51,
+                "x": 457,
+                "y": 586
+              },
+              "role": "Button",
+              "states": [
+                "disabled"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "Message composer for Alex",
+          "rect": {
+            "height": 72,
+            "width": 520,
+            "x": 0,
+            "y": 568
+          },
+          "role": "Pane",
+          "states": []
+        }
+      ],
+      "description": "Private in-memory direct-message conversation. Detached window",
+      "name": "Direct message · Alex",
+      "rect": {
+        "height": 640,
+        "width": 520,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": [
+        "focusable",
+        "focused"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Direct message · Alex",
+  "rect": {
+    "height": 640,
+    "width": 520,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

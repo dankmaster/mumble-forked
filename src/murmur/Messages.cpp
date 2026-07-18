@@ -24,6 +24,7 @@
 #include "StonksLedger.h"
 #include "User.h"
 #include "Version.h"
+#include "WatchTogetherSession.h"
 #include "crypto/CryptState.h"
 
 #include "murmur/database/ChronoUtils.h"
@@ -1155,12 +1156,28 @@ QString normalizedMime(const QString &mime) {
 	return mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
 }
 
-QString safeChatAttachmentFilename(QString filename, const unsigned int assetID) {
+QString safeChatAttachmentFilename(QString filename, const unsigned int assetID,
+								   const msdb::ChatAssetKind kind, const QString &mime) {
 	filename.replace(QLatin1Char('\\'), QLatin1Char('/'));
 	filename = QFileInfo(filename).fileName().trimmed();
 	filename.remove(QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]+")));
 	if (filename == QLatin1String(".") || filename == QLatin1String("..")) filename.clear();
 	if (filename.isEmpty()) filename = QObject::tr("Attachment %1").arg(assetID);
+	if (kind == msdb::ChatAssetKind::Image) {
+		QString extension;
+		if (mime == QLatin1String("image/jpeg")) extension = QStringLiteral("jpg");
+		else if (mime == QLatin1String("image/png")) extension = QStringLiteral("png");
+		else if (mime == QLatin1String("image/webp")) extension = QStringLiteral("webp");
+		else if (mime == QLatin1String("image/gif")) extension = QStringLiteral("gif");
+		else if (mime == QLatin1String("image/bmp")) extension = QStringLiteral("bmp");
+		if (!extension.isEmpty()) {
+			QString baseName = QFileInfo(filename).completeBaseName().trimmed();
+			if (baseName.isEmpty() || baseName == QLatin1String(".") || baseName == QLatin1String("..")) {
+				baseName = QObject::tr("Image %1").arg(assetID);
+			}
+			filename = QStringLiteral("%1.%2").arg(baseName.left(230), extension);
+		}
+	}
 	return filename.left(240);
 }
 
@@ -1429,11 +1446,17 @@ QString previewTitleForMediaUrl(const QUrl &url, const QString &fallback) {
 	return fileName.isEmpty() ? fallback : fileName;
 }
 
-QImage decodeChatImage(const QByteArray &bytes) {
+struct DecodedChatImage {
+	QImage image;
+	QSize sourceSize;
+};
+
+std::optional< DecodedChatImage > decodeChatImageBounded(const QByteArray &bytes,
+													 const QSize &maximumDecodeSize = QSize()) {
 	QBuffer buffer;
 	buffer.setData(bytes);
 	if (!buffer.open(QIODevice::ReadOnly)) {
-		return QImage();
+		return std::nullopt;
 	}
 
 	QImageReader reader(&buffer);
@@ -1444,9 +1467,48 @@ QImage decodeChatImage(const QByteArray &bytes) {
 	if (!sourceSize.isValid() || sourceSize.width() <= 0 || sourceSize.height() <= 0
 		|| sourceSize.width() > maximumDimension || sourceSize.height() > maximumDimension
 		|| static_cast< qint64 >(sourceSize.width()) * static_cast< qint64 >(sourceSize.height()) > maximumPixels) {
-		return QImage();
+		return std::nullopt;
 	}
-	return reader.read();
+
+	if (maximumDecodeSize.isValid()) {
+		QSize scaledSize = sourceSize;
+		scaledSize.scale(maximumDecodeSize, Qt::KeepAspectRatio);
+		if (scaledSize != sourceSize) {
+			// Formats with native scaled decoding (notably JPEG) avoid materializing the full source image.
+			// Other handlers may ignore this hint, but the dimension/pixel limits above still bound the decode.
+			reader.setScaledSize(scaledSize);
+		}
+	}
+
+	DecodedChatImage result;
+	result.image      = reader.read();
+	result.sourceSize = sourceSize;
+	if (result.image.isNull()) {
+		return std::nullopt;
+	}
+	return result;
+}
+
+QImage decodeChatImage(const QByteArray &bytes) {
+	const auto decoded = decodeChatImageBounded(bytes);
+	return decoded ? decoded->image : QImage();
+}
+
+QString detectedChatImageMime(const QByteArray &bytes) {
+	QBuffer buffer;
+	buffer.setData(bytes);
+	if (!buffer.open(QIODevice::ReadOnly)) return QString();
+
+	QImageReader reader(&buffer);
+	const QByteArray format = reader.format().trimmed().toLower();
+	if (format == QByteArrayLiteral("jpg") || format == QByteArrayLiteral("jpeg")) {
+		return QStringLiteral("image/jpeg");
+	}
+	if (format == QByteArrayLiteral("png")) return QStringLiteral("image/png");
+	if (format == QByteArrayLiteral("webp")) return QStringLiteral("image/webp");
+	if (format == QByteArrayLiteral("gif")) return QStringLiteral("image/gif");
+	if (format == QByteArrayLiteral("bmp")) return QStringLiteral("image/bmp");
+	return QString();
 }
 
 QByteArray encodeChatImage(const QImage &image, const char *format, int quality = -1) {
@@ -1472,8 +1534,7 @@ struct SanitizedChatImage {
 	unsigned int height = 0;
 };
 
-std::optional< SanitizedChatImage > sanitizeChatImageBytes(const QByteArray &bytes, bool thumbnailOnly = false) {
-	const QImage image = decodeChatImage(bytes);
+std::optional< SanitizedChatImage > sanitizeDecodedChatImage(const QImage &image, bool thumbnailOnly = false) {
 	if (image.isNull()) {
 		return std::nullopt;
 	}
@@ -1498,6 +1559,13 @@ std::optional< SanitizedChatImage > sanitizeChatImageBytes(const QByteArray &byt
 	}
 
 	return result;
+}
+
+std::optional< SanitizedChatImage > sanitizeChatImageBytes(const QByteArray &bytes, bool thumbnailOnly = false) {
+	const QSize maximumDecodeSize =
+		thumbnailOnly ? QSize(CHAT_PREVIEW_THUMBNAIL_WIDTH, CHAT_PREVIEW_THUMBNAIL_HEIGHT) : QSize();
+	const auto decoded = decodeChatImageBounded(bytes, maximumDecodeSize);
+	return decoded ? sanitizeDecodedChatImage(decoded->image, thumbnailOnly) : std::nullopt;
 }
 
 bool ensureContentAddressedObject(const QString &path, const QByteArray &bytes, const QString &expectedSha256,
@@ -4895,6 +4963,7 @@ void Server::msgUserState(ServerUser *uSource, MumbleProto::UserState &msg) {
 		}
 	}
 
+	if (msg.has_channel_id()) syncWatchTogetherStateForUser(pDstServerUser);
 	emit userStateChanged(pDstServerUser);
 }
 
@@ -5103,6 +5172,7 @@ void Server::msgChannelState(ServerUser *uSource, MumbleProto::ChannelState &msg
 			mpus.set_channel_id(c->iId);
 			userEnterChannel(uSource, c, mpus);
 			sendAll(mpus);
+			syncWatchTogetherStateForUser(uSource);
 			emit userStateChanged(uSource);
 		}
 	} else {
@@ -5622,7 +5692,8 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 		attachment.displayOrder   = static_cast< unsigned int >(attachments.size());
 		const QString declaredFilename =
 			i < msg.attachment_filenames_size() ? u8(msg.attachment_filenames(i)) : QString();
-		attachment.filename       = u8(safeChatAttachmentFilename(declaredFilename, assetID));
+		attachment.filename       = u8(safeChatAttachmentFilename(
+			declaredFilename, assetID, asset.kind, QString::fromStdString(asset.mime)));
 		attachment.mime           = asset.mime;
 		attachment.byteSize       = asset.byteSize;
 		attachment.kind           = asset.kind;
@@ -7345,17 +7416,27 @@ void Server::msgChatAssetUploadCommit(ServerUser *uSource, MumbleProto::ChatAsse
 	unsigned int storedHeight = 0;
 	std::optional< SanitizedChatImage > previewThumbnail;
 	if (upload.kind == msdb::ChatAssetKind::Image && isSanitizableImageMime(upload.mime)) {
-		const auto sanitizedImage = sanitizeChatImageBytes(fileBytes, false);
-		if (!sanitizedImage) {
+		const QString detectedMime = detectedChatImageMime(fileBytes);
+		if (detectedMime.isEmpty() || detectedMime != upload.mime) {
+			reject(QStringLiteral("Uploaded image data does not match its declared MIME type."));
+			return;
+		}
+		const auto decodedImage = decodeChatImageBounded(
+			fileBytes, QSize(CHAT_PREVIEW_THUMBNAIL_WIDTH, CHAT_PREVIEW_THUMBNAIL_HEIGHT));
+		if (!decodedImage) {
 			reject(QStringLiteral("Uploaded image could not be decoded safely."));
 			return;
 		}
 
-		storedBytes      = sanitizedImage->bytes;
-		storedMime       = sanitizedImage->mime;
-		storedWidth      = sanitizedImage->width;
-		storedHeight     = sanitizedImage->height;
-		previewThumbnail = sanitizeChatImageBytes(storedBytes, true);
+		// Preserve the validated original bytes and MIME for downloads. Only the inline preview is
+		// re-encoded, while dimensions come from the source header validated during the bounded decode.
+		storedWidth      = static_cast< unsigned int >(decodedImage->sourceSize.width());
+		storedHeight     = static_cast< unsigned int >(decodedImage->sourceSize.height());
+		previewThumbnail = sanitizeDecodedChatImage(decodedImage->image, true);
+		if (!previewThumbnail) {
+			reject(QStringLiteral("Uploaded image preview could not be created safely."));
+			return;
+		}
 	}
 	const quint64 storedByteSize = static_cast< quint64 >(storedBytes.size());
 	const quint64 previewByteSize =
@@ -9154,21 +9235,30 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 		return;
 	}
 
+	const Mumble::WatchTogether::SessionEventAdmission admission =
+		Mumble::WatchTogether::validateSessionEvent(qhWatchTogetherSessions, sessionID,
+			static_cast< unsigned int >(channel->iId), event);
+	switch (admission) {
+		case Mumble::WatchTogether::SessionEventAdmission::Allowed: break;
+		case Mumble::WatchTogether::SessionEventAdmission::UnknownSession:
+			deny(QStringLiteral("Unknown watch-together session."));
+			return;
+		case Mumble::WatchTogether::SessionEventAdmission::DuplicateSessionID:
+			deny(QStringLiteral("A watch-together session with this ID already exists."));
+			return;
+		case Mumble::WatchTogether::SessionEventAdmission::RoomOccupied:
+			deny(QStringLiteral("A watch-together session is already active in this room."));
+			return;
+		case Mumble::WatchTogether::SessionEventAdmission::ScopeMismatch:
+			deny(QStringLiteral("This watch-together session is not active in your current room."));
+			return;
+	}
+
 	const bool hasStoredSession = qhWatchTogetherSessions.contains(sessionID);
 	MumbleProto::WatchTogetherSync stored =
 		hasStoredSession ? qhWatchTogetherSessions.value(sessionID) : MumbleProto::WatchTogetherSync();
-	if (event == MumbleProto::WatchTogetherEventStart && hasStoredSession) {
-		deny(QStringLiteral("A watch-together session with this ID already exists."));
-		return;
-	}
 	const unsigned int storedHost = stored.has_host_session() ? stored.host_session() : 0;
 	const bool sourceIsHost       = storedHost == 0 || storedHost == uSource->uiSession;
-
-	if (event != MumbleProto::WatchTogetherEventStart && event != MumbleProto::WatchTogetherEventStateRequest
-		&& !hasStoredSession) {
-		deny(QStringLiteral("Unknown watch-together session."));
-		return;
-	}
 	if ((event == MumbleProto::WatchTogetherEventState || event == MumbleProto::WatchTogetherEventEnd
 		 || event == MumbleProto::WatchTogetherEventHostTransfer)
 		&& !sourceIsHost) {

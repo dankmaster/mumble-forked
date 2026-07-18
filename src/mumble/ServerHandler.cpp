@@ -16,6 +16,7 @@
 #include "AudioOutput.h"
 #include "CertService.h"
 #include "ChatFeature.h"
+#include "ChatPerfTrace.h"
 #include "Connection.h"
 #include "Database.h"
 #include "ForkFeature.h"
@@ -36,7 +37,6 @@
 #include "Global.h"
 
 #include <QDateTime>
-#include <QFile>
 #include <QPainter>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QElapsedTimer>
@@ -110,15 +110,10 @@ void appendServerHandlerTrace(const QString &message) {
 		return;
 	}
 
-	QFile traceFile(Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")));
-	if (!traceFile.open(QIODevice::Append | QIODevice::Text)) {
-		return;
-	}
-
 	const QByteArray line =
 		QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toUtf8() + " SH " + message.toUtf8() + '\n';
-	traceFile.write(line);
-	traceFile.flush();
+	mumble::chatperf::appendFileLineAsync(
+		Global::get().qdBasePath.filePath(QLatin1String("shared-modern-connect-trace.log")), line);
 }
 
 QString utf8Hex(const QString &value) {

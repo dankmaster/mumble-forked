@@ -13,8 +13,32 @@ Rectangle {
 	required property var selectionState
 	required property var uiCommands
 	required property var clientSession
+	// Both the desktop rail and the compact Drawer instantiate this component.
+	// Give automation a stable, unambiguous list target when both instances are
+	// present in the object tree but only one is visible.
+	property string roomListObjectName: "navigationRooms"
 	property bool commitOnSelection: false
+	property bool accessibilitySuppressed: false
+	property bool settingsEnabled: true
+	// The desktop shell supplies the matching conversation chrome heights so
+	// the horizontal dividers form one continuous line regardless of whether
+	// the rail is placed on the left or the right. Drawer instances keep the
+	// standalone theme defaults.
+	property real alignedHeaderHeight: Theme.railHeaderHeight
+	property real alignedFooterHeight: Theme.railFooterHeight
+	// Deterministic screenshot fixtures must not inherit the workstation cursor's
+	// hover position. Product builds keep the normal pointer feedback.
+	property bool visualFixtureMode: false
 	property string activeScopeMenuToken: ""
+	property string localFilterText: ""
+	property var localRoomExpansion: ({})
+	property int navigationPresentationRevision: 0
+	readonly property string effectiveFilterText: {
+		const revision = navigationPresentationRevision
+		if (navigationModel && navigationModel.filterText !== undefined)
+			return String(navigationModel.filterText || "")
+		return localFilterText
+	}
 	// Stable row key, rather than session alone: the same user may have a normal
 	// row and one or more listener rows in different scopes.
 	property string activeParticipantMenuKey: ""
@@ -22,7 +46,270 @@ Rectangle {
 	signal scopeMenuRequested(string scopeToken, string kind, var actions, var anchorPoint)
 	signal participantMenuRequested(string sessionId, var actions, var anchorPoint,
 		string entryKind, string scopeToken, string rowKey)
+	signal settingsRequested()
 	signal profileMenuRequested(var anchorPoint)
+	Accessible.ignored: accessibilitySuppressed
+
+
+	function normalizedFilterText() {
+		return String(effectiveFilterText || "").trim().toLocaleLowerCase()
+	}
+
+	function valueMatchesFilter(value, filter) {
+		return filter.length > 0 && String(value || "").toLocaleLowerCase().indexOf(filter) >= 0
+	}
+
+	function listMatchesFilter(values, filter) {
+		const list = values || []
+		for (let index = 0; index < list.length; ++index) {
+			const value = list[index] || ({})
+			if (typeof value === "object") {
+				if (valueMatchesFilter(value.label, filter) || valueMatchesFilter(value.kind, filter))
+					return true
+			} else if (valueMatchesFilter(value, filter)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	function participantSessionForRow(row) {
+		if (!row)
+			return ""
+		const payload = row.payload || row
+		const source = payload.source || ({})
+		const stableId = String(row.stableId || payload.id || "")
+		return String(payload.participantSession || source.session
+			|| (stableId.substring(0, 5) === "user:" ? stableId.substring(5)
+				: (/^[0-9]+$/.test(stableId) ? stableId : "")))
+	}
+
+	function participantEntryKind(row) {
+		const payload = (row && (row.payload || row)) || ({})
+		const source = payload.source || ({})
+		return String(payload.entryKind || source.entryKind || "user").toLowerCase()
+	}
+
+	function participantMatchesFilter(row, filter) {
+		if (!row || filter.length === 0)
+			return true
+		const payload = row.payload || row
+		const source = payload.source || ({})
+		return valueMatchesFilter(row.title || payload.title || source.label, filter)
+			|| valueMatchesFilter(row.subtitle || payload.subtitle, filter)
+			|| valueMatchesFilter(row.status || payload.talkState || source.talkState, filter)
+			|| valueMatchesFilter(payload.talkLabel || source.talkLabel, filter)
+			|| listMatchesFilter(payload.badges || source.badges, filter)
+			|| listMatchesFilter(payload.statuses || source.statuses, filter)
+	}
+
+	function roomOwnMatchesFilter(row, filter) {
+		if (!row || filter.length === 0)
+			return true
+		const payload = row.payload || row
+		return valueMatchesFilter(row.title || payload.title, filter)
+			|| valueMatchesFilter(row.subtitle || payload.subtitle, filter)
+			|| valueMatchesFilter(payload.pathLabel, filter)
+			|| listMatchesFilter(payload.badges, filter)
+	}
+
+	function roomHasMatchingParticipant(scopeToken, filter) {
+		if (filter.length === 0)
+			return false
+		const count = Number(navigationModel.count) || 0
+		for (let index = 0; index < count; ++index) {
+			const candidate = navigationModel.get(index)
+			if (!candidate || String(candidate.kind || "") !== "participant")
+				continue
+			const payload = candidate.payload || candidate
+			if (String(payload.parentScopeToken || "") === String(scopeToken || "")
+					&& participantMatchesFilter(candidate, filter))
+				return true
+		}
+		return false
+	}
+
+	function selectedParticipantMatches(row) {
+		if (!row || selectionState.selectedUserSession === undefined
+				|| selectionState.selectedUserSession === null || participantEntryKind(row) !== "user")
+			return false
+		return participantSessionForRow(row) === String(selectionState.selectedUserSession)
+	}
+
+	function roomContainsSelectedParticipant(scopeToken) {
+		if (selectionState.selectedUserSession === undefined || selectionState.selectedUserSession === null)
+			return false
+		const count = Number(navigationModel.count) || 0
+		for (let index = 0; index < count; ++index) {
+			const candidate = navigationModel.get(index)
+			if (!candidate || String(candidate.kind || "") !== "participant"
+					|| participantEntryKind(candidate) !== "user")
+				continue
+			const payload = candidate.payload || candidate
+			if (String(payload.parentScopeToken || "") === String(scopeToken || "")
+					&& selectedParticipantMatches(candidate))
+				return true
+		}
+		return false
+	}
+
+	function roomMatchesVoiceSelection(scopeToken) {
+		if (selectionState.selectedVoiceChannelId === undefined
+				|| selectionState.selectedVoiceChannelId === null)
+			return false
+		const parts = String(scopeToken || "").split(":")
+		return parts.length === 2 && parts[1] === String(selectionState.selectedVoiceChannelId)
+	}
+
+	function roomExpandedFor(scopeToken, payload) {
+		const revision = navigationPresentationRevision
+		if (navigationModel && typeof navigationModel.isRoomExpanded === "function")
+			return !!navigationModel.isRoomExpanded(String(scopeToken || ""))
+		const token = String(scopeToken || "")
+		if (localRoomExpansion[token] !== undefined)
+			return !!localRoomExpansion[token]
+		if (payload && payload.expanded !== undefined)
+			return !!payload.expanded
+		return true
+	}
+
+	function participantCountForRoom(scopeToken, payload) {
+		const supplied = Number((payload || ({})).participantCount)
+		if (Number.isFinite(supplied) && supplied >= 0)
+			return Math.floor(supplied)
+		let count = 0
+		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
+			const candidate = navigationModel.get(index)
+			const candidatePayload = (candidate && (candidate.payload || candidate)) || ({})
+			if (candidate && String(candidate.kind || "") === "participant"
+					&& String(candidatePayload.parentScopeToken || "") === String(scopeToken || ""))
+				++count
+		}
+		return count
+	}
+
+	function participantRowTalking(row) {
+		const payload = (row && (row.payload || row)) || ({})
+		const source = payload.source || ({})
+		const state = String(row && row.status || payload.talkState || source.talkState || "").toLowerCase()
+		return !!payload.talking || !!source.talking
+			|| ["talking", "whispering", "shouting", "mutedtalking"].indexOf(state) >= 0
+	}
+
+	function talkingCountForRoom(scopeToken, payload) {
+		const supplied = Number((payload || ({})).talkingParticipantCount)
+		if (Number.isFinite(supplied) && supplied >= 0)
+			return Math.floor(supplied)
+		let count = 0
+		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
+			const candidate = navigationModel.get(index)
+			const candidatePayload = (candidate && (candidate.payload || candidate)) || ({})
+			if (candidate && String(candidate.kind || "") === "participant"
+					&& String(candidatePayload.parentScopeToken || "") === String(scopeToken || "")
+					&& participantRowTalking(candidate))
+				++count
+		}
+		return count
+	}
+
+	function navigationRowIsVisible(row) {
+		if (!row)
+			return false
+		const kind = String(row.kind || "")
+		const payload = row.payload || row
+		const scopeToken = String(row.scopeToken || payload.scopeToken || "")
+		const filter = normalizedFilterText()
+		if (kind !== "participant") {
+			if (navigationRowIsSelected(row) || roomMatchesVoiceSelection(scopeToken))
+				return true
+			// The C++ model precomputes the steady-state/filter visibility role. Use
+			// its O(1) positive path before the selected-user ancestry fallback so a
+			// large connected server does not scan every participant for every room.
+			if (payload.railVisible !== undefined && !!payload.railVisible)
+				return true
+			if (roomContainsSelectedParticipant(scopeToken))
+				return true
+			if (payload.railVisible !== undefined)
+				return false
+			return filter.length === 0 || roomOwnMatchesFilter(row, filter)
+				|| roomHasMatchingParticipant(scopeToken, filter)
+		}
+		if (selectedParticipantMatches(row))
+			return true
+		const parentScope = String(payload.parentScopeToken || "")
+		if (!roomExpandedFor(parentScope, payload))
+			return false
+		if (payload.railVisible !== undefined)
+			return !!payload.railVisible
+		if (filter.length === 0)
+			return true
+		let parentMatches = false
+		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
+			const candidate = navigationModel.get(index)
+			if (candidate && String(candidate.kind || "") !== "participant"
+					&& String(candidate.scopeToken || "") === parentScope) {
+				parentMatches = roomOwnMatchesFilter(candidate, filter)
+				break
+			}
+		}
+		return parentMatches || participantMatchesFilter(row, filter)
+	}
+
+	function rowStartsVisibleSection(rowIndex, sectionKind) {
+		const revision = navigationPresentationRevision
+		const section = String(sectionKind || "")
+		if (rowIndex < 0 || section.length === 0)
+			return false
+		for (let index = rowIndex - 1; index >= 0; --index) {
+			const previous = navigationModel.get(index)
+			if (!previous || String(previous.sectionKind || "") !== section)
+				return true
+			if (navigationRowIsVisible(previous))
+				return false
+		}
+		return true
+	}
+
+	function setNavigationFilter(value) {
+		const accepted = String(value || "").slice(0, 128)
+		if (navigationModel && typeof navigationModel.setFilterText === "function")
+			navigationModel.setFilterText(accepted)
+		else
+			localFilterText = accepted
+		++navigationPresentationRevision
+		Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+	}
+
+	function setRoomExpanded(scopeToken, expanded) {
+		const token = String(scopeToken || "")
+		if (token.length === 0)
+			return
+		const listHadFocus = rooms.activeFocus || (rooms.currentItem && rooms.currentItem.activeFocus)
+		if (navigationModel && typeof navigationModel.setRoomExpanded === "function") {
+			navigationModel.setRoomExpanded(token, !!expanded)
+		} else {
+			const state = Object.assign({}, localRoomExpansion)
+			state[token] = !!expanded
+			localRoomExpansion = state
+		}
+		++navigationPresentationRevision
+		Qt.callLater(function() {
+			const current = navigationModel.get(rooms.currentIndex)
+			if (current && !navigationRowIsVisible(current)) {
+				const roomIndex = navigationIndexForScope(token)
+				if (listHadFocus)
+					focusNavigationIndex(roomIndex, Qt.OtherFocusReason)
+				else
+					setCurrentNavigationIndex(roomIndex)
+			} else {
+				ensureCurrentNavigationVisible()
+			}
+		})
+	}
+
+	function toggleRoomExpanded(scopeToken, payload) {
+		setRoomExpanded(scopeToken, !roomExpandedFor(scopeToken, payload))
+	}
 
 	function requestScopeMenu(scopeToken, kind, payload, anchorPoint) {
 		scopeMenuRequested(scopeToken, kind, (payload.source && payload.source.actions) || [], anchorPoint)
@@ -61,10 +348,100 @@ Rectangle {
 		let matches = 0
 		for (let index = 0; index < count; ++index) {
 			const room = navigationModel.get(index)
-			if (room && String(room.kind) === kind)
+			if (room && String(room.kind) === kind && navigationRowIsVisible(room))
 				++matches
 		}
 		return matches
+	}
+
+	function navigationIndexForScope(scopeToken) {
+		const token = String(scopeToken || "")
+		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
+			const row = navigationModel.get(index)
+			if (row && String(row.kind || "") !== "participant"
+					&& String(row.scopeToken || "") === token)
+				return index
+		}
+		return -1
+	}
+
+	function firstVisibleNavigationIndex() {
+		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
+			if (navigationRowIsVisible(navigationModel.get(index)))
+				return index
+		}
+		return -1
+	}
+
+	function lastVisibleNavigationIndex() {
+		for (let index = Number(navigationModel.count || 0) - 1; index >= 0; --index) {
+			if (navigationRowIsVisible(navigationModel.get(index)))
+				return index
+		}
+		return -1
+	}
+
+	function nextVisibleNavigationIndex(index, direction) {
+		const step = direction < 0 ? -1 : 1
+		for (let candidate = Number(index) + step;
+				candidate >= 0 && candidate < Number(navigationModel.count || 0); candidate += step) {
+			if (navigationRowIsVisible(navigationModel.get(candidate)))
+				return candidate
+		}
+		return -1
+	}
+
+	function stepVisibleNavigationIndex(index, distance) {
+		const direction = distance < 0 ? -1 : 1
+		let target = Number(index)
+		let remaining = Math.abs(Number(distance))
+		while (remaining > 0) {
+			const next = nextVisibleNavigationIndex(target, direction)
+			if (next < 0)
+				break
+			target = next
+			--remaining
+		}
+		return target
+	}
+
+	function ensureCurrentNavigationVisible() {
+		const selected = selectedNavigationIndex()
+		if (selected >= 0)
+			return setCurrentNavigationIndex(selected)
+		const current = navigationModel.get(rooms.currentIndex)
+		if (current && navigationRowIsVisible(current))
+			return true
+		return setCurrentNavigationIndex(firstVisibleNavigationIndex())
+	}
+
+	// Qt 6.9's QQuickItemViewFxItem::setVisible() writes the delegate's private
+	// isAccessible flag on every cull/layout pass. That can overwrite a QML
+	// Accessible.ignored binding after a modal has already suppressed the rail.
+	// Reassert only the virtualized semantic owners while the modal is active;
+	// regular rows keep their native ListView accessibility at steady state.
+	function refreshVirtualizedAccessibility() {
+		if (!navigationRail.accessibilitySuppressed || !railAccessibilityBarrier.active
+				|| !rooms.contentItem)
+			return
+		// ItemView delegates and section delegates are direct materialized
+		// children of contentItem. Do not scan the model or descendant controls.
+		const delegates = rooms.contentItem.children || []
+		for (let index = 0; index < delegates.length; ++index) {
+			const item = delegates[index]
+			if (!item)
+				continue
+			const name = String(item.objectName || "")
+			if (item.navigationVisible !== undefined && item.accessibilityPooled !== undefined)
+				railAccessibilityBarrier.reassertItem(item)
+		}
+	}
+
+	onAccessibilitySuppressedChanged: {
+		if (accessibilitySuppressed) {
+			refreshVirtualizedAccessibility()
+			Qt.callLater(refreshVirtualizedAccessibility)
+		}
 	}
 
 	function safeAvatarSource(value) {
@@ -202,8 +579,14 @@ Rectangle {
 			return false
 		if (!!row.selected)
 			return true
-		if (String(row.kind || "") !== "participant"
-				|| selectionState.selectedUserSession === undefined
+		const kind = String(row.kind || "")
+		if (kind !== "participant") {
+			const selectedScopeToken = selectionState.scopeToken === undefined
+				|| selectionState.scopeToken === null ? "" : String(selectionState.scopeToken)
+			return selectedScopeToken.length > 0
+				&& selectedScopeToken === String(row.scopeToken || "")
+		}
+		if (selectionState.selectedUserSession === undefined
 				|| selectionState.selectedUserSession === null)
 			return false
 		const payload = row.payload || ({})
@@ -217,11 +600,43 @@ Rectangle {
 		return session.length > 0 && session === String(selectionState.selectedUserSession)
 	}
 
-	function setCurrentNavigationIndex(index) {
+	function selectedNavigationIndex() {
+		for (let index = 0; index < rooms.count; ++index) {
+			const row = navigationModel.get(index)
+			if (navigationRowIsSelected(row) && navigationRowIsVisible(row))
+				return index
+		}
+		return -1
+	}
+
+	function revealCurrentSelection() {
+		const selectedIndex = selectedNavigationIndex()
+		return selectedIndex >= 0 && setCurrentNavigationIndex(selectedIndex)
+	}
+
+	function navigationPageStep() {
+		return Math.max(1, Math.floor(Math.max(1, rooms.height) /
+			Math.max(1, Theme.roomRowHeight)))
+	}
+
+	function setCurrentNavigationIndex(index, direction) {
 		if (rooms.count <= 0)
 			return false
-		const targetIndex = Math.max(0, Math.min(rooms.count - 1, Number(index)))
-		if (!Number.isFinite(targetIndex))
+		const requestedIndex = Number(index)
+		if (!Number.isFinite(requestedIndex) || requestedIndex < 0)
+			return false
+		let targetIndex = Math.max(0, Math.min(rooms.count - 1, Math.floor(requestedIndex)))
+		if (!navigationRowIsVisible(navigationModel.get(targetIndex))) {
+			const preferredDirection = Number(direction || 0)
+			if (preferredDirection !== 0)
+				targetIndex = nextVisibleNavigationIndex(targetIndex, preferredDirection)
+			else {
+				const after = nextVisibleNavigationIndex(targetIndex, 1)
+				const before = nextVisibleNavigationIndex(targetIndex, -1)
+				targetIndex = after >= 0 ? after : before
+			}
+		}
+		if (targetIndex < 0)
 			return false
 		if (rooms.currentIndex !== targetIndex)
 			rooms.currentIndex = targetIndex
@@ -248,21 +663,13 @@ Rectangle {
 	function focusInitialItem() {
 		if (rooms.count <= 0) {
 			Qt.callLater(function() { profileMenuButton.forceActiveFocus() })
-			return
+			return profileMenuButton.objectName
 		}
-		let selectedIndex = -1
-		let firstActionableIndex = -1
-		for (let index = 0; index < rooms.count; ++index) {
-			const row = navigationModel.get(index)
-			if (row && firstActionableIndex < 0)
-				firstActionableIndex = index
-			if (navigationRowIsSelected(row)) {
-				selectedIndex = index
-				break
-			}
-		}
+		let selectedIndex = selectedNavigationIndex()
+		const firstActionableIndex = firstVisibleNavigationIndex()
 		focusNavigationIndex(selectedIndex >= 0 ? selectedIndex : Math.max(0, firstActionableIndex),
 			Qt.TabFocusReason)
+		return rooms.currentItem ? rooms.currentItem.objectName : rooms.objectName
 	}
 
 	implicitWidth: 310
@@ -271,6 +678,31 @@ Rectangle {
 	// virtualized ListView contributes one navigation stop, followed by the fixed
 	// footer actions.
 	activeFocusOnTab: false
+	Connections {
+		target: selectionState
+		ignoreUnknownSignals: true
+		function onScopeTokenChanged() {
+			Qt.callLater(navigationRail.revealCurrentSelection)
+		}
+		function onSelectedUserSessionChanged() {
+			Qt.callLater(navigationRail.revealCurrentSelection)
+		}
+		function onSelectedVoiceChannelIdChanged() {
+			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+		}
+	}
+	Connections {
+		target: navigationModel
+		ignoreUnknownSignals: true
+		function onFilterTextChanged() {
+			++navigationRail.navigationPresentationRevision
+			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+		}
+		function onRoomExpansionChanged() {
+			++navigationRail.navigationPresentationRevision
+			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+		}
+	}
     color: Theme.rail
 	border.width: 0
 	Rectangle {
@@ -291,14 +723,15 @@ Rectangle {
 		color: Theme.divider
 		z: 20
 	}
-    ColumnLayout {
-        anchors.fill: parent
+	ColumnLayout {
+		id: railContentLayout
+		anchors.fill: parent
         spacing: 0
-        Rectangle {
+		Rectangle {
 			id: serverHeader
 			objectName: "navigationServerHeader"
             Layout.fillWidth: true
-			Layout.preferredHeight: Theme.compact ? 98 : 112
+			Layout.preferredHeight: navigationRail.alignedHeaderHeight
             color: Theme.panel
 			border.width: 0
 			Accessible.role: Accessible.Grouping
@@ -324,15 +757,15 @@ Rectangle {
 				anchors.top: parent.top
 				anchors.leftMargin: 18
 				anchors.rightMargin: 18
-				anchors.topMargin: Theme.compact ? 8 : 10
-				spacing: Theme.compact ? 3 : 4
+				anchors.topMargin: Theme.railHeaderTopInset
+				spacing: Theme.railHeaderSpacing
 				Rectangle {
 					id: serverBadge
 					objectName: "navigationServerBadge"
 					Layout.alignment: Qt.AlignHCenter
-					Layout.preferredWidth: Theme.compact ? 34 : 40
+					Layout.preferredWidth: Theme.railBadgeSize
 					Layout.preferredHeight: Layout.preferredWidth
-					radius: Theme.compact ? 10 : 12
+					radius: Theme.railBadgeRadius
 					color: Theme.accent
 					border.width: 1
 					border.color: Theme.elevationHighlight
@@ -354,7 +787,7 @@ Rectangle {
 					text: clientSession.serverName
 					color: Theme.textStrong
 					font.bold: true
-					font.pixelSize: 14
+					font.pixelSize: Theme.fontBody + 1
 					elide: Text.ElideRight
 					horizontalAlignment: Text.AlignHCenter
 					Accessible.ignored: true
@@ -404,11 +837,89 @@ Rectangle {
 						&& String(clientSession.connectionDetail || "").length > 0
 					ToolTip.text: clientSession.connectionDetail
 				}
-            }
+			}
         }
+		Item {
+			id: navigationFilterBar
+			objectName: "navigationFilterBar"
+			Layout.fillWidth: true
+			Layout.preferredHeight: 50
+			Accessible.role: Accessible.Grouping
+			Accessible.name: qsTr("Filter rooms and people")
+
+			ModernTextField {
+				id: navigationFilterField
+				objectName: "navigationFilterField"
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.verticalCenter: parent.verticalCenter
+				anchors.leftMargin: 12
+				anchors.rightMargin: 12
+				dense: true
+				activeFocusOnTab: true
+				KeyNavigation.tab: rooms
+				leftPadding: 34
+				rightPadding: text.length > 0 ? 34 : Theme.space3
+				text: navigationRail.effectiveFilterText
+				placeholderText: qsTr("Search rooms or people")
+				Accessible.name: qsTr("Search rooms or people")
+				Accessible.description: text.length > 0
+					? qsTr("Showing matching rooms and people. The current selection remains visible.")
+					: qsTr("Type to filter the room navigator")
+				onTextEdited: navigationRail.setNavigationFilter(text)
+				Keys.onEscapePressed: event => {
+					if (text.length > 0)
+						navigationRail.setNavigationFilter("")
+					else
+						rooms.forceActiveFocus(Qt.TabFocusReason)
+					event.accepted = true
+				}
+				Keys.onDownPressed: event => {
+					const index = navigationRail.selectedNavigationIndex() >= 0
+						? navigationRail.selectedNavigationIndex()
+						: navigationRail.firstVisibleNavigationIndex()
+					event.accepted = navigationRail.focusNavigationIndex(index, Qt.OtherFocusReason)
+				}
+				Keys.onReturnPressed: event => {
+					const index = navigationRail.selectedNavigationIndex() >= 0
+						? navigationRail.selectedNavigationIndex()
+						: navigationRail.firstVisibleNavigationIndex()
+					event.accepted = navigationRail.focusNavigationIndex(index, Qt.OtherFocusReason)
+				}
+				ModernIcon {
+					anchors.left: parent.left
+					anchors.leftMargin: 11
+					anchors.verticalCenter: parent.verticalCenter
+					name: "search"
+					size: 14
+					color: navigationFilterField.activeFocus ? Theme.accent : Theme.textMuted
+					Accessible.ignored: true
+				}
+				ModernIconButton {
+					id: navigationFilterClear
+					hoverEnabled: !navigationRail.visualFixtureMode
+					objectName: "navigationFilterClear"
+					anchors.right: parent.right
+					anchors.rightMargin: 3
+					anchors.verticalCenter: parent.verticalCenter
+					width: 26
+					height: 26
+					visible: navigationFilterField.text.length > 0
+					iconName: "close"
+					dense: true
+					activeFocusOnTab: false
+					focusPolicy: Qt.ClickFocus
+					Accessible.name: qsTr("Clear room filter")
+					onClicked: {
+						navigationRail.setNavigationFilter("")
+						navigationFilterField.forceActiveFocus(Qt.MouseFocusReason)
+					}
+				}
+			}
+		}
 		ListView {
 			id: rooms
-			objectName: "navigationRooms"
+			objectName: navigationRail.roomListObjectName
             Layout.fillWidth: true
             Layout.fillHeight: true
 			model: navigationModel
@@ -417,10 +928,14 @@ Rectangle {
 			// directly focusable by pointer, automation and focusInitialItem(), while
 			// keyboard users move the current row with arrows without tabbing through
 			// every delegate on a large server.
-			activeFocusOnTab: count > 0
+			activeFocusOnTab: activeFocus || count > 0
 			KeyNavigation.tab: selfMuteButton
+			KeyNavigation.backtab: navigationFilterField
 			Accessible.role: Accessible.List
 			Accessible.name: qsTr("Rooms and participants")
+			// Keep exactly one accessibility focus owner: the materialized current
+			// row when available, otherwise this virtualized list itself.
+			Accessible.focused: activeFocus && (!currentItem || !currentItem.activeFocus)
 			reuseItems: true
 			// Incubate a bounded number of nearby delegates so keyboard and
 			// accessibility traversal remain deterministic without realizing the
@@ -433,17 +948,25 @@ Rectangle {
 			ScrollBar.vertical: ModernScrollBar {
 				objectName: "navigationScrollBar"
 			}
-			section.property: "sectionKind"
-			section.criteria: ViewSection.FullString
 			Keys.onPressed: event => {
 				if (event.key === Qt.Key_Up) {
-					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex - 1)
+					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex - 1, -1)
 				} else if (event.key === Qt.Key_Down) {
-					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex + 1)
+					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex + 1, 1)
 				} else if (event.key === Qt.Key_Home) {
-					event.accepted = navigationRail.setCurrentNavigationIndex(0)
+					event.accepted = navigationRail.setCurrentNavigationIndex(
+						navigationRail.firstVisibleNavigationIndex())
 				} else if (event.key === Qt.Key_End) {
-					event.accepted = navigationRail.setCurrentNavigationIndex(count - 1)
+					event.accepted = navigationRail.setCurrentNavigationIndex(
+						navigationRail.lastVisibleNavigationIndex())
+				} else if (event.key === Qt.Key_PageUp) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(
+						navigationRail.stepVisibleNavigationIndex(currentIndex,
+							-navigationRail.navigationPageStep()))
+				} else if (event.key === Qt.Key_PageDown) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(
+						navigationRail.stepVisibleNavigationIndex(currentIndex,
+							navigationRail.navigationPageStep()))
 				} else if ((event.key === Qt.Key_Menu
 						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))
 						&& currentItem) {
@@ -467,34 +990,6 @@ Rectangle {
 				if (currentItem) {
 					currentItem.activateSpaceAction()
 					event.accepted = true
-				}
-			}
-			section.delegate: Item {
-				required property string section
-				readonly property string visualLabel: section === "voice" ? qsTr("VOICE ROOMS")
-					: section === "direct" ? qsTr("DIRECT MESSAGES") : qsTr("TEXT ROOMS")
-				objectName: "navigationSection_" + section
-				width: ListView.view ? ListView.view.width : 0
-				height: 34
-				Accessible.role: Accessible.Heading
-				Accessible.name: visualLabel + " · " + navigationRail.roomCountForKind(section)
-
-				Label {
-					id: sectionLabel
-					objectName: "navigationSectionLabel_" + parent.section
-					anchors.left: parent.left
-					anchors.leftMargin: 8
-					anchors.right: parent.right
-					anchors.rightMargin: 8
-					anchors.bottom: parent.bottom
-					anchors.bottomMargin: Theme.space1
-					textFormat: Text.PlainText
-					text: parent.visualLabel
-					color: Theme.withAlpha(Theme.accent, 0.76)
-					font.pixelSize: Theme.fontCaption
-					font.bold: true
-					elide: Text.ElideRight
-					Accessible.ignored: true
 				}
 			}
 			delegate: Rectangle {
@@ -566,8 +1061,22 @@ Rectangle {
 						appendUnique(qsTr("%1 unread messages").arg(unreadCount))
 					if (joined)
 						appendUnique(qsTr("You are here"))
+					if (kind === "voice" && participantCount > 0) {
+						appendUnique(participantCount === 1 ? qsTr("1 participant")
+							: qsTr("%1 participants").arg(participantCount))
+						if (talkingParticipantCount === 1)
+							appendUnique(qsTr("1 person speaking"))
+						else if (talkingParticipantCount > 1)
+							appendUnique(qsTr("%1 people speaking").arg(talkingParticipantCount))
+						appendUnique(roomExpanded ? qsTr("Expanded") : qsTr("Collapsed"))
+					}
 					if (screenShareVisible)
 						appendUnique(String(screenShare.statusLabel || screenShare.badgeLabel || ""))
+					if (screenShareActive) {
+						appendUnique(screenShare.ownerLabel)
+						appendUnique(screenShare.resolutionLabel)
+						appendUnique(screenShare.runtimeLabel)
+					}
 					return details.join(". ")
 				}
 				required property int index
@@ -583,41 +1092,75 @@ Rectangle {
 				required property string status
 				required property var payload
 				readonly property bool isParticipant: kind === "participant"
-				// Kept as a stable delegate API for pointer/automation helpers. Section
-				// headers are owned by the same outer ListView, not by a row.
-				readonly property int sectionHeaderHeight: 0
+				readonly property var navigationRowState: ({
+					"stableId": stableId, "scopeToken": scopeToken, "title": title,
+					"subtitle": subtitle, "kind": kind, "status": status,
+					"selected": selected, "payload": payload
+				})
+				readonly property bool navigationVisible: navigationRail.navigationRowIsVisible(navigationRowState)
+				// ListView keeps a small materialized buffer beyond its clipped viewport.
+				// Windows UIA reports those delegates at their unclipped scene bounds, so
+				// publish a row only while its complete semantic surface is visible.
+				readonly property bool accessibilityViewportVisible: navigationVisible
+					&& height > 0 && rooms.height > 0
+					&& y >= rooms.contentY - 0.5
+					&& y + height <= rooms.contentY + rooms.height + 0.5
+				readonly property bool startsVisibleSection: navigationVisible
+					&& navigationRail.rowStartsVisibleSection(index, sectionKind)
+				readonly property string sectionVisualLabel: sectionKind === "voice" ? qsTr("VOICE ROOMS")
+					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES") : qsTr("TEXT ROOMS")
+				readonly property int sectionHeaderHeight: startsVisibleSection ? 34 : 0
 				readonly property bool joined: !!payload.joined || payload.status === "joined"
 				readonly property bool canJoin: kind === "voice" && !joined
 					&& (payload.canJoin === undefined || !!payload.canJoin)
 				readonly property var screenShare: payload.screenShare || ({})
 				readonly property bool screenShareVisible: !!screenShare.visible
+				readonly property bool screenShareActive: screenShareVisible
+					&& String(screenShare.streamId || "").trim().length > 0
+				readonly property string roomDetailText: screenShareActive
+					? (joined ? qsTr("You are here · %1").arg(String(screenShare.statusLabel
+						|| screenShare.ownerLabel || qsTr("Live screen share")))
+						: String(screenShare.statusLabel || screenShare.ownerLabel || subtitle))
+					: (joined ? qsTr("You are here") : subtitle)
 				readonly property var roomActions: payload.actions
 					|| (payload.source && payload.source.actions) || []
 				readonly property var roomBadges: payload.badges || []
+				readonly property int participantCount: isParticipant ? 0
+					: navigationRail.participantCountForRoom(scopeToken, payload)
+				readonly property int talkingParticipantCount: isParticipant ? 0
+					: navigationRail.talkingCountForRoom(scopeToken, payload)
+				readonly property bool roomExpanded: kind !== "voice" || participantCount <= 0
+					? true : navigationRail.roomExpandedFor(scopeToken, payload)
 				readonly property bool hasRoomActions: roomActions.some(function(action) {
 					return action && String(action.kind || "action") !== "separator"
 				})
-				readonly property bool detailsVisible: !isParticipant && (unreadCount > 0
+				readonly property bool detailsVisible: !isParticipant && (screenShareActive || unreadCount > 0
 					|| (selected && kind !== "voice" && subtitle.length > 0))
-				readonly property int roomRowHeight: detailsVisible ? 48 : 40
+				readonly property int roomRowHeight: detailsVisible
+					? Theme.roomRowHeightDetailed : Theme.roomRowHeight
 				readonly property bool rowFocusVisible: activeFocus
 					|| (rooms.activeFocus && ListView.isCurrentItem)
-				readonly property bool revealActions: roomMouse.containsMouse || rowFocusVisible
+				readonly property bool revealActions: (!navigationRail.visualFixtureMode
+					&& roomMouse.containsMouse) || rowFocusVisible
 					|| (navigationRail.activeScopeMenuToken.length > 0
 						&& navigationRail.activeScopeMenuToken === scopeToken)
 					|| joinButton.activeFocus || shareButton.activeFocus || roomActionsButton.activeFocus
 				objectName: isParticipant
 					? "navigationParticipantSemantic_" + participantDelegate.participantObjectKey
 					: "navigationRoom_" + stableId
-                width: rooms.width - 20
-				height: sectionHeaderHeight + (isParticipant ? (Theme.compact ? 31 : 36) : roomRowHeight)
+				width: rooms.width - 20
+				height: navigationVisible
+					? sectionHeaderHeight + (isParticipant ? Theme.participantRowHeight : roomRowHeight) : 0
+				visible: navigationVisible
+				enabled: navigationVisible
                 radius: 8
 				color: isParticipant ? "transparent"
 					: roomDropArea.containsDrag ? Theme.selected
-					: roomMouse.pressed ? Theme.accentSubtle
+					: (!navigationRail.visualFixtureMode && roomMouse.pressed) ? Theme.accentSubtle
 					: selected ? Theme.selected
 					: joined ? Theme.withAlpha(Theme.success, 0.045)
-					: roomMouse.containsMouse ? Theme.surfaceHover : "transparent"
+					: (!navigationRail.visualFixtureMode && roomMouse.containsMouse)
+						? Theme.surfaceHover : "transparent"
 				border.width: isParticipant ? 0 : rowFocusVisible ? Theme.focusRingWidth
 					: roomDropArea.containsDrag ? 2 : 0
 				border.color: rowFocusVisible ? Theme.focus
@@ -625,19 +1168,66 @@ Rectangle {
 				opacity: roomMouse.drag.active ? 0.72 : 1.0
 				activeFocusOnTab: false
 				onActiveFocusChanged: if (activeFocus) makeCurrent()
-				Accessible.ignored: accessibilityPooled
 				Accessible.role: Accessible.ListItem
-                Accessible.name: title
+				Accessible.name: title
 				Accessible.description: isParticipant ? participantDelegate.accessibleDetails()
 					: accessibleRoomDetails()
 				Accessible.selected: isParticipant ? participantDelegate.selectedParticipant : selected
+				Accessible.focused: activeFocus
 				Accessible.onPressAction: activateSelection()
+				Binding {
+					target: roomDelegate
+					property: "Accessible.ignored"
+					value: navigationRail.accessibilitySuppressed
+						|| roomDelegate.accessibilityPooled || !roomDelegate.navigationVisible
+						|| !roomDelegate.accessibilityViewportVisible
+				}
+				Item {
+					id: inlineSectionHeader
+					objectName: roomDelegate.startsVisibleSection
+						? "navigationSection_" + roomDelegate.sectionKind : ""
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					height: roomDelegate.sectionHeaderHeight
+					visible: roomDelegate.startsVisibleSection
+					z: 12
+					Accessible.role: Accessible.Heading
+					Accessible.name: roomDelegate.sectionVisualLabel + " · "
+						+ navigationRail.roomCountForKind(roomDelegate.sectionKind)
+					Accessible.ignored: navigationRail.accessibilitySuppressed || !visible
+						|| !roomDelegate.accessibilityViewportVisible
+
+					Rectangle {
+						anchors.fill: parent
+						color: Theme.rail
+						Accessible.ignored: true
+					}
+					Label {
+						objectName: roomDelegate.startsVisibleSection
+							? "navigationSectionLabel_" + roomDelegate.sectionKind : ""
+						anchors.left: parent.left
+						anchors.leftMargin: 8
+						anchors.right: parent.right
+						anchors.rightMargin: 8
+						anchors.bottom: parent.bottom
+						anchors.bottomMargin: Theme.space1
+						textFormat: Text.PlainText
+						text: roomDelegate.sectionVisualLabel
+						color: Theme.withAlpha(Theme.accent, 0.76)
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+				}
 				Rectangle {
 					objectName: "navigationRoomSelectionAccent_" + stableId
 					anchors.left: parent.left
-					anchors.verticalCenter: parent.verticalCenter
+					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionHeaderHeight + 5
 					width: 2
-					height: Math.max(16, parent.height - 10)
+					height: Math.max(16, roomDelegate.roomRowHeight - 10)
 					radius: 1
 					color: Theme.accent
 					visible: !roomDelegate.isParticipant && roomDelegate.selected
@@ -656,6 +1246,30 @@ Rectangle {
 					anchors.leftMargin: 8 + Math.min(depth, 5) * 11
 					anchors.rightMargin: 6
 					spacing: 7
+					ModernIconButton {
+						id: roomDisclosureButton
+						hoverEnabled: !navigationRail.visualFixtureMode
+						objectName: "navigationRoomDisclosure_" + stableId
+						visible: kind === "voice" && roomDelegate.participantCount > 0
+						Layout.preferredWidth: visible ? 22 : 0
+						Layout.preferredHeight: 22
+						iconName: "next"
+						rotation: roomDelegate.roomExpanded ? 90 : 0
+						dense: true
+						activeFocusOnTab: false
+						focusPolicy: Qt.ClickFocus
+						z: 4
+						Accessible.name: roomDelegate.roomExpanded
+							? qsTr("Collapse %1").arg(title) : qsTr("Expand %1").arg(title)
+						Accessible.description: roomDelegate.participantCount === 1
+							? qsTr("1 participant")
+							: qsTr("%1 participants").arg(roomDelegate.participantCount)
+						ToolTip.visible: hovered
+						ToolTip.text: Accessible.name
+						Behavior on rotation { NumberAnimation { duration: Theme.motionFast } }
+						onClicked: navigationRail.toggleRoomExpanded(scopeToken, payload)
+						onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
+					}
 					Rectangle {
 						Layout.preferredWidth: 24
 						Layout.preferredHeight: 24
@@ -691,8 +1305,10 @@ Rectangle {
 							Layout.fillWidth: true
 							textFormat: Text.PlainText
 							visible: detailsVisible
-							text: joined ? qsTr("You are here") : subtitle
-							color: joined ? Theme.success : Theme.textMuted
+							text: roomDelegate.roomDetailText
+							color: roomDelegate.screenShareActive
+								? navigationRail.toneColor(screenShare.statusTone, Theme.accent)
+								: joined ? Theme.success : Theme.textMuted
 							font.pixelSize: Theme.fontCaption
 							elide: Text.ElideRight
 							Accessible.ignored: true
@@ -702,6 +1318,39 @@ Rectangle {
 						id: roomMeta
 						Layout.alignment: Qt.AlignVCenter
 						spacing: 4
+						Rectangle {
+							objectName: "navigationRoomParticipantCount_" + stableId
+							visible: kind === "voice" && roomDelegate.participantCount > 0
+							Layout.preferredWidth: Math.max(18, participantCountLabel.implicitWidth + 8)
+							Layout.preferredHeight: 18
+							radius: 9
+							readonly property color countTone: roomDelegate.talkingParticipantCount > 0
+								? Theme.success : Theme.textMuted
+							color: Theme.withAlpha(countTone, roomDelegate.talkingParticipantCount > 0 ? 0.16 : 0.08)
+							border.width: roomDelegate.talkingParticipantCount > 0 ? 1 : 0
+							border.color: Theme.withAlpha(countTone, 0.34)
+							Label {
+								id: participantCountLabel
+								objectName: "navigationRoomParticipantCountLabel_" + stableId
+								anchors.centerIn: parent
+								textFormat: Text.PlainText
+								text: roomDelegate.talkingParticipantCount > 0
+									? qsTr("%1/%2").arg(roomDelegate.talkingParticipantCount)
+										.arg(roomDelegate.participantCount)
+									: String(roomDelegate.participantCount)
+								color: parent.countTone
+								font.pixelSize: 8
+								font.bold: roomDelegate.talkingParticipantCount > 0
+								Accessible.ignored: true
+							}
+							ToolTip.visible: participantCountHover.hovered
+							ToolTip.text: roomDelegate.talkingParticipantCount > 0
+								? qsTr("%1 of %2 participants speaking")
+									.arg(roomDelegate.talkingParticipantCount).arg(roomDelegate.participantCount)
+								: (roomDelegate.participantCount === 1 ? qsTr("1 participant")
+									: qsTr("%1 participants").arg(roomDelegate.participantCount))
+							HoverHandler { id: participantCountHover }
+						}
 						Label {
 							objectName: "navigationRoomBadge_" + stableId
 							// Room badges remain available in the row's accessible description.
@@ -735,7 +1384,8 @@ Rectangle {
 						}
 						Rectangle {
 							objectName: "navigationRoomShareBadge_" + stableId
-							visible: false
+							visible: roomDelegate.screenShareActive
+								&& String(screenShare.badgeLabel || "").length > 0
 							Layout.preferredWidth: shareBadgeLabel.implicitWidth + 10
 							Layout.preferredHeight: 18
 							radius: 9
@@ -765,6 +1415,7 @@ Rectangle {
 						}
 						Button {
 							id: joinButton
+							hoverEnabled: !navigationRail.visualFixtureMode
 							objectName: "navigationRoomJoin_" + stableId
 							visible: kind === "voice" && !joined
 							enabled: canJoin
@@ -805,6 +1456,7 @@ Rectangle {
 						}
 						Button {
 							id: shareButton
+							hoverEnabled: !navigationRail.visualFixtureMode
 							objectName: "navigationRoomShare_" + stableId
 							visible: kind === "voice" && joined && screenShareVisible
 								&& String(screenShare.primaryActionId || "").length > 0
@@ -813,21 +1465,19 @@ Rectangle {
 							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							activeFocusOnTab: false
 							focusPolicy: Qt.ClickFocus
-							Layout.preferredWidth: 44
+							Layout.preferredWidth: 28
 							Layout.preferredHeight: 24
 							padding: 0
 							z: 4
-							text: String(screenShare.mode || "") === "idle" ? qsTr("Share") : qsTr("Live")
+							text: String(screenShare.primaryLabel || qsTr("Screen share"))
 							Accessible.name: text
-							contentItem: Label {
-								textFormat: Text.PlainText
-								text: shareButton.text
+							Accessible.description: String(screenShare.primaryHint
+								|| screenShare.statusLabel || "")
+							contentItem: ModernIcon {
+								name: "screen-share"
+								size: 13
 								color: shareButton.enabled
 									? navigationRail.toneColor(screenShare.primaryTone, Theme.accent) : Theme.textMuted
-								font.pixelSize: 9
-								font.bold: true
-								horizontalAlignment: Text.AlignHCenter
-								verticalAlignment: Text.AlignVCenter
 								Accessible.ignored: true
 							}
 							background: Rectangle {
@@ -846,6 +1496,7 @@ Rectangle {
 						}
 						ModernIconButton {
 							id: roomActionsButton
+							hoverEnabled: !navigationRail.visualFixtureMode
 							objectName: "navigationRoomActions_" + stableId
 							visible: hasRoomActions || kind === "voice" || kind === "text"
 							opacity: revealActions ? 1 : (selected || joined ? 0.62 : 0.48)
@@ -988,18 +1639,42 @@ Rectangle {
 					}
 				}
 				Keys.onPressed: event => {
-					if (event.key === Qt.Key_Up) {
-						event.accepted = navigationRail.focusNavigationIndex(index - 1,
+					if (event.key === Qt.Key_Left && isParticipant) {
+						const parentScope = String(payload.parentScopeToken || "")
+						navigationRail.setRoomExpanded(parentScope, false)
+						event.accepted = parentScope.length > 0
+					} else if (event.key === Qt.Key_Left && kind === "voice"
+							&& participantCount > 0 && roomExpanded) {
+						navigationRail.setRoomExpanded(scopeToken, false)
+						event.accepted = true
+					} else if (event.key === Qt.Key_Right && kind === "voice"
+							&& participantCount > 0 && !roomExpanded) {
+						navigationRail.setRoomExpanded(scopeToken, true)
+						event.accepted = true
+					} else if (event.key === Qt.Key_Up) {
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.nextVisibleNavigationIndex(index, -1),
 							Qt.OtherFocusReason)
 					} else if (event.key === Qt.Key_Down) {
-						event.accepted = navigationRail.focusNavigationIndex(index + 1,
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.nextVisibleNavigationIndex(index, 1),
 							Qt.OtherFocusReason)
 					} else if (event.key === Qt.Key_Home) {
-						event.accepted = navigationRail.focusNavigationIndex(0,
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.firstVisibleNavigationIndex(),
 							Qt.OtherFocusReason)
 					} else if (event.key === Qt.Key_End) {
-						event.accepted = navigationRail.focusNavigationIndex(rooms.count - 1,
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.lastVisibleNavigationIndex(),
 							Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_PageUp) {
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.stepVisibleNavigationIndex(index,
+								-navigationRail.navigationPageStep()), Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_PageDown) {
+						event.accepted = navigationRail.focusNavigationIndex(
+							navigationRail.stepVisibleNavigationIndex(index,
+								navigationRail.navigationPageStep()), Qt.OtherFocusReason)
 					} else if (event.key === Qt.Key_Menu
 						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
 						requestContextMenuAtCenter()
@@ -1100,7 +1775,8 @@ Rectangle {
 					|| participantActions.some(function(action) {
 					return action && String(action.kind || "action") !== "separator"
 				})
-				readonly property bool revealParticipantActions: participantMouse.containsMouse
+				readonly property bool revealParticipantActions: (!navigationRail.visualFixtureMode
+					&& participantMouse.containsMouse)
 					|| roomDelegate.rowFocusVisible
 					|| (stableId.length > 0
 						&& navigationRail.activeParticipantMenuKey === stableId)
@@ -1113,11 +1789,12 @@ Rectangle {
 					roomDelegate.focusRow()
 				}
 				objectName: "navigationParticipant_" + participantObjectKey
-				height: Theme.compact ? 31 : 36
+				height: Theme.participantRowHeight
                 radius: 8
-				color: participantMouse.pressed ? Theme.accentSubtle
+				color: (!navigationRail.visualFixtureMode && participantMouse.pressed) ? Theme.accentSubtle
 					   : selectedParticipant ? Theme.selected
-					   : participantMouse.containsMouse ? Theme.surfaceHover : "transparent"
+					   : (!navigationRail.visualFixtureMode && participantMouse.containsMouse)
+						? Theme.surfaceHover : "transparent"
 				border.width: roomDelegate.rowFocusVisible ? Theme.focusRingWidth : 0
 				border.color: roomDelegate.rowFocusVisible ? Theme.focus : "transparent"
 				opacity: participantMouse.drag.active ? 0.72 : 1.0
@@ -1306,6 +1983,7 @@ Rectangle {
 						}
 						Button {
 							id: participantJoinButton
+							hoverEnabled: !navigationRail.visualFixtureMode
 							objectName: "navigationParticipantJoin_" + participantDelegate.participantObjectKey
 							visible: participantDelegate.canJoin
 							opacity: participantDelegate.revealParticipantActions
@@ -1343,6 +2021,7 @@ Rectangle {
 						}
 						ModernIconButton {
 							id: participantActionsButton
+							hoverEnabled: !navigationRail.visualFixtureMode
 							objectName: "navigationParticipantActions_" + participantDelegate.participantObjectKey
 							visible: participantDelegate.hasParticipantActions
 							opacity: participantDelegate.revealParticipantActions
@@ -1445,15 +2124,27 @@ Rectangle {
 					onDoubleClicked: participantDelegate.openConversation()
 				}
 				}
+
+				ModalAccessibilityBarrier {
+					id: roomAccessibilityBarrier
+					objectName: "navigationRoomAccessibilityBarrier_" + roomDelegate.stableId
+					// The rail-wide barrier owns modal suppression. This delegate-local
+					// barrier only withdraws materialized cache rows outside the viewport,
+					// avoiding competing temporary bindings during modal transitions.
+					active: !navigationRail.accessibilitySuppressed
+						&& !roomDelegate.accessibilityViewportVisible
+					targets: [ roomDelegate ]
+				}
 			}
 		}
         Rectangle {
 			id: selfDock
 			objectName: "navigationSelfDock"
             Layout.fillWidth: true
-			Layout.preferredHeight: Theme.compact ? 68 : 76
+			Layout.preferredHeight: navigationRail.alignedFooterHeight
 			color: selfMuteButton.activeFocus || selfDeafenButton.activeFocus
-				|| profileMenuButton.activeFocus ? Theme.selfCardHover : Theme.selfCardBackground
+				|| settingsButton.activeFocus || profileMenuButton.activeFocus
+				? Theme.selfCardHover : Theme.selfCardBackground
 			border.width: 0
 			Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 			Accessible.role: Accessible.Grouping
@@ -1473,8 +2164,8 @@ Rectangle {
                 anchors.fill: parent
 				anchors.leftMargin: 12
 				anchors.rightMargin: 10
-				anchors.topMargin: 10
-				anchors.bottomMargin: 10
+				anchors.topMargin: 8
+				anchors.bottomMargin: 8
 				spacing: 8
 				Rectangle {
 					id: selfAvatar
@@ -1547,7 +2238,7 @@ Rectangle {
 						Layout.fillWidth: true
 						textFormat: Text.PlainText
 						text: clientSession.selfStatusLabel
-						color: Theme.textFaint
+						color: Theme.microLabelText
 						font.pixelSize: Theme.fontCaption
 						elide: Text.ElideRight
 						Accessible.ignored: true
@@ -1555,12 +2246,14 @@ Rectangle {
                 }
 				ModernIconButton {
 					id: selfMuteButton
+					hoverEnabled: !navigationRail.visualFixtureMode
 					objectName: "selfMuteButton"
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
 					KeyNavigation.tab: selfDeafenButton
 					KeyNavigation.backtab: rooms
 					iconName: clientSession.selfMuted ? "mute" : "microphone"
+					dense: true
 					selected: !!clientSession.selfMuted
 					tone: clientSession.selfMuted ? "danger" : "neutral"
 					Accessible.name: clientSession.selfMuted ? qsTr("Unmute microphone") : qsTr("Mute microphone")
@@ -1570,12 +2263,14 @@ Rectangle {
 				}
 				ModernIconButton {
 					id: selfDeafenButton
+					hoverEnabled: !navigationRail.visualFixtureMode
 					objectName: "selfDeafenButton"
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
-					KeyNavigation.tab: profileMenuButton
+					KeyNavigation.tab: settingsButton
 					KeyNavigation.backtab: selfMuteButton
 					iconName: "deafen"
+					dense: true
 					selected: !!clientSession.selfDeafened
 					tone: clientSession.selfDeafened ? "danger" : "neutral"
 					Accessible.name: clientSession.selfDeafened ? qsTr("Undeafen") : qsTr("Deafen")
@@ -1584,12 +2279,43 @@ Rectangle {
 					onClicked: uiCommands.toggleSelfDeaf()
 				}
 				ModernIconButton {
+					id: settingsButton
+					hoverEnabled: !navigationRail.visualFixtureMode
+					objectName: "settingsButton"
+					activeFocusOnTab: true
+					focusPolicy: Qt.StrongFocus
+					KeyNavigation.tab: profileMenuButton
+					KeyNavigation.backtab: selfDeafenButton
+					iconName: "settings"
+					dense: true
+					enabled: navigationRail.settingsEnabled
+					Accessible.name: qsTr("Settings")
+					Accessible.description: qsTr("Audio, appearance, notifications, plugins, and more")
+					ToolTip.visible: hovered
+					ToolTip.text: Accessible.name
+					onClicked: navigationRail.settingsRequested()
+					Keys.onReturnPressed: event => {
+						navigationRail.settingsRequested()
+						event.accepted = true
+					}
+					Keys.onEnterPressed: event => {
+						navigationRail.settingsRequested()
+						event.accepted = true
+					}
+					Keys.onSpacePressed: event => {
+						navigationRail.settingsRequested()
+						event.accepted = true
+					}
+				}
+				ModernIconButton {
 					id: profileMenuButton
+					hoverEnabled: !navigationRail.visualFixtureMode
 					objectName: "profileMenuButton"
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
-					KeyNavigation.backtab: selfDeafenButton
+					KeyNavigation.backtab: settingsButton
 					iconName: "more"
+					dense: true
 					Accessible.name: qsTr("Profile menu")
 					onClicked: navigationRail.profileMenuRequested(
 						profileMenuButton.mapToItem(null, width / 2, 0))
@@ -1619,7 +2345,26 @@ Rectangle {
 				}
             }
         }
-    }
+		}
+	Timer {
+		id: accessibilityReassertionTimer
+		objectName: "navigationAccessibilityReassertionTimer"
+		interval: 16
+		repeat: true
+		triggeredOnStart: true
+		running: navigationRail.accessibilitySuppressed
+		onTriggered: navigationRail.refreshVirtualizedAccessibility()
+	}
+
+	ModalAccessibilityBarrier {
+		id: railAccessibilityBarrier
+		objectName: "navigationRailAccessibilityBarrier"
+		active: navigationRail.accessibilitySuppressed
+		// ListView delegates are created and reused below the hosted content item.
+		// Keep the barrier next to that virtualized owner so modal activation also
+		// catches rows that settle after the main shell's background pass.
+		targets: [ railContentLayout ]
+	}
 	Accessible.role: Accessible.Pane
 	Accessible.name: qsTr("Rooms and participants")
 }

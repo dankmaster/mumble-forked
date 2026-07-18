@@ -8,6 +8,7 @@
 
 #include "Mumble.pb.h"
 
+#include <QByteArray>
 #include <QList>
 #include <QString>
 #include <QUrl>
@@ -71,6 +72,8 @@ namespace ScreenShare {
 	bool isWebRtcRelayTransport(MumbleProto::ScreenShareRelayTransport relayTransport);
 	QString normalizeRelayUrl(const QString &relayUrl);
 	bool isValidRelayUrl(const QString &relayUrl);
+	QString viewerAudioPreferenceKey(const QString &ownerCertificateHash, const QByteArray &serverCertificateDigest,
+									 const QString &ownerName);
 
 } // namespace ScreenShare
 } // namespace Mumble

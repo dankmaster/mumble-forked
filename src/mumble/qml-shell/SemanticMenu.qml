@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import Mumble.Theme 1.0
 
-ModernMenu {
+PayloadMenu {
 	id: menu
 	property var groups: []
 	property string headerTitle: ""
@@ -10,8 +10,7 @@ ModernMenu {
 	property string headerTone: ""
 	property bool showSectionLabels: true
 	property real maximumHeight: 620
-	readonly property var renderedEntries: flattenGroups(groups)
-	signal actionRequested(string actionId, var payload)
+	readonly property var renderedEntries: hierarchicalGroups(groups)
 
 	function normalizedItems(items) {
 		const output = []
@@ -37,7 +36,20 @@ ModernMenu {
 		return output
 	}
 
-	function flattenGroups(sourceGroups) {
+	function representativeGroupIcon(group, items) {
+		const explicitIcon = String((group || ({})).icon || "").trim()
+		if (explicitIcon.length > 0)
+			return explicitIcon
+		const source = items || []
+		for (let index = 0; index < source.length; ++index) {
+			const icon = String((source[index] || ({})).icon || "").trim()
+			if (icon.length > 0)
+				return icon
+		}
+		return "action"
+	}
+
+	function hierarchicalGroups(sourceGroups) {
 		const output = []
 		if (headerTitle.length > 0) {
 			output.push({
@@ -57,29 +69,28 @@ ModernMenu {
 				continue
 			if (showSectionLabels && String(group.label || "").length > 0) {
 				output.push({
-					"kind": "section",
-					"id": "semantic-menu-section-" + String(group.id || groupIndex),
+					"kind": "submenu",
+					"id": "semantic-menu-group-" + String(group.id || groupIndex),
 					"label": String(group.label || ""),
-					"enabled": false
+					"hint": String(group.hint || ""),
+					// Group rows reuse the first real action glyph supplied by the
+					// controller. This preserves the typed icon vocabulary instead of
+					// painting the same generic menu mark on every top-level row.
+					"icon": representativeGroupIcon(group, items),
+					"enabled": group.enabled === undefined || !!group.enabled,
+					"items": items
 				})
+			} else {
+				for (let itemIndex = 0; itemIndex < items.length; ++itemIndex)
+					output.push(items[itemIndex])
 			}
-			for (let itemIndex = 0; itemIndex < items.length; ++itemIndex)
-				output.push(items[itemIndex])
 		}
 		return output
 	}
 
-	width: 292
-	height: Math.min(implicitHeight, maximumHeight)
+	preferredWidth: 292
+	height: Math.min(implicitHeight, maximumHeight,
+		Math.max(1, logicalViewportHeight))
 	focus: true
-	closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-	Repeater {
-		model: menu.renderedEntries
-		delegate: PayloadMenuItem {
-			required property var modelData
-			payload: modelData
-			onActionRequested: actionId => menu.actionRequested(actionId, modelData)
-		}
-	}
+	entries: renderedEntries
 }

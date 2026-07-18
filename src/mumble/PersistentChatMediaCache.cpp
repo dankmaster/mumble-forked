@@ -197,6 +197,10 @@ std::optional< PreviewEntry > loadPreview(const QString &previewKey) {
 		item.url  = itemObject.value(QStringLiteral("url")).toString();
 		item.mime = itemObject.value(QStringLiteral("mime")).toString();
 		item.kind = itemObject.value(QStringLiteral("kind")).toString();
+		item.title = itemObject.value(QStringLiteral("title")).toString().left(1024);
+		item.streamKind = itemObject.value(QStringLiteral("streamKind")).toString().left(32);
+		item.thumbnail = itemObject.value(QStringLiteral("thumbnail")).toString().left(16384);
+		item.poster = itemObject.value(QStringLiteral("poster")).toString().left(16384);
 		if (!item.url.trimmed().isEmpty()) {
 			entry.mediaItems.push_back(item);
 		}
@@ -260,6 +264,18 @@ void storePreview(const QString &previewKey, const PreviewEntry &entry) {
 		itemObject.insert(QStringLiteral("url"), item.url);
 		itemObject.insert(QStringLiteral("mime"), item.mime);
 		itemObject.insert(QStringLiteral("kind"), item.kind);
+		if (!item.title.isEmpty()) {
+			itemObject.insert(QStringLiteral("title"), item.title.left(1024));
+		}
+		if (!item.streamKind.isEmpty()) {
+			itemObject.insert(QStringLiteral("streamKind"), item.streamKind.left(32));
+		}
+		if (!item.thumbnail.isEmpty()) {
+			itemObject.insert(QStringLiteral("thumbnail"), item.thumbnail.left(16384));
+		}
+		if (!item.poster.isEmpty()) {
+			itemObject.insert(QStringLiteral("poster"), item.poster.left(16384));
+		}
 		mediaItems.push_back(itemObject);
 	}
 	if (!mediaItems.isEmpty()) {

@@ -8,6 +8,7 @@ ApplicationWindow {
 	onClosing: close => close.accepted = false
     property var attachmentViewerPayload: null
     property var pendingPreviewHydrationIds: ({})
+	property var richPreviewSizePresets: ({})
     property bool pendingPreviewHydrationHighPriority: false
     visible: false
     width: 1280
@@ -77,6 +78,15 @@ ApplicationWindow {
     color: Theme.strip
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
+	property bool performanceChatScrollRunning: false
+	property int performanceChatScrollCompletedSteps: 0
+	property int performanceChatScrollTargetSteps: 0
+	property int performanceChatDelegateCreatedCount: 0
+	property int performanceChatDelegatePooledCount: 0
+	property int performanceChatDelegateReusedCount: 0
+	property int performanceChatPreviewLoadedCount: 0
+	property int performanceChatAttachmentLoadedCount: 0
+	property var performanceChatScrollDiagnosticsBefore: ({})
 	readonly property bool compactNavigation: width < 900
 	readonly property bool narrowShell: width < 600
 	readonly property string normalizedConnectionState: String(clientSession.connectionState || "").toLowerCase()
@@ -88,21 +98,25 @@ ApplicationWindow {
 	readonly property int timelineHorizontalMargin: narrowShell ? Theme.space3
 		: compactNavigation ? Theme.space5 : 28
 	readonly property int timelineVerticalMargin: narrowShell ? Theme.space3 : Theme.space5
-	readonly property int conversationLaneMaximumWidth: 840
+	readonly property int conversationLaneMaximumWidth: Theme.chatLaneMaximumWidth
 	// Drawer.visible can stay true while the popup item is resident. Position is
 	// the reliable modal-state signal: zero is fully closed, one fully open.
 	readonly property bool navigationModalActive: navigationDrawer.position > 0.001
-	readonly property bool modalUiActive: dialogState.open || navigationModalActive
+	readonly property bool productDialogTransitionActive: productDialog.opened || productDialog.visible
+	readonly property bool modalUiActive: (dialogState.open && dialogState.kind !== "settings")
+		|| navigationModalActive
+		|| mediaSessionWindowUnavailable
 	readonly property bool automationNavigationOpen: navigationModalActive
 	readonly property real automationNavigationPosition: navigationDrawer.position
-	readonly property real modalTextureScale: root.screen
-		? Math.max(1, Number(root.screen.devicePixelRatio || 1)) : 1
 	readonly property var navigationRoomModel: roomModel
 	readonly property var navigationParticipantModel: participantModel
 	readonly property var navigationRailModel: navigationModel
 	readonly property var navigationSelectionState: selectionState
 	readonly property var navigationCommands: uiCommands
 	readonly property var navigationSession: clientSession
+	readonly property var settingsActionEntry: resolvedSettingsAction()
+	readonly property bool settingsActionEnabled: settingsActionEntry.enabled === undefined
+		|| !!settingsActionEntry.enabled
 	property string contextScopeToken: ""
 	property string contextScopeKind: ""
 	property var contextScopeActions: []
@@ -111,10 +125,56 @@ ApplicationWindow {
 	property var contextParticipantActions: []
 	property string contextParticipantEntryKind: "user"
 	property string contextParticipantScopeToken: ""
+	property bool conversationSearchOpen: false
 	property string automationMenuVariant: ""
+	property var automationMenuSurface: null
+	property var automationMenuFocusItem: null
 	property bool visualFixtureOverrideActive: false
+	Component {
+		id: composerTextCursorDelegate
+		// Preserve real keyboard focus in visual fixtures while keeping the
+		// screenshot frame deterministic across the platform cursor blink timer.
+		Item {
+			width: 1
+			Rectangle {
+				objectName: "composerTextCursorPaint"
+				anchors.fill: parent
+				visible: !root.visualFixtureOverrideActive
+				color: Theme.textStrong
+			}
+		}
+	}
+	// Non-empty only while the deterministic Windows visual gate is presenting
+	// a media surface. The value is forwarded to the isolated media components
+	// so they can exercise loading/playback/error chrome without creating a
+	// Chromium renderer or touching the network.
+	property string visualMediaFixtureMode: ""
 	property bool motdHistoryOverride: false
 	property string motdSeenRequestSignature: ""
+	property url mediaSessionWindowComponentUrl: Qt.resolvedUrl("MediaSessionWindow.qml")
+	property Item mediaWindowFailureFocusReturnItem: null
+	readonly property bool mediaSessionWindowRequested: mediaSession.active && mediaSession.detached
+	readonly property bool mediaRuntimeContractAvailable: !!mediaProfiles
+		&& typeof mediaProfiles.runtimeReady !== "undefined"
+	readonly property bool mediaRuntimeReady: !mediaRuntimeContractAvailable
+		|| !!mediaProfiles.runtimeReady
+	readonly property bool mediaRuntimePreparing: mediaRuntimeContractAvailable
+		&& !!mediaProfiles.runtimePreparing
+	readonly property string mediaRuntimeError: mediaRuntimeContractAvailable
+		? String(mediaProfiles.runtimeError || "") : ""
+	readonly property bool mediaSessionWindowComponentFailed:
+		mediaSessionWindowLoader.active && mediaSessionWindowLoader.status === Loader.Error
+	readonly property bool mediaSessionWindowRuntimeFailed: mediaSessionWindowRequested
+		&& mediaRuntimeError.length > 0
+	// Runtime preparation and runtime failures are presented inside the detached
+	// media window. The shell-level modal is reserved for a QML component load
+	// failure, where no detached product surface exists to host recovery.
+	readonly property bool mediaSessionWindowUnavailable: mediaSessionWindowComponentFailed
+	onMediaSessionWindowComponentUrlChanged: mediaSessionWindowLoader.updateSource()
+	onMediaSessionWindowRequestedChanged: mediaSessionWindowLoader.syncRuntimePresentation()
+	onMediaRuntimeReadyChanged: mediaSessionWindowLoader.syncRuntimePresentation()
+	onMediaRuntimePreparingChanged: mediaSessionWindowLoader.syncRuntimePresentation()
+	onMediaRuntimeErrorChanged: mediaSessionWindowLoader.syncRuntimePresentation()
 	readonly property bool motdHiddenForHistory: !!clientSession.hasMotd
 		&& !clientSession.motdDismissed && !!chatModel.hasUserHistory && !motdHistoryOverride
 	readonly property bool activeScopeHasScreenShare:
@@ -141,16 +201,112 @@ ApplicationWindow {
 		})
 	}
 
-	function refreshModalBackground() {
-		if (root.modalUiActive)
-			Qt.callLater(function() { modalBackgroundSource.scheduleUpdate() })
+	function mediaSessionExternalFallbackUrl() {
+		const candidate = String(mediaSession ? mediaSession.url || "" : "").trim().slice(0, 2048)
+		return /^https:\/\//i.test(candidate) ? candidate : ""
 	}
 
-	onModalUiActiveChanged: refreshModalBackground()
-	onWidthChanged: refreshModalBackground()
-	onHeightChanged: refreshModalBackground()
-	onScreenChanged: refreshModalBackground()
-	Screen.onDevicePixelRatioChanged: refreshModalBackground()
+	function refreshTimelineVirtualizedAccessibility() {
+		if (!root.modalUiActive || !timeline || !timeline.contentItem)
+			return
+		// QQuickItemView may write a materialized delegate's private accessible
+		// bit after the product-level modal barrier has traversed the scene. Keep
+		// this bounded to the live timeline rows; never scan the model or the full
+		// product tree on a frame tick.
+		const delegates = timeline.contentItem.children || []
+		for (let index = 0; index < delegates.length; ++index) {
+			const item = delegates[index]
+			if (item && typeof item.reassertAccessibilitySuppression === "function")
+				item.reassertAccessibilitySuppression()
+		}
+	}
+
+	onModalUiActiveChanged: {
+		if (modalUiActive) {
+			refreshTimelineVirtualizedAccessibility()
+			Qt.callLater(refreshTimelineVirtualizedAccessibility)
+		}
+	}
+
+	function mediaSessionWindowFailureMessage() {
+		if (mediaSessionWindowRuntimeFailed)
+			return mediaRuntimeError
+		const sessionMessage = mediaSession ? String(mediaSession.error || "") : ""
+		return sessionMessage.length > 0 ? sessionMessage
+			: qsTr("The isolated media window is unavailable. Open this provider in your browser instead.")
+	}
+
+	function rememberMediaWindowFailureFocus() {
+		const candidate = root.activeFocusItem
+		root.mediaWindowFailureFocusReturnItem = candidate && candidate.forceActiveFocus
+			? candidate : null
+	}
+
+	function restoreMediaWindowFailureFocus() {
+		const candidate = root.mediaWindowFailureFocusReturnItem
+		root.mediaWindowFailureFocusReturnItem = null
+		Qt.callLater(function() {
+			if (!root.mediaSessionWindowUnavailable && candidate && candidate.forceActiveFocus
+					&& candidate.visible && candidate.enabled)
+				candidate.forceActiveFocus(Qt.PopupFocusReason)
+		})
+	}
+
+	function richPreviewSizePreset(messageId) {
+		const key = String(messageId || "")
+		return key.length > 0 ? String(root.richPreviewSizePresets[key] || "") : ""
+	}
+
+	function rememberRichPreviewSizePreset(messageId, preset) {
+		const key = String(messageId || "")
+		const normalized = String(preset || "").trim().toLowerCase()
+		if (key.length === 0 || [ "compact", "default", "large" ].indexOf(normalized) < 0)
+			return
+		const next = Object.assign({}, root.richPreviewSizePresets)
+		next[key] = normalized
+		root.richPreviewSizePresets = next
+	}
+
+	function openManagedPreviewImage(source, title, messageId) {
+		return root.openAttachment({
+			"url": source, "thumbnailUrl": source, "kind": "image", "alt": title
+		}, title, messageId)
+	}
+
+	function startWatchTogether(url, provider, title) {
+		if (mediaSession && !mediaSession.sharedAvailable)
+			return mediaSession.startShared(url, provider, title)
+		return false
+	}
+
+	function reportMediaSessionWindowComponentFailure() {
+		if (!mediaSession || !mediaSession.active || !mediaSession.detached)
+			return
+		const message = qsTr("The isolated media window is unavailable. Open this provider in your browser instead.")
+		if (typeof mediaSession.reportTypedError === "function")
+			mediaSession.reportTypedError("renderer-component-unavailable", message)
+		else if (typeof mediaSession.reportError === "function")
+			mediaSession.reportError(message)
+		Qt.callLater(function() {
+			if (root.mediaSessionWindowComponentFailed)
+				mediaWindowComponentRetryButton.forceActiveFocus()
+		})
+	}
+
+	function retryMediaSessionWindowComponent() {
+		if (!mediaSession || !mediaSession.active)
+			return
+		if (mediaSessionWindowRuntimeFailed && mediaProfiles
+				&& typeof mediaProfiles.retryRuntime === "function")
+			mediaProfiles.retryRuntime()
+		if (typeof mediaSession.retry === "function")
+			mediaSession.retry()
+		mediaSessionWindowLoader.source = ""
+		Qt.callLater(function() {
+			if (mediaSessionWindowLoader.active)
+				mediaSessionWindowLoader.source = root.mediaSessionWindowComponentUrl
+		})
+	}
 
 	function handleMotdAction(actionId, payload) {
 		const normalized = String(actionId || "").trim()
@@ -182,6 +338,9 @@ ApplicationWindow {
 	Connections {
 		target: chatModel
 		function onHasUserHistoryChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
+		function onDataChanged() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
+		function onModelReset() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
+		function onRowsInserted() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 	}
 
 	onMotdHiddenForHistoryChanged: Qt.callLater(function() { root.maybeMarkMotdSeen() })
@@ -235,52 +394,139 @@ ApplicationWindow {
 		return Qt.formatDate(current, Locale.LongFormat).toUpperCase()
 	}
 
-	function preferredOutgoingMessageWidth(segments, startsGroup) {
+	function estimatedMessageTextWidth(segments, replyActor, replySnippet) {
 		let longestLine = 0
 		for (const segment of (segments || [])) {
 			const text = String(segment && segment.text !== undefined ? segment.text : "")
 			for (const line of text.split(/\r\n|\r|\n/))
 				longestLine = Math.max(longestLine, line.length)
 		}
-		// This only chooses a comfortable bubble width. RichMessageBody remains
-		// responsible for exact text measurement and wrapping.
-		const textEstimate = longestLine * Theme.fontBody * 0.58 + Theme.space4 * 2
-		return Math.max(176, Math.min(520, textEstimate))
+		for (const replyText of [replyActor, replySnippet]) {
+			for (const line of String(replyText || "").split(/\r\n|\r|\n/))
+				longestLine = Math.max(longestLine, line.length)
+		}
+		return longestLine * Theme.fontBody * 0.58
 	}
 
-	function preferredIncomingMessageWidth(segments, startsGroup) {
-		let longestLine = 0
+	function messageContainsInlineImage(segments) {
 		for (const segment of (segments || [])) {
-			const text = String(segment && segment.text !== undefined ? segment.text : "")
-			for (const line of text.split(/\r\n|\r|\n/))
-				longestLine = Math.max(longestLine, line.length)
+			if (segment && String(segment.kind || "").toLowerCase() === "image")
+				return true
 		}
+		return false
+	}
+
+	function preferredAttachmentMessageWidth(attachments, ownOrSystem) {
+		const values = attachments || []
+		if (values.length <= 0)
+			return 0
+		if (values.length > 1)
+			return Theme.chatRichMaximumWidth
+		const attachment = values[0] || ({})
+		const kind = String(attachment.kind || "").toLowerCase()
+		const mime = String(attachment.mime || "").toLowerCase()
+		const image = kind === "image" || mime.indexOf("image/") === 0
+		const requestedWidth = Math.max(0, Number(attachment.width || 0))
+		const tileWidth = image ? Math.min(320, Math.max(180, requestedWidth || 240)) : 360
+		const chromeWidth = ownOrSystem ? Theme.chatBubbleHorizontalPadding * 2
+			: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+		return Math.min(Theme.chatRichMaximumWidth, tileWidth + chromeWidth)
+	}
+
+	function preferredOutgoingMessageWidth(segments, startsGroup, replyActor, replySnippet,
+			deliveryVisible) {
+		// This only chooses a comfortable bubble width. RichMessageBody remains
+		// responsible for exact text measurement and wrapping.
+		const textEstimate = estimatedMessageTextWidth(segments, replyActor, replySnippet)
+			+ Theme.chatBubbleHorizontalPadding * 2
+		const metadataFloor = deliveryVisible ? 300 : 176
+		return Math.max(metadataFloor, Math.min(Theme.chatPlainMaximumWidth, textEstimate))
+	}
+
+	function preferredIncomingMessageWidth(segments, startsGroup, replyActor, replySnippet,
+			deliveryVisible) {
 		// Include the avatar lane and inner bubble padding. Author metadata has a
 		// slightly wider floor only on the first row of a group.
-		const textEstimate = longestLine * Theme.fontBody * 0.58
-			+ Theme.avatarMedium + Theme.space2 + Theme.space3 * 2
-		const metadataFloor = startsGroup ? 260 : 220
-		return Math.max(metadataFloor, Math.min(520, textEstimate))
+		const textEstimate = estimatedMessageTextWidth(segments, replyActor, replySnippet)
+			+ Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+		const metadataFloor = deliveryVisible ? 320 : startsGroup ? 260 : 220
+		return Math.max(metadataFloor, Math.min(Theme.chatPlainMaximumWidth, textEstimate))
 	}
 
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
-		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+		if (/^(image:\/\/mumble\/|qrc:\/)/i.test(source))
+			return source
+		return /^file:\/\//i.test(source)
+			&& /\/mumble-qml-images-[A-Za-z0-9]+\/[0-9a-f]{64}-[0-9a-f-]{36}\.gif$/i.test(source)
+			? source : ""
 	}
 
-	function openAttachment(attachment, titleOverride) {
+	function attachmentIdentity(attachment) {
+		if (!attachment)
+			return ""
+		const inlineToken = String(attachment.inlineToken || "").trim()
+		if (inlineToken.length > 0)
+			return "inline:" + inlineToken
+		let assetId = attachment.assetId
+		if (assetId === undefined || assetId === null || String(assetId).length === 0)
+			assetId = attachment.assetID
+		if (assetId !== undefined && assetId !== null && String(assetId).trim().length > 0)
+			return "asset:" + String(assetId).trim()
+		return "id:" + String(attachment.id || "").trim()
+	}
+
+	function openAttachment(attachment, titleOverride, hydrationMessageId) {
 		if (!attachment)
 			return false
-		const source = safeRenderImageSource(attachment.url || attachment.thumbnailUrl || "")
+		const fullSource = safeRenderImageSource(attachment.url)
+		const thumbnailSource = safeRenderImageSource(attachment.thumbnailUrl)
+		const source = fullSource || thumbnailSource
 		if (source.length === 0)
 			return false
 		attachmentViewerPayload = {
+			"id": attachment.id,
 			"url": source,
-			"thumbnailUrl": safeRenderImageSource(attachment.thumbnailUrl || source),
+			"thumbnailUrl": thumbnailSource || source,
 			"name": String(titleOverride || attachment.name || ""),
-			"alt": String(titleOverride || attachment.alt || attachment.name || qsTr("Image attachment"))
+			"fileName": String(attachment.fileName || attachment.name || ""),
+			"alt": String(titleOverride || attachment.alt || attachment.name || qsTr("Image attachment")),
+			"kind": String(attachment.kind || "image"),
+			"mime": String(attachment.mime || ""),
+			"assetId": attachment.assetId,
+			"assetID": attachment.assetID,
+			"inlineToken": String(attachment.inlineToken || ""),
+			"byteSize": attachment.byteSize,
+			"size": attachment.size,
+			"hydrationMessageId": String(hydrationMessageId || attachment.hydrationMessageId || "")
 		}
 		return true
+	}
+
+	function refreshOpenAttachmentFromModel() {
+		const current = attachmentViewerPayload
+		if (!current)
+			return false
+		const messageId = String(current.hydrationMessageId || "").trim()
+		const identity = attachmentIdentity(current)
+		if (messageId.length === 0 || identity.length === 0)
+			return false
+		const rowIndex = chatModel.rowForStableId(messageId)
+		if (rowIndex < 0)
+			return false
+		const row = chatModel.get(rowIndex)
+		const candidates = row && row.attachments ? row.attachments : []
+		for (let index = 0; index < candidates.length; ++index) {
+			const candidate = candidates[index]
+			if (attachmentIdentity(candidate) !== identity)
+				continue
+			const nextSource = safeRenderImageSource(candidate.url)
+				|| safeRenderImageSource(candidate.thumbnailUrl)
+			if (nextSource.length === 0 || nextSource === String(current.url || ""))
+				return false
+			return openAttachment(candidate, current.alt || current.name, messageId)
+		}
+		return false
 	}
 
 	function isImageAttachment(attachment) {
@@ -293,21 +539,68 @@ ApplicationWindow {
 		if (kind.length > 0 || mime.length > 0)
 			return false
 		// Older message rows only carried a sanitized image-provider URL.
-		return safeRenderImageSource(attachment.url || attachment.thumbnailUrl || "").length > 0
+		return safeRenderImageSource(attachment.url).length > 0
+			|| safeRenderImageSource(attachment.thumbnailUrl).length > 0
 	}
 
-	function requestAttachment(attachment) {
+	function canOpenAttachmentExternally(attachment) {
+		if (!attachment || isImageAttachment(attachment))
+			return false
+		const mime = String(attachment.mime || "").trim().toLowerCase()
+		const supportedMimes = [
+			"application/pdf", "text/plain", "text/markdown",
+			"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg",
+			"audio/flac", "audio/x-flac", "audio/aac", "audio/mp4", "audio/webm",
+			"video/mp4", "video/webm", "video/quicktime"
+		]
+		if (supportedMimes.indexOf(mime) >= 0)
+			return true
+		if (mime.length > 0 && mime !== "application/octet-stream")
+			return false
+		const kind = String(attachment.kind || "").trim().toLowerCase()
+		const fileName = String(attachment.fileName || attachment.name || "").trim()
+		if (kind === "document")
+			return /\.(pdf|txt|md)$/i.test(fileName)
+		if (kind === "audio")
+			return /\.(mp3|m4a|mp4|wav|ogg|flac|aac|webm|weba)$/i.test(fileName)
+		if (kind === "video")
+			return /\.(mp4|webm|mov)$/i.test(fileName)
+		return false
+	}
+
+	function requestAttachment(attachment, hydrationMessageId) {
 		if (!attachment)
 			return false
 		const imageAttachment = isImageAttachment(attachment)
-		if (imageAttachment && openAttachment(attachment))
+		if (imageAttachment && openAttachment(attachment, "", hydrationMessageId))
 			return true
+		if (!imageAttachment && canOpenAttachmentExternally(attachment))
+			return openExternalAttachment(attachment)
 		return downloadAttachment(attachment, !imageAttachment)
+	}
+
+	function openExternalAttachment(attachment) {
+		if (!attachment)
+			return false
+		let rawAssetId = attachment.assetId
+		if (rawAssetId === undefined || rawAssetId === null || String(rawAssetId).length === 0)
+			rawAssetId = attachment.assetID
+		const assetId = String(rawAssetId === undefined || rawAssetId === null ? "" : rawAssetId).trim()
+		if (assetId.length === 0)
+			return false
+		uiCommands.openChatAttachment(assetId, String(attachment.fileName || attachment.name || ""))
+		return true
 	}
 
 	function downloadAttachment(attachment, allowLegacyId) {
 		if (!attachment)
 			return false
+		const inlineToken = String(attachment.inlineToken || "").trim()
+		if (inlineToken.length > 0) {
+			uiCommands.saveChatInlineImage(inlineToken,
+				String(attachment.fileName || attachment.name || ""))
+			return true
+		}
 		let rawAssetId = attachment.assetId
 		if (rawAssetId === undefined || rawAssetId === null || String(rawAssetId).length === 0)
 			rawAssetId = attachment.assetID
@@ -423,15 +716,145 @@ ApplicationWindow {
 		return String(value === undefined || value === null ? "" : value).trim()
 	}
 
+	function menuActionById(items, actionId) {
+		const source = items || []
+		for (let index = 0; index < source.length; ++index) {
+			const entry = source[index] || ({})
+			if (String(entry.id || "") === actionId)
+				return entry
+			const nestedItems = entry.items || (entry.submenu ? entry.submenu.items : null)
+			const nested = menuActionById(nestedItems, actionId)
+			if (nested)
+				return nested
+		}
+		return null
+	}
+
+	function menuActionInGroups(groups, actionId) {
+		const source = groups || []
+		for (let index = 0; index < source.length; ++index) {
+			const action = menuActionById((source[index] || ({})).items, actionId)
+			if (action)
+				return action
+		}
+		return null
+	}
+
+	function menuItemsWithoutAction(items, actionId) {
+		const output = []
+		const source = items || []
+		for (let index = 0; index < source.length; ++index) {
+			const entry = source[index] || ({})
+			if (String(entry.id || "") === actionId)
+				continue
+			let filtered = entry
+			if (entry.items) {
+				filtered = Object.assign({}, filtered, {
+					"items": menuItemsWithoutAction(entry.items, actionId)
+				})
+			}
+			if (entry.submenu && entry.submenu.items) {
+				filtered = Object.assign({}, filtered, {
+					"submenu": Object.assign({}, entry.submenu, {
+						"items": menuItemsWithoutAction(entry.submenu.items, actionId)
+					})
+				})
+			}
+			output.push(filtered)
+		}
+		return output
+	}
+
+	function menuGroupsWithoutAction(groups, actionId) {
+		const output = []
+		const source = groups || []
+		for (let index = 0; index < source.length; ++index) {
+			const group = source[index] || ({})
+			output.push(Object.assign({}, group, {
+				"items": menuItemsWithoutAction(group.items, actionId)
+			}))
+		}
+		return output
+	}
+
+	function resolvedSettingsAction() {
+		const fromApplicationMenu = menuActionInGroups(clientSession.appMenus || [],
+			"configure.settings")
+		if (fromApplicationMenu)
+			return fromApplicationMenu
+		const fromProfileMenu = menuActionById((clientSession.selfMenu || ({})).actions || [],
+			"configure.settings")
+		return fromProfileMenu || ({
+			"kind": "action", "id": "configure.settings",
+			"label": qsTr("Settings"), "enabled": true, "icon": "settings"
+		})
+	}
+
+	function promotedSettingsAction() {
+		return Object.assign({}, root.settingsActionEntry, {
+			"kind": "action",
+			"id": "configure.settings",
+			"label": qsTr("Settings"),
+			"hint": qsTr("Audio, appearance, notifications, plugins, and more"),
+			"icon": "settings"
+		})
+	}
+
+	function applicationMenuGroups() {
+		let groups = (clientSession.appMenus || []).slice()
+		if (activeScope.canMarkRead && Number(activeScope.unreadCount || 0) > 0) {
+			groups.push({
+				"id": "active-conversation",
+				"label": qsTr("Conversation"),
+				"items": [{
+					"kind": "action", "id": "activeScope.markRead",
+					"label": qsTr("Mark read"), "enabled": true
+				}]
+			})
+		}
+		groups = menuGroupsWithoutAction(groups, "configure.settings")
+		groups = groups.map(function(group) {
+			if (String((group || ({})).id || "") !== "configure")
+				return group
+			// Once Settings is promoted, this group contains certificate/avatar
+			// identity actions. Do not leave a second, ambiguous Configure route.
+			return Object.assign({}, group, {
+				"label": qsTr("Identity"), "icon": "certificate"
+			})
+		})
+		// An empty group label is intentionally rendered inline by SemanticMenu.
+		// Settings is therefore the first actionable row instead of being buried
+		// one level below the legacy-named Configure group.
+		return [{
+			"id": "primary-settings", "label": "",
+			"items": [ promotedSettingsAction() ]
+		}].concat(groups)
+	}
+
+	function requestSettings() {
+		if (!root.settingsActionEnabled)
+			return false
+		const action = root.settingsActionEntry || ({})
+		const actionPayload = action.payload ? action.payload : ({})
+		closeProductMenus()
+		if (root.navigationModalActive)
+			navigationDrawer.close()
+		uiCommands.invokeAppAction("configure.settings", actionPayload)
+		return true
+	}
+
 	function profileMenuGroups() {
 		const state = clientSession.selfMenu || ({})
 		const groups = []
 		const presence = state.presence || []
-		const actions = state.actions || []
+		// The footer has a dedicated Settings control. Keep all profile, voice and
+		// identity actions here, but do not repeat the same Settings row in this menu.
+		const actions = menuItemsWithoutAction(state.actions || [], "configure.settings")
 		if (presence.length > 0) {
 			groups.push({
 				"id": "presence",
 				"label": qsTr("Presence"),
+				"icon": "activity",
 				"items": presence
 			})
 		}
@@ -439,6 +862,7 @@ ApplicationWindow {
 			groups.push({
 				"id": "profile-actions",
 				"label": qsTr("Account and app"),
+				"icon": "user",
 				"items": actions
 			})
 		}
@@ -472,16 +896,22 @@ ApplicationWindow {
 		return roomModel.count > 0 ? roomModel.get(0) : null
 	}
 
-	function openMenuAt(menu, anchorPoint) {
+	function openMenuAt(menu, anchorPoint, focusReturnTarget) {
 		const point = anchorPoint && anchorPoint.x !== undefined
 			? anchorPoint : Qt.point(Math.round(root.width / 2), Math.round(root.height / 3))
-		menu.x = Math.max(8, Math.min(root.width - menu.width - 8, Math.round(point.x)))
-		menu.y = Math.max(8, Math.min(root.height - menu.implicitHeight - 8, Math.round(point.y)))
-		menu.open()
-		return menu.visible
+		// Menu declarations live in several different visual branches, so Qt's
+		// implicit popup-parent focus restoration is not reliable after reparenting.
+		// Preserve the concrete row/button that launched the top-level menu instead.
+		menu.openerItem = focusReturnTarget && focusReturnTarget.forceActiveFocus
+			? focusReturnTarget : null
+		// The ModernMenu helper owns all logical-pixel sizing and edge clamping.
+		// Keeping this path devicePixelRatio-free is essential on mixed-DPI Windows.
+		return menu.openAtLogicalPoint(root.contentItem, point, Theme.space2,
+			Theme.space2 + Theme.elevationMenuOffset)
 	}
 
 	function openScopeMenu(scopeToken, kind, actions, anchorPoint) {
+		const focusReturnTarget = root.activeFocusItem
 		closeProductMenus()
 		contextScopeToken = String(scopeToken || "")
 		contextScopeKind = String(kind || "")
@@ -490,31 +920,121 @@ ApplicationWindow {
 			resolvedActions = uiCommands.requestScopeActions(contextScopeToken, contextScopeKind) || []
 		contextScopeActions = resolvedActions
 		const menu = contextScopeKind === "text" ? textRoomMenuPopup : roomMenuPopup
-		return openMenuAt(menu, anchorPoint)
+		if (!menu.hasActionableEntries(contextScopeActions))
+			return false
+		return openMenuAt(menu, anchorPoint, focusReturnTarget)
+	}
+
+	function openConversationSearch() {
+		if (root.modalUiActive)
+			return
+		root.conversationSearchOpen = true
+		Qt.callLater(function() { conversationSearchBar.activate() })
+	}
+
+	function closeConversationSearch(restoreFocus) {
+		const searchOwnedFocus = root.itemOwnsActiveFocus(conversationSearchBar)
+		conversationSearchBar.reset()
+		root.conversationSearchOpen = false
+		if (restoreFocus || searchOwnedFocus) {
+			Qt.callLater(function() {
+				// A pointer-driven scope change has already established a better focus
+				// target. Only recover when focus remained in the now-hidden search bar.
+				const current = root.activeFocusItem
+				if (!restoreFocus && current && current.visible
+						&& !root.itemOwnsActiveFocus(conversationSearchBar))
+					return
+				if (conversationSearchButton.visible && conversationSearchButton.enabled)
+					conversationSearchButton.forceActiveFocus(Qt.OtherFocusReason)
+				else
+					timeline.forceActiveFocus(Qt.OtherFocusReason)
+			})
+		}
+	}
+
+	function revealConversationSearchMatch(row, stableId) {
+		if (!root.conversationSearchOpen || row < 0 || String(stableId || "").length === 0)
+			return
+		timeline.releasePrependAnchor()
+		timeline.stickToBottom = false
+		timeline.currentIndex = row
+		timeline.positionViewAtIndex(row, ListView.Center)
+	}
+
+	function positionVisualFixtureTimelineAt(stableId) {
+		if (!root.visualFixtureOverrideActive)
+			return false
+		const row = chatModel.rowForStableId(String(stableId || ""))
+		if (row < 0)
+			return false
+		timeline.releasePrependAnchor()
+		bottomFollowTimer.stop()
+		timeline.followTailAfterInsert = false
+		timeline.pendingTailInsertCount = 0
+		timeline.pendingTailMessageCount = 0
+		timeline.stickToBottom = false
+		timeline.currentIndex = row
+		timeline.positionViewAtIndex(row, ListView.Beginning)
+		return true
+	}
+
+	function visualFixtureTimelineState() {
+		if (!root.visualFixtureOverrideActive)
+			return ({})
+		const item = timeline.firstVisibleMessageDelegate()
+		return {
+			"firstVisibleStableId": item ? String(item.stableId || "") : "",
+			"firstVisibleOffset": item ? Number(item.y - timeline.contentY) : 0,
+			"contentY": Number(timeline.contentY),
+			"count": Number(timeline.count)
+		}
 	}
 
 	function openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) {
+		const focusReturnTarget = root.activeFocusItem
 		closeProductMenus()
 		contextParticipantId = String(sessionId || "")
 		contextParticipantRowKey = String(rowKey || "")
 		contextParticipantActions = actions || []
 		contextParticipantEntryKind = String(entryKind || "user").toLowerCase()
 		contextParticipantScopeToken = String(scopeToken || "")
-		return openMenuAt(participantMenuPopup, anchorPoint)
+		if (!participantMenuPopup.hasActionableEntries(contextParticipantActions))
+			return false
+		return openMenuAt(participantMenuPopup, anchorPoint, focusReturnTarget)
 	}
 
 	function openProfileMenu(anchorPoint) {
+		const focusReturnTarget = root.activeFocusItem
 		closeProductMenus()
-		return openMenuAt(profileMenuPopup, anchorPoint)
+		return openMenuAt(profileMenuPopup, anchorPoint, focusReturnTarget)
+	}
+
+	function chatBackgroundMenuEntries() {
+		const result = []
+		if (activeScope.canLoadOlder) {
+			result.push({
+				"kind": "action", "id": "activeScope.loadOlder",
+				"label": qsTr("Load older messages"),
+				"enabled": activeScope.loadingState !== "older"
+			})
+		}
+		for (let index = 0; index < root.contextScopeActions.length; ++index)
+			result.push(root.contextScopeActions[index])
+		return result
 	}
 
 	function openChatBackgroundMenu(anchorPoint) {
+		const focusReturnTarget = root.activeFocusItem
 		closeProductMenus()
 		const row = selectedRoomRow()
 		contextScopeToken = row ? String(row.scopeToken || "") : String(activeScope.scopeToken || "")
 		contextScopeKind = row ? String(row.kind || "") : ""
 		contextScopeActions = row && row.source ? (row.source.actions || []) : []
-		return openMenuAt(chatBackgroundMenuPopup, anchorPoint)
+		if (contextScopeToken.length > 0 && contextScopeActions.length === 0)
+			contextScopeActions = uiCommands.requestScopeActions(contextScopeToken, contextScopeKind) || []
+		if (!chatBackgroundMenuPopup.hasActionableEntries(chatBackgroundMenuEntries()))
+			return false
+		return openMenuAt(chatBackgroundMenuPopup, anchorPoint, focusReturnTarget)
 	}
 
 	function visibleMenuLabels(menu) {
@@ -544,19 +1064,50 @@ ApplicationWindow {
 			normalized = "chatBackground"
 		else if (alias === "textroom" || alias === "textroomreal")
 			normalized = "textRoom"
+		else if (alias === "appserver" || alias === "app-server" || alias === "server-submenu")
+			normalized = "appServer"
 		else if (alias === "app" || alias === "room" || alias === "message")
 			normalized = alias
-		// Every probe starts from a clean popup state. A requested live context can
-		// legitimately be absent (for example, a server with no other participants),
-		// and that must not leave the previously probed menu visible in the capture.
-		closeProductMenus()
+		// appServer is a real cascade state of the app menu. Reuse an already-open
+		// parent so a pending exit transition cannot dismiss the freshly opened
+		// child. All unrelated or unavailable live contexts still start clean.
+		const reuseOpenAppMenu = normalized === "appServer" && appMenuPopup.visible
+		if (!reuseOpenAppMenu)
+			closeProductMenus()
 		automationMenuVariant = normalized
+		automationMenuSurface = null
+		automationMenuFocusItem = null
 		let handled = true
 		let menu = null
-		if (normalized === "app") {
-			closeProductMenus()
+		if (normalized === "app" || normalized === "appServer") {
 			menu = appMenuPopup
-			openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
+			if (!reuseOpenAppMenu)
+				openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
+			if (normalized === "appServer") {
+				let serverMenu = null
+				let serverOpener = null
+				for (let index = 0; index < appMenuPopup.count; ++index) {
+					const candidate = appMenuPopup.menuAt(index)
+					if (candidate && candidate.menuPayload
+							&& String(candidate.menuPayload.id || "")
+								=== "semantic-menu-group-server") {
+						serverMenu = candidate
+						serverOpener = appMenuPopup.itemAt(index)
+						break
+					}
+				}
+				handled = !!serverMenu && !!serverOpener
+					&& appMenuPopup.openSubmenuFor(serverOpener, serverMenu, true)
+				if (handled) {
+					menu = serverMenu
+					// Keep the cascade anchored to its real parent row. On item-backed
+					// Windows popups, repeatedly restoring focus directly to a dynamic
+					// child delegate can dismiss the complete menu tree. Keyboard users
+					// still enter the submenu through Right/Enter; deterministic visual
+					// capture focuses the Server opener while proving the child surface.
+					automationMenuFocusItem = serverOpener
+				}
+			}
 		} else if (normalized === "profile") {
 			menu = profileMenuPopup
 			openProfileMenu(Qt.point(root.width - menu.width - 24, root.height - 90))
@@ -566,29 +1117,61 @@ ApplicationWindow {
 				handled = false
 			} else {
 				menu = normalized === "textRoom" ? textRoomMenuPopup : roomMenuPopup
-				openScopeMenu(row.scopeToken, row.kind, row.source ? (row.source.actions || []) : [],
+				handled = openScopeMenu(row.scopeToken, row.kind,
+					row.source ? (row.source.actions || []) : [],
 					Qt.point(root.width - menu.width - 24, 150))
 			}
 		} else if (normalized === "participant") {
-			const row = participantModel.count > 0 ? participantModel.get(0) : null
+			let row = null
+			for (let index = 0; index < root.navigationRailModel.count; ++index) {
+				const candidate = root.navigationRailModel.get(index)
+				const candidateIsSelf = candidate && (!!candidate.isSelf
+					|| !!(candidate.source && candidate.source.isSelf))
+				if (candidate && String(candidate.kind || "") === "participant"
+						&& !candidateIsSelf) {
+					row = candidate
+					break
+				}
+			}
+
 			if (!row) {
 				handled = false
 			} else {
-				menu = participantMenuPopup
-				openParticipantMenu(row.participantSession || (row.source && row.source.session)
-						|| row.stableId || row.id,
-					row.source ? (row.source.actions || []) : [],
-					Qt.point(root.width - menu.width - 24, 250),
-					row.entryKind || (row.source && row.source.entryKind) || "user",
-					row.scopeToken || (row.source && row.source.scopeToken) || "",
-					row.stableId || row.id || "")
+				const participantId = String(row.participantSession
+					|| (row.source && row.source.session) || row.stableId || row.id || "")
+				const participantRowKey = String(row.stableId || row.id || "")
+				if (participantId.length === 0 || participantRowKey.length === 0) {
+					handled = false
+				} else {
+					// Exercise the same model -> NavigationRail -> UiCommandController ->
+					// product-menu path as a real participant-row context request. This
+					// keeps automation from inventing actions that the live UI cannot expose.
+					const rail = desktopNavigationRail.visible
+						? desktopNavigationRail : navigationDrawerRail
+					menu = participantMenuPopup
+					rail.requestParticipantMenu(participantId, participantRowKey, row,
+						Qt.point(root.width - menu.width - 24, 250))
+					handled = menu.visible
+				}
 			}
 		} else if (normalized === "chatBackground") {
 			menu = chatBackgroundMenuPopup
-			openChatBackgroundMenu(Qt.point(Math.round(root.width / 2), Math.round(root.height / 2)))
+			handled = openChatBackgroundMenu(
+				Qt.point(Math.round(root.width / 2), Math.round(root.height / 2)))
 		} else if (normalized === "message") {
 			closeProductMenus()
-			const message = timeline.currentItem || (timeline.count > 0 ? timeline.itemAtIndex(0) : null)
+			// A single-case automation run may arrive before ListView has completed
+			// its first delegate pass. Materialize the visible rows, then select a
+			// genuinely actionable message instead of relying on an incidental
+			// currentIndex left behind by an earlier visual case.
+			timeline.forceLayout()
+			let message = timeline.currentItem && timeline.currentItem.hasMessageActions
+				? timeline.currentItem : null
+			for (let index = 0; !message && index < timeline.count; ++index) {
+				const candidate = timeline.itemAtIndex(index)
+				if (candidate && candidate.openAutomationActions && candidate.hasMessageActions)
+					message = candidate
+			}
 			if (!message || !message.openAutomationActions) {
 				handled = false
 			} else {
@@ -597,6 +1180,7 @@ ApplicationWindow {
 		} else {
 			handled = false
 		}
+		automationMenuSurface = handled ? menu : null
 		const menuVisible = handled && menu !== null && menu.visible
 		const surfaceId = handled && menu !== null
 			? String(menu.objectName || (normalized + "Menu")) : ""
@@ -627,7 +1211,15 @@ ApplicationWindow {
 			"captureRect": captureRect,
 			"viewportWidth": Math.round(root.width),
 			"viewportHeight": Math.round(root.height),
-			"labels": handled ? visibleMenuLabels(menu) : []
+			"fixtureUsed": false,
+			"labels": handled ? visibleMenuLabels(menu) : [],
+			"menuCount": handled && menu && menu.count !== undefined ? Number(menu.count) : 0,
+			"menuHeight": handled && menu ? Number(menu.height || 0) : 0,
+			"menuImplicitHeight": handled && menu ? Number(menu.implicitHeight || 0) : 0,
+			"targetCanReply": handled && menu && menu.targetCanReply !== undefined
+				? !!menu.targetCanReply : false,
+			"targetCanReact": handled && menu && menu.targetCanReact !== undefined
+				? !!menu.targetCanReact : false
 		}
 	}
 
@@ -754,10 +1346,96 @@ ApplicationWindow {
 		})
 	}
 
-	function focusVisualFixture(state) {
+	function visualFixtureItemByObjectName(item, objectName) {
+		if (!item || !objectName)
+			return null
+		if (String(item.objectName || "") === objectName)
+			return item
+		const children = item.children || []
+		for (let index = 0; index < children.length; ++index) {
+			const match = visualFixtureItemByObjectName(children[index], objectName)
+			if (match)
+				return match
+		}
+		return null
+	}
+
+	function focusVisualFixture(state, surfaceVariant) {
+		const surface = String(surfaceVariant || "none")
+		if (surface.indexOf("conversation-search-") === 0) {
+			const searchTarget = visualFixtureItemByObjectName(root.contentItem,
+				"conversationSearchField")
+			if (searchTarget && searchTarget.visible && searchTarget.enabled) {
+				searchTarget.forceActiveFocus(Qt.OtherFocusReason)
+				return searchTarget.objectName
+			}
+		}
 		if (dialogState.open && productDialog.visible) {
-			productDialog.applyInitialFocus()
-			return root.activeFocusItem ? String(root.activeFocusItem.objectName || "") : ""
+			return String(productDialog.applyInitialFocus() || "")
+		}
+		if (surface.indexOf("menu-") === 0) {
+			if (automationMenuFocusItem && automationMenuFocusItem.visible
+					&& automationMenuFocusItem.enabled
+					&& appMenuPopup.focusMenuItem(automationMenuFocusItem))
+				return String(automationMenuFocusItem.objectName || "semanticMenuItem")
+			const menuFocus = automationMenuSurface && automationMenuSurface.visible
+				&& automationMenuSurface.focusInitialItem
+				? automationMenuSurface.focusInitialItem() : root.activeFocusItem
+			if (menuFocus)
+				return String(menuFocus.objectName || "semanticMenuItem")
+		}
+		if (surface === "direct-message-main" || surface === "chat-composer-states") {
+			const dmComposer = visualFixtureItemByObjectName(root.contentItem, "visualFixtureComposer")
+			if (dmComposer && dmComposer.visible && dmComposer.enabled) {
+				dmComposer.forceActiveFocus(Qt.OtherFocusReason)
+				return dmComposer.objectName
+			}
+		}
+		if (surface.indexOf("async-") === 0) {
+			const operationTarget = operationOverlay.visualFixtureFocusTarget
+				|| visualFixtureItemByObjectName(root.contentItem,
+					surface === "async-running" ? "operationCancelButton" : "visualFixtureDismissOperation")
+			if (operationTarget && operationTarget.visible && operationTarget.enabled) {
+				operationTarget.forceActiveFocus(Qt.OtherFocusReason)
+				return operationTarget.objectName
+			}
+		}
+		if (surface.indexOf("toast-") === 0) {
+			const toastTarget = visualFixtureItemByObjectName(root.contentItem, "toastDismissButton")
+			if (toastTarget && toastTarget.visible && toastTarget.enabled) {
+				toastTarget.forceActiveFocus(Qt.OtherFocusReason)
+				return toastTarget.objectName
+			}
+		}
+		if (surface === "update-banner") {
+			const updateAction = visualFixtureItemByObjectName(root.contentItem, "updateAction_update.restart")
+			if (updateAction && updateAction.visible && updateAction.enabled) {
+				updateAction.forceActiveFocus(Qt.OtherFocusReason)
+				return updateAction.objectName
+			}
+		}
+		if (surface.indexOf("media-inline-") === 0) {
+			let mediaControlName = "inlineMediaPopoutButton"
+			if (surface === "media-inline-active" || surface === "media-inline-controls")
+				mediaControlName = "mediaPlayButton"
+			else if (surface === "media-inline-error" || surface === "media-inline-retry")
+				mediaControlName = "inlineMediaRetryButton"
+			else if (surface === "media-inline-external")
+				mediaControlName = "inlineMediaFailureExternalButton"
+			const mediaControl = visualFixtureItemByObjectName(root.contentItem, mediaControlName)
+			if (mediaControl && mediaControl.visible && mediaControl.enabled) {
+				mediaControl.forceActiveFocus(Qt.OtherFocusReason)
+				return mediaControl.objectName
+			}
+		}
+		if (root.compactNavigation && navigationDrawer.opened) {
+			// A compact drawer owns the visible navigation surface. Focusing the
+			// application-menu button behind that modal drawer leaves assistive
+			// technology without a focused node after a theme/viewport transition.
+			// Focus the selected room and return the containing ListView as the
+			// stable fixture target; delegate reuse may replace the concrete row.
+			navigationDrawerRail.focusInitialItem()
+			return navigationDrawerRail.roomListObjectName
 		}
 		if (state === "connected") {
 			// The deterministic fixture intentionally has no writable live scope,
@@ -768,6 +1446,11 @@ ApplicationWindow {
 		if (state === "error" || state === "loading") {
 			if (connectionBanner.focusPrimaryAction())
 				return "connectionBannerPrimaryAction"
+		}
+		if (state === "empty" && emptyConversationConnectButton.visible
+				&& emptyConversationConnectButton.enabled) {
+			emptyConversationConnectButton.forceActiveFocus(Qt.OtherFocusReason)
+			return emptyConversationConnectButton.objectName
 		}
 		appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
 		return appMenuButton.objectName
@@ -785,58 +1468,194 @@ ApplicationWindow {
 		}
 	}
 
+	function itemOwnsActiveFocus(item) {
+		if (!item)
+			return false
+		for (let current = root.activeFocusItem; current; current = current.parent) {
+			if (current === item)
+				return true
+		}
+		return false
+	}
+
+	function focusNavigationLandmark() {
+		if (desktopNavigationRail.visible) {
+			desktopNavigationRail.focusInitialItem()
+			return true
+		}
+		return false
+	}
+
+	function cycleMainLandmarkFocus() {
+		if (itemOwnsActiveFocus(desktopNavigationRail)) {
+			appMenuButton.forceActiveFocus(Qt.TabFocusReason)
+			return
+		}
+		if (itemOwnsActiveFocus(shellHeader)) {
+			timeline.forceActiveFocus(Qt.TabFocusReason)
+			return
+		}
+		if (itemOwnsActiveFocus(timeline)) {
+			if (composerInput.visible && composerInput.enabled)
+				composerInput.forceActiveFocus(Qt.TabFocusReason)
+			else if (!focusNavigationLandmark())
+				appMenuButton.forceActiveFocus(Qt.TabFocusReason)
+			return
+		}
+		if (itemOwnsActiveFocus(composerSurface)) {
+			if (!focusNavigationLandmark())
+				appMenuButton.forceActiveFocus(Qt.TabFocusReason)
+			return
+		}
+		if (!focusNavigationLandmark())
+			appMenuButton.forceActiveFocus(Qt.TabFocusReason)
+	}
+
 	Shortcut {
 		sequence: "F6"
-		context: Qt.ApplicationShortcut
-		onActivated: {
-			const next = root.contentItem.nextItemInFocusChain(true)
-			if (next)
-				next.forceActiveFocus(Qt.TabFocusReason)
-		}
+		context: Qt.WindowShortcut
+		enabled: !root.modalUiActive
+		onActivated: root.cycleMainLandmarkFocus()
 	}
 
     function createScreenShareView(backend) {
-        return screenShareViewComponent.createObject(null, { "backend": backend })
+		return screenShareViewComponent.createObject(null, {
+			"backend": backend,
+			"visualFixtureMode": root.visualFixtureOverrideActive
+		})
     }
 
-	function runPerformanceChatScrollWorkload() {
+	function preparePerformanceChatScrollWorkload(stepCount) {
 		const minimumY = timeline.originY
 		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
-		if (timeline.count < 20 || maximumY - minimumY < 8)
+		const requestedSteps = Math.max(1, Math.floor(Number(stepCount) || 0))
+		// Each step must move the real ListView by at least two logical pixels so
+		// the scene-graph cannot legitimately coalesce it into a no-op frame.
+		if (timeline.count < 20 || maximumY - minimumY < requestedSteps * 2)
 			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
 		performanceChatScrollStartY = timeline.contentY
-		performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8 ? minimumY : maximumY
+		// Model a sustained wheel/trackpad gesture, not a teleport through the
+		// entire history. Traversing thousands of pixels per frame measures cold
+		// delegate construction rather than steady-state chat scrolling and can
+		// leave Windows presentation-throttled between mutations. Sixteen logical
+		// pixels per presented input mirrors a sustained high-resolution wheel or
+		// trackpad gesture; the 40-step release workload still crosses enough rows
+		// to exercise the bounded delegate cache and reuse path.
+		const travelDistance = Math.min(maximumY - minimumY, requestedSteps * 16)
+		performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8
+			? Math.max(minimumY, performanceChatScrollStartY - travelDistance)
+			: Math.min(maximumY, performanceChatScrollStartY + travelDistance)
 		bottomFollowTimer.stop()
-		timelineScrollWorkload.stop()
-		timelineScrollWorkload.from = performanceChatScrollStartY
-		timelineScrollWorkload.to = performanceChatScrollTargetY
-		timelineScrollWorkload.start()
+		performanceChatScrollDiagnosticsBefore = timelineDelegateDiagnostics()
+		performanceChatScrollCompletedSteps = 0
+		performanceChatScrollTargetSteps = requestedSteps
+		performanceChatScrollRunning = true
 		return { "started": true, "beforeY": performanceChatScrollStartY,
-			"targetY": performanceChatScrollTargetY, "count": timeline.count }
+			"targetY": performanceChatScrollTargetY, "count": timeline.count,
+			"targetSteps": performanceChatScrollTargetSteps }
+	}
+
+	function advancePerformanceChatScrollWorkload(step, totalSteps) {
+		const nextStep = Math.floor(Number(step) || 0)
+		const expectedSteps = Math.floor(Number(totalSteps) || 0)
+		if (!performanceChatScrollRunning || expectedSteps !== performanceChatScrollTargetSteps
+				|| nextStep !== performanceChatScrollCompletedSteps + 1
+				|| nextStep > performanceChatScrollTargetSteps) {
+			return { "advanced": false, "currentY": timeline.contentY,
+				"completedSteps": performanceChatScrollCompletedSteps }
+		}
+		const progress = nextStep / performanceChatScrollTargetSteps
+		// Smoothstep preserves the old fluent acceleration curve while C++ owns
+		// the cadence. Assigning contentY keeps this a genuine virtualized
+		// ListView scroll, including delegate reuse and dynamic-height layout.
+		const easedProgress = progress * progress * (3 - 2 * progress)
+		const previousY = timeline.contentY
+		timeline.contentY = performanceChatScrollStartY
+			+ (performanceChatScrollTargetY - performanceChatScrollStartY) * easedProgress
+		performanceChatScrollCompletedSteps = nextStep
+		return { "advanced": Math.abs(timeline.contentY - previousY) > 0.01,
+			"currentY": timeline.contentY, "completedSteps": performanceChatScrollCompletedSteps }
+	}
+
+	function completePerformanceChatScrollWorkload() {
+		performanceChatScrollRunning = false
 	}
 
 	function performanceChatFixtureState() {
 		const minimumY = timeline.originY
 		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
+		const firstVisible = timeline.firstVisibleMessageDelegate()
 		return { "count": timeline.count, "contentHeight": timeline.contentHeight,
 			"viewportHeight": timeline.height, "originY": minimumY, "maximumY": maximumY,
+			"contentY": timeline.contentY,
+			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
+			"delegateDiagnostics": timelineDelegateDiagnostics(),
+			"settled": !bottomFollowTimer.running && !timeline.scopeResetPending
+				&& !timeline.restoringBottom && !timeline.prependAnchorActive
+				&& !performanceChatScrollRunning,
 			"scrollable": timeline.count === 96 && maximumY - minimumY >= 8 }
 	}
 
 	function performanceChatScrollState() {
+		const currentDiagnostics = timelineDelegateDiagnostics()
+		const beforeDiagnostics = performanceChatScrollDiagnosticsBefore || ({})
 		return { "beforeY": performanceChatScrollStartY, "currentY": timeline.contentY,
 			"targetY": performanceChatScrollTargetY,
 			"moved": Math.abs(timeline.contentY - performanceChatScrollStartY) > 1,
-			"running": timelineScrollWorkload.running }
+			"running": performanceChatScrollRunning,
+			"completedSteps": performanceChatScrollCompletedSteps,
+			"targetSteps": performanceChatScrollTargetSteps,
+			"delegateDiagnosticsBefore": beforeDiagnostics,
+			"delegateDiagnostics": currentDiagnostics,
+			"delegateDiagnosticsDelta": {
+				"created": currentDiagnostics.created - Number(beforeDiagnostics.created || 0),
+				"pooled": currentDiagnostics.pooledEvents - Number(beforeDiagnostics.pooledEvents || 0),
+				"reused": currentDiagnostics.reusedEvents - Number(beforeDiagnostics.reusedEvents || 0),
+				"previewsLoaded": currentDiagnostics.previewsLoaded - Number(beforeDiagnostics.previewsLoaded || 0),
+				"attachmentsLoaded": currentDiagnostics.attachmentsLoaded - Number(beforeDiagnostics.attachmentsLoaded || 0)
+			} }
 	}
 
-	NumberAnimation {
-		id: timelineScrollWorkload
-		target: timeline
-		property: "contentY"
-		duration: 450
-		easing.type: Easing.InOutQuad
+	function timelineDelegateDiagnostics() {
+		const children = timeline && timeline.contentItem ? timeline.contentItem.children : []
+		let materialized = 0
+		let pooled = 0
+		let active = 0
+		let previewRows = 0
+		let previewItems = 0
+		let attachmentRows = 0
+		let attachmentItems = 0
+		for (let index = 0; index < children.length; ++index) {
+			const child = children[index]
+			if (!child || child.performanceTimelineDelegate !== true)
+				continue
+			++materialized
+			if (child.accessibilityPooled)
+				++pooled
+			else
+				++active
+			if (child.hasPreviewContent)
+				++previewRows
+			if (child.performancePreviewMaterialized)
+				++previewItems
+			if (child.hasAttachmentContent)
+				++attachmentRows
+			if (child.performanceAttachmentMaterialized)
+				++attachmentItems
+		}
+		return {
+			"materialized": materialized, "active": active, "pooled": pooled,
+			"previewRows": previewRows, "previewItems": previewItems,
+			"attachmentRows": attachmentRows, "attachmentItems": attachmentItems,
+			"contentItemChildren": children.length,
+			"cacheBuffer": timeline ? timeline.cacheBuffer : 0,
+			"created": performanceChatDelegateCreatedCount,
+			"pooledEvents": performanceChatDelegatePooledCount,
+			"reusedEvents": performanceChatDelegateReusedCount,
+			"previewsLoaded": performanceChatPreviewLoadedCount,
+			"attachmentsLoaded": performanceChatAttachmentLoadedCount
+		}
 	}
 
     Timer {
@@ -851,8 +1670,17 @@ ApplicationWindow {
 		function onScopeTokenChanged() {
 			root.clearPreviewHydrationQueue()
 			timeline.beginScopeChange()
+			if (root.conversationSearchOpen)
+				root.closeConversationSearch(false)
 		}
     }
+
+	Shortcut {
+		sequence: StandardKey.Find
+		context: Qt.WindowShortcut
+		enabled: !root.modalUiActive
+		onActivated: root.openConversationSearch()
+	}
 
     Component {
         id: screenShareViewComponent
@@ -861,6 +1689,8 @@ ApplicationWindow {
 
 	QmlDialog {
 		id: productDialog
+		excludeSettings: true
+		visualFixtureMode: root.visualFixtureOverrideActive
 		beforeOpen: function() {
 			root.closeProductMenus()
 			if (root.navigationModalActive) {
@@ -873,6 +1703,37 @@ ApplicationWindow {
 	Connections {
 		target: productDialog
 		function onOpened() { root.closeProductMenus() }
+	}
+	SettingsWindow {
+		id: settingsWindow
+		controller: dialogState
+		parentWindow: root
+		visualFixtureMode: root.visualFixtureOverrideActive
+		beforeOpen: function() {
+			root.closeProductMenus()
+			if (root.navigationModalActive)
+				navigationDrawer.close()
+			return true
+		}
+	}
+
+	ModalAccessibilityBarrier {
+		id: modalAccessibilityBarrier
+		objectName: "modalAccessibilityBarrier"
+		active: root.modalUiActive
+		// Popup content is reparented to Overlay.overlay. The active dialog or
+		// drawer therefore stays outside these background targets and owns the
+		// complete semantic tree while the product scene remains visible.
+		targets: [ productSurface, toastPill ]
+	}
+	Timer {
+		id: timelineAccessibilityReassertionTimer
+		objectName: "timelineAccessibilityReassertionTimer"
+		interval: 16
+		repeat: true
+		triggeredOnStart: true
+		running: root.modalUiActive
+		onTriggered: root.refreshTimelineVirtualizedAccessibility()
 	}
 
 	onVisualFixtureOverrideActiveChanged: {
@@ -892,10 +1753,13 @@ ApplicationWindow {
     }
     Component {
         id: attachmentViewerComponent
-        AttachmentViewer {
-            attachment: root.attachmentViewerPayload || ({})
+		AttachmentViewer {
+			attachment: root.attachmentViewerPayload || ({})
 			transientParent: root
-            onClosing: root.attachmentViewerPayload = null
+			onSaveRequested: attachment => root.downloadAttachment(attachment, false)
+			onRefreshRequested: attachment => root.queuePreviewHydration(
+				String(attachment.hydrationMessageId || ""), true)
+			onClosing: root.attachmentViewerPayload = null
         }
     }
     Loader {
@@ -908,11 +1772,134 @@ ApplicationWindow {
     // when that session closes.
     Loader {
         id: mediaSessionWindowLoader
-        active: mediaSession.active && mediaSession.detached
+		// Start the detached native window once the Windows delay-load worker has
+		// entered a concrete preparing/ready/error state. Keep that presentation
+		// alive through retry so runtime failures remain actionable. The provider
+		// The isolated provider renderer inside MediaSessionWindow stays independently gated by
+		// mediaRuntimeReady and is therefore never instantiated during preparation
+		// or while the runtime is in its retryable error state.
+		property bool runtimePresentationStarted: false
+		active: root.mediaSessionWindowRequested && runtimePresentationStarted
         asynchronous: true
-        source: active ? Qt.resolvedUrl("MediaSessionWindow.qml") : ""
-		onLoaded: item.transientParent = root
+		function syncRuntimePresentation() {
+			if (!root.mediaSessionWindowRequested) {
+				runtimePresentationStarted = false
+				return
+			}
+			if (!root.mediaRuntimeContractAvailable || root.mediaRuntimeReady
+					|| root.mediaRuntimePreparing || root.mediaRuntimeError.length > 0)
+				runtimePresentationStarted = true
+		}
+		function updateSource() {
+			source = active ? root.mediaSessionWindowComponentUrl : ""
+		}
+		onActiveChanged: updateSource()
+		onLoaded: {
+			item.transientParent = root
+			item.visualFixtureMode = root.visualMediaFixtureMode
+		}
+		onStatusChanged: if (status === Loader.Error && active)
+			root.reportMediaSessionWindowComponentFailure()
+		Component.onCompleted: {
+			syncRuntimePresentation()
+			updateSource()
+		}
+		Binding {
+			target: mediaSessionWindowLoader.item
+			property: "visualFixtureMode"
+			value: root.visualMediaFixtureMode
+			when: mediaSessionWindowLoader.item !== null
+		}
     }
+
+	Popup {
+		id: mediaWindowComponentFailurePopup
+		objectName: "mediaSessionWindowComponentFailure"
+		parent: Overlay.overlay
+		x: Math.round((parent.width - width) / 2)
+		y: Math.round((parent.height - height) / 2)
+		width: Math.min(parent.width - Theme.space6 * 2, 520)
+		height: Math.min(parent.height - Theme.space6 * 2, mediaWindowFailureContent.implicitHeight + Theme.space6 * 2)
+		visible: root.mediaSessionWindowUnavailable
+		modal: true
+		dim: true
+		focus: true
+		closePolicy: Popup.NoAutoClose
+		onAboutToShow: root.rememberMediaWindowFailureFocus()
+		onOpened: Qt.callLater(function() {
+			const candidates = [ mediaWindowComponentRetryButton,
+				mediaWindowComponentExternalButton, mediaWindowComponentCloseButton ]
+			for (let index = 0; index < candidates.length; ++index) {
+				const candidate = candidates[index]
+				if (candidate && candidate.visible && candidate.enabled) {
+					candidate.forceActiveFocus(Qt.PopupFocusReason)
+					return
+				}
+			}
+		})
+		onClosed: root.restoreMediaWindowFailureFocus()
+		background: Rectangle {
+			radius: Theme.shellRadius
+			color: Theme.surfaceRaised
+			border.color: Theme.withAlpha(Theme.danger, 0.55)
+			border.width: 1
+		}
+		contentItem: ColumnLayout {
+			id: mediaWindowFailureContent
+			spacing: Theme.space3
+			Accessible.role: Accessible.AlertMessage
+			Accessible.name: qsTr("Media window unavailable")
+			Accessible.description: root.mediaSessionWindowFailureMessage()
+			ModernIcon {
+				Layout.alignment: Qt.AlignHCenter
+				name: "warning"
+				size: Theme.avatarMedium
+				color: Theme.danger
+			}
+			Label {
+				Layout.fillWidth: true
+				text: qsTr("Media window unavailable")
+				textFormat: Text.PlainText
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontTitle
+				font.weight: Font.DemiBold
+				horizontalAlignment: Text.AlignHCenter
+			}
+			Label {
+				Layout.fillWidth: true
+				text: root.mediaSessionWindowFailureMessage()
+				textFormat: Text.PlainText
+				color: Theme.textMuted
+				wrapMode: Text.Wrap
+				horizontalAlignment: Text.AlignHCenter
+			}
+			RowLayout {
+				Layout.alignment: Qt.AlignHCenter
+				ModernButton {
+					id: mediaWindowComponentRetryButton
+					objectName: "mediaSessionWindowComponentRetryButton"
+					visible: root.mediaSessionWindowComponentFailed
+					text: qsTr("Retry")
+					tone: "accent"
+					onClicked: root.retryMediaSessionWindowComponent()
+				}
+				ModernButton {
+					id: mediaWindowComponentExternalButton
+					objectName: "mediaSessionWindowComponentExternalButton"
+					visible: root.mediaSessionExternalFallbackUrl().length > 0
+					text: qsTr("Open in browser")
+					onClicked: Qt.openUrlExternally(root.mediaSessionExternalFallbackUrl())
+				}
+				ModernButton {
+					id: mediaWindowComponentCloseButton
+					objectName: "mediaSessionWindowComponentCloseButton"
+					text: qsTr("Close")
+					onClicked: if (mediaSession && typeof mediaSession.closePlayer === "function")
+						mediaSession.closePlayer()
+				}
+			}
+		}
+	}
 
 	Drawer {
 		id: navigationDrawer
@@ -921,8 +1908,27 @@ ApplicationWindow {
 		height: root.height
 		enabled: root.compactNavigation
 		modal: true
+		dim: true
 		focus: true
 		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+		enter: Transition {
+			NumberAnimation {
+				property: "position"
+				from: 0
+				to: 1
+				duration: root.visualFixtureOverrideActive ? 0 : Theme.motionNormal
+				easing.type: Easing.OutCubic
+			}
+		}
+		exit: Transition {
+			NumberAnimation {
+				property: "position"
+				from: 1
+				to: 0
+				duration: root.visualFixtureOverrideActive ? 0 : Theme.motionNormal
+				easing.type: Easing.InCubic
+			}
+		}
 		onOpened: navigationDrawerRail.focusInitialItem()
 		onClosed: {
 			productDialog.syncVisibility()
@@ -931,9 +1937,15 @@ ApplicationWindow {
 			else
 				desktopNavigationRail.focusInitialItem()
 		}
+		Overlay.modal: Rectangle {
+			objectName: "navigationDrawerScrim"
+			color: Theme.modalScrim
+			Accessible.ignored: true
+		}
 		background: Rectangle { color: Theme.rail; border.color: Theme.divider }
 		NavigationRail {
 			id: navigationDrawerRail
+			roomListObjectName: "navigationDrawerRooms"
 			anchors.fill: parent
 			Accessible.role: Accessible.Dialog
 			Accessible.name: qsTr("Rooms and participants")
@@ -941,7 +1953,15 @@ ApplicationWindow {
 			selectionState: root.navigationSelectionState
 			uiCommands: root.navigationCommands
 			clientSession: root.navigationSession
+			visualFixtureMode: root.visualFixtureOverrideActive
 			commitOnSelection: true
+			settingsEnabled: root.settingsActionEnabled
+			// The drawer is the semantic owner while navigationModalActive is true;
+			// suppressing it through the global modal flag leaves screen readers with
+			// only an empty Window node. Suppress it only for a different product
+			// modal that actually owns the application at the same time.
+			accessibilitySuppressed: root.productDialogTransitionActive
+				|| root.mediaSessionWindowUnavailable
 			activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
 				? root.contextScopeToken : ""
 			activeParticipantMenuKey: participantMenuPopup.visible
@@ -951,6 +1971,7 @@ ApplicationWindow {
 				root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
 			onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
 				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
+			onSettingsRequested: root.requestSettings()
 			onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 		}
 	}
@@ -958,7 +1979,8 @@ ApplicationWindow {
 	SemanticMenu {
 		id: profileMenuPopup
 		objectName: "profileMenu"
-		width: 292
+		accessibleName: qsTr("Profile menu")
+		preferredWidth: 292
 		maximumHeight: Math.max(260, root.height - 48)
 		headerTitle: String((clientSession.selfMenu || ({})).name || clientSession.selfName || qsTr("You"))
 		headerSubtitle: String((clientSession.selfMenu || ({})).statusLabel
@@ -969,122 +1991,80 @@ ApplicationWindow {
 			uiCommands.invokeAppAction(actionId, payload && payload.payload ? payload.payload : ({}))
 	}
 
-	ModernMenu {
+	PayloadMenu {
 		id: roomMenuPopup
 		objectName: "voiceRoomMenu"
-		width: 280
-		focus: true
-		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-		MenuItem {
-			visible: root.contextScopeActions.length === 0
-			height: visible ? implicitHeight : 0
-			text: qsTr("No room actions available")
-			enabled: false
-		}
-		Repeater {
-			model: root.contextScopeActions
-			delegate: PayloadMenuItem {
-				required property var modelData
-				payload: modelData
-				onActionRequested: actionId => uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
-				onValueRequested: (actionId, value, finalValue) =>
-					uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
-			}
-		}
+		accessibleName: qsTr("Voice room menu")
+		preferredWidth: 280
+		maximumHeight: Math.max(160, root.height - 32)
+		entries: root.contextScopeActions.length > 0 ? root.contextScopeActions : [{
+			"kind": "label", "id": "voice-room-empty",
+			"label": qsTr("No room actions available"), "enabled": false
+		}]
+		onActionRequested: (actionId, payload) =>
+			uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
+		onValueRequested: (actionId, value, finalValue, payload) =>
+			uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
 	}
 
-	ModernMenu {
+	PayloadMenu {
 		id: textRoomMenuPopup
 		objectName: "textRoomMenu"
-		width: 280
-		focus: true
-		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-		MenuItem {
-			visible: root.contextScopeActions.length === 0
-			height: visible ? implicitHeight : 0
-			text: qsTr("No text-room actions available")
-			enabled: false
-		}
-		Repeater {
-			model: root.contextScopeActions
-			delegate: PayloadMenuItem {
-				required property var modelData
-				payload: modelData
-				onActionRequested: actionId => uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
-				onValueRequested: (actionId, value, finalValue) =>
-					uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
-			}
-		}
+		accessibleName: qsTr("Text room menu")
+		preferredWidth: 280
+		maximumHeight: Math.max(160, root.height - 32)
+		entries: root.contextScopeActions.length > 0 ? root.contextScopeActions : [{
+			"kind": "label", "id": "text-room-empty",
+			"label": qsTr("No text-room actions available"), "enabled": false
+		}]
+		onActionRequested: (actionId, payload) =>
+			uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
+		onValueRequested: (actionId, value, finalValue, payload) =>
+			uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
 	}
 
-	ModernMenu {
+	PayloadMenu {
 		id: participantMenuPopup
 		objectName: "participantMenu"
-		width: 300
-		focus: true
-		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-		MenuItem {
-			visible: root.contextParticipantActions.length === 0
-			height: visible ? implicitHeight : 0
-			text: qsTr("No participant actions available")
-			enabled: false
+		accessibleName: qsTr("Participant menu")
+		preferredWidth: 300
+		maximumHeight: Math.max(160, root.height - 32)
+		entries: root.contextParticipantActions.length > 0 ? root.contextParticipantActions : [{
+			"kind": "label", "id": "participant-empty",
+			"label": qsTr("No participant actions available"), "enabled": false
+		}]
+		onActionRequested: (actionId, payload) => {
+			if (root.contextParticipantEntryKind === "listener")
+				uiCommands.invokeScopeAction(root.contextParticipantScopeToken, actionId)
+			else
+				uiCommands.invokeParticipantAction(root.contextParticipantId, actionId)
 		}
-		Repeater {
-			model: root.contextParticipantActions
-			delegate: PayloadMenuItem {
-				required property var modelData
-				payload: modelData
-				onActionRequested: actionId => {
-					if (root.contextParticipantEntryKind === "listener")
-						uiCommands.invokeScopeAction(root.contextParticipantScopeToken, actionId)
-					else
-						uiCommands.invokeParticipantAction(root.contextParticipantId, actionId)
-				}
-				onValueRequested: (actionId, value, finalValue) => {
-					if (root.contextParticipantEntryKind === "listener")
-						uiCommands.invokeScopeActionValue(root.contextParticipantScopeToken,
-							actionId, value, finalValue)
-					else
-						uiCommands.invokeParticipantActionValue(root.contextParticipantId,
-							actionId, value, finalValue)
-				}
-			}
+		onValueRequested: (actionId, value, finalValue, payload) => {
+			if (root.contextParticipantEntryKind === "listener")
+				uiCommands.invokeScopeActionValue(root.contextParticipantScopeToken,
+					actionId, value, finalValue)
+			else
+				uiCommands.invokeParticipantActionValue(root.contextParticipantId,
+					actionId, value, finalValue)
 		}
 	}
 
-	ModernMenu {
+	PayloadMenu {
 		id: chatBackgroundMenuPopup
 		objectName: "chatBackgroundMenu"
-		width: 280
-		focus: true
-		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-		MenuItem {
-			visible: activeScope.canLoadOlder
-			height: visible ? implicitHeight : 0
-			text: qsTr("Load older messages")
-			enabled: activeScope.canLoadOlder && activeScope.loadingState !== "older"
-			onTriggered: uiCommands.requestOlderMessages()
+		accessibleName: qsTr("Conversation menu")
+		preferredWidth: 280
+		maximumHeight: Math.max(160, root.height - 32)
+		entries: root.chatBackgroundMenuEntries()
+		onActionRequested: (actionId, payload) => {
+			if (actionId === "activeScope.loadOlder")
+				uiCommands.requestOlderMessages()
+			else if (root.contextScopeToken.length > 0)
+				uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
 		}
-		MenuItem {
-			visible: !activeScope.canLoadOlder && root.contextScopeActions.length === 0
-			height: visible ? implicitHeight : 0
-			text: qsTr("No conversation actions available")
-			enabled: false
-		}
-		Repeater {
-			model: root.contextScopeActions
-			delegate: PayloadMenuItem {
-				required property var modelData
-				payload: modelData
-				onActionRequested: actionId => {
-					if (root.contextScopeToken.length > 0)
-						uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
-				}
-				onValueRequested: (actionId, value, finalValue) => {
-					if (root.contextScopeToken.length > 0)
-						uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
-				}
-			}
+		onValueRequested: (actionId, value, finalValue, payload) => {
+			if (root.contextScopeToken.length > 0)
+				uiCommands.invokeScopeActionValue(root.contextScopeToken, actionId, value, finalValue)
 		}
 	}
 
@@ -1111,6 +2091,7 @@ ApplicationWindow {
 		clip: true
 
 		Behavior on height {
+			enabled: !root.visualFixtureOverrideActive
 			NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic }
 		}
 
@@ -1122,46 +2103,55 @@ ApplicationWindow {
 			spacing: Theme.space2
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
-			ScrollBar.vertical: ScrollBar { policy: operationList.contentHeight > operationList.height
-				? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+			ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 			delegate: AsyncOperationCard {
-				width: operationList.width - (operationList.contentHeight > operationList.height ? 10 : 0)
+				// A height-dependent width made wrapped card content feed back into
+				// contentHeight and the overlay height. Reserve a stable scrollbar gutter.
+				width: Math.max(1, operationList.width - Theme.space2)
 				maximumHeight: operationOverlay.maximumHeight
 				narrowLayout: root.width < 640
+				animationsEnabled: !root.visualFixtureOverrideActive
 				itemResultPageProvider: function(operationId, offset, limit, unsuccessfulOnly) {
 					return operationModel.itemResultPage(operationId, offset, limit, unsuccessfulOnly)
 				}
 				onCancelRequested: operationId => operationModel.cancel(operationId)
 				onDismissRequested: operationId => operationModel.dismiss(operationId)
+				onActionRequested: (operationId, actionId, actionPayload) => {
+					uiCommands.invokeAppAction(actionId, actionPayload || ({}))
+					operationModel.dismiss(operationId)
+				}
 			}
 		}
 	}
 
-	ShaderEffectSource {
-		id: modalBackgroundSource
-		anchors.fill: parent
-		anchors.margins: 8
-		visible: root.modalUiActive
-		enabled: false
-		sourceItem: productSurface
-		// Keep the modal context current until theme and control-state animations
-		// settle instead of freezing an arbitrary intermediate frame.
-		live: root.modalUiActive
-		smooth: false
-		textureSize: Qt.size(Math.max(1, Math.ceil(width * root.modalTextureScale)),
-			Math.max(1, Math.ceil(height * root.modalTextureScale)))
-		Accessible.ignored: true
+	ToastPill {
+		id: toastPill
+		objectName: "productToastPill"
+		anchors.horizontalCenter: parent.horizontalCenter
+		anchors.bottom: parent.bottom
+		// Keep transient feedback clear of the composer even while replies,
+		// attachments, autocomplete, or multiline input expand it.
+		anchors.bottomMargin: composerSurface.height + 22
+		width: Math.min(implicitWidth, Math.max(1, parent.width - Theme.space4 * 2))
+		maximumWidth: Math.min(680, Math.max(280, parent.width - Theme.space4 * 2))
+		controller: toastState
+		animationsEnabled: !root.visualFixtureOverrideActive
+		onActionRequested: actionId => uiCommands.invokeAppAction(actionId, {})
 	}
 
 	Rectangle {
 		id: productSurface
+		objectName: "productSurface"
         anchors.fill: parent
         anchors.margins: 8
-		// ShaderEffectSource can render an invisible source item directly into a
-		// scene-graph texture. Keep the source enabled so controls retain their
-		// normal visual state while the texture is captured; visibility alone
-		// prunes the live tree from input and accessibility during a modal.
-		visible: !root.modalUiActive
+		// Modal popups own pointer/focus blocking. Keeping the live scene in the
+		// window avoids a full-window texture copy and remains capturable by
+		// PrintWindow/off-screen automation. Do not toggle enabled on the entire
+		// tree: that would propagate disabled state and repaint every control for
+		// each dialog. ModalAccessibilityBarrier prunes every semantic descendant
+		// without hiding or disabling the visual background.
+		visible: true
+		Accessible.ignored: false
         radius: Theme.shellRadius
         color: Theme.shellBackground
         border.color: Theme.divider
@@ -1176,12 +2166,21 @@ ApplicationWindow {
 				id: mainContentColumn
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+				// Compact windows must be allowed to shrink below the combined implicit
+				// width of the header and message metadata. Without an explicit zero
+				// minimum the RowLayout grows past productSurface and the rightmost
+				// timestamp/message controls are clipped by the shell radius.
+				Layout.minimumWidth: 0
                 spacing: 0
 
                 Rectangle {
                     id: shellHeader
                     Layout.fillWidth: true
-					Layout.preferredHeight: root.narrowShell ? 64 : 72
+					// On desktop this is also the navigation header height. Keeping
+					// one source of geometry makes the divider continuous for both
+					// left- and right-side rail placement.
+					Layout.preferredHeight: root.compactNavigation
+						? (root.narrowShell ? 64 : 72) : Theme.railHeaderHeight
                     color: Theme.panel
 					border.width: 0
 					DragHandler {
@@ -1252,17 +2251,20 @@ ApplicationWindow {
 							objectName: "compactNavigationToggle"
 							visible: root.compactNavigation
 							iconName: "menu"
+							Accessible.ignored: root.modalUiActive
 							Accessible.name: qsTr("Open rooms and participants")
 							onClicked: navigationDrawer.open()
 						}
 						ModernButton {
 							readonly property var share: activeScope.screenShare || ({})
-							visible: !!share.visible && String(share.primaryActionId || "").length > 0
+							visible: !root.activeScopeHasScreenShare && !!share.visible
+								&& String(share.primaryActionId || "").length > 0
 							dense: true
 							text: root.narrowShell ? qsTr("Share")
 								: String(share.primaryLabel || qsTr("Screen share"))
 							tone: String(share.primaryTone || "neutral")
 							enabled: share.primaryEnabled === undefined || !!share.primaryEnabled
+							Accessible.ignored: root.modalUiActive
 							Accessible.name: String(share.primaryLabel || qsTr("Screen share"))
 							Accessible.description: String(share.primaryHint || "")
 							onClicked: uiCommands.invokeScopeAction(activeScope.scopeToken,
@@ -1338,10 +2340,15 @@ ApplicationWindow {
 							}
 						}
 						ModernIconButton {
+							id: conversationSearchButton
+							objectName: "conversationSearchButton"
 							visible: clientSession.connected
 							iconName: "search"
-							Accessible.name: qsTr("Search users and rooms")
-							onClicked: uiCommands.invokeAction("server.search")
+							Accessible.ignored: root.modalUiActive
+							Accessible.name: root.conversationSearchOpen
+								? qsTr("Focus conversation search") : qsTr("Search this conversation")
+							Accessible.description: qsTr("Search message text, senders, replies, and attachments")
+							onClicked: root.openConversationSearch()
 						}
 						ModernIconButton {
 							objectName: "activeScopeMarkRead"
@@ -1391,20 +2398,24 @@ ApplicationWindow {
 						id: appMenuButton
 						objectName: "visualFixtureApplicationMenu"
 						iconName: "more"
+						Accessible.ignored: root.modalUiActive
                         Accessible.name: qsTr("Application menu")
 						Accessible.focusable: true
 						Accessible.focused: activeFocus
-						onClicked: {
-							root.closeProductMenus()
-							root.openMenuAt(appMenuPopup,
-								appMenuButton.mapToItem(null, appMenuButton.width, appMenuButton.height))
-						}
+							onClicked: {
+								root.closeProductMenus()
+								root.openMenuAt(appMenuPopup,
+									appMenuButton.mapToItem(null, appMenuButton.width, appMenuButton.height),
+									appMenuButton)
+							}
                     }
 					}
                     SemanticMenu {
                         id: appMenuPopup
 						objectName: "applicationMenu"
-						width: 292
+						accessibleName: qsTr("Application menu")
+						parent: root.contentItem
+						preferredWidth: 292
 						maximumHeight: Math.max(280, root.height - 104)
                         modal: false
                         focus: true
@@ -1415,17 +2426,7 @@ ApplicationWindow {
 							? qsTr("%1 · %2").arg(clientSession.selfName).arg(clientSession.selfStatusLabel)
 							: qsTr("Choose a server to get started")
 						headerTone: clientSession.connected ? "success" : ""
-						groups: activeScope.canMarkRead && Number(activeScope.unreadCount || 0) > 0
-							? (clientSession.appMenus || []).concat([{
-								"id": "active-conversation",
-								"label": qsTr("Conversation"),
-								"items": [{
-									"kind": "action",
-									"id": "activeScope.markRead",
-									"label": qsTr("Mark read"),
-									"enabled": true
-								}]
-							}]) : clientSession.appMenus
+						groups: root.applicationMenuGroups()
 						onActionRequested: (actionId, payload) => {
 							if (actionId === "activeScope.markRead")
 								uiCommands.markActiveScopeRead()
@@ -1436,12 +2437,27 @@ ApplicationWindow {
                     }
                 }
 
+				ConversationSearchBar {
+					id: conversationSearchBar
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					visible: root.conversationSearchOpen
+					timelineModel: chatModel
+					narrowLayout: root.narrowShell
+					accessibilitySuppressed: root.modalUiActive
+					visualFixtureMode: root.visualFixtureOverrideActive
+					onCloseRequested: root.closeConversationSearch(true)
+					onCurrentMatchRequested: (row, stableId) =>
+						root.revealConversationSearchMatch(row, stableId)
+				}
+
                 UpdateBanner {
                     Layout.fillWidth: true
 					Layout.leftMargin: Theme.spacing
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Theme.spacing : 0
                     state: clientSession.updateBanner
+					animationsEnabled: !root.visualFixtureOverrideActive
                     onActionRequested: actionId => uiCommands.invokeAppAction(actionId, {})
                 }
 
@@ -1452,6 +2468,8 @@ ApplicationWindow {
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Theme.spacing : 0
 					session: clientSession
+					showDisconnectedAction: !emptyConversationState.visible
+					animationsEnabled: !root.visualFixtureOverrideActive
 					onActionRequested: (actionId, payload) => uiCommands.invokeAppAction(actionId, payload)
 				}
 
@@ -1474,6 +2492,20 @@ ApplicationWindow {
 					onLinkRequested: link => Qt.openUrlExternally(link)
 				}
 
+				ScreenShareScopeCard {
+					id: activeScopeScreenShareCard
+					Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
+					share: activeScope.screenShare || ({})
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					accessibilitySuppressed: root.modalUiActive
+					onActionRequested: actionId => uiCommands.invokeScopeAction(
+						activeScope.scopeToken, actionId)
+				}
+
 				WatchTogetherBanner {
 					Layout.fillWidth: true
 					Layout.leftMargin: Theme.spacing
@@ -1490,11 +2522,25 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     model: chatModel
                     clip: true
+					Accessible.role: Accessible.List
+					Accessible.name: qsTr("Conversation messages")
+					// QQuickListView's scrolling contentItem reports its untransformed
+					// content bounds to Windows UIA. With tall rich cards that wrapper can
+					// appear hundreds of pixels away from its visible children. Remove only
+					// that implementation detail so delegates are parented semantically by
+					// this stable viewport instead.
+					Binding {
+						target: timeline.contentItem
+						property: "Accessible.ignored"
+						value: true
+						when: !!timeline.contentItem
+						restoreMode: Binding.RestoreBindingOrValue
+					}
 					spacing: 0
 					leftMargin: root.timelineHorizontalMargin
 					rightMargin: root.timelineHorizontalMargin
 					topMargin: root.timelineVerticalMargin
-					reuseItems: true
+					reuseItems: !scopeReuseResetActive
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
 						objectName: "chatTimelineScrollBar"
@@ -1512,17 +2558,34 @@ ApplicationWindow {
 					// Build a small amount of chat content outside the viewport while
 					// the chat surface is otherwise idle. Complex rich-message delegates
 					// should not have to be constructed on the first frame they scroll in.
-					cacheBuffer: 256
+					// Keep one bounded viewport of delegates warm. This is enough to
+					// construct occasional rich rows outside the presentation-critical
+					// scroll frame without scaling cache memory with history length.
+					cacheBuffer: Math.max(256, Math.min(720, height))
 					property string prependAnchorId: ""
 					property real prependAnchorOffset: 0
 					property bool prependAnchorActive: false
+					property bool prependMutationInProgress: false
 					property bool restoringPrependAnchor: false
 					property int prependAnchorRetries: 0
+					property int prependAnchorCorrectionFrames: 0
 					property bool stickToBottom: true
 					property bool followTailAfterInsert: false
+					property int pendingTailInsertCount: 0
+					property int pendingTailMessageCount: 0
 					property bool restoringBottom: false
 					property bool scopeResetPending: false
+					// Scope replacement removes one conversation and inserts another in the
+					// same event turn. Temporarily retire the reuse pool so Qt Quick cannot
+					// present a delegate with geometry/content retained from the old scope.
+					// Reuse resumes immediately after the new scope has laid out and remains
+					// enabled for all steady-state chat scrolling.
+					property bool scopeReuseResetActive: false
 					property real bottomFollowThreshold: 48
+					onStickToBottomChanged: {
+						if (stickToBottom)
+							pendingTailMessageCount = 0
+					}
 
 					function isNearBottom() {
 						if (count === 0 || atYEnd)
@@ -1533,14 +2596,17 @@ ApplicationWindow {
 
 					function requestBottomFollow() {
 						if (stickToBottom && !prependAnchorActive && !restoringBottom
-								&& !bottomFollowTimer.running && !timelineScrollWorkload.running)
+								&& !bottomFollowTimer.running && !root.performanceChatScrollRunning)
 							bottomFollowTimer.start()
 					}
 
 					function beginScopeChange() {
 						releasePrependAnchor()
 						bottomFollowTimer.stop()
+						scopeReuseResetActive = true
 						followTailAfterInsert = false
+						pendingTailInsertCount = 0
+						pendingTailMessageCount = 0
 						stickToBottom = true
 						scopeResetPending = true
 					}
@@ -1560,7 +2626,8 @@ ApplicationWindow {
 						for (let index = 0; index < children.length; ++index) {
 							const item = children[index]
 							if (!item || item.stableId === undefined || !item.visible
-									|| item.accessibilityPooled === true || item.y + item.height < contentY)
+									|| item.accessibilityPooled === true
+									|| item.y + item.height <= contentY + 0.5)
 								continue
 							if (!candidate || item.y < candidate.y)
 								candidate = item
@@ -1577,6 +2644,7 @@ ApplicationWindow {
 							return false
 						prependAnchorOffset = item.y - contentY
 						prependAnchorRetries = 0
+						prependAnchorCorrectionFrames = 0
 						prependAnchorActive = true
 						stickToBottom = false
 						return true
@@ -1584,9 +2652,11 @@ ApplicationWindow {
 
 					function releasePrependAnchor() {
 						prependAnchorSettleTimer.stop()
+						prependMutationInProgress = false
 						prependAnchorActive = false
 						prependAnchorId = ""
 						prependAnchorRetries = 0
+						prependAnchorCorrectionFrames = 0
 					}
 
 					function restorePrependAnchor() {
@@ -1610,9 +2680,64 @@ ApplicationWindow {
 						restoringPrependAnchor = true
 						const minimumY = originY
 						const maximumY = Math.max(minimumY, originY + contentHeight - height)
-						contentY = Math.max(minimumY, Math.min(maximumY, item.y - prependAnchorOffset))
+						const desiredY = Math.max(minimumY, Math.min(maximumY, item.y - prependAnchorOffset))
+						if (Math.abs(contentY - desiredY) > 0.5)
+							contentY = desiredY
 						restoringPrependAnchor = false
 						prependAnchorSettleTimer.restart()
+					}
+
+					function containTailMessageWhenPossible() {
+						if (count <= 0)
+							return
+						const item = itemAtIndex(count - 1)
+						if (!item || !item.visible)
+							return
+						// A rich row can be taller than the viewport because its actor/body chrome
+						// surrounds an otherwise fully containable preview. Tail-following must keep
+						// that primary card intact instead of clipping its first device-independent
+						// pixels at fractional DPR.
+						const richBounds = item.primaryRichContentViewportBounds
+							? item.primaryRichContentViewportBounds() : null
+						if (richBounds && richBounds.height > 0 && richBounds.height <= height + 1.0) {
+							let correction = 0
+							if (richBounds.top < -0.5)
+								correction = richBounds.top
+							else if (richBounds.bottom > height + 0.5)
+								correction = richBounds.bottom - height
+							if (Math.abs(correction) > 0.5) {
+								const minimumY = originY
+								const maximumY = Math.max(minimumY, originY + contentHeight - height)
+								contentY = Math.max(minimumY, Math.min(maximumY, contentY + correction))
+							}
+							return
+						}
+						if (item.height > height + 1.0)
+							return
+						// The inline footer normally gives the latest message breathing room.
+						// If that footer pushes an otherwise fitting rich message above the
+						// viewport, trade only the required footer pixels for complete content.
+						// This also keeps the visible row's semantic subtree available at
+						// fractional DPR instead of exposing a visually clipped message.
+						if (item.y < contentY - 1.0) {
+							const minimumY = originY
+							const maximumY = Math.max(minimumY, originY + contentHeight - height)
+							contentY = Math.max(minimumY, Math.min(maximumY, item.y))
+						}
+					}
+
+					// Delegate y-coordinates settle over several scene-graph frames after a
+					// structural insert. Correct only during that bounded window; this is
+					// dormant during steady-state chat and ordinary scrolling.
+					FrameAnimation {
+						id: prependAnchorFrameCorrection
+						running: timeline.prependAnchorActive
+							&& timeline.prependAnchorCorrectionFrames > 0
+						onTriggered: {
+							timeline.restorePrependAnchor()
+							timeline.prependAnchorCorrectionFrames = Math.max(0,
+								timeline.prependAnchorCorrectionFrames - 1)
+						}
 					}
 
 					onContentHeightChanged: {
@@ -1625,7 +2750,11 @@ ApplicationWindow {
 							requestBottomFollow()
 					}
 					onMovementStarted: {
-						if (!restoringPrependAnchor && !restoringBottom) {
+						// QQuickListView reports its own insert displacement as movement.
+						// Preserve the pre-structural anchor through that transition, while
+						// ordinary wheel, drag and flick movement still cancels restoration.
+						if (!restoringPrependAnchor && !restoringBottom
+								&& !prependMutationInProgress) {
 							stickToBottom = false
 							releasePrependAnchor()
 						}
@@ -1660,6 +2789,7 @@ ApplicationWindow {
 							timeline.restoringBottom = true
 							timeline.positionViewAtEnd()
 							Qt.callLater(function() {
+								timeline.containTailMessageWhenPossible()
 								timeline.restoringBottom = false
 								timeline.scopeResetPending = false
 								if (timeline.stickToBottom && !timeline.isNearBottom())
@@ -1668,26 +2798,13 @@ ApplicationWindow {
 						}
 					}
 
-					ModernButton {
-						id: jumpToLatestButton
-						parent: timeline
-						anchors.horizontalCenter: parent.horizontalCenter
-						anchors.bottom: parent.bottom
-						anchors.bottomMargin: Theme.space3
-						z: 30
-						visible: timeline.count > 0 && !timeline.stickToBottom
-						dense: true
-						tone: "accent"
-						text: qsTr("Jump to latest")
-						Accessible.description: qsTr("Scroll to the newest message")
-						onClicked: {
-							timeline.stickToBottom = true
-							timeline.requestBottomFollow()
-						}
-					}
-
 					Connections {
 						target: chatModel
+						function onRowsAboutToBePrepended(count) {
+							if (count > 0 && !timeline.scopeResetPending && !timeline.stickToBottom
+									&& !timeline.prependAnchorActive)
+								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
+						}
 						function onRowsAboutToChange(first, last) {
 							if (!timeline.scopeResetPending && !timeline.stickToBottom
 									&& !timeline.prependAnchorActive)
@@ -1701,18 +2818,29 @@ ApplicationWindow {
 						}
 						function onRowsAboutToBeInserted(parentIndex, first, last) {
 							timeline.followTailAfterInsert = false
+							timeline.pendingTailInsertCount = 0
 							if (timeline.scopeResetPending) {
 								timeline.followTailAfterInsert = true
-							} else if (first === 0 && timeline.count > 0) {
-								timeline.capturePrependAnchor()
+							} else if (first === 0 && timeline.count > 0
+									&& !timeline.prependAnchorActive) {
+								// ChatTimelineModel announces the mutation before Qt begins the
+								// row insertion. Keep that first geometry snapshot; recapturing
+								// here can observe ListView's transitional one-row offset.
+								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
 							} else if (first >= timeline.count) {
 								timeline.followTailAfterInsert = timeline.count === 0
 									|| (timeline.stickToBottom && timeline.isNearBottom())
+								if (!timeline.followTailAfterInsert)
+									timeline.pendingTailInsertCount = Math.max(0, last - first + 1)
 							}
 						}
 						function onRowsInserted(parentIndex, first, last) {
 							if (first === 0 && timeline.prependAnchorActive)
-								Qt.callLater(function() { timeline.restorePrependAnchor() })
+								Qt.callLater(function() {
+									timeline.prependMutationInProgress = false
+									timeline.prependAnchorCorrectionFrames = 12
+									timeline.restorePrependAnchor()
+								})
 							else if (timeline.followTailAfterInsert) {
 								timeline.stickToBottom = true
 								// Scope replacement happens before the next scene render. Position
@@ -1722,11 +2850,20 @@ ApplicationWindow {
 								if (timeline.scopeResetPending)
 									timeline.positionTailImmediately()
 								timeline.requestBottomFollow()
-							}
+							} else if (timeline.pendingTailInsertCount > 0)
+								timeline.pendingTailMessageCount += timeline.pendingTailInsertCount
+							if (timeline.scopeReuseResetActive)
+								Qt.callLater(function() {
+									timeline.forceLayout()
+									timeline.scopeReuseResetActive = false
+								})
 							timeline.followTailAfterInsert = false
+							timeline.pendingTailInsertCount = 0
 						}
 						function onModelReset() {
 							timeline.releasePrependAnchor()
+							timeline.pendingTailInsertCount = 0
+							timeline.pendingTailMessageCount = 0
 							timeline.stickToBottom = true
 							timeline.requestBottomFollow()
 						}
@@ -1774,9 +2911,22 @@ ApplicationWindow {
 						width: timeline.width
 						height: root.timelineVerticalMargin
 					}
-					delegate: ChatMessageFrame {
+			delegate: ChatMessageFrame {
 						id: messageDelegate
-						required property int index
+						readonly property bool performanceTimelineDelegate: true
+				required property int index
+				// Ordinary rows enter UIA only when fully contained so cached actor/header
+				// nodes cannot leak across the clip. A legitimate rich card may be taller
+				// than the viewport; it can never satisfy full containment, so expose that
+				// row while it intersects the viewport and let its visible provider surface
+				// remain navigable.
+				accessibilityViewportVisible: height > timeline.height
+					? y + height > timeline.contentY + 0.5
+						&& y < timeline.contentY + timeline.height - 0.5
+					: y >= timeline.contentY - 0.5
+						&& y + height <= timeline.contentY + timeline.height + 0.5
+				accessibilitySuppressed: root.modalUiActive
+				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 						function openAutomationActions() {
 							openMessageActions()
 							return messageActions
@@ -1799,6 +2949,10 @@ ApplicationWindow {
 						readonly property bool previewNeedsHydration: !!preview
 							&& Object.keys(preview).length > 0
 							&& (preview.state === "loading" || preview.loading === true)
+						readonly property bool attachmentNeedsHydration: (attachments || []).some(function(attachment) {
+							return !!attachment && String(attachment.state || "").toLowerCase() === "loading"
+						})
+						readonly property bool contentNeedsHydration: previewNeedsHydration || attachmentNeedsHydration
 						readonly property bool inHydrationWindow: !accessibilityPooled
 							&& y + height >= timeline.contentY - timeline.height * 0.5
 							&& y <= timeline.contentY + timeline.height * 1.5
@@ -1806,26 +2960,66 @@ ApplicationWindow {
 							&& y + height >= timeline.contentY
 							&& y <= timeline.contentY + timeline.height
 						function requestPreviewHydrationIfNeeded() {
-							if (previewNeedsHydration && inHydrationWindow)
+							if (contentNeedsHydration && inHydrationWindow)
 								root.queuePreviewHydration(stableId, inVisibleViewport)
 						}
+						function primaryRichContentViewportBounds() {
+							let content = null
+							if (messagePreviewLoader.status === Loader.Ready && messagePreviewLoader.item)
+								content = messagePreviewLoader.item
+							else if (messageAttachmentLoader.status === Loader.Ready && messageAttachmentLoader.item)
+								content = messageAttachmentLoader.item
+							if (!content || !content.mapToItem || content.height <= 0)
+								return null
+							const point = content.mapToItem(timeline, 0, 0)
+							return { "top": point.y, "bottom": point.y + content.height,
+								"height": content.height }
+						}
+						function itemIntersectsViewport(item) {
+							if (!item || accessibilityPooled)
+								return false
+							// Keep contentY as an explicit dependency; mapToItem supplies the
+							// transformed viewport coordinate but does not reliably invalidate
+							// bindings for every Flickable movement on all Qt backends.
+							const scrollPosition = timeline.contentY
+							const point = item.mapToItem(timeline, 0, 0)
+							return point.y + item.height > 0.5
+								&& point.y < timeline.height - 0.5 && isFinite(scrollPosition)
+						}
+						function itemContainedInViewport(item) {
+							if (!item || accessibilityPooled)
+								return false
+							const scrollPosition = timeline.contentY
+							const point = item.mapToItem(timeline, 0, 0)
+							return point.y >= -0.5 && point.y + item.height <= timeline.height + 0.5
+								&& isFinite(scrollPosition)
+						}
 						ListView.onPooled: {
+							if (root.visualFixtureOverrideActive)
+								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
 						}
 						ListView.onReused: {
+							if (root.visualFixtureOverrideActive)
+								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
-							messagePreviewCard.resetForReuse()
+							if (messagePreviewLoader.item)
+								messagePreviewLoader.item.resetForReuse()
 							Qt.callLater(function() { messageDelegate.requestPreviewHydrationIfNeeded() })
 						}
-						onPreviewNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
+						onContentNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
 						onInHydrationWindowChanged: requestPreviewHydrationIfNeeded()
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							requestPreviewHydrationIfNeeded()
 						}
-						Component.onCompleted: requestPreviewHydrationIfNeeded()
+						Component.onCompleted: {
+							if (root.visualFixtureOverrideActive)
+								++root.performanceChatDelegateCreatedCount
+							requestPreviewHydrationIfNeeded()
+						}
 						// This technical delegate frame must remain ignored for its entire
 						// lifetime. Switching it between ignored and exposed while ListView
 						// reuses it leaves both promoted and nested children in the Windows
@@ -1847,28 +3041,55 @@ ApplicationWindow {
                         required property bool canReply
 						required property bool canReact
 						required property bool canDelete
+						searchCurrent: root.conversationSearchOpen
+							&& stableId === String(chatModel.currentMatchStableId || "")
 						systemMessage: !!source.system
 							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
 						startsGroup: root.messageStartsGroup(index, source, title)
 						dateSeparatorLabel: root.messageDateSeparator(index, source)
 						bodyImplicitHeight: messageRow.implicitHeight
+						// Flickable margins do not constrain a vertical ListView delegate's
+						// horizontal scene rect. Reserve the shell-safe trailing inset here as
+						// well, otherwise compact metadata extends beneath productSurface's
+						// rounded clip even though the timeline itself is correctly sized.
 						laneAvailableWidth: Math.max(1, timeline.width
-							- timeline.leftMargin - timeline.rightMargin)
+							- timeline.leftMargin - timeline.rightMargin - Theme.space4)
 						laneMaximumWidth: root.conversationLaneMaximumWidth
 						readonly property bool hasPreviewContent: !!preview && Object.keys(preview).length > 0
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
-						readonly property bool hasReactionContent: !!reactions && reactions.length > 0
+						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
 						readonly property bool hasMessageActions: canReply || canReact || canDelete
 							|| !!source.deliveryCanRetry
-						readonly property real previewTargetWidth: preview && preview.previewSize === "compact"
-							? 460 : preview && preview.previewSize === "large" ? 720 : 580
-						wideContent: hasPreviewContent || hasAttachmentContent || hasReplyContent
-							|| hasReactionContent || hasDeliveryStatus
-						preferredWideContentWidth: hasPreviewContent && !hasAttachmentContent
-							? previewTargetWidth + horizontalPadding * 2 : laneWidth
-						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup)
-						preferredIncomingWidth: root.preferredIncomingMessageWidth(bodySegments, startsGroup)
+						readonly property bool performancePreviewMaterialized: messagePreviewLoader.status === Loader.Ready
+							&& !!messagePreviewLoader.item
+						readonly property bool performanceAttachmentMaterialized: messageAttachmentLoader.status === Loader.Ready
+							&& !!messageAttachmentLoader.item
+						readonly property real previewTargetWidth: hasPreviewContent && messagePreviewLoader.item
+							? messagePreviewLoader.item.targetCardWidth
+							: preview && preview.previewSize === "compact" ? 460
+							: preview && preview.previewSize === "large" ? 720 : 580
+						// Reactions are compact metadata and wrap naturally in their Flow. Treating
+						// one reaction like a media card makes an otherwise short message expand
+						// across the complete conversation lane.
+						readonly property real richContentChromeWidth: own || systemMessage
+							? horizontalPadding * 2
+							: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+						// Replies and delivery metadata are compact text. Only media opts into
+						// the wider lane, so sending/failed messages never become broad panels.
+						wideContent: hasPreviewContent || hasAttachmentContent || hasInlineImageContent
+						readonly property real attachmentTargetWidth: hasAttachmentContent
+							? root.preferredAttachmentMessageWidth(attachments, own || systemMessage) : 0
+						readonly property real previewMessageWidth: hasPreviewContent
+							? previewTargetWidth + richContentChromeWidth : 0
+						preferredWideContentWidth: hasInlineImageContent
+							? Theme.chatRichMaximumWidth
+							: Math.min(Theme.chatRichMaximumWidth, Math.max(attachmentTargetWidth,
+								previewMessageWidth, own ? preferredOwnWidth : preferredIncomingWidth))
+						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup,
+							replyActor, replySnippet, hasDeliveryStatus)
+						preferredIncomingWidth: root.preferredIncomingMessageWidth(bodySegments, startsGroup,
+							replyActor, replySnippet, hasDeliveryStatus)
 						readonly property string deliveryState: String(source.deliveryState || status || "").trim().toLowerCase()
 						readonly property string deliveryLabel: String(source.deliveryLabel || status || "").trim()
 						readonly property bool hasDeliveryStatus: deliveryState === "sending"
@@ -1894,7 +3115,8 @@ ApplicationWindow {
                                 Image {
                                     id: avatarImage
                                     anchors.fill: parent
-                                    source: root.safeRenderImageSource(avatarUrl)
+								source: !messageDelegate.accessibilityPooled
+									? root.safeRenderImageSource(avatarUrl) : ""
                                     asynchronous: true
                                     cache: false
                                     sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
@@ -1913,10 +3135,10 @@ ApplicationWindow {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: Theme.space1
+								spacing: Theme.chatMetadataSpacing
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: Theme.space2
+									spacing: Theme.chatMetadataSpacing
 									visible: (messageDelegate.startsGroup && !messageDelegate.own)
 										|| messageDelegate.systemMessage
 									Label {
@@ -1942,10 +3164,12 @@ ApplicationWindow {
 								Rectangle {
 									id: messageBubble
 									objectName: "chatMessageBubble"
-									readonly property real bubbleInset: messageDelegate.own
-										|| messageDelegate.systemMessage ? 0 : Theme.space3
+									readonly property real bubbleHorizontalInset: messageDelegate.own
+										|| messageDelegate.systemMessage ? 0 : Theme.chatBubbleHorizontalPadding
+									readonly property real bubbleVerticalInset: messageDelegate.own
+										|| messageDelegate.systemMessage ? 0 : Theme.chatBubbleVerticalPadding
 									Layout.fillWidth: true
-									Layout.preferredHeight: bubbleContent.implicitHeight + bubbleInset * 2
+									Layout.preferredHeight: bubbleContent.implicitHeight + bubbleVerticalInset * 2
 									radius: Theme.innerRadius
 									color: messageDelegate.own || messageDelegate.systemMessage
 										? "transparent" : messageDelegate.bubbleColor
@@ -1957,27 +3181,49 @@ ApplicationWindow {
 									ColumnLayout {
 										id: bubbleContent
 										anchors.fill: parent
-										anchors.margins: messageBubble.bubbleInset
-										spacing: Theme.space1
+										anchors.leftMargin: messageBubble.bubbleHorizontalInset
+										anchors.rightMargin: messageBubble.bubbleHorizontalInset
+										anchors.topMargin: messageBubble.bubbleVerticalInset
+										anchors.bottomMargin: messageBubble.bubbleVerticalInset
+										spacing: Theme.chatContentSpacing
                                 Rectangle {
                                     id: previewCard
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: replyColumn.implicitHeight + Theme.space3
+                                    // The accessible text children must stay inside the reply card.
+                                    // Reserve the same top and bottom margins that replyColumn uses;
+                                    // space3 is smaller than two space2 margins at regular density.
+                                    Layout.preferredHeight: replyColumn.implicitHeight + Theme.space2 * 2
                                     visible: replyActor.length > 0 || replySnippet.length > 0
                                     radius: Theme.innerRadius
 									color: Theme.chatReplySurface
+									Rectangle {
+										anchors.left: parent.left
+										anchors.top: parent.top
+										anchors.bottom: parent.bottom
+										width: 2
+										radius: 1
+										color: Theme.accent
+										Accessible.ignored: true
+									}
                                     Column {
                                         id: replyColumn
                                         anchors.fill: parent
-                                        anchors.margins: Theme.space2
+										anchors.leftMargin: Theme.space3
+										anchors.rightMargin: Theme.space2
+										anchors.topMargin: Theme.space2
+										anchors.bottomMargin: Theme.space2
                                         Label { textFormat: Text.PlainText; text: replyActor; color: Theme.accent; font.pixelSize: Theme.fontCaption; font.bold: true }
                                         Label { width: parent.width; textFormat: Text.PlainText; text: replySnippet; color: Theme.textMuted; font.pixelSize: Theme.fontLabel; elide: Text.ElideRight }
                                     }
                                 }
 								RichMessageBody {
+									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
-                                    segments: messageDelegate.bodySegments || []
+									accessibilitySuppressed: root.modalUiActive
+										|| !messageDelegate.itemContainedInViewport(messageBody)
+									segments: messageDelegate.bodySegments || []
+									resourceActive: !messageDelegate.accessibilityPooled
                                     textColor: Theme.textMain
                                     pixelSize: Theme.fontBody
 									onLinkRequested: link => Qt.openUrlExternally(link)
@@ -2016,49 +3262,132 @@ ApplicationWindow {
                                     font.pixelSize: Theme.fontBody
                                     font.italic: true
                                 }
-                                AttachmentGallery {
-                                    Layout.fillWidth: true
-                                    attachments: messageDelegate.attachments || []
-                                    onAttachmentRequested: attachment => root.requestAttachment(attachment)
-									onAttachmentDownloadRequested: attachment => root.downloadAttachment(attachment, false)
-                                    onAttachmentRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
+                                Loader {
+									id: messageAttachmentLoader
+									active: messageDelegate.hasAttachmentContent
+									Layout.fillWidth: true
+									onLoaded: if (root.visualFixtureOverrideActive)
+										++root.performanceChatAttachmentLoadedCount
+									sourceComponent: Component {
+										AttachmentGallery {
+											attachments: messageDelegate.attachments || []
+											resourceActive: !messageDelegate.accessibilityPooled
+											animationsEnabled: !root.visualFixtureOverrideActive
+											onAttachmentRequested: attachment => root.requestAttachment(
+												attachment, messageDelegate.stableId)
+											onAttachmentDownloadRequested: attachment => root.downloadAttachment(attachment, false)
+											onAttachmentRetryRequested: attachment => uiCommands.retryChatAttachmentPreview(
+												activeScope.scopeToken, messageDelegate.stableId,
+												String(attachment.assetId || attachment.assetID || ""))
+											onAttachmentRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
+										}
+									}
                                 }
-								RichPreviewCard {
-									id: messagePreviewCard
+								Loader {
+									id: messagePreviewLoader
+									active: messageDelegate.hasPreviewContent
 									Layout.fillWidth: false
 									Layout.alignment: Qt.AlignLeft
-									Layout.preferredWidth: Math.min(targetCardWidth, Math.max(1, parent.width))
-									Layout.maximumWidth: Math.min(targetCardWidth, Math.max(1, parent.width))
-                                    visible: !!messageDelegate.preview && Object.keys(messageDelegate.preview).length > 0
-									preview: messageDelegate.preview || ({})
+									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
+										Math.max(1, parent.width))
+									Layout.maximumWidth: Layout.preferredWidth
+									onLoaded: if (root.visualFixtureOverrideActive)
+										++root.performanceChatPreviewLoadedCount
+									sourceComponent: Component {
+										RichPreviewCard {
+                                    preview: messageDelegate.preview || ({})
 									mediaSessionController: mediaSession
+									mediaProfileFactory: mediaProfiles
 									mediaSessionId: messageDelegate.stableId
+									visualMediaFixtureMode: root.visualMediaFixtureMode
+									savedSizePreset: root.richPreviewSizePreset(messageDelegate.stableId)
 									animationsEnabled: !root.visualFixtureOverrideActive
+									hoverEffectsEnabled: !root.visualFixtureOverrideActive
 									previewIdentity: messageDelegate.stableId + "|" + String(messageDelegate.preview
 										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
 											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
 									renderActive: messageDelegate.inHydrationWindow && !messageDelegate.accessibilityPooled
 									watchTogetherAvailable: !mediaSession.sharedAvailable
                                     onExternalOpenRequested: url => Qt.openUrlExternally(url)
-                                    onImageOpenRequested: (source, title) => root.openAttachment({
-                                        "url": source, "thumbnailUrl": source, "kind": "image", "alt": title
-                                    }, title)
+									onImageOpenRequested: (source, title) => root.openManagedPreviewImage(
+										source, title, messageDelegate.stableId)
 									onImageRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
-									onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) =>
-										mediaSession.openDirect(url, mime, audioUrl, audioMime,
-																messageDelegate.stableId)
-									onInlinePlayRequested: (url, provider) => mediaSession.openInline(url, provider,
-										messageDelegate.stableId)
-									onPopoutPlayRequested: (url, provider) => mediaSession.open(url, provider,
-										messageDelegate.stableId)
-                                    onWatchTogetherRequested: (url, provider, title) => {
-                                        if (!mediaSession.sharedAvailable)
-                                            mediaSession.startShared(url, provider, title)
-                                    }
+									onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
+										const sameMedia = mediaSession.active
+											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
+											&& String(mediaSession.provider || "") === "direct"
+											&& String(mediaSession.url || "") === String(url || "")
+											&& String(mediaSession.audioUrl || "") === String(audioUrl || "")
+											&& String(mediaSession.mediaMime || "").toLowerCase() === String(mime || "").toLowerCase()
+											&& String(mediaSession.audioMime || "").toLowerCase() === String(audioMime || "").toLowerCase()
+										if (sameMedia) {
+											if (mediaSession.detached && typeof mediaSession.attach === "function")
+												mediaSession.attach()
+											if (mediaSession.playbackControllable)
+												mediaSession.play()
+											return
+										}
+										if (mediaSession.openDirectInline(url, mime, audioUrl, audioMime,
+												messageDelegate.stableId))
+											mediaSession.play()
+									}
+									onPopoutDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
+										const sameMedia = mediaSession.active
+											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
+											&& String(mediaSession.provider || "") === "direct"
+											&& String(mediaSession.url || "") === String(url || "")
+											&& String(mediaSession.audioUrl || "") === String(audioUrl || "")
+											&& String(mediaSession.mediaMime || "").toLowerCase() === String(mime || "").toLowerCase()
+											&& String(mediaSession.audioMime || "").toLowerCase() === String(audioMime || "").toLowerCase()
+										if (sameMedia) {
+											if (!mediaSession.detached)
+												mediaSession.detach()
+											return
+										}
+										if (mediaSession.openDirect(url, mime, audioUrl, audioMime,
+												messageDelegate.stableId))
+											mediaSession.play()
+									}
+									onInlinePlayRequested: (url, provider) => {
+										const sameMedia = mediaSession.active
+											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
+											&& String(mediaSession.provider || "").toLowerCase() === String(provider || "").toLowerCase()
+											&& String(mediaSession.url || "") === String(url || "")
+										if (sameMedia) {
+											if (mediaSession.detached && typeof mediaSession.attach === "function")
+												mediaSession.attach()
+											if (mediaSession.playbackControllable)
+												mediaSession.play()
+											return
+										}
+										if (mediaSession.openInline(url, provider, messageDelegate.stableId)
+												&& mediaSession.playbackControllable)
+											mediaSession.play()
+									}
+									onPopoutPlayRequested: (url, provider) => {
+										const sameMedia = mediaSession.active
+											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
+											&& String(mediaSession.provider || "").toLowerCase() === String(provider || "").toLowerCase()
+											&& String(mediaSession.url || "") === String(url || "")
+										if (sameMedia) {
+											if (!mediaSession.detached)
+												mediaSession.detach()
+											return
+										}
+										if (mediaSession.open(url, provider, messageDelegate.stableId)
+												&& mediaSession.playbackControllable)
+											mediaSession.play()
+									}
+									onWatchTogetherRequested: (url, provider, title) =>
+										root.startWatchTogether(url, provider, title)
+									onSizePresetRequested: preset =>
+										root.rememberRichPreviewSizePreset(messageDelegate.stableId, preset)
+										}
+									}
                                 }
                                 Flow {
                                     Layout.fillWidth: true
-                                    spacing: Theme.space2
+									spacing: Theme.chatMetadataSpacing
 									visible: !!reactions && reactions.length > 0
                                     Repeater {
                                         model: reactions || []
@@ -2101,14 +3430,16 @@ ApplicationWindow {
 											objectName: "chatMessageActionRow"
 											Layout.fillWidth: true
 											visible: messageDelegate.hasMessageActions
-												|| (messageDelegate.own && timestamp.length > 0)
-											spacing: Theme.space1
+												|| (messageDelegate.own && !messageDelegate.systemMessage
+													&& timestamp.length > 0)
+											spacing: Theme.chatMetadataSpacing
 
 											Item { Layout.fillWidth: true }
 											Label {
 												textFormat: Text.PlainText
 												text: [timestamp, status].filter(value => String(value).length > 0).join(" · ")
-												visible: text.length > 0 && (messageDelegate.own
+												visible: text.length > 0 && ((messageDelegate.own
+													&& !messageDelegate.systemMessage)
 													|| (!messageDelegate.startsGroup && messageDelegate.hovered))
 												color: Theme.chatMetadata
 												font.pixelSize: Theme.fontCaption
@@ -2162,35 +3493,45 @@ ApplicationWindow {
 												Accessible.name: text
 												Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 												onClicked: messageDelegate.openMessageActions()
-												ModernMenu {
-													id: messageActions
-													property string targetId: ""
-													property bool targetCanReply: false
-													property bool targetCanReact: false
-													property bool targetCanDelete: false
-													property bool targetCanRetry: false
-													onClosed: targetId = ""
-													MenuItem {
-														text: qsTr("Reply")
-														visible: messageActions.targetCanReply
-														onTriggered: uiCommands.replyToMessage(messageActions.targetId)
-													}
-													MenuItem {
-														text: qsTr("Add reaction")
-														visible: messageActions.targetCanReact
-														onTriggered: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
-													}
-													MenuItem {
-														text: qsTr("Retry")
-														visible: messageActions.targetCanRetry
-														onTriggered: uiCommands.retryMessage(messageActions.targetId)
-													}
-													MenuItem {
-														text: qsTr("Delete")
-														visible: messageActions.targetCanDelete
-														onTriggered: uiCommands.deleteMessage(messageActions.targetId)
-													}
+											ModernMenu {
+												id: messageActions
+												objectName: "messageActionsMenu-" + messageDelegate.stableId
+												accessibleName: qsTr("Message actions")
+												property string targetId: ""
+												property bool targetCanReply: false
+												property bool targetCanReact: false
+												property bool targetCanDelete: false
+												property bool targetCanRetry: false
+												onClosed: targetId = ""
+												PayloadMenuItem {
+													payload: ({ "kind": "action", "id": "message.reply",
+														"label": qsTr("Reply"), "icon": "reply" })
+													visible: messageActions.targetCanReply
+													height: visible ? rowImplicitHeight : 0
+													onActionRequested: uiCommands.replyToMessage(messageActions.targetId)
 												}
+												PayloadMenuItem {
+													payload: ({ "kind": "action", "id": "message.react",
+														"label": qsTr("Add reaction"), "icon": "activity" })
+													visible: messageActions.targetCanReact
+													height: visible ? rowImplicitHeight : 0
+													onActionRequested: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
+												}
+												PayloadMenuItem {
+													payload: ({ "kind": "action", "id": "message.retry",
+														"label": qsTr("Retry"), "icon": "retry" })
+													visible: messageActions.targetCanRetry
+													height: visible ? rowImplicitHeight : 0
+													onActionRequested: uiCommands.retryMessage(messageActions.targetId)
+												}
+												PayloadMenuItem {
+													payload: ({ "kind": "action", "id": "message.delete",
+														"label": qsTr("Delete"), "icon": "delete", "tone": "danger" })
+													visible: messageActions.targetCanDelete
+													height: visible ? rowImplicitHeight : 0
+													onActionRequested: uiCommands.deleteMessage(messageActions.targetId)
+												}
+											}
 											}
 										}
 									}
@@ -2258,6 +3599,8 @@ ApplicationWindow {
 								wrapMode: Text.Wrap
 							}
 							ModernButton {
+								id: emptyConversationConnectButton
+								objectName: "emptyConversationConnectButton"
 								anchors.horizontalCenter: parent.horizontalCenter
 								visible: !clientSession.connected && clientSession.canConnect
 								text: qsTr("Choose a server")
@@ -2269,11 +3612,42 @@ ApplicationWindow {
 					}
                 }
 
+				// Keep this navigation action in its own layout row. A floating pill on
+				// top of the viewport obscured the newest visible message, especially in
+				// compact layouts and immediately after history prepends.
+				ModernButton {
+					id: jumpToLatestButton
+					objectName: "jumpToLatestButton"
+					Layout.alignment: Qt.AlignRight
+					Layout.rightMargin: Theme.space4
+					Layout.topMargin: visible ? Theme.space1 : 0
+					Layout.bottomMargin: visible ? Theme.space1 : 0
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					visible: timeline.count > 0 && !timeline.stickToBottom
+					dense: true
+					tone: timeline.pendingTailMessageCount > 0 ? "accent" : "neutral"
+					text: timeline.pendingTailMessageCount > 0
+						? qsTr("%n new message(s)", "", timeline.pendingTailMessageCount)
+						: qsTr("Jump to latest")
+					Accessible.description: timeline.pendingTailMessageCount > 0
+						? qsTr("Scroll to %n new message(s)", "", timeline.pendingTailMessageCount)
+						: qsTr("Scroll to the newest message")
+					onClicked: {
+						timeline.stickToBottom = true
+						timeline.requestBottomFollow()
+					}
+				}
+
 				Rectangle {
 					id: composerSurface
                     Layout.fillWidth: true
-					Layout.preferredHeight: (activeScope.hasPendingReply ? 108 : 72)
-						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * 18
+					// Reply copy, attachments, autocomplete, and the input row all keep
+					// their own minimum height. Reserve the complete reply row plus the
+					// intervening layout gap so compact combinations never overflow the
+					// composer's semantic or visual bounds.
+					readonly property int baseHeight: Math.max(72, Theme.railFooterHeight)
+					Layout.preferredHeight: (activeScope.hasPendingReply ? baseHeight + 44 : baseHeight)
+						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * Theme.composerLineHeight
 						+ (composer.attachments.count > 0 ? 58 : 0)
 						+ (composer.autocompleteItems.length > 0 ? 34 : 0)
 					color: Theme.chatCanvas
@@ -2380,7 +3754,7 @@ ApplicationWindow {
                             ColumnLayout {
                                 anchors.fill: parent
 								anchors.margins: Theme.space2
-								spacing: Theme.space1
+								spacing: Theme.chatMetadataSpacing
 								Rectangle {
 									id: composerReplySurface
 									objectName: "composerReplySurface"
@@ -2400,7 +3774,7 @@ ApplicationWindow {
 									RowLayout {
 										anchors.fill: parent
 										anchors.leftMargin: Theme.space2
-										spacing: Theme.space2
+									spacing: Theme.chatMetadataSpacing
 										ModernIcon {
 											Layout.alignment: Qt.AlignVCenter
 											name: "reply"
@@ -2455,17 +3829,37 @@ ApplicationWindow {
 										required property string kind
 										required property string mime
 										required property var byteSize
-                                        required property string status
+										required property string status
 										required property real progress
 										required property string error
+										readonly property string normalizedStatus: String(status || "").trim().toLowerCase()
+										readonly property real boundedProgress: Math.max(0, Math.min(1,
+											isFinite(Number(progress)) ? Number(progress) : 0))
+										readonly property int progressPercent: Math.round(boundedProgress * 100)
+										readonly property bool preparing: normalizedStatus === "loading"
+											|| normalizedStatus === "queued" || normalizedStatus === "preparing"
+										readonly property bool uploading: normalizedStatus === "uploading"
+										readonly property bool failed: normalizedStatus === "failed"
 										readonly property bool imageDraft: String(kind).toLowerCase() === "image"
 											|| String(mime).toLowerCase().indexOf("image/") === 0
 										readonly property bool mediaDraft: String(kind).toLowerCase() === "video"
 											|| String(kind).toLowerCase() === "audio"
 											|| /^(video|audio)\//i.test(String(mime))
 										readonly property string metadataText: root.attachmentMetadata(kind, mime, byteSize)
+										readonly property string statusText: failed
+											? (String(error || "").trim().slice(0, 512) || qsTr("Attachment failed"))
+											: uploading ? qsTr("Uploading · %1%").arg(progressPercent)
+											: preparing ? qsTr("Preparing attachment…") : qsTr("Ready to send")
+										readonly property string visibleStatusText: normalizedStatus === "ready"
+											&& metadataText.length > 0 ? metadataText : statusText
+										readonly property string accessibleStatusText: normalizedStatus === "ready"
+											&& metadataText.length > 0 ? statusText + " · " + metadataText : statusText
+										objectName: "composerDraftAttachment_" + stableId
 										width: Math.min(210, Math.max(156, attachmentStrip.width - 4))
 										height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
+										Accessible.role: Accessible.Grouping
+										Accessible.name: fileName || qsTr("Attachment")
+										Accessible.description: accessibleStatusText
                                         RowLayout { anchors.fill: parent; anchors.margins: 4
 											Rectangle {
 												Layout.preferredWidth: 38
@@ -2490,20 +3884,63 @@ ApplicationWindow {
 											}
 											ColumnLayout {
 												Layout.fillWidth: true
-												Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
+												spacing: 1
+												Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9; Accessible.ignored: true }
 												Label {
 													id: draftAttachmentMetadata
+													objectName: "composerDraftAttachmentStatus_" + draftAttachment.stableId
 													Layout.fillWidth: true
 													textFormat: Text.PlainText
 													visible: text.length > 0
-													text: status !== "ready" ? (error || status) : draftAttachment.metadataText
-													color: status === "failed" ? Theme.danger : Theme.textMuted
+													text: draftAttachment.visibleStatusText
+													color: draftAttachment.failed ? Theme.danger
+														: draftAttachment.uploading ? Theme.accent : Theme.textMuted
 													elide: Text.ElideRight
 													font.pixelSize: 8
+													Accessible.ignored: true
+												}
+												ModernProgressBar {
+													objectName: "composerDraftAttachmentProgress_" + draftAttachment.stableId
+													Layout.fillWidth: true
+													Layout.preferredHeight: 4
+													visible: draftAttachment.uploading
+													from: 0
+													to: 1
+													value: draftAttachment.boundedProgress
+													trackHeight: 3
+													animated: !root.visualFixtureOverrideActive
+													Accessible.name: qsTr("Uploading %1").arg(draftAttachment.fileName
+														|| qsTr("attachment"))
+													Accessible.description: draftAttachment.statusText
 												}
 											}
-											ModernIconButton { dense: true; visible: status === "failed"; iconName: "retry"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
-											ModernIconButton { dense: true; iconName: "close"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }
+											ModernBusyIndicator {
+												objectName: "composerDraftAttachmentBusy_" + draftAttachment.stableId
+												Layout.preferredWidth: 16
+												Layout.preferredHeight: 16
+												visible: draftAttachment.preparing
+												running: visible
+												Accessible.name: draftAttachment.statusText
+											}
+											ModernIconButton {
+												objectName: "composerDraftAttachmentRetry_" + draftAttachment.stableId
+												dense: true
+												visible: draftAttachment.failed
+												enabled: !composer.sending
+												iconName: "retry"
+												onClicked: composer.retryAttachment(draftAttachment.stableId)
+												Accessible.name: qsTr("Retry %1").arg(draftAttachment.fileName
+													|| qsTr("attachment"))
+											}
+											ModernIconButton {
+												objectName: "composerDraftAttachmentRemove_" + draftAttachment.stableId
+												dense: true
+												enabled: !composer.sending
+												iconName: "close"
+												onClicked: composer.removeAttachment(draftAttachment.stableId)
+												Accessible.name: qsTr("Remove %1").arg(draftAttachment.fileName
+													|| qsTr("attachment"))
+											}
                                         }
                                     }
                                 }
@@ -2531,7 +3968,7 @@ ApplicationWindow {
 										objectName: "composerAttachButton"
 										Layout.alignment: Qt.AlignBottom
 										visible: activeScope.canAttachImages
-										enabled: activeScope.canSend
+										enabled: activeScope.canSend && !composer.sending
 										dense: true
 										iconName: "attach"
 										text: activeScope.canAttachFiles ? qsTr("Attach files") : qsTr("Attach images")
@@ -2545,7 +3982,8 @@ ApplicationWindow {
 								objectName: "visualFixtureComposer"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                text: composer.text
+								text: composer.text
+								cursorDelegate: composerTextCursorDelegate
                                 onTextChanged: if (composer.text !== text) composer.text = text
                                 placeholderText: activeScope.composerPlaceholder.length > 0
                                                  ? activeScope.composerPlaceholder
@@ -2553,6 +3991,7 @@ ApplicationWindow {
                                 enabled: composer.canSend && !composer.sending
 								color: composerInput.enabled ? Theme.textMain : Theme.textMuted
 								placeholderTextColor: Theme.textMuted
+								Accessible.ignored: root.modalUiActive
 								Accessible.name: activeScope.composerPlaceholder.length > 0
 												 ? activeScope.composerPlaceholder
 												 : qsTr("Message composer")
@@ -2604,15 +4043,20 @@ ApplicationWindow {
                 }
             }
 
-            NavigationRail {
+		NavigationRail {
 				id: desktopNavigationRail
                 Layout.preferredWidth: 310
                 Layout.fillHeight: true
-                visible: !root.compactNavigation
+			visible: !root.compactNavigation
+			alignedHeaderHeight: shellHeader.height
+			alignedFooterHeight: composerSurface.height
+			accessibilitySuppressed: root.modalUiActive
 				navigationModel: root.navigationRailModel
-                selectionState: root.navigationSelectionState
-                uiCommands: root.navigationCommands
-                clientSession: root.navigationSession
+				selectionState: root.navigationSelectionState
+				uiCommands: root.navigationCommands
+				clientSession: root.navigationSession
+				visualFixtureMode: root.visualFixtureOverrideActive
+				settingsEnabled: root.settingsActionEnabled
 				activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
 					? root.contextScopeToken : ""
 				activeParticipantMenuKey: participantMenuPopup.visible
@@ -2622,16 +4066,31 @@ ApplicationWindow {
 					root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
 				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
 					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
+				onSettingsRequested: root.requestSettings()
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 			}
+		}
+
+		MouseArea {
+			id: directMessageTrayDismissLayer
+			objectName: "directMessageTrayDismissLayer"
+			anchors.fill: parent
+			visible: directMessageTrayLoader.active
+			enabled: visible
+			z: 39
+			Accessible.ignored: true
+			onClicked: directMessages.setTrayOpen(false)
 		}
 
 		Loader {
 			id: directMessageTrayLoader
 			objectName: "directMessageTrayLoader"
-			parent: mainContentColumn
 			anchors.right: parent.right
-			anchors.rightMargin: Theme.space4
+			// Keep this overlay outside RowLayout/ColumnLayout ownership. On a
+			// right-hand desktop rail, reserve its width so the tray remains over
+			// the chat surface; a left rail or compact drawer needs no reservation.
+			anchors.rightMargin: Theme.space4 + (desktopNavigationRail.visible
+				&& Theme.railSide !== "left" ? desktopNavigationRail.width : 0)
 			anchors.bottom: parent.bottom
 			anchors.bottomMargin: Theme.space4
 			active: directMessages && directMessages.trayOpen
@@ -2651,6 +4110,14 @@ ApplicationWindow {
 			DirectMessageWindow {
 				controller: directMessages
 				parentWindow: root
+				visualFixtureMode: root.visualFixtureOverrideActive
+				savedPreviewSizePresets: root.richPreviewSizePresets
+				onManagedImageOpenRequested: (source, title, messageId) =>
+					root.openManagedPreviewImage(source, title, messageId)
+				onWatchTogetherRequested: (url, provider, title) =>
+					root.startWatchTogether(url, provider, title)
+				onPreviewSizePresetRequested: (preferenceKey, preset) =>
+					root.rememberRichPreviewSizePreset(preferenceKey, preset)
 			}
 		}
 	}

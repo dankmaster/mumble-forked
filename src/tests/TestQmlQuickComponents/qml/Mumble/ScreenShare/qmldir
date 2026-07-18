@@ -1,0 +1,2 @@
+module Mumble.ScreenShare
+ScreenShareVideoItem 1.0 ScreenShareVideoItem.qml

@@ -1,7 +1,9 @@
 # Windows Qt Quick Modern Client Migration
 
-Status snapshot: 2026-07-13. Windows source cutover and the local release
-verification matrix are complete.
+Status snapshot: 2026-07-15. The structural Windows source cutover is complete
+and passes the strict source inventory. Visual and interaction parity, connected
+review, performance evidence, and a fresh packaged-runtime release pass remain
+work for the current revision.
 
 The fork's Windows desktop client now starts a direct `QQuickWindow` through
 `QQmlApplicationEngine` as its only product window. It does not place QML in a
@@ -33,7 +35,7 @@ Product state is owned in C++ and exposed directly to QML:
 The code still uses some `ModernShell` names for historical C++ helpers and
 DTO builders. They are in-process Qt Quick plumbing, not a WebEngine bridge.
 
-## Completed Cutover
+## Completed Structural Cutover
 
 - All `.ui` files under `src/mumble` and the generated `MainWindowUi.h` layer
   have been removed.
@@ -49,7 +51,11 @@ DTO builders. They are in-process Qt Quick plumbing, not a WebEngine bridge.
   Windows UIA tree inside a browser surface.
 - Screen-share frames render through a native Qt Quick scene-graph item.
 - The static/classic Windows client lane is retired; the shared Qt lane is the
-  supported desktop-client build.
+  supported Windows desktop-client build.
+
+These points describe architectural and functional placement. They do not claim
+1:1 visual or interaction parity with the former production Modern UI; that
+polish remains part of the Windows product work.
 
 ## Asynchronous Boundaries
 
@@ -88,6 +94,16 @@ certificate exceptions, context menus, and popup windows. It is controlled by
 `MediaSessionBackend`; it does not receive application state through WebChannel.
 Closing the session destroys the loaded media surface.
 
+The existing `qmlReadinessState` automation command exposes media lifecycle
+state as a typed `media` map. It reports backend `active`, `state`, `errorCode`,
+`detached`, and `provider` values together with renderer presence/health/readiness
+and presentation-window presence/visibility/exposure/readiness. `windowKind`
+distinguishes the main inline surface from a detached media window, while
+`windowComponentFailed` makes asynchronous QML component failure observable.
+The legacy scalar `mediaActive` remains available for existing Windows scripts;
+new gates should use the typed map and require both `rendererReady` and
+`windowReady` only while `media.active` is true.
+
 The Windows Qt 6.9 runtime bundle may still contain WebChannel DLLs because
 Qt's own WebEngineQuick plugin imports them transitively. `mumble.exe` neither
 links to nor uses that API; staging records and gates its direct PE imports so
@@ -117,10 +133,10 @@ without resurrecting the removed frontend.
 ## Delivery Scope
 
 This delivery supports the Windows Qt Quick desktop client and a Linux-hosted
-Murmur/relay. Linux and macOS desktop-client porting is explicitly out of scope:
-this document makes no claim about their client UI, global shortcuts, capture,
-packaging, or runtime readiness. Cross-platform client work belongs in a future
-delivery after the Windows product and installer gates are stable.
+Murmur/relay. Linux and macOS desktop clients are not delivery targets or roadmap
+commitments. Retained generic CMake support and manual reference builds are
+diagnostic only, not claims about their UI, shortcuts, capture,
+packaging, runtime readiness, or product support.
 
 ## Release Gates
 
@@ -135,13 +151,16 @@ widgets, WebChannel, browser shell resources, or unallowlisted widget prompts.
 WebEngine references are allowed only in the explicit Qt Quick media-player
 allowlist.
 
-Release validation also covers controller/model tests, Qt Quick component and
-focus tests, connected UI automation, screenshot/accessibility matrices,
-performance measurements, and Windows staging/MSI/upgrade. Source cutover being
-complete does not waive those Windows runtime and packaging gates.
+Automated Windows CI covers focused controller/model and Qt Quick tests, staged
+binary checks, and the screenshot/accessibility matrix. Installer validation
+runs outside pull requests, while helper runtime, connected UI review,
+performance/media lifecycle, and installer-upgrade checks remain explicit
+release-checklist gates until they have run against the current revision.
+Structural cutover does not waive those Windows runtime and packaging gates.
 
-The reviewed screenshot/accessibility baseline lives in
+The checked-in screenshot/accessibility baseline lives in
 `qml-visual-baseline/`. The Windows CI lane builds its automation-enabled visual
 fixture only after publishing the automation-disabled release payload. Native
 Linux CI remains the authoritative build and test gate for the server; it does
-not build a desktop client.
+not build a desktop client. The separate Qt Quick Linux/macOS client workflow is
+manual diagnostic evidence only and is not a product or release gate.

@@ -169,3 +169,26 @@ std::unique_ptr< SpeechCleanupProcessor > createSpeechCleanupProcessor(
 
 	return {};
 }
+
+bool noiseCancelUsesSpeechCleanup(const Settings::NoiseCancel mode) noexcept {
+	return mode == Settings::NoiseCancelRNN || mode == Settings::NoiseCancelBoth;
+}
+
+void reconcileSpeechCleanupProcessor(
+	const Settings::NoiseCancel mode, const Mumble::SpeechCleanup::Selection &requestedSelection,
+	Mumble::SpeechCleanup::Selection &activeSelection,
+	std::unique_ptr< SpeechCleanupProcessor > &processor) {
+	const Mumble::SpeechCleanup::Selection normalizedSelection =
+		Mumble::SpeechCleanup::normalizeSelection(requestedSelection);
+
+	if (!noiseCancelUsesSpeechCleanup(mode)) {
+		activeSelection = normalizedSelection;
+		processor.reset();
+		return;
+	}
+
+	if (!processor || normalizedSelection != activeSelection) {
+		activeSelection = normalizedSelection;
+		processor       = createSpeechCleanupProcessor(activeSelection);
+	}
+}

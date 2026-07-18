@@ -12,10 +12,13 @@
 class QTimer;
 class QThread;
 class ScreenShareNativeFrameReader;
+class ScreenShareAudioControlWorker;
 
 class ScreenShareViewBackend final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString streamId READ streamId CONSTANT)
+	Q_PROPERTY(QString ownerLabel READ ownerLabel NOTIFY sessionChanged)
+	Q_PROPERTY(QString roomLabel READ roomLabel NOTIFY sessionChanged)
 	Q_PROPERTY(QString title READ title NOTIFY sessionChanged)
 	Q_PROPERTY(QString detail READ detail NOTIFY sessionChanged)
 	Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -23,6 +26,8 @@ class ScreenShareViewBackend final : public QObject {
 	Q_PROPERTY(bool audioMuted READ audioMuted WRITE setAudioMuted NOTIFY audioMutedChanged)
 	Q_PROPERTY(bool audioAvailable READ audioAvailable NOTIFY sessionChanged)
 	Q_PROPERTY(int audioVolume READ audioVolume WRITE setAudioVolume NOTIFY audioVolumeChanged)
+	Q_PROPERTY(QString audioControlStatus READ audioControlStatus NOTIFY audioControlStateChanged)
+	Q_PROPERTY(QString audioControlError READ audioControlError NOTIFY audioControlStateChanged)
 	Q_PROPERTY(qint64 processId READ processId WRITE setProcessId NOTIFY processIdChanged)
 	Q_PROPERTY(QWindow *videoWindow READ videoWindow NOTIFY videoWindowChanged)
 	Q_PROPERTY(QString renderTransport READ renderTransport NOTIFY nativeFrameActiveChanged)
@@ -40,6 +45,8 @@ public:
 	~ScreenShareViewBackend() override;
 
 	QString streamId() const;
+	QString ownerLabel() const;
+	QString roomLabel() const;
 	QString title() const;
 	QString detail() const;
 	QString status() const;
@@ -47,6 +54,8 @@ public:
 	bool audioMuted() const;
 	bool audioAvailable() const;
 	int audioVolume() const;
+	QString audioControlStatus() const;
+	QString audioControlError() const;
 	qint64 processId() const;
 	QWindow *videoWindow() const;
 	QString renderTransport() const;
@@ -60,9 +69,13 @@ public:
 	bool operationCancellable() const;
 
 	void updateSession(const ScreenShareSession &session);
+	void setIdentity(const QString &ownerLabel, const QString &roomLabel);
 	void setProcessId(qint64 processId);
 	void setNativeFrameTransport(const QString &sharedMemoryKey, quint64 generation);
 	void setOperationState(const QString &status, const QString &error, bool cancellable);
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	void setVisualFixtureFrame(const QImage &frame);
+#endif
 	Q_INVOKABLE void setPaused(bool paused);
 	Q_INVOKABLE void setAudioMuted(bool muted);
 	Q_INVOKABLE void setAudioVolume(int percent);
@@ -76,6 +89,7 @@ signals:
 	void pausedChanged();
 	void audioMutedChanged();
 	void audioVolumeChanged();
+	void audioControlStateChanged();
 	void processIdChanged();
 	void videoWindowChanged();
 	void nativeFrameActiveChanged();
@@ -83,6 +97,10 @@ signals:
 	void operationStateChanged();
 	void pauseToggled(const QString &streamId, bool paused);
 	void audioMuteToggled(const QString &streamId, bool muted);
+	void audioVolumeAdjusted(const QString &streamId, int percent);
+#ifdef MUMBLE_HAS_MODERN_UI_MOCKUPS
+	void audioControlsDispatchedForTest(qint64 processId, bool effectiveMuted, int percent);
+#endif
 	void retryRequested(const QString &streamId);
 	void stopRequested(const QString &streamId);
 	void closeRequested(const QString &streamId);
@@ -90,15 +108,23 @@ signals:
 private slots:
 	void pollForVideoWindow();
 	void retryAudioControls();
+	void dispatchAudioControls();
+	void handleAudioControlsApplied(quint64 generation, qint64 processId, bool applied,
+								const QString &errorCode);
 
 private:
 	void clearVideoWindow();
-	bool applyAudioControls();
+	void scheduleAudioControls(int delayMsec = 60);
+	void setAudioControlState(const QString &status, const QString &error = {});
+	QString audioControlErrorForCode(const QString &errorCode) const;
 	void setStatus(const QString &status);
 
 	ScreenShareSession m_session;
+	QString m_ownerLabel;
+	QString m_roomLabel;
 	QTimer *m_windowPollTimer = nullptr;
 	QTimer *m_audioRetryTimer = nullptr;
+	QTimer *m_audioDispatchTimer = nullptr;
 	QPointer< QWindow > m_videoWindow;
 	QString m_status;
 	qint64 m_processId = 0;
@@ -106,10 +132,19 @@ private:
 	bool m_audioMuted = false;
 	int m_audioVolume = 100;
 	int m_audioRetryAttempts = 0;
+	QString m_audioControlStatus = QStringLiteral("idle");
+	QString m_audioControlError;
+	QThread *m_audioThread = nullptr;
+	ScreenShareAudioControlWorker *m_audioWorker = nullptr;
+	quint64 m_audioControlGeneration = 0;
+	bool m_audioApplyInFlight = false;
+	bool m_audioApplyPending = false;
 	QImage m_currentFrame;
 	QThread *m_frameThread = nullptr;
 	ScreenShareNativeFrameReader *m_frameReader = nullptr;
 	bool m_nativeFrameActive = false;
+	quint64 m_nativeFrameGeneration = 0;
+	bool m_acceptNativeFrames = false;
 	QString m_operationStatus = QStringLiteral("idle");
 	QString m_operationError;
 	bool m_operationCancellable = false;

@@ -23,6 +23,8 @@ Rectangle {
 	readonly property color operationTone: operationFailed ? Theme.danger
 		: operationBusy ? Theme.warning
 		: (session.sharedHost || session.sharedJoined ? Theme.success : Theme.accent)
+	readonly property string participantCountLabel: Number(session.sharedParticipantCount) === 1
+		? qsTr("1 participant") : qsTr("%1 participants").arg(session.sharedParticipantCount)
 
     readonly property real naturalActionWidth: {
         const widths = []
@@ -38,8 +40,8 @@ Rectangle {
             widths.push(leaveButton.implicitWidth)
         if (session.sharedHost && endButton)
             widths.push(endButton.implicitWidth)
-        return widths.reduce(function(total, width) { return total + width }, 0)
-            + Math.max(0, widths.length - 1) * Theme.space2
+		return Math.ceil(widths.reduce(function(total, width) { return total + width }, 0))
+			+ Math.max(0, widths.length - 1) * Theme.space2 + Theme.space1
     }
     readonly property bool compactLayout: width < Math.max(620, naturalActionWidth + 300)
     readonly property real actionContentHeight: Math.max(Theme.controlHeight, actionFlow.childrenRect.height)
@@ -58,7 +60,7 @@ Rectangle {
 	Accessible.description: operationFailed ? (operationError || qsTr("Synchronized playback failed"))
 		: operationBusy ? operationLabel
 		: session.sharedHost
-		? qsTr("You are hosting synchronized playback for %1 participant(s)").arg(session.sharedParticipantCount)
+		? qsTr("You are hosting synchronized playback for %1").arg(participantCountLabel)
 		: (session.sharedJoined ? qsTr("Synchronized with the room host")
 			: qsTr("A synchronized media session is available in this voice room"))
 
@@ -168,7 +170,7 @@ Rectangle {
 						textFormat: Text.PlainText
 						text: root.operationFailed
 							? (root.operationError || qsTr("Synchronized playback failed."))
-							: qsTr("%1 participant(s)").arg(session.sharedParticipantCount)
+							: root.participantCountLabel
 						color: root.operationFailed ? Theme.danger : Theme.textMuted
 						font.pixelSize: Theme.fontCaption
 						elide: Text.ElideRight
@@ -213,17 +215,13 @@ Rectangle {
 			Accessible.description: qsTr("Reopen the isolated synchronized media player")
             onClicked: session.reopenSharedPlayer()
         }
-		ModernIconButton {
+		ModernButton {
             id: transferButton
             objectName: "watchTogetherTransferButton"
             visible: session.sharedHost && session.sharedParticipantCount > 1
 			enabled: !root.operationBusy && !root.operationFailed
             dense: true
-			width: Theme.controlHeight
-			height: Theme.controlHeight
-			iconName: "move"
 			text: qsTr("Transfer host")
-            Accessible.name: qsTr("Transfer host")
 			Accessible.description: qsTr("Choose another participant to control synchronized playback")
             onClicked: transferMenu.open()
             ModernMenu {

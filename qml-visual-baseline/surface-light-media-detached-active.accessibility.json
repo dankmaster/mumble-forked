@@ -1,0 +1,229 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "YT",
+              "rect": {
+                "height": 27,
+                "width": 25,
+                "x": 507,
+                "y": 253
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "YouTube media session",
+              "rect": {
+                "height": 27,
+                "width": 520,
+                "x": 260,
+                "y": 327
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "YT provider playback · deterministic visual fixture",
+              "rect": {
+                "height": 16,
+                "width": 520,
+                "x": 260,
+                "y": 370
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Deterministic media playback preview",
+          "rect": {
+            "height": 585,
+            "width": 1040,
+            "x": 0,
+            "y": 12
+          },
+          "role": "Pane",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "YouTube media player, detached window",
+          "rect": {
+            "height": 28,
+            "width": 141,
+            "x": 12,
+            "y": 12
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "YouTube detached media player",
+      "rect": {
+        "height": 608,
+        "width": 1040,
+        "x": 0,
+        "y": 0
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "0:01 of 4:12",
+          "name": "Playback position",
+          "rect": {
+            "height": 36,
+            "width": 926,
+            "x": 12,
+            "y": 616
+          },
+          "role": "Slider",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "1:23 / 4:12",
+          "rect": {
+            "height": 15,
+            "width": 82,
+            "x": 946,
+            "y": 627
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Pause",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 12,
+            "y": 656
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Playing",
+          "rect": {
+            "height": 36,
+            "width": 190,
+            "x": 56,
+            "y": 656
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Mute media",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 254,
+            "y": 656
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "72 percent",
+          "name": "Media volume",
+          "rect": {
+            "height": 36,
+            "width": 104,
+            "x": 298,
+            "y": 656
+          },
+          "role": "Slider",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Enter full screen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 410,
+            "y": 656
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Close",
+          "rect": {
+            "height": 32,
+            "width": 44,
+            "x": 454,
+            "y": 656
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "Media playback controls",
+      "rect": {
+        "height": 92,
+        "width": 1040,
+        "x": 0,
+        "y": 608
+      },
+      "role": "ToolBar",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "YouTube player",
+  "rect": {
+    "height": 700,
+    "width": 1040,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}
