@@ -210,6 +210,7 @@ private slots:
 	void originalPreservesPcmBitsWithoutInitializingProcessor();
 	void originalAndLightNeverConstructNeuralProcessor();
 	void lightClassicMixAlignsAndProtectsSpeech();
+	void lightClassicSceneGateSeparatesCleanSpeechFromStationaryNoise();
 	void lightProcessorUsesExactProductConfigurationAndTail();
 	void neuralRecipeIsPreparedAndReported();
 	void neuralRecipeBindsAuthorizationToLoadedAsset();
@@ -219,7 +220,7 @@ private slots:
 	void realtimePreparationFailureFailsClosed();
 	void neuralRecipeWarmupFailureFailsClosed();
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
-	void balancedProtectsFirstDelayedDrySpeechFrame();
+	void balancedUsesFullOnsetRampAfterWeakPreOnset();
 	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
 	void runtimeUnhealthyProcessorFailsClosed();
@@ -571,6 +572,45 @@ void TestInputEnhancement::lightClassicMixAlignsAndProtectsSpeech() {
 	QCOMPARE(std::memcmp(wet.data(), dryTail.data(), sizeof(wet)), 0);
 }
 
+void TestInputEnhancement::lightClassicSceneGateSeparatesCleanSpeechFromStationaryNoise() {
+	// Exercise the scene classifier independently of Speex: even if the PSD and
+	// VAD inputs are pessimistic, a clean high-dynamic-range signal must remain
+	// exactly delayed-dry after the 64-frame classifier warmup.
+	Pipeline cleanSpeech;
+	QVERIFY(cleanSpeech.configure(RecipeCatalog::resolve(requestFor(Profile::Light))));
+	std::array< std::int16_t, frameSamples > previousDry = {};
+	for (unsigned int frameIndex = 0; frameIndex < 96; ++frameIndex) {
+		std::array< std::int16_t, frameSamples > dry = {};
+		dry.fill(frameIndex % 2 == 0 ? 1'000 : 25'000);
+		std::array< std::int16_t, frameSamples > wet = {};
+		wet.fill(-12'000);
+		QVERIFY(cleanSpeech.mixClassicFrame(wet.data(), dry.data(), frameSamples, 50, 100, 1.0f));
+		QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
+		previousDry = dry;
+	}
+
+	// A stationary, low-dynamic-range noisy scene with the same PSD evidence
+	// must take the opposite branch and admit wet output after warmup.
+	Pipeline stationaryNoise;
+	QVERIFY(stationaryNoise.configure(RecipeCatalog::resolve(requestFor(Profile::Light))));
+	previousDry.fill(0);
+	bool sawWetAfterWarmup = false;
+	for (unsigned int frameIndex = 0; frameIndex < 96; ++frameIndex) {
+		std::array< std::int16_t, frameSamples > dry = {};
+		dry.fill(1'000);
+		std::array< std::int16_t, frameSamples > wet = {};
+		wet.fill(10'000);
+		QVERIFY(stationaryNoise.mixClassicFrame(wet.data(), dry.data(), frameSamples, 0, 100, 1.0f));
+		if (frameIndex < 63) {
+			QCOMPARE(std::memcmp(wet.data(), previousDry.data(), sizeof(wet)), 0);
+		} else if (std::memcmp(wet.data(), previousDry.data(), sizeof(wet)) != 0) {
+			sawWetAfterWarmup = true;
+		}
+		previousDry = dry;
+	}
+	QVERIFY(sawWetAfterWarmup);
+}
+
 void TestInputEnhancement::lightProcessorUsesExactProductConfigurationAndTail() {
 	ResolveRequest request = requestFor(Profile::Light);
 	request.noiseReduction = 40;
@@ -802,7 +842,7 @@ void TestInputEnhancement::liveMixOverrideUsesConfiguredProcessorWithoutReconfig
 			 1);
 }
 
-void TestInputEnhancement::balancedProtectsFirstDelayedDrySpeechFrame() {
+void TestInputEnhancement::balancedUsesFullOnsetRampAfterWeakPreOnset() {
 	FakeState state;
 	state.latency = balancedLatencyBudgetSamples;
 	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
@@ -814,16 +854,27 @@ void TestInputEnhancement::balancedProtectsFirstDelayedDrySpeechFrame() {
 	for (unsigned int index = 0; index < 6; ++index) {
 		QVERIFY(pipeline.processFrame(frame));
 	}
-	for (unsigned int index = 0; index < 8; ++index) {
+
+	// This barely-above-floor frame deliberately triggers onset protection
+	// before the following full consonant. It must consume only the first ramp
+	// step, rather than all protection available to Balanced.
+	frame.fill(0.0001f);
+	QVERIFY(pipeline.processFrame(frame));
+	for (unsigned int index = 0; index < 12; ++index) {
 		frame.fill(0.25f);
 		QVERIFY(pipeline.processFrame(frame));
 	}
 
-	const auto protectedFrame = std::find(state.observedMixes.cbegin(), state.observedMixes.cend(), 0.0f);
-	QVERIFY(protectedFrame != state.observedMixes.cend());
-	QCOMPARE(*protectedFrame, 0.0f);
-	QVERIFY(std::next(protectedFrame) != state.observedMixes.cend());
-	QVERIFY(std::abs(*std::next(protectedFrame) - recipe.mixFactor()) < 0.00001f);
+	const auto protectedBegin = std::find_if(state.observedMixes.cbegin(), state.observedMixes.cend(),
+		[&recipe](float mix) { return mix < recipe.mixFactor() - 0.00001f; });
+	QVERIFY(protectedBegin != state.observedMixes.cend());
+	constexpr std::array< float, 8 > onsetMixCaps = { 0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f };
+	QVERIFY(std::distance(protectedBegin, state.observedMixes.cend())
+			>= static_cast< std::ptrdiff_t >(onsetMixCaps.size() + 1));
+	for (std::size_t index = 0; index < onsetMixCaps.size(); ++index) {
+		QVERIFY(std::abs(protectedBegin[index] - std::min(recipe.mixFactor(), onsetMixCaps[index])) < 0.00001f);
+	}
+	QVERIFY(std::abs(protectedBegin[onsetMixCaps.size()] - recipe.mixFactor()) < 0.00001f);
 }
 
 void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {
