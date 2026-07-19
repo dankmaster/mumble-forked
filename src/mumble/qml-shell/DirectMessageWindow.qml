@@ -40,6 +40,7 @@ Window {
 	property bool conversationSearchOpen: false
 	property bool followTimelineTail: true
 	property bool timelinePositioning: false
+	property string quickReactionMessageId: ""
 	signal managedImageOpenRequested(string source, string title, string messageId)
 	signal watchTogetherRequested(string url, string provider, string title)
 	signal previewSizePresetRequested(string preferenceKey, string preset)
@@ -114,6 +115,32 @@ Window {
 		timelinePositioning = true
 		timeline.positionViewAtEnd()
 		Qt.callLater(function() { root.timelinePositioning = false })
+	}
+
+	function showQuickReactions(messageId, row) {
+		const stableId = String(messageId || "")
+		if (stableId.length === 0)
+			return
+		quickReactionMessageId = stableId
+		let targetRow = Number(row)
+		if (targetRow < 0 && timelineModel
+				&& typeof timelineModel.rowForStableId === "function")
+			targetRow = timelineModel.rowForStableId(stableId)
+		if (targetRow < 0)
+			return
+		Qt.callLater(function() {
+			timeline.positionViewAtIndex(targetRow, ListView.End)
+			timeline.forceLayout()
+		})
+	}
+
+	function toggleQuickReactions(messageId, row) {
+		const stableId = String(messageId || "")
+		if (quickReactionMessageId === stableId) {
+			quickReactionMessageId = ""
+			return
+		}
+		showQuickReactions(stableId, row)
 	}
 
 	function openConversationSearch() {
@@ -346,6 +373,7 @@ Window {
 		}
 	}
 	onActiveConversationIdChanged: {
+		quickReactionMessageId = ""
 		if (componentReady && conversationSearchOpen)
 			closeConversationSearch(false)
 		followTimelineTail = true
@@ -1180,19 +1208,31 @@ Window {
 											}
 										}
 
+										QuickReactionBar {
+											objectName: "directMessageQuickReactions_" + messageDelegate.stableId
+											Layout.fillWidth: true
+											expanded: messageDelegate.canReact
+												&& root.quickReactionMessageId === messageDelegate.stableId
+											activeReactions: root.normalizedSequence(messageDelegate.reactions)
+											onReactionRequested: emoji => {
+												controller.toggleMessageReaction(messageDelegate.stableId, emoji)
+												root.quickReactionMessageId = ""
+											}
+										}
+
 										RowLayout {
 											Layout.fillWidth: true
 											visible: messageDelegate.hasMessageActions
 											spacing: Theme.space1
 											Item { Layout.fillWidth: true }
 
-										ModernIconButton {
+											ModernIconButton {
 												objectName: "directMessageReply_" + messageDelegate.stableId
 												visible: messageDelegate.canReply
 												dense: true
 												iconName: "reply"
 												text: qsTr("Reply")
-											onClicked: root.beginReply(messageDelegate.stableId)
+												onClicked: root.beginReply(messageDelegate.stableId)
 											}
 
 											ModernIconButton {
@@ -1201,7 +1241,8 @@ Window {
 												dense: true
 												iconName: "add"
 												text: qsTr("Add reaction")
-												onClicked: controller.toggleMessageReaction(messageDelegate.stableId, "👍")
+												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
+													messageDelegate.index)
 											}
 
 											ModernIconButton {
@@ -1250,7 +1291,7 @@ Window {
 									"label": qsTr("Add reaction"), "icon": "activity" })
 								visible: messageActions.targetCanReact
 								height: visible ? rowImplicitHeight : 0
-								onActionRequested: controller.toggleMessageReaction(messageActions.targetId, "👍")
+									onActionRequested: root.showQuickReactions(messageActions.targetId, -1)
 							}
 							PayloadMenuItem {
 								payload: ({ "kind": "action", "id": "dm.message.retry",

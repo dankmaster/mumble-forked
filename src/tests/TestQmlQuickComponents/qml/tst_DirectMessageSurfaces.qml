@@ -645,8 +645,20 @@ TestCase {
 		const reactButton = findChild(firstMessage, "directMessageReact_cpp-dm-1")
 		verify(reactButton)
 		reactButton.clicked()
+		compare(directWindow.quickReactionMessageId, "cpp-dm-1")
+		let quickReactions = null
+		tryVerify(function() {
+			firstMessage = timeline.itemAtIndex(0)
+			quickReactions = firstMessage
+				? findChild(firstMessage, "directMessageQuickReactions_cpp-dm-1") : null
+			return quickReactions !== null
+		})
+		tryCompare(quickReactions, "expanded", true)
+		compare(quickReactions.optionCount, 8)
+		quickReactions.optionAt(5).clicked()
 		compare(fakeController.lastRichAction, "reaction")
-		compare(fakeController.lastReaction, "👍")
+		compare(fakeController.lastReaction, "🎉")
+		tryCompare(quickReactions, "expanded", false)
 
 		const attachButton = findChild(directWindow.contentItem, "directMessageAttach")
 		verify(attachButton)

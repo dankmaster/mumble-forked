@@ -57,6 +57,7 @@
 	<file alias="MediaSessionControls.qml">qml-shell/MediaSessionControls.qml</file>
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
 	<file alias="ChatMessageFrame.qml">qml-shell/ChatMessageFrame.qml</file>
+	<file alias="QuickReactionBar.qml">qml-shell/QuickReactionBar.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
 	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>
 	<file alias="RichPreviewCard.qml">qml-shell/RichPreviewCard.qml</file>

@@ -126,6 +126,7 @@ ApplicationWindow {
 	property string contextParticipantEntryKind: "user"
 	property string contextParticipantScopeToken: ""
 	property bool conversationSearchOpen: false
+	property string quickReactionMessageId: ""
 	property string automationMenuVariant: ""
 	property var automationMenuSurface: null
 	property var automationMenuFocusItem: null
@@ -527,6 +528,31 @@ ApplicationWindow {
 			return openAttachment(candidate, current.alt || current.name, messageId)
 		}
 		return false
+	}
+
+	function showQuickReactions(messageId, row) {
+		const stableId = String(messageId || "")
+		if (stableId.length === 0)
+			return
+		quickReactionMessageId = stableId
+		let targetRow = Number(row)
+		if (targetRow < 0)
+			targetRow = chatModel.rowForStableId(stableId)
+		if (targetRow < 0)
+			return
+		Qt.callLater(function() {
+			timeline.positionViewAtIndex(targetRow, ListView.End)
+			timeline.forceLayout()
+		})
+	}
+
+	function toggleQuickReactions(messageId, row) {
+		const stableId = String(messageId || "")
+		if (quickReactionMessageId === stableId) {
+			quickReactionMessageId = ""
+			return
+		}
+		showQuickReactions(stableId, row)
 	}
 
 	function isImageAttachment(attachment) {
@@ -1668,6 +1694,7 @@ ApplicationWindow {
     Connections {
         target: activeScope
 		function onScopeTokenChanged() {
+			root.quickReactionMessageId = ""
 			root.clearPreviewHydrationQueue()
 			timeline.beginScopeChange()
 			if (root.conversationSearchOpen)
@@ -3437,6 +3464,17 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+								QuickReactionBar {
+									objectName: "messageQuickReactions-" + messageDelegate.stableId
+									Layout.fillWidth: true
+									expanded: messageDelegate.canReact
+										&& root.quickReactionMessageId === messageDelegate.stableId
+									activeReactions: messageDelegate.reactions || []
+									onReactionRequested: emoji => {
+										uiCommands.toggleMessageReaction(messageDelegate.stableId, emoji)
+										root.quickReactionMessageId = ""
+									}
+								}
 										RowLayout {
 											id: messageActionRow
 											objectName: "chatMessageActionRow"
@@ -3468,12 +3506,15 @@ ApplicationWindow {
 											}
 											ModernIconButton {
 												objectName: "messageReactButton"
-												visible: messageDelegate.canReact && messageDelegate.hovered
+												visible: messageDelegate.canReact
+													&& (messageDelegate.hovered
+														|| root.quickReactionMessageId === messageDelegate.stableId)
 												dense: true
 												iconName: "add"
 												text: qsTr("Add reaction")
 												Accessible.name: text
-												onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId, "👍")
+												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
+													messageDelegate.index)
 											}
 											ModernIconButton {
 												objectName: "messageRetryButton"
@@ -3527,7 +3568,7 @@ ApplicationWindow {
 														"label": qsTr("Add reaction"), "icon": "activity" })
 													visible: messageActions.targetCanReact
 													height: visible ? rowImplicitHeight : 0
-													onActionRequested: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
+												onActionRequested: root.showQuickReactions(messageActions.targetId, -1)
 												}
 												PayloadMenuItem {
 													payload: ({ "kind": "action", "id": "message.retry",
