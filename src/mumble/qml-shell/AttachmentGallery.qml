@@ -181,10 +181,10 @@ Item {
 				objectName: "attachment_" + stableId
 				width: imageAttachment
 					? Math.max(1, Math.min(Math.max(requestedWidth, 180),
-						Math.min(320, Math.max(1, gallery.width))))
+						Math.min(440, Math.max(1, gallery.width))))
 					: Math.max(1, Math.min(360, Math.max(1, gallery.width)))
 				height: imageAttachment
-					? Math.min(240, Math.max(root.compactLayout ? 96 : 120,
+					? Math.min(320, Math.max(root.compactLayout ? 108 : 132,
 						Math.round(width * aspectRatio)))
 					: 82
 				radius: Theme.innerRadius
@@ -205,8 +205,8 @@ Item {
 						? root.safeRenderImageSource(attachmentTile.sourceUrl) : ""
                     asynchronous: true
                     cache: false
-                    sourceSize: Qt.size(Math.min(640, width * Screen.devicePixelRatio),
-                                        Math.min(480, height * Screen.devicePixelRatio))
+					sourceSize: Qt.size(Math.min(1024, width * Screen.devicePixelRatio),
+										Math.min(768, height * Screen.devicePixelRatio))
                     fillMode: Image.PreserveAspectFit
                     onStatusChanged: if (status === Image.Error && source.toString().length > 0)
                                          root.attachmentRefreshRequested()

@@ -1139,6 +1139,8 @@ public:
 	Q_INVOKABLE void chooseAttachment();
 	Q_INVOKABLE void openChatAttachment(const QString &assetId, const QString &fileName);
 	Q_INVOKABLE void downloadChatAttachment(const QString &assetId, const QString &fileName);
+	Q_INVOKABLE void requestChatAttachmentImage(const QString &assetId, const QString &messageId);
+	Q_INVOKABLE void requestChatInlineImage(const QString &token, const QString &messageId);
 	Q_INVOKABLE void retryChatAttachmentPreview(const QString &scopeToken, const QString &messageId,
 											 const QString &assetId);
 	Q_INVOKABLE void saveChatInlineImage(const QString &token, const QString &fileName);
@@ -1182,6 +1184,8 @@ signals:
 	void attachmentChooseRequested();
 	void chatAttachmentOpenRequested(unsigned int assetId, const QString &fileName);
 	void chatAttachmentDownloadRequested(unsigned int assetId, const QString &fileName);
+	void chatAttachmentImageRequested(unsigned int assetId, const QString &messageId);
+	void chatInlineImageRequested(const QString &token, const QString &messageId);
 	void chatAttachmentPreviewRetryRequested(const QString &scopeToken, const QString &messageId,
 											unsigned int assetId);
 	void chatInlineImageSaveRequested(const QString &token, const QString &fileName);

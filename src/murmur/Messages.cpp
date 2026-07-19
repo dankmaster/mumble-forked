@@ -1270,8 +1270,11 @@ constexpr qint64 CHAT_PREVIEW_MAX_IMAGE_BYTES  = 4 * 1024 * 1024;
 constexpr qint64 CHAT_PREVIEW_MAX_PLAYABLE_MEDIA_BYTES = 16 * 1024 * 1024;
 constexpr int CHAT_PREVIEW_MAX_REDIRECTS       = 3;
 constexpr int CHAT_PREVIEW_MAX_CONCURRENT_HOST = 2;
-constexpr int CHAT_PREVIEW_THUMBNAIL_WIDTH     = 640;
-constexpr int CHAT_PREVIEW_THUMBNAIL_HEIGHT    = 480;
+// Keep enough detail for the wider Qt Quick attachment cards and high-DPI
+// displays. The original asset remains separate and is fetched only when the
+// user opens the image viewer.
+constexpr int CHAT_PREVIEW_THUMBNAIL_WIDTH     = 1024;
+constexpr int CHAT_PREVIEW_THUMBNAIL_HEIGHT    = 768;
 static const QByteArray s_chatPreviewBrowserUserAgent =
 	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");

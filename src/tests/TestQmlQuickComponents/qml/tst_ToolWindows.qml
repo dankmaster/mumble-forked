@@ -389,15 +389,19 @@ TestCase {
 		const managed = "file:///C:/Temp/mumble-qml-images-a1/" + digest
 			+ "-12345678-1234-1234-1234-123456789abc.gif"
 		const tool = createTool("qrc:/qml-shell/AttachmentViewer.qml", {
-			"attachment": { "url": "", "alt": "Managed animation", "assetId": "42" }
+			"attachment": { "url": "", "alt": "Managed animation", "assetId": "42",
+				"width": 1600, "height": 900, "originalState": "loading" }
 		})
 		let saveRequests = 0
 		let refreshRequests = 0
 		tool.saveRequested.connect(function() { saveRequests += 1 })
 		tool.refreshRequested.connect(function() { refreshRequests += 1 })
+		const originalStatus = findChild(tool.contentItem, "attachmentViewerOriginalStatus")
+		verify(originalStatus !== null && originalStatus.visible)
 		compare(tool.safeRenderImageSource(managed), managed)
 		compare(tool.safeRenderImageSource("file:///C:/Temp/unmanaged.gif"), "")
-		tool.attachment = { "url": managed, "alt": "Managed animation", "assetId": "42" }
+		tool.attachment = { "url": managed, "alt": "Managed animation", "assetId": "42",
+			"width": 1600, "height": 900, "originalState": "loading" }
 		tool.width = 420
 		tool.height = 320
 		tryCompare(tool, "compactLayout", true)
@@ -432,6 +436,21 @@ TestCase {
 		wait(50)
 		compare(refreshRequests, 2,
 			"A failed local retry must not enqueue a duplicate hydration request")
+		const zoomToolbar = findChild(tool.contentItem, "attachmentViewerZoomToolbar")
+		verify(zoomToolbar !== null && zoomToolbar.visible)
+		const zoomIn = findChild(tool.contentItem, "attachmentViewerZoomIn")
+		const zoomOut = findChild(tool.contentItem, "attachmentViewerZoomOut")
+		const actualSize = findChild(tool.contentItem, "attachmentViewerActualSize")
+		verify(zoomIn !== null && zoomOut !== null && actualSize !== null)
+		compare(tool.zoom, 1)
+		mouseClick(zoomIn)
+		verify(tool.zoom > 1)
+		mouseClick(zoomOut)
+		verify(Math.abs(tool.zoom - 1) < 0.001)
+		mouseClick(actualSize)
+		verify(tool.zoom > 1, "Actual-size mode must enlarge an image currently fitted to the window")
+		tool.resetZoom()
+		compare(tool.zoom, 1)
 		tool.destroy()
 	}
 

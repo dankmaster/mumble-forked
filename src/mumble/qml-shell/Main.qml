@@ -434,7 +434,7 @@ ApplicationWindow {
 		const mime = String(attachment.mime || "").toLowerCase()
 		const image = kind === "image" || mime.indexOf("image/") === 0
 		const requestedWidth = Math.max(0, Number(attachment.width || 0))
-		const tileWidth = image ? Math.min(320, Math.max(180, requestedWidth || 240)) : 360
+		const tileWidth = image ? Math.min(440, Math.max(220, requestedWidth || 320)) : 360
 		const chromeWidth = ownOrSystem ? Theme.chatBubbleHorizontalPadding * 2
 			: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 		return Math.min(Theme.chatRichMaximumWidth, tileWidth + chromeWidth)
@@ -491,9 +491,17 @@ ApplicationWindow {
 		const source = fullSource || thumbnailSource
 		if (source.length === 0)
 			return false
+		let rawAssetId = attachment.assetId
+		if (rawAssetId === undefined || rawAssetId === null || String(rawAssetId).length === 0)
+			rawAssetId = attachment.assetID
+		const assetId = String(rawAssetId === undefined || rawAssetId === null ? "" : rawAssetId).trim()
+		const inlineToken = String(attachment.inlineToken || "").trim()
+		const messageId = String(hydrationMessageId || attachment.hydrationMessageId || "").trim()
+		const requestOriginal = (assetId.length > 0 || inlineToken.length > 0)
+			&& messageId.length > 0 && fullSource.length === 0
 		attachmentViewerPayload = {
 			"id": attachment.id,
-			"url": source,
+			"url": fullSource,
 			"thumbnailUrl": thumbnailSource || source,
 			"name": String(titleOverride || attachment.name || ""),
 			"fileName": String(attachment.fileName || attachment.name || ""),
@@ -502,10 +510,21 @@ ApplicationWindow {
 			"mime": String(attachment.mime || ""),
 			"assetId": attachment.assetId,
 			"assetID": attachment.assetID,
-			"inlineToken": String(attachment.inlineToken || ""),
+			"inlineToken": inlineToken,
 			"byteSize": attachment.byteSize,
 			"size": attachment.size,
-			"hydrationMessageId": String(hydrationMessageId || attachment.hydrationMessageId || "")
+			"width": attachment.width,
+			"height": attachment.height,
+			"originalState": requestOriginal ? "loading"
+				: String(attachment.originalState || (fullSource.length > 0 ? "ready" : "idle")),
+			"originalError": String(attachment.originalError || ""),
+			"hydrationMessageId": messageId
+		}
+		if (requestOriginal) {
+			if (assetId.length > 0)
+				uiCommands.requestChatAttachmentImage(assetId, messageId)
+			else
+				uiCommands.requestChatInlineImage(inlineToken, messageId)
 		}
 		return true
 	}
@@ -527,9 +546,14 @@ ApplicationWindow {
 			const candidate = candidates[index]
 			if (attachmentIdentity(candidate) !== identity)
 				continue
-			const nextSource = safeRenderImageSource(candidate.url)
-				|| safeRenderImageSource(candidate.thumbnailUrl)
-			if (nextSource.length === 0 || nextSource === String(current.url || ""))
+			const nextFullSource = safeRenderImageSource(candidate.url)
+			const nextThumbnailSource = safeRenderImageSource(candidate.thumbnailUrl)
+			const nextSource = nextFullSource || nextThumbnailSource
+			const sameSources = nextFullSource === String(current.url || "")
+				&& nextThumbnailSource === String(current.thumbnailUrl || "")
+			const sameOriginalState = String(candidate.originalState || "")
+				=== String(current.originalState || "")
+			if (nextSource.length === 0 || (sameSources && sameOriginalState))
 				return false
 			return openAttachment(candidate, current.alt || current.name, messageId)
 		}
@@ -4190,6 +4214,8 @@ ApplicationWindow {
 				savedPreviewSizePresets: root.richPreviewSizePresets
 				onManagedImageOpenRequested: (source, title, messageId) =>
 					root.openManagedPreviewImage(source, title, messageId)
+				onManagedAttachmentOpenRequested: (attachment, messageId) =>
+					root.openAttachment(attachment, "", messageId)
 				onWatchTogetherRequested: (url, provider, title) =>
 					root.startWatchTogether(url, provider, title)
 				onPreviewSizePresetRequested: (preferenceKey, preset) =>

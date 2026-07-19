@@ -4102,6 +4102,29 @@ void UiCommandController::downloadChatAttachment(const QString &assetId, const Q
 	if (!valid || parsed == 0 || parsed > std::numeric_limits< unsigned int >::max()) return;
 	emit chatAttachmentDownloadRequested(static_cast< unsigned int >(parsed), QFileInfo(fileName).fileName().left(255));
 }
+void UiCommandController::requestChatAttachmentImage(const QString &assetId, const QString &messageId) {
+	bool validAsset = false;
+	const qulonglong parsedAsset = assetId.trimmed().toULongLong(&validAsset);
+	bool validMessage = false;
+	const qulonglong parsedMessage = messageId.trimmed().toULongLong(&validMessage);
+	if (!validAsset || parsedAsset == 0 || parsedAsset > std::numeric_limits< unsigned int >::max()
+		|| !validMessage || parsedMessage == 0 || parsedMessage > MaxProtocolId) {
+		return;
+	}
+	emit chatAttachmentImageRequested(
+		static_cast< unsigned int >(parsedAsset), QString::number(parsedMessage));
+}
+void UiCommandController::requestChatInlineImage(const QString &token, const QString &messageId) {
+	const QString normalizedToken = token.trimmed().toLower();
+	static const QRegularExpression safeToken(QStringLiteral("^[0-9a-f]{24}$"));
+	bool validMessage = false;
+	const qulonglong parsedMessage = messageId.trimmed().toULongLong(&validMessage);
+	if (!safeToken.match(normalizedToken).hasMatch() || !validMessage || parsedMessage == 0
+		|| parsedMessage > MaxProtocolId) {
+		return;
+	}
+	emit chatInlineImageRequested(normalizedToken, QString::number(parsedMessage));
+}
 void UiCommandController::retryChatAttachmentPreview(const QString &scopeToken, const QString &messageId,
 											  const QString &assetId) {
 	const QString scope = scopeToken.trimmed();

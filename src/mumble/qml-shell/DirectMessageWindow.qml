@@ -42,6 +42,7 @@ Window {
 	property bool timelinePositioning: false
 	property string quickReactionMessageId: ""
 	signal managedImageOpenRequested(string source, string title, string messageId)
+	signal managedAttachmentOpenRequested(var attachment, string messageId)
 	signal watchTogetherRequested(string url, string provider, string title)
 	signal previewSizePresetRequested(string preferenceKey, string preset)
 	Component {
@@ -227,9 +228,7 @@ Window {
 		const source = safeRenderImageSource(attachment.url)
 			|| safeRenderImageSource(attachment.thumbnailUrl)
 		if (source.length > 0) {
-			const title = String(attachment.alt || attachment.fileName
-				|| attachment.name || qsTr("Image attachment"))
-			managedImageOpenRequested(source, title, String(messageId || ""))
+			managedAttachmentOpenRequested(attachment, String(messageId || ""))
 			return
 		}
 		if (controller)

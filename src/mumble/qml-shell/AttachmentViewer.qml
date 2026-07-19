@@ -13,6 +13,10 @@ ApplicationWindow {
 	signal refreshRequested(var attachment)
 	property string lastRefreshSource: ""
 	property bool retryingSource: false
+	property real zoom: 1.0
+	property real panX: 0
+	property real panY: 0
+	property bool grabbing: false
 	readonly property string fullSource: safeRenderImageSource(attachment ? attachment.url : "")
 	readonly property string thumbnailSource: safeRenderImageSource(attachment ? attachment.thumbnailUrl : "")
 	readonly property string sourceUrl: fullSource || thumbnailSource
@@ -24,6 +28,9 @@ ApplicationWindow {
 	readonly property int loadStatus: managedAnimated ? animation.status : picture.status
 	readonly property bool loadFailed: loadStatus === Image.Error || renderSource.length === 0
 	readonly property bool compactLayout: width < 560 || height < 440
+	readonly property string originalState: safeText(attachment ? attachment.originalState : "", 32).toLowerCase()
+	readonly property bool originalLoading: originalState === "loading" && fullSource.length === 0
+	readonly property bool originalFailed: originalState === "error" && fullSource.length === 0
 	readonly property bool canSaveOriginal: attachment && (safeText(attachment.inlineToken, 128).length > 0
 		|| safeText(attachment.assetId !== undefined ? attachment.assetId : attachment.assetID, 128).length > 0)
 
@@ -111,10 +118,70 @@ ApplicationWindow {
 		}
 	}
 
+	function declaredImageSize() {
+		const width = Math.max(0, Number(attachment ? attachment.width : 0))
+		const height = Math.max(0, Number(attachment ? attachment.height : 0))
+		if (width > 0 && height > 0)
+			return Qt.size(width, height)
+		const sourceItem = viewer.managedAnimated ? animation : picture
+		// Without an explicit sourceSize request Qt reports the provider's decoded
+		// pixel dimensions here. The C++ image pipeline already enforces its decode
+		// and memory limits before registering the image, so retaining that natural
+		// size gives old attachments correct fit and 1:1 behaviour without a second
+		// downsample in QML.
+		const sourceSize = sourceItem.sourceSize
+		return Qt.size(Math.max(1, Number(sourceSize.width || sourceItem.implicitWidth || 1)),
+			Math.max(1, Number(sourceSize.height || sourceItem.implicitHeight || 1)))
+	}
+
+	function fitScale() {
+		const source = declaredImageSize()
+		return Math.min(1, imageStage.width / Math.max(1, source.width),
+			imageStage.height / Math.max(1, source.height))
+	}
+
+	function clampPan() {
+		const target = viewer.managedAnimated ? animation : picture
+		const overflowX = Math.max(0, target.width - imageStage.width) / 2
+		const overflowY = Math.max(0, target.height - imageStage.height) / 2
+		panX = Math.max(-overflowX, Math.min(overflowX, panX))
+		panY = Math.max(-overflowY, Math.min(overflowY, panY))
+	}
+
+	function resetZoom() {
+		zoom = 1
+		panX = 0
+		panY = 0
+	}
+
+	function zoomBy(factor) {
+		zoom = Math.max(0.25, Math.min(12, zoom * factor))
+		Qt.callLater(clampPan)
+	}
+
+	function setActualSize() {
+		zoom = Math.max(0.25, Math.min(12, 1 / Math.max(0.0001, fitScale())))
+		Qt.callLater(clampPan)
+	}
+
+	function panBy(dx, dy) {
+		panX += dx
+		panY += dy
+		clampPan()
+	}
+
 	onLoadFailedChanged: focusRetryIfFailed()
 	onVisibleChanged: focusRetryIfFailed()
 	onActiveChanged: if (active) focusRetryIfFailed()
-	Component.onCompleted: focusRetryIfFailed()
+	onWidthChanged: Qt.callLater(clampPan)
+	onHeightChanged: Qt.callLater(clampPan)
+	Component.onCompleted: {
+		focusRetryIfFailed()
+		Qt.callLater(function() {
+			if (viewer.visible && !viewer.loadFailed)
+				imageStage.forceActiveFocus(Qt.OtherFocusReason)
+		})
+	}
 
     width: 900
     height: 680
@@ -188,21 +255,29 @@ ApplicationWindow {
 
 		Item {
 			id: imageStage
+			objectName: "attachmentViewerStage"
 			anchors.left: parent.left
 			anchors.right: parent.right
 			anchors.top: viewerHeader.bottom
 			anchors.bottom: parent.bottom
 			clip: true
+			focus: true
+			activeFocusOnTab: true
+			Accessible.role: Accessible.Pane
+			Accessible.name: qsTr("Image viewer. Use the mouse wheel or plus and minus to zoom, drag to pan, and zero to fit.")
 
 			Image {
 				id: picture
 				objectName: "attachmentViewerImage"
-            anchors.fill: parent
-				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
-			source: viewer.retryingSource || viewer.managedAnimated ? "" : viewer.renderSource
-            asynchronous: true
-            cache: false
-            fillMode: Image.PreserveAspectFit
+				source: viewer.retryingSource || viewer.managedAnimated ? "" : viewer.renderSource
+				asynchronous: true
+				cache: false
+				width: viewer.declaredImageSize().width * viewer.fitScale() * viewer.zoom
+				height: viewer.declaredImageSize().height * viewer.fitScale() * viewer.zoom
+				x: Math.round((imageStage.width - width) / 2 + viewer.panX)
+				y: Math.round((imageStage.height - height) / 2 + viewer.panY)
+				fillMode: Image.PreserveAspectFit
+				smooth: true
 				visible: !viewer.managedAnimated
 				Accessible.role: Accessible.Graphic
 				Accessible.name: viewer.displayTitle
@@ -217,11 +292,13 @@ ApplicationWindow {
 			AnimatedImage {
 				id: animation
 				objectName: "attachmentViewerAnimation"
-				anchors.fill: parent
-				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
 				source: viewer.retryingSource || !viewer.managedAnimated ? "" : viewer.renderSource
 				asynchronous: true
 				cache: false
+				width: viewer.declaredImageSize().width * viewer.fitScale() * viewer.zoom
+				height: viewer.declaredImageSize().height * viewer.fitScale() * viewer.zoom
+				x: Math.round((imageStage.width - width) / 2 + viewer.panX)
+				y: Math.round((imageStage.height - height) / 2 + viewer.panY)
 				fillMode: Image.PreserveAspectFit
 				playing: viewer.visible && status === AnimatedImage.Ready
 				visible: viewer.managedAnimated
@@ -245,6 +322,7 @@ ApplicationWindow {
 			}
 
 			ColumnLayout {
+				z: 10
 				anchors.centerIn: parent
 				width: Math.max(1, parent.width - Theme.space6 * 2)
 				visible: viewer.loadFailed
@@ -274,6 +352,136 @@ ApplicationWindow {
 					Accessible.name: qsTr("Retry loading %1").arg(viewer.displayTitle)
 					onClicked: viewer.retryLoad()
 				}
+			}
+
+			MouseArea {
+				id: panArea
+				anchors.fill: parent
+				acceptedButtons: Qt.LeftButton
+				cursorShape: viewer.grabbing ? Qt.ClosedHandCursor
+					: ((viewer.managedAnimated ? animation.width : picture.width) > imageStage.width
+						|| (viewer.managedAnimated ? animation.height : picture.height) > imageStage.height
+						? Qt.OpenHandCursor : Qt.ArrowCursor)
+				property real previousX
+				property real previousY
+				onPressed: event => {
+					previousX = event.x
+					previousY = event.y
+					viewer.grabbing = true
+					imageStage.forceActiveFocus()
+				}
+				onPositionChanged: event => {
+					if (!pressed || !viewer.grabbing)
+						return
+					viewer.panBy(event.x - previousX, event.y - previousY)
+					previousX = event.x
+					previousY = event.y
+				}
+				onReleased: viewer.grabbing = false
+				onCanceled: viewer.grabbing = false
+				onDoubleClicked: viewer.zoom > 1.001 ? viewer.resetZoom() : viewer.setActualSize()
+			}
+
+			WheelHandler {
+				target: null
+				onWheel: event => viewer.zoomBy(event.angleDelta.y >= 0 ? 1.2 : 1 / 1.2)
+			}
+
+			Rectangle {
+				id: originalStatusPill
+				objectName: "attachmentViewerOriginalStatus"
+				anchors.horizontalCenter: parent.horizontalCenter
+				anchors.top: parent.top
+				anchors.topMargin: Theme.space3
+				z: 5
+				visible: viewer.originalLoading || viewer.originalFailed
+				width: originalStatusLabel.implicitWidth + Theme.space3 * 2
+				height: Theme.controlHeight
+				radius: height / 2
+				color: Theme.panel
+				border.color: viewer.originalFailed ? Theme.warning : Theme.surfaceBorder
+				Label {
+					id: originalStatusLabel
+					anchors.centerIn: parent
+					textFormat: Text.PlainText
+					text: viewer.originalLoading ? qsTr("Loading original image…")
+						: qsTr("Showing preview · original unavailable")
+					color: viewer.originalFailed ? Theme.warning : Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+				}
+			}
+
+			Rectangle {
+				id: zoomToolbar
+				objectName: "attachmentViewerZoomToolbar"
+				anchors.horizontalCenter: parent.horizontalCenter
+				anchors.bottom: parent.bottom
+				anchors.bottomMargin: Theme.space3
+				z: 6
+				width: zoomControls.implicitWidth + Theme.space2 * 2
+				height: zoomControls.implicitHeight + Theme.space1 * 2
+				radius: Theme.innerRadius
+				color: Theme.panel
+				border.color: Theme.surfaceBorder
+				Accessible.role: Accessible.ToolBar
+				Accessible.name: qsTr("Image zoom controls")
+
+				Row {
+					id: zoomControls
+					anchors.centerIn: parent
+					spacing: Theme.space1
+					ModernIconButton {
+						objectName: "attachmentViewerZoomOut"
+						text: "−"
+						enabled: viewer.zoom > 0.251
+						Accessible.name: qsTr("Zoom out")
+						onClicked: viewer.zoomBy(1 / 1.2)
+					}
+					ModernIconButton {
+						objectName: "attachmentViewerFit"
+						width: Theme.controlHeight + Theme.space6
+						text: Math.round(viewer.fitScale() * viewer.zoom * 100) + "%"
+						Accessible.name: qsTr("Fit image to window")
+						onClicked: viewer.resetZoom()
+					}
+					ModernIconButton {
+						objectName: "attachmentViewerActualSize"
+						width: Theme.controlHeight + Theme.space4
+						text: "1:1"
+						Accessible.name: qsTr("Show image at actual size")
+						onClicked: viewer.setActualSize()
+					}
+					ModernIconButton {
+						objectName: "attachmentViewerZoomIn"
+						text: "+"
+						enabled: viewer.zoom < 11.999
+						Accessible.name: qsTr("Zoom in")
+						onClicked: viewer.zoomBy(1.2)
+					}
+				}
+			}
+
+			Keys.onPressed: event => {
+				const step = event.modifiers & Qt.ShiftModifier ? 80 : 32
+				if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal)
+					viewer.zoomBy(1.2)
+				else if (event.key === Qt.Key_Minus)
+					viewer.zoomBy(1 / 1.2)
+				else if (event.key === Qt.Key_0)
+					viewer.resetZoom()
+				else if (event.key === Qt.Key_1)
+					viewer.setActualSize()
+				else if (event.key === Qt.Key_Left)
+					viewer.panBy(step, 0)
+				else if (event.key === Qt.Key_Right)
+					viewer.panBy(-step, 0)
+				else if (event.key === Qt.Key_Up)
+					viewer.panBy(0, step)
+				else if (event.key === Qt.Key_Down)
+					viewer.panBy(0, -step)
+				else
+					return
+				event.accepted = true
 			}
 		}
     }

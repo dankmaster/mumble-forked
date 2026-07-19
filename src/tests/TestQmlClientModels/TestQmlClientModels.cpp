@@ -3115,6 +3115,8 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QSignalSpy attachmentSpy(&commands, &UiCommandController::attachmentChooseRequested);
 	QSignalSpy attachmentOpenSpy(&commands, &UiCommandController::chatAttachmentOpenRequested);
 	QSignalSpy attachmentDownloadSpy(&commands, &UiCommandController::chatAttachmentDownloadRequested);
+	QSignalSpy attachmentImageSpy(&commands, &UiCommandController::chatAttachmentImageRequested);
+	QSignalSpy inlineImageRequestSpy(&commands, &UiCommandController::chatInlineImageRequested);
 	QSignalSpy attachmentPreviewRetrySpy(&commands,
 		&UiCommandController::chatAttachmentPreviewRetryRequested);
 	QSignalSpy inlineImageSaveSpy(&commands, &UiCommandController::chatInlineImageSaveRequested);
@@ -3134,6 +3136,10 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.downloadChatAttachment(QStringLiteral("4294967296"), QStringLiteral("ignored.bin"));
 	commands.openChatAttachment(QStringLiteral("0"), QStringLiteral("ignored.pdf"));
 	commands.openChatAttachment(QStringLiteral("4294967296"), QStringLiteral("ignored.pdf"));
+	commands.requestChatAttachmentImage(QStringLiteral("42"), QStringLiteral("0"));
+	commands.requestChatAttachmentImage(QStringLiteral("4294967296"), QStringLiteral("12"));
+	commands.requestChatInlineImage(QStringLiteral("bad"), QStringLiteral("12"));
+	commands.requestChatInlineImage(QStringLiteral("abcdef0123456789abcdef01"), QStringLiteral("0"));
 	commands.retryChatAttachmentPreview(QStringLiteral("channel:1"), QStringLiteral("0"), QStringLiteral("42"));
 	commands.retryChatAttachmentPreview(QString(), QStringLiteral("12"), QStringLiteral("42"));
 	commands.retryChatAttachmentPreview(QStringLiteral("channel:1"), QStringLiteral("12"),
@@ -3150,6 +3156,8 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(reactionSpy.count(), 0);
 	QCOMPARE(attachmentOpenSpy.count(), 0);
 	QCOMPARE(attachmentDownloadSpy.count(), 0);
+	QCOMPARE(attachmentImageSpy.count(), 0);
+	QCOMPARE(inlineImageRequestSpy.count(), 0);
 	QCOMPARE(attachmentPreviewRetrySpy.count(), 0);
 	QCOMPARE(inlineImageSaveSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
@@ -3165,6 +3173,8 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.chooseAttachment();
 	commands.openChatAttachment(QStringLiteral(" 78 "), QStringLiteral("folder/report.pdf"));
 	commands.downloadChatAttachment(QStringLiteral(" 77 "), QStringLiteral("folder/notes.pdf"));
+	commands.requestChatAttachmentImage(QStringLiteral(" 76 "), QStringLiteral(" 13 "));
+	commands.requestChatInlineImage(QStringLiteral(" ABCDEF0123456789ABCDEF01 "), QStringLiteral(" 14 "));
 	commands.retryChatAttachmentPreview(QStringLiteral(" channel:42 "), QStringLiteral(" 12 "),
 		QStringLiteral(" 88 "));
 	commands.saveChatInlineImage(QStringLiteral(" ABCDEF0123456789ABCDEF01 "),
@@ -3191,6 +3201,12 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(attachmentDownloadSpy.count(), 1);
 	QCOMPARE(attachmentDownloadSpy.first().at(0).toUInt(), 77U);
 	QCOMPARE(attachmentDownloadSpy.first().at(1).toString(), QStringLiteral("notes.pdf"));
+	QCOMPARE(attachmentImageSpy.count(), 1);
+	QCOMPARE(attachmentImageSpy.first().at(0).toUInt(), 76U);
+	QCOMPARE(attachmentImageSpy.first().at(1).toString(), QStringLiteral("13"));
+	QCOMPARE(inlineImageRequestSpy.count(), 1);
+	QCOMPARE(inlineImageRequestSpy.first().at(0).toString(), QStringLiteral("abcdef0123456789abcdef01"));
+	QCOMPARE(inlineImageRequestSpy.first().at(1).toString(), QStringLiteral("14"));
 	QCOMPARE(attachmentPreviewRetrySpy.count(), 1);
 	QCOMPARE(attachmentPreviewRetrySpy.first().at(0).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(attachmentPreviewRetrySpy.first().at(1).toString(), QStringLiteral("12"));

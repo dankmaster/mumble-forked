@@ -1883,8 +1883,8 @@ QString normalizedPersistentChatText(QString text) {
 	return text.replace(QLatin1String("\r\n"), QLatin1String("\n")).replace(QLatin1Char('\r'), QLatin1Char('\n'));
 }
 
-constexpr int PERSISTENT_CHAT_INLINE_IMAGE_MAX_WIDTH                    = 480;
-constexpr int PERSISTENT_CHAT_INLINE_IMAGE_MAX_HEIGHT                   = 320;
+constexpr int PERSISTENT_CHAT_INLINE_IMAGE_MAX_WIDTH                    = 960;
+constexpr int PERSISTENT_CHAT_INLINE_IMAGE_MAX_HEIGHT                   = 640;
 constexpr qint64 PERSISTENT_CHAT_INLINE_DATA_IMAGE_RAW_INLINE_MAX_BYTES = 64 * 1024;
 constexpr qint64 PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES  = 50 * 1024 * 1024;
 constexpr int PERSISTENT_CHAT_INLINE_DATA_IMAGE_WARMUP_MAX_CONCURRENT   = 2;
@@ -2518,6 +2518,41 @@ QImage persistentChatInlineDataImagePreviewImage(const QString &source, const Pe
 	}
 
 	return image;
+}
+
+QImage persistentChatInlineDataImageViewerImage(const QString &source,
+												 const PersistentChatInlineDataImageInfo &info) {
+	if (!info.valid || info.estimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES) {
+		return QImage();
+	}
+	const QByteArray bytes = persistentChatInlineDataImageBytes(source, info);
+	if (bytes.isEmpty() || bytes.size() > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES) {
+		return QImage();
+	}
+	QBuffer buffer;
+	buffer.setData(bytes);
+	if (!buffer.open(QIODevice::ReadOnly)) return QImage();
+
+	QImageReader reader(&buffer);
+	reader.setAutoTransform(true);
+	const QSize sourceSize = reader.size();
+	constexpr qint64 maximumSourcePixels = 40LL * 1024LL * 1024LL;
+	constexpr qint64 maximumDisplayPixels = 8LL * 1024LL * 1024LL;
+	if (!sourceSize.isValid() || sourceSize.width() <= 0 || sourceSize.height() <= 0
+		|| sourceSize.width() > 16384 || sourceSize.height() > 16384
+		|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height() > maximumSourcePixels) {
+		return QImage();
+	}
+	if (sourceSize.width() > 8192 || sourceSize.height() > 8192
+		|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height() > maximumDisplayPixels) {
+		const qreal scale = std::min({ 1.0,
+			8192.0 / sourceSize.width(), 8192.0 / sourceSize.height(),
+			std::sqrt(static_cast< qreal >(maximumDisplayPixels)
+				/ (static_cast< qreal >(sourceSize.width()) * sourceSize.height())) });
+		reader.setScaledSize(QSize(std::max(1, static_cast< int >(std::floor(sourceSize.width() * scale))),
+			std::max(1, static_cast< int >(std::floor(sourceSize.height() * scale)))));
+	}
+	return reader.read();
 }
 
 [[maybe_unused]] QString persistentChatInlineDataImageThumbnailSource(const QImage &image) {
@@ -13913,6 +13948,10 @@ void MainWindow::applyShellLayout() {
 					&MainWindow::openPersistentChatAttachment);
 			connect(commands, &UiCommandController::chatAttachmentDownloadRequested, this,
 					&MainWindow::downloadPersistentChatAttachment);
+			connect(commands, &UiCommandController::chatAttachmentImageRequested, this,
+					&MainWindow::ensurePersistentChatAttachmentFullImageDownload);
+			connect(commands, &UiCommandController::chatInlineImageRequested, this,
+					&MainWindow::ensurePersistentChatInlineDataImageFullResolution);
 			connect(commands, &UiCommandController::chatInlineImageSaveRequested, this,
 					&MainWindow::savePersistentChatInlineDataImage);
 			connect(commands, &UiCommandController::messageReplyRequested, this,
@@ -22932,11 +22971,17 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 											   const PersistentChatInlineDataImageInfo &info) {
 				const QString token = registerPersistentChatInlineDataImageSource(source);
 				QString providerUrl = m_persistentChatInlineDataImageProviderUrls.value(token);
+				QString fullProviderUrl = m_persistentChatInlineDataImageFullProviderUrls.value(token);
 				const std::shared_ptr< QmlImagePipeline > pipeline =
 					m_qmlShellHost ? m_qmlShellHost->imagePipeline() : std::shared_ptr< QmlImagePipeline >();
 				if (!providerUrl.isEmpty() && (!pipeline || !pipeline->containsSource(providerUrl))) {
 					m_persistentChatInlineDataImageProviderUrls.remove(token);
 					providerUrl.clear();
+				}
+				if (!fullProviderUrl.isEmpty() && (!pipeline || !pipeline->containsSource(fullProviderUrl))) {
+					m_persistentChatInlineDataImageFullProviderUrls.remove(token);
+					m_persistentChatInlineDataImageFullSizes.remove(token);
+					fullProviderUrl.clear();
 				}
 				const auto previewIt = m_persistentChatInlineDataImagePreviewCache.constFind(token);
 				const bool hasDecodedPreview = previewIt != m_persistentChatInlineDataImagePreviewCache.cend()
@@ -22969,17 +23014,30 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 					{ QStringLiteral("fileName"), fileName },
 					{ QStringLiteral("alt"), resolvedAlt },
 					{ QStringLiteral("inlineToken"), token },
-					{ QStringLiteral("state"), !providerUrl.isEmpty() ? QStringLiteral("ready")
+					{ QStringLiteral("state"), (!providerUrl.isEmpty() || !fullProviderUrl.isEmpty())
+						? QStringLiteral("ready")
 						: previewUnavailable ? QStringLiteral("error") : QStringLiteral("loading") }
 				};
 				if (info.estimatedBytes >= 0) item.insert(QStringLiteral("byteSize"), info.estimatedBytes);
-				if (hasDecodedPreview) {
+				const QSize fullImageSize = m_persistentChatInlineDataImageFullSizes.value(token);
+				if (!fullProviderUrl.isEmpty() && fullImageSize.isValid()) {
+					item.insert(QStringLiteral("width"), fullImageSize.width());
+					item.insert(QStringLiteral("height"), fullImageSize.height());
+				} else if (hasDecodedPreview) {
 					item.insert(QStringLiteral("width"), previewIt.value().width());
 					item.insert(QStringLiteral("height"), previewIt.value().height());
 				}
 				if (!providerUrl.isEmpty()) {
-					item.insert(QStringLiteral("url"), providerUrl);
 					item.insert(QStringLiteral("thumbnailUrl"), providerUrl);
+				}
+				if (!fullProviderUrl.isEmpty()) {
+					item.insert(QStringLiteral("url"), fullProviderUrl);
+					item.insert(QStringLiteral("originalState"), QStringLiteral("ready"));
+				} else if (m_persistentChatInlineDataImageFullFailures.contains(token)) {
+					item.insert(QStringLiteral("originalState"), QStringLiteral("error"));
+					item.insert(QStringLiteral("originalError"), tr("The original image could not be decoded."));
+				} else {
+					item.insert(QStringLiteral("originalState"), QStringLiteral("idle"));
 				}
 				structuredAttachments.push_back(item);
 
@@ -23038,15 +23096,33 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 			if (attachment.has_width()) item.insert(QStringLiteral("width"), attachment.width());
 			if (attachment.has_height()) item.insert(QStringLiteral("height"), attachment.height());
 			if (kind == QLatin1String("image")) {
-				QString providerUrl = m_persistentChatAttachmentProviderUrls.value(attachment.asset_id());
-				if (!providerUrl.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()
-					&& !m_qmlShellHost->imagePipeline()->containsSource(providerUrl)) {
+				QString previewProviderUrl = m_persistentChatAttachmentProviderUrls.value(attachment.asset_id());
+				QString fullProviderUrl = m_persistentChatAttachmentFullImageProviderUrls.value(attachment.asset_id());
+				if (!previewProviderUrl.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()
+					&& !m_qmlShellHost->imagePipeline()->containsSource(previewProviderUrl)) {
 					m_persistentChatAttachmentProviderUrls.remove(attachment.asset_id());
-					providerUrl.clear();
+					previewProviderUrl.clear();
 				}
-				if (!providerUrl.isEmpty()) {
-					item.insert(QStringLiteral("url"), providerUrl);
-					item.insert(QStringLiteral("thumbnailUrl"), providerUrl);
+				if (!fullProviderUrl.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()
+					&& !m_qmlShellHost->imagePipeline()->containsSource(fullProviderUrl)) {
+					m_persistentChatAttachmentFullImageProviderUrls.remove(attachment.asset_id());
+					fullProviderUrl.clear();
+				}
+				if (!fullProviderUrl.isEmpty()) {
+					item.insert(QStringLiteral("url"), fullProviderUrl);
+					item.insert(QStringLiteral("originalState"), QStringLiteral("ready"));
+				} else if (m_persistentChatAttachmentFullImageFailures.contains(attachment.asset_id())) {
+					item.insert(QStringLiteral("originalState"), QStringLiteral("error"));
+					item.insert(QStringLiteral("originalError"), tr("The original image could not be loaded."));
+				} else {
+					item.insert(QStringLiteral("originalState"), QStringLiteral("idle"));
+				}
+				if (!previewProviderUrl.isEmpty()) {
+					item.insert(QStringLiteral("thumbnailUrl"), previewProviderUrl);
+					item.insert(QStringLiteral("state"), QStringLiteral("ready"));
+				} else if (!fullProviderUrl.isEmpty()) {
+					item.insert(QStringLiteral("thumbnailUrl"), fullProviderUrl);
+					item.insert(QStringLiteral("state"), QStringLiteral("ready"));
 				} else {
 					const bool canLoadPreview = attachment.has_preview_asset_id() && attachment.preview_asset_id() > 0;
 					const bool previewFailed = m_persistentChatAttachmentPreviewFailures.contains(attachment.asset_id());
@@ -34290,7 +34366,9 @@ void MainWindow::ensurePersistentChatAttachmentImageDownload(const unsigned int 
 		m_persistentChatPendingAttachmentHydrationOrder.removeAll(transferAssetID);
 		PersistentChatAssetDownload download;
 		download.assetID = transferAssetID;
-		download.maximumBytes = 2ULL * 1024ULL * 1024ULL;
+		// Server previews are up to 1024x768 so high-DPI chat cards stay crisp.
+		// Allow lossless/alpha-heavy thumbnails without falling back to an error.
+		download.maximumBytes = 4ULL * 1024ULL * 1024ULL;
 		download.attachmentAssetIDs.insert(assetID);
 		download.attachmentMessageKeys.insert(messageKey);
 		it = m_persistentChatAssetDownloads.insert(transferAssetID, download);
@@ -34307,6 +34385,39 @@ void MainWindow::ensurePersistentChatAttachmentImageDownload(const unsigned int 
 	it->requestPending = true;
 	Global::get().sh->sendMessage(request);
 	armPersistentChatAssetDownloadTimeout(transferAssetID);
+}
+
+void MainWindow::ensurePersistentChatAttachmentFullImageDownload(const unsigned int assetID,
+												  const QString &messageKey) {
+	if (assetID == 0 || messageKey.isEmpty()
+		|| m_persistentChatAttachmentFullImageProviderUrls.contains(assetID)
+		|| !Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	m_persistentChatAttachmentFullImageFailures.remove(assetID);
+	auto it = m_persistentChatAssetDownloads.find(assetID);
+	if (it == m_persistentChatAssetDownloads.end()) {
+		PersistentChatAssetDownload download;
+		download.assetID = assetID;
+		download.maximumBytes = Global::get().uiChatAssetMaxBytes;
+		download.fullImageAssetIDs.insert(assetID);
+		download.attachmentMessageKeys.insert(messageKey);
+		it = m_persistentChatAssetDownloads.insert(assetID, std::move(download));
+	} else {
+		it->maximumBytes = std::max< quint64 >(it->maximumBytes, Global::get().uiChatAssetMaxBytes);
+		it->fullImageAssetIDs.insert(assetID);
+		it->attachmentMessageKeys.insert(messageKey);
+	}
+	if (it->requestPending) return;
+
+	MumbleProto::ChatAssetRequest request;
+	request.set_asset_id(assetID);
+	request.set_offset(it->nextOffset);
+	request.set_max_bytes(262144);
+	it->requestPending = true;
+	Global::get().sh->sendMessage(request);
+	armPersistentChatAssetDownloadTimeout(assetID);
 }
 
 void MainWindow::openPersistentChatAttachment(const unsigned int assetID, const QString &fileName) {
@@ -34508,14 +34619,17 @@ void MainWindow::armPersistentChatAssetDownloadTimeout(const unsigned int assetI
 	QTimer::singleShot(60000, this, [this, assetID, token]() {
 		auto timedOut = m_persistentChatAssetDownloads.find(assetID);
 		if (timedOut == m_persistentChatAssetDownloads.end() || timedOut->timeoutToken != token) return;
-		const bool userRequested = !timedOut->savePaths.isEmpty() || !timedOut->openFileName.isEmpty();
+		const bool userRequested = !timedOut->savePaths.isEmpty() || !timedOut->openFileName.isEmpty()
+			|| !timedOut->fullImageAssetIDs.isEmpty();
 		const QSet< unsigned int > attachmentAssetIDs = timedOut->attachmentAssetIDs;
+		const QSet< unsigned int > fullImageAssetIDs = timedOut->fullImageAssetIDs;
 		const QSet< QString > attachmentMessageKeys = timedOut->attachmentMessageKeys;
 		const QString timeoutMessage = tr("The attachment server did not respond in time.");
 		finishPersistentChatAssetDownloadOperations(
 			*timedOut, QStringLiteral("download-timeout"), timeoutMessage);
 		m_persistentChatAssetDownloads.erase(timedOut);
 		m_persistentChatAttachmentPreviewFailures.unite(attachmentAssetIDs);
+		m_persistentChatAttachmentFullImageFailures.unite(fullImageAssetIDs);
 		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
 		schedulePendingPersistentChatAttachmentImageDownloads();
 		if (userRequested) {
@@ -35737,6 +35851,58 @@ QString MainWindow::registerPersistentChatInlineDataImageSource(const QString &s
 	m_persistentChatInlineDataImageSources.insert(token, source);
 
 	return token;
+}
+
+void MainWindow::ensurePersistentChatInlineDataImageFullResolution(const QString &token,
+														const QString &messageKey) {
+	const QString normalizedToken = token.trimmed().toLower();
+	const auto sourceIt = m_persistentChatInlineDataImageSources.constFind(normalizedToken);
+	if (normalizedToken.isEmpty() || messageKey.isEmpty()
+		|| sourceIt == m_persistentChatInlineDataImageSources.cend()) {
+		return;
+	}
+	if (!messageKey.isEmpty()) {
+		m_persistentChatInlineDataImageWarmupMessageKeys[normalizedToken].insert(messageKey);
+	}
+	if (m_persistentChatInlineDataImageFullProviderUrls.contains(normalizedToken)) {
+		publishPersistentChatInlineDataImageUpdate(normalizedToken);
+		return;
+	}
+	if (m_persistentChatInlineDataImageFullRequestsInFlight.contains(normalizedToken)) return;
+
+	const QString source = sourceIt.value();
+	const PersistentChatInlineDataImageInfo info = persistentChatInlineDataImageInfo(source);
+	if (!info.valid || info.estimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES) {
+		m_persistentChatInlineDataImageFullFailures.insert(normalizedToken);
+		publishPersistentChatInlineDataImageUpdate(normalizedToken);
+		return;
+	}
+
+	m_persistentChatInlineDataImageFullFailures.remove(normalizedToken);
+	m_persistentChatInlineDataImageFullRequestsInFlight.insert(normalizedToken);
+	persistentChatPreviewWorkerQueue().submit< QImage >(
+		this, QStringLiteral("inline:full:%1").arg(normalizedToken),
+		persistentChatPreviewWorkerSourceKey(QStringLiteral("inline-full"), normalizedToken),
+		std::max< qint64 >(1, static_cast< qint64 >(source.size()) * sizeof(QChar)),
+		PersistentChatPreviewWorkerPriority::Interactive,
+		[source, info]() { return persistentChatInlineDataImageViewerImage(source, info); },
+		[this, normalizedToken](std::optional< QImage > image) {
+			m_persistentChatInlineDataImageFullRequestsInFlight.remove(normalizedToken);
+			QString providerUrl;
+			if (image && !image->isNull() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
+				providerUrl = m_qmlShellHost->imagePipeline()->registerImage(
+					*image, QStringLiteral("chat-inline-data-full:%1").arg(normalizedToken));
+			}
+			if (!providerUrl.isEmpty()) {
+				m_persistentChatInlineDataImageFullProviderUrls.insert(normalizedToken, providerUrl);
+				m_persistentChatInlineDataImageFullSizes.insert(normalizedToken, image->size());
+				m_persistentChatInlineDataImageFullFailures.remove(normalizedToken);
+			} else {
+				m_persistentChatInlineDataImageFullSizes.remove(normalizedToken);
+				m_persistentChatInlineDataImageFullFailures.insert(normalizedToken);
+			}
+			publishPersistentChatInlineDataImageUpdate(normalizedToken);
+		});
 }
 
 QString MainWindow::persistentChatInlineDataImageThumbnailSourceForToken(const QString &token,
@@ -39540,6 +39706,10 @@ void MainWindow::serverConnected() {
 	m_persistentChatEmbedPreviewRefs.clear();
 	m_persistentChatInlineDataImageSources.clear();
 	m_persistentChatInlineDataImagePreviewCache.clear();
+	m_persistentChatInlineDataImageFullProviderUrls.clear();
+	m_persistentChatInlineDataImageFullSizes.clear();
+	m_persistentChatInlineDataImageFullRequestsInFlight.clear();
+	m_persistentChatInlineDataImageFullFailures.clear();
 	m_persistentChatInlineDataImageThumbnailSourceCache.clear();
 	m_persistentChatInlineDataImageWarmupSources.clear();
 	m_persistentChatInlineDataImageWarmupMessageKeys.clear();
@@ -39571,7 +39741,9 @@ void MainWindow::serverConnected() {
 	const QString attachmentConnectionChanged = tr("The connection changed during attachment download.");
 	cancelPersistentChatAttachmentWork(QStringLiteral("connection-changed"), attachmentConnectionChanged);
 	m_persistentChatAttachmentProviderUrls.clear();
+	m_persistentChatAttachmentFullImageProviderUrls.clear();
 	m_persistentChatAttachmentPreviewFailures.clear();
+	m_persistentChatAttachmentFullImageFailures.clear();
 	m_persistentChatPendingAttachmentHydrations.clear();
 	m_persistentChatPendingAttachmentHydrationOrder.clear();
 	m_pendingFeedbackSubmissions.clear();
@@ -39697,6 +39869,10 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_persistentChatEmbedPreviewRefs.clear();
 	m_persistentChatInlineDataImageSources.clear();
 	m_persistentChatInlineDataImagePreviewCache.clear();
+	m_persistentChatInlineDataImageFullProviderUrls.clear();
+	m_persistentChatInlineDataImageFullSizes.clear();
+	m_persistentChatInlineDataImageFullRequestsInFlight.clear();
+	m_persistentChatInlineDataImageFullFailures.clear();
 	m_persistentChatInlineDataImageThumbnailSourceCache.clear();
 	m_persistentChatInlineDataImageWarmupSources.clear();
 	m_persistentChatInlineDataImageWarmupMessageKeys.clear();
@@ -39728,7 +39904,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	const QString attachmentConnectionClosed = tr("The connection closed during attachment download.");
 	cancelPersistentChatAttachmentWork(QStringLiteral("connection-closed"), attachmentConnectionClosed);
 	m_persistentChatAttachmentProviderUrls.clear();
+	m_persistentChatAttachmentFullImageProviderUrls.clear();
 	m_persistentChatAttachmentPreviewFailures.clear();
+	m_persistentChatAttachmentFullImageFailures.clear();
 	m_persistentChatPendingAttachmentHydrations.clear();
 	m_persistentChatPendingAttachmentHydrationOrder.clear();
 	m_pendingFeedbackSubmissions.clear();

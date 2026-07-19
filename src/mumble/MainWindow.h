@@ -428,6 +428,7 @@ public:
 		QByteArray bytes;
 		QSet< QString > previewKeys;
 		QSet< unsigned int > attachmentAssetIDs;
+		QSet< unsigned int > fullImageAssetIDs;
 		QSet< QString > attachmentMessageKeys;
 		QStringList savePaths;
 		QString openFileName;
@@ -539,6 +540,8 @@ public:
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
 	void ensurePersistentChatAttachmentImageDownload(unsigned int assetID, unsigned int transferAssetID,
 											 const QString &messageKey);
+	void ensurePersistentChatAttachmentFullImageDownload(unsigned int assetID, const QString &messageKey);
+	void ensurePersistentChatInlineDataImageFullResolution(const QString &token, const QString &messageKey);
 	void downloadPersistentChatAttachment(unsigned int assetID, const QString &fileName);
 	void publishPersistentChatAttachmentImageUpdate(const QSet< QString > &messageKeys);
 	void schedulePendingPersistentChatAttachmentImageDownloads();
@@ -1017,7 +1020,9 @@ protected:
 	QHash< QString, MumbleProto::ChatEmbedRef > m_persistentChatEmbedPreviewRefs;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< unsigned int, QString > m_persistentChatAttachmentProviderUrls;
+	QHash< unsigned int, QString > m_persistentChatAttachmentFullImageProviderUrls;
 	QSet< unsigned int > m_persistentChatAttachmentPreviewFailures;
+	QSet< unsigned int > m_persistentChatAttachmentFullImageFailures;
 	QHash< unsigned int, PendingPersistentChatAttachmentHydration >
 		m_persistentChatPendingAttachmentHydrations;
 	QList< unsigned int > m_persistentChatPendingAttachmentHydrationOrder;
@@ -1047,6 +1052,10 @@ protected:
 	quint64 m_chatEmbedAssistGeneration = 1;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
 	QHash< QString, QImage > m_persistentChatInlineDataImagePreviewCache;
+	QHash< QString, QString > m_persistentChatInlineDataImageFullProviderUrls;
+	QHash< QString, QSize > m_persistentChatInlineDataImageFullSizes;
+	QSet< QString > m_persistentChatInlineDataImageFullRequestsInFlight;
+	QSet< QString > m_persistentChatInlineDataImageFullFailures;
 	QHash< QString, QString > m_persistentChatInlineDataImageThumbnailSourceCache;
 	QHash< QString, QString > m_persistentChatInlineDataImageWarmupSources;
 	QHash< QString, QSet< QString > > m_persistentChatInlineDataImageWarmupMessageKeys;

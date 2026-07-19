@@ -40,6 +40,7 @@
 #include "Global.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <utility>
 #include <QBuffer>
@@ -2249,8 +2250,10 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 	const quint64 transferLimit = it->maximumBytes > 0 ? it->maximumBytes : configuredLimit;
 	const quint64 memoryLimit = std::min< quint64 >(transferLimit, 64ULL * 1024ULL * 1024ULL);
 	const auto rejectDownload = [this, &it](const QString &reason) {
-		const bool userRequested = !it->savePaths.isEmpty() || !it->openFileName.isEmpty();
+		const bool userRequested = !it->savePaths.isEmpty() || !it->openFileName.isEmpty()
+			|| !it->fullImageAssetIDs.isEmpty();
 		const QSet< unsigned int > attachmentAssetIDs = it->attachmentAssetIDs;
+		const QSet< unsigned int > fullImageAssetIDs = it->fullImageAssetIDs;
 		const QSet< QString > attachmentMessageKeys = it->attachmentMessageKeys;
 		const QHash< QString, QString > saveOperationIDsByPath = it->saveOperationIDsByPath;
 		const QString openOperationID = it->openOperationID;
@@ -2265,6 +2268,7 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 			}
 		}
 		m_persistentChatAttachmentPreviewFailures.unite(attachmentAssetIDs);
+		m_persistentChatAttachmentFullImageFailures.unite(fullImageAssetIDs);
 		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
 		schedulePendingPersistentChatAttachmentImageDownloads();
 		if (userRequested) {
@@ -2357,6 +2361,7 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 	const MumbleProto::ChatAssetKind kind = download.kind;
 	const QSet< QString > previewKeys = download.previewKeys;
 	const QSet< unsigned int > attachmentAssetIDs = download.attachmentAssetIDs;
+	const QSet< unsigned int > fullImageAssetIDs = download.fullImageAssetIDs;
 	const QSet< QString > attachmentMessageKeys = download.attachmentMessageKeys;
 	const QStringList savePaths = download.savePaths;
 	const QHash< QString, QString > saveOperationIDsByPath = download.saveOperationIDsByPath;
@@ -2377,10 +2382,11 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 
 	queuePersistentChatAssetIo(
 		workerGroup, QStringLiteral("finalize"), estimatedBytes,
-		[bytes = std::move(bytes), mime, kind, attachmentAssetIDs, previewKeys, savePaths, openFileName,
+		[bytes = std::move(bytes), mime, kind, attachmentAssetIDs, fullImageAssetIDs, previewKeys, savePaths, openFileName,
 		 assetID]() mutable {
 			PersistentChatAssetIoResult result;
-			const bool imageConsumer = !attachmentAssetIDs.isEmpty() || !previewKeys.isEmpty();
+			const bool imageConsumer = !attachmentAssetIDs.isEmpty() || !fullImageAssetIDs.isEmpty()
+				|| !previewKeys.isEmpty();
 			if (imageConsumer && mime.startsWith(QLatin1String("image/"))) {
 				mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
 				QBuffer buffer;
@@ -2394,6 +2400,21 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 					if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
 						&& sourceSize.width() <= 16384 && sourceSize.height() <= 16384
 						&& static_cast< qint64 >(sourceSize.width()) * sourceSize.height() <= maximumPixels) {
+						// Preserve a high-resolution viewer surface while staying inside the
+						// QML image pipeline's bounded decoded-image budget. Saved/downloaded
+						// bytes remain untouched; only the display copy is downsampled.
+						constexpr qint64 maximumDisplayPixels = 8LL * 1024LL * 1024LL;
+						if (sourceSize.width() > 8192 || sourceSize.height() > 8192
+							|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height()
+								> maximumDisplayPixels) {
+							const qreal scale = std::min({ 1.0,
+								8192.0 / sourceSize.width(), 8192.0 / sourceSize.height(),
+								std::sqrt(static_cast< qreal >(maximumDisplayPixels)
+									/ (static_cast< qreal >(sourceSize.width()) * sourceSize.height())) });
+							reader.setScaledSize(QSize(
+								std::max(1, static_cast< int >(std::floor(sourceSize.width() * scale))),
+								std::max(1, static_cast< int >(std::floor(sourceSize.height() * scale)))));
+						}
 						result.image = reader.read();
 					}
 				}
@@ -2447,7 +2468,7 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 			}
 			return result;
 		},
-		[this, assetID, mime, kind, previewKeys, attachmentAssetIDs, attachmentMessageKeys, savePaths,
+		[this, assetID, mime, kind, previewKeys, attachmentAssetIDs, fullImageAssetIDs, attachmentMessageKeys, savePaths,
 		 saveOperationIDsByPath, openFileName, openOperationID, connectionGeneration, ioOperationIDs](
 			std::optional< PersistentChatAssetIoResult > result) {
 			if (connectionGeneration != m_persistentChatAssetConnectionGeneration) return;
@@ -2469,9 +2490,27 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 					}
 				}
 			}
+			if (!fullImageAssetIDs.isEmpty() && !image.isNull() && result
+				&& !result->contentHash.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
+				const QString stableKey = QStringLiteral("chat-attachment-full:%1:%2")
+					.arg(assetID)
+					.arg(result->contentHash);
+				const QString providerUrl = m_qmlShellHost->imagePipeline()->registerImage(image, stableKey);
+				if (!providerUrl.isEmpty()) {
+					for (const unsigned int fullImageAssetID : fullImageAssetIDs) {
+						m_persistentChatAttachmentFullImageProviderUrls.insert(fullImageAssetID, providerUrl);
+						m_persistentChatAttachmentFullImageFailures.remove(fullImageAssetID);
+					}
+				}
+			}
 			for (const unsigned int attachmentAssetID : attachmentAssetIDs) {
 				if (!m_persistentChatAttachmentProviderUrls.contains(attachmentAssetID)) {
 					m_persistentChatAttachmentPreviewFailures.insert(attachmentAssetID);
+				}
+			}
+			for (const unsigned int fullImageAssetID : fullImageAssetIDs) {
+				if (!m_persistentChatAttachmentFullImageProviderUrls.contains(fullImageAssetID)) {
+					m_persistentChatAttachmentFullImageFailures.insert(fullImageAssetID);
 				}
 			}
 
