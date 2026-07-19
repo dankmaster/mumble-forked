@@ -240,8 +240,13 @@ bool QmlWindowStateController::eventFilter(QObject *watched, QEvent *event) {
 				scheduleSave();
 				break;
 			case QEvent::WindowStateChange:
-			case QEvent::Show:
-			case QEvent::Hide: scheduleSave(); break;
+			case QEvent::Show: scheduleSave(); break;
+			case QEvent::Close:
+			case QEvent::Hide:
+				// Detached Loader-owned windows can be destroyed in the same event-loop
+				// turn. Persist their final normal geometry before that happens.
+				flush();
+				break;
 			default: break;
 		}
 	}

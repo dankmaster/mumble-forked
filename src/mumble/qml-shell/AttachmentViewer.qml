@@ -17,6 +17,7 @@ ApplicationWindow {
 	property real panX: 0
 	property real panY: 0
 	property bool grabbing: false
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	readonly property string fullSource: safeRenderImageSource(attachment ? attachment.url : "")
 	readonly property string thumbnailSource: safeRenderImageSource(attachment ? attachment.thumbnailUrl : "")
 	readonly property string sourceUrl: fullSource || thumbnailSource
@@ -176,6 +177,8 @@ ApplicationWindow {
 	onWidthChanged: Qt.callLater(clampPan)
 	onHeightChanged: Qt.callLater(clampPan)
 	Component.onCompleted: {
+		if (geometryStore)
+			geometryStore.restoreWindow(viewer, "attachment-viewer", minimumWidth, minimumHeight)
 		focusRetryIfFailed()
 		Qt.callLater(function() {
 			if (viewer.visible && !viewer.loadFailed)

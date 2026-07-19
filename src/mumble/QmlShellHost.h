@@ -36,6 +36,7 @@ class QmlImagePipeline;
 class QmlMediaProfileFactory;
 class QmlThemeController;
 class QmlWindowStateController;
+class QmlWindowStateStore;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
@@ -140,6 +141,7 @@ private:
 	std::unique_ptr< QmlThemeController > m_themeController;
 	std::unique_ptr< QmlWindowStateController > m_windowStateController;
 	std::unique_ptr< QmlWindowStateController > m_pttWindowStateController;
+	std::unique_ptr< QmlWindowStateStore > m_auxiliaryWindowStateStore;
 	QPointer< QQuickWindow > m_pttToolWindow;
 #ifdef USE_MANUAL_PLUGIN
 	std::unique_ptr< ManualPluginController > m_manualPluginController;

@@ -12,6 +12,7 @@ Window {
 	property bool visualFixtureMode: false
 	property var beforeOpen: null
 	property bool initialPlacementComplete: false
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	readonly property string surfaceId: "settings.window"
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
 	readonly property bool settingsOpen: controller && controller.open
@@ -90,16 +91,19 @@ Window {
 	onVisibleChanged: {
 		if (!visible)
 			return
-		if (!initialPlacementComplete) {
+		const restored = geometryStore
+			&& geometryStore.restoreWindow(settingsWindow, "settings",
+				minimumWidth, minimumHeight)
+		if (!restored && !initialPlacementComplete) {
 			ensureUsableGeometry(true)
-			initialPlacementComplete = true
-		} else {
+		} else if (!restored) {
 			ensureUsableGeometry(false)
 		}
+		initialPlacementComplete = true
 		activateSettings()
 	}
 	onScreenChanged: Qt.callLater(function() {
-		if (settingsWindow.visible)
+		if (settingsWindow.visible && !settingsWindow.geometryStore)
 			settingsWindow.ensureUsableGeometry(false)
 	})
 	onActiveChanged: {

@@ -313,6 +313,7 @@ struct Settings {
 	QByteArray qbaMinimalViewGeometry         = {};
 	QByteArray qbaMinimalViewState            = {};
 	QByteArray qbaModernMainWindowGeometry    = {};
+	QByteArray qbaModernAuxiliaryWindowGeometries = {};
 	QByteArray qbaModernMainWindowState       = {};
 	QByteArray qbaModernMinimalViewGeometry   = {};
 	QByteArray qbaModernMinimalViewState      = {};

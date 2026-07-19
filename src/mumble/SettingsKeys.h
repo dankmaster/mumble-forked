@@ -196,6 +196,7 @@ const SettingsKey WINDOW_GEOMETRY_MINIMAL_VIEW_KEY        = { "minimal_view_wind
 const SettingsKey WINDOW_STATE_KEY                        = { "window_state" };
 const SettingsKey WINDOW_STATE_MINIMAL_VIEW_KEY           = { "minimal_view_window_state" };
 const SettingsKey MODERN_WINDOW_GEOMETRY_KEY              = { "window_geometry_modern" };
+const SettingsKey MODERN_AUXILIARY_WINDOW_GEOMETRIES_KEY  = { "auxiliary_window_geometries_modern" };
 const SettingsKey MODERN_MINIMAL_VIEW_GEOMETRY_KEY        = { "minimal_view_window_geometry_modern" };
 const SettingsKey MODERN_WINDOW_STATE_KEY                 = { "window_state_modern" };
 const SettingsKey MODERN_MINIMAL_VIEW_STATE_KEY           = { "minimal_view_window_state_modern" };

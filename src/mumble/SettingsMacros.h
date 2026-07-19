@@ -175,6 +175,7 @@
 	PROCESS(ui, WINDOW_STATE_KEY, qbaMainWindowState)                                     \
 	PROCESS(ui, WINDOW_STATE_MINIMAL_VIEW_KEY, qbaMinimalViewState)                       \
 	PROCESS(ui, MODERN_WINDOW_GEOMETRY_KEY, qbaModernMainWindowGeometry)                  \
+	PROCESS(ui, MODERN_AUXILIARY_WINDOW_GEOMETRIES_KEY, qbaModernAuxiliaryWindowGeometries) \
 	PROCESS(ui, MODERN_MINIMAL_VIEW_GEOMETRY_KEY, qbaModernMinimalViewGeometry)           \
 	PROCESS(ui, MODERN_WINDOW_STATE_KEY, qbaModernMainWindowState)                        \
 	PROCESS(ui, MODERN_MINIMAL_VIEW_STATE_KEY, qbaModernMinimalViewState)                 \

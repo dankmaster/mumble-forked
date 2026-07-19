@@ -14,6 +14,7 @@
 #include "QmlMediaProfileFactory.h"
 #include "QmlThemeController.h"
 #include "QmlWindowStateController.h"
+#include "QmlWindowStateStore.h"
 #include "ScreenShareVideoItem.h"
 #include "UiTheme.h"
 #include "Global.h"
@@ -62,7 +63,9 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_composerController(std::make_unique< ComposerController >(m_imagePipeline, this)),
 	  m_themeController(std::make_unique< QmlThemeController >(this)),
 	  m_windowStateController(std::make_unique< QmlWindowStateController >(this)),
-	  m_pttWindowStateController(std::make_unique< QmlWindowStateController >(this)) {
+	  m_pttWindowStateController(std::make_unique< QmlWindowStateController >(this)),
+	  m_auxiliaryWindowStateStore(std::make_unique< QmlWindowStateStore >(
+		  Global::get().s.qbaModernAuxiliaryWindowGeometries, this)) {
 	m_recorderController->setRuntime(m_recorderRuntime.get());
 	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
 #ifdef USE_MANUAL_PLUGIN
@@ -87,6 +90,7 @@ QmlShellHost::~QmlShellHost() {
 	releasePttForSafety(PttSafetyReason::HostDestroyed);
 	m_windowStateController->flush();
 	m_pttWindowStateController->flush();
+	m_auxiliaryWindowStateStore->flush();
 	destroyScreenShareViews();
 	delete m_pttToolWindow.data();
 #ifdef USE_MANUAL_PLUGIN
@@ -136,7 +140,8 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_mediaProfileFactory.get()),
 						  static_cast< QObject * >(m_selectionState.get()),
 						  static_cast< QObject * >(m_performanceMonitor.get()),
-						  static_cast< QObject * >(m_themeController.get()) }) {
+						  static_cast< QObject * >(m_themeController.get()),
+						  static_cast< QObject * >(m_auxiliaryWindowStateStore.get()) }) {
 		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
 	}
 	QQmlContext *context = m_engine->rootContext();
@@ -161,6 +166,9 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("qmlPerformance"), m_performanceMonitor.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 	context->setContextProperty(QStringLiteral("uiTheme"), m_themeController.get());
+	context->setContextProperty(QStringLiteral("windowStateStore"), m_auxiliaryWindowStateStore.get());
+	connect(m_auxiliaryWindowStateStore.get(), &QmlWindowStateStore::encodedStatesChanged, this,
+			[](const QByteArray &states) { Global::get().s.qbaModernAuxiliaryWindowGeometries = states; });
 #ifdef USE_MANUAL_PLUGIN
 	QQmlEngine::setObjectOwnership(m_manualPluginController.get(), QQmlEngine::CppOwnership);
 	context->setContextProperty(QStringLiteral("manualPlugin"), m_manualPluginController.get());
@@ -551,6 +559,8 @@ bool QmlShellHost::ensureManualPluginWindow() {
 	window->setTransientParent(m_window);
 	registerCaptureWindow(window);
 	applyUiThemeNativeTitleBar(window);
+	m_auxiliaryWindowStateStore->restoreWindow(window, QStringLiteral("manual-plugin"),
+		window->minimumSize().width(), window->minimumSize().height());
 	connect(window, &QObject::destroyed, this, [this]() { m_manualPluginWindow = nullptr; });
 	return true;
 }
@@ -585,6 +595,8 @@ QObject *QmlShellHost::createScreenShareView(QObject *backend) {
 			window->setTransientParent(m_window);
 			registerCaptureWindow(window);
 			applyUiThemeNativeTitleBar(window);
+			m_auxiliaryWindowStateStore->restoreWindow(window, QStringLiteral("screen-share-viewer"),
+				window->minimumSize().width(), window->minimumSize().height());
 			// ApplicationWindow's initial visible binding is not a sufficient
 			// reopen contract on Windows while the previous viewer is completing
 			// deferred destruction. Explicitly show and schedule a frame so a

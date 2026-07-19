@@ -1,6 +1,7 @@
 add_executable(TestQmlWindowStateController
 	TestQmlWindowStateController.cpp
 	../../mumble/QmlWindowStateController.cpp
+	../../mumble/QmlWindowStateStore.cpp
 )
 
 set_target_properties(TestQmlWindowStateController PROPERTIES AUTOMOC ON)

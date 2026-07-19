@@ -14,6 +14,7 @@ ApplicationWindow {
     property bool grabbing: false
 	readonly property bool compactLayout: width < 560 || height < 440
 	readonly property string displayTitle: safeText(controller.title, 512) || qsTr("Image")
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -121,6 +122,9 @@ ApplicationWindow {
         panY += dy
         clampPan()
     }
+
+	Component.onCompleted: if (geometryStore)
+		geometryStore.restoreWindow(viewer, "image-viewer", minimumWidth, minimumHeight)
 
     onWidthChanged: clampPan()
     onHeightChanged: clampPan()

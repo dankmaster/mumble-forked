@@ -41,6 +41,8 @@ Window {
 	property bool followTimelineTail: true
 	property bool timelinePositioning: false
 	property string quickReactionMessageId: ""
+	property bool hasPersistedPlacement: false
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	signal managedImageOpenRequested(string source, string title, string messageId)
 	signal managedAttachmentOpenRequested(var attachment, string messageId)
 	signal watchTogetherRequested(string url, string provider, string title)
@@ -361,7 +363,8 @@ Window {
 
 	onVisibleChanged: {
 		if (visible) {
-			positionNearParent()
+			if (!hasPersistedPlacement)
+				positionNearParent()
 			if (componentReady)
 				activateComposer()
 			followTimelineTail = true
@@ -384,6 +387,8 @@ Window {
 	}
 	onDockedChanged: if (docked && visible) positionNearParent()
 	Component.onCompleted: {
+		hasPersistedPlacement = geometryStore
+			&& geometryStore.restoreWindow(root, "direct-message", minimumWidth, 320)
 		componentReady = true
 		if (visible) {
 			activateComposer()

@@ -114,6 +114,7 @@ ApplicationWindow {
 	property int _audioMissingStatePolls: 0
 	property bool _rendererHealthy: false
 	property string _documentUrl: ""
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -180,7 +181,11 @@ ApplicationWindow {
 	           : qsTr("%1 player").arg(providerLabel)
 	    color: Theme.shellBackground
 	Component.onCompleted: {
-		applyInitialWindowSize()
+		const restored = geometryStore
+			&& geometryStore.restoreWindow(mediaWindow, "media-session",
+				minimumWidth, minimumHeight)
+		if (!restored)
+			applyInitialWindowSize()
 		Qt.callLater(controls.focusInitialControl)
 	}
 	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked)

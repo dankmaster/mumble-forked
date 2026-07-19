@@ -11,6 +11,22 @@ TestCase {
 	height: 700
 	property var settingsWindow: null
 	property string mainSource: ""
+	QtObject {
+		id: geometryStoreDouble
+		property bool restoreResult: false
+		property int calls: 0
+		function restoreWindow(window, key, minimumWidth, minimumHeight) {
+			calls += 1
+			compare(key, "settings")
+			if (restoreResult) {
+				window.x = 173
+				window.y = 119
+				window.width = Math.max(minimumWidth, 760)
+				window.height = Math.max(minimumHeight, 620)
+			}
+			return restoreResult
+		}
+	}
 
 	function initTestCase() {
 		mainSource = String(mainQmlSource || "")
@@ -22,7 +38,8 @@ TestCase {
 		tryCompare(component, "status", Component.Ready)
 		const created = component.createObject(null, {
 			"controller": dialogState,
-			"parentWindow": testCase.Window.window
+			"parentWindow": testCase.Window.window,
+			"geometryStore": geometryStoreDouble
 		})
 		verify(created !== null)
 		return created
@@ -46,6 +63,8 @@ TestCase {
 	function init() {
 		dialogState.open = false
 		dialogState.resetSections()
+		geometryStoreDouble.restoreResult = false
+		geometryStoreDouble.calls = 0
 		settingsWindow = createSettingsWindow()
 		openSettings()
 	}
@@ -111,6 +130,19 @@ TestCase {
 		tryVerify(function() {
 			return settingsWindow.hostedDialog.hasActiveDialogFocus()
 		})
+	}
+
+	function test_reopen_prefers_persisted_geometry_over_recentering() {
+		dialogState.open = false
+		tryCompare(settingsWindow, "visible", false)
+		geometryStoreDouble.restoreResult = true
+		dialogState.open = true
+		tryCompare(settingsWindow, "visible", true)
+		verify(geometryStoreDouble.calls > 0)
+		compare(settingsWindow.x, 173)
+		compare(settingsWindow.y, 119)
+		compare(settingsWindow.width, 760)
+		compare(settingsWindow.height, 620)
 	}
 
 	function test_settings_navigation_remains_keyboard_and_pointer_driven() {

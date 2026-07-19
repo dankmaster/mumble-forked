@@ -11,6 +11,7 @@ Window {
 	property bool visualFixtureMode: false
 	property var beforeOpen: null
 	property string presentedDialogId: ""
+	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	readonly property string surfaceId: "product-dialog.window"
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
 	readonly property bool productOpen: controller && controller.open
@@ -52,6 +53,11 @@ Window {
 	}
 
 	function ensureUsableGeometry(usePreferredSize, centerWindow) {
+		const dialogId = currentDialogId()
+		if (geometryStore && dialogId.length > 0
+				&& geometryStore.restoreWindow(productWindow, "dialog:" + dialogId,
+					minimumWidth, minimumHeight))
+			return true
 		const available = availableGeometry()
 		const margin = Theme.space4
 		const maximumUsableWidth = Math.max(minimumWidth, available.width - margin * 2)
@@ -81,6 +87,7 @@ Window {
 			Math.min(x, available.x + available.width - width - margin))
 		y = Math.max(available.y + margin,
 			Math.min(y, available.y + available.height - height - margin))
+		return false
 	}
 
 	function activateDialog() {
@@ -134,7 +141,7 @@ Window {
 
 	Component.onCompleted: syncVisibility()
 	onScreenChanged: Qt.callLater(function() {
-		if (productWindow.visible)
+		if (productWindow.visible && !productWindow.geometryStore)
 			productWindow.ensureUsableGeometry(false, false)
 	})
 	onActiveChanged: {

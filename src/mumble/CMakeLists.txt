@@ -373,6 +373,8 @@ list(APPEND MUMBLE_SOURCES
 	"QmlThemeController.h"
 	"QmlWindowStateController.cpp"
 	"QmlWindowStateController.h"
+	"QmlWindowStateStore.cpp"
+	"QmlWindowStateStore.h"
 )
 
 if(modern-layout-automation)

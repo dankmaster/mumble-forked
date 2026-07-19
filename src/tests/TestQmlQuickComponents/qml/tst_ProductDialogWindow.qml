@@ -10,13 +10,29 @@ TestCase {
 	width: 900
 	height: 700
 	property var productWindow: null
+	QtObject {
+		id: geometryStoreDouble
+		property var calls: []
+		property bool restoreResult: false
+		function restoreWindow(window, key, minimumWidth, minimumHeight) {
+			calls = calls.concat([ key ])
+			if (restoreResult) {
+				window.x = 211
+				window.y = 133
+				window.width = Math.max(minimumWidth, 630)
+				window.height = Math.max(minimumHeight, 470)
+			}
+			return restoreResult
+		}
+	}
 
 	function createProductWindow() {
 		const component = Qt.createComponent("qrc:/qml-shell/ProductDialogWindow.qml")
 		tryCompare(component, "status", Component.Ready)
 		const created = component.createObject(null, {
 			"controller": dialogState,
-			"parentWindow": testCase.Window.window
+			"parentWindow": testCase.Window.window,
+			"geometryStore": geometryStoreDouble
 		})
 		verify(created !== null, component.errorString())
 		return created
@@ -39,6 +55,8 @@ TestCase {
 		dialogState.open = false
 		dialogState.resetSections()
 		dialogState.setSpecialState("generic", {})
+		geometryStoreDouble.calls = []
+		geometryStoreDouble.restoreResult = false
 		productWindow = createProductWindow()
 	}
 
@@ -91,6 +109,26 @@ TestCase {
 		})
 		tryVerify(function() { return productWindow.width !== firstWidth })
 		compare(productWindow.presentedDialogId, "dialog-b")
+	}
+
+	function test_each_logical_dialog_uses_its_own_persisted_geometry_key() {
+		geometryStoreDouble.restoreResult = true
+		openProduct("server-browser", 820, 640)
+		compare(geometryStoreDouble.calls[geometryStoreDouble.calls.length - 1],
+			"dialog:server-browser")
+		compare(productWindow.x, 211)
+		compare(productWindow.y, 133)
+		compare(productWindow.width, 630)
+		compare(productWindow.height, 470)
+
+		dialogState.setSpecialState("generic", {
+			"id": "stonks", "pages": [], "width": 1000, "height": 760
+		})
+		tryCompare(productWindow, "presentedDialogId", "stonks")
+		compare(geometryStoreDouble.calls[geometryStoreDouble.calls.length - 1],
+			"dialog:stonks")
+		compare(productWindow.width, 630)
+		compare(productWindow.height, 470)
 	}
 
 	function test_system_close_uses_controller_owned_close_path() {

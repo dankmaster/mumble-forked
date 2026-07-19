@@ -1,4 +1,5 @@
 #include "QmlWindowStateController.h"
+#include "QmlWindowStateStore.h"
 
 #include <QtTest/QtTest>
 
@@ -15,6 +16,8 @@ private slots:
 	void keepsLogicalSizeAcrossDpiChanges();
 	void honorsToolWindowMinimumSize();
 	void recognizesCompositorManagedPlatforms();
+	void roundTripsIndependentAuxiliaryWindowStates();
+	void rejectsMalformedAuxiliaryWindowStates();
 };
 
 void TestQmlWindowStateController::clampsOffscreenGeometryToPreferredScreen() {
@@ -126,6 +129,37 @@ void TestQmlWindowStateController::recognizesCompositorManagedPlatforms() {
 	QVERIFY(!QmlWindowStateController::platformUsesCompositorManagedPositioning(QStringLiteral("xcb")));
 	QVERIFY(!QmlWindowStateController::platformUsesCompositorManagedPositioning(QStringLiteral("windows")));
 	QVERIFY(!QmlWindowStateController::platformUsesCompositorManagedPositioning(QStringLiteral("cocoa")));
+}
+
+void TestQmlWindowStateController::roundTripsIndependentAuxiliaryWindowStates() {
+	QmlWindowState settings;
+	settings.normalGeometry = QRect(180, 120, 980, 760);
+	settings.screenName = QStringLiteral("Primary");
+	QmlWindowState browser;
+	browser.normalGeometry = QRect(2180, 40, 840, 620);
+	browser.screenName = QStringLiteral("Secondary");
+
+	const QHash< QString, QByteArray > source {
+		{ QStringLiteral("settings"), QmlWindowStateController::encode(settings) },
+		{ QStringLiteral("dialog:server-browser"), QmlWindowStateController::encode(browser) }
+	};
+	const QByteArray encoded = QmlWindowStateStore::encode(source);
+	const QHash< QString, QByteArray > decoded = QmlWindowStateStore::decode(encoded);
+	QCOMPARE(decoded.size(), 2);
+	QCOMPARE(decoded.value(QStringLiteral("settings")), source.value(QStringLiteral("settings")));
+	QCOMPARE(decoded.value(QStringLiteral("dialog:server-browser")),
+		 source.value(QStringLiteral("dialog:server-browser")));
+	QCOMPARE(QmlWindowStateStore::encode(decoded), encoded);
+}
+
+void TestQmlWindowStateController::rejectsMalformedAuxiliaryWindowStates() {
+	QVERIFY(QmlWindowStateStore::decode(QByteArrayLiteral("not-json")).isEmpty());
+	QVERIFY(QmlWindowStateStore::decode(QByteArrayLiteral(
+		R"({"format":"mumble-qml-auxiliary-window-states","version":99,"states":{}})"))
+			.isEmpty());
+	QVERIFY(QmlWindowStateStore::decode(QByteArrayLiteral(
+		R"({"format":"mumble-qml-auxiliary-window-states","version":1,"states":{"settings":"bm90LXdpbmRvdy1zdGF0ZQ=="}})"))
+			.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestQmlWindowStateController)
