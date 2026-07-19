@@ -2210,22 +2210,22 @@ Rectangle {
 			}
             RowLayout {
                 anchors.fill: parent
-				anchors.leftMargin: 12
+				anchors.leftMargin: 14
 				anchors.rightMargin: 10
-				anchors.topMargin: 8
-				anchors.bottomMargin: 8
-				spacing: 8
+				anchors.topMargin: 7
+				anchors.bottomMargin: 7
+				spacing: 10
 				Rectangle {
 					id: selfAvatar
 					objectName: "selfAvatar"
-					Layout.preferredWidth: 34
-					Layout.preferredHeight: 34
-					radius: 17
+					Layout.preferredWidth: Theme.avatarMedium
+					Layout.preferredHeight: Theme.avatarMedium
+					radius: Math.max(8, Theme.innerRadius - 2)
 					clip: true
-					color: Theme.selfCardHover
+					color: Theme.accentSubtle
 					border.width: 1
-					border.color: clientSession.connected ? Theme.withAlpha(Theme.accent, 0.68)
-						: Theme.selfCardBorder
+					border.color: selfAvatarImage.status === Image.Ready
+						? Theme.quietBorder : Theme.withAlpha(Theme.accent, 0.58)
 					readonly property string avatarSource: navigationRail.safeAvatarSource(
 						((clientSession.selfMenu || ({})).avatarUrl) || "")
 					Image {
@@ -2256,11 +2256,11 @@ Rectangle {
 						objectName: "selfPresenceDot"
 						anchors.right: parent.right
 						anchors.bottom: parent.bottom
-						anchors.rightMargin: 1
-						anchors.bottomMargin: 1
-						width: 10
-						height: 10
-						radius: 5
+						anchors.rightMargin: -1
+						anchors.bottomMargin: -1
+						width: 9
+						height: 9
+						radius: width / 2
 						color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
 							: clientSession.connected ? Theme.success : Theme.textFaint
 						border.width: 2
@@ -2277,6 +2277,7 @@ Rectangle {
 						textFormat: Text.PlainText
 						text: clientSession.selfName
 						color: Theme.textStrong
+						font.pixelSize: Theme.fontBody
 						font.bold: true
 						elide: Text.ElideRight
 						Accessible.ignored: true
@@ -2286,12 +2287,18 @@ Rectangle {
 						Layout.fillWidth: true
 						textFormat: Text.PlainText
 						text: clientSession.selfStatusLabel
-						color: Theme.microLabelText
+						color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
+							: clientSession.connected ? Theme.success : Theme.microLabelText
 						font.pixelSize: Theme.fontCaption
 						elide: Text.ElideRight
 						Accessible.ignored: true
 					}
                 }
+				RowLayout {
+					id: selfActions
+					objectName: "selfActionGroup"
+					Layout.alignment: Qt.AlignVCenter
+					spacing: Theme.space1
 				ModernIconButton {
 					id: selfMuteButton
 					hoverEnabled: !navigationRail.visualFixtureMode
@@ -2304,6 +2311,8 @@ Rectangle {
 					dense: true
 					selected: !!clientSession.selfMuted
 					tone: clientSession.selfMuted ? "danger" : "neutral"
+					opacity: selected || hovered || activeFocus ? 1 : 0.72
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 					Accessible.name: clientSession.selfMuted ? qsTr("Unmute microphone") : qsTr("Mute microphone")
 					ToolTip.visible: hovered
 					ToolTip.text: Accessible.name
@@ -2321,6 +2330,8 @@ Rectangle {
 					dense: true
 					selected: !!clientSession.selfDeafened
 					tone: clientSession.selfDeafened ? "danger" : "neutral"
+					opacity: selected || hovered || activeFocus ? 1 : 0.72
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 					Accessible.name: clientSession.selfDeafened ? qsTr("Undeafen") : qsTr("Deafen")
 					ToolTip.visible: hovered
 					ToolTip.text: Accessible.name
@@ -2337,6 +2348,8 @@ Rectangle {
 					iconName: "settings"
 					dense: true
 					enabled: navigationRail.settingsEnabled
+					opacity: hovered || activeFocus ? 1 : 0.72
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 					Accessible.name: qsTr("Settings")
 					Accessible.description: qsTr("Audio, appearance, notifications, plugins, and more")
 					ToolTip.visible: hovered
@@ -2364,6 +2377,8 @@ Rectangle {
 					KeyNavigation.backtab: settingsButton
 					iconName: "more"
 					dense: true
+					opacity: hovered || activeFocus ? 1 : 0.72
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 					Accessible.name: qsTr("Profile menu")
 					onClicked: navigationRail.profileMenuRequested(
 						profileMenuButton.mapToItem(null, width / 2, 0))
@@ -2390,6 +2405,7 @@ Rectangle {
 							event.accepted = true
 						}
 					}
+				}
 				}
             }
         }

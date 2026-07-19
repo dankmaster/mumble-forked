@@ -1273,8 +1273,8 @@ TestCase {
 		compare(selfAvatar.avatarSource,
 			"image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8")
 		compare(String(selfAvatarImage.source), selfAvatar.avatarSource)
-		compare(selfAvatarImage.sourceSize.width, 68)
-		compare(selfAvatarImage.sourceSize.height, 68)
+		compare(selfAvatarImage.sourceSize.width, Theme.avatarMedium * 2)
+		compare(selfAvatarImage.sourceSize.height, Theme.avatarMedium * 2)
 	}
 
 	function test_listener_row_keeps_stable_identity_and_scope_actions_without_selection() {
@@ -1351,11 +1351,12 @@ TestCase {
 		const presence = findChild(loader.item, "selfPresenceDot")
 		const nameLabel = findChild(loader.item, "selfNameLabel")
 		const statusLabel = findChild(loader.item, "selfStatusLabel")
+		const actionGroup = findChild(loader.item, "selfActionGroup")
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")
 		const settingsButton = findChild(loader.item, "settingsButton")
 		const profileButton = findChild(loader.item, "profileMenuButton")
-		verify(dock !== null && avatar !== null && presence !== null)
+		verify(dock !== null && avatar !== null && presence !== null && actionGroup !== null)
 		verify(nameLabel !== null && statusLabel !== null)
 		verify(muteButton !== null && deafenButton !== null && settingsButton !== null
 			&& profileButton !== null)
@@ -1364,7 +1365,11 @@ TestCase {
 		verify(dock.Accessible.description.indexOf("Online") >= 0)
 		verify(nameLabel.Accessible.ignored)
 		verify(statusLabel.Accessible.ignored)
-		compare(String(statusLabel.color), String(Theme.microLabelText))
+		compare(avatar.width, Theme.avatarMedium)
+		verify(avatar.radius < avatar.width / 2,
+			"The profile avatar should use the polished rounded-square silhouette")
+		compare(actionGroup.spacing, Theme.space1)
+		compare(String(statusLabel.color), String(Theme.success))
 		compare(String(presence.color), String(Theme.success))
 		tryCompare(dock, "color", Theme.selfCardHover)
 
@@ -1383,6 +1388,7 @@ TestCase {
 
 		session.selfMuted = true
 		tryCompare(presence, "color", Theme.danger)
+		tryCompare(statusLabel, "color", Theme.danger)
 		verify(dock.Accessible.description.indexOf("Microphone muted") >= 0)
 		session.selfMuted = false
 	}
