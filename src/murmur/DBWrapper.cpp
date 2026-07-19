@@ -1584,6 +1584,31 @@ void DBWrapper::removeChatHistoryGrant(unsigned int serverID, unsigned int userI
 	WRAPPER_END
 }
 
+void DBWrapper::applyChatHistoryGrantChange(const ::msdb::DBChatHistoryGrant &grant,
+										const Channel &permissionChannel, const bool revoke) {
+	WRAPPER_BEGIN
+
+	assertValidID(grant.serverID);
+	assertRegisteredUserExists(grant.serverID, grant.userID);
+	assert(!permissionChannel.bTemporary);
+
+	// The durable grant row and the ACL/group representation are one logical write.
+	// updateChannelData joins this outer transaction, so either both persist or neither does.
+	::mdb::TransactionHolder transaction = m_serverDB.ensureTransaction();
+	if (revoke) {
+		m_serverDB.getChatHistoryGrantTable().removeGrant(grant.serverID, grant.userID, grant.scope, grant.scopeID);
+	} else {
+		if (grant.grantedByUserID) {
+			assertRegisteredUserExists(grant.serverID, grant.grantedByUserID.value());
+		}
+		m_serverDB.getChatHistoryGrantTable().setGrant(grant);
+	}
+	updateChannelData(grant.serverID, permissionChannel);
+	transaction.commit();
+
+	WRAPPER_END
+}
+
 std::optional< ::msdb::DBChatHistoryGrant >
 	DBWrapper::getChatHistoryGrant(unsigned int serverID, unsigned int userID, ::msdb::ChatThreadScope scope,
 								   unsigned int scopeID) {

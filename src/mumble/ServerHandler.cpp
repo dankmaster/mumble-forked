@@ -1600,14 +1600,16 @@ void ServerHandler::sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned
 }
 
 void ServerHandler::sendChatHistoryGrant(unsigned int userID, MumbleProto::ChatScope scope, unsigned int scopeID,
-										 quint64 visibleAfter, bool revoke) {
-	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryGrants)) {
+										 quint64 visibleAfter, bool revoke, const quint64 requestID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryGrants)
+		|| !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryGrantAcks) || requestID == 0) {
 		return;
 	}
 
 	MumbleProto::ChatHistoryGrantSync sync;
 	sync.set_action(revoke ? MumbleProto::ChatHistoryGrantSync_Action_Revoke
 						   : MumbleProto::ChatHistoryGrantSync_Action_Grant);
+	sync.set_request_id(requestID);
 
 	MumbleProto::ChatHistoryGrantInfo *grant = sync.add_grants();
 	grant->set_user_id(userID);

@@ -1005,6 +1005,19 @@ protected:
 	quint64 m_persistentChatOpenAttachmentDirectoryBytes = 0;
 	quint64 m_persistentChatAssetDownloadTimeoutSerial = 0;
 	quint64 m_persistentChatAssetConnectionGeneration = 1;
+	struct PendingChatHistoryGrant {
+		quint64 requestID = 0;
+		quint64 connectionGeneration = 0;
+		unsigned int session = 0;
+		unsigned int persistentUserID = 0;
+		MumbleProto::ChatScope scope = MumbleProto::Channel;
+		unsigned int scopeID = 0;
+		MumbleProto::ChatHistoryGrantSync_Action action = MumbleProto::ChatHistoryGrantSync_Action_Grant;
+		QPointer< ClientUser > target;
+		QString dialogID;
+	};
+	std::optional< PendingChatHistoryGrant > m_pendingChatHistoryGrant;
+	quint64 m_chatHistoryGrantRequestSerial = 0;
 	QSet< QString > m_persistentChatAttachmentIoOperationIDs;
 	QPointer< ChatAttachmentUploader > m_chatAttachmentUploader;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
@@ -1224,6 +1237,9 @@ protected:
 	void openModernKickUserDialog(ClientUser *user);
 	void openModernBanUserDialog(ClientUser *user);
 	void openModernChatHistoryGrantDialog(ClientUser *user);
+	void updateModernChatHistoryGrantDialog(const QString &dialogID, const QString &statusMessage,
+										  const QString &tone, bool applyEnabled);
+	void failPendingChatHistoryGrant(const QString &errorCode, const QString &message);
 	void openModernLocalNicknameDialog(const ClientUser *user);
 	void openModernUserCommentDialog(ClientUser *user);
 	void openModernUserCommentResetDialog(ClientUser *user);

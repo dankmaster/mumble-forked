@@ -22,6 +22,8 @@ enum ChatFeature {
 	ChatFeatureDirectMessages = 9;
 	ChatFeatureHistoryWarmup = 10;
 	ChatFeatureActorAvatars = 11;
+	// Correlated Accepted/NoOp/Rejected responses for ChatHistoryGrantSync mutations.
+	ChatFeatureHistoryGrantAcks = 12;
 }
 
 enum ForkFeature {
@@ -951,9 +953,20 @@ message ChatHistoryGrantSync {
 		Grant = 1;
 		Revoke = 2;
 	}
+	enum Result {
+		ResultUnspecified = 0;
+		Accepted = 1;
+		NoOp = 2;
+		Rejected = 3;
+	}
 
 	optional Action action = 1 [default = Sync];
 	repeated ChatHistoryGrantInfo grants = 2;
+	// Client-generated correlation for single-item Grant/Revoke mutations.
+	optional uint64 request_id = 3;
+	optional Result result = 4 [default = ResultUnspecified];
+	optional string error_code = 5;
+	optional string message = 6;
 }
 
 message ChatAssetUploadInit {

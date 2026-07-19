@@ -116,6 +116,7 @@ if(server)
 	add_subdirectory("TestCrypt")
 	add_subdirectory("TestAudioReceiverBuffer")
 	add_subdirectory("TestWatchTogetherSession")
+	add_subdirectory("TestChatHistoryGrantHandler")
 endif()
 
 # Shared tests

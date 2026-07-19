@@ -595,6 +595,13 @@ ModernDialogController::ActionResult ModernDialogController::invokeGenericDialog
 		result.stateChanged = false;
 		return result;
 	}
+	const QVariantMap actionItem =
+		findAction(m_genericDialog.value(QStringLiteral("actions")).toList(), action);
+	if (!actionItem.isEmpty() && actionItem.contains(QStringLiteral("enabled"))
+		&& !actionItem.value(QStringLiteral("enabled")).toBool()) {
+		result.stateChanged = false;
+		return result;
+	}
 
 	ActionResult::GenericAction genericAction;
 	genericAction.dialogID = m_genericDialog.value(QStringLiteral("id")).toString();
@@ -603,8 +610,6 @@ ModernDialogController::ActionResult ModernDialogController::invokeGenericDialog
 	collectFieldValues(m_genericDialog.value(QStringLiteral("sections")).toList(), genericAction.fieldValues);
 	result.genericAction = genericAction;
 
-	const QVariantMap actionItem =
-		findAction(m_genericDialog.value(QStringLiteral("actions")).toList(), action);
 	result.closeDialog = action == QLatin1String("close") || action == QLatin1String("cancel")
 						 || actionItem.value(QStringLiteral("closesDialog")).toBool();
 	result.stateChanged = result.closeDialog;

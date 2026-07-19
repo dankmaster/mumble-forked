@@ -174,6 +174,8 @@ public:
 	void setChatHistoryGrant(const ::mumble::server::db::DBChatHistoryGrant &grant);
 	void removeChatHistoryGrant(unsigned int serverID, unsigned int userID, ::mumble::server::db::ChatThreadScope scope,
 								unsigned int scopeID);
+	void applyChatHistoryGrantChange(const ::mumble::server::db::DBChatHistoryGrant &grant,
+								 const Channel &permissionChannel, bool revoke);
 	std::optional< ::mumble::server::db::DBChatHistoryGrant >
 		getChatHistoryGrant(unsigned int serverID, unsigned int userID, ::mumble::server::db::ChatThreadScope scope,
 							unsigned int scopeID);

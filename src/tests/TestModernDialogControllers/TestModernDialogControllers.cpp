@@ -165,6 +165,7 @@ private slots:
 	void dialogControllerBuildsDeleteMessageConfirmation();
 	void dialogControllerBuildsChangeAvatar();
 	void dialogControllerBuildsMigrationNotice();
+	void chatHistoryGrantDialogWaitsForMatchedAcknowledgement();
 };
 
 void TestModernDialogControllers::productCertificateDialogUsesProductionContract() {
@@ -2221,6 +2222,8 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(captureBody.contains(QStringLiteral("captureWindowReady(windowId)")));
 	QVERIFY(!captureBody.contains(QStringLiteral("QEventLoop")));
 	QVERIFY(!captureBody.contains(QStringLiteral("processEvents")));
+	QVERIFY(shellHostSource.contains(QStringLiteral("QLatin1String(\"product-dialog\")")));
+	QVERIFY(shellHostSource.contains(QStringLiteral("product-dialog.window")));
 
 	const qsizetype stateStart =
 		automationSource.indexOf(QStringLiteral("QVariantMap ModernUiAutomationServer::buildStateResponse"));
@@ -2305,6 +2308,10 @@ void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestr
 	QVERIFY(waitBody.contains(QStringLiteral("Timed out waiting for Qt Quick window exposure.")));
 	QVERIFY(waitBody.contains(QStringLiteral("Timed out waiting for a completed Qt Quick scene-graph frame after")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("productDialogTransitionActive")));
+	QVERIFY(fixtureSource.contains(
+		QStringLiteral("*captureWindow = QStringLiteral(\"product-dialog\")")));
+	QVERIFY(fixtureSource.contains(
+		QStringLiteral("captureWindow == QLatin1String(\"product-dialog\")")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("Focus ownership is a GUI-item contract")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("closeTimeout.start(2000)")));
 
@@ -3593,6 +3600,87 @@ void TestModernDialogControllers::dialogControllerBuildsMigrationNotice() {
 		controller.invokeAction(QStringLiteral("aclMigration"), QStringLiteral("close"), QVariantMap());
 	QCOMPARE(result.closeDialog, true);
 	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+}
+
+void TestModernDialogControllers::chatHistoryGrantDialogWaitsForMatchedAcknowledgement() {
+	auto hiddenField = [](const QString &id, const QVariant &value) {
+		return QVariantMap { { QStringLiteral("id"), id }, { QStringLiteral("type"), QStringLiteral("hidden") },
+			{ QStringLiteral("value"), value } };
+	};
+	QVariantMap apply { { QStringLiteral("id"), QStringLiteral("saveChatHistoryGrant") },
+		{ QStringLiteral("label"), QStringLiteral("Apply") }, { QStringLiteral("enabled"), true },
+		{ QStringLiteral("closesDialog"), false } };
+	QVariantMap section { { QStringLiteral("fields"), QVariantList {
+		hiddenField(QStringLiteral("session"), 17U),
+		hiddenField(QStringLiteral("persistentUserId"), 8),
+		hiddenField(QStringLiteral("connectionGeneration"), quint64(23)) } } };
+	QVariantMap dialog { { QStringLiteral("id"), QStringLiteral("chatHistoryGrant:17") },
+		{ QStringLiteral("kind"), QStringLiteral("form") },
+		{ QStringLiteral("sections"), QVariantList { section } },
+		{ QStringLiteral("actions"), QVariantList { apply } } };
+
+	ModernDialogController controller;
+	controller.openGenericDialog(dialog);
+	const ModernDialogController::ActionResult submitted = controller.invokeAction(
+		QStringLiteral("chatHistoryGrant:17"), QStringLiteral("saveChatHistoryGrant"), {});
+	QVERIFY(submitted.genericAction.has_value());
+	QCOMPARE(submitted.genericAction->fieldValues.value(QStringLiteral("session")).toUInt(), 17U);
+	QCOMPARE(submitted.genericAction->fieldValues.value(QStringLiteral("persistentUserId")).toInt(), 8);
+	QCOMPARE(submitted.genericAction->fieldValues.value(QStringLiteral("connectionGeneration")).toULongLong(),
+		quint64(23));
+	QVERIFY(!submitted.closeDialog);
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("chatHistoryGrant:17"));
+
+	apply.insert(QStringLiteral("enabled"), false);
+	dialog.insert(QStringLiteral("actions"), QVariantList { apply });
+	const QVariantMap pendingState = controller.openGenericDialog(dialog);
+	QVERIFY(!dialogAction(pendingState, QStringLiteral("saveChatHistoryGrant"))
+		.value(QStringLiteral("enabled")).toBool());
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("chatHistoryGrant:17"));
+	const ModernDialogController::ActionResult duplicate = controller.invokeAction(
+		QStringLiteral("chatHistoryGrant:17"), QStringLiteral("saveChatHistoryGrant"), {});
+	QVERIFY(!duplicate.genericAction.has_value());
+	QVERIFY(!duplicate.stateChanged);
+
+	apply.insert(QStringLiteral("enabled"), true);
+	QVariantMap errorNote { { QStringLiteral("id"), QStringLiteral("grant.error") },
+		{ QStringLiteral("type"), QStringLiteral("note") },
+		{ QStringLiteral("value"), QStringLiteral("Permission changed; try again.") },
+		{ QStringLiteral("tone"), QStringLiteral("danger") } };
+	dialog.insert(QStringLiteral("actions"), QVariantList { apply });
+	dialog.insert(QStringLiteral("sections"), QVariantList {
+		section, QVariantMap { { QStringLiteral("id"), QStringLiteral("chatHistoryGrantStatus") },
+			{ QStringLiteral("fields"), QVariantList { errorNote } } } });
+	const QVariantMap rejectedState = controller.openGenericDialog(dialog);
+	QVERIFY(dialogAction(rejectedState, QStringLiteral("saveChatHistoryGrant"))
+		.value(QStringLiteral("enabled")).toBool());
+	QCOMPARE(controller.activeDialogID(), QStringLiteral("chatHistoryGrant:17"));
+	controller.close(QStringLiteral("chatHistoryGrant:17"));
+	QVERIFY(controller.activeDialogID().isEmpty());
+
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString messagesPath = QFINDTESTDATA("../../mumble/Messages.cpp");
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY(!mainWindowPath.isEmpty());
+	QVERIFY(!messagesPath.isEmpty());
+	QVERIFY(!automationPath.isEmpty());
+	const QString mainWindowSource = readTestSource(mainWindowPath);
+	const QString messagesSource = readTestSource(messagesPath);
+	const QString automationSource = readTestSource(automationPath);
+	QVERIFY(mainWindowSource.contains(QStringLiteral("if (user->iId < 0)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("ChatFeatureHistoryGrantAcks")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("if (m_pendingChatHistoryGrant)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("boundPersistentUserID")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("boundConnectionGeneration")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("ack_timeout")));
+	QVERIFY(messagesSource.contains(QStringLiteral("msg.request_id() != m_pendingChatHistoryGrant->requestID")));
+	QVERIFY(messagesSource.contains(QStringLiteral("currentTarget != pending.target")));
+	QVERIFY(messagesSource.contains(QStringLiteral("acknowledgedScope != pending.scope")));
+	QVERIFY(messagesSource.contains(QStringLiteral("ChatHistoryGrantSync_Result_Rejected")));
+	QVERIFY(messagesSource.contains(QStringLiteral("ChatHistoryGrantSync_Result_Accepted")));
+	QVERIFY(messagesSource.contains(QStringLiteral("ChatHistoryGrantSync_Result_NoOp")));
+	QVERIFY(automationSource.contains(QStringLiteral("persistentUserId")));
+	QVERIFY(automationSource.contains(QStringLiteral("connectionGeneration")));
 }
 
 QTEST_MAIN(TestModernDialogControllers)

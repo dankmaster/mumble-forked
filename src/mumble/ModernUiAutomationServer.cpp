@@ -595,6 +595,8 @@ namespace {
 				QStringLiteral("saveLocalNickname"), QString(), QSize(640, 430));
 		}
 		if (variant == QLatin1String("chatHistoryGrant")) {
+			constexpr int registeredUserID = 8;
+			constexpr quint64 connectionGeneration = 1;
 			const QVariantList scopeOptions {
 				automationSelectOption(QObject::tr("Current voice room: Root"), QStringLiteral("0:0")),
 				automationSelectOption(QObject::tr("Server-wide chat"), QStringLiteral("2:0"))
@@ -614,6 +616,8 @@ namespace {
 					QObject::tr("Access"),
 					QVariantList {
 						automationHiddenField(QStringLiteral("session"), session),
+						automationHiddenField(QStringLiteral("persistentUserId"), registeredUserID),
+						automationHiddenField(QStringLiteral("connectionGeneration"), connectionGeneration),
 						automationReadonlyField(QObject::tr("User"), displayName),
 						automationSelectField(QStringLiteral("history.scope"), QObject::tr("Scope"),
 											  QStringLiteral("0:0"), scopeOptions, QStringLiteral("string")),
@@ -623,7 +627,7 @@ namespace {
 											  QStringLiteral("number"), 30) }) },
 				QVariantList { cancel,
 							   automationDialogAction(QStringLiteral("saveChatHistoryGrant"),
-													  QObject::tr("Apply"), QStringLiteral("accent"), true) },
+												  QObject::tr("Apply"), QStringLiteral("accent"), false) },
 				QStringLiteral("saveChatHistoryGrant"), QString(), QSize(700, 560));
 		}
 

@@ -19,6 +19,7 @@
 #include "ForkFeature.h"
 #include "Log.h"
 #include "MainWindow.h"
+#include "ModernDialogController.h"
 #include "MumbleConstants.h"
 #include "GlobalShortcut.h"
 #include "ChannelListenerManager.h"
@@ -1166,6 +1167,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	bool createdUser                             = false;
 	bool renamedUser                             = false;
 	bool movedChannels                           = false;
+	bool persistentIdentityChanged               = false;
 
 	if (msg.has_channel_id()) {
 		channel = Channel::get(msg.channel_id());
@@ -1211,7 +1213,15 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	appendUserStateTrace(QStringLiteral("post-create"));
 
 	if (msg.has_user_id()) {
+		persistentIdentityChanged = pDst->iId != static_cast< int >(msg.user_id());
 		pmModel->setUserId(pDst, static_cast< int >(msg.user_id()));
+		if (persistentIdentityChanged && m_pendingChatHistoryGrant
+			&& m_pendingChatHistoryGrant->session == pDst->uiSession
+			&& m_pendingChatHistoryGrant->persistentUserID != msg.user_id()) {
+			failPendingChatHistoryGrant(
+				QStringLiteral("stale_target"),
+				tr("The target user's registered identity changed. Reopen the user menu and submit the grant again."));
+		}
 	}
 	appendUserStateTrace(QStringLiteral("post-user-id"));
 
@@ -1646,7 +1656,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		if (rebuildConversationList) {
 			rebuildPersistentChatChannelList();
 		}
-		if (rebuildConversationList || movedChannels || activeDirectMessageAffected) {
+		if (rebuildConversationList || movedChannels || activeDirectMessageAffected || persistentIdentityChanged) {
 			updateMenuPermissions();
 			if (!rebuildConversationList) {
 				publishQmlParticipantState(pDst);
@@ -1671,6 +1681,11 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 	SELF_INIT;
 
 	QString reason = u8(msg.reason()).toHtmlEscaped();
+	if (m_pendingChatHistoryGrant && m_pendingChatHistoryGrant->session == pDst->uiSession) {
+		failPendingChatHistoryGrant(
+			QStringLiteral("target_disconnected"),
+			tr("The target user disconnected before the server confirmed the chat history grant."));
+	}
 
 	if (pDst == pSelf) {
 		bRetryServer = false;
@@ -2578,7 +2593,68 @@ void MainWindow::msgChatReactionState(const MumbleProto::ChatReactionState &msg)
 	handlePersistentChatReactionState(msg);
 }
 
-void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync &) {
+void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync &msg) {
+	if (!m_pendingChatHistoryGrant || !msg.has_request_id()
+		|| msg.request_id() != m_pendingChatHistoryGrant->requestID) {
+		return;
+	}
+
+	const PendingChatHistoryGrant pending = *m_pendingChatHistoryGrant;
+	ClientUser *currentTarget = ClientUser::get(pending.session);
+	if (pending.connectionGeneration != m_persistentChatAssetConnectionGeneration || !pending.target
+		|| currentTarget != pending.target || currentTarget->iId < 0
+		|| static_cast< unsigned int >(currentTarget->iId) != pending.persistentUserID) {
+		failPendingChatHistoryGrant(
+			QStringLiteral("stale_target"),
+			tr("The target user's server identity changed before the grant was confirmed. Reopen the user menu and try again."));
+		return;
+	}
+	if (!msg.has_action() || msg.action() != pending.action || msg.grants_size() != 1
+		|| !msg.grants(0).has_user_id() || msg.grants(0).user_id() != pending.persistentUserID) {
+		failPendingChatHistoryGrant(
+			QStringLiteral("mismatched_ack"),
+			tr("The server returned an acknowledgement for a different chat history grant."));
+		return;
+	}
+	const MumbleProto::ChatScope acknowledgedScope = msg.grants(0).has_scope()
+		? msg.grants(0).scope() : MumbleProto::Channel;
+	const unsigned int acknowledgedScopeID = msg.grants(0).has_scope_id()
+		? msg.grants(0).scope_id() : Mumble::ROOT_CHANNEL_ID;
+	if (acknowledgedScope != pending.scope || acknowledgedScopeID != pending.scopeID) {
+		failPendingChatHistoryGrant(
+			QStringLiteral("mismatched_ack"),
+			tr("The server acknowledged a different chat history scope. Reopen the dialog and try again."));
+		return;
+	}
+
+	const MumbleProto::ChatHistoryGrantSync_Result result = msg.has_result()
+		? msg.result() : MumbleProto::ChatHistoryGrantSync_Result_ResultUnspecified;
+	if (result == MumbleProto::ChatHistoryGrantSync_Result_Rejected) {
+		const QString message = msg.has_message() && !u8(msg.message()).trimmed().isEmpty()
+			? u8(msg.message()).trimmed()
+			: tr("The server rejected the chat history grant. Review your permissions and try again.");
+		failPendingChatHistoryGrant(
+			msg.has_error_code() ? u8(msg.error_code()) : QStringLiteral("rejected"), message);
+		return;
+	}
+	if (result != MumbleProto::ChatHistoryGrantSync_Result_Accepted
+		&& result != MumbleProto::ChatHistoryGrantSync_Result_NoOp) {
+		failPendingChatHistoryGrant(
+			QStringLiteral("invalid_ack"),
+			tr("The server response did not contain a valid chat history grant result."));
+		return;
+	}
+
+	m_pendingChatHistoryGrant.reset();
+	if (m_modernDialogController && m_modernDialogController->activeDialogID() == pending.dialogID) {
+		publishModernDialogState(m_modernDialogController->close(pending.dialogID));
+	}
+	const bool revoked = pending.action == MumbleProto::ChatHistoryGrantSync_Action_Revoke;
+	publishModernToast(
+		QStringLiteral("success"), tr("Chat history access"),
+		result == MumbleProto::ChatHistoryGrantSync_Result_NoOp
+			? (revoked ? tr("Chat history access was already revoked.") : tr("Chat history access was already granted."))
+			: (revoked ? tr("Chat history access revoked.") : tr("Chat history access granted.")));
 }
 
 void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &msg) {

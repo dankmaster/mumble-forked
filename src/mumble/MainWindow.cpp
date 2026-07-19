@@ -18811,11 +18811,22 @@ void MainWindow::openModernChatHistoryGrantDialog(ClientUser *user) {
 	if (!user) {
 		return;
 	}
-	if (user->iId < 0 || !Global::get().sh || !(Global::get().pPermissions & ChanACL::Write)) {
+	if (user->iId < 0) {
+		publishModernToast(QStringLiteral("error"), tr("Grant chat history"),
+			tr("Wait until the server confirms this user's registration, then reopen the user menu."));
+		return;
+	}
+	if (!Global::get().sh || !(Global::get().pPermissions & ChanACL::Write)) {
+		publishModernToast(QStringLiteral("error"), tr("Grant chat history"),
+			tr("You are no longer connected with permission to manage chat history."));
 		return;
 	}
 	if (!Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
-														 MumbleProto::ChatFeatureHistoryGrants)) {
+													 MumbleProto::ChatFeatureHistoryGrants)
+		|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+													  MumbleProto::ChatFeatureHistoryGrantAcks)) {
+		publishModernToast(QStringLiteral("error"), tr("Grant chat history"),
+			tr("This server cannot acknowledge chat history grant changes safely."));
 		return;
 	}
 
@@ -18875,6 +18886,9 @@ void MainWindow::openModernChatHistoryGrantDialog(ClientUser *user) {
 		QVariantList { modernDialogSection(
 			tr("Access"),
 			QVariantList { modernHiddenField(QStringLiteral("session"), user->uiSession),
+						   modernHiddenField(QStringLiteral("persistentUserId"), user->iId),
+						   modernHiddenField(QStringLiteral("connectionGeneration"),
+											 m_persistentChatAssetConnectionGeneration),
 						   modernReadonlyField(tr("User"), user->qsName),
 						   modernSelectField(QStringLiteral("history.scope"), tr("Scope"),
 											 scopeOptions.constFirst().toMap().value(QStringLiteral("value")),
@@ -18884,8 +18898,59 @@ void MainWindow::openModernChatHistoryGrantDialog(ClientUser *user) {
 											 QStringLiteral("number"), 30) }) },
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("saveChatHistoryGrant"), tr("Apply"), true,
-										  QStringLiteral("accent"), true) },
+										  QStringLiteral("accent"), false) },
 		QStringLiteral("saveChatHistoryGrant"), QSize(700, 560)));
+}
+
+void MainWindow::updateModernChatHistoryGrantDialog(const QString &dialogID, const QString &statusMessage,
+														 const QString &tone, const bool applyEnabled) {
+	if (!m_modernDialogController || m_modernDialogController->activeDialogID() != dialogID) {
+		return;
+	}
+
+	QVariantMap dialog = m_modernDialogController->state();
+	QVariantList actions = dialog.value(QStringLiteral("actions")).toList();
+	for (QVariant &entry : actions) {
+		QVariantMap action = entry.toMap();
+		const QString actionID = action.value(QStringLiteral("id")).toString();
+		if (actionID == QLatin1String("saveChatHistoryGrant") || actionID == QLatin1String("cancel")) {
+			action.insert(QStringLiteral("enabled"), applyEnabled);
+			entry = action;
+		}
+	}
+	dialog.insert(QStringLiteral("actions"), actions);
+
+	QVariantList sections = dialog.value(QStringLiteral("sections")).toList();
+	for (auto it = sections.begin(); it != sections.end();) {
+		if (it->toMap().value(QStringLiteral("id")).toString() == QLatin1String("chatHistoryGrantStatus")) {
+			it = sections.erase(it);
+		} else {
+			++it;
+		}
+	}
+	if (!statusMessage.trimmed().isEmpty()) {
+		QVariantMap note = modernNoteField(statusMessage);
+		if (!tone.isEmpty()) {
+			note.insert(QStringLiteral("tone"), tone);
+		}
+		QVariantMap status = modernDialogSection(tr("Status"), QVariantList { note });
+		status.insert(QStringLiteral("id"), QStringLiteral("chatHistoryGrantStatus"));
+		status.insert(QStringLiteral("tone"), tone);
+		sections.push_back(status);
+	}
+	dialog.insert(QStringLiteral("sections"), sections);
+	publishModernDialogState(m_modernDialogController->openGenericDialog(dialog));
+}
+
+void MainWindow::failPendingChatHistoryGrant(const QString &errorCode, const QString &message) {
+	if (!m_pendingChatHistoryGrant) {
+		return;
+	}
+	const QString dialogID = m_pendingChatHistoryGrant->dialogID;
+	m_pendingChatHistoryGrant.reset();
+	updateModernChatHistoryGrantDialog(dialogID, message, QStringLiteral("danger"), true);
+	publishModernToast(QStringLiteral("error"), tr("Chat history grant failed"), message);
+	qWarning().noquote() << "Chat history grant request failed:" << errorCode;
 }
 
 void MainWindow::openModernLocalNicknameDialog(const ClientUser *user) {
@@ -20928,7 +20993,37 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		session && actionID == QLatin1String("saveChatHistoryGrant")) {
 		ClientUser *user = ClientUser::get(*session);
 		const auto scope = modernChatHistoryScopeFromToken(fieldValues.value(QStringLiteral("history.scope")).toString());
-		if (!user || user->iId < 0 || !scope || !Global::get().sh) {
+		const int boundPersistentUserID = fieldValues.value(QStringLiteral("persistentUserId"), -1).toInt();
+		const quint64 boundConnectionGeneration =
+			fieldValues.value(QStringLiteral("connectionGeneration")).toULongLong();
+		if (m_pendingChatHistoryGrant) {
+			updateModernChatHistoryGrantDialog(dialogID,
+				tr("Waiting for the server to acknowledge the previous request."), QStringLiteral("info"), false);
+			return true;
+		}
+		if (!user || user->iId < 0 || user->iId != boundPersistentUserID
+			|| boundConnectionGeneration == 0
+			|| boundConnectionGeneration != m_persistentChatAssetConnectionGeneration) {
+			updateModernChatHistoryGrantDialog(
+				dialogID,
+				tr("This user registration is no longer current. Close this dialog, wait for the server-confirmed user state, and reopen it."),
+				QStringLiteral("danger"), true);
+			return true;
+		}
+		if (!scope) {
+			updateModernChatHistoryGrantDialog(
+				dialogID, tr("The selected chat history scope is no longer valid. Reopen the dialog and try again."),
+				QStringLiteral("danger"), true);
+			return true;
+		}
+		if (!Global::get().sh
+			|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+													   MumbleProto::ChatFeatureHistoryGrants)
+			|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+													   MumbleProto::ChatFeatureHistoryGrantAcks)) {
+			updateModernChatHistoryGrantDialog(
+				dialogID, tr("The connection can no longer acknowledge chat history grant changes."),
+				QStringLiteral("danger"), true);
 			return true;
 		}
 
@@ -20943,8 +21038,34 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 				static_cast< quint64 >(std::max< qint64 >(0, nowSeconds - static_cast< qint64 >(days) * 86400));
 		}
 
-		Global::get().sh->sendChatHistoryGrant(static_cast< unsigned int >(user->iId), scope->first, scope->second,
-											   visibleAfter, revoke);
+		quint64 requestID = ++m_chatHistoryGrantRequestSerial;
+		if (requestID == 0) {
+			requestID = ++m_chatHistoryGrantRequestSerial;
+		}
+		PendingChatHistoryGrant pending;
+		pending.requestID            = requestID;
+		pending.connectionGeneration = m_persistentChatAssetConnectionGeneration;
+		pending.session              = *session;
+		pending.persistentUserID     = static_cast< unsigned int >(user->iId);
+		pending.scope                = scope->first;
+		pending.scopeID              = scope->second;
+		pending.action               = revoke ? MumbleProto::ChatHistoryGrantSync_Action_Revoke
+												  : MumbleProto::ChatHistoryGrantSync_Action_Grant;
+		pending.target               = user;
+		pending.dialogID             = dialogID;
+		m_pendingChatHistoryGrant    = pending;
+
+		updateModernChatHistoryGrantDialog(dialogID, tr("Waiting for the server to confirm the change..."),
+			QStringLiteral("info"), false);
+		Global::get().sh->sendChatHistoryGrant(pending.persistentUserID, pending.scope, pending.scopeID,
+			visibleAfter, revoke, requestID);
+		QTimer::singleShot(10000, this, [this, requestID]() {
+			if (m_pendingChatHistoryGrant && m_pendingChatHistoryGrant->requestID == requestID) {
+				failPendingChatHistoryGrant(
+					QStringLiteral("ack_timeout"),
+					tr("The server did not acknowledge the chat history grant. Check the connection and try again."));
+			}
+		});
 		return true;
 	}
 
@@ -36300,7 +36421,9 @@ void MainWindow::qmUser_aboutToShow() {
 		qaUserGrantChatHistory->setEnabled(
 			p->iId >= 0 && (Global::get().pPermissions & ChanACL::Write)
 			&& Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
-															   MumbleProto::ChatFeatureHistoryGrants));
+														   MumbleProto::ChatFeatureHistoryGrants)
+			&& Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														   MumbleProto::ChatFeatureHistoryGrantAcks));
 		qaUserRemoteSpeechCleanup->setChecked(!isSelf && p->isRemoteSpeechCleanupEnabled());
 		qaUserLocalIgnore->setEnabled(!isSelf);
 		qaUserLocalIgnoreTTS->setEnabled(!isSelf);
@@ -38931,6 +39054,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 		? tr("The connection closed before the server confirmed the administrative change.")
 		: tr("The connection closed: %1").arg(reason.trimmed());
 	failPendingModernServerAdminOperations(adminDisconnectError);
+	failPendingChatHistoryGrant(QStringLiteral("connection_closed"), adminDisconnectError);
 
 	// Reset move-back history
 	qaMoveBack->setEnabled(false);

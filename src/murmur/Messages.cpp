@@ -658,7 +658,8 @@ bool clientSupportsChatFeature(const ServerUser *user, const MumbleProto::ChatFe
 		return Mumble::ChatFeatures::contains(user->qlSupportedChatFeatures, feature);
 	}
 
-	if (feature == MumbleProto::ChatFeatureHistoryGrants || feature == MumbleProto::ChatFeatureDirectMessages
+	if (feature == MumbleProto::ChatFeatureHistoryGrants || feature == MumbleProto::ChatFeatureHistoryGrantAcks
+		|| feature == MumbleProto::ChatFeatureDirectMessages
 		|| feature == MumbleProto::ChatFeatureHistoryWarmup || feature == MumbleProto::ChatFeatureActorAvatars) {
 		return false;
 	}
@@ -772,6 +773,7 @@ QList< int > effectiveChatFeatures(const ServerUser *user) {
 	legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureDirectMessages));
 	legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureHistoryWarmup));
 	legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureActorAvatars));
+	legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureHistoryGrantAcks));
 	legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureAttachments));
 	return legacyFeatures;
 }
@@ -7911,128 +7913,121 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 	ZoneScoped;
 
 	MSG_SETUP(ServerUser::Authenticated);
-	QMutexLocker qml(&qmCache);
-
-	RATELIMIT(uSource);
-
-	if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryGrants)) {
-		sendPersistentChatUnsupported(uSource);
-		return;
-	}
-
-	Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
-	if (!rootChannel) {
-		return;
-	}
-
 	const MumbleProto::ChatHistoryGrantSync_Action action =
 		msg.has_action() ? msg.action() : MumbleProto::ChatHistoryGrantSync_Action_Sync;
+	const bool mutation = action == MumbleProto::ChatHistoryGrantSync_Action_Grant
+		|| action == MumbleProto::ChatHistoryGrantSync_Action_Revoke;
 
-	if (action == MumbleProto::ChatHistoryGrantSync_Action_Sync) {
-		if (!hasPermission(uSource, rootChannel, ChanACL::Write)) {
-			PERM_DENIED(uSource, rootChannel, ChanACL::Write);
+	auto makeResponse = [&msg, action]() {
+		MumbleProto::ChatHistoryGrantSync response;
+		response.set_action(action);
+		if (msg.has_request_id()) {
+			response.set_request_id(msg.request_id());
+		}
+		return response;
+	};
+	auto rejectMutation = [this, uSource, &msg, action, &makeResponse](const QString &errorCode,
+																	 const QString &displayMessage) {
+		MumbleProto::ChatHistoryGrantSync response = makeResponse();
+		response.set_result(MumbleProto::ChatHistoryGrantSync_Result_Rejected);
+		response.set_error_code(u8(errorCode));
+		response.set_message(u8(displayMessage));
+		if (msg.grants_size() == 1) {
+			*response.add_grants() = msg.grants(0);
+		}
+		sendMessage(uSource, response);
+		const unsigned int targetID = msg.grants_size() == 1 && msg.grants(0).has_user_id()
+			? msg.grants(0).user_id() : 0;
+		log(uSource, QStringLiteral("Chat history grant rejected action=%1 target=%2 reason=%3")
+						 .arg(static_cast< int >(action)).arg(targetID).arg(errorCode));
+	};
+
+	if (uSource->leakyBucket.ratelimit(1)) {
+		if (mutation) {
+			rejectMutation(QStringLiteral("rate_limited"),
+				tr("Too many chat history grant requests. Wait a moment and try again."));
+		}
+		return;
+	}
+
+	if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryGrants)) {
+		if (mutation) {
+			rejectMutation(QStringLiteral("unsupported"), tr("This server does not support chat history grants."));
+		} else {
+			sendPersistentChatUnsupported(uSource);
+		}
+		return;
+	}
+
+	if (mutation && clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryGrantAcks)
+		&& !msg.has_request_id()) {
+		rejectMutation(QStringLiteral("missing_request_id"), tr("The grant request did not include a request ID."));
+		return;
+	}
+	if (mutation && msg.grants_size() != 1) {
+		rejectMutation(QStringLiteral("invalid_item_count"),
+			tr("A chat history grant request must contain exactly one target."));
+		return;
+	}
+
+	Channel *permissionChannel = nullptr;
+	Channel *rootChannel       = nullptr;
+	unsigned int targetUserID  = 0;
+	MumbleProto::ChatScope scope = MumbleProto::Channel;
+	unsigned int scopeID       = Mumble::ROOT_CHANNEL_ID;
+	std::optional< msdb::ChatThreadScope > dbScope;
+	bool changed = false;
+	MumbleProto::ChatHistoryGrantSync response = makeResponse();
+
+	{
+		QMutexLocker qml(&qmCache);
+		rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+		if (!rootChannel) {
+			if (mutation) {
+				rejectMutation(QStringLiteral("missing_root_channel"), tr("The server root channel is unavailable."));
+			}
 			return;
 		}
 
-		MumbleProto::ChatHistoryGrantSync response;
-		response.set_action(MumbleProto::ChatHistoryGrantSync_Action_Sync);
-		for (const msdb::DBChatHistoryGrant &grant : m_dbWrapper.getChatHistoryGrants(iServerNum)) {
-			const std::optional< MumbleProto::ChatHistoryGrantInfo > info = protoGrantInfoFromDB(grant);
-			if (info) {
-				*response.add_grants() = *info;
-			}
-		}
-		sendMessage(uSource, response);
-		return;
-	}
-
-	if (action != MumbleProto::ChatHistoryGrantSync_Action_Grant
-		&& action != MumbleProto::ChatHistoryGrantSync_Action_Revoke) {
-		return;
-	}
-
-	auto chatHistoryAclGroupName = [](Channel *permissionChannel) {
-		static const QString canonicalGroupName = QStringLiteral("chathistory");
-		if (!permissionChannel) {
-			return canonicalGroupName;
-		}
-
-		for (const ChanACL *acl : permissionChannel->qlACL) {
-			if (acl && acl->iUserId < 0 && acl->qsGroup.compare(canonicalGroupName, Qt::CaseInsensitive) == 0
-				&& permissionChannel->qhGroups.contains(acl->qsGroup)) {
-				return acl->qsGroup;
-			}
-		}
-
-		for (const Group *group : permissionChannel->qhGroups) {
-			if (group && group->qsName.compare(canonicalGroupName, Qt::CaseInsensitive) == 0) {
-				return group->qsName;
-			}
-		}
-
-		return canonicalGroupName;
-	};
-
-	auto ensureChatHistoryAcl = [chatHistoryAclGroupName](Channel *permissionChannel, unsigned int userID) {
-		const QString groupName = chatHistoryAclGroupName(permissionChannel);
-		Group *group                   = permissionChannel->qhGroups.value(groupName);
-		if (!group) {
-			group = new Group(permissionChannel, groupName);
-		}
-
-		group->qsRemove.remove(static_cast< int >(userID));
-		group->qsAdd.insert(static_cast< int >(userID));
-
-		bool hasGrantAcl = false;
-		for (ChanACL *acl : permissionChannel->qlACL) {
-			if (acl && acl->iUserId < 0 && acl->qsGroup == groupName
-				&& ((acl->pAllow & ChanACL::ViewTextMessageHistory) == ChanACL::ViewTextMessageHistory)) {
-				hasGrantAcl = true;
-				break;
-			}
-		}
-
-		if (!hasGrantAcl) {
-			ChanACL *acl    = new ChanACL(permissionChannel);
-			acl->bApplyHere = true;
-			acl->bApplySubs = false;
-			acl->qsGroup    = groupName;
-			acl->pDeny      = ChanACL::None;
-			acl->pAllow     = ChanACL::ViewTextMessageHistory;
-		}
-	};
-
-	auto removeChatHistoryGroupMember = [](Channel *permissionChannel, unsigned int userID) {
-		static const QString canonicalGroupName = QStringLiteral("chathistory");
-		for (Group *group : permissionChannel->qhGroups) {
-			if (!group || group->qsName.compare(canonicalGroupName, Qt::CaseInsensitive) != 0) {
-				continue;
+		if (action == MumbleProto::ChatHistoryGrantSync_Action_Sync) {
+			// qmCache is already held. Calling Server::hasPermission here would self-lock.
+			if (!ChanACL::hasPermission(uSource, rootChannel, ChanACL::Write, &acCache)) {
+				PERM_DENIED(uSource, rootChannel, ChanACL::Write);
+				return;
 			}
 
-			group->qsAdd.remove(static_cast< int >(userID));
-			group->qsRemove.remove(static_cast< int >(userID));
-		}
-	};
-
-	QSet< Channel * > changedChannels;
-	QSet< unsigned int > changedUserIDs;
-	MumbleProto::ChatHistoryGrantSync response;
-	response.set_action(action);
-
-	for (int i = 0; i < msg.grants_size(); ++i) {
-		const MumbleProto::ChatHistoryGrantInfo &info = msg.grants(i);
-		if (!info.has_user_id() || !m_dbWrapper.registeredUserExists(iServerNum, info.user_id())) {
-			continue;
+			for (const msdb::DBChatHistoryGrant &grant : m_dbWrapper.getChatHistoryGrants(iServerNum)) {
+				const std::optional< MumbleProto::ChatHistoryGrantInfo > info = protoGrantInfoFromDB(grant);
+				if (info) {
+					*response.add_grants() = *info;
+				}
+			}
+			response.set_result(MumbleProto::ChatHistoryGrantSync_Result_Accepted);
+			sendMessage(uSource, response);
+			return;
 		}
 
-		MumbleProto::ChatScope scope = info.has_scope() ? info.scope() : MumbleProto::Channel;
-		unsigned int scopeID         = info.has_scope_id() ? info.scope_id() : Mumble::ROOT_CHANNEL_ID;
-		const std::optional< msdb::ChatThreadScope > dbScope = dbScopeFromProto(scope);
+		if (!mutation) {
+			rejectMutation(QStringLiteral("invalid_action"), tr("The chat history grant action is invalid."));
+			return;
+		}
+
+		const MumbleProto::ChatHistoryGrantInfo &info = msg.grants(0);
+		if (!info.has_user_id() || info.user_id() > static_cast< unsigned int >(std::numeric_limits< int >::max())
+			|| !m_dbWrapper.registeredUserExists(iServerNum, info.user_id())) {
+			rejectMutation(QStringLiteral("target_not_registered"),
+				tr("The target no longer has a registered server identity. Reopen the user menu and try again."));
+			return;
+		}
+		targetUserID = info.user_id();
+		scope        = info.has_scope() ? info.scope() : MumbleProto::Channel;
+		scopeID      = info.has_scope_id() ? info.scope_id() : Mumble::ROOT_CHANNEL_ID;
+		dbScope      = dbScopeFromProto(scope);
 		if (!dbScope) {
-			continue;
+			rejectMutation(QStringLiteral("invalid_scope"), tr("The selected chat history scope is not supported."));
+			return;
 		}
 
-		Channel *permissionChannel = nullptr;
 		switch (scope) {
 			case MumbleProto::Channel:
 				permissionChannel = qhChannels.value(scopeID);
@@ -8042,69 +8037,143 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 				permissionChannel = rootChannel;
 				break;
 			case MumbleProto::TextChannel: {
-				std::optional< msdb::DBTextChannel > textChannel = m_dbWrapper.getTextChannel(iServerNum, scopeID);
-				if (!textChannel) {
-					continue;
+				const std::optional< msdb::DBTextChannel > textChannel = m_dbWrapper.getTextChannel(iServerNum, scopeID);
+				if (textChannel) {
+					permissionChannel = qhChannels.value(textChannel->aclChannelID);
 				}
-				permissionChannel = qhChannels.value(textChannel->aclChannelID);
 				break;
 			}
 			case MumbleProto::Aggregate:
 			case MumbleProto::Private:
-				continue;
+				break;
 		}
-
-		if (!permissionChannel) {
-			continue;
+		if (!permissionChannel || permissionChannel->bTemporary) {
+			rejectMutation(QStringLiteral("scope_not_found"), tr("The selected chat history scope no longer exists."));
+			return;
 		}
+		MumbleProto::ChatHistoryGrantInfo normalizedInfo = info;
+		normalizedInfo.set_user_id(targetUserID);
+		normalizedInfo.set_scope(scope);
+		normalizedInfo.set_scope_id(scopeID);
 
-		if (!hasPermission(uSource, permissionChannel, ChanACL::Write)
-			&& !hasPermission(uSource, rootChannel, ChanACL::Write)) {
+		// qmCache is already held. Keep all permission checks on the lock-aware ACL path.
+		if (!ChanACL::hasPermission(uSource, permissionChannel, ChanACL::Write, &acCache)
+			&& !ChanACL::hasPermission(uSource, rootChannel, ChanACL::Write, &acCache)) {
+			rejectMutation(QStringLiteral("permission_denied"),
+				tr("You no longer have permission to manage chat history for this scope."));
 			PERM_DENIED(uSource, permissionChannel, ChanACL::Write);
 			return;
 		}
 
-		if (action == MumbleProto::ChatHistoryGrantSync_Action_Grant) {
-			ensureChatHistoryAcl(permissionChannel, info.user_id());
-
-			msdb::DBChatHistoryGrant grant(iServerNum, info.user_id(), *dbScope, scopeID);
-			grant.visibleAfter = chatTimePointFromEpochSeconds(info.has_visible_after() ? info.visible_after() : 0);
-			grant.grantedAt = std::chrono::system_clock::now();
-			if (uSource->iId >= 0) {
-				grant.grantedByUserID = static_cast< unsigned int >(uSource->iId);
+		const std::optional< msdb::DBChatHistoryGrant > existingGrant =
+			m_dbWrapper.getChatHistoryGrant(iServerNum, targetUserID, *dbScope, scopeID);
+		const auto requestedVisibleAfter =
+			chatTimePointFromEpochSeconds(info.has_visible_after() ? info.visible_after() : 0);
+		if ((action == MumbleProto::ChatHistoryGrantSync_Action_Revoke && !existingGrant)
+			|| (action == MumbleProto::ChatHistoryGrantSync_Action_Grant && existingGrant
+				&& existingGrant->visibleAfter == requestedVisibleAfter)) {
+			response.set_result(MumbleProto::ChatHistoryGrantSync_Result_NoOp);
+			if (existingGrant) {
+				if (const auto normalized = protoGrantInfoFromDB(*existingGrant)) {
+					*response.add_grants() = *normalized;
+				}
+			} else {
+				*response.add_grants() = normalizedInfo;
 			}
-			m_dbWrapper.setChatHistoryGrant(grant);
+			sendMessage(uSource, response);
+			log(uSource, QStringLiteral("Chat history grant no-op action=%1 target=%2 scope=%3 scope_id=%4")
+						 .arg(static_cast< int >(action)).arg(targetUserID)
+						 .arg(static_cast< int >(scope)).arg(scopeID));
+			return;
+		}
 
-			const std::optional< MumbleProto::ChatHistoryGrantInfo > responseInfo = protoGrantInfoFromDB(grant);
-			if (responseInfo) {
-				*response.add_grants() = *responseInfo;
+		static const QString canonicalGroupName = QStringLiteral("chathistory");
+		QString groupName = canonicalGroupName;
+		for (const Group *candidate : permissionChannel->qhGroups) {
+			if (candidate && candidate->qsName.compare(canonicalGroupName, Qt::CaseInsensitive) == 0) {
+				groupName = candidate->qsName;
+				break;
+			}
+		}
+		Group *group = permissionChannel->qhGroups.value(groupName);
+		const bool groupCreated = action == MumbleProto::ChatHistoryGrantSync_Action_Grant && !group;
+		if (groupCreated) {
+			group = new Group(permissionChannel, groupName);
+		}
+		const QSet< int > previousAdd = group ? group->qsAdd : QSet< int >{};
+		const QSet< int > previousRemove = group ? group->qsRemove : QSet< int >{};
+		ChanACL *createdAcl = nullptr;
+
+		if (action == MumbleProto::ChatHistoryGrantSync_Action_Grant) {
+			group->qsRemove.remove(static_cast< int >(targetUserID));
+			group->qsAdd.insert(static_cast< int >(targetUserID));
+			const bool hasGrantAcl = std::any_of(permissionChannel->qlACL.cbegin(), permissionChannel->qlACL.cend(),
+				[&groupName](const ChanACL *acl) {
+					return acl && acl->iUserId < 0 && acl->qsGroup.compare(groupName, Qt::CaseInsensitive) == 0
+						&& (acl->pAllow & ChanACL::ViewTextMessageHistory) == ChanACL::ViewTextMessageHistory;
+				});
+			if (!hasGrantAcl) {
+				createdAcl             = new ChanACL(permissionChannel);
+				createdAcl->bApplyHere = true;
+				createdAcl->bApplySubs = false;
+				createdAcl->qsGroup    = groupName;
+				createdAcl->pDeny      = ChanACL::None;
+				createdAcl->pAllow     = ChanACL::ViewTextMessageHistory;
+			}
+		} else if (group) {
+			group->qsAdd.remove(static_cast< int >(targetUserID));
+			group->qsRemove.remove(static_cast< int >(targetUserID));
+		}
+
+		msdb::DBChatHistoryGrant grant(iServerNum, targetUserID, *dbScope, scopeID);
+		grant.visibleAfter = requestedVisibleAfter;
+		grant.grantedAt    = std::chrono::system_clock::now();
+		if (uSource->iId >= 0) {
+			grant.grantedByUserID = static_cast< unsigned int >(uSource->iId);
+		}
+		try {
+			m_dbWrapper.applyChatHistoryGrantChange(
+				grant, *permissionChannel, action == MumbleProto::ChatHistoryGrantSync_Action_Revoke);
+		} catch (const std::exception &) {
+			if (group) {
+				group->qsAdd    = previousAdd;
+				group->qsRemove = previousRemove;
+			}
+			if (createdAcl) {
+				permissionChannel->qlACL.removeAll(createdAcl);
+				delete createdAcl;
+			}
+			if (groupCreated) {
+				permissionChannel->qhGroups.remove(groupName);
+				delete group;
+			}
+			rejectMutation(QStringLiteral("database_error"),
+				tr("The server could not save the chat history grant. No changes were applied."));
+			return;
+		}
+
+		changed = true;
+		response.set_result(MumbleProto::ChatHistoryGrantSync_Result_Accepted);
+		if (action == MumbleProto::ChatHistoryGrantSync_Action_Grant) {
+			if (const auto normalized = protoGrantInfoFromDB(grant)) {
+				*response.add_grants() = *normalized;
 			}
 		} else {
-			m_dbWrapper.removeChatHistoryGrant(iServerNum, info.user_id(), *dbScope, scopeID);
-			removeChatHistoryGroupMember(permissionChannel, info.user_id());
-			*response.add_grants() = info;
-		}
-
-		changedChannels.insert(permissionChannel);
-		changedUserIDs.insert(info.user_id());
-	}
-
-	if (response.grants_size() == 0) {
-		return;
-	}
-
-	for (Channel *changedChannel : changedChannels) {
-		if (changedChannel && !changedChannel->bTemporary) {
-			m_dbWrapper.updateChannelData(iServerNum, *changedChannel);
+			*response.add_grants() = normalizedInfo;
 		}
 	}
-	clearACLCache();
 
+	// The ACL mutation and both durable writes are complete before the cache is invalidated.
+	// clearACLCache owns qmCache itself, so it must run after the guarded mutation scope.
+	if (changed) {
+		clearACLCache();
+	}
 	sendMessage(uSource, response);
+	log(uSource, QStringLiteral("Chat history grant accepted action=%1 target=%2 scope=%3 scope_id=%4")
+				 .arg(static_cast< int >(action)).arg(targetUserID).arg(static_cast< int >(scope)).arg(scopeID));
 
 	for (ServerUser *currentUser : qhUsers) {
-		if (currentUser && currentUser->iId >= 0
-			&& changedUserIDs.contains(static_cast< unsigned int >(currentUser->iId))) {
+		if (currentUser && currentUser->iId >= 0 && static_cast< unsigned int >(currentUser->iId) == targetUserID) {
 			sendTextChannelSync(currentUser);
 		}
 	}
