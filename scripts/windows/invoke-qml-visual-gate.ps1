@@ -317,10 +317,10 @@ function Assert-QmlAccessibilityEvidence {
 	) -or $surface.StartsWith("settings-", [StringComparison]::Ordinal) `
 		-or $surface.StartsWith("dialog-", [StringComparison]::Ordinal) `
 		-or $surface.StartsWith("screen-share-editor", [StringComparison]::Ordinal)
-	$mainWindowModalSurface = $surface.StartsWith("settings-", [StringComparison]::Ordinal) `
+	$modalSurface = $surface.StartsWith("settings-", [StringComparison]::Ordinal) `
 		-or $surface.StartsWith("dialog-", [StringComparison]::Ordinal) `
 		-or $surface.StartsWith("screen-share-editor", [StringComparison]::Ordinal)
-	$modalAccessibilityActive = $NavigationOpen -or $mainWindowModalSurface
+	$modalAccessibilityActive = $NavigationOpen -or $modalSurface
 	$focus = Get-QmlAccessibilityFocusSummary $Snapshot
 	if (-not $focus.valid) {
 		throw "Case '$CaseId' accessibility tree contains no focus owner or multiple independent focus branches."
@@ -1133,6 +1133,8 @@ foreach ($case in $selectedCases) {
 	}
 	$expectedCaptureWindow = if ($surfaceVariant -eq "direct-message-window") { "direct-message" }
 		elseif ($surfaceVariant.StartsWith("settings-", [StringComparison]::Ordinal)) { "settings" }
+		elseif ($surfaceVariant.StartsWith("dialog-", [StringComparison]::Ordinal) -or
+			$surfaceVariant.StartsWith("screen-share-editor", [StringComparison]::Ordinal)) { "product-dialog" }
 		elseif ($surfaceVariant -eq "manual-plugin") { "manual-plugin" }
 		elseif ($surfaceVariant -eq "attachment-viewer") { "attachment-viewer" }
 		elseif ($surfaceVariant -eq "image-viewer") { "image-viewer" }

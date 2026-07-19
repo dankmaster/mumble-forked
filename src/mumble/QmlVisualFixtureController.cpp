@@ -2118,9 +2118,10 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	constexpr int maximumFocusAttempts = 3;
 	for (int attempt = 0; attempt < maximumFocusAttempts && !requestedTargetOwnsFocus; ++attempt) {
 		QVariant focusTarget;
-		if (captureWindow == QLatin1String("main") || captureWindow == QLatin1String("settings")) {
-			QQuickWindow *focusWindow = captureWindow == QLatin1String("settings")
-				? presentationWindow : window;
+		if (captureWindow == QLatin1String("main") || captureWindow == QLatin1String("settings")
+			|| captureWindow == QLatin1String("product-dialog")) {
+			QQuickWindow *focusWindow = captureWindow == QLatin1String("main")
+				? window : presentationWindow;
 			if (!QMetaObject::invokeMethod(focusWindow, "focusVisualFixture", Q_RETURN_ARG(QVariant, focusTarget),
 									  Q_ARG(QVariant, QVariant(state)),
 									  Q_ARG(QVariant, QVariant(surfaceVariant)))) {
@@ -2564,6 +2565,8 @@ bool QmlVisualFixtureController::applySurface(const QString &surfaceVariant, QSt
 		m_host->dialogController()->applyState(dialog);
 		if (surfaceVariant.startsWith(QLatin1String("settings-")) && captureWindow) {
 			*captureWindow = QStringLiteral("settings");
+		} else if (captureWindow) {
+			*captureWindow = QStringLiteral("product-dialog");
 		}
 		return true;
 	}

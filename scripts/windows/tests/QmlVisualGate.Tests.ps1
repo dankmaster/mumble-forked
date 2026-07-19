@@ -1755,10 +1755,11 @@ Describe "Qt Quick connected fixture contract" {
 	It "rejects product-background accessibility nodes behind every main-window modal" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 
-		$worker | Should Match '\$mainWindowModalSurface\s*=\s*\$surface\.StartsWith\("settings-"'
+		$worker | Should Match '\$modalSurface\s*=\s*\$surface\.StartsWith\("settings-"'
 		$worker | Should Match '\$surface\.StartsWith\("dialog-"'
 		$worker | Should Match '\$surface\.StartsWith\("screen-share-editor"'
-		$worker | Should Match '\$modalAccessibilityActive\s*=\s*\$NavigationOpen -or \$mainWindowModalSurface'
+		$worker | Should Match '\$modalAccessibilityActive\s*=\s*\$NavigationOpen -or \$modalSurface'
+		$worker | Should Match '\$surfaceVariant\.StartsWith\("dialog-"[\s\S]*"product-dialog"'
 		$worker | Should Match 'Assert-QmlAccessibilityModalSubtree -Snapshot \$Snapshot'
 		$worker | Should Match 'outside its active dialog subtree'
 	}

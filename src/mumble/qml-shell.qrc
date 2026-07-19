@@ -43,6 +43,7 @@
     <file alias="PttToolWindow.qml">qml-shell/PttToolWindow.qml</file>
     <file alias="ManualPluginWindow.qml">qml-shell/ManualPluginWindow.qml</file>
 	<file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
+	<file alias="ProductDialogWindow.qml">qml-shell/ProductDialogWindow.qml</file>
 	<file alias="SettingsWindow.qml">qml-shell/SettingsWindow.qml</file>
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>
     <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>

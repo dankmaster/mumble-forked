@@ -343,14 +343,17 @@ QQuickWindow *QmlShellHost::captureWindowTarget(const QString &windowId, QString
 		return m_manualPluginWindow;
 	}
 #endif
-	if (normalizedWindowId == QLatin1String("settings")
+	if (normalizedWindowId == QLatin1String("product-dialog")
+		|| normalizedWindowId == QLatin1String("settings")
 		|| normalizedWindowId == QLatin1String("direct-message")
 		|| normalizedWindowId == QLatin1String("media-session")
 		|| normalizedWindowId == QLatin1String("screen-share")
 		|| normalizedWindowId == QLatin1String("attachment-viewer")
 		|| normalizedWindowId == QLatin1String("image-viewer")) {
 		QString surfaceId;
-		if (normalizedWindowId == QLatin1String("settings")) {
+		if (normalizedWindowId == QLatin1String("product-dialog")) {
+			surfaceId = QStringLiteral("product-dialog.window");
+		} else if (normalizedWindowId == QLatin1String("settings")) {
 			surfaceId = QStringLiteral("settings.window");
 		} else if (normalizedWindowId == QLatin1String("direct-message")) {
 			surfaceId = QStringLiteral("directMessage.window");
@@ -403,7 +406,8 @@ void QmlShellHost::registerCaptureWindow(QQuickWindow *window) {
 bool QmlShellHost::captureWindowReady(const QString &windowId) const {
 	QQuickWindow *targetWindow = captureWindowTarget(windowId);
 	const QString normalizedWindowId = windowId.trimmed().toLower();
-	if (normalizedWindowId == QLatin1String("settings")
+	if (normalizedWindowId == QLatin1String("product-dialog")
+		|| normalizedWindowId == QLatin1String("settings")
 		|| normalizedWindowId == QLatin1String("direct-message")
 		|| normalizedWindowId == QLatin1String("media-session")
 		|| normalizedWindowId == QLatin1String("screen-share")

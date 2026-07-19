@@ -132,7 +132,7 @@ TestCase {
 
 	function test_settings_does_not_install_the_main_window_modal_barrier() {
 		verify(/readonly property bool modalUiActive:\s*\(dialogState\.open\s*&&\s*dialogState\.kind\s*!==\s*"settings"\)/.test(mainSource))
-		verify(/QmlDialog\s*\{[\s\S]*id:\s*productDialog[\s\S]*excludeSettings:\s*true/.test(mainSource))
+		verify(/ProductDialogWindow\s*\{[\s\S]*id:\s*productDialog[\s\S]*controller:\s*dialogState/.test(mainSource))
 		verify(/SettingsWindow\s*\{[\s\S]*controller:\s*dialogState[\s\S]*parentWindow:\s*root/.test(mainSource))
 	}
 }

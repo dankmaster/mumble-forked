@@ -1687,9 +1687,10 @@ ApplicationWindow {
         ScreenShareViewWindow { }
     }
 
-	QmlDialog {
+	ProductDialogWindow {
 		id: productDialog
-		excludeSettings: true
+		controller: dialogState
+		parentWindow: root
 		visualFixtureMode: root.visualFixtureOverrideActive
 		beforeOpen: function() {
 			root.closeProductMenus()
@@ -1702,7 +1703,7 @@ ApplicationWindow {
 	}
 	Connections {
 		target: productDialog
-		function onOpened() { root.closeProductMenus() }
+		function onOpenedWindow() { root.closeProductMenus() }
 	}
 	SettingsWindow {
 		id: settingsWindow
