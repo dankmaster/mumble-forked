@@ -22,6 +22,7 @@
 #endif
 
 #include <QtCore/QAbstractItemModel>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
 #include <QtCore/QFileInfo>
@@ -286,6 +287,22 @@ Mumble::ModernRecorderController *QmlShellHost::recorderController() const {
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
 std::shared_ptr< QmlImagePipeline > QmlShellHost::imagePipeline() const { return m_imagePipeline; }
+QString QmlShellHost::registerServerIdentityImage(const QByteArray &imageBytes) {
+	if (imageBytes.isEmpty()) {
+		m_serverIdentityImageHash.clear();
+		m_serverIdentityImageUrl.clear();
+		return QString();
+	}
+	const QByteArray hash = QCryptographicHash::hash(imageBytes, QCryptographicHash::Sha256);
+	if (hash == m_serverIdentityImageHash && !m_serverIdentityImageUrl.isEmpty())
+		return m_serverIdentityImageUrl;
+	const QString stableKey = QStringLiteral("server-identity:%1").arg(QString::fromLatin1(hash.toHex()));
+	const QString url = m_imagePipeline->registerEncoded(imageBytes, QByteArrayLiteral("image/png"), stableKey);
+	if (url.isEmpty()) return QString();
+	m_serverIdentityImageHash = hash;
+	m_serverIdentityImageUrl  = url;
+	return m_serverIdentityImageUrl;
+}
 QmlThemeController *QmlShellHost::themeController() const { return m_themeController.get(); }
 
 void QmlShellHost::setVisualFixtureOverrideActive(const bool active) {

@@ -731,6 +731,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	Global::get().qsServerDisplayName.clear();
 	Global::get().qsServerMonogram.clear();
 	Global::get().qbaServerImage.clear();
+	refreshQmlServerIdentity();
 
 	Global::get().sh->sendPing(); // Send initial ping to establish UDP connection
 	appendServerSyncTrace(QStringLiteral("sent-ping"));
@@ -840,6 +841,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 	bool persistentGlobalChanged = false;
 	bool screenShareConfigChanged = false;
+	bool serverIdentityChanged = false;
 	bool modernLayoutCompatibleAdvertised = false;
 	if (msg.has_welcome_text()) {
 		QString str = u8(msg.welcome_text());
@@ -964,15 +966,19 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 	if (msg.has_server_display_name()) {
 		Global::get().qsServerDisplayName = u8(msg.server_display_name()).trimmed().left(128);
 		modernLayoutCompatibleAdvertised  = true;
+		serverIdentityChanged             = true;
 	}
 	if (msg.has_server_monogram()) {
 		Global::get().qsServerMonogram = u8(msg.server_monogram()).trimmed().left(12);
 		modernLayoutCompatibleAdvertised = true;
+		serverIdentityChanged            = true;
 	}
 	if (msg.has_server_image()) {
 		Global::get().qbaServerImage = blob(msg.server_image());
 		modernLayoutCompatibleAdvertised = true;
+		serverIdentityChanged            = true;
 	}
+	if (serverIdentityChanged) refreshQmlServerIdentity();
 	if (screenShareConfigChanged && Global::get().s.bScreenShareDiagnostics) {
 		qInfo().noquote()
 			<< QStringLiteral("MainWindow: received screen-share ServerConfig enabled=%1 recording=%2 helper_required=%3 "

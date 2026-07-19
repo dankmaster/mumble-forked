@@ -92,7 +92,9 @@ TestCase {
 
     QtObject {
         id: session
-        property string serverName: "Test server"
+		property string serverName: "Test server"
+		property string serverMonogram: "1M"
+		property string serverImageUrl: "image://mumble/server-identity-test?g=1"
         property string connectionLabel: "Connected"
 		property string connectionTone: "success"
 		property string connectionDetail: "Current ping: 12 ms"
@@ -211,6 +213,12 @@ TestCase {
 	}
 
 	SignalSpy {
+		id: serverMenuSpy
+		target: loader.item
+		signalName: "serverMenuRequested"
+	}
+
+	SignalSpy {
 		id: settingsSpy
 		target: loader.item
 		signalName: "settingsRequested"
@@ -234,6 +242,7 @@ TestCase {
 		scopeMenuSpy.clear()
 		participantMenuSpy.clear()
 		profileMenuSpy.clear()
+		serverMenuSpy.clear()
 		settingsSpy.clear()
         commands.selectedScope = ""
 		commands.selectedRailKind = ""
@@ -440,15 +449,21 @@ TestCase {
 		const header = findChild(loader.item, "navigationServerHeader")
 		const badge = findChild(loader.item, "navigationServerBadge")
 		const monogram = findChild(loader.item, "navigationServerMonogram")
+		const serverImage = findChild(loader.item, "navigationServerImage")
 		const serverName = findChild(loader.item, "navigationServerName")
 		const pill = findChild(loader.item, "navigationConnectionPill")
 		const dot = findChild(loader.item, "navigationConnectionDot")
 		const connectionLabel = findChild(loader.item, "navigationConnectionLabel")
-		verify(header !== null && badge !== null && monogram !== null && serverName !== null)
+		verify(header !== null && badge !== null && monogram !== null && serverImage !== null
+			&& serverName !== null)
 		verify(pill !== null && dot !== null && connectionLabel !== null)
 		verify(header.height >= 98)
-		compare(monogram.text, "TS")
+		compare(monogram.text, "1M")
 		compare(String(monogram.color), String(Theme.onAccent))
+		compare(serverImage.source.toString(), session.serverImageUrl)
+		tryCompare(serverImage, "status", Image.Ready)
+		compare(serverImage.visible, true)
+		compare(monogram.visible, false)
 		compare(serverName.text, "Test server")
 		compare(connectionLabel.text, "Connected")
 		compare(String(dot.color), String(Theme.success))
@@ -456,6 +471,30 @@ TestCase {
 		compare(header.Accessible.name, "Test server")
 		verify(header.Accessible.description.indexOf("Current ping: 12 ms") >= 0)
 		compare(pill.Accessible.name, "Connected")
+		compare(badge.Accessible.role, Accessible.Button)
+		verify(badge.Accessible.name.indexOf("Test server") >= 0)
+	}
+
+	function test_server_logo_falls_back_to_configured_monogram_and_opens_menu() {
+		const badge = findChild(loader.item, "navigationServerBadge")
+		const monogram = findChild(loader.item, "navigationServerMonogram")
+		const serverImage = findChild(loader.item, "navigationServerImage")
+		verify(badge !== null && monogram !== null && serverImage !== null)
+		const originalImage = session.serverImageUrl
+		try {
+			session.serverImageUrl = ""
+			tryCompare(monogram, "visible", true)
+			compare(monogram.text, "1M")
+			mouseClick(badge)
+			compare(serverMenuSpy.count, 1)
+			verify(serverMenuSpy.signalArguments[0][0].x >= 0)
+			verify(serverMenuSpy.signalArguments[0][0].y >= 0)
+			badge.forceActiveFocus()
+			keyClick(Qt.Key_Return)
+			compare(serverMenuSpy.count, 2)
+		} finally {
+			session.serverImageUrl = originalImage
+		}
 	}
 
 	function test_desktop_chrome_heights_can_share_exact_divider_geometry() {

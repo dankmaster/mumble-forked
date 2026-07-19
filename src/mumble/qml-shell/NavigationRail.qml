@@ -48,6 +48,7 @@ Rectangle {
 		string entryKind, string scopeToken, string rowKey)
 	signal settingsRequested()
 	signal profileMenuRequested(var anchorPoint)
+	signal serverMenuRequested(var anchorPoint)
 	Accessible.ignored: accessibilitySuppressed
 
 
@@ -600,6 +601,12 @@ Rectangle {
 		return session.length > 0 && session === String(selectionState.selectedUserSession)
 	}
 
+	function activateServerMenu() {
+		serverBadge.forceActiveFocus(Qt.MouseFocusReason)
+		serverMenuRequested(serverBadge.mapToItem(null,
+			Math.round(serverBadge.width / 2), serverBadge.height))
+	}
+
 	function selectedNavigationIndex() {
 		for (let index = 0; index < rooms.count; ++index) {
 			const row = navigationModel.get(index)
@@ -762,23 +769,64 @@ Rectangle {
 				Rectangle {
 					id: serverBadge
 					objectName: "navigationServerBadge"
+					readonly property string imageSource: navigationRail.safeAvatarSource(
+						clientSession.serverImageUrl || "")
 					Layout.alignment: Qt.AlignHCenter
 					Layout.preferredWidth: Theme.railBadgeSize
 					Layout.preferredHeight: Layout.preferredWidth
 					radius: Theme.railBadgeRadius
-					color: Theme.accent
-					border.width: 1
-					border.color: Theme.elevationHighlight
+					color: imageSource.length > 0 ? Theme.surfaceRaised : Theme.accent
+					border.width: activeFocus ? Theme.focusRingWidth : 1
+					border.color: activeFocus ? Theme.focus
+						: serverBadgeHover.hovered ? Theme.accent : Theme.elevationHighlight
+					clip: true
+					activeFocusOnTab: !navigationRail.accessibilitySuppressed
+					Accessible.role: Accessible.Button
+					Accessible.name: qsTr("Open the menu for %1").arg(clientSession.serverName)
+					Accessible.description: qsTr("Server identity and server actions")
+					Accessible.onPressAction: navigationRail.activateServerMenu()
+					Keys.onReturnPressed: event => {
+						navigationRail.activateServerMenu()
+						event.accepted = true
+					}
+					Keys.onSpacePressed: event => {
+						navigationRail.activateServerMenu()
+						event.accepted = true
+					}
+					HoverHandler {
+						id: serverBadgeHover
+						cursorShape: Qt.PointingHandCursor
+					}
+					TapHandler {
+						acceptedButtons: Qt.LeftButton
+						onTapped: navigationRail.activateServerMenu()
+					}
+					Image {
+						id: serverIdentityImage
+						objectName: "navigationServerImage"
+						anchors.fill: parent
+						source: serverBadge.imageSource
+						asynchronous: true
+						cache: false
+						sourceSize: Qt.size(64, 64)
+						fillMode: Image.PreserveAspectCrop
+						visible: status === Image.Ready
+						Accessible.ignored: true
+					}
 					Label {
 						objectName: "navigationServerMonogram"
 						anchors.centerIn: parent
 						textFormat: Text.PlainText
-						text: navigationRail.serverMonogram(clientSession.serverName)
+						text: String(clientSession.serverMonogram || "").trim()
+							|| navigationRail.serverMonogram(clientSession.serverName)
 						color: Theme.onAccent
 						font.bold: true
 						font.pixelSize: Theme.fontBody
+						visible: serverIdentityImage.status !== Image.Ready
 						Accessible.ignored: true
 					}
+					ToolTip.visible: serverBadgeHover.hovered
+					ToolTip.text: Accessible.name
 				}
 				Label {
 					objectName: "navigationServerName"

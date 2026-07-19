@@ -1555,10 +1555,7 @@ QString modernShellServerImageDataUrl(const QByteArray &imageBytes) {
 		|| !Global::get().mw->qmlShellHost()->imagePipeline()) {
 		return QString();
 	}
-	const QString stableKey = QStringLiteral("server-identity:%1")
-		.arg(QString::fromLatin1(QCryptographicHash::hash(imageBytes, QCryptographicHash::Sha256).toHex()));
-	return Global::get().mw->qmlShellHost()->imagePipeline()->registerEncoded(
-		imageBytes, QByteArrayLiteral("image/png"), stableKey);
+	return Global::get().mw->qmlShellHost()->registerServerIdentityImage(imageBytes);
 }
 
 std::optional< QByteArray > modernShellNormalizeServerIdentityImageBytes(const QByteArray &imageBytes,
@@ -20954,7 +20951,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			Global::get().qsServerMonogram    = monogram;
 			Global::get().qbaServerImage      = *serverImage;
 			Global::get().sh->sendMessage(config);
-			if (m_qmlShellHost) m_qmlShellHost->sessionController()->setServerName(displayName);
+			refreshQmlServerIdentity();
 			scheduleQmlRoomStateUpdate();
 			publishModernToast(QStringLiteral("success"), tr("Server settings"), tr("Server settings saved."));
 		} else {
@@ -27375,9 +27372,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 
 		Global::get().sh->sendMessage(config);
-		if (m_qmlShellHost) {
-			m_qmlShellHost->sessionController()->setServerName(Global::get().qsServerDisplayName);
-		}
+		refreshQmlServerIdentity();
 		publishModernToast(QStringLiteral("success"), tr("Server identity"), tr("Server identity saved."));
 		return true;
 	}
@@ -28502,17 +28497,12 @@ void MainWindow::syncQmlShellState() {
 		Global::get().sh->getConnectionInfo(host, port, username, password);
 	}
 	Q_UNUSED(password)
-	QString serverName = Global::get().qsServerDisplayName.trimmed();
-	if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
-	if (serverName.isEmpty()) serverName = host.trimmed();
-	if (serverName.isEmpty()) serverName = tr("Mumble");
-
 	ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
 	ClientSessionController *session = m_qmlShellHost->sessionController();
-	session->setServerName(connected ? serverName : tr("Mumble"));
-		session->setSelfStatusLabel(!connected ? tr("Offline")
-											  : (Global::get().s.bDeaf ? tr("Deafened")
-																	: (Global::get().s.bMute ? tr("Muted") : tr("Online"))));
+	refreshQmlServerIdentity();
+	session->setSelfStatusLabel(!connected ? tr("Offline")
+										  : (Global::get().s.bDeaf ? tr("Deafened")
+																: (Global::get().s.bMute ? tr("Muted") : tr("Online"))));
 	session->setSelfName(selfUser ? selfUser->qsName : (!username.trimmed().isEmpty() ? username : tr("You")));
 	session->setConnected(connected);
 	session->setSelfMuted(Global::get().s.bMute);
@@ -28560,6 +28550,34 @@ void MainWindow::syncQmlShellState() {
 		|| !m_modernMessageDeliveryProbeMessages.isEmpty()) {
 		m_qmlShellHost->chatModel()->replaceMessages(messages);
 	}
+}
+
+void MainWindow::refreshQmlServerIdentity() {
+	if (!m_qmlShellHost) return;
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	QString serverName = Global::get().qsServerDisplayName.trimmed();
+	if (serverName.isEmpty() && connected) {
+		if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+			rootChannel && rootChannel->qsName != tr("Root")) {
+			serverName = rootChannel->qsName.trimmed();
+		}
+	}
+	if (serverName.isEmpty() && connected) serverName = Global::get().s.qsLastServer.trimmed();
+	if (serverName.isEmpty() && connected && Global::get().sh) {
+		QString host;
+		QString username;
+		QString password;
+		unsigned short port = 0;
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+		serverName = host.trimmed();
+	}
+	if (serverName.isEmpty()) serverName = tr("Mumble");
+
+	ClientSessionController *session = m_qmlShellHost->sessionController();
+	session->setServerName(connected ? serverName : tr("Mumble"));
+	session->setServerMonogram(connected ? Global::get().qsServerMonogram : QString());
+	session->setServerImageUrl(connected
+		? m_qmlShellHost->registerServerIdentityImage(Global::get().qbaServerImage) : QString());
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
@@ -39221,6 +39239,7 @@ void MainWindow::serverConnected() {
 	Global::get().qsServerDisplayName.clear();
 	Global::get().qsServerMonogram.clear();
 	Global::get().qbaServerImage.clear();
+	refreshQmlServerIdentity();
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
 	Global::get().uiChatAssetMaxBytes              = 25ULL * 1024ULL * 1024ULL;
@@ -39373,6 +39392,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().qsServerDisplayName.clear();
 	Global::get().qsServerMonogram.clear();
 	Global::get().qbaServerImage.clear();
+	refreshQmlServerIdentity();
 	Global::get().uiChatAssetMaxBytes     = 25ULL * 1024ULL * 1024ULL;
 	Global::get().uiChatAttachmentLimit  = 4;
 	if (m_qmlShellHost) {

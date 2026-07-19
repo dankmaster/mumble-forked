@@ -1351,6 +1351,8 @@ ClientSessionController::ClientSessionController(QObject *parent) : QObject(pare
 }
 
 QString ClientSessionController::serverName() const { return m_serverName; }
+QString ClientSessionController::serverMonogram() const { return m_serverMonogram; }
+QString ClientSessionController::serverImageUrl() const { return m_serverImageUrl; }
 QString ClientSessionController::connectionLabel() const { return m_connectionLabel; }
 QString ClientSessionController::selfStatusLabel() const { return m_selfStatusLabel; }
 QString ClientSessionController::connectionState() const { return m_connectionState; }
@@ -1390,6 +1392,20 @@ QVariantList ClientSessionController::motdActions() const { return m_motdActions
 	emit signalName()
 
 void ClientSessionController::setServerName(const QString &value) { SET_VALUE(m_serverName, serverNameChanged); }
+void ClientSessionController::setServerMonogram(const QString &value) {
+	const QString accepted = value.trimmed().left(12);
+	if (!acceptsFrontendStateMutation(this) || m_serverMonogram == accepted) return;
+	m_serverMonogram = accepted;
+	emit serverMonogramChanged();
+}
+void ClientSessionController::setServerImageUrl(const QString &value) {
+	const QString candidate = value.trimmed();
+	const QString accepted = candidate.startsWith(QLatin1String("image://mumble/"), Qt::CaseInsensitive)
+		? candidate : QString();
+	if (!acceptsFrontendStateMutation(this) || m_serverImageUrl == accepted) return;
+	m_serverImageUrl = accepted;
+	emit serverImageUrlChanged();
+}
 void ClientSessionController::setConnectionLabel(const QString &value) {
 	SET_VALUE(m_connectionLabel, connectionLabelChanged);
 }
@@ -1499,6 +1515,10 @@ void ClientSessionController::setMotdLastSeenSignature(const QString &value) {
 
 void ClientSessionController::applyState(const QVariantMap &state) {
 	if (state.contains(QStringLiteral("serverName"))) setServerName(state.value(QStringLiteral("serverName")).toString());
+	if (state.contains(QStringLiteral("serverMonogram")))
+		setServerMonogram(state.value(QStringLiteral("serverMonogram")).toString());
+	if (state.contains(QStringLiteral("serverImageUrl")))
+		setServerImageUrl(state.value(QStringLiteral("serverImageUrl")).toString());
 	if (state.contains(QStringLiteral("connectionLabel")))
 		setConnectionLabel(state.value(QStringLiteral("connectionLabel")).toString());
 	if (state.contains(QStringLiteral("selfStatusLabel")))

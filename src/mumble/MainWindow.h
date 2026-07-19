@@ -310,6 +310,7 @@ public:
 	QVariantMap buildQmlMessageDeliveryProbeScopeState() const;
 	void publishQmlAutomationChatProbeState();
 	void syncQmlShellState();
+	void refreshQmlServerIdentity();
 	QmlSelectionState *qmlSelectionState() const;
 	void applyQmlRoomState(const QVariantMap &state);
 	void applyQmlDirectMessagesState(const QVariantMap &state);

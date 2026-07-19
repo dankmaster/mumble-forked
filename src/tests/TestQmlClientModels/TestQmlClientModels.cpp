@@ -2811,6 +2811,8 @@ void TestQmlClientModels::duplicateStableIdsAreCoalesced() {
 void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	ClientSessionController session;
 	QSignalSpy spy(&session, &ClientSessionController::connectedChanged);
+	QSignalSpy monogramSpy(&session, &ClientSessionController::serverMonogramChanged);
+	QSignalSpy imageSpy(&session, &ClientSessionController::serverImageUrlChanged);
 	QSignalSpy motdSpy(&session, &ClientSessionController::motdHtmlChanged);
 	QSignalSpy motdSegmentsSpy(&session, &ClientSessionController::motdSegmentsChanged);
 	session.setConnected(false);
@@ -2828,6 +2830,21 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	QCOMPARE(session.motdSegments().first().toMap().value(QStringLiteral("text")).toString(),
 			 QStringLiteral("Welcome"));
 	QCOMPARE(session.motdSummary(), QStringLiteral("Welcome"));
+	session.setServerMonogram(QStringLiteral("  1M  "));
+	session.setServerMonogram(QStringLiteral("1M"));
+	QCOMPARE(monogramSpy.count(), 1);
+	QCOMPARE(session.serverMonogram(), QStringLiteral("1M"));
+	session.setServerImageUrl(QStringLiteral("https://example.com/unmanaged.png"));
+	QCOMPARE(imageSpy.count(), 0);
+	const QString managedImage = QStringLiteral("image://mumble/server-identity-test?g=4");
+	session.setServerImageUrl(managedImage);
+	session.setServerImageUrl(managedImage);
+	QCOMPARE(imageSpy.count(), 1);
+	QCOMPARE(session.serverImageUrl(), managedImage);
+	session.applyState({ { QStringLiteral("serverMonogram"), QStringLiteral("TS") },
+		{ QStringLiteral("serverImageUrl"), QString() } });
+	QCOMPARE(session.serverMonogram(), QStringLiteral("TS"));
+	QVERIFY(session.serverImageUrl().isEmpty());
 }
 
 void TestQmlClientModels::sessionParsesManagedMotdImagesAndTracksSourceIdentity() {

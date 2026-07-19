@@ -30,6 +30,8 @@ namespace QmlVisualFixtureMutation {
 class ClientSessionController final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString serverName READ serverName WRITE setServerName NOTIFY serverNameChanged)
+	Q_PROPERTY(QString serverMonogram READ serverMonogram WRITE setServerMonogram NOTIFY serverMonogramChanged)
+	Q_PROPERTY(QString serverImageUrl READ serverImageUrl WRITE setServerImageUrl NOTIFY serverImageUrlChanged)
 	Q_PROPERTY(QString connectionLabel READ connectionLabel WRITE setConnectionLabel NOTIFY connectionLabelChanged)
 	Q_PROPERTY(QString selfStatusLabel READ selfStatusLabel WRITE setSelfStatusLabel NOTIFY selfStatusLabelChanged)
 	Q_PROPERTY(QString connectionState READ connectionState WRITE setConnectionState NOTIFY connectionStateChanged)
@@ -61,6 +63,8 @@ public:
 	explicit ClientSessionController(QObject *parent = nullptr);
 
 	QString serverName() const;
+	QString serverMonogram() const;
+	QString serverImageUrl() const;
 	QString connectionLabel() const;
 	QString selfStatusLabel() const;
 	QString connectionState() const;
@@ -90,6 +94,8 @@ public:
 	QVariantList motdActions() const;
 
 	void setServerName(const QString &value);
+	void setServerMonogram(const QString &value);
+	void setServerImageUrl(const QString &value);
 	void setConnectionLabel(const QString &value);
 	void setSelfStatusLabel(const QString &value);
 	void setConnectionState(const QString &value);
@@ -116,6 +122,8 @@ public:
 
 signals:
 	void serverNameChanged();
+	void serverMonogramChanged();
+	void serverImageUrlChanged();
 	void connectionLabelChanged();
 	void selfStatusLabelChanged();
 	void connectionStateChanged();
@@ -147,6 +155,8 @@ signals:
 private:
 	void recomputeMotdDerivedState();
 	QString m_serverName = QStringLiteral("Mumble");
+	QString m_serverMonogram;
+	QString m_serverImageUrl;
 	QString m_connectionLabel = QStringLiteral("Disconnected");
 	QString m_selfStatusLabel = QStringLiteral("Offline");
 	QString m_connectionState = QStringLiteral("disconnected");

@@ -4,9 +4,11 @@
 #ifndef MUMBLE_MUMBLE_QMLSHELLHOST_H_
 #define MUMBLE_MUMBLE_QMLSHELLHOST_H_
 
+#include <QtCore/QByteArray>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
+#include <QtCore/QString>
 #include <QtCore/QVariantMap>
 
 #include <memory>
@@ -74,6 +76,7 @@ public:
 	QmlSelectionState *selectionState() const;
 	QmlPerformanceMonitor *performanceMonitor() const;
 	std::shared_ptr< QmlImagePipeline > imagePipeline() const;
+	QString registerServerIdentityImage(const QByteArray &imageBytes);
 	QmlThemeController *themeController() const;
 	bool visualFixtureOverrideActive() const { return m_visualFixtureOverrideActive; }
 	void setVisualFixtureOverrideActive(bool active);
@@ -131,6 +134,8 @@ private:
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
 	std::shared_ptr< QmlImagePipeline > m_imagePipeline;
+	QByteArray m_serverIdentityImageHash;
+	QString m_serverIdentityImageUrl;
 	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
 	std::unique_ptr< QmlWindowStateController > m_windowStateController;

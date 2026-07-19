@@ -1035,6 +1035,22 @@ ApplicationWindow {
 		return openMenuAt(profileMenuPopup, anchorPoint, focusReturnTarget)
 	}
 
+	function openApplicationMenu(anchorPoint, focusReturnTarget) {
+		const opener = focusReturnTarget && focusReturnTarget.forceActiveFocus
+			? focusReturnTarget : root.activeFocusItem
+		const openMenu = function() {
+			root.closeProductMenus()
+			root.openMenuAt(appMenuPopup, anchorPoint, opener)
+		}
+		if (root.navigationModalActive) {
+			navigationDrawer.close()
+			Qt.callLater(openMenu)
+		} else {
+			openMenu()
+		}
+		return true
+	}
+
 	function chatBackgroundMenuEntries() {
 		const result = []
 		if (activeScope.canLoadOlder) {
@@ -2001,6 +2017,7 @@ ApplicationWindow {
 				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 			onSettingsRequested: root.requestSettings()
 			onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
+			onServerMenuRequested: anchorPoint => root.openApplicationMenu(anchorPoint)
 		}
 	}
 
@@ -2431,8 +2448,7 @@ ApplicationWindow {
 						Accessible.focusable: true
 						Accessible.focused: activeFocus
 							onClicked: {
-								root.closeProductMenus()
-								root.openMenuAt(appMenuPopup,
+								root.openApplicationMenu(
 									appMenuButton.mapToItem(null, appMenuButton.width, appMenuButton.height),
 									appMenuButton)
 							}
@@ -4121,6 +4137,7 @@ ApplicationWindow {
 					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 				onSettingsRequested: root.requestSettings()
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
+				onServerMenuRequested: anchorPoint => root.openApplicationMenu(anchorPoint)
 			}
 		}
 
