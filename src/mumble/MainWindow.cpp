@@ -148,6 +148,9 @@
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QUdpSocket>
+#include <QtMultimedia/QMediaPlayer>
+#include <QtMultimedia/QVideoFrame>
+#include <QtMultimedia/QVideoSink>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QFileDialog>
 
@@ -9402,16 +9405,56 @@ QString normalizedJsonUrlString(QString value) {
 }
 
 QString redditPreviewImageUrl(const QJsonObject &post) {
-	const QJsonArray images = post.value(QStringLiteral("preview"))
-								  .toObject()
-								  .value(QStringLiteral("images"))
-								  .toArray();
-	if (images.isEmpty()) {
-		return {};
+	const auto safeCandidate = [](QString value) {
+		value = normalizedJsonUrlString(std::move(value));
+		const QUrl url(value);
+		return url.scheme().toLower() == QLatin1String("https") && isSafePreviewTarget(url) ? value : QString();
+	};
+	const auto imageFromPost = [&safeCandidate](const QJsonObject &candidate) {
+		const QJsonArray images = candidate.value(QStringLiteral("preview"))
+									  .toObject()
+									  .value(QStringLiteral("images"))
+									  .toArray();
+		if (!images.isEmpty()) {
+			const QString source = safeCandidate(images.at(0)
+										 .toObject()
+										 .value(QStringLiteral("source"))
+										 .toObject()
+										 .value(QStringLiteral("url"))
+										 .toString());
+			if (!source.isEmpty()) {
+				return source;
+			}
+		}
+
+		for (const QString &mediaKey : { QStringLiteral("secure_media"), QStringLiteral("media") }) {
+			const QString oEmbedThumbnail = safeCandidate(candidate.value(mediaKey)
+														 .toObject()
+														 .value(QStringLiteral("oembed"))
+														 .toObject()
+														 .value(QStringLiteral("thumbnail_url"))
+														 .toString());
+			if (!oEmbedThumbnail.isEmpty()) {
+				return oEmbedThumbnail;
+			}
+		}
+
+		const QString thumbnail = safeCandidate(candidate.value(QStringLiteral("thumbnail")).toString());
+		return thumbnail;
+	};
+
+	QString image = imageFromPost(post);
+	if (!image.isEmpty()) {
+		return image;
 	}
 
-	return normalizedJsonUrlString(
-		images.at(0).toObject().value(QStringLiteral("source")).toObject().value(QStringLiteral("url")).toString());
+	// Crossposts frequently keep their media poster only on the original post.
+	// Resolve that bounded first parent instead of showing an empty player stage.
+	const QJsonArray parents = post.value(QStringLiteral("crosspost_parent_list")).toArray();
+	if (!parents.isEmpty()) {
+		image = imageFromPost(parents.first().toObject());
+	}
+	return image;
 }
 
 QUrl redditDashManifestUrl(const QJsonObject &video) {
@@ -12335,6 +12378,7 @@ QNetworkReply *MainWindow::startPersistentChatPreviewPost(const QNetworkRequest 
 }
 
 void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previewKey) {
+	cancelPersistentChatVideoPosters(previewKey);
 	if (previewKey.isEmpty()) {
 		persistentChatPreviewWorkerQueue().cancelGroupsWithPrefix(this, QStringLiteral("preview:"));
 		persistentChatPreviewWorkerQueue().cancelGroupsWithPrefix(this, QStringLiteral("preview-cache-read:"));
@@ -30394,6 +30438,235 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 			++managedIt;
 		}
 	}
+
+	queuePersistentChatVideoPoster(previewKey);
+}
+
+QString MainWindow::persistentChatVideoPosterSource(const PersistentChatPreview &preview) const {
+	const auto playableVideoSource = [](const QString &rawUrl, const QString &kind, const QString &mime) {
+		const QString normalizedKind = kind.trimmed().toLower();
+		const QString normalizedMime = mime.trimmed().toLower();
+		if (normalizedKind != QLatin1String("video") && !normalizedMime.startsWith(QLatin1String("video/"))) {
+			return QString();
+		}
+		const QUrl url(rawUrl.trimmed());
+		if (rawUrl.size() > 16384 || url.scheme().toLower() != QLatin1String("https")
+			|| !isTrustedRemotePlayableMediaUrl(url, normalizedMime)) {
+			return QString();
+		}
+		return url.toString(QUrl::FullyEncoded);
+	};
+
+	QString source = playableVideoSource(preview.mediaDataUrl, preview.mediaKind, preview.mediaMime);
+	if (source.isEmpty()) {
+		for (const PersistentChatPreviewMediaItem &item : std::as_const(preview.mediaItems)) {
+			source = playableVideoSource(item.url, item.kind, item.mime);
+			if (!source.isEmpty()) {
+				break;
+			}
+		}
+	}
+	return source;
+}
+
+void MainWindow::queuePersistentChatVideoPoster(const QString &previewKey) {
+	auto previewIt = m_persistentChatPreviews.find(previewKey);
+	if (previewIt == m_persistentChatPreviews.end() || !previewIt->metadataFinished
+		|| !previewIt->thumbnailFinished || !previewIt->thumbnailImage.isNull()
+		|| !previewIt->thumbnailRequestSource.isEmpty()) {
+		return;
+	}
+
+	PersistentChatPreview &preview = previewIt.value();
+	for (int index = 0; index < static_cast< int >(preview.mediaItems.size()); ++index) {
+		const PersistentChatPreviewMediaItem &item = preview.mediaItems[static_cast< std::size_t >(index)];
+		if (item.kind.compare(QLatin1String("video"), Qt::CaseInsensitive) != 0
+			&& !item.mime.startsWith(QLatin1String("video/"), Qt::CaseInsensitive)) {
+			continue;
+		}
+		for (const auto &[field, artwork] : {
+				 std::pair { QStringLiteral("thumbnail"), item.thumbnail.trimmed() },
+				 std::pair { QStringLiteral("poster"), item.poster.trimmed() } }) {
+			if (artwork.isEmpty()) {
+				continue;
+			}
+			const auto managed = preview.metadataImages.constFind(
+				persistentChatMediaItemImageKey(index, field));
+			// Prefer provider-authored artwork. Generate a frame only after its
+			// bounded image request has conclusively failed.
+			if (managed == preview.metadataImages.cend() || !managed->finished
+				|| !managed->providerUrl.isEmpty()) {
+				return;
+			}
+		}
+	}
+	const QString source = persistentChatVideoPosterSource(preview);
+	if (source.isEmpty() || preview.videoPosterAttemptedSource == source
+		|| m_activePersistentChatVideoPosterKey == previewKey
+		|| m_persistentChatVideoPosterQueuedKeys.contains(previewKey)) {
+		return;
+	}
+
+	// Keep automatic poster work bounded. Current/tail messages arrive last, so
+	// discard the oldest queued request when a busy history page contains many
+	// poster-less videos instead of opening an unbounded set of decoders.
+	constexpr int maxQueuedVideoPosters = 8;
+	while (m_persistentChatVideoPosterQueue.size() >= maxQueuedVideoPosters) {
+		m_persistentChatVideoPosterQueuedKeys.remove(m_persistentChatVideoPosterQueue.takeFirst());
+	}
+	m_persistentChatVideoPosterQueue.push_back(previewKey);
+	m_persistentChatVideoPosterQueuedKeys.insert(previewKey);
+	if (m_activePersistentChatVideoPosterKey.isEmpty()) {
+		QTimer::singleShot(75, this, &MainWindow::startNextPersistentChatVideoPoster);
+	}
+}
+
+void MainWindow::startNextPersistentChatVideoPoster() {
+	if (!m_activePersistentChatVideoPosterKey.isEmpty()) {
+		return;
+	}
+
+	while (!m_persistentChatVideoPosterQueue.isEmpty()) {
+		const QString previewKey = m_persistentChatVideoPosterQueue.takeFirst();
+		m_persistentChatVideoPosterQueuedKeys.remove(previewKey);
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end() || !previewIt->thumbnailImage.isNull()) {
+			continue;
+		}
+
+		PersistentChatPreview &preview = previewIt.value();
+		const QString source = persistentChatVideoPosterSource(preview);
+		const QUrl sourceUrl(source);
+		if (source.isEmpty() || preview.videoPosterAttemptedSource == source) {
+			continue;
+		}
+
+		preview.videoPosterAttemptedSource = source;
+		m_activePersistentChatVideoPosterKey = previewKey;
+		m_activePersistentChatVideoPosterSource = source;
+		m_persistentChatVideoPosterPlayer = new QMediaPlayer(this);
+		m_persistentChatVideoPosterSink   = new QVideoSink(this);
+		m_persistentChatVideoPosterTimeout = new QTimer(this);
+		m_persistentChatVideoPosterTimeout->setSingleShot(true);
+		m_persistentChatVideoPosterPlayer->setVideoSink(m_persistentChatVideoPosterSink);
+
+		connect(m_persistentChatVideoPosterSink, &QVideoSink::videoFrameChanged, this,
+				[this, previewKey, source](const QVideoFrame &frame) {
+			if (!frame.isValid() || m_activePersistentChatVideoPosterKey != previewKey
+				|| m_activePersistentChatVideoPosterSource != source) {
+				return;
+			}
+			// Mapping a hardware-backed frame and smooth-scaling a large source can
+			// be expensive. Detach the decoder immediately and perform that CPU work
+			// on the bounded preview worker instead of the UI thread.
+			disconnect(m_persistentChatVideoPosterSink, nullptr, this, nullptr);
+			disconnect(m_persistentChatVideoPosterPlayer, nullptr, this, nullptr);
+			m_persistentChatVideoPosterPlayer->pause();
+			const QSize frameSize = frame.size();
+			const qint64 estimatedBytes = frameSize.isValid()
+				? static_cast< qint64 >(frameSize.width()) * frameSize.height() * 4
+				: 0;
+			persistentChatPreviewWorkerQueue().submit< QImage >(
+				this, persistentChatPreviewWorkerGroup(previewKey),
+				persistentChatPreviewWorkerSourceKey(QStringLiteral("video-poster"), source),
+				estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
+				[frame]() mutable { return persistentChatThumbnailImage(frame.toImage()); },
+				[this, previewKey, source](std::optional< QImage > image) {
+					finishPersistentChatVideoPoster(previewKey, source,
+						image ? std::move(*image) : QImage());
+				});
+		});
+		connect(m_persistentChatVideoPosterPlayer, &QMediaPlayer::errorOccurred, this,
+				[this, previewKey, source](QMediaPlayer::Error, const QString &) {
+			finishPersistentChatVideoPoster(previewKey, source);
+		});
+		connect(m_persistentChatVideoPosterPlayer, &QMediaPlayer::mediaStatusChanged, this,
+				[this, previewKey, source](QMediaPlayer::MediaStatus status) {
+			if (status == QMediaPlayer::InvalidMedia || status == QMediaPlayer::EndOfMedia) {
+				finishPersistentChatVideoPoster(previewKey, source);
+			}
+		});
+		connect(m_persistentChatVideoPosterTimeout, &QTimer::timeout, this,
+				[this, previewKey, source]() { finishPersistentChatVideoPoster(previewKey, source); });
+
+		m_persistentChatVideoPosterTimeout->start(8000);
+		m_persistentChatVideoPosterPlayer->setSource(sourceUrl);
+		m_persistentChatVideoPosterPlayer->play();
+		return;
+	}
+}
+
+void MainWindow::finishPersistentChatVideoPoster(const QString &previewKey, const QString &source,
+												  const QImage &image) {
+	if (m_activePersistentChatVideoPosterKey != previewKey
+		|| m_activePersistentChatVideoPosterSource != source) {
+		return;
+	}
+
+	if (m_persistentChatVideoPosterTimeout) {
+		m_persistentChatVideoPosterTimeout->stop();
+		m_persistentChatVideoPosterTimeout->deleteLater();
+	}
+	if (m_persistentChatVideoPosterPlayer) {
+		m_persistentChatVideoPosterPlayer->stop();
+		m_persistentChatVideoPosterPlayer->deleteLater();
+	}
+	if (m_persistentChatVideoPosterSink) {
+		m_persistentChatVideoPosterSink->deleteLater();
+	}
+	m_persistentChatVideoPosterTimeout = nullptr;
+	m_persistentChatVideoPosterPlayer  = nullptr;
+	m_persistentChatVideoPosterSink    = nullptr;
+	m_activePersistentChatVideoPosterKey.clear();
+	m_activePersistentChatVideoPosterSource.clear();
+
+	auto previewIt = m_persistentChatPreviews.find(previewKey);
+	if (previewIt != m_persistentChatPreviews.end()
+		&& previewIt->videoPosterAttemptedSource == source
+		&& previewIt->thumbnailImage.isNull() && !image.isNull()) {
+		previewIt->thumbnailImage = image;
+		previewIt->thumbnailFinished = true;
+		publishPersistentChatPreviewUpdate(previewKey);
+	}
+
+	QTimer::singleShot(50, this, &MainWindow::startNextPersistentChatVideoPoster);
+}
+
+void MainWindow::cancelPersistentChatVideoPosters(const QString &previewKey) {
+	if (previewKey.isEmpty()) {
+		m_persistentChatVideoPosterQueue.clear();
+		m_persistentChatVideoPosterQueuedKeys.clear();
+	} else if (m_persistentChatVideoPosterQueuedKeys.remove(previewKey)) {
+		m_persistentChatVideoPosterQueue.removeAll(previewKey);
+	}
+
+	if (!previewKey.isEmpty() && m_activePersistentChatVideoPosterKey != previewKey) {
+		return;
+	}
+	if (m_activePersistentChatVideoPosterKey.isEmpty()) {
+		return;
+	}
+
+	if (m_persistentChatVideoPosterTimeout) {
+		m_persistentChatVideoPosterTimeout->stop();
+		m_persistentChatVideoPosterTimeout->deleteLater();
+	}
+	if (m_persistentChatVideoPosterPlayer) {
+		disconnect(m_persistentChatVideoPosterPlayer, nullptr, this, nullptr);
+		m_persistentChatVideoPosterPlayer->stop();
+		m_persistentChatVideoPosterPlayer->deleteLater();
+	}
+	if (m_persistentChatVideoPosterSink) {
+		disconnect(m_persistentChatVideoPosterSink, nullptr, this, nullptr);
+		m_persistentChatVideoPosterSink->deleteLater();
+	}
+	m_persistentChatVideoPosterTimeout = nullptr;
+	m_persistentChatVideoPosterPlayer  = nullptr;
+	m_persistentChatVideoPosterSink    = nullptr;
+	m_activePersistentChatVideoPosterKey.clear();
+	m_activePersistentChatVideoPosterSource.clear();
+	QTimer::singleShot(50, this, &MainWindow::startNextPersistentChatVideoPoster);
 }
 
 void MainWindow::completePersistentChatPreviewImageProvider(const QString &previewKey, const int mediaItemIndex,

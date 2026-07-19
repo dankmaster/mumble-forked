@@ -81,6 +81,8 @@ class QLockFile;
 class QHostAddress;
 class QNetworkReply;
 class QNetworkRequest;
+class QMediaPlayer;
+class QVideoSink;
 class QSslCertificate;
 class QSslError;
 class QToolButton;
@@ -414,6 +416,7 @@ public:
 		bool mediaImageProviderRequested = false;
 		bool mediaImageProviderFinished  = false;
 		bool mediaImageProviderAnimated  = false;
+		QString videoPosterAttemptedSource;
 	};
 
 	struct PersistentChatAssetDownload {
@@ -582,6 +585,12 @@ public:
 											 const QString &suggestedMime = QString());
 	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
 	void ensurePersistentChatPreviewImageProviders(const QString &previewKey);
+	QString persistentChatVideoPosterSource(const PersistentChatPreview &preview) const;
+	void queuePersistentChatVideoPoster(const QString &previewKey);
+	void startNextPersistentChatVideoPoster();
+	void finishPersistentChatVideoPoster(const QString &previewKey, const QString &source,
+										 const QImage &image = QImage());
+	void cancelPersistentChatVideoPosters(const QString &previewKey = QString());
 	void requestPersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
 											 const QString &sourceIdentity, const QUrl &requestUrl,
 											 const QString &suggestedMime = QString(), int redirectCount = 0);
@@ -993,6 +1002,13 @@ protected:
 	bool m_persistentChatMessageIndexValid = false;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
 	QHash< QNetworkReply *, QString > m_persistentChatPreviewNetworkReplies;
+	QStringList m_persistentChatVideoPosterQueue;
+	QSet< QString > m_persistentChatVideoPosterQueuedKeys;
+	QString m_activePersistentChatVideoPosterKey;
+	QString m_activePersistentChatVideoPosterSource;
+	QMediaPlayer *m_persistentChatVideoPosterPlayer = nullptr;
+	QVideoSink *m_persistentChatVideoPosterSink      = nullptr;
+	QTimer *m_persistentChatVideoPosterTimeout       = nullptr;
 	QSet< QString > m_persistentChatPreviewCacheWritesInFlight;
 	QSet< QString > m_persistentChatPreviewCacheWritesPending;
 	QSet< QString > m_persistentChatPreviewCacheReadsInFlight;
