@@ -10,6 +10,8 @@ Item {
 	property bool active: false
 	property var targets: []
 	property var activeBindings: []
+	property var activeBindingMap: new Map()
+	property var visitedItemGenerations: new Map()
 	property bool refreshPending: false
 	readonly property int bindingCount: activeBindings.length
 
@@ -99,12 +101,7 @@ Item {
 	}
 
 	function bindingFor(item) {
-		for (let index = 0; index < activeBindings.length; ++index) {
-			const entry = activeBindings[index]
-			if (entry && entry.item === item)
-				return entry.binding
-		}
-		return null
+		return item ? (activeBindingMap.get(item) || null) : null
 	}
 
 	// QQuickItemViewFxItem::setVisible() writes the delegate's private
@@ -143,20 +140,21 @@ Item {
 		}
 	}
 
-	function suppressItem(item, visitedItems) {
+	function suppressItem(item) {
 		// A delegate-local barrier may need to suppress its owning ItemView row.
 		// That target contains this helper as a visual child, so stop traversal at
 		// the helper itself instead of recursively trying to bind the barrier.
 		if (!item || item === root)
 			return
-		if (visitedItems.indexOf(item) >= 0)
+		if (visitedItemGenerations.has(item))
 			return
-		visitedItems.push(item)
+		visitedItemGenerations.set(item, true)
 		const existingBinding = bindingFor(item)
 		if (!existingBinding) {
 			const binding = ignoredBindingComponent.createObject(root, { "scopeItem": item })
 			if (binding) {
 				activeBindings.push({ "item": item, "binding": binding })
+				activeBindingMap.set(item, binding)
 			}
 		} else {
 			// ItemView may overwrite its delegate's private accessibility flag
@@ -173,16 +171,16 @@ Item {
 		}
 		const children = item.children || []
 		for (let index = 0; index < children.length; ++index)
-			suppressItem(children[index], visitedItems)
+			suppressItem(children[index])
 
 		// Flickable and ItemView delegates live below a separately hosted
 		// contentItem on some Qt Quick backends. Loader and Popup-like hosts have
 		// the same shape. These items are not guaranteed to appear in children,
-		// so traverse the public host links explicitly and rely on visitedItems to
-		// avoid binding the same visual item twice.
+		// so traverse the public host links explicitly and rely on the traversal
+		// visited map to avoid binding the same visual item twice.
 		const hostedPropertyNames = [ "contentItem", "item", "headerItem", "footerItem", "popupItem" ]
 		for (let index = 0; index < hostedPropertyNames.length; ++index)
-			suppressItem(hostedItem(item, hostedPropertyNames[index]), visitedItems)
+			suppressItem(hostedItem(item, hostedPropertyNames[index]))
 	}
 
 	function scheduleRefresh() {
@@ -200,9 +198,11 @@ Item {
 		// the persistent product scene when one modal is replaced by another.
 		// Each bound item also observes childrenChanged, so late model delegates are
 		// picked up once on the next event-loop turn without a polling traversal.
-		const visitedItems = []
+		// Keep traversal membership bounded to the current visual graph. A
+		// persistent Map would retain every transient ItemView delegate ever seen.
+		visitedItemGenerations = new Map()
 		for (let index = 0; index < targets.length; ++index) {
-			suppressItem(targets[index], visitedItems)
+			suppressItem(targets[index])
 		}
 		// Pooled rows and nested prompts can reuse a barrier with a different target.
 		// Retain only wrappers reached from the current graph so reuse cannot retain
@@ -210,9 +210,12 @@ Item {
 		const retainedBindings = []
 		for (let index = 0; index < activeBindings.length; ++index) {
 			const entry = activeBindings[index]
-			if (entry && entry.item && entry.binding && visitedItems.indexOf(entry.item) >= 0) {
+			if (entry && entry.item && entry.binding
+					&& visitedItemGenerations.has(entry.item)) {
 				retainedBindings.push(entry)
 			} else if (entry && entry.binding) {
+				if (entry.item)
+					activeBindingMap.delete(entry.item)
 				entry.binding.overrideActive = false
 				entry.binding.destroy()
 			}
@@ -225,8 +228,11 @@ Item {
 		refreshTimer.stop()
 		refreshPending = false
 		const bindings = activeBindings
-		if (destroyBindings)
+		if (destroyBindings) {
 			activeBindings = []
+			activeBindingMap.clear()
+			visitedItemGenerations.clear()
+		}
 		for (let index = bindings.length - 1; index >= 0; --index) {
 			const binding = bindings[index] ? bindings[index].binding : null
 			if (binding) {

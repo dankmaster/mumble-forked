@@ -106,6 +106,12 @@ ApplicationWindow {
 	readonly property bool modalUiActive: (dialogState.open && dialogState.kind !== "settings")
 		|| navigationModalActive
 		|| mediaSessionWindowUnavailable
+	// Detached product dialogs are native QQuickWindows. Windows owns their
+	// modal accessibility relationship, so recursively suppressing the complete
+	// main scene duplicates native work and stalls the GUI thread. Keep the deep
+	// barrier only for modal surfaces hosted inside this window.
+	readonly property bool backgroundAccessibilitySuppressed: navigationModalActive
+		|| mediaSessionWindowUnavailable
 	readonly property bool automationNavigationOpen: navigationModalActive
 	readonly property real automationNavigationPosition: navigationDrawer.position
 	readonly property var navigationRoomModel: roomModel
@@ -208,7 +214,7 @@ ApplicationWindow {
 	}
 
 	function refreshTimelineVirtualizedAccessibility() {
-		if (!root.modalUiActive || !timeline || !timeline.contentItem)
+		if (!root.backgroundAccessibilitySuppressed || !timeline || !timeline.contentItem)
 			return
 		// QQuickItemView may write a materialized delegate's private accessible
 		// bit after the product-level modal barrier has traversed the scene. Keep
@@ -1764,7 +1770,7 @@ ApplicationWindow {
 	ModalAccessibilityBarrier {
 		id: modalAccessibilityBarrier
 		objectName: "modalAccessibilityBarrier"
-		active: root.modalUiActive
+		active: root.backgroundAccessibilitySuppressed
 		// Popup content is reparented to Overlay.overlay. The active dialog or
 		// drawer therefore stays outside these background targets and owns the
 		// complete semantic tree while the product scene remains visible.
@@ -1776,7 +1782,7 @@ ApplicationWindow {
 		interval: 16
 		repeat: true
 		triggeredOnStart: true
-		running: root.modalUiActive
+		running: root.backgroundAccessibilitySuppressed
 		onTriggered: root.refreshTimelineVirtualizedAccessibility()
 	}
 
@@ -2296,7 +2302,7 @@ ApplicationWindow {
 							objectName: "compactNavigationToggle"
 							visible: root.compactNavigation
 							iconName: "menu"
-							Accessible.ignored: root.modalUiActive
+							Accessible.ignored: root.backgroundAccessibilitySuppressed
 							Accessible.name: qsTr("Open rooms and participants")
 							onClicked: navigationDrawer.open()
 						}
@@ -2309,7 +2315,7 @@ ApplicationWindow {
 								: String(share.primaryLabel || qsTr("Screen share"))
 							tone: String(share.primaryTone || "neutral")
 							enabled: share.primaryEnabled === undefined || !!share.primaryEnabled
-							Accessible.ignored: root.modalUiActive
+							Accessible.ignored: root.backgroundAccessibilitySuppressed
 							Accessible.name: String(share.primaryLabel || qsTr("Screen share"))
 							Accessible.description: String(share.primaryHint || "")
 							onClicked: uiCommands.invokeScopeAction(activeScope.scopeToken,
@@ -2389,7 +2395,7 @@ ApplicationWindow {
 							objectName: "conversationSearchButton"
 							visible: clientSession.connected
 							iconName: "search"
-							Accessible.ignored: root.modalUiActive
+							Accessible.ignored: root.backgroundAccessibilitySuppressed
 							Accessible.name: root.conversationSearchOpen
 								? qsTr("Focus conversation search") : qsTr("Search this conversation")
 							Accessible.description: qsTr("Search message text, senders, replies, and attachments")
@@ -2443,7 +2449,7 @@ ApplicationWindow {
 						id: appMenuButton
 						objectName: "visualFixtureApplicationMenu"
 						iconName: "more"
-						Accessible.ignored: root.modalUiActive
+						Accessible.ignored: root.backgroundAccessibilitySuppressed
                         Accessible.name: qsTr("Application menu")
 						Accessible.focusable: true
 						Accessible.focused: activeFocus
@@ -2488,7 +2494,7 @@ ApplicationWindow {
 					visible: root.conversationSearchOpen
 					timelineModel: chatModel
 					narrowLayout: root.narrowShell
-					accessibilitySuppressed: root.modalUiActive
+					accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					visualFixtureMode: root.visualFixtureOverrideActive
 					onCloseRequested: root.closeConversationSearch(true)
 					onCurrentMatchRequested: (row, stableId) =>
@@ -2546,7 +2552,7 @@ ApplicationWindow {
 					share: activeScope.screenShare || ({})
 					scopeLabel: activeScope.label
 					narrowLayout: root.narrowShell
-					accessibilitySuppressed: root.modalUiActive
+					accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					onActionRequested: actionId => uiCommands.invokeScopeAction(
 						activeScope.scopeToken, actionId)
 				}
@@ -2970,7 +2976,7 @@ ApplicationWindow {
 						&& y < timeline.contentY + timeline.height - 0.5
 					: y >= timeline.contentY - 0.5
 						&& y + height <= timeline.contentY + timeline.height + 0.5
-				accessibilitySuppressed: root.modalUiActive
+				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 						function openAutomationActions() {
 							openMessageActions()
@@ -3265,7 +3271,7 @@ ApplicationWindow {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
-									accessibilitySuppressed: root.modalUiActive
+									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
 									resourceActive: !messageDelegate.accessibilityPooled
@@ -4060,7 +4066,7 @@ ApplicationWindow {
                                 enabled: composer.canSend && !composer.sending
 								color: composerInput.enabled ? Theme.textMain : Theme.textMuted
 								placeholderTextColor: Theme.textMuted
-								Accessible.ignored: root.modalUiActive
+								Accessible.ignored: root.backgroundAccessibilitySuppressed
 								Accessible.name: activeScope.composerPlaceholder.length > 0
 												 ? activeScope.composerPlaceholder
 												 : qsTr("Message composer")
@@ -4119,7 +4125,7 @@ ApplicationWindow {
 			visible: !root.compactNavigation
 			alignedHeaderHeight: shellHeader.height
 			alignedFooterHeight: composerSurface.height
-			accessibilitySuppressed: root.modalUiActive
+			accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 				navigationModel: root.navigationRailModel
 				selectionState: root.navigationSelectionState
 				uiCommands: root.navigationCommands

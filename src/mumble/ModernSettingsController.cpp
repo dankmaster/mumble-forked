@@ -62,7 +62,10 @@ namespace {
 			return BackendAvailability::compiled().rnnoise ? CpuClass::Standard : CpuClass::Low;
 		}
 		if (profile != Profile::Auto) {
-			return verifier->manualProfileCpuClass();
+			// The real Quality/Voice Focus probe initializes and exercises a neural
+			// pipeline. It is pre-warmed in the background; Settings must never
+			// perform or wait for that work on the GUI thread.
+			return verifier->cachedManualProfileCpuClass().value_or(CpuClass::Low);
 		}
 		const AutoV2::CapabilityProbeKey key = AutoV2::currentCapabilityProbeKey(verifier->runtimePayloadFingerprint());
 		const AutoV2::CapabilityProbeResult result = AutoV2::cachedCapabilityProbe(key);
@@ -124,7 +127,8 @@ namespace {
 	}
 
 	InputEnhancementSettingsReadiness inputEnhancementReadinessForSettings(
-		const Settings &settings, Mumble::InputEnhancement::Profile profile, int noiseReduction, int naturalCrisp) {
+		const Settings &settings, Mumble::InputEnhancement::Profile profile, int noiseReduction, int naturalCrisp,
+		const bool presentationOnly = false) {
 		using namespace Mumble::InputEnhancement;
 		const InputEnhancementPackageVerifier *verifier =
 			Global::g_global_struct ? Global::get().inputEnhancementPackageVerifier : nullptr;
@@ -157,8 +161,10 @@ namespace {
 		if (!verifier && profile != Profile::Original) {
 			return { false, false, false, ProfileReadinessReason::PackageUnavailable, runtimeBlockReason };
 		}
-		const ProfileReadiness processingReadiness =
-			verifier ? verifier->readinessForProfile(request) : profileReadiness(request);
+		const ProfileReadiness processingReadiness = verifier
+			? (presentationOnly ? verifier->presentationReadinessForProfile(request)
+							: verifier->readinessForProfile(request))
+			: profileReadiness(request);
 		return { processingReadiness.selectable && runtimeBlockReason == EnhancedRuntimeBlockReason::None,
 				 processingReadiness.selectable, processingReadiness.productionQualified, processingReadiness.reason,
 				 runtimeBlockReason };
@@ -695,7 +701,7 @@ namespace {
 			const InputEnhancementSettingsReadiness readiness =
 				inputEnhancementReadinessForSettings(
 					settings, profile, preset ? preset->noiseReduction : 0,
-					preset ? preset->naturalCrisp : 0);
+					preset ? preset->naturalCrisp : 0, true);
 			QString reason = inputEnhancementReadinessReasonText(readiness);
 			if (readiness.selectable && !readiness.productionQualified) {
 				reason = QObject::tr("Preview/session-only on this input backend or device identity.");
@@ -3910,7 +3916,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const InputEnhancementSettingsReadiness currentInputEnhancementReadiness =
 			inputEnhancementReadinessForSettings(
 				m_draft, inputEnhancementPreference.profile, inputEnhancementPreference.reduction,
-				inputEnhancementPreference.character);
+				inputEnhancementPreference.character, true);
 		QString inputEnhancementProfileHint = m_inputEnhancementReadinessUiError;
 		if (inputEnhancementProfileHint.isEmpty()
 			&& inputEnhancementPreference.profile != Mumble::InputEnhancement::Profile::Original
@@ -3921,7 +3927,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const InputEnhancementSettingsReadiness inputEnhancementAutoReadiness =
 			inputEnhancementReadinessForSettings(
 				m_draft, Mumble::InputEnhancement::Profile::Auto,
-				inputEnhancementPreference.reduction, inputEnhancementPreference.character);
+				inputEnhancementPreference.reduction, inputEnhancementPreference.character, true);
 		const bool inputEnhancementAutoSelected =
 			inputEnhancementPreference.profile == Mumble::InputEnhancement::Profile::Auto;
 		QString inputEnhancementAutoHint = QObject::tr(

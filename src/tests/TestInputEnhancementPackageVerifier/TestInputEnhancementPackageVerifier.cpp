@@ -184,12 +184,14 @@ private slots:
 	void acceptsExactSignedCatalogAndPublishesModelHashes();
 	void bindsRuntimeRecipesToSignedCatalog();
 	void preflightExplainsUnavailableProfiles();
+	void presentationPreflightUsesVerifiedSnapshotWithoutWeakeningAcceptance();
 	void rejectsChangedManifestSignatureAndAssetBytes();
 	void rejectsUnsafePathsUnknownReferencesAndWrongCatalog_data();
 	void rejectsUnsafePathsUnknownReferencesAndWrongCatalog();
 	void rejectsMismatchedExecutionSemantics_data();
 	void rejectsMismatchedExecutionSemantics();
 	void missingSignatureAndReleaseKeyFailClosed();
+	void asynchronousManualProfileProbePublishesOnlyCompletedCache();
 	void onlyKeylessBuildZeroCanRunUnmanaged();
 };
 
@@ -405,6 +407,52 @@ void TestInputEnhancementPackageVerifier::missingSignatureAndReleaseKeyFailClose
 	QVERIFY(keylessVerifier.readyForHealthMarker());
 	QVERIFY(!keylessVerifier.verificationHealthy());
 	QVERIFY(!keylessVerifier.modelAuthorized(QStringLiteral("rnnoise:embedded")));
+}
+
+void TestInputEnhancementPackageVerifier::presentationPreflightUsesVerifiedSnapshotWithoutWeakeningAcceptance() {
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	writeValidPackage(root);
+	InputEnhancementPackageVerifier verifier(configuration(root));
+	QVERIFY(verifier.verify().verified);
+
+	ResolveRequest request;
+	request.profile             = Profile::Quality;
+	request.cpuClass            = CpuClass::High;
+	request.backendAvailability = { true, true, true };
+	request.captureDevice       = CaptureDeviceContext::liveDevice(QStringLiteral("WASAPI"), true);
+	QVERIFY(verifier.presentationReadinessForProfile(request).selectable);
+	QVERIFY(verifier.readinessForProfile(request).selectable);
+
+	// A same-size mutation is intentionally invisible to the cheap presentation
+	// path, but the security boundary still re-hashes and rejects it.
+	const QString modelPath = QDir(root.path()).filePath(QStringLiteral("deepfilternet/model.tar.gz"));
+	QVERIFY(writeFile(modelPath, QByteArray(DeepFilterAsset.size(), 'X')));
+	QVERIFY(verifier.presentationReadinessForProfile(request).selectable);
+	QVERIFY(!verifier.readinessForProfile(request).selectable);
+
+	// Presentation stays on the immutable verified snapshot even if the package
+	// changes later; the strict acceptance path remains the enforcement point.
+	QVERIFY(QFile::remove(modelPath));
+	QVERIFY(verifier.presentationReadinessForProfile(request).selectable);
+	QVERIFY(!verifier.readinessForProfile(request).selectable);
+}
+
+void TestInputEnhancementPackageVerifier::asynchronousManualProfileProbePublishesOnlyCompletedCache() {
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	writeValidPackage(root);
+	QVERIFY(QFile::remove(QDir(root.path()).filePath(QStringLiteral("input-recipes.json.sig"))));
+	InputEnhancementPackageVerifier verifier(configuration(root));
+	QCOMPARE(errorValue(verifier.verify().error), errorValue(PackageVerificationError::MissingSignature));
+	QVERIFY(!verifier.cachedManualProfileCpuClass().has_value());
+
+	verifier.startManualProfileCpuClassProbe();
+	QTRY_VERIFY_WITH_TIMEOUT(verifier.cachedManualProfileCpuClass().has_value(), 1000);
+	QCOMPARE(*verifier.cachedManualProfileCpuClass(), CpuClass::Low);
+	// Starting an already-completed probe is idempotent and retains the result.
+	verifier.startManualProfileCpuClassProbe();
+	QCOMPARE(*verifier.cachedManualProfileCpuClass(), CpuClass::Low);
 }
 
 void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() {

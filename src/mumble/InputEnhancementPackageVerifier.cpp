@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSet>
 
 #include <algorithm>
@@ -500,6 +501,19 @@ InputEnhancementPackageVerifier::InputEnhancementPackageVerifier(Configuration c
 	m_report.store(std::make_shared< const PackageVerificationReport >(), std::memory_order_release);
 }
 
+InputEnhancementPackageVerifier::~InputEnhancementPackageVerifier() {
+	std::future< void > probeFuture;
+	{
+		std::lock_guard lock(m_manualProfileProbeFutureMutex);
+		if (m_manualProfileProbeFuture.valid()) {
+			probeFuture = std::move(m_manualProfileProbeFuture);
+		}
+	}
+	if (probeFuture.valid()) {
+		probeFuture.wait();
+	}
+}
+
 PackageVerificationReport InputEnhancementPackageVerifier::verify() {
 	if (m_developmentBypass) {
 		// Verification may be repeated by tests or a future package refresh. Drop
@@ -658,6 +672,18 @@ bool InputEnhancementPackageVerifier::modelsAuthorized(const QStringList &modelI
 	return std::all_of(modelIds.cbegin(), modelIds.cend(), [this](const QString &id) { return modelAuthorized(id); });
 }
 
+bool InputEnhancementPackageVerifier::modelSnapshotAuthorized(const QString &modelId) const {
+	const auto current = snapshot();
+	if (!current || (!m_developmentBypass && !m_verified.load(std::memory_order_acquire))
+		|| !verificationHealthy()) {
+		return false;
+	}
+	// verify() already bound the exact model bytes to this immutable snapshot.
+	// Presentation never touches the filesystem; the strict path re-hashes
+	// immediately before a selection is accepted or a model is initialized.
+	return current->models.contains(modelId);
+}
+
 bool InputEnhancementPackageVerifier::recipeAuthorized(const Recipe &recipe) const {
 	const auto current = snapshot();
 	if (!current) {
@@ -711,12 +737,36 @@ ProfileReadiness InputEnhancementPackageVerifier::readinessForProfile(const Reso
 	return readiness;
 }
 
+ProfileReadiness InputEnhancementPackageVerifier::presentationReadinessForProfile(
+	const ResolveRequest &request) const {
+	ProfileReadiness readiness = profileReadiness(request);
+	if (!readiness.selectable || request.profile == Profile::Original) {
+		return readiness;
+	}
+	if (!verificationHealthy()) {
+		return { false, false, ProfileReadinessReason::PackageUnavailable };
+	}
+
+	const Recipe recipe = RecipeCatalog::resolve(request);
+	if ((request.profile != Profile::Auto && recipe.effectiveProfile() != request.profile)
+		|| !recipeAuthorized(recipe)) {
+		return { false, false, ProfileReadinessReason::RecipeUnauthorized };
+	}
+	if (recipe.usesNeuralProcessor() && !modelSnapshotAuthorized(recipe.modelId())) {
+		return { false, false, ProfileReadinessReason::ModelUnavailable };
+	}
+	return readiness;
+}
+
 CpuClass InputEnhancementPackageVerifier::manualProfileCpuClass() const {
 	if (!verificationHealthy()) {
+		m_manualProfileProbeReady.store(true, std::memory_order_release);
 		return CpuClass::Low;
 	}
 
 	std::call_once(m_manualProfileProbeOnce, [this]() {
+		const auto publishReady =
+			qScopeGuard([this]() { m_manualProfileProbeReady.store(true, std::memory_order_release); });
 		const BackendAvailability availability = BackendAvailability::compiled();
 		ManualProfileCapabilityMetrics metrics;
 		metrics.rnnoiseAvailable       = availability.rnnoise;
@@ -778,6 +828,26 @@ CpuClass InputEnhancementPackageVerifier::manualProfileCpuClass() const {
 			// Standard classification established above.
 		}
 	});
+	return m_manualProfileCpuClass;
+}
+
+void InputEnhancementPackageVerifier::startManualProfileCpuClassProbe() {
+	if (m_manualProfileProbeReady.load(std::memory_order_acquire)) {
+		return;
+	}
+	std::lock_guard lock(m_manualProfileProbeFutureMutex);
+	if (m_manualProfileProbeFuture.valid()) {
+		return;
+	}
+	m_manualProfileProbeFuture = std::async(std::launch::async, [this]() {
+		std::ignore = manualProfileCpuClass();
+	});
+}
+
+std::optional< CpuClass > InputEnhancementPackageVerifier::cachedManualProfileCpuClass() const noexcept {
+	if (!m_manualProfileProbeReady.load(std::memory_order_acquire)) {
+		return std::nullopt;
+	}
 	return m_manualProfileCpuClass;
 }
 

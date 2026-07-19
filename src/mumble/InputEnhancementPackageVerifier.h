@@ -14,8 +14,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 namespace Mumble::InputEnhancement {
 
@@ -96,6 +98,7 @@ public:
 	static constexpr qint64 maximumModelAssetBytes        = 1024LL * 1024LL * 1024LL;
 
 	explicit InputEnhancementPackageVerifier(Configuration configuration);
+	~InputEnhancementPackageVerifier();
 
 	PackageVerificationReport verify();
 	PackageVerificationReport report() const;
@@ -120,10 +123,22 @@ public:
 	/// profile itself can run; deterministic runtime fallback is never presented
 	/// as a successful preflight.
 	ProfileReadiness readinessForProfile(const ResolveRequest &request) const;
+	/// Returns presentation-only readiness from the package snapshot that was
+	/// fully hashed by verify(). This deliberately avoids re-reading large model
+	/// files while a settings surface is being composed. Callers must still use
+	/// readinessForProfile() before accepting or activating a selection.
+	ProfileReadiness presentationReadinessForProfile(const ResolveRequest &request) const;
 	/// Runs and caches a real Quality pipeline/worker probe off the audio
 	/// callback. Manual profile readiness is deliberately independent from
 	/// AutoV2's synthetic policy-capability probe.
 	CpuClass manualProfileCpuClass() const;
+	/// Starts the expensive one-time manual profile capability probe away from
+	/// the GUI and audio callback threads. The owned future is joined during
+	/// destruction so the verifier always outlives the work.
+	void startManualProfileCpuClassProbe();
+	/// Returns only an already-computed result. Presentation code must use this
+	/// accessor so opening Settings can never run or wait for the real probe.
+	std::optional< CpuClass > cachedManualProfileCpuClass() const noexcept;
 	QByteArray modelSha256(const QString &modelId) const;
 	QString modelSha256Hex(const QString &modelId) const;
 	QString modelPath(const QString &modelId) const;
@@ -148,6 +163,7 @@ private:
 	PackageVerificationReport fail(PackageVerificationError error, QString detail);
 	void publishReport(const PackageVerificationReport &report);
 	std::shared_ptr< const Snapshot > snapshot() const;
+	bool modelSnapshotAuthorized(const QString &modelId) const;
 
 	Configuration m_configuration;
 	std::atomic< std::shared_ptr< const Snapshot > > m_snapshot;
@@ -157,6 +173,9 @@ private:
 	const bool m_developmentBypass;
 	mutable std::once_flag m_manualProfileProbeOnce;
 	mutable CpuClass m_manualProfileCpuClass;
+	mutable std::atomic_bool m_manualProfileProbeReady{ false };
+	std::mutex m_manualProfileProbeFutureMutex;
+	std::future< void > m_manualProfileProbeFuture;
 };
 
 } // namespace Mumble::InputEnhancement
