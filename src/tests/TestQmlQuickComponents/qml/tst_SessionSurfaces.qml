@@ -139,7 +139,7 @@ TestCase {
         session.motdDismissed = false
         session.motdChanged = true
 		motdLoader.item.hiddenForHistory = false
-		motdLoader.item.maximumImageHeight = 82
+		motdLoader.item.maximumImageHeight = 68
 		connectionLoader.item.showDisconnectedAction = true
 		connectionLoader.item.animationsEnabled = true
 		connectionLoader.item.height = connectionLoader.height
@@ -285,7 +285,7 @@ TestCase {
         compare(motdActionSpy.signalArguments[0][0], "motd.dismiss")
     }
 
-	function test_motd_collapsed_surface_matches_the_compact_production_bar() {
+	function test_motd_collapsed_surface_keeps_the_welcome_summary_visible() {
 		const panel = motdLoader.item
 		compare(panel.activeFocusOnTab, false)
 		session.motdSummary = "Welcome\uFFFC   friends"
@@ -306,11 +306,11 @@ TestCase {
 		verify(panel.contentVisible && !panel.expanded)
 		verify(flow !== null)
 		compare(summary.text, "Welcome friends")
-		verify(!summary.visible, "collapsed MOTD must not render summary copy")
+		verify(summary.visible, "collapsed MOTD must keep its useful summary visible")
 		compare(bodyScroll.height, 0)
-		compare(panel.headerHeight, 38)
-		compare(panel.implicitHeight, 38)
-		compare(header.height, 38)
+		compare(panel.headerHeight, 42)
+		compare(panel.implicitHeight, 42)
+		compare(header.height, 42)
 		compare(badge.width, 24)
 		compare(badge.height, 24)
 		compare(heading.text, "Welcome")
@@ -330,7 +330,7 @@ TestCase {
 			verify(origin.x >= 0 && origin.x + control.width <= panel.width)
 			verify(origin.y >= 0 && origin.y + control.height <= panel.headerHeight)
 		}
-		compare(expand.iconName, "next")
+		compare(expand.iconName, "chevron-down")
 		compare(dismiss.iconName, "close")
 	}
 
@@ -394,7 +394,7 @@ TestCase {
 		compare(bodyScroll.contentWidth, bodyScroll.availableWidth)
 		const collapse = findChild(motdLoader.item, "motdAction_motd.hide")
 		verify(collapse !== null)
-		compare(collapse.iconName, "chevron-down")
+		compare(collapse.iconName, "chevron-up")
 		const text = findChild(motdLoader.item, "richMessageBodyText")
 		verify(text !== null)
 		verify(text.text.indexOf("Welcome") >= 0)
@@ -425,7 +425,7 @@ TestCase {
 		compare(card.Accessible.role, Accessible.Graphic)
 		compare(card.Accessible.name, "Server welcome art")
 		compare(richBody.maximumImageWidth, 560)
-		compare(richBody.maximumImageHeight, 82)
+		compare(richBody.maximumImageHeight, 68)
 		compare(richBody.imageBorderWidth, 0)
 		compare(richBody.imageSurfaceColor, panel.color)
 		compare(richBody.textHorizontalAlignment, Text.AlignLeft)
@@ -433,7 +433,7 @@ TestCase {
 			return structured.width > 600 && card.width < structured.width - Theme.space4
 		})
 		verify(card.width < structured.width - Theme.space4)
-		verify(card.implicitHeight <= 82 + Theme.space1 * 2 + 0.5)
+		verify(card.implicitHeight <= 68 + Theme.space1 * 2 + 0.5)
 		const heading = findChild(panel, "motdHeading")
 		verify(heading !== null)
 		const headingOrigin = heading.mapToItem(panel, 0, 0)
@@ -579,7 +579,7 @@ TestCase {
 				id + " bounds " + origin.x + "+" + button.width + " within " + panel.width)
 			verify(button.Accessible.name.length > 0)
 		}
-		compare(panel.implicitHeight, 38)
+		compare(panel.implicitHeight, 42)
 	}
 
 	function test_update_actions_wrap_at_420_and_relax_at_760() {

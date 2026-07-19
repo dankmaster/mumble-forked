@@ -169,7 +169,7 @@ private:
 	quint64 m_motdParseGeneration = 0;
 	QString m_motdSummary;
 	bool m_hasMotd = false;
-	bool m_motdExpanded = true;
+	bool m_motdExpanded = false;
 	bool m_motdDismissed = false;
 	QString m_motdSignature;
 	QString m_motdDismissedSignature;

@@ -2480,12 +2480,12 @@ ApplicationWindow {
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
 					maximumBodyHeight: root.height <= 560
-						? (root.activeScopeHasScreenShare ? 68 : root.compactNavigation ? 72 : 96)
-						: root.compactNavigation ? Math.max(132, Math.min(184, root.height * 0.22))
-						: Math.max(166, Math.min(288, root.height * 0.36))
+						? (root.activeScopeHasScreenShare ? 60 : root.compactNavigation ? 68 : 88)
+						: root.compactNavigation ? Math.max(112, Math.min(160, root.height * 0.18))
+						: Math.max(132, Math.min(220, root.height * 0.28))
 					maximumImageHeight: root.height <= 560
-						? (root.activeScopeHasScreenShare ? 38 : root.compactNavigation ? 36 : 48)
-						: root.compactNavigation ? 72 : 82
+						? (root.activeScopeHasScreenShare ? 32 : root.compactNavigation ? 34 : 40)
+						: root.compactNavigation ? 56 : 68
 					hiddenForHistory: root.motdHiddenForHistory
 					visualFixtureMode: root.visualFixtureOverrideActive
 					session: clientSession

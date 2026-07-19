@@ -316,7 +316,10 @@ struct Settings {
 	QByteArray qbaModernMainWindowState       = {};
 	QByteArray qbaModernMinimalViewGeometry   = {};
 	QByteArray qbaModernMinimalViewState      = {};
-	bool bModernShellMotdExpanded             = true;
+	// A server welcome is useful context, but must not displace the active
+	// conversation on every connection. The compact summary remains visible and
+	// the full rich body is an explicit user choice.
+	bool bModernShellMotdExpanded             = false;
 	QString qsModernShellMotdDismissedSignature;
 	QString qsModernShellMotdLastSeenSignature;
 	QString qsModernShellTheme                = QStringLiteral("dark");
