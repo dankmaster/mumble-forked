@@ -817,6 +817,10 @@ public:
 	void requestStonksState(const QString &period = QString(),
 							std::optional< unsigned int > userID = std::nullopt);
 	void handleStonksState(const MumbleProto::StonksState &state);
+	void refreshStonksTickerQuotes(bool force = false);
+	void requestStonksTickerQuote(const QString &symbol);
+	void finishStonksTickerQuote(const QString &symbol, quint64 requestToken, QVariantMap quote);
+	void publishStonksTickerQuotes();
 	QVariantMap buildModernStonksDialog() const;
 	bool handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload);
 	bool openModernDeleteMessageDialog(unsigned int messageID, const PersistentChatTarget &target,
@@ -1092,6 +1096,10 @@ protected:
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;
 #	endif
 	QVariantMap m_stonksState;
+	QVariantMap m_stonksTickerQuoteCache;
+	QHash< QString, quint64 > m_stonksTickerQuoteRequests;
+	quint64 m_stonksTickerQuoteRequestSerial = 0;
+	QTimer *m_stonksTickerQuoteRefreshTimer  = nullptr;
 	QVariantMap m_modernConnectionStateProbe;
 	QVariantMap m_modernScreenShareStateProbe;
 	struct PendingScreenShareThumbnailJob {
@@ -1104,6 +1112,7 @@ protected:
 	std::shared_ptr< std::atomic< bool > > m_screenShareDiscoveryCancellation;
 	QHash< quint64, PendingScreenShareThumbnailJob > m_pendingScreenShareThumbnailJobs;
 	QHash< QString, quint64 > m_pendingScreenShareThumbnailJobBySource;
+	QStringList m_queuedScreenShareThumbnailSourceIDs;
 	bool m_screenSharePickerShuttingDown = false;
 	std::optional< unsigned int > m_pendingScreenShareDialogChannelID;
 	QVariantList m_modernRichPreviewProbeMessages;
@@ -1375,7 +1384,9 @@ public slots:
 	QVariantMap buildModernScreenShareDialogDto(Channel *channel);
 	bool handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload);
 	void beginModernScreenShareDiscovery(quint64 generation);
+	void queueModernScreenShareThumbnails(quint64 generation);
 	void requestModernScreenShareThumbnail(const QString &sourceId, quint64 generation);
+	void pumpModernScreenShareThumbnailQueue();
 	void finishModernScreenShareThumbnail(quint64 jobID, const QImage &image);
 	void cancelModernScreenSharePickerJobs();
 	bool openScreenShareWindowOrStatus(const QString &streamID);

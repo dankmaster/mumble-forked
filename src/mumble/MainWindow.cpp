@@ -216,6 +216,7 @@ constexpr int ScreenSharePickerProcessIDRole        = Qt::UserRole + 611;
 constexpr int ScreenSharePickerAudioAutoRole        = Qt::UserRole + 612;
 #ifdef Q_OS_WIN
 constexpr qsizetype ScreenShareThumbnailPendingLimit = 8;
+constexpr qsizetype ScreenShareThumbnailQueueLimit   = 64;
 constexpr int ScreenShareDiscoveryPriority           = 100;
 constexpr int ScreenShareThumbnailPriority           = -10;
 
@@ -16007,6 +16008,39 @@ namespace {
 		return state;
 	}
 
+	QStringList stonksTickerSymbols(const QVariantMap &state) {
+		const QVariantMap preferences = state.value(QStringLiteral("feedPreferences")).toMap();
+		QStringList symbols;
+		QSet< QString > seen;
+
+		const auto appendSymbols = [&symbols, &seen](const QVariantList &tickers) {
+			for (const QVariant &tickerValue : tickers) {
+				const QVariantMap ticker = tickerValue.toMap();
+				QString candidate = ticker.value(QStringLiteral("providerSymbol")).toString().trimmed();
+				if (candidate.isEmpty()) {
+					candidate = ticker.value(QStringLiteral("symbol")).toString();
+				}
+				const QString symbol = Mumble::Finance::normalizeTickerSymbol(candidate);
+				if (symbol.isEmpty() || seen.contains(symbol)) {
+					continue;
+				}
+				seen.insert(symbol);
+				symbols.push_back(symbol);
+			}
+		};
+
+		if (preferences.value(QStringLiteral("showPins"), true).toBool()) {
+			appendSymbols(state.value(QStringLiteral("pinnedTickers")).toList());
+		}
+		if (preferences.value(QStringLiteral("showMine"), true).toBool()) {
+			appendSymbols(state.value(QStringLiteral("personalTickers")).toList());
+		}
+		if (preferences.value(QStringLiteral("showPopular"), true).toBool()) {
+			appendSymbols(state.value(QStringLiteral("popularTickers")).toList());
+		}
+		return symbols;
+	}
+
 	QVariantMap stonksPositionDto(const MumbleProto::StonksPosition &position) {
 		QVariantMap dto;
 		dto.insert(QStringLiteral("symbol"), u8(position.symbol()));
@@ -17230,6 +17264,204 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
 	}
+	refreshStonksTickerQuotes();
+}
+
+void MainWindow::refreshStonksTickerQuotes(const bool force) {
+	if (m_stonksState.isEmpty() || m_stonksState.value(QStringLiteral("disableQuoteLookup")).toBool()
+		|| !m_stonksState.value(QStringLiteral("supported")).toBool()
+		|| !m_stonksState.value(QStringLiteral("enabled"), true).toBool()
+		|| !Global::get().s.bModernShellTickerBannerEnabled) {
+		if (m_stonksTickerQuoteRefreshTimer) {
+			m_stonksTickerQuoteRefreshTimer->stop();
+		}
+		publishStonksTickerQuotes();
+		return;
+	}
+
+	const QStringList symbols = stonksTickerSymbols(m_stonksState);
+	if (symbols.isEmpty()) {
+		if (m_stonksTickerQuoteRefreshTimer) {
+			m_stonksTickerQuoteRefreshTimer->stop();
+		}
+		publishStonksTickerQuotes();
+		return;
+	}
+
+	if (!m_stonksTickerQuoteRefreshTimer) {
+		m_stonksTickerQuoteRefreshTimer = new QTimer(this);
+		m_stonksTickerQuoteRefreshTimer->setInterval(5 * 60 * 1000);
+		connect(m_stonksTickerQuoteRefreshTimer, &QTimer::timeout, this, [this]() {
+			requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
+			refreshStonksTickerQuotes(true);
+		});
+	}
+	m_stonksTickerQuoteRefreshTimer->start();
+
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	constexpr qint64 quoteStaleMsec = 5 * 60 * 1000;
+	for (const QString &symbol : symbols) {
+		const QVariantMap cached = m_stonksTickerQuoteCache.value(symbol).toMap();
+		const bool pending        = cached.value(QStringLiteral("pending")).toBool();
+		const qint64 fetchedAt    = cached.value(QStringLiteral("fetchedAt")).toLongLong();
+		if (pending || (!force && fetchedAt > 0 && now - fetchedAt < quoteStaleMsec)) {
+			continue;
+		}
+		requestStonksTickerQuote(symbol);
+	}
+	publishStonksTickerQuotes();
+}
+
+void MainWindow::requestStonksTickerQuote(const QString &symbol) {
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	if (normalizedSymbol.isEmpty()) {
+		return;
+	}
+
+	const quint64 requestToken = ++m_stonksTickerQuoteRequestSerial;
+	m_stonksTickerQuoteRequests.insert(normalizedSymbol, requestToken);
+	QVariantMap pending = m_stonksTickerQuoteCache.value(normalizedSymbol).toMap();
+	pending.insert(QStringLiteral("pending"), true);
+	pending.insert(QStringLiteral("requestedAt"), QDateTime::currentMSecsSinceEpoch());
+	m_stonksTickerQuoteCache.insert(normalizedSymbol, pending);
+
+	if (!Global::get().nam) {
+		finishStonksTickerQuote(normalizedSymbol, requestToken,
+			QVariantMap { { QStringLiteral("ok"), false },
+						  { QStringLiteral("error"), tr("Quote lookup is not available right now.") } });
+		return;
+	}
+
+	auto symbolCandidates = std::make_shared< QList< QString > >(
+		Mumble::Finance::yahooFinanceSymbolCandidates(normalizedSymbol));
+	if (symbolCandidates->isEmpty()) {
+		finishStonksTickerQuote(normalizedSymbol, requestToken,
+			QVariantMap { { QStringLiteral("ok"), false },
+						  { QStringLiteral("error"), tr("Enter a valid ticker symbol.") } });
+		return;
+	}
+
+	auto lastError  = std::make_shared< QString >();
+	auto fetchQuote = std::make_shared< std::function< void(int) > >();
+	*fetchQuote = [this, normalizedSymbol, requestToken, symbolCandidates, lastError, fetchQuote](int symbolIndex) {
+		if (m_stonksTickerQuoteRequests.value(normalizedSymbol) != requestToken) {
+			*fetchQuote = {};
+			return;
+		}
+		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
+			QVariantMap result { { QStringLiteral("ok"), false },
+							 { QStringLiteral("error"),
+							   lastError->trimmed().isEmpty() ? tr("Yahoo did not return a usable price.")
+															  : lastError->trimmed() } };
+			*fetchQuote = {};
+			finishStonksTickerQuote(normalizedSymbol, requestToken, result);
+			return;
+		}
+
+		const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(
+			symbolCandidates->at(symbolIndex), QStringLiteral("5d"), QStringLiteral("1d"));
+		if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
+			*lastError = tr("Quote provider URL was rejected.");
+			(*fetchQuote)(symbolIndex + 1);
+			return;
+		}
+
+		QNetworkRequest request(chartURL);
+		preparePreviewRequest(request);
+		request.setRawHeader(QByteArrayLiteral("Accept"),
+			QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+		QNetworkReply *reply = Global::get().nam->get(request);
+		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+		connect(reply, &QNetworkReply::finished, this,
+			[this, reply, normalizedSymbol, requestToken, symbolIndex, symbolCandidates, lastError, fetchQuote]() {
+				const QByteArray data      = reply->readAll();
+				const bool success         = reply->error() == QNetworkReply::NoError;
+				const QString networkError = reply->errorString();
+				reply->deleteLater();
+
+				if (m_stonksTickerQuoteRequests.value(normalizedSymbol) != requestToken) {
+					*fetchQuote = {};
+					return;
+				}
+				if (!success || data.isEmpty()) {
+					*lastError = networkError.trimmed().isEmpty() ? tr("Quote lookup failed.") : networkError;
+					(*fetchQuote)(symbolIndex + 1);
+					return;
+				}
+
+				QString parseError;
+				const std::optional< Mumble::Finance::YahooChartQuote > quote =
+					Mumble::Finance::parseYahooChartQuote(data, &parseError);
+				if (!quote || !quote->hasRegularMarketPrice || !std::isfinite(quote->regularMarketPrice)
+					|| quote->regularMarketPrice <= 0.0) {
+					*lastError = parseError.trimmed().isEmpty() ? tr("Yahoo did not return a usable price.") : parseError;
+					(*fetchQuote)(symbolIndex + 1);
+					return;
+				}
+
+				const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
+					quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
+				const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
+				QVariantMap result {
+					{ QStringLiteral("ok"), true },
+					{ QStringLiteral("providerId"), QStringLiteral("yahoo-finance") },
+					{ QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol },
+					{ QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol },
+					{ QStringLiteral("displayName"), !quote->shortName.trimmed().isEmpty()
+													  ? quote->shortName.trimmed() : quote->longName.trimmed() },
+					{ QStringLiteral("exchange"), !quote->fullExchangeName.trimmed().isEmpty()
+												  ? quote->fullExchangeName.trimmed() : quote->exchangeName.trimmed() },
+					{ QStringLiteral("price"), quote->regularMarketPrice },
+					{ QStringLiteral("currency"), quote->currency.trimmed().isEmpty()
+													 ? QStringLiteral("USD") : quote->currency.trimmed() },
+					{ QStringLiteral("priceHint"), quote->priceHint },
+					{ QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
+						quote->regularMarketTime > 0 ? static_cast< qulonglong >(quote->regularMarketTime) : 0ULL) },
+					{ QStringLiteral("quoteSourceUrl"),
+					  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString() },
+					{ QStringLiteral("quoteConfidence"), 1.0 }
+				};
+				if (quote->hasPreviousClose && std::abs(quote->previousClose) > 0.0000001) {
+					const double change = quote->regularMarketPrice - quote->previousClose;
+					result.insert(QStringLiteral("previousClose"), quote->previousClose);
+					result.insert(QStringLiteral("change"), change);
+					result.insert(QStringLiteral("changePercent"), (change / quote->previousClose) * 100.0);
+				}
+
+				*fetchQuote = {};
+				finishStonksTickerQuote(normalizedSymbol, requestToken, result);
+			});
+	};
+
+	(*fetchQuote)(0);
+}
+
+void MainWindow::finishStonksTickerQuote(const QString &symbol, const quint64 requestToken, QVariantMap quote) {
+	if (m_stonksTickerQuoteRequests.value(symbol) != requestToken) {
+		return;
+	}
+	m_stonksTickerQuoteRequests.remove(symbol);
+	quote.insert(QStringLiteral("pending"), false);
+	quote.insert(QStringLiteral("fetchedAt"), QDateTime::currentMSecsSinceEpoch());
+	m_stonksTickerQuoteCache.insert(symbol, quote);
+	if (!quote.value(QStringLiteral("ok")).toBool()) {
+		qWarning("Stonks quote lookup failed for %s: %s", qUtf8Printable(symbol),
+				 qUtf8Printable(quote.value(QStringLiteral("error")).toString()));
+	}
+	publishStonksTickerQuotes();
+}
+
+void MainWindow::publishStonksTickerQuotes() {
+	if (m_stonksState.isEmpty()) {
+		return;
+	}
+	QVariantMap quotes;
+	for (const QString &symbol : stonksTickerSymbols(m_stonksState)) {
+		if (m_stonksTickerQuoteCache.contains(symbol)) {
+			quotes.insert(symbol, m_stonksTickerQuoteCache.value(symbol));
+		}
+	}
+	m_stonksState.insert(QStringLiteral("tickerQuotes"), quotes);
 	scheduleQmlRoomStateUpdate();
 }
 
@@ -17274,7 +17506,7 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		Global::get().s.bModernShellTickerBannerEnabled =
 			payload.value(QStringLiteral("tickerBannerEnabled"), false).toBool();
 		Global::get().s.save();
-		scheduleQmlRoomStateUpdate();
+		refreshStonksTickerQuotes();
 		if (m_modernDialogController
 			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 			openModernGenericDialog(buildModernStonksDialog());
@@ -17291,6 +17523,7 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		return true;
 	}
 	if (action == QLatin1String("refresh")) {
+		refreshStonksTickerQuotes(true);
 		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 		return true;
 	}
@@ -36784,8 +37017,30 @@ void MainWindow::beginModernScreenShareDiscovery(const quint64 generation) {
 			dialog.insert(QStringLiteral("screenShare"), share);
 			guardedThis->publishModernDialogState(
 				guardedThis->m_modernDialogController->openGenericDialog(dialog));
+			guardedThis->queueModernScreenShareThumbnails(generation);
 		}, Qt::QueuedConnection);
 	}, ScreenShareDiscoveryPriority);
+#else
+	Q_UNUSED(generation);
+#endif
+}
+
+void MainWindow::queueModernScreenShareThumbnails(const quint64 generation) {
+#ifdef Q_OS_WIN
+	if (generation != m_screenSharePickerGeneration || m_screenSharePickerShuttingDown
+		|| !m_modernDialogController
+		|| m_modernDialogController->activeDialogID() != QLatin1String("screenShare")) {
+		return;
+	}
+
+	const QVariantMap share = m_modernDialogController->state().value(QStringLiteral("screenShare")).toMap();
+	for (const QVariant &sectionValue : share.value(QStringLiteral("sources")).toList()) {
+		for (const QVariant &itemValue : sectionValue.toMap().value(QStringLiteral("items")).toList()) {
+			const QVariantMap item = itemValue.toMap();
+			if (!item.value(QStringLiteral("thumbnail")).toString().isEmpty()) continue;
+			requestModernScreenShareThumbnail(item.value(QStringLiteral("id")).toString(), generation);
+		}
+	}
 #else
 	Q_UNUSED(generation);
 #endif
@@ -36795,7 +37050,8 @@ void MainWindow::requestModernScreenShareThumbnail(const QString &sourceId, cons
 #ifdef Q_OS_WIN
 	const QString normalized = sourceId.trimmed();
 	if (normalized.isEmpty() || generation != m_screenSharePickerGeneration || m_screenSharePickerShuttingDown
-		|| m_pendingScreenShareThumbnailJobBySource.contains(normalized) || !m_modernDialogController
+		|| m_pendingScreenShareThumbnailJobBySource.contains(normalized)
+		|| m_queuedScreenShareThumbnailSourceIDs.contains(normalized) || !m_modernDialogController
 		|| m_modernDialogController->activeDialogID() != QLatin1String("screenShare")) {
 		return;
 	}
@@ -36830,10 +37086,15 @@ void MainWindow::requestModernScreenShareThumbnail(const QString &sourceId, cons
 		}
 	}
 	if (!geometry.isValid()) return;
-	// Bound both queued and running work. A rejected hover can retry after one
-	// of the current jobs finishes; ScreenShareEditor deliberately backs those
-	// retries off so large window lists cannot flood this pool.
-	if (m_pendingScreenShareThumbnailJobs.size() >= ScreenShareThumbnailPendingLimit) return;
+	// Keep only a small number of capture tasks in the native thread pool. The
+	// remaining sources stay in this generation-owned queue and are pumped as
+	// jobs finish, so opening the picker hydrates every card without flooding the
+	// global pool or requiring pointer hover.
+	if (m_pendingScreenShareThumbnailJobs.size() >= ScreenShareThumbnailPendingLimit) {
+		if (m_queuedScreenShareThumbnailSourceIDs.size() < ScreenShareThumbnailQueueLimit)
+			m_queuedScreenShareThumbnailSourceIDs.append(normalized);
+		return;
+	}
 
 	quint64 jobID = ++m_nextScreenShareThumbnailJobID;
 	if (jobID == 0) jobID = ++m_nextScreenShareThumbnailJobID;
@@ -36856,6 +37117,16 @@ void MainWindow::requestModernScreenShareThumbnail(const QString &sourceId, cons
 #endif
 }
 
+void MainWindow::pumpModernScreenShareThumbnailQueue() {
+#ifdef Q_OS_WIN
+	while (m_pendingScreenShareThumbnailJobs.size() < ScreenShareThumbnailPendingLimit
+			&& !m_queuedScreenShareThumbnailSourceIDs.isEmpty()) {
+		const QString sourceID = m_queuedScreenShareThumbnailSourceIDs.takeFirst();
+		requestModernScreenShareThumbnail(sourceID, m_screenSharePickerGeneration);
+	}
+#endif
+}
+
 void MainWindow::finishModernScreenShareThumbnail(const quint64 jobID, const QImage &image) {
 #ifdef Q_OS_WIN
 	const auto jobIt = m_pendingScreenShareThumbnailJobs.find(jobID);
@@ -36864,6 +37135,7 @@ void MainWindow::finishModernScreenShareThumbnail(const quint64 jobID, const QIm
 	m_pendingScreenShareThumbnailJobs.erase(jobIt);
 	if (m_pendingScreenShareThumbnailJobBySource.value(job.sourceID) == jobID)
 		m_pendingScreenShareThumbnailJobBySource.remove(job.sourceID);
+	pumpModernScreenShareThumbnailQueue();
 	if (!job.cancellation || job.cancellation->load() || image.isNull()
 		|| job.generation != m_screenSharePickerGeneration || m_screenSharePickerShuttingDown
 		|| !m_modernDialogController
@@ -36912,6 +37184,7 @@ void MainWindow::cancelModernScreenSharePickerJobs() {
 		if (it->cancellation) it->cancellation->store(true);
 	}
 	m_pendingScreenShareThumbnailJobBySource.clear();
+	m_queuedScreenShareThumbnailSourceIDs.clear();
 #endif
 }
 
@@ -36938,6 +37211,7 @@ void MainWindow::openModernScreenShareDialog(Channel *channel) {
 		++m_screenSharePickerGeneration;
 		cancelModernScreenSharePickerJobs();
 		openModernGenericDialog(buildModernScreenShareDialogDto(channel));
+		queueModernScreenShareThumbnails(m_screenSharePickerGeneration);
 		m_screenShareManager->helperClient().refreshCapabilities();
 		return;
 	}
@@ -36947,8 +37221,13 @@ void MainWindow::openModernScreenShareDialog(Channel *channel) {
 	const quint64 generation = ++m_screenSharePickerGeneration;
 	openModernGenericDialog(buildModernScreenShareDialogDto(channel));
 	if (m_screenShareManager->canRequestLocalShare()) {
+		// Reserve one worker for the latency-critical source discovery before
+		// background thumbnail hydration can occupy the picker pool. The dialog is
+		// already visible, and monitor thumbnails may fill concurrently on the
+		// second worker without delaying the window list.
 		beginModernScreenShareDiscovery(generation);
 	}
+	queueModernScreenShareThumbnails(generation);
 }
 
 bool MainWindow::handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload) {
@@ -39001,6 +39280,9 @@ void MainWindow::serverConnected() {
 	clearModernShellMessageDtoCache("connect");
 	m_modernShellActorAvatarDataUrls.clear();
 	m_stonksState.clear();
+	m_stonksTickerQuoteCache.clear();
+	m_stonksTickerQuoteRequests.clear();
+	if (m_stonksTickerQuoteRefreshTimer) m_stonksTickerQuoteRefreshTimer->stop();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
 	m_stonksSelectedUserID.reset();
 	syncPersistentChatGatewayHandler();
@@ -39156,6 +39438,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	clearModernShellMessageDtoCache("disconnect");
 	m_modernShellActorAvatarDataUrls.clear();
 	m_stonksState.clear();
+	m_stonksTickerQuoteCache.clear();
+	m_stonksTickerQuoteRequests.clear();
+	if (m_stonksTickerQuoteRefreshTimer) m_stonksTickerQuoteRefreshTimer->stop();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
 	m_stonksSelectedUserID.reset();
 	syncPersistentChatGatewayHandler();
