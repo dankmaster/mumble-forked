@@ -24215,19 +24215,26 @@ QVariantList MainWindow::buildQmlChannelParticipantStates(const Channel *channel
 		});
 	};
 
-	QList< const ClientUser * > listeners;
-	if (Global::get().channelListenerManager) {
-		for (const unsigned int session : Global::get().channelListenerManager->getListenersForChannel(channel->iId)) {
-			if (const ClientUser *user = ClientUser::get(session)) {
-				listeners.push_back(user);
-			}
+	QList< const ClientUser * > users;
+	QSet< unsigned int > channelSessions;
+	for (const User *baseUser : channel->qlUsers) {
+		if (const ClientUser *user = baseUser ? ClientUser::get(baseUser->uiSession) : nullptr) {
+			if (channelSessions.contains(user->uiSession)) continue;
+			channelSessions.insert(user->uiSession);
+			users.push_back(user);
 		}
 	}
 
-	QList< const ClientUser * > users;
-	for (const User *baseUser : channel->qlUsers) {
-		if (const ClientUser *user = baseUser ? ClientUser::get(baseUser->uiSession) : nullptr) {
-			users.push_back(user);
+	QList< const ClientUser * > listeners;
+	if (Global::get().channelListenerManager) {
+		for (const unsigned int session : Global::get().channelListenerManager->getListenersForChannel(channel->iId)) {
+			// A move into a channel and the corresponding listener removal can arrive in
+			// separate state updates. Physical presence is authoritative during that
+			// window; publishing both identities would render the same session twice.
+			if (channelSessions.contains(session)) continue;
+			if (const ClientUser *user = ClientUser::get(session)) {
+				listeners.push_back(user);
+			}
 		}
 	}
 

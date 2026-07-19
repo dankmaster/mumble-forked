@@ -233,6 +233,57 @@ namespace {
 		return false;
 	}
 
+	QVariantList coalesceVoiceScopeParticipants(const QVariantList &participants,
+										 const QString &fallbackScopeToken = {}) {
+		QSet< QString > presentUserScopes;
+		for (const QVariant &entry : participants) {
+			const QVariantMap participant = entry.toMap();
+			const QString session = participant.value(QStringLiteral("session")).toString().trimmed();
+			const QString entryKind = participant.value(QStringLiteral("entryKind"), QStringLiteral("user"))
+								  .toString().trimmed().toLower();
+			const QString scopeToken = participant.value(QStringLiteral("scopeToken"), fallbackScopeToken)
+								   .toString().trimmed();
+			if (!session.isEmpty() && !scopeToken.isEmpty() && entryKind != QLatin1String("listener")) {
+				presentUserScopes.insert(scopeToken + QLatin1Char('\x1f') + session);
+			}
+		}
+
+		QVariantList coalesced;
+		QHash< QString, qsizetype > outputIndexByIdentity;
+		coalesced.reserve(participants.size());
+		outputIndexByIdentity.reserve(participants.size());
+		for (const QVariant &entry : participants) {
+			const QVariantMap participant = entry.toMap();
+			const QString session = participant.value(QStringLiteral("session")).toString().trimmed();
+			const QString entryKind = participant.value(QStringLiteral("entryKind"), QStringLiteral("user"))
+								  .toString().trimmed().toLower();
+			const QString scopeToken = participant.value(QStringLiteral("scopeToken"), fallbackScopeToken)
+								   .toString().trimmed();
+			const QString scopeSession = scopeToken + QLatin1Char('\x1f') + session;
+			if (!session.isEmpty() && !scopeToken.isEmpty() && entryKind == QLatin1String("listener")
+				&& presentUserScopes.contains(scopeSession)) {
+				continue;
+			}
+
+			QString identity = participant.value(QStringLiteral("participantKey")).toString().trimmed();
+			if (!session.isEmpty() && !scopeToken.isEmpty()) {
+				identity = entryKind + QLatin1Char('\x1f') + scopeSession;
+			}
+			if (identity.isEmpty()) {
+				coalesced.push_back(entry);
+				continue;
+			}
+			const auto existing = outputIndexByIdentity.constFind(identity);
+			if (existing != outputIndexByIdentity.cend()) {
+				coalesced[*existing] = entry;
+			} else {
+				outputIndexByIdentity.insert(identity, coalesced.size());
+				coalesced.push_back(entry);
+			}
+		}
+		return coalesced;
+	}
+
 	void preserveListenerPresentation(const QVariantMap &row, QVariantList &badges, QVariantList &statuses) {
 		if (!row.value(QStringLiteral("listener")).toBool()
 			&& row.value(QStringLiteral("entryKind")).toString() != QLatin1String("listener"))
@@ -2106,9 +2157,10 @@ QVariantMap ParticipantModel::participantRow(const QVariantMap &participant) {
 }
 
 void ParticipantModel::replaceParticipantStates(const QVariantList &participants) {
+	const QVariantList coalescedParticipants = coalesceVoiceScopeParticipants(participants);
 	QVariantList rows;
-	rows.reserve(participants.size());
-	for (const QVariant &entry : participants) {
+	rows.reserve(coalescedParticipants.size());
+	for (const QVariant &entry : coalescedParticipants) {
 		const QVariantMap row = participantRow(entry.toMap());
 		if (!row.isEmpty()) rows.push_back(row);
 	}
@@ -2124,7 +2176,29 @@ QVariantList ParticipantModel::participantStates() const {
 
 void ParticipantModel::upsertParticipantState(const QVariantMap &participant) {
 	const QVariantMap row = participantRow(participant);
-	if (!row.isEmpty()) upsertRow(row);
+	if (row.isEmpty()) return;
+
+	const QString session = participant.value(QStringLiteral("session")).toString().trimmed();
+	const QString scopeToken = participant.value(QStringLiteral("scopeToken")).toString().trimmed();
+	const bool incomingListener = participant.value(QStringLiteral("entryKind")).toString().trimmed().toLower()
+		== QLatin1String("listener");
+	if (!session.isEmpty() && !scopeToken.isEmpty()) {
+		for (int rowIndex = rowCount() - 1; rowIndex >= 0; --rowIndex) {
+			const QVariantMap existingRow = get(rowIndex);
+			const QVariantMap existing = existingRow.value(QStringLiteral("source")).toMap();
+			if (existing.value(QStringLiteral("session")).toString().trimmed() != session
+				|| existing.value(QStringLiteral("scopeToken")).toString().trimmed() != scopeToken) {
+				continue;
+			}
+			const bool existingListener = existing.value(QStringLiteral("entryKind")).toString()
+										 .trimmed().toLower() == QLatin1String("listener");
+			if (incomingListener && !existingListener) return;
+			if (!incomingListener && existingListener) {
+				removeRow(existingRow.value(QStringLiteral("id")).toString());
+			}
+		}
+	}
+	upsertRow(row);
 }
 
 void ParticipantModel::removeParticipant(const QString &sessionId) {
@@ -2305,7 +2379,19 @@ QVariantMap NavigationRailModel::navigationRoomRow(const QVariantMap &room, cons
 
 void NavigationRailModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
 	if (!acceptsFrontendStateMutation(this)) return;
-	m_voiceRoomStates = voiceRooms;
+	m_voiceRoomStates.clear();
+	m_voiceRoomStates.reserve(voiceRooms.size());
+	for (const QVariant &entry : voiceRooms) {
+		QVariantMap room = entry.toMap();
+		if (room.contains(QStringLiteral("participants"))) {
+			const QVariantList participants = coalesceVoiceScopeParticipants(
+				room.value(QStringLiteral("participants")).toList(),
+				room.value(QStringLiteral("token")).toString().trimmed());
+			room.insert(QStringLiteral("participants"), participants);
+			room.insert(QStringLiteral("participantCount"), participants.size());
+		}
+		m_voiceRoomStates.push_back(room);
+	}
 	m_textRoomStates = textRooms;
 	synchronizeAllRows();
 }

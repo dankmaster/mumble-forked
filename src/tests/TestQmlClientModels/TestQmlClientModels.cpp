@@ -27,6 +27,7 @@ private slots:
 	void navigationRailPresentationStateStaysStableAndIncremental();
 	void roomRowsExposeActionsOnlySource();
 	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
+	void voiceScopeParticipantsCoalescePresenceAndListenerOverlap();
 	void directMessageHistoryMergePublishesOnce();
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
@@ -1065,6 +1066,69 @@ void TestQmlClientModels::directMessageControllerKeepsConversationDraftsSeparate
 	QCOMPARE(closeSpy.count(), 1);
 	controller.clearDraft();
 	QVERIFY(controller.draft().isEmpty());
+}
+
+void TestQmlClientModels::voiceScopeParticipantsCoalescePresenceAndListenerOverlap() {
+	const QVariantMap staleListener {
+		{ QStringLiteral("participantKey"), QStringLiteral("listener:1:7") },
+		{ QStringLiteral("session"), 7 },
+		{ QStringLiteral("scopeToken"), QStringLiteral("channel:1") },
+		{ QStringLiteral("entryKind"), QStringLiteral("listener") },
+		{ QStringLiteral("label"), QStringLiteral("Alice") },
+		{ QStringLiteral("isSelf"), false }
+	};
+	const QVariantMap presentUser {
+		{ QStringLiteral("participantKey"), QStringLiteral("user:7") },
+		{ QStringLiteral("session"), 7 },
+		{ QStringLiteral("scopeToken"), QStringLiteral("channel:1") },
+		{ QStringLiteral("entryKind"), QStringLiteral("user") },
+		{ QStringLiteral("label"), QStringLiteral("Alice") },
+		{ QStringLiteral("isSelf"), true }
+	};
+
+	ParticipantModel participants;
+	participants.replaceParticipantStates({ staleListener, presentUser, presentUser });
+	QCOMPARE(participants.rowCount(), 1);
+	QCOMPARE(participants.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+	QVERIFY(participants.get(0).value(QStringLiteral("isSelf")).toBool());
+	participants.clear();
+	participants.upsertParticipantState(staleListener);
+	participants.upsertParticipantState(presentUser);
+	QCOMPARE(participants.rowCount(), 1);
+	QCOMPARE(participants.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+	participants.upsertParticipantState(staleListener);
+	QCOMPARE(participants.rowCount(), 1);
+	QCOMPARE(participants.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+
+	NavigationRailModel navigation;
+	QSignalSpy resetSpy(&navigation, &QAbstractItemModel::modelReset);
+	navigation.replaceRoomStates({ QVariantMap {
+		{ QStringLiteral("token"), QStringLiteral("channel:1") },
+		{ QStringLiteral("label"), QStringLiteral("Lobby") },
+		{ QStringLiteral("participants"), QVariantList { staleListener, presentUser, presentUser } }
+	} }, {});
+	QCOMPARE(navigation.rowCount(), 2);
+	QCOMPARE(navigation.get(0).value(QStringLiteral("participantCount")).toInt(), 1);
+	QCOMPARE(navigation.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+	QVERIFY(navigation.get(1).value(QStringLiteral("isSelf")).toBool());
+	QCOMPARE(resetSpy.count(), 0);
+
+	// Listener identities remain independent when the same session listens to
+	// other scopes and has no physical user row in those rooms.
+	navigation.replaceRoomStates({ QVariantMap {
+		{ QStringLiteral("token"), QStringLiteral("channel:2") },
+		{ QStringLiteral("label"), QStringLiteral("Games") },
+		{ QStringLiteral("participants"), QVariantList { QVariantMap {
+			{ QStringLiteral("participantKey"), QStringLiteral("listener:2:7") },
+			{ QStringLiteral("session"), 7 },
+			{ QStringLiteral("scopeToken"), QStringLiteral("channel:2") },
+			{ QStringLiteral("entryKind"), QStringLiteral("listener") },
+			{ QStringLiteral("label"), QStringLiteral("Alice") }
+		} } }
+	} }, {});
+	QCOMPARE(navigation.rowCount(), 2);
+	QCOMPARE(navigation.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("listener:2:7"));
+	QCOMPARE(resetSpy.count(), 0);
 }
 
 void TestQmlClientModels::directMessageControllerRoutesRichMessageIntents() {
