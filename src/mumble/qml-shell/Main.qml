@@ -2630,6 +2630,10 @@ ApplicationWindow {
 							}
 						}
 					}
+					MiddleDragScrollHandler {
+						targetFlickable: timeline
+						horizontalEnabled: false
+					}
 					// Build a small amount of chat content outside the viewport while
 					// the chat surface is otherwise idle. Complex rich-message delegates
 					// should not have to be constructed on the first frame they scroll in.

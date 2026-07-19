@@ -357,7 +357,7 @@ ApplicationWindow {
 			MouseArea {
 				id: panArea
 				anchors.fill: parent
-				acceptedButtons: Qt.LeftButton
+					acceptedButtons: Qt.LeftButton | Qt.MiddleButton
 				cursorShape: viewer.grabbing ? Qt.ClosedHandCursor
 					: ((viewer.managedAnimated ? animation.width : picture.width) > imageStage.width
 						|| (viewer.managedAnimated ? animation.height : picture.height) > imageStage.height
@@ -379,7 +379,10 @@ ApplicationWindow {
 				}
 				onReleased: viewer.grabbing = false
 				onCanceled: viewer.grabbing = false
-				onDoubleClicked: viewer.zoom > 1.001 ? viewer.resetZoom() : viewer.setActualSize()
+					onDoubleClicked: event => {
+						if (event.button === Qt.LeftButton)
+							viewer.zoom > 1.001 ? viewer.resetZoom() : viewer.setActualSize()
+					}
 			}
 
 			WheelHandler {

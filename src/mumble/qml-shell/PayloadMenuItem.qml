@@ -59,7 +59,7 @@ import Mumble.Theme 1.0
 	topPadding: 0
 	bottomPadding: 0
 	activeFocusOnTab: activeFocus || enabled
-	hoverEnabled: hasSubmenu
+	hoverEnabled: enabled
 	enabled: (itemKind === "action" || itemKind === "slider" || itemKind === "submenu")
 		&& (payload.enabled === undefined || !!payload.enabled)
 	checkable: itemKind === "action" && !!payload.checkable
@@ -76,6 +76,10 @@ import Mumble.Theme 1.0
 	Keys.onSpacePressed: event => event.accepted = item.openAttachedSubmenu(true)
 	Keys.onLeftPressed: event => event.accepted = item.closeOwningSubmenu()
 	Keys.onEscapePressed: event => event.accepted = item.closeOwningSubmenu()
+	Keys.onPressed: event => {
+		if (item.menu && item.menu["setPointerNavigationActive"] !== undefined)
+			item.menu["setPointerNavigationActive"](false)
+	}
 	Shortcut {
 		enabled: item.hasSubmenu && item.enabled && item.activeFocus
 		sequences: [Qt.Key_Right, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space]
@@ -90,6 +94,8 @@ import Mumble.Theme 1.0
 	}
 
 	onHoveredChanged: {
+		if (hovered && item.menu && item.menu["setPointerNavigationActive"] !== undefined)
+			item.menu["setPointerNavigationActive"](true)
 		if (!item.hasSubmenu)
 			return
 		// The menu tree and its delegates are already materialized. Opening here is
@@ -102,8 +108,12 @@ import Mumble.Theme 1.0
 		id: focusBackground
 		objectName: "payloadFocusBackground"
 		color: (item.highlighted || item.down) && item.enabled ? Theme.popupSelected : "transparent"
-		border.color: item.activeFocus && item.enabled ? Theme.focus : "transparent"
-		border.width: item.activeFocus && item.enabled ? Theme.focusRingWidth : 0
+		border.color: item.activeFocus && item.enabled
+			&& !(item.menu && item.menu.pointerNavigationActive)
+			? Theme.focus : "transparent"
+		border.width: item.activeFocus && item.enabled
+			&& !(item.menu && item.menu.pointerNavigationActive)
+			? Theme.focusRingWidth : 0
 		radius: Math.max(4, Math.round(Theme.innerRadius / 2))
 	}
 

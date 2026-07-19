@@ -11,6 +11,10 @@ Menu {
 	property var openerItem: null
 	property var parentMenu: null
 	property var activeSubmenu: null
+	// Pointer hover and keyboard focus deliberately use different emphasis. A
+	// pointer-opened child menu must not leave a bright focus ring behind on its
+	// parent row, while keyboard navigation must retain the focus indicator.
+	property bool pointerNavigationActive: false
 	property int submenuOpenRequestCount: 0
 	property string accessibleName: title.length > 0 ? title : qsTr("Menu")
 	readonly property var windowActiveFocusItem: contentItem && contentItem.Window.window
@@ -117,7 +121,8 @@ Menu {
 		implicitWidth: 220
 		implicitHeight: Theme.controlHeight
 		color: Theme.popupBackground
-		border.color: menu.surfaceOwnsActiveFocus ? Theme.focus : Theme.popupBorder
+		border.color: menu.surfaceOwnsActiveFocus && !menu.pointerNavigationActive
+			? Theme.focus : Theme.popupBorder
 		border.width: 1
 		radius: Theme.innerRadius
 
@@ -170,6 +175,17 @@ Menu {
 			}
 		}
 		return null
+	}
+	onOpened: {
+		// Popup instances are reused. Seed the current input modality from the
+		// owning cascade instead of leaking a hover state from an earlier opening.
+		pointerNavigationActive = parentMenu ? parentMenu.pointerNavigationActive : false
+	}
+
+	function setPointerNavigationActive(value) {
+		pointerNavigationActive = !!value
+		if (parentMenu && parentMenu["setPointerNavigationActive"] !== undefined)
+			parentMenu["setPointerNavigationActive"](value)
 	}
 
 	function openWithInitialFocus() {

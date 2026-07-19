@@ -246,7 +246,7 @@ ApplicationWindow {
             MouseArea {
                 id: panArea
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
+				acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                 cursorShape: viewer.grabbing ? Qt.ClosedHandCursor
                     : (picture.width > stage.width || picture.height > stage.height ? Qt.OpenHandCursor : Qt.ArrowCursor)
                 property real previousX
@@ -263,7 +263,10 @@ ApplicationWindow {
                 }
                 onReleased: viewer.grabbing = false
                 onCanceled: viewer.grabbing = false
-                onDoubleClicked: viewer.resetZoom()
+				onDoubleClicked: event => {
+					if (event.button === Qt.LeftButton)
+						viewer.resetZoom()
+				}
             }
 
             WheelHandler {

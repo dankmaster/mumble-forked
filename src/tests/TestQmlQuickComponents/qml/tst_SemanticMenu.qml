@@ -236,6 +236,37 @@ TestCase {
 		compare(rowFocus.border.width, Theme.focusRingWidth)
 	}
 
+	function test_pointer_hover_uses_one_fill_without_a_stale_keyboard_focus_ring() {
+		const menu = menuLoader.item
+		menu.x = 24
+		menu.y = 24
+		menu.open()
+		tryVerify(function() { return menu.visible })
+		const serverMenu = menuForGroup("server")
+		const serverTrigger = triggerForMenu(serverMenu)
+		const rowFocus = findChild(serverTrigger, "payloadFocusBackground")
+		verify(serverTrigger !== null && rowFocus !== null)
+
+		serverTrigger.forceActiveFocus()
+		tryCompare(rowFocus.border, "width", Theme.focusRingWidth)
+		mouseMove(serverTrigger, serverTrigger.width / 2, serverTrigger.height / 2)
+		tryCompare(menu, "pointerNavigationActive", true)
+		compare(rowFocus.border.width, 0)
+		compare(rowFocus.border.color, Qt.rgba(0, 0, 0, 0))
+		compare(rowFocus.color, Theme.popupSelected)
+		tryVerify(function() { return serverMenu.visible })
+
+		const connectItem = itemForActionInMenu(serverMenu, "server.connect")
+		mouseMove(connectItem, connectItem.width / 2, connectItem.height / 2)
+		tryCompare(serverMenu, "pointerNavigationActive", true)
+		compare(menu.pointerNavigationActive, true)
+
+		connectItem.forceActiveFocus()
+		keyClick(Qt.Key_Down)
+		tryCompare(menu, "pointerNavigationActive", false)
+		compare(serverMenu.pointerNavigationActive, false)
+	}
+
 	function test_submenu_keyboard_navigation_restores_focus_and_does_not_dispatch_on_open() {
 		mouseMove(testCase, testCase.width - 2, testCase.height - 2)
 		wait(Theme.motionFast + 20)

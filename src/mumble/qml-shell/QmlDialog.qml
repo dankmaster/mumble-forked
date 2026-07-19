@@ -1344,8 +1344,12 @@ Dialog {
 					anchors.rightMargin: Math.max(8, Theme.spacing - 2)
 					anchors.bottomMargin: Math.max(8, Theme.spacing - 2)
 					anchors.topMargin: settingsRailLabel.visible ? Theme.space2 : Math.max(8, Theme.spacing - 2)
-                    model: dialogState.pages
-                    clip: true
+					model: dialogState.pages
+					clip: true
+					MiddleDragScrollHandler {
+						targetFlickable: dialogPageList
+						horizontalEnabled: false
+					}
                     spacing: Math.max(2, Math.round(Theme.spacing / 4))
 					activeFocusOnTab: activeFocus || count > 0
 					keyNavigationEnabled: true
@@ -1528,6 +1532,11 @@ Dialog {
 						anchors.top: dialogContentScroll.top
 						anchors.right: dialogContentScroll.right
 						anchors.bottom: dialogContentScroll.bottom
+					}
+					MiddleDragScrollHandler {
+						parent: dialogContentScroll.contentItem
+						targetFlickable: dialogContentScroll.contentItem
+						horizontalEnabled: false
 					}
 					Column {
 						id: dialogContentColumn
@@ -1861,6 +1870,10 @@ Dialog {
 								spacing: 5
 								model: dialogState.state.sourceRows === undefined
 									? dialogState.favorites : (dialogState.state.sourceRows || [])
+								MiddleDragScrollHandler {
+									targetFlickable: connectFavoriteList
+									horizontalEnabled: false
+								}
 								currentIndex: Number(dialogState.state.selectedServerIndex === undefined
 									? dialogState.selectedFavoriteIndex : dialogState.state.selectedServerIndex)
 								activeFocusOnTab: activeFocus || (visible && count > 0)
@@ -3598,6 +3611,10 @@ Dialog {
 				cacheBuffer: resultRoot.resultRowHeight * 2
 				reuseItems: true
 				boundsBehavior: Flickable.StopAtBounds
+				MiddleDragScrollHandler {
+					targetFlickable: resultList
+					horizontalEnabled: false
+				}
 				currentIndex: count > 0 ? 0 : -1
 				activeFocusOnTab: activeFocus || visible
 				keyNavigationEnabled: true

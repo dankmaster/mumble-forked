@@ -996,6 +996,10 @@ Rectangle {
 			ScrollBar.vertical: ModernScrollBar {
 				objectName: "navigationScrollBar"
 			}
+			MiddleDragScrollHandler {
+				targetFlickable: rooms
+				horizontalEnabled: false
+			}
 			Keys.onPressed: event => {
 				if (event.key === Qt.Key_Up) {
 					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex - 1, -1)

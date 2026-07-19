@@ -10,6 +10,7 @@
 	<file alias="ModernBusyIndicator.qml">qml-shell/ModernBusyIndicator.qml</file>
 	<file alias="ModernProgressBar.qml">qml-shell/ModernProgressBar.qml</file>
 	<file alias="ModernScrollBar.qml">qml-shell/ModernScrollBar.qml</file>
+	<file alias="MiddleDragScrollHandler.qml">qml-shell/MiddleDragScrollHandler.qml</file>
 	<file alias="ModernTextField.qml">qml-shell/ModernTextField.qml</file>
 	<file alias="ModernCheckBox.qml">qml-shell/ModernCheckBox.qml</file>
 	<file alias="ModernComboBox.qml">qml-shell/ModernComboBox.qml</file>

@@ -708,6 +708,10 @@ Window {
 					Accessible.description: qsTr("%1 messages. Use Home or End to move through the conversation.")
 						.arg(count)
 					ScrollBar.vertical: ModernScrollBar { policy: ScrollBar.AsNeeded }
+					MiddleDragScrollHandler {
+						targetFlickable: timeline
+						horizontalEnabled: false
+					}
 					onMovementStarted: root.followTimelineTail = false
 					onMovementEnded: root.followTimelineTail = atYEnd
 					onContentYChanged: {
