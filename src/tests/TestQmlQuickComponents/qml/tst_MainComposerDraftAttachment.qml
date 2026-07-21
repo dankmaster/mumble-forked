@@ -159,7 +159,11 @@ TestCase {
 		verify(/function\s+requestPreviewHydrationIfNeeded\(\)[\s\S]*backendContentNeedsHydration[\s\S]*queuePreviewHydration/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*!forcedByDeadline\s*&&\s*pendingScopeHydrationCount\(\)\s*>\s*0[\s\S]*scopePresentationQuietTimer\.restart\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationDeadlineTimer[\s\S]*interval:\s*2000[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
-		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationFinalizeQuietTimer\.start\(\)[\s\S]*scopePresentationFinalizeDeadlineTimer\.start\(\)/.test(mainSource))
+		verify(/id:\s*scopePresentationFinalizeQuietTimer[\s\S]*interval:\s*120[\s\S]*completeScopePresentationFinalization\(false\)/.test(mainSource))
+		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:[\s\S]*timeline\.scopePresentationPending[\s\S]*Preparing conversation/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled"/.test(mainSource))
@@ -175,7 +179,7 @@ TestCase {
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
 		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(256,\s*Math\.min\(720,\s*height\)\)/.test(mainSource))
-		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*forceLayout\(\)[\s\S]*scopeReuseResetActive\s*=\s*false/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*forceLayout\(\)/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{/.test(mainSource))
 		verify(!/RichPreviewCard\s*\{\s*id:\s*messagePreviewCard/.test(mainSource))

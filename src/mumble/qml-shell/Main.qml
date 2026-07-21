@@ -2801,6 +2801,8 @@ ApplicationWindow {
 						bottomFollowTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
+						scopePresentationFinalizeQuietTimer.stop()
+						scopePresentationFinalizeDeadlineTimer.stop()
 						scopePresentationObservationTimer.stop()
 						++scopePresentationGeneration
 						scopePresentationPending = true
@@ -2825,10 +2827,13 @@ ApplicationWindow {
 					}
 
 					function noteScopePresentationMutation() {
-						if (!scopePresentationPending || scopePresentationFinalizing)
+						if (!scopePresentationPending)
 							return
 						++scopePresentationMutationCount
-						scopePresentationQuietTimer.restart()
+						if (scopePresentationFinalizing)
+							scopePresentationFinalizeQuietTimer.restart()
+						else
+							scopePresentationQuietTimer.restart()
 					}
 
 					function pendingScopeHydrationCount() {
@@ -2851,27 +2856,58 @@ ApplicationWindow {
 							scopePresentationQuietTimer.restart()
 							return
 						}
-						const generation = scopePresentationGeneration
 						scopePresentationFinalizing = true
 						scopePresentationForcedByDeadline = !!forcedByDeadline
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
+						// Re-enable steady-state delegate reuse while the conversation is still
+						// hidden. Creating the replacement pool can refine rich-row geometry, so
+						// give it its own bounded quiet window before exposing the timeline.
+						scopeReuseResetActive = false
 						forceLayout()
 						positionTailImmediately()
+						restoringBottom = true
+						containTailMessageWhenPossible()
+						restoringBottom = false
+						scopePresentationFinalizeQuietTimer.start()
+						scopePresentationFinalizeDeadlineTimer.start()
+					}
+
+					function completeScopePresentationFinalization(forcedByDeadline) {
+						if (!scopePresentationPending || !scopePresentationFinalizing)
+							return
+						const generation = scopePresentationGeneration
+						const mutationCount = scopePresentationMutationCount
+						scopePresentationFinalizeQuietTimer.stop()
+						forceLayout()
+						positionTailImmediately()
+						restoringBottom = true
+						containTailMessageWhenPossible()
+						restoringBottom = false
 						Qt.callLater(function() {
 							if (generation !== timeline.scopePresentationGeneration
-									|| !timeline.scopePresentationPending)
+									|| !timeline.scopePresentationPending
+									|| !timeline.scopePresentationFinalizing)
 								return
 							timeline.forceLayout()
 							timeline.positionTailImmediately()
+							timeline.restoringBottom = true
+							timeline.containTailMessageWhenPossible()
+							timeline.restoringBottom = false
+							if (!forcedByDeadline
+									&& mutationCount !== timeline.scopePresentationMutationCount) {
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
+							scopePresentationFinalizeDeadlineTimer.stop()
+							timeline.scopePresentationForcedByDeadline =
+								timeline.scopePresentationForcedByDeadline || !!forcedByDeadline
 							timeline.scopeResetPending = false
-							timeline.scopeReuseResetActive = false
 							timeline.scopePresentationCompletedAt = Date.now()
 							timeline.scopePresentationPending = false
 							timeline.scopePresentationFinalizing = false
 							timeline.scopePresentationObservationActive = true
 							scopePresentationObservationTimer.restart()
-							timeline.requestBottomFollow()
 						})
 					}
 
@@ -3074,6 +3110,20 @@ ApplicationWindow {
 						interval: 2000
 						repeat: false
 						onTriggered: timeline.finishScopePresentation(true)
+					}
+
+					Timer {
+						id: scopePresentationFinalizeQuietTimer
+						interval: 120
+						repeat: false
+						onTriggered: timeline.completeScopePresentationFinalization(false)
+					}
+
+					Timer {
+						id: scopePresentationFinalizeDeadlineTimer
+						interval: 500
+						repeat: false
+						onTriggered: timeline.completeScopePresentationFinalization(true)
 					}
 
 					Timer {
