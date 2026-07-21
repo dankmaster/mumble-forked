@@ -3275,7 +3275,11 @@ ApplicationWindow {
 						readonly property bool attachmentNeedsHydration: (attachments || []).some(function(attachment) {
 							return !!attachment && String(attachment.state || "").toLowerCase() === "loading"
 						})
-						readonly property bool contentNeedsHydration: previewNeedsHydration || attachmentNeedsHydration
+						readonly property bool bodyNeedsHydration: !!source.bodyHydrationPending
+						readonly property bool backendContentNeedsHydration: previewNeedsHydration
+							|| attachmentNeedsHydration
+						readonly property bool contentNeedsHydration: backendContentNeedsHydration
+							|| bodyNeedsHydration
 						readonly property bool inHydrationWindow: !accessibilityPooled
 							&& y + height >= timeline.contentY - timeline.height * 0.5
 							&& y <= timeline.contentY + timeline.height * 1.5
@@ -3283,7 +3287,7 @@ ApplicationWindow {
 							&& y + height >= timeline.contentY
 							&& y <= timeline.contentY + timeline.height
 						function requestPreviewHydrationIfNeeded() {
-							if (contentNeedsHydration && inHydrationWindow)
+							if (backendContentNeedsHydration && inHydrationWindow)
 								root.queuePreviewHydration(stableId, inVisibleViewport)
 						}
 						function primaryRichContentViewportBounds() {

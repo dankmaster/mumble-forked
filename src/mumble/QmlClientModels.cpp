@@ -3069,6 +3069,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	const QString bodyText = message.value(QStringLiteral("bodyText"), message.value(QStringLiteral("plainText"))).toString();
 	const QString bodyHtml = message.value(QStringLiteral("bodyHtml")).toString();
 	QVariantList bodySegments = fallbackStructuredMessageBody(bodyText);
+	bool bodyHydrationPending = false;
 	if (messageBodyNeedsRichParsing(bodyHtml)) {
 		const QByteArray cacheKey = structuredMessageBodyCacheKey(bodyHtml, bodyText);
 		const QByteArray previousKey = m_expectedRichBodyKeyByMessage.value(messageId);
@@ -3083,6 +3084,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 		if (const auto cached = cachedStructuredMessageBody(cacheKey)) {
 			bodySegments = *cached;
 		} else if (requests) {
+			bodyHydrationPending = true;
 			requests->push_back({ messageId, cacheKey, bodyHtml.left(MaxRichBodyCharacters),
 								  bodyText.left(MaxRichBodyCharacters) });
 		}
@@ -3097,6 +3099,8 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	// SourceRole doubled dormant-card memory before playback was ever activated.
 	source.remove(QStringLiteral("preview"));
 	source.remove(QStringLiteral("previewStub"));
+	if (bodyHydrationPending) source.insert(QStringLiteral("bodyHydrationPending"), true);
+	else source.remove(QStringLiteral("bodyHydrationPending"));
 
 	return { { QStringLiteral("id"), messageId },
 			 { QStringLiteral("title"), message.value(QStringLiteral("actor"),
@@ -3400,8 +3404,13 @@ void ChatTimelineModel::drainRichBodyResults() {
 		const int rowIndex = indexOf(ready.messageId);
 		if (rowIndex < 0) continue;
 		QVariantMap row = get(rowIndex);
-		if (row.value(QStringLiteral("bodySegments")).toList() == ready.segments) continue;
-		row.insert(QStringLiteral("bodySegments"), ready.segments);
+		QVariantMap source = row.value(QStringLiteral("source")).toMap();
+		const bool segmentsChanged = row.value(QStringLiteral("bodySegments")).toList() != ready.segments;
+		const bool hydrationPending = source.value(QStringLiteral("bodyHydrationPending")).toBool();
+		if (!segmentsChanged && !hydrationPending) continue;
+		if (segmentsChanged) row.insert(QStringLiteral("bodySegments"), ready.segments);
+		source.remove(QStringLiteral("bodyHydrationPending"));
+		row.insert(QStringLiteral("source"), source);
 		// The parser result is owned by this model and is accepted only after both
 		// the stable message id and expected cache key still match. It must be able
 		// to land while the visual-fixture override rejects unrelated live writes.

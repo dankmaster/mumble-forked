@@ -2369,14 +2369,19 @@ PersistentChatInlineDataImageInfo persistentChatInlineDataImageInfo(const QStrin
 	}
 
 	if (info.base64) {
-		const QString payload = source.mid(commaIndex + 1).trimmed();
-		int padding           = 0;
-		if (payload.endsWith(QLatin1String("=="))) {
+		int payloadStart = commaIndex + 1;
+		int payloadEnd   = source.size();
+		while (payloadStart < payloadEnd && source.at(payloadStart).isSpace()) ++payloadStart;
+		while (payloadEnd > payloadStart && source.at(payloadEnd - 1).isSpace()) --payloadEnd;
+		const qint64 payloadSize = payloadEnd - payloadStart;
+		int padding              = 0;
+		if (payloadSize >= 2 && source.at(payloadEnd - 1) == QLatin1Char('=')
+			&& source.at(payloadEnd - 2) == QLatin1Char('=')) {
 			padding = 2;
-		} else if (payload.endsWith(QLatin1Char('='))) {
+		} else if (payloadSize >= 1 && source.at(payloadEnd - 1) == QLatin1Char('=')) {
 			padding = 1;
 		}
-		info.estimatedBytes = std::max< qint64 >(0, (static_cast< qint64 >(payload.size()) * 3) / 4 - padding);
+		info.estimatedBytes = std::max< qint64 >(0, (payloadSize * 3) / 4 - padding);
 	}
 
 	return info;
@@ -2718,7 +2723,11 @@ QString normalizePersistentChatInlineImages(
 												   QRegularExpression::CaseInsensitiveOption
 													   | QRegularExpression::DotMatchesEverythingOption);
 	QString normalizedHtml;
-	normalizedHtml.reserve(html.size() + 128);
+	// Data URLs can be hundreds of KiB while their typed replacement is only a
+	// small attachment marker. Do not reserve the discarded source size merely
+	// to produce that compact result on the UI thread.
+	normalizedHtml.reserve(html.contains(QLatin1String("data:image"), Qt::CaseInsensitive)
+		? std::min< qsizetype >(16384, html.size() + 128) : html.size() + 128);
 	int lastOffset = 0;
 
 	QRegularExpressionMatchIterator it = s_imgTagPattern.globalMatch(html);
@@ -2729,8 +2738,8 @@ QString normalizePersistentChatInlineImages(
 		QString tag                            = match.captured(0);
 		const QRegularExpressionMatch srcMatch = s_srcPattern.match(tag);
 		if (srcMatch.hasMatch()) {
-			const PersistentChatInlineDataImageInfo dataImageInfo =
-				persistentChatInlineDataImageInfo(srcMatch.captured(2));
+			const QString source = srcMatch.captured(2);
+			const PersistentChatInlineDataImageInfo dataImageInfo = persistentChatInlineDataImageInfo(source);
 			const bool shouldUseReplacement =
 				buildInlineDataImageReplacement || dataImageInfo.estimatedBytes < 0
 				|| dataImageInfo.estimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_RAW_INLINE_MAX_BYTES;
@@ -2739,7 +2748,7 @@ QString normalizePersistentChatInlineImages(
 				const QString altText                  = altMatch.hasMatch() ? altMatch.captured(2) : QString();
 				const QString replacementHtml =
 					buildInlineDataImageReplacement
-						? buildInlineDataImageReplacement(srcMatch.captured(2), altText, dataImageInfo)
+						? buildInlineDataImageReplacement(source, altText, dataImageInfo)
 						: QString();
 				if (!replacementHtml.isEmpty()) {
 					normalizedHtml += replacementHtml;
@@ -2810,16 +2819,30 @@ QString persistentChatContentHtml(
 		return persistentChatLinkedPlainTextHtml(normalizedContent);
 	}
 
-	const QString sanitizedHtml = normalizePersistentChatInlineStyles(Log::validHtml(normalizedContent));
+	// Remove legacy data-image payloads before the general HTML sanitizer sees
+	// them. The controlled replacement is sanitized together with the remaining
+	// message, while a multi-hundred-KiB base64 blob never enters the expensive
+	// DOM-style validation path.
+	const bool preprocessedInlineData = buildInlineDataImageReplacement
+		&& normalizedContent.contains(QLatin1String("<img"), Qt::CaseInsensitive)
+		&& normalizedContent.contains(QLatin1String("data:image"), Qt::CaseInsensitive);
+	const QString sanitizationInput = preprocessedInlineData
+		? normalizePersistentChatInlineImages(normalizedContent, buildInlineDataImageReplacement)
+		: normalizedContent;
+	const QString sanitizedHtml = normalizePersistentChatInlineStyles(Log::validHtml(sanitizationInput));
 	static const QRegularExpression bodyPattern(QLatin1String("<body[^>]*>(.*)</body>"),
 												QRegularExpression::DotMatchesEverythingOption
 													| QRegularExpression::CaseInsensitiveOption);
 	const QRegularExpressionMatch bodyMatch = bodyPattern.match(sanitizedHtml);
 	if (bodyMatch.hasMatch()) {
-		return normalizePersistentChatInlineImages(bodyMatch.captured(1), buildInlineDataImageReplacement);
+		return normalizePersistentChatInlineImages(bodyMatch.captured(1),
+			preprocessedInlineData ? PersistentChatInlineDataImageReplacementBuilder {}
+								   : buildInlineDataImageReplacement);
 	}
 
-	return normalizePersistentChatInlineImages(sanitizedHtml, buildInlineDataImageReplacement);
+	return normalizePersistentChatInlineImages(sanitizedHtml,
+		preprocessedInlineData ? PersistentChatInlineDataImageReplacementBuilder {}
+							   : buildInlineDataImageReplacement);
 }
 
 QString persistentChatPlainTextSummary(const QString &content, int maxLength = 160) {
@@ -2858,6 +2881,29 @@ QString persistentChatCondensedBodyHtml(const QString &bodyHtml, const QString &
 bool persistentChatBodyTextContainsLegacyInlineImageHtml(const QString &bodyText) {
 	return bodyText.contains(QLatin1String("<img"), Qt::CaseInsensitive)
 		   && bodyText.contains(QLatin1String("data:image"), Qt::CaseInsensitive);
+}
+
+bool persistentChatRawTextContainsAsciiCaseInsensitive(const std::string &text, const char *needle) {
+	const std::size_t needleSize = std::strlen(needle);
+	if (needleSize == 0 || text.size() < needleSize) return false;
+	const auto asciiLower = [](const unsigned char ch) {
+		return ch >= 'A' && ch <= 'Z' ? static_cast< unsigned char >(ch + ('a' - 'A')) : ch;
+	};
+	for (std::size_t offset = 0; offset + needleSize <= text.size(); ++offset) {
+		std::size_t index = 0;
+		for (; index < needleSize; ++index) {
+			if (asciiLower(static_cast< unsigned char >(text[offset + index]))
+				!= asciiLower(static_cast< unsigned char >(needle[index]))) break;
+		}
+		if (index == needleSize) return true;
+	}
+	return false;
+}
+
+bool persistentChatMessageContainsLegacyInlineImageHtml(const MumbleProto::ChatMessage &message) {
+	const std::string &rawBody = message.has_body_text() ? message.body_text() : message.message();
+	return persistentChatRawTextContainsAsciiCaseInsensitive(rawBody, "<img")
+		&& persistentChatRawTextContainsAsciiCaseInsensitive(rawBody, "data:image");
 }
 
 QString persistentChatMessageSourceText(const MumbleProto::ChatMessage &message) {
@@ -23284,15 +23330,33 @@ bool MainWindow::triggerModernShellSerializedAction(const ModernShellMenuSeriali
 QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMessage &message,
 													 const PersistentChatTarget &target, const bool canReply,
 													 const bool canReact, const bool canDeleteMessages,
-													 const ModernShellMessageBuildMode buildMode) {
+												 const ModernShellMessageBuildMode buildMode) {
 	mumble::chatperf::ScopedDuration trace("chat.message_dto.build");
 	const bool fastFirstPaint = buildMode == ModernShellMessageBuildMode::FastFirstPaint;
-	const ClientUser *self                  = ClientUser::get(Global::get().uiSession);
-	const std::optional< QString > systemText = persistentChatSystemMessageText(message);
+	const QString messageKey = persistentChatMessageIdentityKey(message);
+	const bool deletedMessage = message.has_deleted_at() && message.deleted_at() > 0;
+	const bool rawLegacyInlineDataImages = !deletedMessage
+		&& persistentChatMessageContainsLegacyInlineImageHtml(message);
+	// Avoid converting a multi-hundred-KiB legacy image body merely to prove that
+	// it is not a system event. Ordinary messages retain the compatibility parser,
+	// including its Unicode whitespace handling.
+	const bool mayBeSystemMessage = !rawLegacyInlineDataImages || !message.has_body_text()
+		|| [&message] {
+			const std::string &rawBody = message.body_text();
+			std::size_t offset = 0;
+			while (offset < rawBody.size()
+				   && (rawBody[offset] == ' ' || rawBody[offset] == '\t'
+					   || rawBody[offset] == '\r' || rawBody[offset] == '\n')) ++offset;
+			return offset < rawBody.size() && rawBody[offset] == '[';
+		}();
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	const std::optional< QString > systemText = mayBeSystemMessage
+		? persistentChatSystemMessageText(message) : std::nullopt;
 	const bool systemMessage               = systemText.has_value();
-	const bool deletedMessage              = message.has_deleted_at() && message.deleted_at() > 0;
 	const bool ownMessage                  = isOwnPersistentChatMessage(message);
-	const bool liveSessionMessage          = m_persistentChatLiveMessageKeys.contains(persistentChatMessageIdentityKey(message));
+	const bool liveSessionMessage          = m_persistentChatLiveMessageKeys.contains(messageKey);
+	const bool hasLegacyInlineDataImages   = rawLegacyInlineDataImages && !systemMessage;
+	const bool fastLegacyInlineFirstPaint  = fastFirstPaint && hasLegacyInlineDataImages;
 	const QString actorLabel               = systemMessage ? tr("System") : persistentChatActorLabel(message);
 	const QString actorIdentityKey         = persistentChatActorIdentityKey(message, liveSessionMessage);
 	const ClientUser *messageUser          = nullptr;
@@ -23307,16 +23371,31 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 		}
 	}
 
-	QString bodyText = systemMessage ? *systemText : (deletedMessage ? QString() : persistentChatMessageSourceText(message));
+	QString bodyText = systemMessage ? *systemText
+		: (deletedMessage || fastLegacyInlineFirstPaint ? QString() : persistentChatMessageSourceText(message));
 	QString bodyHtml;
 	QVariantList structuredAttachments;
-	const QString messageKey = persistentChatMessageIdentityKey(message);
-	const bool hasLegacyInlineDataImages = !systemMessage && !deletedMessage
-		&& persistentChatBodyTextContainsLegacyInlineImageHtml(persistentChatMessageRawBody(message));
 	if (systemMessage) {
 		bodyHtml = systemText->toHtmlEscaped();
 	} else if (deletedMessage) {
 		bodyHtml = QString::fromLatin1("<em>%1</em>").arg(tr("[message deleted]").toHtmlEscaped());
+	} else if (fastLegacyInlineFirstPaint) {
+		// The viewport asks for pending attachments as soon as their delegates are
+		// materialized. A tiny typed marker therefore lets the complete row arrive
+		// immediately, then hydrates one expensive legacy image message per event
+		// turn without ever exposing the placeholder during a scope transition.
+		const QString placeholderToken = QString::fromLatin1(
+			QCryptographicHash::hash(messageKey.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+		structuredAttachments.push_back(QVariantMap {
+			{ QStringLiteral("id"), QStringLiteral("%1:inline:pending").arg(messageKey) },
+			{ QStringLiteral("kind"), QStringLiteral("image") },
+			{ QStringLiteral("mime"), QStringLiteral("image/*") },
+			{ QStringLiteral("name"), tr("Image attachment") },
+			{ QStringLiteral("fileName"), tr("Image attachment") },
+			{ QStringLiteral("alt"), tr("Image attachment") },
+			{ QStringLiteral("inlineToken"), placeholderToken },
+			{ QStringLiteral("state"), QStringLiteral("loading") }
+		});
 	} else {
 		const auto buildModernInlineDataImageReplacement =
 			[this, messageKey, &structuredAttachments](const QString &source, const QString &altText,
@@ -23352,7 +23431,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				if (providerUrl.isEmpty() && !previewUnavailable) {
 					// First paint remains non-blocking. The bounded worker publishes a targeted
 					// typed attachment update after it has decoded the legacy data URL.
-					queuePersistentChatInlineDataImageWarmup(source, messageKey);
+					queuePersistentChatInlineDataImageWarmup(source, messageKey, token, info.estimatedBytes);
 				}
 
 				const QString resolvedAlt = altText.trimmed().isEmpty() ? tr("Image attachment") : altText.trimmed();
@@ -23398,7 +23477,9 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				return QStringLiteral("<span data-mumble-inline-image-attachment='1'></span>");
 			};
 		bodyHtml = message.has_body_text()
-					   ? persistentChatMessageBodyHtml(message, buildModernInlineDataImageReplacement)
+					   ? (hasLegacyInlineDataImages
+							  ? persistentChatContentHtml(bodyText, buildModernInlineDataImageReplacement)
+							  : persistentChatMessageBodyHtml(message, buildModernInlineDataImageReplacement))
 					   : persistentChatContentHtml(persistentChatMessageRawBody(message),
 												   buildModernInlineDataImageReplacement);
 		if (hasLegacyInlineDataImages) {
@@ -23503,7 +23584,8 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 			: (message.has_body_text() ? resolvedPersistentChatReplyReference(m_persistentChatMessages, message)
 									   : extractPersistentChatReplyReference(bodyHtml, &bodyHtml));
 	const std::optional< QString > previewKey =
-		(!systemMessage && !deletedMessage) ? persistentChatPreviewKey(message) : std::nullopt;
+		(!systemMessage && !deletedMessage && !fastLegacyInlineFirstPaint)
+			? persistentChatPreviewKey(message) : std::nullopt;
 	if (previewKey && persistentChatSourceTextIsSinglePreviewableUrl(bodyText)) {
 		bodyHtml = persistentChatPreviewSourceUrlHtml(bodyText);
 	}
@@ -23717,7 +23799,8 @@ void MainWindow::publishPersistentChatInlineDataImageUpdate(const QString &token
 
 QString MainWindow::modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message,
 												  const PersistentChatTarget &target, const bool canReply,
-												  const bool canReact, const bool canDeleteMessages) const {
+												  const bool canReact, const bool canDeleteMessages,
+												  const ModernShellMessageBuildMode buildMode) const {
 	if (target.serverLog || target.directMessage) {
 		return QString();
 	}
@@ -23729,13 +23812,14 @@ QString MainWindow::modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage
 								   .arg(canReact ? 1 : 0)
 								   .arg(canDeleteMessages ? 1 : 0)
 								   .arg(Global::get().uiSession);
-	return QString::fromLatin1("%1:%2|%3:%4|%5|%6")
+	return QString::fromLatin1("%1:%2|%3:%4|%5|%6|%7")
 		.arg(scopeValue)
 		.arg(target.scopeID)
 		.arg(static_cast< qulonglong >(message.thread_id()))
 		.arg(static_cast< qulonglong >(message.message_id()))
 		.arg(static_cast< qulonglong >(message.created_at()))
-		.arg(contextKey);
+		.arg(contextKey)
+		.arg(buildMode == ModernShellMessageBuildMode::Full ? QLatin1String("full") : QLatin1String("fast"));
 }
 
 QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey) const {
@@ -23912,11 +23996,21 @@ QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::Ch
 														   const PersistentChatTarget &target, const bool canReply,
 														   const bool canReact, const bool canDeleteMessages,
 														   const ModernShellMessageBuildMode buildMode) {
+	// A fully hydrated row is always a valid first paint and is preferable on a
+	// revisit. Otherwise retain a separate lightweight entry until viewport
+	// hydration evicts both variants and publishes the complete DTO.
 	if (buildMode == ModernShellMessageBuildMode::FastFirstPaint) {
-		return buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages, buildMode);
+		const QString fullCacheKey = modernShellMessageDtoCacheKey(
+			message, target, canReply, canReact, canDeleteMessages, ModernShellMessageBuildMode::Full);
+		if (const auto fullIt = m_modernShellMessageDtoCache.constFind(fullCacheKey);
+			fullIt != m_modernShellMessageDtoCache.cend()) {
+			mumble::chatperf::recordValue("modern.message_dto_cache.full_first_paint_hit", 1);
+			return fullIt.value();
+		}
 	}
 
-	const QString cacheKey = modernShellMessageDtoCacheKey(message, target, canReply, canReact, canDeleteMessages);
+	const QString cacheKey = modernShellMessageDtoCacheKey(
+		message, target, canReply, canReact, canDeleteMessages, buildMode);
 	if (cacheKey.isEmpty()) {
 		return buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages, buildMode);
 	}
@@ -23924,9 +24018,6 @@ QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::Ch
 	if (const auto it = m_modernShellMessageDtoCache.constFind(cacheKey);
 		it != m_modernShellMessageDtoCache.cend()) {
 		mumble::chatperf::recordValue("modern.message_dto_cache.hit", 1);
-		// A cached DTO was built only after its preview had been ensured. Preview
-		// invalidation evicts the DTO, so reparsing the message body on every hit is
-		// both redundant and a measurable room-switch cost.
 		return it.value();
 	}
 
@@ -36550,7 +36641,14 @@ QString MainWindow::persistentChatInlineDataImageThumbnailSourceForToken(const Q
 void MainWindow::queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey) {
 	const PersistentChatInlineDataImageInfo info = persistentChatInlineDataImageInfo(source);
 	const QString token = persistentChatInlineDataImageToken(source);
-	if (!info.valid || info.estimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES
+	if (!info.valid) return;
+	queuePersistentChatInlineDataImageWarmup(source, messageKey, token, info.estimatedBytes);
+}
+
+void MainWindow::queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey,
+												   const QString &knownToken, const qint64 knownEstimatedBytes) {
+	const QString token = knownToken.trimmed().toLower();
+	if (token.isEmpty() || knownEstimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES
 		|| m_persistentChatInlineDataImageWarmupFailures.contains(token)) {
 		return;
 	}

@@ -3458,6 +3458,12 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 	QVERIFY(previewKeyBody.contains(QStringLiteral("chat.preview.key.cache_hit")));
 	QVERIFY(previewKeyBody.contains(QStringLiteral("chat.preview.key.cache_miss")));
 
+	QVERIFY(mainWindowSource.contains(QStringLiteral("persistentChatMessageContainsLegacyInlineImageHtml")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("fastLegacyInlineFirstPaint")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("%1:inline:pending")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("modern.message_dto_cache.full_first_paint_hit")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("knownEstimatedBytes")));
+
 	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));
 }

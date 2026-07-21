@@ -1849,6 +1849,8 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 	// Rich HTML parsing is deliberately kept off the UI thread. The synchronous
 	// insertion exposes safe plain text until the bounded worker result arrives.
 	QCOMPARE(model.get(0).value(QStringLiteral("bodySegments")).toList().size(), 1);
+	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
+				.value(QStringLiteral("bodyHydrationPending")).toBool());
 	const auto hasParsedFormatting = [&model] {
 		const QVariantList current = model.get(0).value(QStringLiteral("bodySegments")).toList();
 		for (const QVariant &entry : current) {
@@ -1861,6 +1863,8 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 		return false;
 	};
 	QTRY_VERIFY_WITH_TIMEOUT(hasParsedFormatting(), 5000);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
+								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
 	QVERIFY(!changedSpy.isEmpty());
 	const QVariantList segments = model.get(0).value(QStringLiteral("bodySegments")).toList();
 	QVERIFY(!segments.isEmpty());

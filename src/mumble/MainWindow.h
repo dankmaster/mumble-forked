@@ -670,6 +670,8 @@ public:
 	void savePersistentChatInlineDataImage(const QString &token, const QString &fileName);
 	void warmupPersistentChatInlineDataImages(const MumbleProto::ChatMessage &message);
 	void queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey = QString());
+	void queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey,
+											  const QString &knownToken, qint64 knownEstimatedBytes);
 	void flushPersistentChatInlineDataImageWarmups();
 	void setPersistentChatContentMode(bool showServerLog, bool preserveScrollPosition = false,
 									  bool showComposer = false);
@@ -751,7 +753,8 @@ public:
 	QString modernShellActorAvatarDataUrl(const MumbleProto::ChatMessage &message, const QString &actorIdentityKey,
 										 const ClientUser *messageUser, int avatarSize);
 	QString modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message, const PersistentChatTarget &target,
-										  bool canReply, bool canReact, bool canDeleteMessages) const;
+										  bool canReply, bool canReact, bool canDeleteMessages,
+										  ModernShellMessageBuildMode buildMode) const;
 	QString persistentChatPreviewCacheIdentityKey(const MumbleProto::ChatMessage &message) const;
 	QVariantMap modernShellPreviewStateForKey(const QString &previewKey) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
