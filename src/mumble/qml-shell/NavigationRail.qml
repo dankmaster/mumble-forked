@@ -21,6 +21,11 @@ Rectangle {
 	property bool accessibilitySuppressed: false
 	property bool settingsEnabled: true
 	property bool stonksEnabled: false
+	property bool serverMenuOpen: false
+	// Mirror identity chrome with the rail so the server card keeps the same
+	// outside-to-inside reading order on either side of the conversation.
+	property string railSide: Theme.railSide
+	readonly property bool railOnLeft: railSide === "left"
 	// The desktop shell supplies the matching conversation chrome heights so
 	// the horizontal dividers form one continuous line regardless of whether
 	// the rail is placed on the left or the right. Drawer instances keep the
@@ -603,10 +608,9 @@ Rectangle {
 		return session.length > 0 && session === String(selectionState.selectedUserSession)
 	}
 
-	function activateServerMenu() {
-		serverBadge.forceActiveFocus(Qt.MouseFocusReason)
-		serverMenuRequested(serverBadge.mapToItem(null,
-			Math.round(serverBadge.width / 2), serverBadge.height))
+	function activateServerMenu(anchorItem) {
+		const anchor = anchorItem || serverHeader
+		serverMenuRequested(anchor.mapToItem(null, 0, anchor.height))
 	}
 
 	function selectedNavigationIndex() {
@@ -719,7 +723,7 @@ Rectangle {
 		anchors.top: parent.top
 		anchors.bottom: parent.bottom
 		width: 1
-		visible: Theme.railSide === "right"
+		visible: !navigationRail.railOnLeft
 		color: Theme.divider
 		z: 20
 	}
@@ -728,7 +732,7 @@ Rectangle {
 		anchors.top: parent.top
 		anchors.bottom: parent.bottom
 		width: 1
-		visible: Theme.railSide === "left"
+		visible: navigationRail.railOnLeft
 		color: Theme.divider
 		z: 20
 	}
@@ -741,17 +745,38 @@ Rectangle {
 			objectName: "navigationServerHeader"
             Layout.fillWidth: true
 			Layout.preferredHeight: navigationRail.alignedHeaderHeight
-            color: Theme.panel
-			border.width: 0
-			Accessible.role: Accessible.Grouping
-			Accessible.name: clientSession.serverName
+			color: serverHeaderClickArea.containsMouse || activeFocus
+				|| navigationRail.serverMenuOpen ? Theme.surfaceHover : Theme.panel
+			border.width: activeFocus ? Theme.focusRingWidth : 0
+			border.color: Theme.focus
+			Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+			activeFocusOnTab: !navigationRail.accessibilitySuppressed
+			Accessible.role: Accessible.Button
+			Accessible.name: qsTr("Open server actions for %1").arg(clientSession.serverName)
 			Accessible.description: [clientSession.connectionLabel, clientSession.connectionDetail]
 				.filter(function(value) { return String(value || "").trim().length > 0 }).join(". ")
+			Accessible.onPressAction: navigationRail.activateServerMenu(serverActionsButton)
+			Keys.onReturnPressed: event => {
+				navigationRail.activateServerMenu(serverActionsButton)
+				event.accepted = true
+			}
+			Keys.onSpacePressed: event => {
+				navigationRail.activateServerMenu(serverActionsButton)
+				event.accepted = true
+			}
 			DragHandler {
 				enabled: !navigationRail.commitOnSelection
 				target: null
 				onActiveChanged: if (active && navigationRail.Window.window)
 					navigationRail.Window.window.startSystemMove()
+			}
+			MouseArea {
+				id: serverHeaderClickArea
+				anchors.fill: parent
+				enabled: !navigationRail.accessibilitySuppressed
+				hoverEnabled: true
+				cursorShape: Qt.PointingHandCursor
+				onClicked: navigationRail.activateServerMenu(serverActionsButton)
 			}
 			Rectangle {
 				anchors.left: parent.left
@@ -761,11 +786,17 @@ Rectangle {
 				color: Theme.divider
 			}
 			RowLayout {
+				id: serverHeaderContent
+				objectName: "navigationServerHeaderContent"
 				anchors.left: parent.left
 				anchors.right: parent.right
 				anchors.verticalCenter: parent.verticalCenter
-				anchors.leftMargin: Theme.space4
-				anchors.rightMargin: Theme.space4
+				// A slightly deeper outer inset pulls the identity cluster toward the
+				// card's optical center without losing its side-aware alignment.
+				anchors.leftMargin: Theme.space5
+				anchors.rightMargin: Theme.space5
+				LayoutMirroring.enabled: !navigationRail.railOnLeft
+				LayoutMirroring.childrenInherit: true
 				spacing: Theme.space3
 				Rectangle {
 					id: serverBadge
@@ -777,31 +808,11 @@ Rectangle {
 					Layout.preferredHeight: Layout.preferredWidth
 					radius: Theme.railBadgeRadius
 					color: imageSource.length > 0 ? Theme.surfaceRaised : Theme.accent
-					border.width: activeFocus ? Theme.focusRingWidth : 1
-					border.color: activeFocus ? Theme.focus
-						: serverBadgeHover.hovered ? Theme.accent : Theme.elevationHighlight
+					border.width: 1
+					border.color: serverHeaderClickArea.containsMouse
+						? Theme.accent : Theme.elevationHighlight
 					clip: true
-					activeFocusOnTab: !navigationRail.accessibilitySuppressed
-					Accessible.role: Accessible.Button
-					Accessible.name: qsTr("Open the menu for %1").arg(clientSession.serverName)
-					Accessible.description: qsTr("Server identity and server actions")
-					Accessible.onPressAction: navigationRail.activateServerMenu()
-					Keys.onReturnPressed: event => {
-						navigationRail.activateServerMenu()
-						event.accepted = true
-					}
-					Keys.onSpacePressed: event => {
-						navigationRail.activateServerMenu()
-						event.accepted = true
-					}
-					HoverHandler {
-						id: serverBadgeHover
-						cursorShape: Qt.PointingHandCursor
-					}
-					TapHandler {
-						acceptedButtons: Qt.LeftButton
-						onTapped: navigationRail.activateServerMenu()
-					}
+					Accessible.ignored: true
 					Image {
 						id: serverIdentityImage
 						objectName: "navigationServerImage"
@@ -826,8 +837,6 @@ Rectangle {
 						visible: serverIdentityImage.status !== Image.Ready
 						Accessible.ignored: true
 					}
-					ToolTip.visible: serverBadgeHover.hovered
-					ToolTip.text: Accessible.name
 				}
 				ColumnLayout {
 					Layout.fillWidth: true
@@ -842,6 +851,8 @@ Rectangle {
 						font.bold: true
 						font.pixelSize: Theme.fontBody + 1
 						elide: Text.ElideRight
+						horizontalAlignment: navigationRail.railOnLeft
+							? Text.AlignLeft : Text.AlignRight
 						Accessible.ignored: true
 					}
 					Rectangle {
@@ -853,6 +864,8 @@ Rectangle {
 						Layout.preferredWidth: Math.min(parent.width,
 							connectionPillContent.implicitWidth + 16)
 						Layout.preferredHeight: 20
+						Layout.alignment: navigationRail.railOnLeft
+							? Qt.AlignLeft : Qt.AlignRight
 						radius: 10
 						color: Theme.withAlpha(statusColor, 0.08)
 						border.width: 1
@@ -888,6 +901,23 @@ Rectangle {
 							&& String(clientSession.connectionDetail || "").length > 0
 						ToolTip.text: clientSession.connectionDetail
 					}
+				}
+				ModernIconButton {
+					id: serverActionsButton
+					objectName: "navigationServerActions"
+					Layout.alignment: Qt.AlignVCenter
+					Layout.preferredWidth: 30
+					Layout.preferredHeight: 30
+					iconName: "more"
+					dense: true
+					selected: navigationRail.serverMenuOpen
+					opacity: selected || hovered || visualFocus ? 1 : 0.72
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+					Accessible.name: qsTr("Server actions for %1").arg(clientSession.serverName)
+					Accessible.description: qsTr("Server information, connection, and administration")
+					ToolTip.visible: hovered
+					ToolTip.text: qsTr("Server actions")
+					onClicked: navigationRail.activateServerMenu(serverActionsButton)
 				}
 			}
         }
@@ -2390,6 +2420,17 @@ Rectangle {
 					ToolTip.visible: hovered
 					ToolTip.text: Accessible.name
 					onClicked: uiCommands.toggleSelfDeaf()
+				}
+				Rectangle {
+					id: selfActionDivider
+					objectName: "selfActionDivider"
+					Layout.alignment: Qt.AlignVCenter
+					Layout.preferredWidth: 1
+					Layout.preferredHeight: 20
+					Layout.leftMargin: Theme.space1
+					Layout.rightMargin: Theme.space1
+					color: Theme.selfCardBorder
+					Accessible.ignored: true
 				}
 				ModernIconButton {
 					id: stonksButton

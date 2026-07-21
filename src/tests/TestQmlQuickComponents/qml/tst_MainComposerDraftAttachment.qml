@@ -39,9 +39,10 @@ TestCase {
 
 	function test_message_actions_are_direct_without_an_overflow_button() {
 		verify(!/objectName:\s*"(?:message|compactMessage)ActionsButton"/.test(mainSource))
-		verify(/objectName:\s*"messageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
+		verify(/id:\s*messageReactButton\s*\n\s*objectName:\s*"messageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
 		verify(/objectName:\s*"messageReplyButton"[\s\S]*visible:\s*messageDelegate\.canReply[\s\S]*messageFooter\.quickReactionsExpanded/.test(mainSource))
 		verify(/objectName:\s*"compactMessageReplyButton"[\s\S]*visible:\s*messageDelegate\.canReply/.test(mainSource))
+		verify(/id:\s*compactMessageReactButton\s*\n\s*objectName:\s*"compactMessageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
 	}
 
 	function test_plain_text_actions_do_not_add_an_empty_footer_row() {
@@ -89,6 +90,11 @@ TestCase {
 		verify(/id:\s*bottomStonksTicker[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.bottom:\s*parent\.bottom/.test(mainSource))
 		verify(/id:\s*topStonksTicker[\s\S]{0,220}Layout\.fillWidth:\s*true[\s\S]{0,260}root\.stonksTickerPlacement === "top"/.test(mainSource))
 		verify(/id:\s*aboveComposerStonksTicker[\s\S]{0,320}root\.stonksTickerPlacement === "aboveComposer"/.test(mainSource))
+	}
+
+	function test_stonks_profile_shortcut_respects_the_client_preference() {
+		verify(/readonly property bool stonksShortcutEnabled:[\s\S]{0,180}profileShortcutVisible !== false/.test(mainSource))
+		verify(/id:\s*desktopNavigationRail[\s\S]{0,900}stonksEnabled:\s*root\.stonksShortcutEnabled/.test(mainSource))
 	}
 
 	function test_draft_upload_state_is_accessible_and_actions_lock_while_sending() {
@@ -141,6 +147,20 @@ TestCase {
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*firstVisibleId[\s\S]*settled/.test(mainSource))
 		verify(/"settled":\s*!bottomFollowTimer\.running[\s\S]*!timeline\.scopeResetPending[\s\S]*!performanceChatScrollRunning/.test(mainSource))
 		verify(/"contentY":\s*timeline\.contentY/.test(mainSource))
+	}
+
+	function test_scope_history_is_presented_only_after_tail_geometry_settles() {
+		verify(/property bool scopePresentationPending:\s*false[\s\S]*property int scopePresentationExposedHeightChangeCount:\s*0/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*scopePresentationQuietTimer\.start\(\)[\s\S]*scopePresentationDeadlineTimer\.start\(\)/.test(mainSource))
+		verify(/onContentHeightChanged:\s*\{[\s\S]*if \(scopePresentationPending\)[\s\S]*noteScopePresentationMutation\(\)[\s\S]*return/.test(mainSource))
+		verify(/id:\s*scopePresentationQuietTimer[\s\S]*interval:\s*120[\s\S]*finishScopePresentation\(false\)/.test(mainSource))
+		verify(/function\s+pendingScopeHydrationCount\(\)[\s\S]*contentNeedsHydration[\s\S]*inHydrationWindow/.test(mainSource))
+		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*!forcedByDeadline\s*&&\s*pendingScopeHydrationCount\(\)\s*>\s*0[\s\S]*scopePresentationQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/id:\s*scopePresentationDeadlineTimer[\s\S]*interval:\s*2000[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
+		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
+		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:[\s\S]*timeline\.scopePresentationPending[\s\S]*Preparing conversation/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled"/.test(mainSource))
 	}
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {

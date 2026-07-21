@@ -752,6 +752,7 @@ public:
 										 const ClientUser *messageUser, int avatarSize);
 	QString modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message, const PersistentChatTarget &target,
 										  bool canReply, bool canReact, bool canDeleteMessages) const;
+	QString persistentChatPreviewCacheIdentityKey(const MumbleProto::ChatMessage &message) const;
 	QVariantMap modernShellPreviewStateForKey(const QString &previewKey) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
 												   const PersistentChatTarget &target, bool canReply, bool canReact,
@@ -1179,6 +1180,7 @@ protected:
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;
+	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
 	quint64 m_modernDirectMessageLocalID = 0;

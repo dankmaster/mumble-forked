@@ -222,7 +222,7 @@ Rectangle {
 				Label {
 					Layout.fillWidth: true
 					textFormat: Text.PlainText
-					text: root.resultReady ? qsTr("1 · Detection recommendation") : qsTr("1 · Detection guide")
+					text: root.resultReady ? qsTr("Detection recommendation") : qsTr("Detection guide")
 					color: Theme.textStrong
 					font.weight: Font.DemiBold
 				}
@@ -337,7 +337,7 @@ Rectangle {
 				objectName: "voiceMeterCalibration_" + String(root.field.id || "")
 				visible: root.setupState === 0
 				enabled: root.inputAvailable && String(root.field.calibrationActionId || "").length > 0
-				text: root.field.calibrationLabel || qsTr("Start guided setup")
+				text: root.field.calibrationLabel || qsTr("Set up voice activation")
 				tone: "accent"
 				onClicked: root.startQuietCapture()
 			}

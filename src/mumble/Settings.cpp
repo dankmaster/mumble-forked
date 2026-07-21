@@ -835,6 +835,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qsModernShellAccent, "ui/modernShellAccent");
 	LOAD(qsModernShellCustomAccent, "ui/modernShellCustomAccent");
 	LOAD(iModernShellCustomAccentStrength, "ui/modernShellCustomAccentStrength");
+	LOAD(bModernShellStonksProfileShortcutVisible, "ui/modernShellStonksProfileShortcutVisible");
 	LOAD(bModernShellTickerBannerEnabled, "ui/modernShellTickerBannerEnabled");
 	LOAD(qsModernShellTickerPlacement, "ui/modernShellTickerPlacement");
 	LOAD(qsModernShellTickerDirection, "ui/modernShellTickerDirection");

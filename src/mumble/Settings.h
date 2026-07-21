@@ -343,6 +343,9 @@ struct Settings {
 	QString qsModernShellAccent               = QStringLiteral("auto");
 	QString qsModernShellCustomAccent         = QStringLiteral("#5ec8b0");
 	int iModernShellCustomAccentStrength      = 50;
+	// The portfolio remains available from Settings and the server menu even
+	// when its convenience shortcut is removed from the profile card.
+	bool bModernShellStonksProfileShortcutVisible = true;
 	bool bModernShellTickerBannerEnabled      = false;
 	// Stonks is an explicit client opt-in. Presentation choices are retained
 	// while the strip is off so enabling it never resets the user's layout.

@@ -196,6 +196,8 @@
 	PROCESS(ui, MODERN_SHELL_ACCENT_KEY, qsModernShellAccent)                             \
 	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_KEY, qsModernShellCustomAccent)                 \
 	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_STRENGTH_KEY, iModernShellCustomAccentStrength) \
+	PROCESS(ui, MODERN_SHELL_STONKS_PROFILE_SHORTCUT_VISIBLE_KEY,                         \
+			bModernShellStonksProfileShortcutVisible)                                      \
 	PROCESS(ui, MODERN_SHELL_TICKER_BANNER_ENABLED_KEY, bModernShellTickerBannerEnabled)  \
 	PROCESS(ui, MODERN_SHELL_TICKER_PLACEMENT_KEY, qsModernShellTickerPlacement)          \
 	PROCESS(ui, MODERN_SHELL_TICKER_DIRECTION_KEY, qsModernShellTickerDirection)          \

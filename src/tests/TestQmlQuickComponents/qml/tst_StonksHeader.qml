@@ -99,6 +99,53 @@ TestCase {
 		compare(header.pixelsPerSecond(), 42)
 	}
 
+	function test_horizontal_ticker_advances_smoothly_after_content_layout() {
+		const header = loader.item
+		header.tickerDirection = "left"
+		header.tickerSpeed = "fast"
+		const track = findChild(header, "stonksTickerHorizontalTrack")
+		const animation = findChild(header, "stonksTickerHorizontalAnimation")
+		verify(track !== null && animation !== null)
+		tryVerify(function() { return animation.travel > 0 })
+		tryVerify(function() { return track.x < -1 })
+		const firstX = track.x
+		wait(120)
+		const secondX = track.x
+		wait(120)
+		const thirdX = track.x
+		verify(secondX < firstX - 1)
+		verify(thirdX < secondX - 1)
+	}
+
+	function test_quote_refresh_does_not_snap_ticker_back_to_start() {
+		const header = loader.item
+		header.tickerDirection = "left"
+		header.tickerSpeed = "fast"
+		const track = findChild(header, "stonksTickerHorizontalTrack")
+		const animation = findChild(header, "stonksTickerHorizontalAnimation")
+		verify(track !== null && animation !== null)
+		tryVerify(function() { return track.x < -8 && track.x > -animation.travel / 2 })
+		const beforeRefreshX = track.x
+		const refreshedState = populatedState()
+		refreshedState.tickerQuotes.RKLB.price = 18.61
+		header.stonks = refreshedState
+		wait(80)
+		verify(track.x < beforeRefreshX - 1)
+	}
+
+	function test_pointer_focus_does_not_leave_ticker_paused() {
+		const header = loader.item
+		header.tickerDirection = "left"
+		header.forceActiveFocus(Qt.MouseFocusReason)
+		tryCompare(header, "activeFocus", true)
+		tryCompare(header, "tickerRunning", true)
+
+		testCase.forceActiveFocus()
+		header.forceActiveFocus(Qt.TabFocusReason)
+		tryCompare(header, "visualFocus", true)
+		tryCompare(header, "tickerRunning", false)
+	}
+
 	function test_automation_fixture_disables_marquee_without_hiding_tickers() {
 		const header = loader.item
 		const state = populatedState()

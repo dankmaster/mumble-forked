@@ -6003,6 +6003,19 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlTimelinePresentationState")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariant qmlState;
+		if (!QMetaObject::invokeMethod(host->window(), "timelinePresentationState",
+				Q_RETURN_ARG(QVariant, qmlState))) {
+			return errorResponse(tr("The chat timeline presentation state is unavailable."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("timeline"), qmlState.toMap());
+		return response;
+	}
+
 	if (command == QLatin1String("pttLifecycleProbe")) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));

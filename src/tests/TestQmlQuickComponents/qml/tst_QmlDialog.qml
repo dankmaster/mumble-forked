@@ -37,6 +37,7 @@ TestCase {
 		dialogState.setValidationError("visibleField", "");
 		dialogState.setValidationError("liveInvalid", "");
 		dialogState.setValidationError("parent0", "");
+		dialogState.setValidationError("audio.delay", "");
         dialogState.open = false;
         tryCompare(loader.item, "visible", false);
 		dialogState.resetSections();
@@ -1978,7 +1979,7 @@ TestCase {
 
 	function test_input_enhancement_calibration_renders_every_runtime_state() {
 		const expectedHeadings = [
-			"2 · Processing calibration", "Check microphone level", "Check microphone level",
+			"Processing comparison", "Check microphone level", "Check microphone level",
 			"Capture room sound", "Capture room sound", "Capture your voice", "Capture your voice",
 			"Capture local noise", "Capture local noise", "Compare safe candidates", "Blind comparison",
 			"Selection ready", "Calibration applied", "Calibration cancelled", "Calibration stopped",
@@ -2144,6 +2145,57 @@ TestCase {
 			return findChild(loader.item.contentItem, "dialogField_advancedValue") !== null
 				&& findChild(loader.item.contentItem, "dialogField_expertValue") !== null;
 		});
+	}
+
+	function test_collapsible_sections_reveal_details_and_validation_expands_them() {
+		dialogState.setSections([{
+			"id": "codec", "title": "Network voice quality",
+			"subtitle": "Defaults work for nearly everyone.",
+			"advanced": true, "collapsible": true, "expandedByDefault": false,
+			"fields": [{
+				"id": "audio.delay", "type": "number", "label": "Release delay",
+				"value": 30, "min": 0, "max": 500, "step": 10, "suffix": " ms"
+			}]
+		}]);
+
+		const advancedToggle = findChild(loader.item.contentItem, "dialogAdvancedToggle");
+		verify(advancedToggle !== null && advancedToggle.visible);
+		mouseClick(advancedToggle);
+		let section = null;
+		let sectionToggle = null;
+		tryVerify(function() {
+			section = findChild(loader.item.contentItem, "dialogSection_codec");
+			sectionToggle = findChild(loader.item.contentItem, "dialogSectionToggle_codec");
+			return section !== null && section.visible && sectionToggle !== null && sectionToggle.visible;
+		});
+		compare(section.Accessible.description, "Collapsed section");
+		compare(sectionToggle.iconName, "chevron-down");
+		verify(findChild(loader.item.contentItem, "dialogField_audio.delay") === null);
+
+		mouseClick(sectionToggle);
+		let delayField = null;
+		tryVerify(function() {
+			delayField = findChild(loader.item.contentItem, "dialogField_audio.delay");
+			return delayField !== null && delayField.visible;
+		});
+		compare(section.Accessible.description, "Expanded section");
+		compare(sectionToggle.iconName, "chevron-up");
+		compare(delayField.displayText, "30 ms");
+
+		mouseClick(sectionToggle);
+		tryVerify(function() {
+			return findChild(loader.item.contentItem, "dialogField_audio.delay") === null;
+		});
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		verify(closeButton !== null);
+		closeButton.forceActiveFocus();
+		tryCompare(closeButton, "activeFocus", true);
+		dialogState.setValidationError("audio.delay", "Choose a valid delay");
+		tryVerify(function() {
+			delayField = findChild(loader.item.contentItem, "dialogField_audio.delay");
+			return delayField !== null && delayField.visible && delayField.activeFocus;
+		});
+		dialogState.setValidationError("audio.delay", "");
 	}
 
 	function test_result_list_virtualizes_ten_thousand_stable_rows_and_supports_keyboard() {

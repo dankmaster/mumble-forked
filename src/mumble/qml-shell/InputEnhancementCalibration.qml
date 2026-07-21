@@ -126,7 +126,7 @@ ColumnLayout {
 
 	function stateHeading() {
 		switch (calibrationState) {
-		case 0: return qsTr("2 · Processing calibration")
+		case 0: return qsTr("Processing comparison")
 		case 1:
 		case 2: return qsTr("Check microphone level")
 		case 3:

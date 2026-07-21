@@ -1644,11 +1644,11 @@ namespace {
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
 		field.insert(QStringLiteral("calibrationState"), QStringLiteral("idle"));
 		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("finishAudioSetupWizard"));
-		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Start guided setup"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Set up voice activation"));
 		field.insert(QStringLiteral("calibrationTooltip"),
 					 QObject::tr("Measure room sound and normal speech, then compare suitable detection methods."));
 		field.insert(QStringLiteral("calibrationStatusText"),
-					 QObject::tr("Run the guided check for this microphone, or adjust detection manually below."));
+					 QObject::tr("Run the guided check for this microphone. Manual tuning is available in Advanced."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -2093,6 +2093,8 @@ namespace {
 		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(settings));
+		dto.insert(QStringLiteral("stonksProfileShortcutVisible"),
+				   settings.bModernShellStonksProfileShortcutVisible);
 		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
 		dto.insert(QStringLiteral("tickerPlacement"), settings.qsModernShellTickerPlacement);
 		dto.insert(QStringLiteral("tickerDirection"), settings.qsModernShellTickerDirection);
@@ -2910,6 +2912,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 								 runtimeState.value(QStringLiteral("loaded")).toBool());
 	} else if (id == QLatin1String("stonks.client.enabled")) {
 		m_draft.bModernShellTickerBannerEnabled = value.toBool();
+	} else if (id == QLatin1String("stonks.client.profileShortcutVisible")) {
+		m_draft.bModernShellStonksProfileShortcutVisible = value.toBool();
 	} else if (id == QLatin1String("stonks.client.placement")) {
 		m_draft.qsModernShellTickerPlacement = normalizedStonksTickerPlacement(value);
 	} else if (id == QLatin1String("stonks.client.direction")) {
@@ -3422,12 +3426,16 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		// These controls are intentionally immediate. Move the saved values into
 		// the reset/cancel baseline so closing Settings never rolls them back.
 		m_original.bModernShellTickerBannerEnabled = m_draft.bModernShellTickerBannerEnabled;
+		m_original.bModernShellStonksProfileShortcutVisible =
+			m_draft.bModernShellStonksProfileShortcutVisible;
 		m_original.qsModernShellTickerPlacement     = m_draft.qsModernShellTickerPlacement;
 		m_original.qsModernShellTickerDirection     = m_draft.qsModernShellTickerDirection;
 		m_original.qsModernShellTickerSpeed         = m_draft.qsModernShellTickerSpeed;
 		result.externalActionID = QStringLiteral("stonks.updateClient");
 		result.externalActionPayload.insert(QStringLiteral("tickerBannerEnabled"),
 										m_draft.bModernShellTickerBannerEnabled);
+		result.externalActionPayload.insert(QStringLiteral("profileShortcutVisible"),
+										m_draft.bModernShellStonksProfileShortcutVisible);
 		result.externalActionPayload.insert(QStringLiteral("tickerPlacement"),
 										normalizedStonksTickerPlacement(m_draft.qsModernShellTickerPlacement));
 		result.externalActionPayload.insert(QStringLiteral("tickerDirection"),
@@ -4262,6 +4270,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		};
 		QVariantList sections {
 			sectionItem(QObject::tr("Portfolio"), QVariantList {
+				boolField(QStringLiteral("stonks.client.profileShortcutVisible"),
+						  QObject::tr("Show Stonks in the profile card"),
+						  m_draft.bModernShellStonksProfileShortcutVisible),
 				enabledField(actionField(QStringLiteral("stonks.client.openPortfolio"),
 									 QObject::tr("Portfolio, leaderboard, following, and pins"),
 									 QObject::tr("Open portfolio"), QStringLiteral("stonks.openPortfolio"),
@@ -4525,196 +4536,223 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 				? autoCalibrationUnavailableText()
 				: m_inputEnhancementCalibrationUiError;
 
-		QVariantList inputQuickSetupFields {
-			selectField(QStringLiteral("audio.inputSystem"), QObject::tr("Input system"), inputSystem,
-						systemOptions(inputSystems)),
-			enabledField(selectField(QStringLiteral("audio.inputDevice"), QObject::tr("Input device"), inputDevice,
+		const auto audioInputSection = [](const QString &id, const QString &title, const QString &subtitle,
+									 const QVariantList &fields) {
+			QVariantMap section = sectionItem(title, fields);
+			section.insert(QStringLiteral("id"), id);
+			section.insert(QStringLiteral("subtitle"), subtitle);
+			return section;
+		};
+		const auto collapsibleSection = [](QVariantMap section, const bool expandedByDefault) {
+			section.insert(QStringLiteral("collapsible"), true);
+			section.insert(QStringLiteral("expandedByDefault"), expandedByDefault);
+			return section;
+		};
+
+		QVariantList microphoneFields {
+			enabledField(selectField(QStringLiteral("audio.inputDevice"), QObject::tr("Microphone"), inputDevice,
 								 deviceOptions(inputDevices)), !inputDevices.isEmpty())
 		};
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 		if (selectedInputSystem == QLatin1String("WASAPI")) {
-			inputQuickSetupFields.push_back(selectField(
-				QStringLiteral("audio.wasapiInputRouting"), QObject::tr("When the microphone disconnects"),
-				wasapiRoutingIndex(m_draft.qsWASAPIInputRoutingPolicy, !m_draft.qsWASAPIInput.isEmpty()),
-				wasapiRoutingOptions()));
-			inputQuickSetupFields.push_back(wasapiRuntimeStatusField(eCapture));
+			microphoneFields.push_back(wasapiRuntimeStatusField(eCapture));
 		}
 #endif
-		inputQuickSetupFields.push_back(advancedField(enabledField(
+		microphoneFields.push_back(advancedField(selectField(QStringLiteral("audio.inputSystem"),
+														 QObject::tr("Audio system"), inputSystem,
+														 systemOptions(inputSystems))));
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (selectedInputSystem == QLatin1String("WASAPI")) {
+			microphoneFields.push_back(advancedField(selectField(
+				QStringLiteral("audio.wasapiInputRouting"), QObject::tr("When the microphone disconnects"),
+				wasapiRoutingIndex(m_draft.qsWASAPIInputRoutingPolicy, !m_draft.qsWASAPIInput.isEmpty()),
+				wasapiRoutingOptions())));
+		}
+#endif
+		microphoneFields.push_back(advancedField(enabledField(
 			boolField(QStringLiteral("audio.exclusiveInput"), QObject::tr("Use exclusive input mode"),
 					  m_draft.bExclusiveInput), inputCanExclusive)));
-		inputQuickSetupFields.push_back(voiceMeterField(
-			m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError));
-		inputQuickSetupFields.push_back(inputEnhancementCalibrationField(
-			m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError));
 
-		return QVariantList {
-			sectionItem(QObject::tr("Quick setup"), inputQuickSetupFields),
-			sectionItem(QObject::tr("Transmit"), QVariantList {
-												selectField(QStringLiteral("audio.transmitMode"),
-															QObject::tr("Transmit mode"),
-															static_cast< int >(m_draft.atTransmit),
-															transmitModeOptions()) }),
-			advancedSection(sectionItem(QObject::tr("Manual voice detection"), QVariantList {
-												hintedField(enabledField(selectField(QStringLiteral("audio.vadSource"),
-																					 QObject::tr("Detection method"),
-																					 static_cast< int >(m_draft.vsVAD),
-																					 vadSourceOptions()),
-																		 voiceActivityTransmit),
-															QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
-												hintedField(enabledField(
-													selectField(QStringLiteral("audio.inputGateMode"),
-																QObject::tr("Input gate"),
-																static_cast< int >(m_draft.inputGateMode),
-																inputGateModeOptions()),
-													voiceActivityTransmit),
-														   QObject::tr("Off keeps the original behavior and is recommended after guided setup; stricter gates may clip soft words.")),
-												hintedField(enabledField(
-													rangeField(QStringLiteral("audio.vadMin"),
-															   QObject::tr("Stop threshold"),
-															   vadThresholdFromFloat(m_draft.fVADmin), 0, 100, 1,
-															   QStringLiteral("%")),
-													voiceActivityTransmit),
-																	   QObject::tr("Close the microphone when the live signal falls below this level.")),
-												hintedField(enabledField(
-													rangeField(QStringLiteral("audio.vadMax"),
-															   QObject::tr("Start threshold"),
-															   vadThresholdFromFloat(m_draft.fVADmax), 0, 100, 1,
-															   QStringLiteral("%")),
-													voiceActivityTransmit),
-																	   QObject::tr("Open the microphone when the live signal rises above this level.")),
-												hintedField(enabledField(numberField(QStringLiteral("audio.voiceHold"),
-																		  QObject::tr("Release delay"),
-																		  m_draft.iVoiceHold, 0, 250, 1,
-																		  QObject::tr(" frames")),
-																	 voiceActivityTransmit),
-																			   QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) })),
-			advancedSection(sectionItem(QObject::tr("Push-to-talk"), QVariantList {
-												enabledField(numberField(QStringLiteral("audio.doublePush"),
-																		QObject::tr("Double-push lockout"),
-																		static_cast< int >(m_draft.uiDoublePush), 0, 5000,
-																		50, QObject::tr(" ms")),
-															 pushToTalkTransmit),
-												enabledField(numberField(QStringLiteral("audio.pttHold"),
-																		QObject::tr("Push-to-talk hold"),
-																		static_cast< int >(m_draft.pttHold), 0, 5000, 50,
-																		QObject::tr(" ms")),
-															 pushToTalkTransmit),
-												enabledField(boolField(QStringLiteral("audio.showPttWindow"),
-																	   QObject::tr("Show push-to-talk button window"),
-																	   m_draft.bShowPTTButtonWindow),
-															 pushToTalkTransmit) })),
-			advancedSection(sectionItem(QObject::tr("Compression"), QVariantList {
-												   numberField(QStringLiteral("audio.framesPerPacket"),
-															   QObject::tr("Audio per packet"),
-															   m_draft.iFramesPerPacket, 1, 6, 1,
-															   QObject::tr(" frames")),
-												   rangeField(QStringLiteral("audio.quality"),
-															  QObject::tr("Voice bitrate"),
-															  bitrateKbitFromBits(m_draft.iQuality), 8,
-															  m_draft.experimentalHighBitrateEnabled ? 512 : 192, 1,
-															  QObject::tr(" kbit/s")),
-												   boolField(QStringLiteral("audio.experimentalHighBitrate"),
-															 QObject::tr("Enable experimental high bitrate voice"),
-															 m_draft.experimentalHighBitrateEnabled),
-												   boolField(QStringLiteral("audio.allowLowDelay"),
-															 QObject::tr("Allow Opus low-delay mode"),
-															 m_draft.bAllowLowDelay) })),
-			sectionItem(QObject::tr("Microphone processing"), QVariantList {
-												   advancedField(rangeField(QStringLiteral("audio.maxAmplification"),
-																				QObject::tr("Maximum amplification"),
-																				amplificationFromMinLoudness(
-																					m_draft.iMinLoudness),
-																				0, kMaxAmplificationSliderValue, 100,
-																				QString())),
-												   selectField(QStringLiteral("audio.echoMode"),
-															   QObject::tr("Echo cancellation"),
-															   static_cast< int >(m_draft.echoOption),
-															   echoOptionsFor(m_draft)),
-										   hintedField(
-											   selectField(QStringLiteral("audio.inputEnhancementProfile"),
-													   QObject::tr("Input enhancement"),
-													   static_cast< int >(inputEnhancementPreference.profile),
-													   inputEnhancementProfileOptions(
-														   m_draft, inputEnhancementPreference.profile)),
-											   inputEnhancementProfileHint),
-												   rangeField(QStringLiteral("audio.inputEnhancementReduction"),
-															  QObject::tr("Noise reduction"),
-													  inputEnhancementPreference.reduction,
-															  0, 100, 1, QStringLiteral("%")),
-													   rangeField(QStringLiteral("audio.inputEnhancementCharacter"),
-																  QObject::tr("Natural ↔ Clear"),
-													  inputEnhancementPreference.character,
-														  0, 100, 1, QStringLiteral("%")),
-										   advancedField(hintedField(
-											   enabledField(
-												   boolField(QStringLiteral("audio.inputEnhancementExperimentalAuto"),
-														 QObject::tr("Experimental Auto profile"),
-														 inputEnhancementAutoSelected),
-												   inputEnhancementAutoSelected
-													   || inputEnhancementAutoReadiness.selectable),
-											   inputEnhancementAutoHint)),
-												   advancedField(selectField(QStringLiteral("audio.noiseCancelMode"),
-																	 QObject::tr("Legacy suppression mode"),
-																	 static_cast< int >(m_draft.noiseCancelMode),
-																	 noiseCancelModeOptions())),
-													   hiddenField(advancedField(selectField(
-																	   QStringLiteral("audio.noiseCancelBackend"),
-																	   QObject::tr("Neural backend"),
-																	   static_cast< int >(inputCleanupBackend),
-																	   speechCleanupBackendOptions())),
-																   !inputNeuralCleanupActive),
-													   hiddenField(advancedField(selectField(
-																	   QStringLiteral("audio.noiseCancelModel"),
-																	   QObject::tr("Neural model"), inputCleanupModel,
-																	   speechCleanupModelOptions(inputCleanupBackend),
-																	   QStringLiteral("string"))),
-																   !inputNeuralCleanupActive),
-													   hiddenField(advancedField(
-																	   fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
-																				 QObject::tr("Custom model file"),
-																				 QStringLiteral("text"),
-																				 m_draft.noiseCancelCustomModelPath)),
-																   !(inputNeuralCleanupActive && inputCustomModel)),
-													   hiddenField(advancedField(rangeField(
-																	   QStringLiteral("audio.speexNoiseStrength"),
-																	   QObject::tr("Speex suppression strength"),
-																	   m_draft.iSpeexNoiseCancelStrength == 0
-																		   ? 14
-																		   : -m_draft.iSpeexNoiseCancelStrength,
-																	   0, 100, 1, QString())),
-																   !inputSpeexCleanupActive) }),
-			advancedSection(sectionItem(QObject::tr("Cues and idle behavior"), QVariantList {
-															boolField(QStringLiteral("audio.cuePtt"),
-																	  QObject::tr("Play transmit cue for push-to-talk"),
-																	  m_draft.audioCueEnabledPTT),
-															boolField(QStringLiteral("audio.cueVad"),
-																	  QObject::tr("Play transmit cue for voice activity"),
-																	  m_draft.audioCueEnabledVAD),
-															fieldItem(QStringLiteral("audio.cueOnPath"),
-																	  QObject::tr("Transmit cue on file"),
-																	  QStringLiteral("text"), m_draft.qsTxAudioCueOn),
-															fieldItem(QStringLiteral("audio.cueOffPath"),
-																	  QObject::tr("Transmit cue off file"),
-																	  QStringLiteral("text"), m_draft.qsTxAudioCueOff),
-															boolField(QStringLiteral("audio.muteCue"),
-																	  QObject::tr("Play mute cue"),
-																	  m_draft.bTxMuteCue),
-															fieldItem(QStringLiteral("audio.muteCuePath"),
-																	  QObject::tr("Mute cue file"),
-																	  QStringLiteral("text"), m_draft.qsTxMuteCue),
-															numberField(QStringLiteral("audio.idleMinutes"),
-																		QObject::tr("Idle after"),
-																		static_cast< int >(m_draft.iIdleTime / 60),
-																		0, 1440, 1, QObject::tr(" min")),
-															selectField(QStringLiteral("audio.idleAction"),
-																		QObject::tr("Idle action"),
-																		static_cast< int >(m_draft.iaeIdleAction),
-																		idleActionOptions()),
-															boolField(QStringLiteral("audio.undoIdleAction"),
-																	  QObject::tr("Undo idle action on activity"),
-																	  m_draft.bUndoIdleActionUponActivity) }))
+		QString transmitSubtitle;
+		switch (m_draft.atTransmit) {
+			case Settings::VAD:
+				transmitSubtitle = QObject::tr(
+					"Recommended for hands-free chat: Mumble opens the microphone when you speak.");
+				break;
+			case Settings::PushToTalk:
+				transmitSubtitle = QObject::tr(
+					"Your microphone sends only while your push-to-talk shortcut is held.");
+				break;
+			case Settings::Continuous:
+			default:
+				transmitSubtitle = QObject::tr(
+					"Your microphone stays open while unmuted. Use this only when you intend to send everything.");
+				break;
+		}
+
+		QVariantList processingFields {
+			hintedField(selectField(QStringLiteral("audio.inputEnhancementProfile"),
+											 QObject::tr("Voice enhancement"),
+											 static_cast< int >(inputEnhancementPreference.profile),
+											 inputEnhancementProfileOptions(m_draft, inputEnhancementPreference.profile)),
+						 inputEnhancementProfileHint)
 		};
+		if (inputEnhancementPreference.profile != Mumble::InputEnhancement::Profile::Original) {
+			processingFields.push_back(rangeField(QStringLiteral("audio.inputEnhancementReduction"),
+												  QObject::tr("Noise reduction"),
+												  inputEnhancementPreference.reduction, 0, 100, 1,
+												  QStringLiteral("%")));
+			processingFields.push_back(rangeField(QStringLiteral("audio.inputEnhancementCharacter"),
+												  QObject::tr("Natural ↔ Clear"),
+												  inputEnhancementPreference.character, 0, 100, 1,
+												  QStringLiteral("%")));
+		}
+
+		QVariantList sections {
+			audioInputSection(QStringLiteral("microphone"), QObject::tr("Microphone"),
+							  QObject::tr("Choose what Mumble listens to. The default device follows your system input."),
+							  microphoneFields),
+			audioInputSection(
+				QStringLiteral("transmission"), QObject::tr("When should Mumble transmit?"), transmitSubtitle,
+				QVariantList { presentationField(
+					selectField(QStringLiteral("audio.transmitMode"), QObject::tr("Transmit mode"),
+								static_cast< int >(m_draft.atTransmit), transmitModeOptions()),
+					QStringLiteral("segmented")) }),
+			audioInputSection(
+				QStringLiteral("microphoneCheck"), QObject::tr("Check your microphone"),
+				QObject::tr("Speak at your normal distance. The meter and guided setup use the same signal as transmission."),
+				QVariantList { voiceMeterField(m_draft, m_inputEnhancementCalibrationWorker->snapshot(),
+												inputEnhancementCalibrationUiError) }),
+			audioInputSection(
+				QStringLiteral("voiceProcessing"), QObject::tr("Voice processing"),
+				inputEnhancementPreference.profile == Mumble::InputEnhancement::Profile::Original
+					? QObject::tr("Leave your voice untouched, or choose a profile for clearer speech in noisy rooms.")
+					: QObject::tr("Start with the selected profile. Adjust the two controls only if you need to."),
+				processingFields)
+		};
+
+		if (voiceActivityTransmit) {
+			sections.push_back(advancedSection(collapsibleSection(
+				audioInputSection(
+					QStringLiteral("voiceActivation"), QObject::tr("Voice activation tuning"),
+					QObject::tr("Guided setup above is the safest starting point. Open this only to tune detection manually."),
+					QVariantList {
+						hintedField(selectField(QStringLiteral("audio.vadSource"), QObject::tr("Detection method"),
+												static_cast< int >(m_draft.vsVAD), vadSourceOptions()),
+									QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
+						hintedField(selectField(QStringLiteral("audio.inputGateMode"), QObject::tr("Input gate"),
+												static_cast< int >(m_draft.inputGateMode), inputGateModeOptions()),
+									QObject::tr("Off is recommended after guided setup; stricter gates may clip soft words.")),
+						hintedField(rangeField(QStringLiteral("audio.vadMin"), QObject::tr("Stop threshold"),
+												vadThresholdFromFloat(m_draft.fVADmin), 0, 100, 1,
+												QStringLiteral("%")),
+									QObject::tr("Close the microphone when the live signal falls below this level.")),
+						hintedField(rangeField(QStringLiteral("audio.vadMax"), QObject::tr("Start threshold"),
+												vadThresholdFromFloat(m_draft.fVADmax), 0, 100, 1,
+												QStringLiteral("%")),
+									QObject::tr("Open the microphone when the live signal rises above this level.")),
+						hintedField(numberField(QStringLiteral("audio.voiceHold"), QObject::tr("Release delay"),
+												m_draft.iVoiceHold, 0, 250, 1, QObject::tr(" frames")),
+									QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) }),
+				false)));
+		} else if (pushToTalkTransmit) {
+			sections.push_back(advancedSection(collapsibleSection(
+				audioInputSection(
+					QStringLiteral("pushToTalk"), QObject::tr("Push-to-talk behavior"),
+					QObject::tr("Fine-tune shortcut timing. Create or change the shortcut under Key Bindings."),
+					QVariantList {
+						numberField(QStringLiteral("audio.doublePush"), QObject::tr("Double-push lockout"),
+									static_cast< int >(m_draft.uiDoublePush), 0, 5000, 50, QObject::tr(" ms")),
+						numberField(QStringLiteral("audio.pttHold"), QObject::tr("Release delay"),
+									static_cast< int >(m_draft.pttHold), 0, 5000, 50, QObject::tr(" ms")),
+						boolField(QStringLiteral("audio.showPttWindow"),
+								  QObject::tr("Show push-to-talk button window"), m_draft.bShowPTTButtonWindow) }),
+				false)));
+		}
+
+		if (inputEnhancementPreference.profile != Mumble::InputEnhancement::Profile::Original) {
+			sections.push_back(advancedSection(collapsibleSection(
+				audioInputSection(
+					QStringLiteral("processingCalibration"), QObject::tr("Compare processing"),
+					QObject::tr("Use one private local recording to compare safe processing choices before applying one."),
+					QVariantList { inputEnhancementCalibrationField(
+						m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError) }),
+				false)));
+		}
+
+		sections.push_back(advancedSection(collapsibleSection(
+			audioInputSection(
+				QStringLiteral("processingDetails"), QObject::tr("Processing details"),
+				QObject::tr("Gain, echo cancellation, experimental switching, and legacy cleanup engines."),
+				QVariantList {
+					rangeField(QStringLiteral("audio.maxAmplification"), QObject::tr("Maximum amplification"),
+							   amplificationFromMinLoudness(m_draft.iMinLoudness), 0,
+							   kMaxAmplificationSliderValue, 100, QString()),
+					selectField(QStringLiteral("audio.echoMode"), QObject::tr("Echo cancellation"),
+								static_cast< int >(m_draft.echoOption), echoOptionsFor(m_draft)),
+					hintedField(
+						enabledField(boolField(QStringLiteral("audio.inputEnhancementExperimentalAuto"),
+											 QObject::tr("Experimental Auto profile"), inputEnhancementAutoSelected),
+								 inputEnhancementAutoSelected || inputEnhancementAutoReadiness.selectable),
+						inputEnhancementAutoHint),
+					selectField(QStringLiteral("audio.noiseCancelMode"), QObject::tr("Legacy suppression mode"),
+								static_cast< int >(m_draft.noiseCancelMode), noiseCancelModeOptions()),
+					hiddenField(selectField(QStringLiteral("audio.noiseCancelBackend"), QObject::tr("Neural backend"),
+										static_cast< int >(inputCleanupBackend), speechCleanupBackendOptions()),
+							!inputNeuralCleanupActive),
+					hiddenField(selectField(QStringLiteral("audio.noiseCancelModel"), QObject::tr("Neural model"),
+										inputCleanupModel, speechCleanupModelOptions(inputCleanupBackend),
+										QStringLiteral("string")),
+							!inputNeuralCleanupActive),
+					hiddenField(fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
+									  QObject::tr("Custom model file"), QStringLiteral("text"),
+									  m_draft.noiseCancelCustomModelPath),
+							!(inputNeuralCleanupActive && inputCustomModel)),
+					hiddenField(rangeField(QStringLiteral("audio.speexNoiseStrength"),
+									   QObject::tr("Speex suppression strength"),
+									   m_draft.iSpeexNoiseCancelStrength == 0
+										   ? 14
+										   : -m_draft.iSpeexNoiseCancelStrength,
+									   0, 100, 1, QString()),
+							!inputSpeexCleanupActive) }),
+			false)));
+
+		sections.push_back(advancedSection(collapsibleSection(
+			audioInputSection(
+				QStringLiteral("networkVoice"), QObject::tr("Network voice quality"),
+				QObject::tr("Codec and latency controls. The defaults work for nearly everyone."),
+				QVariantList {
+					numberField(QStringLiteral("audio.framesPerPacket"), QObject::tr("Audio per packet"),
+								m_draft.iFramesPerPacket, 1, 6, 1, QObject::tr(" frames")),
+					rangeField(QStringLiteral("audio.quality"), QObject::tr("Voice bitrate"),
+							   bitrateKbitFromBits(m_draft.iQuality), 8,
+							   m_draft.experimentalHighBitrateEnabled ? 512 : 192, 1,
+							   QObject::tr(" kbit/s")),
+					boolField(QStringLiteral("audio.experimentalHighBitrate"),
+							  QObject::tr("Enable experimental high bitrate voice"),
+							  m_draft.experimentalHighBitrateEnabled),
+					boolField(QStringLiteral("audio.allowLowDelay"), QObject::tr("Allow Opus low-delay mode"),
+							  m_draft.bAllowLowDelay) }),
+			false)));
+
+		QVariantList idleFields {
+			selectField(QStringLiteral("audio.idleAction"), QObject::tr("When I am idle"),
+						static_cast< int >(m_draft.iaeIdleAction), idleActionOptions())
+		};
+		if (m_draft.iaeIdleAction != Settings::Nothing) {
+			idleFields.push_back(numberField(QStringLiteral("audio.idleMinutes"), QObject::tr("After"),
+										 static_cast< int >(m_draft.iIdleTime / 60), 0, 1440, 1,
+										 QObject::tr(" min")));
+			idleFields.push_back(boolField(QStringLiteral("audio.undoIdleAction"),
+									   QObject::tr("Undo the idle action when activity resumes"),
+									   m_draft.bUndoIdleActionUponActivity));
+		}
+		sections.push_back(advancedSection(collapsibleSection(
+			audioInputSection(QStringLiteral("idleBehavior"), QObject::tr("Idle behavior"),
+							  QObject::tr("Optionally mute or deafen after a period of inactivity."), idleFields),
+			false)));
+
+		return sections;
 	}
 
 	if (m_activePage == QLatin1String("audioOutput")) {

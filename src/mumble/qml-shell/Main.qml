@@ -126,6 +126,7 @@ ApplicationWindow {
 	readonly property var stonksTickerState: clientSession.stonks || ({})
 	readonly property bool stonksShortcutEnabled: !!clientSession.connected
 		&& stonksTickerState.supported === true
+		&& stonksTickerState.profileShortcutVisible !== false
 	readonly property bool stonksTickerEnabled: stonksTickerState.tickerBannerEnabled === true
 	readonly property string stonksTickerPlacement: String(stonksTickerState.tickerPlacement || "bottom")
 	readonly property string stonksTickerDirection: String(stonksTickerState.tickerDirection || "left")
@@ -1682,9 +1683,44 @@ ApplicationWindow {
 			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
 			"delegateDiagnostics": timelineDelegateDiagnostics(),
 			"settled": !bottomFollowTimer.running && !timeline.scopeResetPending
+				&& !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 				&& !timeline.restoringBottom && !timeline.prependAnchorActive
 				&& !performanceChatScrollRunning,
 			"scrollable": timeline.count === 96 && maximumY - minimumY >= 8 }
+	}
+
+	function timelinePresentationState() {
+		const minimumY = timeline.originY
+		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
+		const firstVisible = timeline.firstVisibleMessageDelegate()
+		const completedAt = timeline.scopePresentationCompletedAt > 0
+			? timeline.scopePresentationCompletedAt : Date.now()
+		return {
+			"scopeToken": String(activeScope.scopeToken || ""),
+			"scopeLabel": String(activeScope.label || ""),
+			"count": timeline.count,
+			"contentHeight": timeline.contentHeight,
+			"viewportHeight": timeline.height,
+			"contentY": timeline.contentY,
+			"maximumY": maximumY,
+			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
+			"presentationPending": timeline.scopePresentationPending,
+			"presentationFinalizing": timeline.scopePresentationFinalizing,
+			"observationActive": timeline.scopePresentationObservationActive,
+			"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
+			"generation": timeline.scopePresentationGeneration,
+			"mutationCount": timeline.scopePresentationMutationCount,
+			"tailCorrectionCount": timeline.scopePresentationTailCorrectionCount,
+			"exposedHeightChangeCount": timeline.scopePresentationExposedHeightChangeCount,
+			"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
+			"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
+			"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
+			"durationMs": timeline.scopePresentationStartedAt > 0
+				? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
+			"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
+				&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
+				&& !timeline.restoringBottom && !timeline.prependAnchorActive
+		}
 	}
 
 	function performanceChatScrollState() {
@@ -2082,6 +2118,7 @@ ApplicationWindow {
 			commitOnSelection: true
 			settingsEnabled: root.settingsActionEnabled
 			stonksEnabled: root.stonksShortcutEnabled
+			serverMenuOpen: appMenuPopup.visible
 			// The drawer is the semantic owner while navigationModalActive is true;
 			// suppressing it through the global modal flag leaves screen readers with
 			// only an empty Window node. Suppress it only for a different product
@@ -2650,6 +2687,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     model: chatModel
                     clip: true
+					interactive: !scopePresentationPending
 					Accessible.role: Accessible.List
 					Accessible.name: qsTr("Conversation messages")
 					// QQuickListView's scrolling contentItem reports its untransformed
@@ -2672,6 +2710,7 @@ ApplicationWindow {
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
 						objectName: "chatTimelineScrollBar"
+						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
 							if (pressed) {
 								bottomFollowTimer.stop()
@@ -2716,6 +2755,21 @@ ApplicationWindow {
 					property int pendingTailMessageCount: 0
 					property bool restoringBottom: false
 					property bool scopeResetPending: false
+					// Rich text, preview cards, and attachments refine delegate heights after
+					// a scope arrives. Keep that churn behind one stable loading surface and
+					// expose the fully anchored tail in a single frame.
+					property bool scopePresentationPending: false
+					property bool scopePresentationFinalizing: false
+					property bool scopePresentationObservationActive: false
+					property bool scopePresentationForcedByDeadline: false
+					property int scopePresentationGeneration: 0
+					property int scopePresentationMutationCount: 0
+					property int scopePresentationTailCorrectionCount: 0
+					property int scopePresentationExposedHeightChangeCount: 0
+					property int scopePresentationExposedTailCorrectionCount: 0
+					property real scopePresentationExposedTailTravel: 0
+					property double scopePresentationStartedAt: 0
+					property double scopePresentationCompletedAt: 0
 					// Scope replacement removes one conversation and inserts another in the
 					// same event turn. Temporarily retire the reuse pool so Qt Quick cannot
 					// present a delegate with geometry/content retained from the old scope.
@@ -2737,19 +2791,110 @@ ApplicationWindow {
 
 					function requestBottomFollow() {
 						if (stickToBottom && !prependAnchorActive && !restoringBottom
-								&& !bottomFollowTimer.running && !root.performanceChatScrollRunning)
+								&& !scopePresentationPending && !bottomFollowTimer.running
+								&& !root.performanceChatScrollRunning)
 							bottomFollowTimer.start()
 					}
 
 					function beginScopeChange() {
 						releasePrependAnchor()
 						bottomFollowTimer.stop()
+						scopePresentationQuietTimer.stop()
+						scopePresentationDeadlineTimer.stop()
+						scopePresentationObservationTimer.stop()
+						++scopePresentationGeneration
+						scopePresentationPending = true
+						scopePresentationFinalizing = false
+						scopePresentationObservationActive = false
+						scopePresentationForcedByDeadline = false
+						scopePresentationMutationCount = 0
+						scopePresentationTailCorrectionCount = 0
+						scopePresentationExposedHeightChangeCount = 0
+						scopePresentationExposedTailCorrectionCount = 0
+						scopePresentationExposedTailTravel = 0
+						scopePresentationStartedAt = Date.now()
+						scopePresentationCompletedAt = 0
 						scopeReuseResetActive = true
 						followTailAfterInsert = false
 						pendingTailInsertCount = 0
 						pendingTailMessageCount = 0
 						stickToBottom = true
 						scopeResetPending = true
+						scopePresentationQuietTimer.start()
+						scopePresentationDeadlineTimer.start()
+					}
+
+					function noteScopePresentationMutation() {
+						if (!scopePresentationPending || scopePresentationFinalizing)
+							return
+						++scopePresentationMutationCount
+						scopePresentationQuietTimer.restart()
+					}
+
+					function pendingScopeHydrationCount() {
+						const children = contentItem ? contentItem.children : []
+						let pending = 0
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (item && item.contentNeedsHydration === true
+									&& item.inHydrationWindow === true
+									&& item.accessibilityPooled !== true)
+								++pending
+						}
+						return pending
+					}
+
+					function finishScopePresentation(forcedByDeadline) {
+						if (!scopePresentationPending || scopePresentationFinalizing)
+							return
+						if (!forcedByDeadline && pendingScopeHydrationCount() > 0) {
+							scopePresentationQuietTimer.restart()
+							return
+						}
+						const generation = scopePresentationGeneration
+						scopePresentationFinalizing = true
+						scopePresentationForcedByDeadline = !!forcedByDeadline
+						scopePresentationQuietTimer.stop()
+						scopePresentationDeadlineTimer.stop()
+						forceLayout()
+						positionTailImmediately()
+						Qt.callLater(function() {
+							if (generation !== timeline.scopePresentationGeneration
+									|| !timeline.scopePresentationPending)
+								return
+							timeline.forceLayout()
+							timeline.positionTailImmediately()
+							timeline.scopeResetPending = false
+							timeline.scopeReuseResetActive = false
+							timeline.scopePresentationCompletedAt = Date.now()
+							timeline.scopePresentationPending = false
+							timeline.scopePresentationFinalizing = false
+							timeline.scopePresentationObservationActive = true
+							scopePresentationObservationTimer.restart()
+							timeline.requestBottomFollow()
+						})
+					}
+
+					function recordTailCorrection(previousY, nextY) {
+						const distance = Math.abs(nextY - previousY)
+						if (distance <= 0.5)
+							return
+						++scopePresentationTailCorrectionCount
+						if (!scopePresentationPending && scopePresentationObservationActive) {
+							++scopePresentationExposedTailCorrectionCount
+							scopePresentationExposedTailTravel += distance
+						}
+					}
+
+					function setTailContentY(nextY) {
+						const minimumY = originY
+						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						const boundedY = Math.max(minimumY, Math.min(maximumY, nextY))
+						if (Math.abs(contentY - boundedY) <= 0.5)
+							return
+						const previousY = contentY
+						contentY = boundedY
+						recordTailCorrection(previousY, contentY)
 					}
 
 					function positionTailImmediately() {
@@ -2757,7 +2902,7 @@ ApplicationWindow {
 							return
 						const maximumY = Math.max(originY, originY + contentHeight - height)
 						restoringBottom = true
-						contentY = maximumY
+						setTailContentY(maximumY)
 						restoringBottom = false
 					}
 
@@ -2847,9 +2992,7 @@ ApplicationWindow {
 							else if (richBounds.bottom > height + 0.5)
 								correction = richBounds.bottom - height
 							if (Math.abs(correction) > 0.5) {
-								const minimumY = originY
-								const maximumY = Math.max(minimumY, originY + contentHeight - height)
-								contentY = Math.max(minimumY, Math.min(maximumY, contentY + correction))
+								setTailContentY(contentY + correction)
 							}
 							return
 						}
@@ -2861,9 +3004,7 @@ ApplicationWindow {
 						// This also keeps the visible row's semantic subtree available at
 						// fractional DPR instead of exposing a visually clipped message.
 						if (item.y < contentY - 1.0) {
-							const minimumY = originY
-							const maximumY = Math.max(minimumY, originY + contentHeight - height)
-							contentY = Math.max(minimumY, Math.min(maximumY, item.y))
+							setTailContentY(item.y)
 						}
 					}
 
@@ -2882,6 +3023,12 @@ ApplicationWindow {
 					}
 
 					onContentHeightChanged: {
+						if (scopePresentationPending) {
+							noteScopePresentationMutation()
+							return
+						}
+						if (scopePresentationObservationActive)
+							++scopePresentationExposedHeightChangeCount
 						if (prependAnchorActive && !restoringPrependAnchor)
 							Qt.callLater(function() { timeline.restorePrependAnchor() })
 						else if (scopeResetPending && !restoringBottom) {
@@ -2916,6 +3063,27 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: scopePresentationQuietTimer
+						interval: 120
+						repeat: false
+						onTriggered: timeline.finishScopePresentation(false)
+					}
+
+					Timer {
+						id: scopePresentationDeadlineTimer
+						interval: 2000
+						repeat: false
+						onTriggered: timeline.finishScopePresentation(true)
+					}
+
+					Timer {
+						id: scopePresentationObservationTimer
+						interval: 400
+						repeat: false
+						onTriggered: timeline.scopePresentationObservationActive = false
+					}
+
+					Timer {
 						id: bottomFollowTimer
 						// Coalesce the height churn produced by delegate creation, rich-text
 						// layout and asynchronous media into at most one correction per frame.
@@ -2929,7 +3097,7 @@ ApplicationWindow {
 							if (!timeline.scopeResetPending && Math.abs(maximumY - timeline.contentY) <= 0.5)
 								return
 							timeline.restoringBottom = true
-							timeline.positionViewAtEnd()
+							timeline.setTailContentY(maximumY)
 							Qt.callLater(function() {
 								timeline.containTailMessageWhenPossible()
 								timeline.restoringBottom = false
@@ -2955,6 +3123,8 @@ ApplicationWindow {
 						function onDataChanged(topLeft, bottomRight, roles) {
 							if (timeline.prependAnchorActive)
 								Qt.callLater(function() { timeline.restorePrependAnchor() })
+							else if (timeline.scopePresentationPending)
+								timeline.noteScopePresentationMutation()
 							else
 								timeline.requestBottomFollow()
 						}
@@ -2999,6 +3169,8 @@ ApplicationWindow {
 									timeline.forceLayout()
 									timeline.scopeReuseResetActive = false
 								})
+							if (timeline.scopePresentationPending)
+								timeline.noteScopePresentationMutation()
 							timeline.followTailAfterInsert = false
 							timeline.pendingTailInsertCount = 0
 						}
@@ -3007,9 +3179,14 @@ ApplicationWindow {
 							timeline.pendingTailInsertCount = 0
 							timeline.pendingTailMessageCount = 0
 							timeline.stickToBottom = true
-							timeline.requestBottomFollow()
+							if (timeline.scopePresentationPending)
+								timeline.noteScopePresentationMutation()
+							else
+								timeline.requestBottomFollow()
 						}
 						function onCountChanged() {
+							if (timeline.scopePresentationPending)
+								timeline.noteScopePresentationMutation()
 							if (timeline.count === 0) {
 								timeline.releasePrependAnchor()
 								timeline.stickToBottom = true
@@ -3017,6 +3194,7 @@ ApplicationWindow {
 						}
 					}
 					TapHandler {
+						enabled: !timeline.scopePresentationPending
 						acceptedButtons: Qt.RightButton
 						onTapped: point => {
 							const row = timeline.itemAt(point.position.x + timeline.contentX,
@@ -3031,6 +3209,7 @@ ApplicationWindow {
                         width: timeline.width
                         height: (activeScope.canLoadOlder || activeScope.loadingState === "older") ? 48 : 0
                         visible: height > 0
+						opacity: timeline.scopePresentationPending ? 0 : 1
                         ModernButton {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: parent.top
@@ -3055,6 +3234,7 @@ ApplicationWindow {
 					}
 			delegate: ChatMessageFrame {
 						id: messageDelegate
+						opacity: timeline.scopePresentationPending ? 0 : 1
 						readonly property bool performanceTimelineDelegate: true
 				required property int index
 				// Ordinary rows enter UIA only when fully contained so cached actor/header
@@ -3068,6 +3248,7 @@ ApplicationWindow {
 					: y >= timeline.contentY - 0.5
 						&& y + height <= timeline.contentY + timeline.height + 0.5
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
+					|| timeline.scopePresentationPending
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 						function openAutomationActions() {
 							openMessageActions()
@@ -3658,6 +3839,7 @@ ApplicationWindow {
 												onClicked: uiCommands.replyToMessage(messageDelegate.stableId)
 											}
 											ModernIconButton {
+												id: messageReactButton
 												objectName: "messageReactButton"
 												visible: messageDelegate.canReact
 													&& (messageDelegate.hovered
@@ -3772,6 +3954,7 @@ ApplicationWindow {
 											onClicked: uiCommands.replyToMessage(messageDelegate.stableId)
 										}
 										ModernIconButton {
+											id: compactMessageReactButton
 											objectName: "compactMessageReactButton"
 											visible: messageDelegate.canReact
 											dense: true
@@ -3817,8 +4000,12 @@ ApplicationWindow {
 						width: Math.max(1, Math.min(380, timeline.width
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
-						visible: chatModel.count === 0 && !root.connectionTransitionActive
+						readonly property bool visualLoading: activeScope.loading
+							|| timeline.scopePresentationPending
+						visible: (timeline.scopePresentationPending || chatModel.count === 0)
+							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
+						z: 5
 						radius: Theme.innerRadius
 						color: Theme.surfaceRaised
 						border.color: Theme.surfaceBorder
@@ -3837,7 +4024,7 @@ ApplicationWindow {
 							ModernBusyIndicator {
 								objectName: "emptyConversationBusyIndicator"
 								anchors.horizontalCenter: parent.horizontalCenter
-								visible: activeScope.loading
+								visible: emptyConversationState.visualLoading
 								running: visible
 								animated: !root.visualFixtureOverrideActive
 								Accessible.name: qsTr("Loading conversation")
@@ -3846,7 +4033,9 @@ ApplicationWindow {
 								id: emptyConversationTitle
 								width: parent.width
 								textFormat: Text.PlainText
-								text: activeScope.loading ? qsTr("Loading conversation")
+								text: emptyConversationState.visualLoading
+									? (activeScope.loading ? qsTr("Loading conversation")
+										: qsTr("Preparing conversation"))
 									: !clientSession.connected ? qsTr("Connect to Mumble")
 									: activeScope.canSend ? qsTr("This conversation is quiet")
 									: qsTr("Choose a conversation")
@@ -3860,7 +4049,10 @@ ApplicationWindow {
 								id: emptyConversationDetail
 								width: parent.width
 								textFormat: Text.PlainText
-								text: activeScope.loading ? qsTr("Messages will appear here when history is ready.")
+								text: emptyConversationState.visualLoading
+									? (activeScope.loading
+										? qsTr("Messages will appear here when history is ready.")
+										: qsTr("Recent messages are being laid out."))
 									: !clientSession.connected ? qsTr("Open the server browser to load rooms and messages.")
 									: activeScope.canSend ? qsTr("Be the first to write in %1.").arg(activeScope.label)
 									: qsTr("Select a text room, voice room, or direct message to get started.")
@@ -3895,6 +4087,7 @@ ApplicationWindow {
 					Layout.bottomMargin: visible ? Theme.space1 : 0
 					Layout.preferredHeight: visible ? implicitHeight : 0
 					visible: timeline.count > 0 && !timeline.stickToBottom
+						&& !timeline.scopePresentationPending
 					dense: true
 					tone: timeline.pendingTailMessageCount > 0 ? "accent" : "neutral"
 					text: timeline.pendingTailMessageCount > 0
@@ -4347,6 +4540,7 @@ ApplicationWindow {
 				visualFixtureMode: root.visualFixtureOverrideActive
 				settingsEnabled: root.settingsActionEnabled
 				stonksEnabled: root.stonksShortcutEnabled
+				serverMenuOpen: appMenuPopup.visible
 				activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
 					? root.contextScopeToken : ""
 				activeParticipantMenuKey: participantMenuPopup.visible

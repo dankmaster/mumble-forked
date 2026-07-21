@@ -236,6 +236,7 @@ TestCase {
 		tryVerify(function() { return loader.item !== null })
 		loader.item.alignedHeaderHeight = Theme.railHeaderHeight
 		loader.item.alignedFooterHeight = Theme.railFooterHeight
+		loader.item.railSide = Theme.railSide
 		// Drain delegate rebind/reuse work from the previous test before resetting
 		// the command probe. Otherwise a queued release from a recycled row can
 		// make the following pointer-drag assertion observe stale target state.
@@ -286,6 +287,7 @@ TestCase {
 		loader.item.accessibilitySuppressed = false
 		loader.item.settingsEnabled = true
 		loader.item.stonksEnabled = true
+		loader.item.serverMenuOpen = false
 		const profile = findChild(loader.item, "selfIdentityButton")
 		if (profile !== null)
 			profile.forceActiveFocus()
@@ -470,9 +472,6 @@ TestCase {
 			&& serverName !== null)
 		verify(pill !== null && dot !== null && connectionLabel !== null)
 		compare(header.height, Theme.railHeaderHeight)
-		const badgePosition = badge.mapToItem(header, 0, 0)
-		const namePosition = serverName.mapToItem(header, 0, 0)
-		verify(badgePosition.x < namePosition.x)
 		compare(monogram.text, "1M")
 		compare(String(monogram.color), String(Theme.onAccent))
 		compare(serverImage.source.toString(), session.serverImageUrl)
@@ -482,19 +481,107 @@ TestCase {
 		compare(serverName.text, "Test server")
 		compare(connectionLabel.text, "Connected")
 		compare(String(dot.color), String(Theme.success))
-		compare(header.Accessible.role, Accessible.Grouping)
-		compare(header.Accessible.name, "Test server")
+		compare(header.Accessible.role, Accessible.Button)
+		verify(header.Accessible.name.indexOf("Test server") >= 0)
 		verify(header.Accessible.description.indexOf("Current ping: 12 ms") >= 0)
 		compare(pill.Accessible.name, "Connected")
-		compare(badge.Accessible.role, Accessible.Button)
-		verify(badge.Accessible.name.indexOf("Test server") >= 0)
+		compare(badge.Accessible.ignored, true)
+		compare(badge.activeFocusOnTab, false)
+	}
+
+	function test_server_header_centers_inward_and_mirrors_with_rail_side() {
+		const header = findChild(loader.item, "navigationServerHeader")
+		const content = findChild(loader.item, "navigationServerHeaderContent")
+		const badge = findChild(loader.item, "navigationServerBadge")
+		const serverName = findChild(loader.item, "navigationServerName")
+		const actionsButton = findChild(loader.item, "navigationServerActions")
+		const pill = findChild(loader.item, "navigationConnectionPill")
+		verify(header !== null && content !== null && badge !== null
+			&& serverName !== null && actionsButton !== null && pill !== null)
+
+		loader.item.railSide = "left"
+		tryVerify(function() {
+			return badge.mapToItem(header, 0, 0).x
+				< serverName.mapToItem(header, 0, 0).x
+		})
+		let badgePosition = badge.mapToItem(header, 0, 0)
+		let namePosition = serverName.mapToItem(header, 0, 0)
+		let actionsPosition = actionsButton.mapToItem(header, 0, 0)
+		verify(badgePosition.x < namePosition.x,
+			"Left rail must place the server badge before the server name: badge="
+				+ badgePosition.x + ", name=" + namePosition.x)
+		verify(actionsPosition.x > namePosition.x)
+		verify(Math.abs(badgePosition.x - Theme.space5) < 0.5)
+		compare(serverName.horizontalAlignment, Text.AlignLeft)
+		compare(pill.Layout.alignment, Qt.AlignLeft)
+
+		loader.item.railSide = "right"
+		tryVerify(function() {
+			return badge.mapToItem(header, 0, 0).x
+				> serverName.mapToItem(header, 0, 0).x
+		})
+		badgePosition = badge.mapToItem(header, 0, 0)
+		namePosition = serverName.mapToItem(header, 0, 0)
+		actionsPosition = actionsButton.mapToItem(header, 0, 0)
+		verify(badgePosition.x > namePosition.x,
+			"Right rail must place the server badge after the server name: badge="
+				+ badgePosition.x + ", name=" + namePosition.x)
+		verify(actionsPosition.x < namePosition.x)
+		verify(Math.abs((header.width - badgePosition.x - badge.width) - Theme.space5) < 0.5)
+		compare(serverName.horizontalAlignment, Text.AlignRight)
+		compare(pill.Layout.alignment, Qt.AlignRight)
+	}
+
+	function test_server_actions_have_an_always_visible_menu_button() {
+		const button = findChild(loader.item, "navigationServerActions")
+		verify(button !== null)
+		compare(button.visible, true)
+		compare(button.iconName, "more")
+		verify(button.opacity >= 0.7)
+		verify(button.Accessible.name.indexOf("Test server") >= 0)
+		verify(button.Accessible.description.indexOf("connection") >= 0)
+
+		mouseClick(button)
+		compare(serverMenuSpy.count, 1)
+		verify(serverMenuSpy.signalArguments[0][0].x >= 0)
+		verify(serverMenuSpy.signalArguments[0][0].y >= 0)
+
+		loader.item.serverMenuOpen = true
+		tryCompare(button, "selected", true)
+		loader.item.serverMenuOpen = false
+	}
+
+	function test_complete_server_card_opens_menu_by_pointer_keyboard_and_accessibility() {
+		const header = findChild(loader.item, "navigationServerHeader")
+		const badge = findChild(loader.item, "navigationServerBadge")
+		const serverName = findChild(loader.item, "navigationServerName")
+		const pill = findChild(loader.item, "navigationConnectionPill")
+		verify(header !== null && badge !== null && serverName !== null && pill !== null)
+
+		mouseClick(badge)
+		compare(serverMenuSpy.count, 1)
+		mouseClick(serverName)
+		compare(serverMenuSpy.count, 2)
+		mouseClick(pill)
+		compare(serverMenuSpy.count, 3)
+		compare(header.activeFocus, false)
+
+		header.forceActiveFocus(Qt.TabFocusReason)
+		tryCompare(header, "activeFocus", true)
+		keyClick(Qt.Key_Return)
+		compare(serverMenuSpy.count, 4)
+		keyClick(Qt.Key_Space)
+		compare(serverMenuSpy.count, 5)
+		header.Accessible.pressAction()
+		compare(serverMenuSpy.count, 6)
 	}
 
 	function test_server_logo_falls_back_to_configured_monogram_and_opens_menu() {
+		const header = findChild(loader.item, "navigationServerHeader")
 		const badge = findChild(loader.item, "navigationServerBadge")
 		const monogram = findChild(loader.item, "navigationServerMonogram")
 		const serverImage = findChild(loader.item, "navigationServerImage")
-		verify(badge !== null && monogram !== null && serverImage !== null)
+		verify(header !== null && badge !== null && monogram !== null && serverImage !== null)
 		const originalImage = session.serverImageUrl
 		try {
 			session.serverImageUrl = ""
@@ -504,7 +591,7 @@ TestCase {
 			compare(serverMenuSpy.count, 1)
 			verify(serverMenuSpy.signalArguments[0][0].x >= 0)
 			verify(serverMenuSpy.signalArguments[0][0].y >= 0)
-			badge.forceActiveFocus()
+			header.forceActiveFocus(Qt.TabFocusReason)
 			keyClick(Qt.Key_Return)
 			compare(serverMenuSpy.count, 2)
 		} finally {
@@ -1349,8 +1436,16 @@ TestCase {
 
 	function test_stonks_portfolio_is_a_direct_profile_card_action() {
 		const button = findChild(loader.item, "stonksPortfolioButton")
+		const divider = findChild(loader.item, "selfActionDivider")
+		const deafen = findChild(loader.item, "selfDeafenButton")
+		const settings = findChild(loader.item, "settingsButton")
 		verify(button !== null)
+		verify(divider !== null && deafen !== null && settings !== null)
 		compare(button.visible, true)
+		compare(divider.visible, true)
+		const dividerPosition = divider.mapToItem(loader.item, 0, 0)
+		verify(dividerPosition.x > deafen.mapToItem(loader.item, 0, 0).x)
+		verify(dividerPosition.x < settings.mapToItem(loader.item, 0, 0).x)
 		compare(button.iconName, "activity")
 		compare(button.Accessible.role, Accessible.Button)
 		compare(button.Accessible.name, "Open Stonks portfolio")

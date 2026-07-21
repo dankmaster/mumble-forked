@@ -216,6 +216,9 @@ const SettingsKey MODERN_SHELL_RAIL_SIDE_KEY              = { "modern_shell_rail
 const SettingsKey MODERN_SHELL_ACCENT_KEY                 = { "modern_shell_accent" };
 const SettingsKey MODERN_SHELL_CUSTOM_ACCENT_KEY          = { "modern_shell_custom_accent" };
 const SettingsKey MODERN_SHELL_CUSTOM_ACCENT_STRENGTH_KEY = { "modern_shell_custom_accent_strength" };
+const SettingsKey MODERN_SHELL_STONKS_PROFILE_SHORTCUT_VISIBLE_KEY = {
+	"modern_shell_stonks_profile_shortcut_visible"
+};
 const SettingsKey MODERN_SHELL_TICKER_BANNER_ENABLED_KEY  = { "modern_shell_ticker_banner_enabled" };
 const SettingsKey MODERN_SHELL_TICKER_PLACEMENT_KEY       = { "modern_shell_ticker_placement" };
 const SettingsKey MODERN_SHELL_TICKER_DIRECTION_KEY       = { "modern_shell_ticker_direction" };

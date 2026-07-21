@@ -156,6 +156,7 @@ private slots:
 	void detachedMediaWindowWaitsForRuntimeReadiness();
 	void automationWalkProbesUseDeterministicFixtures();
 	void persistentChatAttachmentIoIsStrictAndAsynchronous();
+	void persistentChatHistoryWarmupStaysViewportBounded();
 	void persistentChatProviderImagesStayManagedAndCancelable();
 	void serverIdentityImagePickerIsManagedAndAsynchronous();
 	void dialogControllerBuildsFailedConnectionReconnect();
@@ -678,6 +679,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(uiTweaks.value(QStringLiteral("classicUserIcons")).toBool(), true);
 	QCOMPARE(uiTweaks.value(QStringLiteral("railSide")).toString(), QStringLiteral("left"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("stonksProfileShortcutVisible")).toBool(), true);
 	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerEnabled")).toBool(), false);
 	QCOMPARE(uiTweaks.value(QStringLiteral("tickerPlacement")).toString(), QStringLiteral("bottom"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("tickerDirection")).toString(), QStringLiteral("left"));
@@ -732,6 +734,8 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	audioInputSettings.atTransmit      = Settings::Continuous;
 	audioInputSettings.vsVAD           = Settings::SignalToNoise;
 	audioInputSettings.noiseCancelMode = Settings::NoiseCancelOff;
+	audioInputSettings.inputEnhancement.defaultPreference.profile =
+		Mumble::InputEnhancement::Profile::Quality;
 	controller.open(audioInputSettings, QStringLiteral("AudioInput"), true);
 	const QVariantMap audioInputOnboarding = controller.state();
 	QCOMPARE(audioInputOnboarding.value(QStringLiteral("initialFocusId")).toString(),
@@ -741,130 +745,142 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	controller.open(audioInputSettings, QStringLiteral("AudioInput"));
 	QCOMPARE(controller.activePage(), QStringLiteral("audioInput"));
 	const QVariantList audioInputSections = controller.state().value(QStringLiteral("sections")).toList();
-	bool foundInputSignalSection          = false;
-	bool foundInputMeterInQuickSetup      = false;
-	bool foundEnhancementCalibration      = false;
-	bool foundDetectionMethodField        = false;
-	bool foundInputGateField              = false;
-	bool foundManualStopThreshold         = false;
-	bool foundManualStartThreshold        = false;
-	bool foundManualReleaseDelay          = false;
-	bool foundHiddenNeuralCleanupFields   = false;
-	bool foundNoiseCancelOptionHints      = false;
-	for (const QVariant &sectionValue : audioInputSections) {
-		const QVariantMap section = sectionValue.toMap();
-		if (section.value(QStringLiteral("title")).toString() == QLatin1String("Input signal")) {
-			foundInputSignalSection = true;
+	const auto findSection = [](const QVariantList &sections, const QString &id) {
+		for (const QVariant &sectionValue : sections) {
+			const QVariantMap section = sectionValue.toMap();
+			if (section.value(QStringLiteral("id")).toString() == id) {
+				return section;
+			}
 		}
+		return QVariantMap();
+	};
+	const auto findField = [](const QVariantMap &section, const QString &id) {
 		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
 			const QVariantMap field = fieldValue.toMap();
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Quick setup")
-				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
-				foundInputMeterInQuickSetup =
-					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
-					&& field.value(QStringLiteral("calibrationActionId")).toString()
-						   == QLatin1String("finishAudioSetupWizard")
-					&& field.value(QStringLiteral("calibrationLabel")).toString()
-						   == QLatin1String("Start guided setup")
-					&& field.value(QStringLiteral("calibrationState")).toString() == QLatin1String("idle")
-					&& field.contains(QStringLiteral("inputGateMode"))
-					&& field.value(QStringLiteral("recommendedVadSource")).toInt() == Settings::SignalToNoise
-					&& field.value(QStringLiteral("recommendedInputGateMode")).toInt() == Settings::InputGateOff
-					&& !field.value(QStringLiteral("calibrationStatusText")).toString().trimmed().isEmpty();
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")
-				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.vadSource")) {
-				const QVariantList options = field.value(QStringLiteral("options")).toList();
-				bool optionsHaveHints       = options.size() == 3;
-				for (const QVariant &optionValue : options) {
-					const QVariantMap option = optionValue.toMap();
-					optionsHaveHints =
-						optionsHaveHints && !option.value(QStringLiteral("hint")).toString().trimmed().isEmpty();
-				}
-				foundDetectionMethodField =
-					field.value(QStringLiteral("label")).toString() == QLatin1String("Detection method")
-					&& !field.value(QStringLiteral("enabled")).toBool()
-					&& field.value(QStringLiteral("value")).toInt() == Settings::SignalToNoise
-					&& options.size() == 3
-					&& options.at(0).toMap().value(QStringLiteral("label")).toString()
-						   == QLatin1String("Speech probability")
-					&& options.at(1).toMap().value(QStringLiteral("label")).toString() == QLatin1String("Speech + volume")
-					&& options.at(2).toMap().value(QStringLiteral("label")).toString() == QLatin1String("Volume level")
-					&& optionsHaveHints
-					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("Speech + volume"));
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")
-				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputGateMode")) {
-				const QVariantList options = field.value(QStringLiteral("options")).toList();
-				bool optionsHaveHints       = options.size() == 3;
-				for (const QVariant &optionValue : options) {
-					const QVariantMap option = optionValue.toMap();
-					optionsHaveHints =
-						optionsHaveHints && !option.value(QStringLiteral("hint")).toString().trimmed().isEmpty();
-				}
-				foundInputGateField =
-					field.value(QStringLiteral("label")).toString() == QLatin1String("Input gate")
-					&& !field.value(QStringLiteral("enabled")).toBool()
-					&& field.value(QStringLiteral("value")).toInt() == Settings::InputGateOff && optionsHaveHints
-					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("original behavior"));
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")) {
-				const QString fieldID = field.value(QStringLiteral("id")).toString();
-				const bool directlyVisible = !field.value(QStringLiteral("advanced"), false).toBool()
-					&& field.value(QStringLiteral("type")).toString() != QLatin1String("hidden");
-				if (fieldID == QLatin1String("audio.vadMin")) {
-					foundManualStopThreshold = directlyVisible
-						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Stop threshold");
-				} else if (fieldID == QLatin1String("audio.vadMax")) {
-					foundManualStartThreshold = directlyVisible
-						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Start threshold");
-				} else if (fieldID == QLatin1String("audio.voiceHold")) {
-					foundManualReleaseDelay = directlyVisible
-						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Release delay");
-				}
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Microphone processing")
-				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelMode")) {
-				const QVariantList options = field.value(QStringLiteral("options")).toList();
-				bool optionsHaveHints       = options.size() == 4;
-				for (const QVariant &optionValue : options) {
-					const QVariantMap option = optionValue.toMap();
-					optionsHaveHints =
-						optionsHaveHints && !option.value(QStringLiteral("hint")).toString().trimmed().isEmpty();
-				}
-				foundNoiseCancelOptionHints = optionsHaveHints;
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Microphone processing")
-				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelBackend")) {
-				foundHiddenNeuralCleanupFields = field.value(QStringLiteral("type")).toString() == QLatin1String("hidden");
-			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Quick setup")
-				&& field.value(QStringLiteral("id")).toString()
-					   == QLatin1String("audio.inputEnhancementCalibration")) {
-				foundEnhancementCalibration =
-					field.value(QStringLiteral("type")).toString()
-						   == QLatin1String("inputEnhancementCalibration")
-					&& !field.value(QStringLiteral("inputEnhancementCalibrationAvailable")).toBool()
-					&& field.value(QStringLiteral("inputEnhancementCalibrationUnavailableReason"))
-						   .toString()
-						   .contains(QLatin1String("Start the selected input device"));
+			if (field.value(QStringLiteral("id")).toString() == id) {
+				return field;
 			}
 		}
+		return QVariantMap();
+	};
+
+	QStringList audioInputSectionIds;
+	for (const QVariant &sectionValue : audioInputSections) {
+		audioInputSectionIds.push_back(sectionValue.toMap().value(QStringLiteral("id")).toString());
 	}
-	QVERIFY(!foundInputSignalSection);
-	QVERIFY(foundInputMeterInQuickSetup);
-	QVERIFY(foundEnhancementCalibration);
-	QVERIFY(foundDetectionMethodField);
-	QVERIFY(foundInputGateField);
-	QVERIFY(foundManualStopThreshold);
-	QVERIFY(foundManualStartThreshold);
-	QVERIFY(foundManualReleaseDelay);
-	QVERIFY(foundHiddenNeuralCleanupFields);
-	QVERIFY(foundNoiseCancelOptionHints);
+	QCOMPARE(audioInputSectionIds,
+			 QStringList({ QStringLiteral("microphone"), QStringLiteral("transmission"),
+						   QStringLiteral("microphoneCheck"), QStringLiteral("voiceProcessing"),
+						   QStringLiteral("processingCalibration"), QStringLiteral("processingDetails"),
+						   QStringLiteral("networkVoice"), QStringLiteral("idleBehavior") }));
+
+	const QVariantMap microphoneSection = findSection(audioInputSections, QStringLiteral("microphone"));
+	QCOMPARE(microphoneSection.value(QStringLiteral("title")).toString(), QStringLiteral("Microphone"));
+	QVERIFY(!microphoneSection.value(QStringLiteral("subtitle")).toString().trimmed().isEmpty());
+	QCOMPARE(findField(microphoneSection, QStringLiteral("audio.inputDevice"))
+			 .value(QStringLiteral("label"))
+			 .toString(),
+		 QStringLiteral("Microphone"));
+	QVERIFY(findField(microphoneSection, QStringLiteral("audio.inputSystem"))
+				.value(QStringLiteral("advanced"))
+				.toBool());
+
+	const QVariantMap transmissionSection = findSection(audioInputSections, QStringLiteral("transmission"));
+	QCOMPARE(findField(transmissionSection, QStringLiteral("audio.transmitMode"))
+			 .value(QStringLiteral("presentation"))
+			 .toString(),
+		 QStringLiteral("segmented"));
+	QVERIFY(transmissionSection.value(QStringLiteral("subtitle"))
+				.toString()
+				.contains(QLatin1String("stays open")));
+
+	const QVariantMap checkSection = findSection(audioInputSections, QStringLiteral("microphoneCheck"));
+	const QVariantMap meterField   = findField(checkSection, QStringLiteral("audio.inputMeter"));
+	QCOMPARE(meterField.value(QStringLiteral("type")).toString(), QStringLiteral("voiceMeter"));
+	QCOMPARE(meterField.value(QStringLiteral("calibrationActionId")).toString(),
+			 QStringLiteral("finishAudioSetupWizard"));
+	QCOMPARE(meterField.value(QStringLiteral("calibrationLabel")).toString(),
+			 QStringLiteral("Set up voice activation"));
+	QCOMPARE(meterField.value(QStringLiteral("calibrationState")).toString(), QStringLiteral("idle"));
+	QCOMPARE(meterField.value(QStringLiteral("recommendedVadSource")).toInt(), Settings::SignalToNoise);
+	QCOMPARE(meterField.value(QStringLiteral("recommendedInputGateMode")).toInt(), Settings::InputGateOff);
+	QVERIFY(meterField.value(QStringLiteral("calibrationStatusText"))
+				.toString()
+				.contains(QLatin1String("Advanced")));
+
+	const QVariantMap calibrationSection =
+		findSection(audioInputSections, QStringLiteral("processingCalibration"));
+	QVERIFY(calibrationSection.value(QStringLiteral("advanced")).toBool());
+	QVERIFY(calibrationSection.value(QStringLiteral("collapsible")).toBool());
+	QVERIFY(!calibrationSection.value(QStringLiteral("expandedByDefault")).toBool());
+	const QVariantMap calibrationField =
+		findField(calibrationSection, QStringLiteral("audio.inputEnhancementCalibration"));
+	QCOMPARE(calibrationField.value(QStringLiteral("type")).toString(),
+			 QStringLiteral("inputEnhancementCalibration"));
+	QVERIFY(!calibrationField.value(QStringLiteral("inputEnhancementCalibrationAvailable")).toBool());
+	QVERIFY(calibrationField.value(QStringLiteral("inputEnhancementCalibrationUnavailableReason"))
+				.toString()
+				.contains(QLatin1String("Start the selected input device")));
+
+	const QVariantMap processingDetails = findSection(audioInputSections, QStringLiteral("processingDetails"));
+	QVERIFY(processingDetails.value(QStringLiteral("advanced")).toBool());
+	QVERIFY(processingDetails.value(QStringLiteral("collapsible")).toBool());
+	QVERIFY(!processingDetails.value(QStringLiteral("expandedByDefault")).toBool());
+	const QVariantMap noiseCancelMode = findField(processingDetails, QStringLiteral("audio.noiseCancelMode"));
+	const QVariantList noiseCancelOptions = noiseCancelMode.value(QStringLiteral("options")).toList();
+	QCOMPARE(noiseCancelOptions.size(), 4);
+	for (const QVariant &optionValue : noiseCancelOptions) {
+		QVERIFY(!optionValue.toMap().value(QStringLiteral("hint")).toString().trimmed().isEmpty());
+	}
+	QCOMPARE(findField(processingDetails, QStringLiteral("audio.noiseCancelBackend"))
+			 .value(QStringLiteral("type"))
+			 .toString(),
+		 QStringLiteral("hidden"));
+	QVERIFY(findSettingsFieldById(audioInputSections, QStringLiteral("audio.cuePtt")).isEmpty());
+	QVERIFY(findSection(audioInputSections, QStringLiteral("voiceActivation")).isEmpty());
+	QVERIFY(findSection(audioInputSections, QStringLiteral("pushToTalk")).isEmpty());
 
 	controller.updateField(QStringLiteral("audio.transmitMode"), Settings::VAD);
 	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
 	QCOMPARE(controller.draft().vsVAD, Settings::SignalToNoise);
+	const QVariantList voiceActivitySections = controller.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap voiceActivationSection =
+		findSection(voiceActivitySections, QStringLiteral("voiceActivation"));
+	QVERIFY(voiceActivationSection.value(QStringLiteral("advanced")).toBool());
+	QVERIFY(voiceActivationSection.value(QStringLiteral("collapsible")).toBool());
+	QVERIFY(!voiceActivationSection.value(QStringLiteral("expandedByDefault")).toBool());
+	QVERIFY(findSection(voiceActivitySections, QStringLiteral("pushToTalk")).isEmpty());
+	const QVariantMap vadSourceField = findField(voiceActivationSection, QStringLiteral("audio.vadSource"));
+	const QVariantList vadSourceOptionList = vadSourceField.value(QStringLiteral("options")).toList();
+	QCOMPARE(vadSourceOptionList.size(), 3);
+	for (const QVariant &optionValue : vadSourceOptionList) {
+		QVERIFY(!optionValue.toMap().value(QStringLiteral("hint")).toString().trimmed().isEmpty());
+	}
+	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.vadMin"))
+			 .value(QStringLiteral("label"))
+			 .toString(),
+		 QStringLiteral("Stop threshold"));
+	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.vadMax"))
+			 .value(QStringLiteral("label"))
+			 .toString(),
+		 QStringLiteral("Start threshold"));
+	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.voiceHold"))
+			 .value(QStringLiteral("suffix"))
+			 .toString(),
+		 QStringLiteral(" frames"));
+
+	controller.updateField(QStringLiteral("audio.transmitMode"), Settings::PushToTalk);
+	const QVariantList pushToTalkSections = controller.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap pushToTalkSection = findSection(pushToTalkSections, QStringLiteral("pushToTalk"));
+	QVERIFY(!pushToTalkSection.isEmpty());
+	QVERIFY(findSection(pushToTalkSections, QStringLiteral("voiceActivation")).isEmpty());
+	QVERIFY(pushToTalkSection.value(QStringLiteral("collapsible")).toBool());
+	QVERIFY(!pushToTalkSection.value(QStringLiteral("expandedByDefault")).toBool());
+	QCOMPARE(findField(pushToTalkSection, QStringLiteral("audio.doublePush"))
+			 .value(QStringLiteral("suffix"))
+			 .toString(),
+		 QStringLiteral(" ms"));
+	controller.updateField(QStringLiteral("audio.transmitMode"), Settings::VAD);
 
 	controller.updateField(QStringLiteral("audio.vadSource"), Settings::Hybrid);
 	QCOMPARE(controller.draft().vsVAD, Settings::Hybrid);
@@ -953,12 +969,17 @@ void TestModernDialogControllers::settingsControllerPublishesLiveStonksAndPermis
 
 	Settings settings;
 	QCOMPARE(settings.bModernShellTickerBannerEnabled, false);
+	QCOMPARE(settings.bModernShellStonksProfileShortcutVisible, true);
 	ModernSettingsController controller;
 	controller.open(settings, QStringLiteral("Stonks"));
 	QCOMPARE(controller.activePage(), QStringLiteral("stonks"));
 	QVariantList sections = controller.state().value(QStringLiteral("sections")).toList();
 	QCOMPARE(findField(sections, QStringLiteral("stonks.client.enabled")).value(QStringLiteral("value")).toBool(),
 			 false);
+	QCOMPARE(findField(sections, QStringLiteral("stonks.client.profileShortcutVisible"))
+			 .value(QStringLiteral("value"))
+			 .toBool(),
+			 true);
 	const QVariantMap placementField = findField(sections, QStringLiteral("stonks.client.placement"));
 	QCOMPARE(placementField.value(QStringLiteral("value")).toString(), QStringLiteral("bottom"));
 	QCOMPARE(placementField.value(QStringLiteral("options")).toList().size(), 4);
@@ -983,6 +1004,12 @@ void TestModernDialogControllers::settingsControllerPublishesLiveStonksAndPermis
 	QCOMPARE(liveResult.externalActionID, QStringLiteral("stonks.updateClient"));
 	QCOMPARE(liveResult.externalActionPayload.value(QStringLiteral("tickerBannerEnabled")).toBool(), true);
 	QCOMPARE(controller.draft().bModernShellTickerBannerEnabled, true);
+	const ModernSettingsController::ActionResult shortcutResult = controller.invokeAction(
+		QStringLiteral("stonks.updateClient"),
+		QVariantMap { { QStringLiteral("fieldId"), QStringLiteral("stonks.client.profileShortcutVisible") },
+					  { QStringLiteral("value"), false } });
+	QCOMPARE(shortcutResult.externalActionPayload.value(QStringLiteral("profileShortcutVisible")).toBool(), false);
+	QCOMPARE(controller.draft().bModernShellStonksProfileShortcutVisible, false);
 	const ModernSettingsController::ActionResult placementResult = controller.invokeAction(
 		QStringLiteral("stonks.updateClient"),
 		QVariantMap { { QStringLiteral("fieldId"), QStringLiteral("stonks.client.placement") },
@@ -1714,7 +1741,8 @@ void TestModernDialogControllers::settingsControllerAutoProfileIsRuntimeGated() 
 	bool advancedAutoControlDisabled = false;
 	bool foundFixedProfileAutoAdapt  = false;
 	for (const QVariant &sectionValue : controller.state().value(QStringLiteral("sections")).toList()) {
-		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+		const QVariantMap section = sectionValue.toMap();
+		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
 			const QVariantMap field = fieldValue.toMap();
 			if (field.value(QStringLiteral("id")).toString()
 				== QLatin1String("audio.inputEnhancementProfile")) {
@@ -1727,7 +1755,8 @@ void TestModernDialogControllers::settingsControllerAutoProfileIsRuntimeGated() 
 				}
 			} else if (field.value(QStringLiteral("id")).toString()
 					   == QLatin1String("audio.inputEnhancementExperimentalAuto")) {
-				foundAdvancedAutoControl = field.value(QStringLiteral("advanced")).toBool();
+				foundAdvancedAutoControl = section.value(QStringLiteral("advanced")).toBool()
+					|| field.value(QStringLiteral("advanced")).toBool();
 				advancedAutoControlDisabled = !field.value(QStringLiteral("enabled"), true).toBool();
 			} else if (field.value(QStringLiteral("id")).toString()
 					   == QLatin1String("audio.inputEnhancementAutoAdapt")) {
@@ -3393,6 +3422,44 @@ void TestModernDialogControllers::persistentChatAttachmentIoIsStrictAndAsynchron
 	QVERIFY(!refillBody.contains(QStringLiteral("publishPersistentChatAttachmentImageUpdate(")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("m_persistentChatMessageIndexValid")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("m_modernShellMessageDtoCacheKeysByMessage.take(")));
+}
+
+void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounded() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	const QString mainWindowSource = readTestSource(mainWindowPath);
+	const QString automationSource = readTestSource(automationPath);
+
+	const qsizetype historyStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::handlePersistentChatHistory"));
+	const qsizetype historyEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::handlePersistentChatReadState"), historyStart);
+	QVERIFY(historyStart >= 0);
+	QVERIFY(historyEnd > historyStart);
+	const QString historyBody = mainWindowSource.mid(historyStart, historyEnd - historyStart);
+	QVERIFY(historyBody.contains(QStringLiteral("for (const MumbleProto::ChatMessage &message : msg.messages())")));
+	QVERIFY(historyBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
+	QVERIFY(historyBody.contains(QStringLiteral("chat.handle.history.evict")));
+	QVERIFY(historyBody.contains(QStringLiteral("chat.handle.history.dispatch")));
+	QVERIFY(!historyBody.contains(QStringLiteral("clearModernShellMessageDtoCache(")));
+	QVERIFY(!historyBody.contains(QStringLiteral("warmupPersistentChatPreviews(msg)")));
+
+	const qsizetype previewKeyStart = mainWindowSource.indexOf(
+		QStringLiteral("std::optional< QString > MainWindow::persistentChatPreviewKey"));
+	const qsizetype previewKeyEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::rememberPersistentChatPreviewInputs"), previewKeyStart);
+	QVERIFY(previewKeyStart >= 0);
+	QVERIFY(previewKeyEnd > previewKeyStart);
+	const QString previewKeyBody = mainWindowSource.mid(previewKeyStart, previewKeyEnd - previewKeyStart);
+	QVERIFY(previewKeyBody.contains(QStringLiteral("m_persistentChatPreviewKeyCache.constFind(cacheKey)")));
+	QVERIFY(previewKeyBody.contains(QStringLiteral("m_persistentChatPreviewKeyCache.insert(cacheKey")));
+	QVERIFY(previewKeyBody.contains(QStringLiteral("chat.preview.key.cache_hit")));
+	QVERIFY(previewKeyBody.contains(QStringLiteral("chat.preview.key.cache_miss")));
+
+	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
+	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));
 }
 
 void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCancelable() {

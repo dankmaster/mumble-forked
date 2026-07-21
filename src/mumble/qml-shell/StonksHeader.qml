@@ -31,6 +31,9 @@ AbstractButton {
 	readonly property bool automationAnimationDisabled: stonks.disableTickerAnimation === true
 	readonly property bool horizontalMovement: tickerDirection === "left" || tickerDirection === "right"
 	readonly property bool movementShouldRun: !automationAnimationDisabled && tickerRows.length > 0
+	readonly property string tickerSequenceKey: tickerRows.map(function(row) {
+		return String(row.symbol || "")
+	}).join("\u001f")
 	readonly property bool tickerRunning: horizontalMovement
 		? horizontalAnimation.running && !horizontalAnimation.paused
 		: verticalAnimation.running && !verticalAnimation.paused
@@ -129,17 +132,21 @@ AbstractButton {
 		const animation = horizontalMovement ? horizontalAnimation : verticalAnimation
 		if (!animation.running)
 			return
-		if (hovered || activeFocus)
+		if (hovered || visualFocus)
 			animation.pause()
 		else
 			animation.resume()
 	}
 
 	function restartTickerAnimation() {
-		if (!animationReady || !visible || !movementShouldRun)
+		if (!animationReady)
 			return
 		Qt.callLater(function() {
+			if (!root.visible || !root.movementShouldRun)
+				return
 			const animation = root.horizontalMovement ? horizontalAnimation : verticalAnimation
+			if (animation.travel <= 0)
+				return
 			animation.restart()
 			root.updateTickerPause()
 		})
@@ -147,7 +154,11 @@ AbstractButton {
 
 	onTickerDirectionChanged: restartTickerAnimation()
 	onTickerSpeedChanged: restartTickerAnimation()
-	onTickerRowsChanged: restartTickerAnimation()
+	// Quote refreshes replace tickerRows even when the ordered symbols are unchanged.
+	// Restarting for every new price snaps the strip back to its origin, so only a
+	// real feed-order change is allowed to reset the loop.
+	onTickerSequenceKeyChanged: restartTickerAnimation()
+	onVisibleChanged: restartTickerAnimation()
 	Component.onCompleted: {
 		animationReady = true
 		restartTickerAnimation()
@@ -181,9 +192,9 @@ AbstractButton {
 	background: Rectangle {
 		radius: root.docked ? 0 : Theme.innerRadius
 		color: root.down || root.hovered ? Theme.surfaceHover : Theme.strip
-		border.color: root.activeFocus ? Theme.focus
+		border.color: root.visualFocus ? Theme.focus
 			: root.errorText.length > 0 ? Theme.danger : Theme.surfaceBorder
-		border.width: root.activeFocus ? Theme.focusRingWidth : 1
+		border.width: root.visualFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 		Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
 	}
@@ -324,6 +335,10 @@ AbstractButton {
 					duration: root.animationDuration(travel)
 					easing.type: Easing.Linear
 					loops: Animation.Infinite
+					onTravelChanged: {
+						if (travel > 0 && horizontalTrack.x === 0)
+							root.restartTickerAnimation()
+					}
 					running: root.visible && root.horizontalMovement && root.movementShouldRun
 						&& tickerViewport.visible
 					onRunningChanged: {
@@ -345,6 +360,10 @@ AbstractButton {
 					duration: root.animationDuration(travel)
 					easing.type: Easing.Linear
 					loops: Animation.Infinite
+					onTravelChanged: {
+						if (travel > 0 && verticalTrack.y === 0)
+							root.restartTickerAnimation()
+					}
 					running: root.visible && !root.horizontalMovement && root.movementShouldRun
 						&& tickerViewport.visible
 					onRunningChanged: {

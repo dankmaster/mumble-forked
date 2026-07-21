@@ -87,6 +87,7 @@ Dialog {
 	property int focusRequestGeneration: 0
 	property int activeFocusRevealGeneration: 0
 	property var dialogPresentationMemory: ({})
+	property var settingsSectionExpansionMemory: ({})
 	property bool nestedModalOpen: false
 	property Item nestedModalFocusReturnItem: null
 	property string nestedModalFocusReturnName: ""
@@ -408,6 +409,49 @@ Dialog {
 		}
 		return false
 	}
+	function settingsSectionExpansionKey(section, sectionIndex) {
+		const dialogId = String(dialogState.state.id || "dialog")
+		const pageId = String(dialogState.activePage || "single")
+		const sectionId = String((section || {}).id || sectionIndex)
+		return dialogId + "|" + pageId + "|" + sectionId
+	}
+	function settingsSectionExpanded(section, sectionIndex) {
+		const sectionData = section || {}
+		if (!sectionData.collapsible)
+			return true
+		const key = settingsSectionExpansionKey(sectionData, sectionIndex)
+		const remembered = settingsSectionExpansionMemory[key]
+		if (remembered !== undefined)
+			return Boolean(remembered)
+		return sectionData.expandedByDefault === undefined
+			? true : Boolean(sectionData.expandedByDefault)
+	}
+	function setSettingsSectionExpanded(section, sectionIndex, expanded) {
+		const key = settingsSectionExpansionKey(section, sectionIndex)
+		const memory = Object.assign({}, settingsSectionExpansionMemory)
+		memory[key] = Boolean(expanded)
+		settingsSectionExpansionMemory = memory
+		scheduleContentMeasurement()
+		Qt.callLater(dialog.scheduleContentMeasurement)
+	}
+	function expandSettingsSectionForField(fieldId) {
+		const requested = String(fieldId || "")
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const section = sections[sectionIndex] || {}
+			const fields = section.fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				if (String((fields[fieldIndex] || {}).id || "") !== requested)
+					continue
+				if (section.collapsible && !settingsSectionExpanded(section, sectionIndex)) {
+					setSettingsSectionExpanded(section, sectionIndex, true)
+					return true
+				}
+				return false
+			}
+		}
+		return false
+	}
 	function focusFirstInvalidField(allowRetry, generation) {
 		if (generation !== undefined && generation !== focusRequestGeneration) return
 		if (!visible || !contentItem) return
@@ -415,12 +459,15 @@ Dialog {
 		if (invalid.length === 0) return
 		let missingDelegate = false
 		let hiddenAdvancedError = false
+		let revealedCollapsedSection = false
 		for (let index = 0; index < invalid.length; ++index) {
 			const fieldId = invalid[index]
 			const target = focusObjectInTree(contentItem, "dialogField_" + fieldId)
 			if (!target) {
 				missingDelegate = true
 				hiddenAdvancedError = hiddenAdvancedError || invalidFieldIsAdvanced(fieldId)
+				revealedCollapsedSection = expandSettingsSectionForField(fieldId)
+					|| revealedCollapsedSection
 				continue
 			}
 			if (target.enabled !== false && target.visible !== false && target.forceActiveFocus) {
@@ -435,7 +482,7 @@ Dialog {
 			Qt.callLater(function() {
 				dialog.focusFirstInvalidField(false, generation)
 			})
-		} else if (allowRetry && missingDelegate) {
+		} else if ((allowRetry && missingDelegate) || revealedCollapsedSection) {
 			Qt.callLater(function() {
 				dialog.focusFirstInvalidField(false, generation)
 			})
@@ -930,6 +977,7 @@ Dialog {
 	closePolicy: Popup.NoAutoClose
 	onOpened: {
 		nestedModalOpen = false
+		settingsSectionExpansionMemory = ({})
 		showAdvanced = !!dialogState.state.showAdvanced
 		resetContentPosition()
 		scheduleContentMeasurement()
@@ -2157,6 +2205,10 @@ Dialog {
 							objectName: "dialogSection_" + String(modelData.id || index)
 							property bool sectionAdvanced: !!modelData.advanced
 							property bool sectionVisible: !modelData.advanced || dialog.showAdvanced
+							property bool sectionCollapsible: !!modelData.collapsible
+							property bool sectionExpanded: !sectionCollapsible
+								|| dialog.settingsSectionExpanded(modelData, index)
+							property bool sectionDetailsVisible: !sectionCollapsible || sectionExpanded
 							readonly property bool accessibilityFullyVisible: visible
 								&& dialog.itemFullyInsideDialogBounds(sectionContainer)
 							readonly property string sectionPresentation: String(modelData.presentation || "form").toLowerCase()
@@ -2174,7 +2226,9 @@ Dialog {
 							radius: Theme.innerRadius
 							Accessible.role: Accessible.Pane
 							Accessible.name: String(modelData.title || qsTr("Dialog section"))
-							Accessible.description: sectionPresentation
+							Accessible.description: sectionCollapsible
+								? (sectionExpanded ? qsTr("Expanded section") : qsTr("Collapsed section"))
+								: sectionPresentation
 							Accessible.ignored: !accessibilityFullyVisible
                             Column {
                                 id: sectionColumn
@@ -2185,22 +2239,41 @@ Dialog {
 								anchors.margins: parent.presentationPadding
 								spacing: parent.listPresentation || parent.recordsPresentation
 									? Theme.space2 : Math.max(6, Theme.spacing - 2)
-                                Label {
-									id: sectionTitleLabel
-									objectName: "dialogSectionHeading_" + String(modelData.id || index)
-									textFormat: Text.PlainText
-                                    width: parent.width
-                                    text: modelData.title || ""
-									visible: text.length > 0
-										&& !dialog.sectionTitleDuplicatesActiveSettingsPage(text)
-                                    color: Theme.textStrong
-                                    font.pixelSize: 13
-                                    font.bold: true
-									Accessible.role: Accessible.Heading
-									Accessible.name: text
-									Accessible.ignored: !visible
-										|| !dialog.itemFullyInsideContentViewport(sectionTitleLabel)
-                                }
+								RowLayout {
+									width: parent.width
+									spacing: Theme.space2
+									Label {
+										id: sectionTitleLabel
+										objectName: "dialogSectionHeading_" + String(modelData.id || index)
+										textFormat: Text.PlainText
+										Layout.fillWidth: true
+										text: modelData.title || ""
+										visible: text.length > 0
+											&& !dialog.sectionTitleDuplicatesActiveSettingsPage(text)
+										color: Theme.textStrong
+										font.pixelSize: 13
+										font.bold: true
+										Accessible.role: Accessible.Heading
+										Accessible.name: text
+										Accessible.ignored: !visible
+											|| !dialog.itemFullyInsideContentViewport(sectionTitleLabel)
+									}
+									ModernIconButton {
+										id: sectionExpandButton
+										objectName: "dialogSectionToggle_" + String(modelData.id || index)
+										visible: sectionContainer.sectionCollapsible
+										dense: true
+										iconName: sectionContainer.sectionExpanded ? "chevron-up" : "chevron-down"
+										text: sectionContainer.sectionExpanded ? qsTr("Collapse") : qsTr("Expand")
+										Accessible.name: sectionContainer.sectionExpanded
+											? qsTr("Collapse %1").arg(String(modelData.title || qsTr("section")))
+											: qsTr("Expand %1").arg(String(modelData.title || qsTr("section")))
+										Accessible.description: sectionContainer.sectionExpanded
+											? qsTr("Hide these settings") : qsTr("Show these settings")
+										onClicked: dialog.setSettingsSectionExpanded(
+											modelData, sectionContainer.index, !sectionContainer.sectionExpanded)
+									}
+								}
 								Label {
 									id: sectionSubtitleLabel
 									textFormat: Text.PlainText
@@ -2233,8 +2306,9 @@ Dialog {
                                                 || (field.visibleWhen.values || []).indexOf(
                                                     String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
                                         }
-										property bool advancedVisible: sectionColumn.parent.sectionVisible
-																		 && (!field.advanced || dialog.showAdvanced)
+									property bool advancedVisible: sectionColumn.parent.sectionVisible
+										&& sectionColumn.parent.sectionDetailsVisible
+										&& (!field.advanced || dialog.showAdvanced)
 										visible: conditionVisible && advancedVisible
 										readonly property bool accessibilityExposed: visible
 											&& (accessibilityAllowsPartialExposure
@@ -2358,8 +2432,8 @@ Dialog {
 				Label {
 					anchors.verticalCenter: parent.verticalCenter
 					textFormat: Text.PlainText
-					text: dialog.showAdvanced ? qsTr("Advanced options visible")
-						: qsTr("%n advanced option(s) hidden", "", dialog.advancedFieldCount())
+					text: dialog.showAdvanced ? qsTr("Advanced settings visible")
+						: qsTr("Advanced settings hidden")
 					color: Theme.textMuted
 					font.pixelSize: 10
 					Accessible.ignored: true
@@ -2904,7 +2978,7 @@ Dialog {
 		id: rangeField
 		ColumnLayout {
 			id: rangeRoot
-			property var field
+			property var field: ({})
 			property real pendingValue: minimumValue
 			property bool pendingValueDirty: false
 			readonly property real minimumValue: Number(field.minimum ?? field.min ?? 0)
@@ -3007,13 +3081,11 @@ Dialog {
 			}
 		}
 	}
-    Component {
-        id: numberField
-        ColumnLayout {
-            id: numberRoot
-            property var field
-			readonly property bool useGrouping: field.useGrouping === undefined
-				? true : Boolean(field.useGrouping)
+	Component {
+		id: numberField
+		ColumnLayout {
+			id: numberRoot
+			property var field: ({})
             width: parent ? parent.width : 0
 			spacing: Theme.space1
 			Label { textFormat: Text.PlainText; text: numberRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
@@ -3034,14 +3106,18 @@ Dialog {
 				Accessible.name: String(numberRoot.field.label || "")
 				Accessible.description: String(numberRoot.field.hint || numberRoot.field.unavailableReason || "")
 				textFromValue: function(value, locale) {
-					const numericText = numberRoot.useGrouping
+					const fieldData = numberRoot.field || {}
+					const useGrouping = fieldData.useGrouping === undefined
+						? true : Boolean(fieldData.useGrouping)
+					const numericText = useGrouping
 						? Number(value).toLocaleString(locale, "f", 0)
 						: String(Math.round(Number(value)))
-					return numericText + String(numberRoot.field.suffix || "")
+					return numericText + String(fieldData.suffix || "")
 				}
 				valueFromText: function(text, locale) {
+					const fieldData = numberRoot.field || {}
 					let source = String(text)
-					const suffix = String(numberRoot.field.suffix || "")
+					const suffix = String(fieldData.suffix || "")
 					if (suffix.length > 0 && source.endsWith(suffix))
 						source = source.slice(0, source.length - suffix.length)
 					return Number.fromLocaleString(locale, source.trim())

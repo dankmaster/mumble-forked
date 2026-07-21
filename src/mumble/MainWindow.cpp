@@ -16192,6 +16192,8 @@ namespace {
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
 		state.insert(QStringLiteral("enabled"), Global::get().bStonksEnabled);
+		state.insert(QStringLiteral("profileShortcutVisible"),
+					 Global::get().s.bModernShellStonksProfileShortcutVisible);
 		state.insert(QStringLiteral("tickerBannerEnabled"),
 					 Global::get().s.bModernShellTickerBannerEnabled);
 		state.insert(QStringLiteral("tickerPlacement"),
@@ -16490,6 +16492,8 @@ namespace {
 		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(settings));
+		dto.insert(QStringLiteral("stonksProfileShortcutVisible"),
+				   settings.bModernShellStonksProfileShortcutVisible);
 		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
 		dto.insert(QStringLiteral("tickerPlacement"),
 				   normalizedStonksTickerPlacement(settings.qsModernShellTickerPlacement));
@@ -17764,6 +17768,10 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		if (payload.contains(QStringLiteral("tickerBannerEnabled"))) {
 			Global::get().s.bModernShellTickerBannerEnabled =
 				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
+		}
+		if (payload.contains(QStringLiteral("profileShortcutVisible"))) {
+			Global::get().s.bModernShellStonksProfileShortcutVisible =
+				payload.value(QStringLiteral("profileShortcutVisible")).toBool();
 		}
 		if (payload.contains(QStringLiteral("tickerPlacement"))) {
 			Global::get().s.qsModernShellTickerPlacement =
@@ -23277,6 +23285,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 													 const PersistentChatTarget &target, const bool canReply,
 													 const bool canReact, const bool canDeleteMessages,
 													 const ModernShellMessageBuildMode buildMode) {
+	mumble::chatperf::ScopedDuration trace("chat.message_dto.build");
 	const bool fastFirstPaint = buildMode == ModernShellMessageBuildMode::FastFirstPaint;
 	const ClientUser *self                  = ClientUser::get(Global::get().uiSession);
 	const std::optional< QString > systemText = persistentChatSystemMessageText(message);
@@ -23632,6 +23641,7 @@ void MainWindow::clearModernShellMessageDtoCache(const char *reason) {
 	const int previousSize = m_modernShellMessageDtoCache.size();
 	m_modernShellMessageDtoCache.clear();
 	m_modernShellMessageDtoCacheKeysByMessage.clear();
+	m_persistentChatPreviewKeyCache.clear();
 	mumble::chatperf::recordValue("modern.message_dto_cache.clear", previousSize);
 	appendModernShellConnectTrace(QStringLiteral("modern message dto cache clear reason=%1 size=%2 context=%3")
 									  .arg(QString::fromLatin1(reason ? reason : "unknown"))
@@ -23642,6 +23652,7 @@ void MainWindow::clearModernShellMessageDtoCache(const char *reason) {
 void MainWindow::evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message) {
 	const QSet< QString > keysToRemove =
 		m_modernShellMessageDtoCacheKeysByMessage.take(persistentChatMessageIdentityKey(message));
+	m_persistentChatPreviewKeyCache.remove(persistentChatPreviewCacheIdentityKey(message));
 
 	for (const QString &key : keysToRemove) {
 		m_modernShellMessageDtoCache.remove(key);
@@ -27873,6 +27884,10 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 			Global::get().s.bModernShellTickerBannerEnabled =
 				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
 		}
+		if (payload.contains(QStringLiteral("stonksProfileShortcutVisible"))) {
+			Global::get().s.bModernShellStonksProfileShortcutVisible =
+				payload.value(QStringLiteral("stonksProfileShortcutVisible")).toBool();
+		}
 		if (payload.contains(QStringLiteral("tickerPlacement"))) {
 			Global::get().s.qsModernShellTickerPlacement =
 				normalizedStonksTickerPlacement(payload.value(QStringLiteral("tickerPlacement")).toString());
@@ -28312,6 +28327,7 @@ void MainWindow::initializePersistentChatBackend() {
 }
 
 void MainWindow::publishPersistentChatSnapshot() {
+	mumble::chatperf::ScopedDuration trace("chat.publish.snapshot");
 	if (!m_persistentChatController) return;
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
@@ -28446,9 +28462,15 @@ void MainWindow::publishPersistentChatSnapshot() {
 
 	// QML ListView virtualizes delegates; retaining the complete loaded model keeps prepended history reachable
 	// while StableListModel synchronizes by stable message ID without a model reset.
-	const QVariantList messages =
-		buildModernShellMessageStates(target, 0, ModernShellMessageBuildMode::FastFirstPaint);
-	m_qmlShellHost->chatModel()->replaceMessages(messages);
+	QVariantList messages;
+	{
+		mumble::chatperf::ScopedDuration buildTrace("chat.publish.snapshot.build");
+		messages = buildModernShellMessageStates(target, 0, ModernShellMessageBuildMode::FastFirstPaint);
+	}
+	{
+		mumble::chatperf::ScopedDuration applyTrace("chat.publish.snapshot.apply");
+		m_qmlShellHost->chatModel()->replaceMessages(messages);
+	}
 	mumble::chatperf::recordValue(switchingScope ? "qml.chat.scope_sync.direct" : "qml.chat.snapshot_sync.direct", 1);
 }
 
@@ -28570,6 +28592,16 @@ QString MainWindow::modernMotdServerStateKey() const {
 		Global::get().sh->getConnectionInfo(host, port, username, password);
 	}
 	return ModernMotd::serverStateKey(digest, host, port);
+}
+
+QString MainWindow::persistentChatPreviewCacheIdentityKey(const MumbleProto::ChatMessage &message) const {
+	const MumbleProto::ChatScope scope = message.has_scope() ? message.scope() : MumbleProto::Channel;
+	const unsigned int scopeID         = message.has_scope_id() ? message.scope_id() : 0;
+	return QString::fromLatin1("%1:%2:%3:%4")
+		.arg(static_cast< int >(scope))
+		.arg(scopeID)
+		.arg(static_cast< qulonglong >(message.thread_id()))
+		.arg(static_cast< qulonglong >(message.message_id()));
 }
 
 QVariantMap MainWindow::modernMotdServerViewState() const {
@@ -29753,69 +29785,84 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 		return std::nullopt;
 	}
 
-	if (const std::optional< MumbleProto::ChatEmbedRef > embed = persistentChatPrimaryEmbed(message); embed) {
-		const QUrl canonicalUrl(u8(embed->canonical_url()).trimmed());
-		const QString youtubePreviewKey = youtubePreviewKeyForUrl(canonicalUrl);
-		if (!youtubePreviewKey.isEmpty()) {
-			// The server may intentionally publish only a thin embed reference. Route
-			// known video URLs through the client provider pipeline so title, author
-			// and thumbnail hydration are not replaced by a duplicated host fallback.
-			return youtubePreviewKey;
-		}
-		const QString twitchPreviewKey = twitchPreviewKeyForUrl(canonicalUrl);
-		if (!twitchPreviewKey.isEmpty()) {
-			return twitchPreviewKey;
-		}
-		return QString::fromLatin1("embed:%1")
-			.arg(QString::fromUtf8(QUrl::toPercentEncoding(u8(embed->canonical_url()))));
+	const QString cacheKey = persistentChatPreviewCacheIdentityKey(message);
+	if (const auto cached = m_persistentChatPreviewKeyCache.constFind(cacheKey);
+		cached != m_persistentChatPreviewKeyCache.cend()) {
+		mumble::chatperf::recordValue("chat.preview.key.cache_hit", 1);
+		if (cached.value().isEmpty()) return std::nullopt;
+		return cached.value();
 	}
 
-	const bool hasTypedBodyText = message.has_body_text();
-	QString messageContent = hasTypedBodyText ? persistentChatMessageSourceText(message)
-											: persistentChatMessageRawBody(message);
-	if (!hasTypedBodyText) {
-		extractPersistentChatReplyReference(messageContent, &messageContent);
-	}
-	// Typed message bodies are already normalized source text. Running every one
-	// through QTextDocument just to discover URLs made room switching pay an HTML
-	// parse cost even for ordinary chat lines.
-	const QList< QUrl > urls = extractPreviewableUrls(messageContent, hasTypedBodyText);
-	for (const QUrl &url : urls) {
-		const QString youtubePreviewKey = youtubePreviewKeyForUrl(url);
-		if (!youtubePreviewKey.isEmpty()) {
-			return youtubePreviewKey;
-		}
-		if (isYouTubeHost(url.host())) {
-			// Only create custom previews for actual videos. Generic previews for YouTube
-			// landing pages are noisy, expensive, and were unstable in Windows testing.
-			continue;
-		}
-		const QString twitchPreviewKey = twitchPreviewKeyForUrl(url);
-		if (!twitchPreviewKey.isEmpty()) {
-			return twitchPreviewKey;
+	const auto resolvePreviewKey = [&]() -> std::optional< QString > {
+		if (const std::optional< MumbleProto::ChatEmbedRef > embed = persistentChatPrimaryEmbed(message); embed) {
+			const QUrl canonicalUrl(u8(embed->canonical_url()).trimmed());
+			const QString youtubePreviewKey = youtubePreviewKeyForUrl(canonicalUrl);
+			if (!youtubePreviewKey.isEmpty()) {
+				// The server may intentionally publish only a thin embed reference. Route
+				// known video URLs through the client provider pipeline so title, author
+				// and thumbnail hydration are not replaced by a duplicated host fallback.
+				return youtubePreviewKey;
+			}
+			const QString twitchPreviewKey = twitchPreviewKeyForUrl(canonicalUrl);
+			if (!twitchPreviewKey.isEmpty()) {
+				return twitchPreviewKey;
+			}
+			return QString::fromLatin1("embed:%1")
+				.arg(QString::fromUtf8(QUrl::toPercentEncoding(u8(embed->canonical_url()))));
 		}
 
-		if (isTrustedRemotePlayableMediaUrl(url)) {
+		const bool hasTypedBodyText = message.has_body_text();
+		QString messageContent = hasTypedBodyText ? persistentChatMessageSourceText(message)
+												: persistentChatMessageRawBody(message);
+		if (!hasTypedBodyText) {
+			extractPersistentChatReplyReference(messageContent, &messageContent);
+		}
+		// Typed message bodies are already normalized source text. Running every one
+		// through QTextDocument just to discover URLs made room switching pay an HTML
+		// parse cost even for ordinary chat lines.
+		const QList< QUrl > urls = extractPreviewableUrls(messageContent, hasTypedBodyText);
+		for (const QUrl &url : urls) {
+			const QString youtubePreviewKey = youtubePreviewKeyForUrl(url);
+			if (!youtubePreviewKey.isEmpty()) {
+				return youtubePreviewKey;
+			}
+			if (isYouTubeHost(url.host())) {
+				// Only create custom previews for actual videos. Generic previews for YouTube
+				// landing pages are noisy, expensive, and were unstable in Windows testing.
+				continue;
+			}
+			const QString twitchPreviewKey = twitchPreviewKeyForUrl(url);
+			if (!twitchPreviewKey.isEmpty()) {
+				return twitchPreviewKey;
+			}
+
+			if (isTrustedRemotePlayableMediaUrl(url)) {
+				return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(url));
+			}
+
+			if (isDirectImageUrl(url)) {
+				return QString::fromLatin1("image:%1").arg(normalizedPreviewUrl(url));
+			}
+
 			return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(url));
 		}
 
-		if (isDirectImageUrl(url)) {
-			return QString::fromLatin1("image:%1").arg(normalizedPreviewUrl(url));
+		const QString tickerSourceText = hasTypedBodyText
+											 ? messageContent
+											 : QTextDocumentFragment::fromHtml(messageContent).toPlainText();
+		const QList< Mumble::Finance::TickerMention > tickerMentions =
+			Mumble::Finance::extractTickerMentions(tickerSourceText, 1);
+		if (!tickerMentions.isEmpty() && tickerMentions.constFirst().yahooFinanceUrl.isValid()) {
+			return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(tickerMentions.constFirst().yahooFinanceUrl));
 		}
 
-		return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(url));
-	}
+		return std::nullopt;
+	};
 
-	const QString tickerSourceText = hasTypedBodyText
-										 ? messageContent
-										 : QTextDocumentFragment::fromHtml(messageContent).toPlainText();
-	const QList< Mumble::Finance::TickerMention > tickerMentions =
-		Mumble::Finance::extractTickerMentions(tickerSourceText, 1);
-	if (!tickerMentions.isEmpty() && tickerMentions.constFirst().yahooFinanceUrl.isValid()) {
-		return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(tickerMentions.constFirst().yahooFinanceUrl));
-	}
-
-	return std::nullopt;
+	const std::optional< QString > resolved = resolvePreviewKey();
+	m_persistentChatPreviewKeyCache.insert(cacheKey, resolved.value_or(QString()));
+	mumble::chatperf::recordValue("chat.preview.key.cache_miss", 1);
+	return resolved;
 }
 
 void MainWindow::rememberPersistentChatPreviewInputs(const MumbleProto::ChatMessage &message) {
@@ -35746,14 +35793,25 @@ void MainWindow::handlePersistentChatHistory(const MumbleProto::ChatHistoryRespo
 		return;
 	}
 
-	clearModernShellMessageDtoCache("history");
+	// Warmup replies can cover hundreds of messages across rooms. They must not
+	// invalidate the active room's DTO cache or eagerly start rich-preview work.
+	// Evict only message identities carried by this reply; viewport hydration
+	// will build previews in bounded batches after the lightweight rows exist.
+	{
+		mumble::chatperf::ScopedDuration evictTrace("chat.handle.history.evict");
+		for (const MumbleProto::ChatMessage &message : msg.messages()) {
+			evictModernShellMessageDtoCacheForMessage(message);
+		}
+	}
 	if ((msg.has_scope() ? msg.scope() : MumbleProto::Channel) == MumbleProto::Private) {
 		mergeModernDirectMessageHistory(msg);
 		return;
 	}
-	warmupPersistentChatPreviews(msg);
-	syncPersistentChatGatewayHandler();
-	m_persistentChatGateway->handleIncomingHistory(msg);
+	{
+		mumble::chatperf::ScopedDuration dispatchTrace("chat.handle.history.dispatch");
+		syncPersistentChatGatewayHandler();
+		m_persistentChatGateway->handleIncomingHistory(msg);
+	}
 }
 
 void MainWindow::handlePersistentChatReadState(const MumbleProto::ChatReadStateUpdate &msg) {
