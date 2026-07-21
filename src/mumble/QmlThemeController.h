@@ -39,6 +39,7 @@ class QmlThemeController final : public QObject {
 	Q_PROPERTY(QString densityId READ densityId NOTIFY densityChanged)
 	Q_PROPERTY(QString accentId READ accentId NOTIFY themeStateChanged)
 	Q_PROPERTY(QString railSide READ railSide NOTIFY themeStateChanged)
+	Q_PROPERTY(bool classicUserIcons READ classicUserIcons NOTIFY themeStateChanged)
 	Q_PROPERTY(QVariantMap state READ state NOTIFY themeStateChanged)
 
 public:
@@ -73,11 +74,13 @@ public:
 	QString densityId() const { return m_densityId; }
 	QString accentId() const { return m_accentId; }
 	QString railSide() const { return m_railSide; }
+	bool classicUserIcons() const { return m_classicUserIcons; }
 	QVariantMap state() const;
 
 	Q_INVOKABLE void refresh();
 	bool applyProductAppearance(const QString &theme, const QString &density, const QString &accent,
-							const QString &customAccent = QStringLiteral("#5ec8b0"), int customAccentStrength = 50);
+							const QString &customAccent = QStringLiteral("#5ec8b0"), int customAccentStrength = 50,
+							const QString &railSide = QStringLiteral("right"), bool classicUserIcons = false);
 	void applyTokens(const UiThemeTokens &tokens, const Mumble::ModernTheme::ThemeMetrics &metrics = {},
 					 const QColor &shellBackground = {});
 	bool applyVisualGateAppearance(const QString &theme, const QString &layout,
@@ -95,7 +98,7 @@ private:
 	void applyProductTokens(UiThemeTokens tokens, Mumble::ModernTheme::ThemeMetrics metrics,
 						const QColor &shellBackground, const QString &themeId, const QString &themeSource,
 						const QString &densityId, const QString &accentId, const QString &customAccent,
-						int customAccentStrength);
+						int customAccentStrength, const QString &railSide, bool classicUserIcons);
 	QColor m_shellBackground = QColor(QStringLiteral("#20262f"));
 	QColor m_panel = QColor(QStringLiteral("#262d38"));
 	QColor m_surfaceRaised = QColor(QStringLiteral("#2e3742"));
@@ -125,6 +128,7 @@ private:
 	QString m_densityId = QStringLiteral("comfortable");
 	QString m_accentId = QStringLiteral("auto");
 	QString m_railSide = QStringLiteral("right");
+	bool m_classicUserIcons = false;
 };
 
 #endif

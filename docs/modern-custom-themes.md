@@ -6,7 +6,7 @@ Themes are loaded from the bundled and profile `ModernThemes` directories. The a
 
 The built-in catalog contains Dark, Light, Mocha, Macchiato, Frappe, Latte, Nord, and Gruvbox. Accent choices are Auto, Teal, Blue, Violet, Amber, Rose, and Custom. Auto is not a fixed color: it keeps the accent, hover, subtle-selection, and focus roles declared by the selected theme. Every other choice replaces those roles as one consistent family.
 
-Theme, density, and accent choices preview immediately across the running Modern UI without changing the saved profile. **Apply** saves the current preview and keeps Settings open; **Done** saves and closes. **Cancel**, Escape, and the close button restore the most recently applied appearance.
+Theme, density, classic user icons, rail side, and accent choices preview immediately across the running Modern UI without changing the saved profile. **Apply** saves the current preview and keeps Settings open; **Done** saves and closes. **Cancel**, Escape, and the close button restore the most recently applied appearance.
 
 ## Install a theme
 

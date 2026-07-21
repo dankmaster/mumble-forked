@@ -237,6 +237,7 @@ TestCase {
 		loader.item.alignedHeaderHeight = Theme.railHeaderHeight
 		loader.item.alignedFooterHeight = Theme.railFooterHeight
 		loader.item.railSide = Theme.railSide
+		loader.item.classicUserIcons = false
 		// Drain delegate rebind/reuse work from the previous test before resetting
 		// the command probe. Otherwise a queued release from a recycled row can
 		// make the following pointer-drag assertion observe stale target state.
@@ -1335,6 +1336,31 @@ TestCase {
 		compare(commands.participantActionCount, 1)
 		compare(commands.participantActionId, "join")
 		compare(commands.selectedParticipant, "42")
+	}
+
+	function test_classic_user_icons_replace_avatars_and_talk_dots_live() {
+		const avatarImage = findChild(loader.item, "navigationParticipantAvatarImage_42")
+		const avatarFallback = findChild(loader.item, "navigationParticipantAvatarFallback_42")
+		const talk = findChild(loader.item, "navigationParticipantTalk_42")
+		const classic = findChild(loader.item, "navigationParticipantClassicIcon_42")
+		const listenerClassic = findChild(loader.item,
+			"navigationParticipantClassicIcon_listener:2:42")
+		verify(avatarImage !== null && avatarFallback !== null && talk !== null)
+		verify(classic !== null && listenerClassic !== null)
+		verify(!classic.visible)
+		verify(talk.visible)
+
+		loader.item.classicUserIcons = true
+		tryCompare(classic, "visible", true)
+		compare(String(classic.source), "qrc:/native/talking_on.svg")
+		compare(String(listenerClassic.source), "qrc:/native/talking_off.svg")
+		verify(!avatarImage.visible)
+		verify(!avatarFallback.visible)
+		verify(!talk.visible)
+
+		loader.item.classicUserIcons = false
+		tryCompare(classic, "visible", false)
+		tryCompare(talk, "visible", true)
 	}
 
 	function test_source_only_action_capability_and_missing_talk_state_stay_correct() {

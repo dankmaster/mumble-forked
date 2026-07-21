@@ -1316,6 +1316,10 @@ void TestModernDialogControllers::settingsAppearanceAutoAccentTracksDraftTheme()
 	QPair< QColor, QColor > colors = appearanceColors(controller.state(), QStringLiteral("nord"));
 	QVERIFY(colors.first.isValid());
 	QCOMPARE(colors.second, colors.first);
+	QVariantMap automaticOption = findOption(
+		findField(controller.state(), QStringLiteral("look.modernAccent")), QStringLiteral("auto"));
+	QCOMPARE(automaticOption.value(QStringLiteral("themeLabel")).toString(), QStringLiteral("Nord"));
+	QVERIFY(automaticOption.value(QStringLiteral("hint")).toString().contains(QStringLiteral("Nord")));
 	const QColor nordAccent = colors.second;
 
 	controller.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("gruvbox"));
@@ -1323,6 +1327,10 @@ void TestModernDialogControllers::settingsAppearanceAutoAccentTracksDraftTheme()
 	QVERIFY(colors.first.isValid());
 	QCOMPARE(colors.second, colors.first);
 	QVERIFY(colors.second != nordAccent);
+	automaticOption = findOption(
+		findField(controller.state(), QStringLiteral("look.modernAccent")), QStringLiteral("auto"));
+	QCOMPARE(automaticOption.value(QStringLiteral("themeLabel")).toString(), QStringLiteral("Gruvbox"));
+	QVERIFY(automaticOption.value(QStringLiteral("hint")).toString().contains(QStringLiteral("Gruvbox")));
 	QCOMPARE(controller.draft().qsModernShellAccent, QStringLiteral("auto"));
 
 	controller.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("violet"));
@@ -1350,6 +1358,8 @@ void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack()
 	Settings settings;
 	settings.qsModernShellTheme = QStringLiteral("dark");
 	settings.qsModernShellDensity = QStringLiteral("comfortable");
+	settings.bModernShellClassicUserIcons = false;
+	settings.qsModernShellRailSide = QStringLiteral("right");
 	settings.qsModernShellAccent = QStringLiteral("auto");
 	settings.qsModernShellCustomAccent = QStringLiteral("#112233");
 	settings.iModernShellCustomAccentStrength = 40;
@@ -1374,8 +1384,17 @@ void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack()
 	QVERIFY(preview.appearanceToPreview.has_value());
 	QCOMPARE(preview.appearanceToPreview->theme, QStringLiteral("nord"));
 	QCOMPARE(preview.appearanceToPreview->density, QStringLiteral("comfortable"));
+	QCOMPARE(preview.appearanceToPreview->classicUserIcons, false);
+	QCOMPARE(preview.appearanceToPreview->railSide, QStringLiteral("right"));
 	QCOMPARE(preview.appearanceToPreview->accent, QStringLiteral("auto"));
 	QCOMPARE(controller.draft().qsModernShellTheme, QStringLiteral("nord"));
+
+	preview = previewField(QStringLiteral("look.modernRailSide"), QStringLiteral("left"));
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->railSide, QStringLiteral("left"));
+	preview = previewField(QStringLiteral("look.modernClassicUserIcons"), true);
+	QVERIFY(preview.appearanceToPreview.has_value());
+	QCOMPARE(preview.appearanceToPreview->classicUserIcons, true);
 
 	preview = previewField(QStringLiteral("look.modernAccent"), QStringLiteral("custom"));
 	QVERIFY(preview.appearanceToPreview.has_value());
@@ -1403,6 +1422,8 @@ void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack()
 	QVERIFY(apply.accepted);
 	QVERIFY(!apply.closeDialog);
 	QCOMPARE(apply.settingsToApply->qsModernShellTheme, QStringLiteral("gruvbox"));
+	QCOMPARE(apply.settingsToApply->qsModernShellRailSide, QStringLiteral("left"));
+	QCOMPARE(apply.settingsToApply->bModernShellClassicUserIcons, true);
 	QCOMPARE(apply.settingsToApply->qsModernShellAccent, QStringLiteral("custom"));
 	QCOMPARE(apply.settingsToApply->qsModernShellCustomAccent, QStringLiteral("#3366cc"));
 	QCOMPARE(apply.settingsToApply->iModernShellCustomAccentStrength, 75);
@@ -1416,6 +1437,8 @@ void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack()
 	QVERIFY(!cancel.settingsToApply.has_value());
 	QVERIFY(cancel.appearanceToPreview.has_value());
 	QCOMPARE(cancel.appearanceToPreview->theme, QStringLiteral("gruvbox"));
+	QCOMPARE(cancel.appearanceToPreview->railSide, QStringLiteral("left"));
+	QCOMPARE(cancel.appearanceToPreview->classicUserIcons, true);
 	QCOMPARE(cancel.appearanceToPreview->accent, QStringLiteral("custom"));
 	QCOMPARE(cancel.appearanceToPreview->customAccent, QStringLiteral("#3366cc"));
 	QCOMPARE(cancel.appearanceToPreview->customAccentStrength, 75);
@@ -1429,6 +1452,8 @@ void TestModernDialogControllers::settingsAppearancePreviewCommitsAndRollsBack()
 	QVERIFY(reset.appearanceToPreview.has_value());
 	QCOMPARE(reset.appearanceToPreview->theme, QStringLiteral("gruvbox"));
 	QCOMPARE(reset.appearanceToPreview->density, QStringLiteral("comfortable"));
+	QCOMPARE(reset.appearanceToPreview->railSide, QStringLiteral("left"));
+	QCOMPARE(reset.appearanceToPreview->classicUserIcons, true);
 	QCOMPARE(controller.draft().qsModernShellDensity, QStringLiteral("comfortable"));
 
 	preview = previewField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));

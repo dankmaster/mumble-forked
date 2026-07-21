@@ -1838,6 +1838,8 @@ namespace {
 		static const QSet< QString > previewFields {
 			QStringLiteral("look.modernTheme"),
 			QStringLiteral("look.modernDensity"),
+			QStringLiteral("look.modernClassicUserIcons"),
+			QStringLiteral("look.modernRailSide"),
 			QStringLiteral("look.modernAccent"),
 			QStringLiteral("look.modernCustomAccent"),
 			QStringLiteral("look.modernCustomAccentStrength")
@@ -1850,6 +1852,8 @@ namespace {
 		ModernSettingsController::AppearancePreview preview;
 		preview.theme = normalizedModernShellTheme(settings.qsModernShellTheme, catalog);
 		preview.density = normalizedModernShellDensity(settings.qsModernShellDensity);
+		preview.classicUserIcons = settings.bModernShellClassicUserIcons;
+		preview.railSide = normalizedModernShellRailSide(settings.qsModernShellRailSide);
 		preview.accent = normalizedModernShellAccent(settings.qsModernShellAccent);
 		preview.customAccent = normalizedModernShellCustomAccent(settings.qsModernShellCustomAccent);
 		preview.customAccentStrength =
@@ -2008,8 +2012,10 @@ namespace {
 		const Settings &settings, const QList< Mumble::ModernTheme::ThemeDefinition > &customThemes) {
 		const QString themeID = normalizedModernShellTheme(settings.qsModernShellTheme, customThemes);
 		QColor automaticAccent = uiThemeTokensForThemeId(themeID).accent;
+		QString automaticThemeLabel = modernShellBuiltInThemeLabel(themeID);
 		if (const Mumble::ModernTheme::ThemeDefinition *customTheme =
 				modernShellCustomTheme(customThemes, themeID)) {
+			automaticThemeLabel = customTheme->name;
 			QColor customThemeAccent = customTheme->palette.accent;
 			if (!customThemeAccent.isValid()) {
 				customThemeAccent = QColor(
@@ -2021,8 +2027,10 @@ namespace {
 		}
 		QVariantMap automaticOption = modernShellAccentOption(
 			QStringLiteral("auto"), QObject::tr("Auto"), automaticAccent,
-			QObject::tr("Uses the accent supplied by the selected theme."));
+			QObject::tr("Follows the accent declared by %1 and updates when the theme changes.")
+				.arg(automaticThemeLabel));
 		automaticOption.insert(QStringLiteral("automatic"), true);
+		automaticOption.insert(QStringLiteral("themeLabel"), automaticThemeLabel);
 
 		QVariantMap customOption = modernShellAccentOption(
 			Mumble::ModernTheme::customAccentId(), QObject::tr("Custom"),
@@ -4939,7 +4947,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													modernShellThemeOptions(m_modernThemeCatalog),
 													QStringLiteral("string")),
 												QStringLiteral("themeGrid")),
-											QObject::tr("Select a theme to preview it instantly. Apply saves without closing; Done saves and closes.")),
+											QObject::tr("Appearance changes preview instantly. Apply saves without closing; Done saves and closes.")),
 										actionField(QStringLiteral("look.modernThemesDirectory"),
 													QObject::tr("Custom theme folder"),
 													QObject::tr("Open folder"),

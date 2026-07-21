@@ -111,11 +111,13 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QmlThemeController controller;
 	QSignalSpy densityChanged(&controller, &QmlThemeController::densityChanged);
 	QVERIFY(controller.applyProductAppearance(QStringLiteral("nord"), QStringLiteral("spacious"),
-		QStringLiteral("rose")));
+		QStringLiteral("rose"), QStringLiteral("#5ec8b0"), 50, QStringLiteral("left"), true));
 	QCOMPARE(controller.themeId(), QStringLiteral("nord"));
 	QCOMPARE(controller.themeSource(), QStringLiteral("modernShell"));
 	QCOMPARE(controller.densityId(), QStringLiteral("spacious"));
 	QCOMPARE(controller.accentId(), QStringLiteral("rose"));
+	QCOMPARE(controller.railSide(), QStringLiteral("left"));
+	QCOMPARE(controller.classicUserIcons(), true);
 	QCOMPARE(controller.spacing(), 16);
 	QCOMPARE(controller.accent(), QColor(QStringLiteral("#ff8aa0")));
 	QCOMPARE(densityChanged.count(), 1);
@@ -123,6 +125,9 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QCOMPARE(state.value(QStringLiteral("themeId")).toString(), QStringLiteral("nord"));
 	QCOMPARE(state.value(QStringLiteral("density")).toString(), QStringLiteral("spacious"));
 	QCOMPARE(state.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
+	QCOMPARE(state.value(QStringLiteral("railSide")).toString(), QStringLiteral("left"));
+	QCOMPARE(state.value(QStringLiteral("userIcons")).toString(), QStringLiteral("classic"));
+	QCOMPARE(state.value(QStringLiteral("classicUserIcons")).toBool(), true);
 	const QVariantMap effectiveTokens = state.value(QStringLiteral("effectiveTokens")).toMap();
 	QCOMPARE(effectiveTokens.value(QStringLiteral("spacing")).toInt(), 16);
 	QCOMPARE(effectiveTokens.value(QStringLiteral("surfaceRaised")).toString(),
@@ -132,10 +137,12 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QVERIFY(!effectiveTokens.value(QStringLiteral("--accent-rgb")).toString().isEmpty());
 
 	QVERIFY(controller.applyProductAppearance(QStringLiteral("dark"), QStringLiteral("compact"),
-		QStringLiteral("custom"), QStringLiteral("#3366cc"), 75));
+		QStringLiteral("custom"), QStringLiteral("#3366cc"), 75, QStringLiteral("right"), false));
 	QVERIFY(controller.compact());
 	QCOMPARE(controller.spacing(), 8);
 	QCOMPARE(controller.accent(), QColor(QStringLiteral("#3366cc")));
+	QCOMPARE(controller.railSide(), QStringLiteral("right"));
+	QCOMPARE(controller.classicUserIcons(), false);
 }
 
 void TestQmlThemeController::autoAccentTracksThemeAndManualOverridesRemainStable() {
@@ -173,6 +180,10 @@ void TestQmlThemeController::autoAccentTracksThemeAndManualOverridesRemainStable
 	QVERIFY(controller.applyProductAppearance(
 		secondTheme, QStringLiteral("comfortable"), QStringLiteral("violet")));
 	QCOMPARE(controller.accent(), fixedAccent);
+	QVERIFY(controller.applyProductAppearance(
+		secondTheme, QStringLiteral("comfortable"), QStringLiteral("auto")));
+	QCOMPARE(controller.accent(), secondThemeAccent);
+	QCOMPARE(controller.focus(), uiThemeTokensForThemeId(secondTheme).focusAccent);
 
 	const QColor customAccent(QStringLiteral("#3366cc"));
 	QVERIFY(controller.applyProductAppearance(firstTheme, QStringLiteral("comfortable"),
