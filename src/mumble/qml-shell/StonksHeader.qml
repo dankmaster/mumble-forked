@@ -10,8 +10,11 @@ AbstractButton {
 	property string scopeToken: ""
 	property string scopeLabel: ""
 	property bool narrowLayout: false
+	property bool docked: false
 	property bool tickerBannerEnabled: false
-	property bool tickerBannerAlwaysScroll: true
+	property string tickerDirection: "left"
+	property string tickerSpeed: "normal"
+	property bool animationReady: false
 	readonly property bool loading: stonks.loading === true
 	readonly property string errorText: String(stonks.error || "").trim()
 	readonly property bool automationVisible: stonks.automationHeaderVisible === true
@@ -26,9 +29,11 @@ AbstractButton {
 	readonly property bool shouldShow: tickerBannerEnabled && supported && enabledForServer
 		&& hasVisibleState
 	readonly property bool automationAnimationDisabled: stonks.disableTickerAnimation === true
-	readonly property bool marqueeShouldRun: !automationAnimationDisabled && tickerRows.length > 0
-		&& (tickerBannerAlwaysScroll || marqueePrimary.width > tickerViewport.width)
-	readonly property bool marqueeRunning: marqueeAnimation.running && !marqueeAnimation.paused
+	readonly property bool horizontalMovement: tickerDirection === "left" || tickerDirection === "right"
+	readonly property bool movementShouldRun: !automationAnimationDisabled && tickerRows.length > 0
+	readonly property bool tickerRunning: horizontalMovement
+		? horizontalAnimation.running && !horizontalAnimation.paused
+		: verticalAnimation.running && !verticalAnimation.paused
 
 	signal openRequested()
 
@@ -107,13 +112,45 @@ AbstractButton {
 			: change > 0 ? Theme.success : Theme.danger
 	}
 
-	function updateMarqueePause() {
-		if (!marqueeAnimation.running)
+	function pixelsPerSecond() {
+		switch (tickerSpeed) {
+		case "verySlow": return 12
+		case "slow": return 18
+		case "fast": return 42
+		default: return 28
+		}
+	}
+
+	function animationDuration(distance) {
+		return Math.max(2600, Math.round(Math.max(1, distance) * 1000 / pixelsPerSecond()))
+	}
+
+	function updateTickerPause() {
+		const animation = horizontalMovement ? horizontalAnimation : verticalAnimation
+		if (!animation.running)
 			return
 		if (hovered || activeFocus)
-			marqueeAnimation.pause()
+			animation.pause()
 		else
-			marqueeAnimation.resume()
+			animation.resume()
+	}
+
+	function restartTickerAnimation() {
+		if (!animationReady || !visible || !movementShouldRun)
+			return
+		Qt.callLater(function() {
+			const animation = root.horizontalMovement ? horizontalAnimation : verticalAnimation
+			animation.restart()
+			root.updateTickerPause()
+		})
+	}
+
+	onTickerDirectionChanged: restartTickerAnimation()
+	onTickerSpeedChanged: restartTickerAnimation()
+	onTickerRowsChanged: restartTickerAnimation()
+	Component.onCompleted: {
+		animationReady = true
+		restartTickerAnimation()
 	}
 
 	visible: shouldShow
@@ -130,8 +167,8 @@ AbstractButton {
 	Accessible.description: loading ? String(stonks.status || qsTr("Loading ticker quotes"))
 		: errorText.length > 0 ? errorText : qsTr("Shows pinned, portfolio, and popular ticker quotes")
 	onClicked: openRequested()
-	onHoveredChanged: updateMarqueePause()
-	onActiveFocusChanged: updateMarqueePause()
+	onHoveredChanged: updateTickerPause()
+	onActiveFocusChanged: updateTickerPause()
 	Keys.onReturnPressed: event => {
 		root.openRequested()
 		event.accepted = true
@@ -142,7 +179,7 @@ AbstractButton {
 	}
 
 	background: Rectangle {
-		radius: Theme.innerRadius
+		radius: root.docked ? 0 : Theme.innerRadius
 		color: root.down || root.hovered ? Theme.surfaceHover : Theme.strip
 		border.color: root.activeFocus ? Theme.focus
 			: root.errorText.length > 0 ? Theme.danger : Theme.surfaceBorder
@@ -217,7 +254,7 @@ AbstractButton {
 
 			Item {
 				id: tickerViewport
-				objectName: "stonksHeaderTickerViewport"
+				objectName: "stonksTickerViewport"
 				anchors.left: parent.left
 				anchors.right: parent.right
 				anchors.top: parent.top
@@ -226,13 +263,14 @@ AbstractButton {
 				visible: !root.loading && root.errorText.length === 0
 
 				Row {
-					id: tickerTrack
-					objectName: "stonksHeaderTickerRow"
+					id: horizontalTrack
+					objectName: "stonksTickerHorizontalTrack"
 					anchors.verticalCenter: parent.verticalCenter
 					spacing: Theme.space4
+					visible: root.horizontalMovement
 
 					Row {
-						id: marqueePrimary
+						id: horizontalPrimary
 						spacing: Theme.space4
 						Repeater {
 							model: root.tickerRows
@@ -240,8 +278,7 @@ AbstractButton {
 						}
 					}
 					Row {
-						id: marqueeDuplicate
-						visible: root.marqueeShouldRun
+						id: horizontalDuplicate
 						spacing: Theme.space4
 						Repeater {
 							model: root.tickerRows
@@ -250,23 +287,71 @@ AbstractButton {
 					}
 				}
 
+				Column {
+					id: verticalTrack
+					objectName: "stonksTickerVerticalTrack"
+					width: parent.width
+					spacing: Theme.space2
+					visible: !root.horizontalMovement
+					Column {
+						id: verticalPrimary
+						width: parent.width
+						spacing: Theme.space2
+						Repeater {
+							model: root.tickerRows
+							delegate: tickerDelegate
+						}
+					}
+					Column {
+						id: verticalDuplicate
+						width: parent.width
+						spacing: Theme.space2
+						Repeater {
+							model: root.tickerRows
+							delegate: tickerDelegate
+						}
+					}
+				}
+
 				NumberAnimation {
-					id: marqueeAnimation
-					objectName: "stonksHeaderMarqueeAnimation"
-					target: tickerTrack
+					id: horizontalAnimation
+					objectName: "stonksTickerHorizontalAnimation"
+					target: horizontalTrack
 					property: "x"
-					from: 0
-					to: -(marqueePrimary.width + tickerTrack.spacing)
-					duration: Math.max(4500,
-						Math.round((marqueePrimary.width + tickerTrack.spacing) * 28))
+					readonly property real travel: horizontalPrimary.width + horizontalTrack.spacing
+					from: root.tickerDirection === "right" ? -travel : 0
+					to: root.tickerDirection === "right" ? 0 : -travel
+					duration: root.animationDuration(travel)
 					easing.type: Easing.Linear
 					loops: Animation.Infinite
-					running: root.visible && root.marqueeShouldRun && tickerViewport.visible
+					running: root.visible && root.horizontalMovement && root.movementShouldRun
+						&& tickerViewport.visible
 					onRunningChanged: {
 						if (!running)
-							tickerTrack.x = 0
+							horizontalTrack.x = 0
 						else
-							root.updateMarqueePause()
+							root.updateTickerPause()
+					}
+				}
+
+				NumberAnimation {
+					id: verticalAnimation
+					objectName: "stonksTickerVerticalAnimation"
+					target: verticalTrack
+					property: "y"
+					readonly property real travel: verticalPrimary.height + verticalTrack.spacing
+					from: root.tickerDirection === "down" ? -travel : 0
+					to: root.tickerDirection === "down" ? 0 : -travel
+					duration: root.animationDuration(travel)
+					easing.type: Easing.Linear
+					loops: Animation.Infinite
+					running: root.visible && !root.horizontalMovement && root.movementShouldRun
+						&& tickerViewport.visible
+					onRunningChanged: {
+						if (!running)
+							verticalTrack.y = 0
+						else
+							root.updateTickerPause()
 					}
 				}
 			}
@@ -284,7 +369,8 @@ AbstractButton {
 		id: tickerDelegate
 		Row {
 			required property var modelData
-			objectName: "stonksHeaderTicker_" + String(modelData.symbol || "")
+			objectName: "stonksTicker_" + String(modelData.symbol || "")
+			height: Math.max(18, implicitHeight)
 			spacing: Theme.space1
 			Label {
 				textFormat: Text.PlainText

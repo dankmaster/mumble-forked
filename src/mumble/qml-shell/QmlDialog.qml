@@ -806,11 +806,13 @@ Dialog {
 		if (value.indexOf("audio output") >= 0 || value.indexOf("output") >= 0) return "volume"
 		if (value.indexOf("appearance") >= 0 || value.indexOf("look") >= 0) return "eye"
 		if (value.indexOf("message") >= 0 || value.indexOf("sound") >= 0) return "message"
+		if (value.indexOf("stonks") >= 0) return "activity"
 		if (value.indexOf("key") >= 0 || value.indexOf("binding") >= 0
 			|| value.indexOf("shortcut") >= 0) return "key"
 		if (value.indexOf("network") >= 0) return "connect"
 		if (value.indexOf("screen") >= 0 || value.indexOf("share") >= 0) return "screen-share"
 		if (value.indexOf("plugin") >= 0) return "plugin"
+		if (value.indexOf("motd") >= 0 || value.indexOf("message of the day") >= 0) return "message"
 		if (value.indexOf("about") >= 0) return "info"
 		return "settings"
 	}
@@ -842,12 +844,15 @@ Dialog {
 		if (id === "look" || id === "ui" || value.indexOf("appearance") >= 0
 			|| value.indexOf("interface") >= 0)
 			return qsTr("Experience")
-		if (id === "messages" || id === "keys" || value.indexOf("message") >= 0
+		if (id === "messages" || id === "stonks" || id === "keys" || value.indexOf("message") >= 0
+			|| value.indexOf("stonks") >= 0
 			|| value.indexOf("binding") >= 0)
 			return qsTr("Interaction")
 		if (id === "network" || id === "screenshare" || id === "plugins"
 			|| value.indexOf("network") >= 0 || value.indexOf("screen") >= 0 || value.indexOf("plugin") >= 0)
 			return qsTr("Connectivity")
+		if (id === "motd" || value.indexOf("motd") >= 0)
+			return qsTr("Server")
 		return qsTr("Settings")
 	}
 	function advancedFieldCount() {
@@ -879,6 +884,13 @@ Dialog {
 			|| id === "look.modernCustomAccentStrength"
 	}
 	function updateFieldValue(fieldId, value) {
+		if (String(fieldId || "").indexOf("stonks.client.") === 0) {
+			dialogState.invokeAction("stonks.updateClient", {
+				"fieldId": String(fieldId),
+				"value": value
+			})
+			return
+		}
 		if (isAppearancePreviewField(fieldId)) {
 			dialogState.invokeAction("look.previewAppearance", {
 				"fieldId": String(fieldId),
@@ -2212,7 +2224,7 @@ Dialog {
                                         property var field: modelData
 										readonly property string fieldType: String((field || {}).type || "text")
 										readonly property bool accessibilityAllowsPartialExposure:
-											[ "pluginEditor", "messageEventEditor", "shortcutEditor",
+											[ "pluginEditor", "messageEventEditor", "shortcutEditor", "motdEditor",
 											  "aclEditor", "serverAdminEditor", "resultList" ]
 												.indexOf(fieldType) >= 0
                                         property bool conditionVisible: {
@@ -2256,6 +2268,7 @@ Dialog {
                                             if (type === "hidden") return hiddenField
                                             if (type === "note") return noteField
 											if (type === "voiceMeter") return voiceMeterField
+											if (type === "inputEnhancementCalibration") return inputEnhancementCalibrationField
 											if (type === "readonly" || type === "status") return readonlyField
                                             if (type === "checkbox" || type === "toggle") return checkboxField
 											if (type === "select" || type === "combo" || type === "dropdown") {
@@ -2272,6 +2285,7 @@ Dialog {
                                             if (type === "shortcutEditor") return shortcutEditorField
                                             if (type === "aclEditor") return aclEditorField
 											if (type === "serverAdminEditor") return serverAdminEditorField
+											if (type === "motdEditor") return motdEditorField
                                             if (type === "textarea") return textareaField
                                             if (type === "resultList") return resultListField
                                             if (type === "color") return colorField
@@ -2637,22 +2651,6 @@ Dialog {
 			readonly property int speechThreshold: Math.max(silenceThreshold,
 				Math.min(100, Number(field.speechThreshold === undefined ? 100 : field.speechThreshold)))
 			readonly property bool replayActive: Number(field.loopbackMode || meter.loopbackMode || 0) !== 0
-			function setupPayload() {
-				return {
-					"silenceThreshold": silenceThreshold,
-					"speechThreshold": speechThreshold,
-					"vadSource": Number(field.recommendedVadSource === undefined
-						? vadSource : field.recommendedVadSource),
-					"voiceHold": Number(field.voiceHold || 20),
-					"maxAmplification": Number(field.recommendedMaxAmplification === undefined
-						? (field.maxAmplification || 0) : field.recommendedMaxAmplification),
-					"noiseCancelMode": Number(field.recommendedNoiseCancelMode === undefined
-						? (field.noiseCancelMode || 0) : field.recommendedNoiseCancelMode),
-					"inputGateMode": Number(field.recommendedInputGateMode === undefined
-						? (field.inputGateMode || 0) : field.recommendedInputGateMode),
-					"speexNoiseStrength": Number(field.speexNoiseStrength || 14)
-				}
-			}
 			width: parent ? parent.width : 0
 			spacing: Math.max(6, Theme.spacing - 3)
 			RowLayout {
@@ -2742,22 +2740,14 @@ Dialog {
 				font.pixelSize: 11
 				wrapMode: Text.Wrap
 			}
-			InputEnhancementCalibration {
+			VoiceActivationSetup {
 				field: voiceMeterRoot.field
+				meter: voiceMeterRoot.meter
 				controller: dialogState
 			}
 			Flow {
 				Layout.fillWidth: true
 				spacing: Math.max(6, Math.round(Theme.spacing / 2))
-				ModernButton {
-					objectName: "voiceMeterCalibration_" + String(voiceMeterRoot.field.id || "")
-					visible: String(voiceMeterRoot.field.calibrationActionId || "").length > 0
-					text: voiceMeterRoot.field.calibrationLabel || qsTr("Audio setup")
-					ToolTip.visible: hovered && String(voiceMeterRoot.field.calibrationTooltip || "").length > 0
-					ToolTip.text: voiceMeterRoot.field.calibrationTooltip || ""
-					onClicked: dialogState.invokeAction(voiceMeterRoot.field.calibrationActionId,
-														 voiceMeterRoot.setupPayload())
-				}
 				ModernButton {
 					objectName: "voiceMeterReplay_" + String(voiceMeterRoot.field.id || "")
 					visible: String(voiceMeterRoot.field.replayStartActionId || voiceMeterRoot.field.replayStopActionId || "").length > 0
@@ -2776,6 +2766,19 @@ Dialog {
 														 { "mode": voiceMeterRoot.meter.connected ? "server" : "local" })
 					}
 				}
+			}
+		}
+	}
+	Component {
+		id: inputEnhancementCalibrationField
+		ColumnLayout {
+			id: calibrationFieldRoot
+			objectName: "dialogField_" + String((field || {}).id || "")
+			property var field: ({})
+			width: parent ? parent.width : 0
+			InputEnhancementCalibration {
+				field: calibrationFieldRoot.field
+				controller: dialogState
 			}
 		}
 	}
@@ -2829,9 +2832,11 @@ Dialog {
 				enabled: selectRoot.field.enabled === undefined || Boolean(selectRoot.field.enabled)
                 model: selectRoot.field.options || []
                 textRole: "label"
-                valueRole: "value"
+				valueRole: "value"
+				toolTipText: String(selectRoot.field.tooltip || "")
 				Accessible.name: String(selectRoot.field.label || "")
-				Accessible.description: String(selectRoot.field.hint || selectRoot.field.unavailableReason || "")
+				Accessible.description: String(selectRoot.field.tooltip || selectRoot.field.hint
+					|| selectRoot.field.unavailableReason || "")
                 Component.onCompleted: selectRoot.syncCurrentIndex()
                 onModelChanged: selectRoot.syncCurrentIndex()
 				onActivated: {
@@ -2900,6 +2905,8 @@ Dialog {
 		ColumnLayout {
 			id: rangeRoot
 			property var field
+			property real pendingValue: minimumValue
+			property bool pendingValueDirty: false
 			readonly property real minimumValue: Number(field.minimum ?? field.min ?? 0)
 			readonly property real maximumValue: Number(field.maximum ?? field.max ?? 100)
 			readonly property real fieldStep: Math.max(0.000001, Number(field.step ?? field.stepSize ?? 1))
@@ -2915,8 +2922,26 @@ Dialog {
 					: Math.max(0, Math.min(6, Number(field.decimals)))
 				return Number(value).toLocaleString(Qt.locale(), "f", decimals) + String(field.suffix || "")
 			}
+			function queueValue(value) {
+				pendingValue = typedValue(value)
+				pendingValueDirty = true
+				rangeUpdateTimer.restart()
+			}
+			function flushValue() {
+				if (!pendingValueDirty)
+					return
+				rangeUpdateTimer.stop()
+				pendingValueDirty = false
+				dialog.updateFieldValue(field.id, pendingValue)
+			}
 			width: parent ? parent.width : 0
 			spacing: Theme.space1
+			Timer {
+				id: rangeUpdateTimer
+				interval: 32
+				repeat: false
+				onTriggered: rangeRoot.flushValue()
+			}
 			RowLayout {
 				Layout.fillWidth: true
 				Label {
@@ -2946,7 +2971,7 @@ Dialog {
 				to: rangeRoot.maximumValue
 				stepSize: rangeRoot.fieldStep
 				value: Number(rangeRoot.field.value ?? rangeRoot.minimumValue)
-				snapMode: Slider.SnapAlways
+				snapMode: Slider.SnapOnRelease
 				live: true
 				enabled: rangeRoot.field.enabled === undefined || Boolean(rangeRoot.field.enabled)
 				Accessible.name: String(rangeRoot.field.label || "")
@@ -2958,7 +2983,16 @@ Dialog {
 						.arg(rangeRoot.formattedValue(to))
 					return hint.length > 0 ? valueText + ". " + hint : valueText
 				}
-				onMoved: dialog.updateFieldValue(rangeRoot.field.id, rangeRoot.typedValue(value))
+				onMoved: {
+					if (pressed)
+						rangeRoot.queueValue(value)
+					else
+						dialog.updateFieldValue(rangeRoot.field.id, rangeRoot.typedValue(value))
+				}
+				onPressedChanged: {
+					if (!pressed)
+						rangeRoot.flushValue()
+				}
 			}
 			Label {
 				Layout.fillWidth: true
@@ -3157,12 +3191,19 @@ Dialog {
         }
     }
 	Component {
+		id: motdEditorField
+		MotdEditor {
+			dialogHost: dialog
+			dialogStateHost: dialogState
+		}
+	}
+	Component {
 		id: imageField
 		ColumnLayout {
 			id: imageRoot
 			property var field
 			readonly property string requestedPreviewSource: String(
-				field.previewSource || field.previewUrl || field.imageUrl || "")
+				field.previewSource || field.previewUrl || field.imageUrl || field.value || "")
 			readonly property string previewSource: dialog.safeDialogImageSource(requestedPreviewSource)
 			readonly property bool hasImage: previewSource.length > 0
 			readonly property bool previewDecodeFailed: hasImage && imagePreview.status === Image.Error

@@ -78,6 +78,18 @@ TestCase {
 		compare(productWindow.hostedDialog.excludeSettings, true)
 	}
 
+	function test_native_show_is_deferred_past_the_controller_callback() {
+		dialogState.setSpecialState("deferred-show", {
+			"id": "deferred-show", "pages": [], "width": 720, "height": 560
+		})
+		dialogState.open = true
+		// Showing synchronously here can re-enter QSGThreadedRenderLoop while the
+		// menu/controller callback that published the state is still on the stack.
+		compare(productWindow.visible, false)
+		tryCompare(productWindow, "visible", true)
+		tryCompare(productWindow.hostedDialog, "visible", true)
+	}
+
 	function test_preferred_geometry_is_committed_before_show_and_stays_stable() {
 		openProduct("first-frame-size", 720, 600)
 		const available = productWindow.availableGeometry()

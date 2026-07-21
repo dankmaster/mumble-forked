@@ -214,7 +214,7 @@ Describe "Qt Quick visual manifest validation" {
 			"compact-light-connected", "compact-dark-connected", "desktop-light-empty",
 			"desktop-dark-empty", "desktop-light-loading", "desktop-dark-loading",
 			"desktop-light-error", "desktop-dark-error", "motd-light-expanded",
-			"motd-dark-collapsed", "motd-light-changed", "motd-dark-history-hidden",
+			"motd-dark-collapsed", "motd-light-changed", "motd-dark-history-visible",
 			"motd-compact-short-expanded", "preview-dark-youtube", "preview-light-youtube",
 			"preview-hidpi-dark-youtube", "preview-dark-spotify", "preview-light-tiktok",
 			"preview-dark-instagram", "preview-light-finance", "preview-dark-audio",
@@ -233,7 +233,7 @@ Describe "Qt Quick visual manifest validation" {
 		$motdCases = @($matrix.cases | Where-Object { $_.PSObject.Properties.Name -contains "motd_variant" })
 		$motdCases.Count | Should Be 5
 		@($motdCases | Where-Object { [string]$_.state -ne "connected" }).Count | Should Be 0
-		foreach ($variant in @("expanded", "collapsed", "changed", "history-hidden")) {
+		foreach ($variant in @("expanded", "collapsed", "changed", "history-visible")) {
 			@($motdCases | Where-Object { [string]$_.motd_variant -eq $variant }).Count | Should BeGreaterThan 0
 		}
 		@($motdCases | Where-Object {
@@ -539,7 +539,7 @@ Describe "Qt Quick visual manifest validation" {
 		foreach ($surface in $expectedCases.Values) {
 			$worker | Should Match ([regex]::Escape('"' + $surface + '"'))
 		}
-		$worker | Should Match '"menu-profile"\s*\{\s*@\("Demo User",\s*"Presence",\s*"Account and app"\)'
+		$worker | Should Match '"menu-profile"\s*\{\s*@\("Demo User",\s*"Presence",\s*"Profile"\)'
 		$worker | Should Match 'Profile menu.*must expose Online once as the Demo User header description'
 	}
 
@@ -1298,21 +1298,21 @@ Describe "Qt Quick connected fixture contract" {
 		[string]$thrown.Exception.Message | Should Match "Store details.*provider grouping"
 	}
 
-	It "uses system timeline rows for visible MOTDs and user history for the hidden variant" {
+	It "keeps the server MOTD visible when the active conversation has user history" {
 		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($controller -match 'systemMessages\s*=\s*motdVariant\s*!=\s*QLatin1String\("none"\)') | Should Be $true
-		($controller -match 'motdVariant\s*!=\s*QLatin1String\("history-hidden"\)') | Should Be $true
+		($controller -match 'motdVariant\s*!=\s*QLatin1String\("history-visible"\)') | Should Be $true
 		($controller -match 'QStringLiteral\("system"\),\s*systemMessages') | Should Be $true
 		($worker -match 'motd_has_user_history') | Should Be $true
 		($worker -match 'motd_visible') | Should Be $true
 	}
 
-	It "requires accessible visible and history-hidden MOTD affordances" {
+	It "requires an accessible server MOTD affordance for every visible variant" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($worker -match 'Server message of the day') | Should Be $true
 		($worker -match 'Hide welcome message.*-notin\s+\$names') | Should Be $true
-		($worker -match 'history-hidden.*Show welcome message.*-notin\s+\$names') | Should Be $true
+		($worker -match 'history-visible') | Should Be $true
 	}
 
 	It "resets transient MOTD persistence before every synthetic case" {
@@ -1351,7 +1351,7 @@ Describe "Qt Quick connected fixture contract" {
 		$modernMenu | Should Match 'devicePixelRatio here is a\s*\n?\s*// correctness bug'
 		$mainQml | Should Match '(?s)id:\s*appMenuPopup.*?parent:\s*root\.contentItem'
 		$mainQml | Should Match 'normalized\s*=\s*"appServer"'
-		$mainQml | Should Match 'appMenuPopup\.openSubmenuFor\(serverOpener,\s*serverMenu,\s*true\)'
+		$mainQml | Should Match 'candidate\.payload\.id[\s\S]*substring\(0, 7\) === "server\."'
 		$semanticMenu | Should Match 'function representativeGroupIcon\(group, items\)'
 		$semanticMenu | Should Match '"icon": representativeGroupIcon\(group, items\)'
 		$semanticMenu | Should Not Match 'group\.icon\s*\|\|\s*"menu"'
@@ -1580,10 +1580,10 @@ Describe "Qt Quick connected fixture contract" {
 		$qml | Should Match 'message\.openAutomationActions\(\)'
 	}
 
-	It "requires one semantic PopupMenu per level in each product menu cascade" {
+	It "requires one semantic PopupMenu for each product menu surface" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		$worker | Should Match '\$surface\.StartsWith\("menu-"[\s\S]*role\)\.Equals\("PopupMenu"'
-		$worker | Should Match 'surface -eq "menu-app-server"\) \{ 2 \} else \{ 1 \}'
+		$worker | Should Match '\$expectedMenuContainerCount = 1'
 		$worker | Should Match 'menuContainers\.Count -ne \$expectedMenuContainerCount'
 		$worker | Should Match '"menu-app-server" \{ @\([\s\S]*"Server information…"[\s\S]*"Access tokens…"'
 		$menu = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\ModernMenu.qml"

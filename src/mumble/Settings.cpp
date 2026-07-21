@@ -827,6 +827,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(bModernShellMotdExpanded, "ui/modernShellMotdExpanded");
 	LOAD(qsModernShellMotdDismissedSignature, "ui/modernShellMotdDismissedSignature");
 	LOAD(qsModernShellMotdLastSeenSignature, "ui/modernShellMotdLastSeenSignature");
+	LOAD(qsModernShellMotdServerStates, "ui/modernShellMotdServerStates");
 	LOAD(qsModernShellTheme, "ui/modernShellTheme");
 	LOAD(qsModernShellDensity, "ui/modernShellDensity");
 	LOAD(bModernShellClassicUserIcons, "ui/modernShellClassicUserIcons");
@@ -835,7 +836,9 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qsModernShellCustomAccent, "ui/modernShellCustomAccent");
 	LOAD(iModernShellCustomAccentStrength, "ui/modernShellCustomAccentStrength");
 	LOAD(bModernShellTickerBannerEnabled, "ui/modernShellTickerBannerEnabled");
-	LOAD(bModernShellTickerBannerAlwaysScroll, "ui/modernShellTickerAlwaysScroll");
+	LOAD(qsModernShellTickerPlacement, "ui/modernShellTickerPlacement");
+	LOAD(qsModernShellTickerDirection, "ui/modernShellTickerDirection");
+	LOAD(qsModernShellTickerSpeed, "ui/modernShellTickerSpeed");
 	LOAD(qsUsername, "ui/username");
 	LOAD(qsLastServer, "ui/server");
 	LOADENUM(ssFilter, "ui/serverfilter");

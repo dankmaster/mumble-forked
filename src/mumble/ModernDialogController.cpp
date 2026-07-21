@@ -166,10 +166,37 @@ QVariantMap ModernDialogController::openConnect(const QList< FavoriteServer > &f
 	return state();
 }
 
-QVariantMap ModernDialogController::openSettings(const Settings &settings, const QString &pageName) {
-	m_settings.open(settings, pageName);
+QVariantMap ModernDialogController::openSettings(const Settings &settings, const QString &pageName,
+												 const bool audioInputOnboarding,
+												 const QVariantMap &stonksContext,
+												 const QVariantMap &motdContext) {
+	m_settings.open(settings, pageName, audioInputOnboarding, stonksContext, motdContext);
 	beginRootDialog(QStringLiteral("settings"));
 	return state();
+}
+
+bool ModernDialogController::setSettingsStonksContext(const QVariantMap &stonksContext) {
+	if (m_activeDialogID != QLatin1String("settings")) {
+		return false;
+	}
+	m_settings.setStonksContext(stonksContext);
+	return true;
+}
+
+bool ModernDialogController::setSettingsMotdContext(const QVariantMap &motdContext) {
+	if (m_activeDialogID != QLatin1String("settings")) {
+		return false;
+	}
+	m_settings.setMotdContext(motdContext);
+	return true;
+}
+
+bool ModernDialogController::setSettingsMotdPreview(const QString &sourceHtml, const QVariantList &blocks,
+													const QString &summary) {
+	if (m_activeDialogID != QLatin1String("settings")) {
+		return false;
+	}
+	return m_settings.setMotdPreview(sourceHtml, blocks, summary);
 }
 
 QVariantMap ModernDialogController::openFailedConnection(const QVariantMap &context) {

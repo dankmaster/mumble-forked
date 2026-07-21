@@ -20,7 +20,8 @@ TestCase {
 		return {
 			"supported": true,
 			"enabled": true,
-			"feature": { "tickerBannerEnabled": false, "tickerBannerAlwaysScroll": true },
+			"feature": { "tickerBannerEnabled": false, "tickerPlacement": "bottom",
+				"tickerDirection": "left", "tickerSpeed": "normal" },
 			"registered": true,
 			"canAdmin": true,
 			"selfUserId": 1,
@@ -73,27 +74,52 @@ TestCase {
 		}
 	}
 
-	function test_ticker_banner_is_an_explicit_client_opt_in() {
+	function test_portfolio_shortcut_selects_portfolio_and_survives_state_refresh() {
+		const state = populatedState()
+		state.initialTab = "portfolio"
+		loader.item.stonks = state
+		compare(loader.item.activeTab, "portfolio")
+
+		loader.item.stonks = populatedState()
+		compare(loader.item.activeTab, "portfolio")
+	}
+
+	function test_ticker_settings_are_explicit_live_client_choices() {
 		const editor = loader.item
+		editor.selectTab("settings")
 		const enabled = findChild(editor, "stonksTickerBannerEnabled")
-		const alwaysScroll = findChild(editor, "stonksTickerBannerAlwaysScroll")
+		const placement = findChild(editor, "stonksTickerPlacement")
+		const direction = findChild(editor, "stonksTickerDirection")
+		const speed = findChild(editor, "stonksTickerSpeed")
 		verify(enabled !== null)
-		verify(alwaysScroll !== null)
+		verify(placement !== null)
+		verify(direction !== null)
+		verify(speed !== null)
 		compare(enabled.checked, false)
-		compare(alwaysScroll.checked, true)
-		compare(alwaysScroll.enabled, false)
+		compare(placement.currentValue, "bottom")
+		compare(direction.currentValue, "left")
+		compare(speed.currentValue, "normal")
+		compare(placement.count, 4)
+		compare(direction.count, 4)
+		compare(speed.count, 4)
 
 		mouseClick(enabled, enabled.width / 2, enabled.height / 2, Qt.LeftButton)
-		compare(dialogState.lastAction, "setTickerBannerEnabled")
+		compare(dialogState.lastAction, "setTickerPresentation")
 		compare(dialogState.lastPayload.tickerBannerEnabled, true)
 
-		const activeState = populatedState()
-		activeState.feature.tickerBannerEnabled = true
-		editor.stonks = activeState
-		tryCompare(alwaysScroll, "enabled", true)
-		mouseClick(alwaysScroll, alwaysScroll.width / 2, alwaysScroll.height / 2, Qt.LeftButton)
-		compare(dialogState.lastAction, "setTickerBannerAlwaysScroll")
-		compare(dialogState.lastPayload.tickerBannerAlwaysScroll, false)
+		placement.currentIndex = 0
+		placement.activated(0)
+		compare(dialogState.lastAction, "setTickerPresentation")
+		compare(dialogState.lastPayload.tickerPlacement, "windowTop")
+		placement.currentIndex = 1
+		placement.activated(1)
+		compare(dialogState.lastPayload.tickerPlacement, "top")
+		direction.currentIndex = 3
+		direction.activated(3)
+		compare(dialogState.lastPayload.tickerDirection, "down")
+		speed.currentIndex = 1
+		speed.activated(1)
+		compare(dialogState.lastPayload.tickerSpeed, "slow")
 	}
 
 	function init() {
@@ -114,7 +140,7 @@ TestCase {
 		const editor = loader.item
 		compare(loader.visible, true)
 		compare(editor.visible, true)
-		const tabIds = ["overview", "portfolio", "leaderboard", "following", "audit", "admin"]
+		const tabIds = ["overview", "portfolio", "leaderboard", "following", "audit", "settings", "admin"]
 		for (let index = 0; index < tabIds.length; ++index) {
 			const button = findChild(editor, "stonksTab_" + tabIds[index])
 			verify(button !== null)

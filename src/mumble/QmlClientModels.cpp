@@ -13,6 +13,8 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QRegularExpression>
@@ -27,11 +29,14 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtGui/QAction>
 #include <QtGui/QTextBlock>
+#include <QtGui/QTextBlockFormat>
 #include <QtGui/QTextCharFormat>
 #include <QtGui/QTextDocument>
 #include <QtGui/QTextDocumentFragment>
 #include <QtGui/QTextFragment>
 #include <QtGui/QTextImageFormat>
+#include <QtGui/QTextList>
+#include <QtGui/QTextListFormat>
 
 #include <algorithm>
 #include <cmath>
@@ -593,6 +598,138 @@ namespace {
 				static_cast< int >(std::clamp< qsizetype >(estimatedBytes, 1, RichBodyCacheBytes)));
 		}
 		return segments;
+	}
+
+	struct StructuredMotdDocument {
+		QVariantList segments;
+		QVariantList blocks;
+	};
+
+	QString motdBlockAlignment(const Qt::Alignment alignment) {
+		if (alignment.testFlag(Qt::AlignHCenter)) return QStringLiteral("center");
+		if (alignment.testFlag(Qt::AlignRight)) return QStringLiteral("right");
+		return QStringLiteral("left");
+	}
+
+	QString motdListMarker(const QTextBlock &block) {
+		const QTextList *list = block.textList();
+		if (!list) return {};
+		const QTextListFormat::Style style = list->format().style();
+		if (style == QTextListFormat::ListDecimal) {
+			return QString::number(list->itemNumber(block) + 1) + QLatin1Char('.');
+		}
+		return style == QTextListFormat::ListCircle ? QStringLiteral("\u25e6")
+			: style == QTextListFormat::ListSquare ? QStringLiteral("\u25aa")
+			: QStringLiteral("\u2022");
+	}
+
+	QVariantMap motdContentBlock(const QString &kind, const QVariantList &segments,
+							 const QTextBlock &sourceBlock, const int headingLevel = 0) {
+		if (segments.isEmpty()) return {};
+		QString plainText;
+		for (const QVariant &value : segments) {
+			const QVariantMap segment = value.toMap();
+			if (segment.contains(QStringLiteral("text"))) {
+				plainText += segment.value(QStringLiteral("text")).toString();
+			} else if (segment.value(QStringLiteral("kind")).toString() == QLatin1String("image")) {
+				plainText += segment.value(QStringLiteral("alt")).toString();
+			}
+		}
+
+		const QTextBlockFormat format = sourceBlock.blockFormat();
+		QVariantMap block {
+			{ QStringLiteral("kind"), kind },
+			{ QStringLiteral("segments"), segments },
+			{ QStringLiteral("plainText"), plainText.trimmed().left(4096) },
+			{ QStringLiteral("alignment"), motdBlockAlignment(format.alignment()) },
+			{ QStringLiteral("indent"), qBound(0, format.indent(), 8) }
+		};
+		if (headingLevel > 0) block.insert(QStringLiteral("headingLevel"), headingLevel);
+		if (kind == QLatin1String("list-item")) {
+			block.insert(QStringLiteral("marker"), motdListMarker(sourceBlock));
+		}
+		return block;
+	}
+
+	StructuredMotdDocument structuredMotdDocument(const QString &bodyHtml, const QString &bodyText) {
+		StructuredMotdDocument result;
+		const QString boundedHtml = bodyHtml.left(MaxRichBodyCharacters);
+		const QString fallback = bodyText.left(MaxRichBodyCharacters);
+		if (boundedHtml.trimmed().isEmpty()) return result;
+
+		QTextDocument document;
+		document.setDocumentMargin(0);
+		document.setHtml(boundedHtml);
+		qsizetype emittedCharacters = 0;
+		bool firstFlatBlock = true;
+		for (QTextBlock block = document.begin(); block.isValid()
+				&& result.blocks.size() < MaxRichBodySegments; block = block.next()) {
+			const QTextBlockFormat blockFormat = block.blockFormat();
+			const int headingLevel = qBound(0, blockFormat.headingLevel(), 6);
+			const bool listItem = block.textList() != nullptr;
+			const QString baseKind = headingLevel > 0 ? QStringLiteral("heading")
+				: listItem ? QStringLiteral("list-item")
+				: blockFormat.indent() > 0 ? QStringLiteral("quote")
+				: QStringLiteral("paragraph");
+			QVariantList textSegments;
+
+			const auto appendFlatBoundary = [&] {
+				if (!firstFlatBlock && emittedCharacters < MaxRichBodyCharacters) {
+					result.segments.push_back(richTextSegment(QStringLiteral("\n")));
+					++emittedCharacters;
+				}
+				firstFlatBlock = false;
+			};
+			const auto flushTextBlock = [&] {
+				const QVariantMap content = motdContentBlock(baseKind, textSegments, block, headingLevel);
+				if (!content.isEmpty()) {
+					appendFlatBoundary();
+					result.blocks.push_back(content);
+					for (const QVariant &segment : std::as_const(textSegments)) result.segments.push_back(segment);
+				}
+				textSegments.clear();
+			};
+
+			for (QTextBlock::iterator it = block.begin(); !it.atEnd()
+					&& result.blocks.size() < MaxRichBodySegments; ++it) {
+				const QTextFragment fragment = it.fragment();
+				if (!fragment.isValid()) continue;
+				const QVariantMap image = richImageSegment(fragment.charFormat());
+				if (!image.isEmpty()) {
+					flushTextBlock();
+					appendFlatBoundary();
+					result.blocks.push_back(motdContentBlock(
+						QStringLiteral("image"), QVariantList { image }, block));
+					result.segments.push_back(image);
+					continue;
+				}
+
+				QString text = fragment.text();
+				if (emittedCharacters + text.size() > MaxRichBodyCharacters) {
+					text.truncate(MaxRichBodyCharacters - emittedCharacters);
+				}
+				const QVariantMap segment = richTextSegment(text, fragment.charFormat());
+				if (!segment.isEmpty()) {
+					textSegments.push_back(segment);
+					emittedCharacters += segment.value(QStringLiteral("text")).toString().size();
+				}
+				if (emittedCharacters >= MaxRichBodyCharacters) break;
+			}
+			flushTextBlock();
+		}
+
+		if (result.blocks.isEmpty() && !fallback.isEmpty()) {
+			const QVariantList segments { richTextSegment(fallback) };
+			result.segments = segments;
+			result.blocks.push_back(QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("paragraph") },
+				{ QStringLiteral("segments"), segments },
+				{ QStringLiteral("plainText"), fallback.trimmed().left(4096) },
+				{ QStringLiteral("alignment"), QStringLiteral("left") },
+				{ QStringLiteral("indent"), 0 }
+			});
+		}
+		return result;
 	}
 
 	QVariantMap normalizedPreviewMetadata(const QVariant &value) {
@@ -1347,6 +1484,104 @@ namespace {
 	}
 }
 
+namespace ModernMotd {
+	namespace {
+		constexpr int MaxStoredServerStates = 64;
+
+		QJsonObject decodedServerStates(const QString &serializedStates) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(serializedStates.toUtf8(), &error);
+			if (error.error != QJsonParseError::NoError || !document.isObject()) return {};
+			return document.object().value(QStringLiteral("servers")).toObject();
+		}
+
+		QString boundedSignature(const QJsonValue &value) {
+			return value.toString().trimmed().left(256);
+		}
+	}
+
+	QString serverStateKey(const QByteArray &serverDigest, const QString &host, const quint16 port) {
+		QByteArray identity;
+		if (!serverDigest.isEmpty()) {
+			identity = QByteArrayLiteral("digest\0") + serverDigest;
+		} else {
+			const QString normalizedHost = host.trimmed().toLower();
+			if (normalizedHost.isEmpty() || port == 0) return {};
+			identity = QByteArrayLiteral("endpoint\0") + normalizedHost.toUtf8()
+				+ QByteArrayLiteral("\0") + QByteArray::number(port);
+		}
+		return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+	}
+
+	QVariantMap serverViewState(const QString &serializedStates, const QString &serverKey) {
+		QVariantMap state {
+			{ QStringLiteral("exists"), false },
+			{ QStringLiteral("expanded"), false },
+			{ QStringLiteral("dismissedSignature"), QString() },
+			{ QStringLiteral("lastSeenSignature"), QString() }
+		};
+		const QString normalizedKey = serverKey.trimmed();
+		if (normalizedKey.isEmpty()) return state;
+
+		const QJsonObject servers = decodedServerStates(serializedStates);
+		const QJsonValue entryValue = servers.value(normalizedKey);
+		if (!entryValue.isObject()) return state;
+		const QJsonObject entry = entryValue.toObject();
+		state.insert(QStringLiteral("exists"), true);
+		state.insert(QStringLiteral("expanded"), entry.value(QStringLiteral("expanded")).toBool());
+		state.insert(QStringLiteral("dismissedSignature"),
+					 boundedSignature(entry.value(QStringLiteral("dismissedSignature"))));
+		state.insert(QStringLiteral("lastSeenSignature"),
+					 boundedSignature(entry.value(QStringLiteral("lastSeenSignature"))));
+		return state;
+	}
+
+	QString withServerViewState(const QString &serializedStates, const QString &serverKey,
+							const QVariantMap &state) {
+		const QString normalizedKey = serverKey.trimmed();
+		if (normalizedKey.isEmpty()) return serializedStates;
+
+		QJsonObject servers = decodedServerStates(serializedStates);
+		QJsonObject entry;
+		entry.insert(QStringLiteral("expanded"), state.value(QStringLiteral("expanded")).toBool());
+		entry.insert(QStringLiteral("dismissedSignature"),
+					 state.value(QStringLiteral("dismissedSignature")).toString().trimmed().left(256));
+		entry.insert(QStringLiteral("lastSeenSignature"),
+					 state.value(QStringLiteral("lastSeenSignature")).toString().trimmed().left(256));
+		entry.insert(QStringLiteral("updatedAt"), QDateTime::currentMSecsSinceEpoch());
+		servers.insert(normalizedKey, entry);
+
+		if (servers.size() > MaxStoredServerStates) {
+			QList< QPair< QString, qint64 > > byAge;
+			byAge.reserve(servers.size());
+			const QJsonObject &serverEntries = servers;
+			for (auto it = serverEntries.begin(); it != serverEntries.end(); ++it) {
+				byAge.push_back(qMakePair(it.key(), static_cast< qint64 >(
+					it.value().toObject().value(QStringLiteral("updatedAt")).toVariant().toLongLong())));
+			}
+			std::sort(byAge.begin(), byAge.end(), [](const auto &lhs, const auto &rhs) {
+				return lhs.second == rhs.second ? lhs.first < rhs.first : lhs.second < rhs.second;
+			});
+			for (int index = 0; index < byAge.size() - MaxStoredServerStates; ++index) {
+				servers.remove(byAge.at(index).first);
+			}
+		}
+
+		QJsonObject root;
+		root.insert(QStringLiteral("version"), 1);
+		root.insert(QStringLiteral("servers"), servers);
+		return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+	}
+
+	QVariantList documentBlocks(const QString &html) {
+		const QString bounded = html.left(MaxRichBodyCharacters);
+		if (bounded.trimmed().isEmpty()) return {};
+		const QString plainText =
+			QTextDocumentFragment::fromHtml(bounded).toPlainText().left(MaxRichBodyCharacters);
+		return structuredMotdDocument(bounded, plainText).blocks;
+	}
+}
+
 ClientSessionController::ClientSessionController(QObject *parent) : QObject(parent) {
 }
 
@@ -1371,6 +1606,7 @@ QVariantMap ClientSessionController::updateBanner() const { return m_updateBanne
 QVariantMap ClientSessionController::stonks() const { return m_stonks; }
 QString ClientSessionController::motdHtml() const { return m_motdHtml; }
 QVariantList ClientSessionController::motdSegments() const { return m_motdSegments; }
+QVariantList ClientSessionController::motdBlocks() const { return m_motdBlocks; }
 QString ClientSessionController::motdSummary() const { return m_motdSummary; }
 bool ClientSessionController::hasMotd() const { return m_hasMotd; }
 bool ClientSessionController::motdExpanded() const { return m_motdExpanded; }
@@ -1469,26 +1705,33 @@ void ClientSessionController::setMotdContent(const QString &html, const QString 
 		m_motdSegments.clear();
 		emit motdSegmentsChanged();
 	}
+	if (!m_motdBlocks.isEmpty()) {
+		m_motdBlocks.clear();
+		emit motdBlocksChanged();
+	}
 	recomputeMotdDerivedState();
 	if (bounded.trimmed().isEmpty()) return;
 
 	const quint64 generation = m_motdParseGeneration;
-	auto *watcher = new QFutureWatcher< QVariantList >(this);
-	connect(watcher, &QFutureWatcher< QVariantList >::finished, this,
+	auto *watcher = new QFutureWatcher< StructuredMotdDocument >(this);
+	connect(watcher, &QFutureWatcher< StructuredMotdDocument >::finished, this,
 		[this, watcher, generation, bounded] {
-			const QVariantList segments = watcher->result();
+			const StructuredMotdDocument document = watcher->result();
 			watcher->deleteLater();
-			if (generation != m_motdParseGeneration || m_motdHtml != bounded
-				|| m_motdSegments == segments) {
-				return;
+			if (generation != m_motdParseGeneration || m_motdHtml != bounded) return;
+			if (m_motdSegments != document.segments) {
+				m_motdSegments = document.segments;
+				emit motdSegmentsChanged();
 			}
-			m_motdSegments = segments;
-			emit motdSegmentsChanged();
+			if (m_motdBlocks != document.blocks) {
+				m_motdBlocks = document.blocks;
+				emit motdBlocksChanged();
+			}
 		});
 	watcher->setFuture(QtConcurrent::run(&richBodyThreadPool(), [bounded] {
 		const QString plainText =
 			QTextDocumentFragment::fromHtml(bounded).toPlainText().left(MaxRichBodyCharacters);
-		return structuredMessageBody(bounded, plainText);
+		return structuredMotdDocument(bounded, plainText);
 	}));
 }
 void ClientSessionController::setMotdSummary(const QString &value) { SET_VALUE(m_motdSummary, motdSummaryChanged); }
@@ -2051,6 +2294,13 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 			 { QStringLiteral("source"), source } };
 }
 
+void RoomModel::clearConnectionState() {
+	m_voiceRoomStates.clear();
+	m_textRoomStates.clear();
+	m_directMessageStates.clear();
+	synchronizeAllRows();
+}
+
 void RoomModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	m_voiceRoomStates = voiceRooms;
@@ -2354,6 +2604,14 @@ void NavigationRailModel::setRoomExpanded(const QString &scopeToken, const bool 
 void NavigationRailModel::toggleRoomExpanded(const QString &scopeToken) {
 	const QString token = scopeToken.trimmed();
 	if (!token.isEmpty()) setRoomExpanded(token, !isRoomExpanded(token));
+}
+
+void NavigationRailModel::clearConnectionState() {
+	m_voiceRoomStates.clear();
+	m_textRoomStates.clear();
+	m_directMessageStates.clear();
+	m_collapsedRoomScopes.clear();
+	synchronizeAllRows();
 }
 
 QVariantMap NavigationRailModel::navigationRoomRow(const QVariantMap &room, const QString &kind) const {

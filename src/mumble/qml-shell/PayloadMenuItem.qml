@@ -94,8 +94,12 @@ import Mumble.Theme 1.0
 	}
 
 	onHoveredChanged: {
-		if (hovered && item.menu && item.menu["setPointerNavigationActive"] !== undefined)
-			item.menu["setPointerNavigationActive"](true)
+		if (hovered && item.menu) {
+			if (item.menu["setPointerNavigationActive"] !== undefined)
+				item.menu["setPointerNavigationActive"](true)
+			if (item.menu["activatePointerItem"] !== undefined)
+				item.menu["activatePointerItem"](item)
+		}
 		if (!item.hasSubmenu)
 			return
 		// The menu tree and its delegates are already materialized. Opening here is
@@ -107,7 +111,8 @@ import Mumble.Theme 1.0
 	background: Rectangle {
 		id: focusBackground
 		objectName: "payloadFocusBackground"
-		color: (item.highlighted || item.down) && item.enabled ? Theme.popupSelected : "transparent"
+		color: (item.hovered || item.highlighted || item.down) && item.enabled
+			? Theme.popupSelected : "transparent"
 		border.color: item.activeFocus && item.enabled
 			&& !(item.menu && item.menu.pointerNavigationActive)
 			? Theme.focus : "transparent"

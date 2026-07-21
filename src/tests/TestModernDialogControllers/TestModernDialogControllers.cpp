@@ -127,6 +127,8 @@ private slots:
 	void productCertificateDialogUsesProductionContract();
 	void productScreenShareEditorUsesProductionContract();
 	void settingsControllerForcesModernAndAppliesDraft();
+	void settingsControllerPublishesLiveStonksAndPermissionGatedAdministration();
+	void settingsControllerPublishesPermissionAwareMotdEditor();
 	void settingsAppearanceAutoAccentTracksDraftTheme();
 	void settingsAppearancePreviewCommitsAndRollsBack();
 	void settingsControllerEditsShortcutDataAndTargets();
@@ -423,7 +425,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(state.value(QStringLiteral("preventBackdropClose")).toBool(), true);
 	const QStringList productionSettingsPages {
 		QStringLiteral("audioInput"), QStringLiteral("audioOutput"), QStringLiteral("look"),
-		QStringLiteral("ui"), QStringLiteral("messages"), QStringLiteral("keys"),
+		QStringLiteral("ui"), QStringLiteral("messages"), QStringLiteral("stonks"), QStringLiteral("keys"),
 		QStringLiteral("network"), QStringLiteral("screenShare"), QStringLiteral("plugins"),
 		QStringLiteral("about")
 	};
@@ -510,6 +512,26 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 		return pageController.state().value(QStringLiteral("sections")).toList();
 	};
 
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	Settings wasapiSettings          = settings;
+	wasapiSettings.qsAudioOutput     = QStringLiteral("WASAPI");
+	ModernSettingsController wasapiController;
+	wasapiController.open(wasapiSettings, QStringLiteral("audioOutput"));
+	const QVariantMap latencyField = findSettingsFieldById(
+		wasapiController.state().value(QStringLiteral("sections")).toList(),
+		QStringLiteral("audio.wasapiLatencyProfile"));
+	QVERIFY(!latencyField.isEmpty());
+	QVERIFY(latencyField.value(QStringLiteral("tooltip")).toString().contains(QStringLiteral("server ping")));
+	QVERIFY(latencyField.value(QStringLiteral("tooltip")).toString().contains(QStringLiteral("exclusive mode")));
+	const QVariantList latencyOptions = latencyField.value(QStringLiteral("options")).toList();
+	QCOMPARE(latencyOptions.size(), 3);
+	QVERIFY(latencyOptions.at(0).toMap().value(QStringLiteral("label")).toString().contains(
+		QStringLiteral("recommended")));
+	for (const QVariant &latencyOption : latencyOptions) {
+		QVERIFY(latencyOption.toMap().value(QStringLiteral("hint")).toString().size() > 100);
+	}
+#endif
+
 	ModernSettingsController keyController;
 	keyController.open(settings, QStringLiteral("keys"));
 	QCOMPARE(keyController.activePage(), QStringLiteral("keys"));
@@ -586,20 +608,11 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 				 .toString(),
 			 QStringLiteral("about.openQt"));
 	const QString tickerEnabledFieldID = QStringLiteral("look.modernTickerBannerEnabled");
-	const QString tickerScrollFieldID  = QStringLiteral("look.modernTickerAlwaysScroll");
 	const QVariantMap defaultTickerEnabledField =
 		findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerEnabledFieldID);
-	const QVariantMap defaultTickerScrollField =
-		findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerScrollFieldID);
-	QVERIFY(!defaultTickerEnabledField.isEmpty());
-	QVERIFY(!defaultTickerScrollField.isEmpty());
-	QCOMPARE(defaultTickerEnabledField.value(QStringLiteral("value")).toBool(), false);
-	QCOMPARE(defaultTickerScrollField.value(QStringLiteral("value")).toBool(), true);
-	QCOMPARE(defaultTickerScrollField.value(QStringLiteral("enabled"), true).toBool(), false);
+	QVERIFY(defaultTickerEnabledField.isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerEnabledFieldID).isEmpty());
-	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerScrollFieldID).isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerEnabledFieldID).isEmpty());
-	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerScrollFieldID).isEmpty());
 	const QVariantMap reconnectLastChannelField =
 		findSettingsFieldById(settingsPageSections(QStringLiteral("network")),
 							  QStringLiteral("network.reconnectToLastChannel"));
@@ -658,11 +671,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	tweakController.updateField(QStringLiteral("look.modernClassicUserIcons"), true);
 	tweakController.updateField(QStringLiteral("look.modernRailSide"), QStringLiteral("left"));
 	tweakController.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("rose"));
-	tweakController.updateField(QStringLiteral("look.modernTickerBannerEnabled"), false);
-	tweakController.updateField(QStringLiteral("look.modernTickerAlwaysScroll"), true);
 	const QVariantMap uiTweaks = tweakController.state().value(QStringLiteral("uiTweaks")).toMap();
-	const QVariantMap disabledTickerScrollField =
-		findSettingsFieldById(tweakController.state().value(QStringLiteral("sections")).toList(), tickerScrollFieldID);
 	QCOMPARE(uiTweaks.value(QStringLiteral("theme")).toString(), QStringLiteral("latte"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("density")).toString(), QStringLiteral("compact"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("userIcons")).toString(), QStringLiteral("classic"));
@@ -670,8 +679,9 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(uiTweaks.value(QStringLiteral("railSide")).toString(), QStringLiteral("left"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerEnabled")).toBool(), false);
-	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool(), true);
-	QCOMPARE(disabledTickerScrollField.value(QStringLiteral("enabled"), true).toBool(), false);
+	QCOMPARE(uiTweaks.value(QStringLiteral("tickerPlacement")).toString(), QStringLiteral("bottom"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("tickerDirection")).toString(), QStringLiteral("left"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("tickerSpeed")).toString(), QStringLiteral("normal"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("rose"));
 
@@ -722,11 +732,18 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	audioInputSettings.atTransmit      = Settings::Continuous;
 	audioInputSettings.vsVAD           = Settings::SignalToNoise;
 	audioInputSettings.noiseCancelMode = Settings::NoiseCancelOff;
+	controller.open(audioInputSettings, QStringLiteral("AudioInput"), true);
+	const QVariantMap audioInputOnboarding = controller.state();
+	QCOMPARE(audioInputOnboarding.value(QStringLiteral("initialFocusId")).toString(),
+			 QStringLiteral("voiceMeterCalibration_audio.inputMeter"));
+	QVERIFY(audioInputOnboarding.value(QStringLiteral("subtitle")).toString().contains(
+		QLatin1String("choose how others hear you")));
 	controller.open(audioInputSettings, QStringLiteral("AudioInput"));
 	QCOMPARE(controller.activePage(), QStringLiteral("audioInput"));
 	const QVariantList audioInputSections = controller.state().value(QStringLiteral("sections")).toList();
 	bool foundInputSignalSection          = false;
-	bool foundInputMeterInVoiceActivation = false;
+	bool foundInputMeterInQuickSetup      = false;
+	bool foundEnhancementCalibration      = false;
 	bool foundDetectionMethodField        = false;
 	bool foundInputGateField              = false;
 	bool foundManualStopThreshold         = false;
@@ -741,26 +758,21 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 		}
 		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
 			const QVariantMap field = fieldValue.toMap();
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Quick setup")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
-				foundInputMeterInVoiceActivation =
+				foundInputMeterInQuickSetup =
 					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
 					&& field.value(QStringLiteral("calibrationActionId")).toString()
 						   == QLatin1String("finishAudioSetupWizard")
 					&& field.value(QStringLiteral("calibrationLabel")).toString()
-						   == QLatin1String("Use recommended settings")
+						   == QLatin1String("Start guided setup")
 					&& field.value(QStringLiteral("calibrationState")).toString() == QLatin1String("idle")
-					&& field.contains(QStringLiteral("maxAmplification"))
-					&& field.contains(QStringLiteral("noiseCancelMode"))
 					&& field.contains(QStringLiteral("inputGateMode"))
-					&& field.contains(QStringLiteral("neuralCleanupAvailable"))
-					&& field.value(QStringLiteral("recommendedVadSource")).toInt() == Settings::Hybrid
-					&& field.value(QStringLiteral("recommendedInputGateMode")).toInt() == Settings::InputGateBalanced
-					&& field.contains(QStringLiteral("recommendedNoiseCancelMode"))
-					&& field.contains(QStringLiteral("recommendedMaxAmplification"))
+					&& field.value(QStringLiteral("recommendedVadSource")).toInt() == Settings::SignalToNoise
+					&& field.value(QStringLiteral("recommendedInputGateMode")).toInt() == Settings::InputGateOff
 					&& !field.value(QStringLiteral("calibrationStatusText")).toString().trimmed().isEmpty();
 			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.vadSource")) {
 				const QVariantList options = field.value(QStringLiteral("options")).toList();
 				bool optionsHaveHints       = options.size() == 3;
@@ -781,7 +793,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 					&& optionsHaveHints
 					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("Speech + volume"));
 			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputGateMode")) {
 				const QVariantList options = field.value(QStringLiteral("options")).toList();
 				bool optionsHaveHints       = options.size() == 3;
@@ -796,7 +808,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 					&& field.value(QStringLiteral("value")).toInt() == Settings::InputGateOff && optionsHaveHints
 					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("original behavior"));
 			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")) {
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Manual voice detection")) {
 				const QString fieldID = field.value(QStringLiteral("id")).toString();
 				const bool directlyVisible = !field.value(QStringLiteral("advanced"), false).toBool()
 					&& field.value(QStringLiteral("type")).toString() != QLatin1String("hidden");
@@ -811,7 +823,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 						&& field.value(QStringLiteral("label")).toString() == QLatin1String("Release delay");
 				}
 			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Audio processing")
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Microphone processing")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelMode")) {
 				const QVariantList options = field.value(QStringLiteral("options")).toList();
 				bool optionsHaveHints       = options.size() == 4;
@@ -822,14 +834,26 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 				}
 				foundNoiseCancelOptionHints = optionsHaveHints;
 			}
-			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Audio processing")
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Microphone processing")
 				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelBackend")) {
 				foundHiddenNeuralCleanupFields = field.value(QStringLiteral("type")).toString() == QLatin1String("hidden");
+			}
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Quick setup")
+				&& field.value(QStringLiteral("id")).toString()
+					   == QLatin1String("audio.inputEnhancementCalibration")) {
+				foundEnhancementCalibration =
+					field.value(QStringLiteral("type")).toString()
+						   == QLatin1String("inputEnhancementCalibration")
+					&& !field.value(QStringLiteral("inputEnhancementCalibrationAvailable")).toBool()
+					&& field.value(QStringLiteral("inputEnhancementCalibrationUnavailableReason"))
+						   .toString()
+						   .contains(QLatin1String("Start the selected input device"));
 			}
 		}
 	}
 	QVERIFY(!foundInputSignalSection);
-	QVERIFY(foundInputMeterInVoiceActivation);
+	QVERIFY(foundInputMeterInQuickSetup);
+	QVERIFY(foundEnhancementCalibration);
 	QVERIFY(foundDetectionMethodField);
 	QVERIFY(foundInputGateField);
 	QVERIFY(foundManualStopThreshold);
@@ -912,6 +936,199 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(qFuzzyCompare(audioInputResult.settingsToApply->fVADmax, 0.70f));
 	QCOMPARE(audioInputResult.accepted, true);
 	QCOMPARE(audioInputResult.closeDialog, true);
+}
+
+void TestModernDialogControllers::settingsControllerPublishesLiveStonksAndPermissionGatedAdministration() {
+	auto findField = [](const QVariantList &sections, const QString &id) {
+		for (const QVariant &sectionValue : sections) {
+			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("id")).toString() == id) {
+					return field;
+				}
+			}
+		}
+		return QVariantMap();
+	};
+
+	Settings settings;
+	QCOMPARE(settings.bModernShellTickerBannerEnabled, false);
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("Stonks"));
+	QCOMPARE(controller.activePage(), QStringLiteral("stonks"));
+	QVariantList sections = controller.state().value(QStringLiteral("sections")).toList();
+	QCOMPARE(findField(sections, QStringLiteral("stonks.client.enabled")).value(QStringLiteral("value")).toBool(),
+			 false);
+	const QVariantMap placementField = findField(sections, QStringLiteral("stonks.client.placement"));
+	QCOMPARE(placementField.value(QStringLiteral("value")).toString(), QStringLiteral("bottom"));
+	QCOMPARE(placementField.value(QStringLiteral("options")).toList().size(), 4);
+	QCOMPARE(placementField.value(QStringLiteral("options")).toList().at(0).toMap().value(QStringLiteral("value"))
+				 .toString(),
+			 QStringLiteral("windowTop"));
+	QCOMPARE(findField(sections, QStringLiteral("stonks.client.direction")).value(QStringLiteral("value")).toString(),
+			 QStringLiteral("left"));
+	QCOMPARE(findField(sections, QStringLiteral("stonks.client.speed")).value(QStringLiteral("value")).toString(),
+			 QStringLiteral("normal"));
+	QVERIFY(findField(sections, QStringLiteral("stonks.server.enabled")).isEmpty());
+	const QVariantMap disconnectedPortfolio =
+		findField(sections, QStringLiteral("stonks.client.openPortfolio"));
+	QCOMPARE(disconnectedPortfolio.value(QStringLiteral("actionId")).toString(),
+			 QStringLiteral("stonks.openPortfolio"));
+	QCOMPARE(disconnectedPortfolio.value(QStringLiteral("enabled")).toBool(), false);
+
+	const ModernSettingsController::ActionResult liveResult = controller.invokeAction(
+		QStringLiteral("stonks.updateClient"),
+		QVariantMap { { QStringLiteral("fieldId"), QStringLiteral("stonks.client.enabled") },
+					  { QStringLiteral("value"), true } });
+	QCOMPARE(liveResult.externalActionID, QStringLiteral("stonks.updateClient"));
+	QCOMPARE(liveResult.externalActionPayload.value(QStringLiteral("tickerBannerEnabled")).toBool(), true);
+	QCOMPARE(controller.draft().bModernShellTickerBannerEnabled, true);
+	const ModernSettingsController::ActionResult placementResult = controller.invokeAction(
+		QStringLiteral("stonks.updateClient"),
+		QVariantMap { { QStringLiteral("fieldId"), QStringLiteral("stonks.client.placement") },
+					  { QStringLiteral("value"), QStringLiteral("windowTop") } });
+	QCOMPARE(placementResult.externalActionPayload.value(QStringLiteral("tickerPlacement")).toString(),
+			 QStringLiteral("windowTop"));
+	QCOMPARE(controller.draft().qsModernShellTickerPlacement, QStringLiteral("windowTop"));
+	const ModernSettingsController::ActionResult cancelResult =
+		controller.invokeAction(QStringLiteral("cancel"), QVariantMap());
+	QVERIFY(!cancelResult.settingsToApply.has_value());
+
+	QVariantMap adminContext {
+		{ QStringLiteral("connected"), true },
+		{ QStringLiteral("supported"), true },
+		{ QStringLiteral("canAdmin"), true },
+		{ QStringLiteral("enabled"), true },
+		{ QStringLiteral("socialAnnouncementsEnabled"), true },
+		{ QStringLiteral("textChannelId"), 4u },
+		{ QStringLiteral("textChannels"),
+		  QVariantList { QVariantMap { { QStringLiteral("textChannelId"), 4u },
+								 { QStringLiteral("name"), QStringLiteral("markets") } } } }
+	};
+	controller.open(settings, QStringLiteral("stonks"), false, adminContext);
+	sections = controller.state().value(QStringLiteral("sections")).toList();
+	QCOMPARE(findField(sections, QStringLiteral("stonks.client.openPortfolio"))
+			 .value(QStringLiteral("enabled"))
+			 .toBool(),
+			 true);
+	QCOMPARE(findField(sections, QStringLiteral("stonks.server.enabled")).value(QStringLiteral("value")).toBool(),
+			 true);
+	QCOMPARE(findField(sections, QStringLiteral("stonks.server.textChannelId"))
+			 .value(QStringLiteral("options"))
+			 .toList()
+			 .size(),
+			 2);
+	QCOMPARE(findField(sections, QStringLiteral("stonks.server.apply")).value(QStringLiteral("actionId")).toString(),
+			 QStringLiteral("stonks.applyServer"));
+	controller.updateField(QStringLiteral("stonks.server.enabled"), false);
+	controller.updateField(QStringLiteral("stonks.server.socialAnnouncementsEnabled"), false);
+	controller.updateField(QStringLiteral("stonks.server.textChannelId"), 0u);
+	const ModernSettingsController::ActionResult serverResult =
+		controller.invokeAction(QStringLiteral("stonks.applyServer"), QVariantMap());
+	QCOMPARE(serverResult.externalActionID, QStringLiteral("stonks.applyServer"));
+	QCOMPARE(serverResult.externalActionPayload.value(QStringLiteral("enabled")).toBool(), false);
+	QCOMPARE(serverResult.externalActionPayload.value(QStringLiteral("socialAnnouncementsEnabled")).toBool(), false);
+	QCOMPARE(serverResult.externalActionPayload.value(QStringLiteral("textChannelId")).toUInt(), 0u);
+	const ModernSettingsController::ActionResult portfolioResult =
+		controller.invokeAction(QStringLiteral("stonks.openPortfolio"), QVariantMap());
+	QCOMPARE(portfolioResult.externalActionID, QStringLiteral("stonks.openPortfolio"));
+
+	adminContext.insert(QStringLiteral("canAdmin"), false);
+	controller.setStonksContext(adminContext);
+	QVERIFY(findField(controller.state().value(QStringLiteral("sections")).toList(),
+					  QStringLiteral("stonks.server.enabled"))
+				.isEmpty());
+	QVERIFY(!controller.invokeAction(QStringLiteral("stonks.applyServer"), QVariantMap()).stateChanged);
+
+	ModernDialogController dialog;
+	dialog.openSettings(settings, QStringLiteral("stonks"), false, adminContext);
+	const ModernDialogController::ActionResult denied =
+		dialog.invokeAction(QStringLiteral("settings"), QStringLiteral("stonks.applyServer"), QVariantMap());
+	QVERIFY(!denied.genericAction.has_value());
+}
+
+void TestModernDialogControllers::settingsControllerPublishesPermissionAwareMotdEditor() {
+	Settings settings;
+	ModernSettingsController controller;
+	QVariantMap readOnlyContext {
+		{ QStringLiteral("connected"), true },
+		{ QStringLiteral("available"), true },
+		{ QStringLiteral("canEdit"), false },
+		{ QStringLiteral("serverName"), QStringLiteral("Upstream Mumble") },
+		{ QStringLiteral("html"), QStringLiteral("<h2>Welcome</h2>") },
+		{ QStringLiteral("maximumLength"), 100000 }
+	};
+	controller.open(settings, QStringLiteral("motd"), false, {}, readOnlyContext);
+	QCOMPARE(controller.activePage(), QStringLiteral("motd"));
+	QVariantMap state = controller.state();
+	const QVariantMap readOnlyField = dialogField(state, QStringLiteral("motd.html"));
+	QCOMPARE(readOnlyField.value(QStringLiteral("type")).toString(), QStringLiteral("motdEditor"));
+	QCOMPARE(readOnlyField.value(QStringLiteral("value")).toString(), QStringLiteral("<h2>Welcome</h2>"));
+	QVERIFY(!readOnlyField.value(QStringLiteral("canEdit")).toBool());
+	QVERIFY(!readOnlyField.value(QStringLiteral("showSaveAction")).toBool());
+	const ModernSettingsController::ActionResult readOnlyPreview = controller.invokeAction(
+		QStringLiteral("motd.preview"), QVariantMap { { QStringLiteral("html"), QStringLiteral("ignored") } });
+	QCOMPARE(readOnlyPreview.externalActionID, QStringLiteral("motd.preview"));
+	QCOMPARE(readOnlyPreview.externalActionPayload.value(QStringLiteral("html")).toString(),
+			 QStringLiteral("<h2>Welcome</h2>"));
+	const QVariantList previewBlocks {
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("heading") },
+			{ QStringLiteral("plainText"), QStringLiteral("Welcome") } }
+	};
+	QVERIFY(controller.setMotdPreview(QStringLiteral("<h2>Welcome</h2>"), previewBlocks,
+		QStringLiteral("Welcome")));
+	const QVariantMap previewField = dialogField(controller.state(), QStringLiteral("motd.html"));
+	QCOMPARE(previewField.value(QStringLiteral("previewSourceHtml")).toString(),
+			 QStringLiteral("<h2>Welcome</h2>"));
+	QCOMPARE(previewField.value(QStringLiteral("previewBlocks")).toList(), previewBlocks);
+	controller.updateField(QStringLiteral("motd.html"), QStringLiteral("not allowed"));
+	QCOMPARE(dialogField(controller.state(), QStringLiteral("motd.html"))
+			 .value(QStringLiteral("value")).toString(), QStringLiteral("<h2>Welcome</h2>"));
+	QVERIFY(!controller.invokeAction(QStringLiteral("motd.save"), {}).stateChanged);
+
+	QVariantMap editableContext = readOnlyContext;
+	editableContext.insert(QStringLiteral("canEdit"), true);
+	controller.setMotdContext(editableContext);
+	controller.updateField(QStringLiteral("motd.html"), QStringLiteral("<p>Updated</p>"));
+	const ModernSettingsController::ActionResult save = controller.invokeAction(
+		QStringLiteral("motd.save"), QVariantMap { { QStringLiteral("html"), QStringLiteral("<p>Updated</p>") } });
+	QCOMPARE(save.externalActionID, QStringLiteral("motd.save"));
+	QCOMPARE(save.externalActionPayload.value(QStringLiteral("html")).toString(),
+			 QStringLiteral("<p>Updated</p>"));
+	const ModernSettingsController::ActionResult editablePreview = controller.invokeAction(
+		QStringLiteral("motd.preview"), QVariantMap { { QStringLiteral("html"), QStringLiteral("<p>Draft</p>") } });
+	QCOMPARE(editablePreview.externalActionID, QStringLiteral("motd.preview"));
+	QCOMPARE(editablePreview.externalActionPayload.value(QStringLiteral("html")).toString(),
+			 QStringLiteral("<p>Draft</p>"));
+
+	const ModernSettingsController::ActionResult image = controller.invokeAction(
+		QStringLiteral("motd.insertImage"), QVariantMap { { QStringLiteral("selectionStart"), 3 } });
+	QCOMPARE(image.externalActionID, QStringLiteral("motd.insertImage"));
+	QCOMPARE(image.externalActionPayload.value(QStringLiteral("fieldId")).toString(), QStringLiteral("motd.html"));
+	QCOMPARE(image.externalActionPayload.value(QStringLiteral("maximumLength")).toInt(), 100000);
+
+	ModernDialogController dialog;
+	dialog.openSettings(settings, QStringLiteral("motd"), false, {}, editableContext);
+	const ModernDialogController::ActionResult routed = dialog.invokeAction(
+		QStringLiteral("settings"), QStringLiteral("motd.save"),
+		QVariantMap { { QStringLiteral("html"), QStringLiteral("<p>Compatible</p>") } });
+	QVERIFY(routed.genericAction.has_value());
+	QCOMPARE(routed.genericAction->actionID, QStringLiteral("motd.save"));
+	QCOMPARE(routed.genericAction->payload.value(QStringLiteral("html")).toString(),
+			 QStringLiteral("<p>Compatible</p>"));
+	const ModernDialogController::ActionResult previewRouted = dialog.invokeAction(
+		QStringLiteral("settings"), QStringLiteral("motd.preview"),
+		QVariantMap { { QStringLiteral("html"), QStringLiteral("<p>Preview</p>") } });
+	QVERIFY(previewRouted.genericAction.has_value());
+	QCOMPARE(previewRouted.genericAction->actionID, QStringLiteral("motd.preview"));
+	QVERIFY(dialog.setSettingsMotdPreview(QStringLiteral("<p>Preview</p>"), previewBlocks,
+		QStringLiteral("Preview")));
+
+	controller.open(settings, QStringLiteral("motd"));
+	QCOMPARE(controller.activePage(), QStringLiteral("audioInput"));
+	for (const QVariant &pageValue : controller.state().value(QStringLiteral("pages")).toList()) {
+		QVERIFY(pageValue.toMap().value(QStringLiteral("id")).toString() != QLatin1String("motd"));
+	}
 }
 
 void TestModernDialogControllers::connectControllerPublishesVisualContract() {
@@ -2924,7 +3141,9 @@ void TestModernDialogControllers::automationWalkProbesUseDeterministicFixtures()
 	QVERIFY(stonksEnd > stonksStart);
 	const QString stonksBody = automationSource.mid(stonksStart, stonksEnd - stonksStart);
 	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerBannerEnabled\"), true")));
-	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerBannerAlwaysScroll\"), false")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerPlacement\"), QStringLiteral(\"bottom\")")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerDirection\"), QStringLiteral(\"left\")")));
+	QVERIFY(stonksBody.contains(QStringLiteral("\"tickerSpeed\"), QStringLiteral(\"normal\")")));
 	QVERIFY(stonksBody.contains(QStringLiteral("\"disableTickerAnimation\"), true")));
 	QVERIFY(stonksBody.contains(QStringLiteral("\"automationHeaderVisible\"), true")));
 	QVERIFY(stonksBody.contains(QStringLiteral("\"disableQuoteLookup\"), true")));
@@ -2932,6 +3151,11 @@ void TestModernDialogControllers::automationWalkProbesUseDeterministicFixtures()
 		QStringLiteral("stonks.disableTickerAnimation === true")));
 	QVERIFY(stonksHeaderSource.contains(
 		QStringLiteral("!automationAnimationDisabled && tickerRows.length > 0")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("objectName: \"stonksTickerTop\"")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("objectName: \"stonksTickerAboveComposer\"")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("objectName: \"stonksTickerWindowTop\"")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("objectName: \"stonksTickerBottom\"")));
+	QVERIFY(!mainQmlSource.contains(QStringLiteral("objectName: \"stonksConversationHeader\"")));
 
 	const qsizetype menuStart = mainQmlSource.indexOf(QStringLiteral("function openAutomationMenuProbe(variant)"));
 	const qsizetype menuEnd = mainQmlSource.indexOf(

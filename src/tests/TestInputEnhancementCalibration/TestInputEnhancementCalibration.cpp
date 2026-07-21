@@ -201,6 +201,23 @@ void TestInputEnhancementCalibration::localEvaluationCreatesBlindDraftAndApplyWi
 	QVERIFY(session.finishEvaluation());
 	QCOMPARE(enumValue(session.state()), enumValue(State::BlindComparison));
 	QVERIFY(!session.transmissionAllowed());
+	const CalibrationSession::BlindComparison comparison = session.blindComparison();
+	QCOMPARE(comparison.count, std::size_t{ 3 });
+	std::array< std::uint32_t, 3 > comparisonRecipeTokens = {};
+	for (std::size_t index = 0; index < comparison.count; ++index) {
+		QVERIFY(comparison.playbackTokens[index] != 0);
+		const CalibrationSession::Selection *selection =
+			session.selectionForPlaybackToken(comparison.playbackTokens[index]);
+		QVERIFY(selection);
+		comparisonRecipeTokens[index] = selection->recipeToken;
+		for (std::size_t prior = 0; prior < index; ++prior) {
+			QVERIFY(comparison.playbackTokens[index] != comparison.playbackTokens[prior]);
+		}
+	}
+	for (const std::uint32_t expectedToken : { 11U, 22U, 33U }) {
+		QVERIFY(std::find(comparisonRecipeTokens.cbegin(), comparisonRecipeTokens.cend(), expectedToken)
+				!= comparisonRecipeTokens.cend());
+	}
 
 	const CalibrationSession::BlindPair pair = session.blindPair();
 	QVERIFY(pair.leftPlaybackToken != 0);
@@ -210,9 +227,6 @@ void TestInputEnhancementCalibration::localEvaluationCreatesBlindDraftAndApplyWi
 	const CalibrationSession::Selection *right = session.selectionForPlaybackToken(pair.rightPlaybackToken);
 	QVERIFY(left);
 	QVERIFY(right);
-	const std::array< std::uint32_t, 2 > finalistTokens = { left->recipeToken, right->recipeToken };
-	QVERIFY(std::find(finalistTokens.cbegin(), finalistTokens.cend(), 22U) != finalistTokens.cend());
-	QVERIFY(std::find(finalistTokens.cbegin(), finalistTokens.cend(), 33U) != finalistTokens.cend());
 
 	const CalibrationSession::Selection expected = *right;
 	QVERIFY(session.selectBlindWinner(pair.rightPlaybackToken));

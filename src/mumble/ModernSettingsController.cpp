@@ -26,6 +26,9 @@
 #include "SpeechCleanup.h"
 #include "UiTheme.h"
 #include "Version.h"
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+#	include "WASAPI.h"
+#endif
 
 #include <QtCore/QDebug>
 #include <QtCore/QCryptographicHash>
@@ -190,6 +193,71 @@ namespace {
 		return optionItem(QVariant(value), label, true, hint);
 	}
 
+	QString normalizedStonksTickerPlacement(const QVariant &value) {
+		const QString placement = value.toString().trimmed();
+		if (placement == QLatin1String("windowTop") || placement == QLatin1String("top")
+			|| placement == QLatin1String("aboveComposer")) {
+			return placement;
+		}
+		return QStringLiteral("bottom");
+	}
+
+	QString normalizedStonksTickerDirection(const QVariant &value) {
+		const QString direction = value.toString().trimmed();
+		if (direction == QLatin1String("right") || direction == QLatin1String("up")
+			|| direction == QLatin1String("down")) {
+			return direction;
+		}
+		return QStringLiteral("left");
+	}
+
+	QString normalizedStonksTickerSpeed(const QVariant &value) {
+		const QString speed = value.toString().trimmed();
+		if (speed == QLatin1String("verySlow") || speed == QLatin1String("slow")
+			|| speed == QLatin1String("fast")) {
+			return speed;
+		}
+		return QStringLiteral("normal");
+	}
+
+	QVariantMap normalizedStonksContext(const QVariantMap &context) {
+		QVariantMap normalized;
+		normalized.insert(QStringLiteral("connected"), context.value(QStringLiteral("connected")).toBool());
+		normalized.insert(QStringLiteral("supported"), context.value(QStringLiteral("supported")).toBool());
+		normalized.insert(QStringLiteral("canAdmin"), context.value(QStringLiteral("canAdmin")).toBool());
+		normalized.insert(QStringLiteral("enabled"), context.value(QStringLiteral("enabled"), true).toBool());
+		normalized.insert(QStringLiteral("socialAnnouncementsEnabled"),
+						  context.value(QStringLiteral("socialAnnouncementsEnabled"), true).toBool());
+		normalized.insert(QStringLiteral("textChannelId"), context.value(QStringLiteral("textChannelId")).toUInt());
+		normalized.insert(QStringLiteral("textChannels"), context.value(QStringLiteral("textChannels")).toList());
+		return normalized;
+	}
+
+	QVariantMap normalizedMotdContext(const QVariantMap &context) {
+		QVariantMap normalized;
+		const bool connected = context.value(QStringLiteral("connected")).toBool();
+		const bool available = connected && context.value(QStringLiteral("available"), true).toBool();
+		const int maximumLength = qBound(1024, context.value(QStringLiteral("maximumLength"), 100000).toInt(),
+									 1000000);
+		const QString html = context.value(QStringLiteral("html")).toString().left(maximumLength + 1);
+		normalized.insert(QStringLiteral("connected"), connected);
+		normalized.insert(QStringLiteral("available"), available);
+		normalized.insert(QStringLiteral("canEdit"),
+						  available && context.value(QStringLiteral("canEdit")).toBool());
+		normalized.insert(QStringLiteral("serverName"), context.value(QStringLiteral("serverName")).toString());
+		normalized.insert(QStringLiteral("html"), html);
+		normalized.insert(QStringLiteral("originalHtml"),
+						  context.value(QStringLiteral("originalHtml"), html).toString().left(maximumLength + 1));
+		normalized.insert(QStringLiteral("previewSourceHtml"),
+						  context.value(QStringLiteral("previewSourceHtml")).toString().left(maximumLength + 1));
+		normalized.insert(QStringLiteral("previewBlocks"),
+						  context.value(QStringLiteral("previewBlocks")).toList());
+		normalized.insert(QStringLiteral("previewSummary"),
+						  context.value(QStringLiteral("previewSummary")).toString().left(4096));
+		normalized.insert(QStringLiteral("maximumLength"), maximumLength);
+		return normalized;
+	}
+
 	QVariantMap fieldItem(const QString &id, const QString &label, const QString &type, const QVariant &value) {
 		QVariantMap field;
 		field.insert(QStringLiteral("id"), id);
@@ -316,10 +384,6 @@ namespace {
 			  QObject::tr("Pick the custom Modern shell accent color used when Accent is set to Custom.") },
 			{ QStringLiteral("look.modernCustomAccentStrength"),
 			  QObject::tr("Adjust how strongly the custom accent tints selected surfaces, glow, and borders.") },
-			{ QStringLiteral("look.modernTickerBannerEnabled"),
-			  QObject::tr("Show the Stonks ticker banner in the Modern conversation header.") },
-			{ QStringLiteral("look.modernTickerAlwaysScroll"),
-			  QObject::tr("Keep the Stonks ticker banner moving even when the current ticker list fits on screen.") },
 			{ QStringLiteral("look.hideInTray"),
 			  QObject::tr("Hide the taskbar window when Mumble is minimized to the system tray.") },
 			{ QStringLiteral("look.stateInTray"),
@@ -402,6 +466,8 @@ namespace {
 			  QObject::tr("Shows the live signal used by voice activation and the current stop/start thresholds.") },
 			{ QStringLiteral("audio.inputSystem"), QObject::tr("Select the audio backend used for microphone capture.") },
 			{ QStringLiteral("audio.inputDevice"), QObject::tr("Select which microphone or capture source Mumble uses.") },
+			{ QStringLiteral("audio.wasapiInputRouting"),
+			  QObject::tr("Choose whether Windows default fallback is allowed when the selected microphone disappears.") },
 			{ QStringLiteral("audio.exclusiveInput"),
 			  QObject::tr("Let Mumble take exclusive control of the input device when the backend supports it.") },
 			{ QStringLiteral("audio.transmitMode"),
@@ -468,6 +534,16 @@ namespace {
 			  QObject::tr("Undo an automatic idle mute or deafen when activity resumes.") },
 			{ QStringLiteral("audio.outputSystem"), QObject::tr("Select the audio backend used for playback.") },
 			{ QStringLiteral("audio.outputDevice"), QObject::tr("Select which speakers or headset Mumble uses.") },
+			{ QStringLiteral("audio.wasapiOutputRouting"),
+			  QObject::tr("Choose whether Windows default fallback is allowed when the selected output disappears.") },
+			{ QStringLiteral("audio.wasapiLatencyProfile"),
+			  QObject::tr(
+				  "Controls only the local Windows shared-mode audio engine period: how often WASAPI asks Mumble "
+				  "to provide or consume audio. It does not reduce server ping, codec delay, or Mumble's network "
+				  "jitter buffer, and it has no effect in exclusive mode. Shorter periods mean more frequent CPU "
+				  "wake-ups and tighter deadlines, which can increase power use and cause crackles or dropouts on "
+				  "busy systems or sensitive USB, Bluetooth, and dock drivers. Stable is recommended unless you "
+				  "have measured a real local-monitoring benefit.") },
 			{ QStringLiteral("audio.exclusiveOutput"),
 			  QObject::tr("Let Mumble take exclusive control of the output device when the backend supports it.") },
 			{ QStringLiteral("audio.outputVolume"), QObject::tr("Adjust playback volume for incoming speech.") },
@@ -734,6 +810,25 @@ namespace {
 									  QObject::tr("Experimental Auto is managed in Advanced settings.")));
 		}
 		return options;
+	}
+
+	QString inputEnhancementProfileLabel(Mumble::InputEnhancement::Profile profile) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		switch (profile) {
+			case Profile::Original:
+				return QObject::tr("Original");
+			case Profile::Light:
+				return QObject::tr("Light");
+			case Profile::Balanced:
+				return QObject::tr("Balanced");
+			case Profile::Quality:
+				return QObject::tr("Quality");
+			case Profile::VoiceFocus:
+				return QObject::tr("Voice Focus");
+			case Profile::Auto:
+				return QObject::tr("Auto");
+		}
+		return QObject::tr("Unknown");
 	}
 
 	Mumble::InputEnhancement::LegacyOverride legacyInputOverride(const Settings &settings) {
@@ -1347,6 +1442,20 @@ namespace {
 		return AudioOutputRegistrar::qmNew->value(system)->getDeviceChoices();
 	}
 
+	QList< audioDevice > deviceChoicesWithUnavailableSelection(QList< audioDevice > choices,
+																 const QVariant &selected) {
+		if (selected.toString().isEmpty()) {
+			return choices;
+		}
+		for (const audioDevice &choice : choices) {
+			if (deviceChoiceMatches(choice.second, selected)) {
+				return choices;
+			}
+		}
+		choices.prepend(audioDevice(QObject::tr("Previously selected device — unavailable"), selected));
+		return choices;
+	}
+
 	QVariantList deviceOptions(const QList< audioDevice > &choices) {
 		QVariantList options;
 		for (int i = 0; i < choices.size(); ++i) {
@@ -1363,6 +1472,90 @@ namespace {
 		}
 		return choices.isEmpty() ? -1 : 0;
 	}
+
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	ERole wasapiRole(const Settings &settings) {
+		const QString role = settings.qsWASAPIRole.trimmed().toLower();
+		if (role == QLatin1String("console")) return eConsole;
+		if (role == QLatin1String("multimedia")) return eMultimedia;
+		return eCommunications;
+	}
+
+	QVariantList wasapiRoutingOptions() {
+		return QVariantList {
+			optionItem(0, QObject::tr("Follow Windows communications device"), true,
+					   QObject::tr("Automatically follows the Windows default for Mumble's selected audio role.")),
+			optionItem(1, QObject::tr("Prefer selected device"), true,
+					   QObject::tr("Uses the selected device when available and a temporary Windows fallback otherwise.")),
+			optionItem(2, QObject::tr("Selected device only"), true,
+					   QObject::tr("Pauses this stream instead of switching to another microphone or speaker."))
+		};
+	}
+
+	int wasapiRoutingIndex(const QString &name, const bool configuredEndpointPresent) {
+		switch (Mumble::WASAPI::routingPolicyFromName(name, configuredEndpointPresent)) {
+			case Mumble::WASAPI::RoutingPolicy::FollowDefault: return 0;
+			case Mumble::WASAPI::RoutingPolicy::StrictSelected: return 2;
+			case Mumble::WASAPI::RoutingPolicy::PreferSelected:
+			default: return 1;
+		}
+	}
+
+	QVariantList wasapiLatencyOptions() {
+		return QVariantList {
+			optionItem(0, QObject::tr("Stable (recommended)"), true,
+					   QObject::tr(
+						   "Uses Mumble's traditional WASAPI shared-mode initialization and lets Windows and the driver "
+						   "keep conservative buffering. This gives audio callbacks more scheduling headroom and is the "
+						   "best default for reliability, battery life, Bluetooth devices, USB headsets, and docks.")),
+			optionItem(1, QObject::tr("Balanced"), true,
+					   QObject::tr(
+						   "Uses IAudioClient3 and requests the driver's advertised default shared-mode engine period. "
+						   "This may reduce local device buffering while retaining more margin than the minimum period. "
+						   "It causes more frequent callbacks than Stable on some drivers and automatically falls back to "
+						   "Stable when IAudioClient3 or the requested format is unsupported.")),
+			optionItem(2, QObject::tr("Minimum period (advanced)"), true,
+					   QObject::tr(
+						   "Requests the driver's minimum supported IAudioClient3 shared-mode period. This minimizes only "
+						   "the local device-buffer contribution to latency; it does not improve network delay. The tighter "
+						   "callback deadlines increase CPU wake-ups and the risk of underruns, crackles, or dropouts. Use "
+						   "it only after measuring a benefit; unsupported requests fall back to Stable."))
+		};
+	}
+
+	int wasapiLatencyIndex(const QString &name) {
+		switch (Mumble::WASAPI::latencyProfileFromName(name)) {
+			case Mumble::WASAPI::LatencyProfile::Balanced: return 1;
+			case Mumble::WASAPI::LatencyProfile::Low: return 2;
+			case Mumble::WASAPI::LatencyProfile::Stable:
+			default: return 0;
+		}
+	}
+
+	QVariantMap wasapiRuntimeStatusField(const EDataFlow flow) {
+		const Mumble::WASAPI::RuntimeState state = WASAPISystem::runtimeState(flow);
+		QString text;
+		if (state.usingFallback) {
+			text = QObject::tr("Preferred device unavailable. Currently using %1 temporarily.")
+					   .arg(state.activeDisplayName.isEmpty() ? QObject::tr("the Windows communications device")
+															  : state.activeDisplayName);
+		} else if (!state.preferredAvailable && state.policy == Mumble::WASAPI::RoutingPolicy::StrictSelected) {
+			text = QObject::tr("Selected device unavailable. This audio stream is paused by strict routing.");
+		} else if (state.reboundByFingerprint) {
+			text = QObject::tr("Reconnected to %1 after Windows assigned it a new endpoint identifier.")
+					   .arg(state.activeDisplayName);
+		} else if (!state.activeDisplayName.isEmpty()) {
+			text = QObject::tr("Currently using %1.").arg(state.activeDisplayName);
+		} else {
+			text = QObject::tr("The WASAPI stream has not selected an active device yet.");
+		}
+		if (!state.lastError.isEmpty() && !text.contains(state.lastError)) {
+			text += QLatin1Char(' ');
+			text += state.lastError;
+		}
+		return noteField(text);
+	}
+#endif
 
 	int percentFromInvertedFloat(const float value) {
 		return qBound(0, static_cast< int >(std::lround((1.0f - value) * 100.0f)), 100);
@@ -1420,18 +1613,42 @@ namespace {
 		const QString &uiError) {
 		QVariantMap field = fieldItem(QStringLiteral("audio.inputMeter"), QObject::tr("Current voice input"),
 									  QStringLiteral("voiceMeter"), 0);
-		const int currentAmplification                 = amplificationFromMinLoudness(settings.iMinLoudness);
-		const Settings::NoiseCancel recommendedCleanup = recommendedNoiseCancelMode(settings);
+		using Profile = Mumble::InputEnhancement::Profile;
+		const AudioInputPtr input = currentAudioInput();
+		// Calibrate the input that is actually running. Audio backends may fall back
+		// to their default device when a previously saved device disappears; the
+		// device selector mirrors that fallback by selecting its first choice.
+		const Mumble::InputEnhancement::DefaultPreference &preference =
+			input ? Mumble::InputEnhancement::preferenceForDevice(settings.inputEnhancement,
+														  input->inputDeviceIdentity())
+				  : currentInputEnhancementPreference(settings);
+		bool calibrationAvailable = false;
+		QString calibrationUnavailableReason;
+		if (preference.profile == Profile::Auto
+				   || Mumble::InputEnhancement::runtimeAutoAdaptationEnabled(preference)) {
+			calibrationUnavailableReason = autoCalibrationUnavailableText();
+		} else if (!input) {
+			calibrationUnavailableReason = QObject::tr("Start the selected input device before calibrating enhancement.");
+		} else if (!input->inputEnhancementHealthyForUpdate()) {
+			calibrationUnavailableReason =
+				QObject::tr("Restart or reapply a healthy input-enhancement profile before calibrating.");
+		} else if (preference.profile != Profile::Original
+				   && !input->healthyActiveInputEnhancementBinding(input->inputDeviceIdentity(), preference)) {
+			calibrationUnavailableReason =
+				QObject::tr("Apply the selected input-enhancement profile before calibrating it.");
+		} else {
+			calibrationAvailable = true;
+		}
 		field.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
 		field.insert(QStringLiteral("transmitMode"), static_cast< int >(settings.atTransmit));
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
 		field.insert(QStringLiteral("calibrationState"), QStringLiteral("idle"));
 		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("finishAudioSetupWizard"));
-		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Use recommended settings"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Start guided setup"));
 		field.insert(QStringLiteral("calibrationTooltip"),
-					 QObject::tr("Stage recommended voice detection, input gate, amplification, and cleanup settings. Apply or save to activate them."));
+					 QObject::tr("Measure room sound and normal speech, then compare suitable detection methods."));
 		field.insert(QStringLiteral("calibrationStatusText"),
-					 QObject::tr("Adjust the thresholds manually below, or run the optional enhancement calibration."));
+					 QObject::tr("Run the guided check for this microphone, or adjust detection manually below."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -1442,22 +1659,19 @@ namespace {
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
 		field.insert(QStringLiteral("voiceHold"), settings.iVoiceHold);
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
-		field.insert(QStringLiteral("maxAmplification"), currentAmplification);
-		field.insert(QStringLiteral("noiseCancelMode"), static_cast< int >(settings.noiseCancelMode));
 		field.insert(QStringLiteral("inputGateMode"), static_cast< int >(settings.inputGateMode));
-		field.insert(QStringLiteral("speexNoiseStrength"),
-					 settings.iSpeexNoiseCancelStrength == 0 ? 14 : -settings.iSpeexNoiseCancelStrength);
+		field.insert(QStringLiteral("recommendedVadSource"), static_cast< int >(Settings::SignalToNoise));
+		field.insert(QStringLiteral("recommendedInputGateMode"), static_cast< int >(Settings::InputGateOff));
 		field.insert(QStringLiteral("neuralCleanupAvailable"), hasAvailableSpeechCleanupBackend());
-		field.insert(QStringLiteral("recommendedVadSource"), static_cast< int >(Settings::Hybrid));
-		field.insert(QStringLiteral("recommendedInputGateMode"), static_cast< int >(Settings::InputGateBalanced));
-		field.insert(QStringLiteral("recommendedNoiseCancelMode"), static_cast< int >(recommendedCleanup));
-		field.insert(QStringLiteral("recommendedMaxAmplification"), currentAmplification);
+		field.insert(QStringLiteral("inputEnhancementCalibrationAvailable"), calibrationAvailable);
+		field.insert(QStringLiteral("inputEnhancementCalibrationUnavailableReason"),
+					 calibrationUnavailableReason);
 		field.insert(QStringLiteral("inputEnhancementCalibrationWorkerState"),
 					 calibrationWorkerStateName(worker.state));
 		field.insert(QStringLiteral("inputEnhancementCalibrationProgress"), worker.progressPercent);
 		field.insert(QStringLiteral("inputEnhancementCalibrationErrorText"),
 					 uiError.isEmpty() ? worker.error : uiError);
-		if (const AudioInputPtr input = currentAudioInput()) {
+		if (input) {
 			field.insert(QStringLiteral("inputEnhancementCalibrationStartActionId"),
 						 QStringLiteral("startInputEnhancementCalibration"));
 			field.insert(QStringLiteral("inputEnhancementProbationRunning"),
@@ -1499,11 +1713,31 @@ namespace {
 				}
 				if (state == Mumble::InputEnhancement::CalibrationSession::State::BlindComparison
 					|| state == Mumble::InputEnhancement::CalibrationSession::State::DraftReady) {
-					const Mumble::InputEnhancement::CalibrationSession::BlindPair pair = runtime->blindPair();
-					field.insert(QStringLiteral("inputEnhancementCalibrationLeftPlaybackToken"),
-								 QString::number(pair.leftPlaybackToken));
-					field.insert(QStringLiteral("inputEnhancementCalibrationRightPlaybackToken"),
-								 QString::number(pair.rightPlaybackToken));
+					const Mumble::InputEnhancement::CalibrationSession::BlindComparison comparison =
+						runtime->blindComparison();
+					QVariantList playbackOptions;
+					for (std::size_t index = 0; index < comparison.count; ++index) {
+						QVariantMap option;
+						option.insert(QStringLiteral("label"),
+									  QString(QChar(QLatin1Char('A').unicode() + static_cast< ushort >(index))));
+						option.insert(QStringLiteral("playbackToken"),
+									  QString::number(comparison.playbackTokens[index]));
+						playbackOptions.push_back(option);
+					}
+					field.insert(QStringLiteral("inputEnhancementCalibrationPlaybackOptions"), playbackOptions);
+					if (comparison.count >= 2) {
+						field.insert(QStringLiteral("inputEnhancementCalibrationLeftPlaybackToken"),
+									 QString::number(comparison.playbackTokens[0]));
+						field.insert(QStringLiteral("inputEnhancementCalibrationRightPlaybackToken"),
+									 QString::number(comparison.playbackTokens[1]));
+					}
+					if (state == Mumble::InputEnhancement::CalibrationSession::State::DraftReady) {
+						if (const Mumble::InputEnhancement::DefaultPreference *draftPreference =
+								runtime->draftPreference()) {
+							field.insert(QStringLiteral("inputEnhancementCalibrationSelectedProfile"),
+										 inputEnhancementProfileLabel(draftPreference->profile));
+						}
+					}
 				}
 			} else {
 				field.insert(QStringLiteral("inputEnhancementCalibrationState"),
@@ -1511,6 +1745,19 @@ namespace {
 				field.insert(QStringLiteral("inputEnhancementCalibrationTransmissionBlocked"), false);
 			}
 		}
+		return field;
+	}
+
+	QVariantMap inputEnhancementCalibrationField(
+		const Settings &settings,
+		const Mumble::InputEnhancement::CalibrationEvaluationWorker::Snapshot &worker,
+		const QString &uiError) {
+		QVariantMap field = voiceMeterField(settings, worker, uiError);
+		field.insert(QStringLiteral("id"), QStringLiteral("audio.inputEnhancementCalibration"));
+		field.insert(QStringLiteral("label"), QObject::tr("Hear what others hear"));
+		field.insert(QStringLiteral("type"), QStringLiteral("inputEnhancementCalibration"));
+		field.insert(QStringLiteral("tooltip"),
+					 QObject::tr("Record one guided sample, hear every safe processing profile after Opus, and choose your sound."));
 		return field;
 	}
 
@@ -1847,7 +2094,9 @@ namespace {
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(settings));
 		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
-		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
+		dto.insert(QStringLiteral("tickerPlacement"), settings.qsModernShellTickerPlacement);
+		dto.insert(QStringLiteral("tickerDirection"), settings.qsModernShellTickerDirection);
+		dto.insert(QStringLiteral("tickerSpeed"), settings.qsModernShellTickerSpeed);
 		return dto;
 	}
 
@@ -2567,7 +2816,8 @@ ModernSettingsController::~ModernSettingsController() {
 	m_inputEnhancementCalibrationWorker->reset();
 }
 
-void ModernSettingsController::open(const Settings &settings, const QString &pageName) {
+void ModernSettingsController::open(const Settings &settings, const QString &pageName, const bool audioInputOnboarding,
+									const QVariantMap &stonksContext, const QVariantMap &motdContext) {
 	cancelInputEnhancementCalibration();
 	m_inputEnhancementCalibrationWorker->reset();
 	m_inputEnhancementCalibrationControls.reset();
@@ -2575,6 +2825,8 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	m_inputEnhancementReadinessUiError.clear();
 	m_original = settings;
 	m_draft    = settings;
+	m_stonksContext = normalizedStonksContext(stonksContext);
+	m_motdContext   = normalizedMotdContext(motdContext);
 	m_shortcutCaptureIndex = -1;
 	m_voiceReplayPreviousTransmitMode.reset();
 	m_voiceReplayPreviousLoopMode.reset();
@@ -2582,9 +2834,33 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	m_voiceReplayPreviousMaxPacketDelay.reset();
 	m_runtimePreviewDiffersFromOriginal = false;
 	m_appearancePreviewActive = false;
+	m_audioInputOnboarding = audioInputOnboarding;
 	refreshModernThemeCatalog();
 	forceModernLayout();
 	setActivePage(pageName);
+}
+
+void ModernSettingsController::setStonksContext(const QVariantMap &stonksContext) {
+	m_stonksContext = normalizedStonksContext(stonksContext);
+}
+
+void ModernSettingsController::setMotdContext(const QVariantMap &motdContext) {
+	m_motdContext = normalizedMotdContext(motdContext);
+}
+
+bool ModernSettingsController::setMotdPreview(const QString &sourceHtml, const QVariantList &blocks,
+											  const QString &summary) {
+	const int maximumLength = m_motdContext.value(QStringLiteral("maximumLength"), 100000).toInt();
+	const QString bounded = sourceHtml.left(maximumLength + 1);
+	if (bounded != m_motdContext.value(QStringLiteral("html")).toString()) return false;
+	const bool changed = m_motdContext.value(QStringLiteral("previewSourceHtml")).toString() != bounded
+		|| m_motdContext.value(QStringLiteral("previewBlocks")).toList() != blocks
+		|| m_motdContext.value(QStringLiteral("previewSummary")).toString() != summary;
+	if (!changed) return false;
+	m_motdContext.insert(QStringLiteral("previewSourceHtml"), bounded);
+	m_motdContext.insert(QStringLiteral("previewBlocks"), blocks);
+	m_motdContext.insert(QStringLiteral("previewSummary"), summary.left(4096));
+	return true;
 }
 
 void ModernSettingsController::refreshModernThemeCatalog() {
@@ -2600,7 +2876,13 @@ QVariantMap ModernSettingsController::state() const {
 	dialog.insert(QStringLiteral("id"), QStringLiteral("settings"));
 	dialog.insert(QStringLiteral("kind"), QStringLiteral("settings"));
 	dialog.insert(QStringLiteral("title"), QObject::tr("Settings"));
-	dialog.insert(QStringLiteral("subtitle"), QString());
+	dialog.insert(QStringLiteral("subtitle"),
+				  m_audioInputOnboarding && m_activePage == QLatin1String("audioInput")
+					  ? QObject::tr("Set up your microphone, record one guided sample, and choose how others hear you.")
+					  : QString());
+	if (m_audioInputOnboarding && m_activePage == QLatin1String("audioInput")) {
+		dialog.insert(QStringLiteral("initialFocusId"), QStringLiteral("voiceMeterCalibration_audio.inputMeter"));
+	}
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("ok"));
 	dialog.insert(QStringLiteral("preventBackdropClose"), true);
 	dialog.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(m_draft, m_modernThemeCatalog));
@@ -2626,6 +2908,32 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		const QVariantMap runtimeState = value.toMap();
 		reconcilePluginLoadedState(runtimeState.value(QStringLiteral("path")).toString(),
 								 runtimeState.value(QStringLiteral("loaded")).toBool());
+	} else if (id == QLatin1String("stonks.client.enabled")) {
+		m_draft.bModernShellTickerBannerEnabled = value.toBool();
+	} else if (id == QLatin1String("stonks.client.placement")) {
+		m_draft.qsModernShellTickerPlacement = normalizedStonksTickerPlacement(value);
+	} else if (id == QLatin1String("stonks.client.direction")) {
+		m_draft.qsModernShellTickerDirection = normalizedStonksTickerDirection(value);
+	} else if (id == QLatin1String("stonks.client.speed")) {
+		m_draft.qsModernShellTickerSpeed = normalizedStonksTickerSpeed(value);
+	} else if (id == QLatin1String("stonks.server.enabled") && m_stonksContext.value(QStringLiteral("canAdmin")).toBool()) {
+		m_stonksContext.insert(QStringLiteral("enabled"), value.toBool());
+	} else if (id == QLatin1String("stonks.server.socialAnnouncementsEnabled")
+			   && m_stonksContext.value(QStringLiteral("canAdmin")).toBool()) {
+		m_stonksContext.insert(QStringLiteral("socialAnnouncementsEnabled"), value.toBool());
+	} else if (id == QLatin1String("stonks.server.textChannelId")
+			   && m_stonksContext.value(QStringLiteral("canAdmin")).toBool()) {
+		m_stonksContext.insert(QStringLiteral("textChannelId"), value.toUInt());
+	} else if (id == QLatin1String("motd.html")
+			   && m_motdContext.value(QStringLiteral("canEdit")).toBool()) {
+		const int maximumLength = m_motdContext.value(QStringLiteral("maximumLength"), 100000).toInt();
+		const QString html = value.toString().left(maximumLength + 1);
+		m_motdContext.insert(QStringLiteral("html"), html);
+		if (m_motdContext.value(QStringLiteral("previewSourceHtml")).toString() != html) {
+			m_motdContext.insert(QStringLiteral("previewSourceHtml"), QString());
+			m_motdContext.insert(QStringLiteral("previewBlocks"), QVariantList());
+			m_motdContext.insert(QStringLiteral("previewSummary"), QString());
+		}
 	} else if (id == QLatin1String("look.quitBehavior")) {
 		m_draft.quitBehavior = static_cast< QuitBehavior >(value.toInt());
 	} else if (id == QLatin1String("look.alwaysOnTop")) {
@@ -2645,10 +2953,6 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.qsModernShellCustomAccent = normalizedModernShellCustomAccent(value);
 	} else if (id == QLatin1String("look.modernCustomAccentStrength")) {
 		m_draft.iModernShellCustomAccentStrength = normalizedModernShellCustomAccentStrength(value.toInt());
-	} else if (id == QLatin1String("look.modernTickerBannerEnabled")) {
-		m_draft.bModernShellTickerBannerEnabled = value.toBool();
-	} else if (id == QLatin1String("look.modernTickerAlwaysScroll")) {
-		m_draft.bModernShellTickerBannerAlwaysScroll = value.toBool();
 	} else if (id == QLatin1String("look.hideInTray")) {
 		m_draft.bHideInTray = value.toBool();
 	} else if (id == QLatin1String("look.stateInTray")) {
@@ -2722,8 +3026,25 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (index >= 0 && index < choices.size() && AudioInputRegistrar::qmNew
 			&& AudioInputRegistrar::qmNew->contains(m_draft.qsAudioInput)) {
 			AudioInputRegistrar::qmNew->value(m_draft.qsAudioInput)->setDeviceChoice(choices.at(index).second,
-																					 m_draft);
+																			 m_draft);
 		}
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	} else if (id == QLatin1String("audio.wasapiInputRouting")) {
+		const int index = qBound(0, value.toInt(), 2);
+		const Mumble::WASAPI::RoutingPolicy policy = index == 0 ? Mumble::WASAPI::RoutingPolicy::FollowDefault
+			: index == 2 ? Mumble::WASAPI::RoutingPolicy::StrictSelected
+							 : Mumble::WASAPI::RoutingPolicy::PreferSelected;
+		m_draft.qsWASAPIInputRoutingPolicy = Mumble::WASAPI::routingPolicyName(policy);
+		if (policy == Mumble::WASAPI::RoutingPolicy::FollowDefault) {
+			m_draft.qsWASAPIInput.clear();
+			m_draft.qsWASAPIInputDeviceIdentity.clear();
+		} else if (m_draft.qsWASAPIInput.isEmpty()) {
+			const Mumble::WASAPI::DeviceDescriptor descriptor =
+				WASAPISystem::defaultDeviceDescriptor(eCapture, wasapiRole(m_draft));
+			m_draft.qsWASAPIInput = descriptor.endpointId;
+			m_draft.qsWASAPIInputDeviceIdentity = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+		}
+#endif
 	} else if (id == QLatin1String("audio.outputSystem")) {
 		const QList< QString > systems = outputSystemNames();
 		m_draft.qsAudioOutput         = systemNameAt(systems, value, m_draft.qsAudioOutput);
@@ -2736,8 +3057,30 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (index >= 0 && index < choices.size() && AudioOutputRegistrar::qmNew
 			&& AudioOutputRegistrar::qmNew->contains(m_draft.qsAudioOutput)) {
 			AudioOutputRegistrar::qmNew->value(m_draft.qsAudioOutput)->setDeviceChoice(choices.at(index).second,
-																					   m_draft);
+																			   m_draft);
 		}
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	} else if (id == QLatin1String("audio.wasapiOutputRouting")) {
+		const int index = qBound(0, value.toInt(), 2);
+		const Mumble::WASAPI::RoutingPolicy policy = index == 0 ? Mumble::WASAPI::RoutingPolicy::FollowDefault
+			: index == 2 ? Mumble::WASAPI::RoutingPolicy::StrictSelected
+							 : Mumble::WASAPI::RoutingPolicy::PreferSelected;
+		m_draft.qsWASAPIOutputRoutingPolicy = Mumble::WASAPI::routingPolicyName(policy);
+		if (policy == Mumble::WASAPI::RoutingPolicy::FollowDefault) {
+			m_draft.qsWASAPIOutput.clear();
+			m_draft.qsWASAPIOutputDeviceIdentity.clear();
+		} else if (m_draft.qsWASAPIOutput.isEmpty()) {
+			const Mumble::WASAPI::DeviceDescriptor descriptor =
+				WASAPISystem::defaultDeviceDescriptor(eRender, wasapiRole(m_draft));
+			m_draft.qsWASAPIOutput = descriptor.endpointId;
+			m_draft.qsWASAPIOutputDeviceIdentity = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+		}
+	} else if (id == QLatin1String("audio.wasapiLatencyProfile")) {
+		const int index = qBound(0, value.toInt(), 2);
+		m_draft.qsWASAPILatencyProfile = Mumble::WASAPI::latencyProfileName(
+			index == 1 ? Mumble::WASAPI::LatencyProfile::Balanced
+				: index == 2 ? Mumble::WASAPI::LatencyProfile::Low : Mumble::WASAPI::LatencyProfile::Stable);
+#endif
 	} else if (id == QLatin1String("audio.exclusiveInput")) {
 		m_draft.bExclusiveInput = value.toBool();
 	} else if (id == QLatin1String("audio.exclusiveOutput")) {
@@ -3068,6 +3411,108 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		return result;
 	}
 
+	if (action == QLatin1String("stonks.updateClient")) {
+		const QString fieldID = payload.value(QStringLiteral("fieldId")).toString().trimmed();
+		if (!fieldID.startsWith(QLatin1String("stonks.client."))
+			|| !payload.contains(QStringLiteral("value"))) {
+			result.stateChanged = false;
+			return result;
+		}
+		updateField(fieldID, payload.value(QStringLiteral("value")));
+		// These controls are intentionally immediate. Move the saved values into
+		// the reset/cancel baseline so closing Settings never rolls them back.
+		m_original.bModernShellTickerBannerEnabled = m_draft.bModernShellTickerBannerEnabled;
+		m_original.qsModernShellTickerPlacement     = m_draft.qsModernShellTickerPlacement;
+		m_original.qsModernShellTickerDirection     = m_draft.qsModernShellTickerDirection;
+		m_original.qsModernShellTickerSpeed         = m_draft.qsModernShellTickerSpeed;
+		result.externalActionID = QStringLiteral("stonks.updateClient");
+		result.externalActionPayload.insert(QStringLiteral("tickerBannerEnabled"),
+										m_draft.bModernShellTickerBannerEnabled);
+		result.externalActionPayload.insert(QStringLiteral("tickerPlacement"),
+										normalizedStonksTickerPlacement(m_draft.qsModernShellTickerPlacement));
+		result.externalActionPayload.insert(QStringLiteral("tickerDirection"),
+										normalizedStonksTickerDirection(m_draft.qsModernShellTickerDirection));
+		result.externalActionPayload.insert(QStringLiteral("tickerSpeed"),
+										normalizedStonksTickerSpeed(m_draft.qsModernShellTickerSpeed));
+		return result;
+	}
+
+	if (action == QLatin1String("stonks.openPortfolio")) {
+		result.externalActionID = QStringLiteral("stonks.openPortfolio");
+		return result;
+	}
+
+	if (action == QLatin1String("stonks.applyServer")) {
+		if (!m_stonksContext.value(QStringLiteral("connected")).toBool()
+			|| !m_stonksContext.value(QStringLiteral("supported")).toBool()
+			|| !m_stonksContext.value(QStringLiteral("canAdmin")).toBool()) {
+			result.stateChanged = false;
+			return result;
+		}
+		result.externalActionID = QStringLiteral("stonks.applyServer");
+		result.externalActionPayload.insert(QStringLiteral("enabled"),
+										m_stonksContext.value(QStringLiteral("enabled"), true).toBool());
+		result.externalActionPayload.insert(
+			QStringLiteral("socialAnnouncementsEnabled"),
+			m_stonksContext.value(QStringLiteral("socialAnnouncementsEnabled"), true).toBool());
+		result.externalActionPayload.insert(QStringLiteral("textChannelId"),
+										m_stonksContext.value(QStringLiteral("textChannelId")).toUInt());
+		return result;
+	}
+
+	if (action == QLatin1String("motd.save")) {
+		if (!m_motdContext.value(QStringLiteral("available")).toBool()
+			|| !m_motdContext.value(QStringLiteral("canEdit")).toBool()) {
+			result.stateChanged = false;
+			return result;
+		}
+		const int maximumLength = m_motdContext.value(QStringLiteral("maximumLength"), 100000).toInt();
+		const QString html = payload.value(QStringLiteral("html"),
+									  m_motdContext.value(QStringLiteral("html"))).toString();
+		if (html.size() > maximumLength) {
+			result.stateChanged = false;
+			return result;
+		}
+		m_motdContext.insert(QStringLiteral("html"), html);
+		result.externalActionID = QStringLiteral("motd.save");
+		result.externalActionPayload.insert(QStringLiteral("html"), html);
+		return result;
+	}
+
+	if (action == QLatin1String("motd.preview")) {
+		if (!m_motdContext.value(QStringLiteral("available")).toBool()) {
+			result.stateChanged = false;
+			return result;
+		}
+		const int maximumLength = m_motdContext.value(QStringLiteral("maximumLength"), 100000).toInt();
+		const QString html = m_motdContext.value(QStringLiteral("canEdit")).toBool()
+			? payload.value(QStringLiteral("html"), m_motdContext.value(QStringLiteral("html"))).toString()
+			: m_motdContext.value(QStringLiteral("html")).toString();
+		if (html.size() > maximumLength) {
+			result.stateChanged = false;
+			return result;
+		}
+		m_motdContext.insert(QStringLiteral("html"), html);
+		result.stateChanged = false;
+		result.externalActionID = QStringLiteral("motd.preview");
+		result.externalActionPayload.insert(QStringLiteral("html"), html);
+		return result;
+	}
+
+	if (action == QLatin1String("motd.insertImage")) {
+		if (!m_motdContext.value(QStringLiteral("available")).toBool()
+			|| !m_motdContext.value(QStringLiteral("canEdit")).toBool()) {
+			result.stateChanged = false;
+			return result;
+		}
+		result.externalActionID      = QStringLiteral("motd.insertImage");
+		result.externalActionPayload = payload;
+		result.externalActionPayload.insert(QStringLiteral("fieldId"), QStringLiteral("motd.html"));
+		result.externalActionPayload.insert(QStringLiteral("maximumLength"),
+										 m_motdContext.value(QStringLiteral("maximumLength"), 100000));
+		return result;
+	}
+
 	if (action == QLatin1String("cancel")) {
 		m_shortcutCaptureIndex = -1;
 		restoreVoiceReplayDraft();
@@ -3322,14 +3767,6 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			return result;
 		}
 		const Mumble::InputEnhancement::DeviceIdentity runningIdentity = input->inputDeviceIdentity();
-		const Mumble::InputEnhancement::DeviceIdentity draftIdentity =
-			draftInputEnhancementDeviceIdentity(m_draft);
-		if (!Mumble::InputEnhancement::deviceIdentitiesMatch(runningIdentity, draftIdentity)) {
-			m_inputEnhancementCalibrationUiError =
-				QObject::tr("Apply the selected input device before calibrating it.");
-			result.stateChanged = true;
-			return result;
-		}
 		m_inputEnhancementCalibrationWorker->reset();
 		m_inputEnhancementCalibrationUiError.clear();
 		const Mumble::InputEnhancement::DefaultPreference candidateControls =
@@ -3381,6 +3818,14 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		const AudioInputPtr input = currentAudioInput();
 		auto *runtime             = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
 		result.stateChanged       = runtime && runtime->advance();
+		if (result.stateChanged && runtime
+			&& runtime->state() == Mumble::InputEnhancement::CalibrationSession::State::Evaluating
+			&& m_inputEnhancementCalibrationControls) {
+			const auto candidates = Mumble::InputEnhancement::CalibrationRuntimeBridge::standardCandidateSet(
+				*m_inputEnhancementCalibrationControls);
+			m_inputEnhancementCalibrationUiError.clear();
+			m_inputEnhancementCalibrationWorker->start(input, candidates);
+		}
 		return result;
 	}
 
@@ -3388,6 +3833,14 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		const AudioInputPtr input = currentAudioInput();
 		auto *runtime             = input ? input->inputEnhancementCalibrationRuntime() : nullptr;
 		result.stateChanged       = runtime && runtime->skipOptionalLocalNoise();
+		if (result.stateChanged && runtime
+			&& runtime->state() == Mumble::InputEnhancement::CalibrationSession::State::Evaluating
+			&& m_inputEnhancementCalibrationControls) {
+			const auto candidates = Mumble::InputEnhancement::CalibrationRuntimeBridge::standardCandidateSet(
+				*m_inputEnhancementCalibrationControls);
+			m_inputEnhancementCalibrationUiError.clear();
+			m_inputEnhancementCalibrationWorker->start(input, candidates);
+		}
 		return result;
 	}
 
@@ -3608,6 +4061,14 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		refreshShortcutRestartFlag();
 		forceModernLayout();
 		result.settingsToApply = m_draft;
+		if (m_motdContext.value(QStringLiteral("available")).toBool()
+			&& m_motdContext.value(QStringLiteral("canEdit")).toBool()
+			&& m_motdContext.value(QStringLiteral("html")).toString()
+				   != m_motdContext.value(QStringLiteral("originalHtml")).toString()) {
+			result.externalActionID = QStringLiteral("motd.save");
+			result.externalActionPayload.insert(
+				QStringLiteral("html"), m_motdContext.value(QStringLiteral("html")).toString());
+		}
 		// Apply commits and persists the current baseline without closing;
 		// Done performs the same commit and then closes the dialog.
 		result.accepted        = true;
@@ -3642,19 +4103,55 @@ QVariantList ModernSettingsController::pages() const {
 		return item;
 	};
 
-	return QVariantList { page(QStringLiteral("audioInput"), QObject::tr("Audio Input")),
+	QVariantList result { page(QStringLiteral("audioInput"), QObject::tr("Audio Input")),
 						  page(QStringLiteral("audioOutput"), QObject::tr("Audio Output")),
 						  page(QStringLiteral("look"), QObject::tr("Appearance")),
 						  page(QStringLiteral("ui"), QObject::tr("User Interface")),
 						  page(QStringLiteral("messages"), QObject::tr("Messages & Sounds")),
+						  page(QStringLiteral("stonks"), QObject::tr("Stonks")) };
+	if (m_motdContext.value(QStringLiteral("available")).toBool()) {
+		result.push_back(page(QStringLiteral("motd"), QObject::tr("Server MOTD"), true));
+	}
+	result.append(QVariantList {
 						  page(QStringLiteral("keys"), QObject::tr("Key Bindings")),
 						  page(QStringLiteral("network"), QObject::tr("Network")),
 						  page(QStringLiteral("screenShare"), QObject::tr("Screen Sharing"), true),
 						  page(QStringLiteral("plugins"), QObject::tr("Plugins")),
-						  page(QStringLiteral("about"), QObject::tr("About")) };
+						  page(QStringLiteral("about"), QObject::tr("About")) });
+	return result;
 }
 
 QVariantList ModernSettingsController::sectionsForActivePage() const {
+	if (m_activePage == QLatin1String("motd")) {
+		const bool canEdit = m_motdContext.value(QStringLiteral("canEdit")).toBool();
+		QVariantMap editor = fieldItem(QStringLiteral("motd.html"), QObject::tr("Message of the day"),
+									  QStringLiteral("motdEditor"),
+									  m_motdContext.value(QStringLiteral("html")).toString());
+		editor.insert(QStringLiteral("originalValue"),
+					  m_motdContext.value(QStringLiteral("originalHtml")).toString());
+		editor.insert(QStringLiteral("canEdit"), canEdit);
+		editor.insert(QStringLiteral("enabled"), canEdit);
+		editor.insert(QStringLiteral("showSaveAction"), canEdit);
+		editor.insert(QStringLiteral("maximumLength"),
+						  m_motdContext.value(QStringLiteral("maximumLength"), 100000));
+		editor.insert(QStringLiteral("previewSourceHtml"),
+						  m_motdContext.value(QStringLiteral("previewSourceHtml")).toString());
+		editor.insert(QStringLiteral("previewBlocks"),
+						  m_motdContext.value(QStringLiteral("previewBlocks")).toList());
+		editor.insert(QStringLiteral("previewSummary"),
+						  m_motdContext.value(QStringLiteral("previewSummary")).toString());
+		editor.insert(QStringLiteral("hint"),
+					  canEdit
+						  ? QObject::tr("Uses the standard Mumble welcome_text setting; original Mumble clients receive the same MOTD.")
+						  : QObject::tr("You can view this MOTD, but Root Write permission is required to edit it."));
+		QString sectionTitle = QObject::tr("Connected server");
+		const QString serverName = m_motdContext.value(QStringLiteral("serverName")).toString().trimmed();
+		if (!serverName.isEmpty()) {
+			sectionTitle = serverName;
+		}
+		return QVariantList { sectionItem(sectionTitle, QVariantList { editor }) };
+	}
+
 	if (m_activePage == QLatin1String("ui")) {
 		return QVariantList {
 			sectionItem(QObject::tr("Window behavior"), QVariantList {
@@ -3742,6 +4239,87 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 QStringLiteral("text"), m_draft.qsTxMuteCue) }),
 			sectionItem(QObject::tr("Per-event behavior"), QVariantList { messageEventEditorField(m_draft) })
 		};
+	}
+
+	if (m_activePage == QLatin1String("stonks")) {
+		const QVariantList placementOptions {
+			optionItem(QStringLiteral("windowTop"), QObject::tr("Top of window")),
+			optionItem(QStringLiteral("top"), QObject::tr("Top of content")),
+			optionItem(QStringLiteral("aboveComposer"), QObject::tr("Above message field")),
+			optionItem(QStringLiteral("bottom"), QObject::tr("Bottom of window"))
+		};
+		const QVariantList directionOptions {
+			optionItem(QStringLiteral("left"), QObject::tr("Move left")),
+			optionItem(QStringLiteral("right"), QObject::tr("Move right")),
+			optionItem(QStringLiteral("up"), QObject::tr("Move up")),
+			optionItem(QStringLiteral("down"), QObject::tr("Move down"))
+		};
+		const QVariantList speedOptions {
+			optionItem(QStringLiteral("verySlow"), QObject::tr("Very slow")),
+			optionItem(QStringLiteral("slow"), QObject::tr("Slow")),
+			optionItem(QStringLiteral("normal"), QObject::tr("Normal")),
+			optionItem(QStringLiteral("fast"), QObject::tr("Fast"))
+		};
+		QVariantList sections {
+			sectionItem(QObject::tr("Portfolio"), QVariantList {
+				enabledField(actionField(QStringLiteral("stonks.client.openPortfolio"),
+									 QObject::tr("Portfolio, leaderboard, following, and pins"),
+									 QObject::tr("Open portfolio"), QStringLiteral("stonks.openPortfolio"),
+									 QStringLiteral("accent")),
+						 m_stonksContext.value(QStringLiteral("connected")).toBool()
+							 && m_stonksContext.value(QStringLiteral("supported")).toBool())
+			}),
+			sectionItem(QObject::tr("Ticker strip"), QVariantList {
+				boolField(QStringLiteral("stonks.client.enabled"), QObject::tr("Show the Stonks ticker"),
+						  m_draft.bModernShellTickerBannerEnabled),
+				selectField(QStringLiteral("stonks.client.placement"), QObject::tr("Placement"),
+							normalizedStonksTickerPlacement(m_draft.qsModernShellTickerPlacement),
+							placementOptions, QStringLiteral("string")),
+				selectField(QStringLiteral("stonks.client.direction"), QObject::tr("Direction"),
+							normalizedStonksTickerDirection(m_draft.qsModernShellTickerDirection),
+							directionOptions, QStringLiteral("string")),
+				selectField(QStringLiteral("stonks.client.speed"), QObject::tr("Speed"),
+							normalizedStonksTickerSpeed(m_draft.qsModernShellTickerSpeed),
+							speedOptions, QStringLiteral("string")),
+				noteField(QObject::tr("The ticker is off by default. Changes are saved and shown immediately."))
+			})
+		};
+
+		if (m_stonksContext.value(QStringLiteral("connected")).toBool()
+			&& m_stonksContext.value(QStringLiteral("supported")).toBool()
+			&& m_stonksContext.value(QStringLiteral("canAdmin")).toBool()) {
+			QVariantList channelOptions {
+				optionItem(QVariant::fromValue< uint >(0), QObject::tr("Automatic (#stonks)"))
+			};
+			for (const QVariant &channelValue : m_stonksContext.value(QStringLiteral("textChannels")).toList()) {
+				const QVariantMap channel = channelValue.toMap();
+				const uint channelID = channel.value(QStringLiteral("textChannelId")).toUInt();
+				if (channelID == 0) {
+					continue;
+				}
+				QString label = channel.value(QStringLiteral("name")).toString().trimmed();
+				if (label.isEmpty()) {
+					label = QObject::tr("Text room %1").arg(channelID);
+				} else if (!label.startsWith(QLatin1Char('#'))) {
+					label.prepend(QLatin1Char('#'));
+				}
+				channelOptions.push_back(optionItem(QVariant::fromValue< uint >(channelID), label));
+			}
+			sections.push_back(sectionItem(QObject::tr("Server administration"), QVariantList {
+				boolField(QStringLiteral("stonks.server.enabled"), QObject::tr("Enable Stonks on this server"),
+						  m_stonksContext.value(QStringLiteral("enabled"), true).toBool()),
+				boolField(QStringLiteral("stonks.server.socialAnnouncementsEnabled"),
+						  QObject::tr("Post social announcements"),
+						  m_stonksContext.value(QStringLiteral("socialAnnouncementsEnabled"), true).toBool()),
+				selectField(QStringLiteral("stonks.server.textChannelId"), QObject::tr("Announcement room"),
+							m_stonksContext.value(QStringLiteral("textChannelId")).toUInt(), channelOptions),
+				actionField(QStringLiteral("stonks.server.apply"), QObject::tr("Server configuration"),
+							QObject::tr("Apply to server"), QStringLiteral("stonks.applyServer"),
+							QStringLiteral("accent")),
+				noteField(QObject::tr("These controls are shown only when the server grants you Stonks administration permission."))
+			}));
+		}
+		return sections;
 	}
 
 	if (m_activePage == QLatin1String("keys")) {
@@ -3892,8 +4470,12 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const QList< QString > inputSystems = inputSystemNames();
 		const int inputSystem               = systemIndex(inputSystems, m_draft.qsAudioInput, AudioInputRegistrar::current);
 		const QString selectedInputSystem   = systemNameAt(inputSystems, inputSystem, m_draft.qsAudioInput);
-		const QList< audioDevice > inputDevices = inputDeviceChoices(selectedInputSystem);
-		const int inputDevice = deviceIndex(inputDevices, inputDeviceChoiceFor(m_draft, selectedInputSystem));
+		const QVariant selectedInputDevice = inputDeviceChoiceFor(m_draft, selectedInputSystem);
+		QList< audioDevice > inputDevices = inputDeviceChoices(selectedInputSystem);
+		if (selectedInputSystem == QLatin1String("WASAPI")) {
+			inputDevices = deviceChoicesWithUnavailableSelection(std::move(inputDevices), selectedInputDevice);
+		}
+		const int inputDevice = deviceIndex(inputDevices, selectedInputDevice);
 		const bool inputCanExclusive =
 			AudioInputRegistrar::qmNew && AudioInputRegistrar::qmNew->contains(selectedInputSystem)
 			&& AudioInputRegistrar::qmNew->value(selectedInputSystem)->canExclusive();
@@ -3943,40 +4525,50 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 				? autoCalibrationUnavailableText()
 				: m_inputEnhancementCalibrationUiError;
 
+		QVariantList inputQuickSetupFields {
+			selectField(QStringLiteral("audio.inputSystem"), QObject::tr("Input system"), inputSystem,
+						systemOptions(inputSystems)),
+			enabledField(selectField(QStringLiteral("audio.inputDevice"), QObject::tr("Input device"), inputDevice,
+								 deviceOptions(inputDevices)), !inputDevices.isEmpty())
+		};
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (selectedInputSystem == QLatin1String("WASAPI")) {
+			inputQuickSetupFields.push_back(selectField(
+				QStringLiteral("audio.wasapiInputRouting"), QObject::tr("When the microphone disconnects"),
+				wasapiRoutingIndex(m_draft.qsWASAPIInputRoutingPolicy, !m_draft.qsWASAPIInput.isEmpty()),
+				wasapiRoutingOptions()));
+			inputQuickSetupFields.push_back(wasapiRuntimeStatusField(eCapture));
+		}
+#endif
+		inputQuickSetupFields.push_back(advancedField(enabledField(
+			boolField(QStringLiteral("audio.exclusiveInput"), QObject::tr("Use exclusive input mode"),
+					  m_draft.bExclusiveInput), inputCanExclusive)));
+		inputQuickSetupFields.push_back(voiceMeterField(
+			m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError));
+		inputQuickSetupFields.push_back(inputEnhancementCalibrationField(
+			m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError));
+
 		return QVariantList {
-			sectionItem(QObject::tr("Input device"), QVariantList {
-											   selectField(QStringLiteral("audio.inputSystem"),
-														   QObject::tr("Input system"), inputSystem,
-														   systemOptions(inputSystems)),
-											   enabledField(selectField(QStringLiteral("audio.inputDevice"),
-																		QObject::tr("Input device"), inputDevice,
-																		deviceOptions(inputDevices)),
-															!inputDevices.isEmpty()),
-											   advancedField(enabledField(boolField(QStringLiteral("audio.exclusiveInput"),
-																				  QObject::tr("Use exclusive input mode"),
-																				  m_draft.bExclusiveInput),
-																	 inputCanExclusive)) }),
-			sectionItem(QObject::tr("Voice activation"), QVariantList {
+			sectionItem(QObject::tr("Quick setup"), inputQuickSetupFields),
+			sectionItem(QObject::tr("Transmit"), QVariantList {
 												selectField(QStringLiteral("audio.transmitMode"),
 															QObject::tr("Transmit mode"),
 															static_cast< int >(m_draft.atTransmit),
-															transmitModeOptions()),
+															transmitModeOptions()) }),
+			advancedSection(sectionItem(QObject::tr("Manual voice detection"), QVariantList {
 												hintedField(enabledField(selectField(QStringLiteral("audio.vadSource"),
 																					 QObject::tr("Detection method"),
 																					 static_cast< int >(m_draft.vsVAD),
 																					 vadSourceOptions()),
 																		 voiceActivityTransmit),
 															QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
-												advancedField(hintedField(enabledField(
+												hintedField(enabledField(
 													selectField(QStringLiteral("audio.inputGateMode"),
 																QObject::tr("Input gate"),
 																static_cast< int >(m_draft.inputGateMode),
 																inputGateModeOptions()),
 													voiceActivityTransmit),
-																		   QObject::tr("Optional extra guard after cleanup; Off keeps the original behavior."))),
-												voiceMeterField(m_draft,
-													m_inputEnhancementCalibrationWorker->snapshot(),
-													inputEnhancementCalibrationUiError),
+														   QObject::tr("Off keeps the original behavior and is recommended after guided setup; stricter gates may clip soft words.")),
 												hintedField(enabledField(
 													rangeField(QStringLiteral("audio.vadMin"),
 															   QObject::tr("Stop threshold"),
@@ -3996,7 +4588,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		  m_draft.iVoiceHold, 0, 250, 1,
 																		  QObject::tr(" frames")),
 																	 voiceActivityTransmit),
-																	   QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) }),
+																			   QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) })),
 			advancedSection(sectionItem(QObject::tr("Push-to-talk"), QVariantList {
 												enabledField(numberField(QStringLiteral("audio.doublePush"),
 																		QObject::tr("Double-push lockout"),
@@ -4028,7 +4620,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												   boolField(QStringLiteral("audio.allowLowDelay"),
 															 QObject::tr("Allow Opus low-delay mode"),
 															 m_draft.bAllowLowDelay) })),
-			sectionItem(QObject::tr("Audio processing"), QVariantList {
+			sectionItem(QObject::tr("Microphone processing"), QVariantList {
 												   advancedField(rangeField(QStringLiteral("audio.maxAmplification"),
 																				QObject::tr("Maximum amplification"),
 																				amplificationFromMinLoudness(
@@ -4050,10 +4642,10 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															  QObject::tr("Noise reduction"),
 													  inputEnhancementPreference.reduction,
 															  0, 100, 1, QStringLiteral("%")),
-												   rangeField(QStringLiteral("audio.inputEnhancementCharacter"),
-														  QObject::tr("Natural ↔ Clear"),
+													   rangeField(QStringLiteral("audio.inputEnhancementCharacter"),
+																  QObject::tr("Natural ↔ Clear"),
 													  inputEnhancementPreference.character,
-															  0, 100, 1, QStringLiteral("%")),
+														  0, 100, 1, QStringLiteral("%")),
 										   advancedField(hintedField(
 											   enabledField(
 												   boolField(QStringLiteral("audio.inputEnhancementExperimentalAuto"),
@@ -4129,8 +4721,12 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const QList< QString > outputSystems = outputSystemNames();
 		const int outputSystem = systemIndex(outputSystems, m_draft.qsAudioOutput, AudioOutputRegistrar::current);
 		const QString selectedOutputSystem = systemNameAt(outputSystems, outputSystem, m_draft.qsAudioOutput);
-		const QList< audioDevice > outputDevices = outputDeviceChoices(selectedOutputSystem);
-		const int outputDevice = deviceIndex(outputDevices, outputDeviceChoiceFor(m_draft, selectedOutputSystem));
+		const QVariant selectedOutputDevice = outputDeviceChoiceFor(m_draft, selectedOutputSystem);
+		QList< audioDevice > outputDevices = outputDeviceChoices(selectedOutputSystem);
+		if (selectedOutputSystem == QLatin1String("WASAPI")) {
+			outputDevices = deviceChoicesWithUnavailableSelection(std::move(outputDevices), selectedOutputDevice);
+		}
+		const int outputDevice = deviceIndex(outputDevices, selectedOutputDevice);
 		const AudioOutputRegistrar *outputRegistrar =
 			AudioOutputRegistrar::qmNew && AudioOutputRegistrar::qmNew->contains(selectedOutputSystem)
 				? AudioOutputRegistrar::qmNew->value(selectedOutputSystem)
@@ -4148,45 +4744,56 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const bool remoteCustomModel =
 			Mumble::SpeechCleanup::usesCustomModelPath(remoteCleanupBackend, remoteCleanupModel);
 
+		QVariantList outputDeviceFields {
+			selectField(QStringLiteral("audio.outputSystem"), QObject::tr("Output system"), outputSystem,
+						systemOptions(outputSystems)),
+			enabledField(selectField(QStringLiteral("audio.outputDevice"), QObject::tr("Output device"), outputDevice,
+								 deviceOptions(outputDevices)), !outputDevices.isEmpty())
+		};
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (selectedOutputSystem == QLatin1String("WASAPI")) {
+			outputDeviceFields.push_back(selectField(
+				QStringLiteral("audio.wasapiOutputRouting"), QObject::tr("When the output device disconnects"),
+				wasapiRoutingIndex(m_draft.qsWASAPIOutputRoutingPolicy, !m_draft.qsWASAPIOutput.isEmpty()),
+				wasapiRoutingOptions()));
+			outputDeviceFields.push_back(wasapiRuntimeStatusField(eRender));
+		}
+#endif
+		outputDeviceFields.push_back(advancedField(enabledField(
+			boolField(QStringLiteral("audio.exclusiveOutput"), QObject::tr("Use exclusive output mode"),
+					  m_draft.bExclusiveOutput), outputCanExclusive)));
+
+		QVariantList outputPlaybackFields {
+			rangeField(QStringLiteral("audio.outputVolume"), QObject::tr("Incoming speech volume"),
+					   percentFromFloat(m_draft.fVolume), 0, 200, 5, QStringLiteral("%"))
+		};
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (selectedOutputSystem == QLatin1String("WASAPI")) {
+			outputPlaybackFields.push_back(advancedField(selectField(
+				QStringLiteral("audio.wasapiLatencyProfile"), QObject::tr("WASAPI shared-mode buffer strategy"),
+				wasapiLatencyIndex(m_draft.qsWASAPILatencyProfile), wasapiLatencyOptions())));
+		}
+#endif
+		outputPlaybackFields.push_back(advancedField(enabledField(numberField(
+			QStringLiteral("audio.outputDelay"), QObject::tr("Output delay"),
+			outputDelaySliderFromSettings(m_draft.iOutputDelay), 0, 100, 1, QObject::tr(" x10 ms")),
+			outputUsesDelay)));
+		outputPlaybackFields.push_back(advancedField(numberField(
+			QStringLiteral("audio.jitterBuffer"), QObject::tr("Jitter buffer"), m_draft.iJitterBufferSize, 0, 10, 1,
+			QObject::tr(" steps"))));
+		outputPlaybackFields.push_back(advancedField(selectField(
+			QStringLiteral("audio.loopMode"), QObject::tr("Loopback mode"), static_cast< int >(m_draft.lmLoopMode),
+			loopModeOptions())));
+		outputPlaybackFields.push_back(advancedField(numberField(
+			QStringLiteral("audio.loopPacketDelay"), QObject::tr("Loopback packet delay"),
+			static_cast< int >(m_draft.dMaxPacketDelay), 0, 1000, 1, QObject::tr(" ms"))));
+		outputPlaybackFields.push_back(advancedField(rangeField(
+			QStringLiteral("audio.loopPacketLoss"), QObject::tr("Loopback packet loss"),
+			static_cast< int >(m_draft.dPacketLoss * 100.0f), 0, 100, 1, QStringLiteral("%"))));
+
 		return QVariantList {
-			sectionItem(QObject::tr("Device"), QVariantList {
-											   selectField(QStringLiteral("audio.outputSystem"),
-														   QObject::tr("Output system"), outputSystem,
-														   systemOptions(outputSystems)),
-											   enabledField(selectField(QStringLiteral("audio.outputDevice"),
-																		QObject::tr("Output device"), outputDevice,
-																		deviceOptions(outputDevices)),
-															!outputDevices.isEmpty()),
-											   advancedField(enabledField(boolField(QStringLiteral("audio.exclusiveOutput"),
-																				  QObject::tr("Use exclusive output mode"),
-																				  m_draft.bExclusiveOutput),
-																	 outputCanExclusive)) }),
-			sectionItem(QObject::tr("Playback"), QVariantList {
-												rangeField(QStringLiteral("audio.outputVolume"),
-														   QObject::tr("Incoming speech volume"),
-														   percentFromFloat(m_draft.fVolume), 0, 200, 5,
-														   QStringLiteral("%")),
-												advancedField(enabledField(numberField(
-													QStringLiteral("audio.outputDelay"), QObject::tr("Output delay"),
-													outputDelaySliderFromSettings(m_draft.iOutputDelay), 0, 100, 1,
-													QObject::tr(" x10 ms")),
-																		 outputUsesDelay)),
-												advancedField(numberField(QStringLiteral("audio.jitterBuffer"),
-																		  QObject::tr("Jitter buffer"),
-																		  m_draft.iJitterBufferSize, 0, 10, 1,
-																		  QObject::tr(" steps"))),
-												advancedField(selectField(QStringLiteral("audio.loopMode"),
-																		  QObject::tr("Loopback mode"),
-																		  static_cast< int >(m_draft.lmLoopMode),
-																		  loopModeOptions())),
-												advancedField(numberField(QStringLiteral("audio.loopPacketDelay"),
-																		  QObject::tr("Loopback packet delay"),
-																		  static_cast< int >(m_draft.dMaxPacketDelay), 0,
-																		  1000, 1, QObject::tr(" ms"))),
-												advancedField(rangeField(QStringLiteral("audio.loopPacketLoss"),
-																		 QObject::tr("Loopback packet loss"),
-																		 static_cast< int >(m_draft.dPacketLoss * 100.0f),
-																		 0, 100, 1, QStringLiteral("%"))) }),
+			sectionItem(QObject::tr("Device"), outputDeviceFields),
+			sectionItem(QObject::tr("Playback"), outputPlaybackFields),
 			advancedSection(sectionItem(QObject::tr("Attenuation"), QVariantList {
 												   enabledField(boolField(QStringLiteral("audio.attenuateOthers"),
 																		  QObject::tr("Attenuate external applications while others talk"),
@@ -4332,16 +4939,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															QStringLiteral("look.modernCustomAccentStrength"),
 															QObject::tr("Accent strength"),
 															normalizedModernShellCustomAccentStrength(
-																m_draft.iModernShellCustomAccentStrength),
-															0, 100, 1, QStringLiteral("%")),
-														!customAccentSelected),
-											boolField(QStringLiteral("look.modernTickerBannerEnabled"),
-													  QObject::tr("Show Stonks ticker banner"),
-													  m_draft.bModernShellTickerBannerEnabled),
-											enabledField(boolField(QStringLiteral("look.modernTickerAlwaysScroll"),
-																   QObject::tr("Keep ticker moving"),
-																   m_draft.bModernShellTickerBannerAlwaysScroll),
-														 m_draft.bModernShellTickerBannerEnabled) })
+																			m_draft.iModernShellCustomAccentStrength),
+																	0, 100, 1, QStringLiteral("%")),
+															!customAccentSelected) })
 	};
 }
 
@@ -4357,10 +4957,17 @@ void ModernSettingsController::setActivePage(const QString &pageID) {
 		m_activePage = QStringLiteral("audioOutput");
 	} else if (normalized == QLatin1String("PluginConfig")) {
 		m_activePage = QStringLiteral("plugins");
+	} else if (normalized == QLatin1String("Stonks") || normalized == QLatin1String("StonksConfig")) {
+		m_activePage = QStringLiteral("stonks");
+	} else if ((normalized == QLatin1String("Motd") || normalized == QLatin1String("MOTD")
+				|| normalized == QLatin1String("ServerMotd") || normalized == QLatin1String("motd"))
+			   && m_motdContext.value(QStringLiteral("available")).toBool()) {
+		m_activePage = QStringLiteral("motd");
 	} else if (normalized == QLatin1String("network") || normalized == QLatin1String("screenShare")
 			   || normalized == QLatin1String("audioInput") || normalized == QLatin1String("audioOutput")
 			   || normalized == QLatin1String("look") || normalized == QLatin1String("ui")
-			   || normalized == QLatin1String("messages") || normalized == QLatin1String("keys")
+			   || normalized == QLatin1String("messages") || normalized == QLatin1String("stonks")
+			   || normalized == QLatin1String("keys")
 			   || normalized == QLatin1String("plugins") || normalized == QLatin1String("about")) {
 		m_activePage = normalized;
 	} else if (normalized == QLatin1String("appearance")) {

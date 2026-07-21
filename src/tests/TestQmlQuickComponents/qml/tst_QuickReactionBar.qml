@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 import "qrc:/qml-shell" as Shell
 
 TestCase {
@@ -30,6 +31,7 @@ TestCase {
 
 	function test_exposes_complete_quick_reaction_set() {
 		compare(reactionBar.optionCount, 8)
+		compare(reactionBar.implicitWidth, 8 * 38 + 7 * Theme.space1)
 		compare(reactionBar.optionAt(0).modelData.emoji, "👍")
 		compare(reactionBar.optionAt(7).modelData.emoji, "🔥")
 		verify(reactionBar.optionAt(1).reacted)

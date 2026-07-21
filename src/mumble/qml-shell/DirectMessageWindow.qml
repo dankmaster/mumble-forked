@@ -716,6 +716,8 @@ Window {
 					MiddleDragScrollHandler {
 						targetFlickable: timeline
 						horizontalEnabled: false
+						onScrollingStarted: root.followTimelineTail = false
+						onScrollingEnded: root.followTimelineTail = timeline.atYEnd
 					}
 					onMovementStarted: root.followTimelineTail = false
 					onMovementEnded: root.followTimelineTail = atYEnd
@@ -1200,6 +1202,7 @@ Window {
 											Repeater {
 												model: root.normalizedSequence(messageDelegate.reactions)
 								delegate: ModernButton {
+									id: directReactionButton
 									required property var modelData
 									required property int index
 													objectName: "directMessageReaction_" + messageDelegate.stableId
@@ -1207,8 +1210,33 @@ Window {
 													dense: true
 									checkable: true
 									checked: !!modelData.selfReacted
-													text: String(modelData.emoji || "") + (Number(modelData.count || 0) > 0
-														? " " + Number(modelData.count) : "")
+									text: String(modelData.emoji || "")
+									Accessible.name: qsTr("%1 reaction, %2").arg(String(modelData.emoji || ""))
+										.arg(Number(modelData.count || 0))
+									contentItem: Row {
+										spacing: Theme.space1
+										Label {
+											anchors.verticalCenter: parent.verticalCenter
+											textFormat: Text.PlainText
+											text: String(modelData.emoji || "")
+											color: !directReactionButton.enabled ? Theme.textMuted
+												: directReactionButton.checked
+													? Theme.contrastText(directReactionButton.toneColor) : Theme.textStrong
+											font.family: Qt.platform.os === "windows" ? "Segoe UI Emoji" : ""
+											font.pixelSize: 17
+										}
+										Label {
+											anchors.verticalCenter: parent.verticalCenter
+											visible: Number(modelData.count || 0) > 0
+											textFormat: Text.PlainText
+											text: String(Number(modelData.count || 0))
+											color: !directReactionButton.enabled ? Theme.textMuted
+												: directReactionButton.checked
+													? Theme.contrastText(directReactionButton.toneColor) : Theme.textMain
+											font.pixelSize: Theme.fontCaption
+											font.weight: Font.DemiBold
+										}
+									}
 													enabled: messageDelegate.canReact
 													onClicked: controller.toggleMessageReaction(messageDelegate.stableId,
 														String(modelData.emoji || ""))
@@ -1216,27 +1244,32 @@ Window {
 											}
 										}
 
-										QuickReactionBar {
-											objectName: "directMessageQuickReactions_" + messageDelegate.stableId
-											Layout.fillWidth: true
-											expanded: messageDelegate.canReact
-												&& root.quickReactionMessageId === messageDelegate.stableId
-											activeReactions: root.normalizedSequence(messageDelegate.reactions)
-											onReactionRequested: emoji => {
-												controller.toggleMessageReaction(messageDelegate.stableId, emoji)
-												root.quickReactionMessageId = ""
-											}
-										}
-
 										RowLayout {
+											id: directMessageActionRow
+											readonly property bool quickReactionsExpanded: messageDelegate.canReact
+												&& root.quickReactionMessageId === messageDelegate.stableId
 											Layout.fillWidth: true
 											visible: messageDelegate.hasMessageActions
 											spacing: Theme.space1
 											Item { Layout.fillWidth: true }
 
+											QuickReactionBar {
+												objectName: "directMessageQuickReactions_" + messageDelegate.stableId
+												Layout.alignment: Qt.AlignVCenter
+												Layout.preferredWidth: implicitWidth
+												Layout.preferredHeight: implicitHeight
+												expanded: directMessageActionRow.quickReactionsExpanded
+												activeReactions: root.normalizedSequence(messageDelegate.reactions)
+												onReactionRequested: emoji => {
+													controller.toggleMessageReaction(messageDelegate.stableId, emoji)
+													root.quickReactionMessageId = ""
+												}
+											}
+
 											ModernIconButton {
 												objectName: "directMessageReply_" + messageDelegate.stableId
 												visible: messageDelegate.canReply
+													&& !directMessageActionRow.quickReactionsExpanded
 												dense: true
 												iconName: "reply"
 												text: qsTr("Reply")
@@ -1247,8 +1280,11 @@ Window {
 												objectName: "directMessageReact_" + messageDelegate.stableId
 												visible: messageDelegate.canReact
 												dense: true
-												iconName: "add"
-												text: qsTr("Add reaction")
+												iconName: "reaction"
+												selected: directMessageActionRow.quickReactionsExpanded
+												text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
+												ToolTip.visible: hovered
+												ToolTip.text: text
 												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
 													messageDelegate.index)
 											}
@@ -1256,19 +1292,12 @@ Window {
 											ModernIconButton {
 												objectName: "directMessageDelete_" + messageDelegate.stableId
 												visible: messageDelegate.canDelete
+													&& !directMessageActionRow.quickReactionsExpanded
 												dense: true
 												iconName: "delete"
 												tone: "danger"
 												text: qsTr("Delete")
 												onClicked: controller.deleteMessage(messageDelegate.stableId)
-											}
-
-											ModernIconButton {
-												objectName: "directMessageActions_" + messageDelegate.stableId
-												dense: true
-												iconName: "more"
-												text: qsTr("Message actions")
-												onClicked: messageDelegate.openMessageActions()
 											}
 										}
 									}
@@ -1296,7 +1325,7 @@ Window {
 							}
 							PayloadMenuItem {
 								payload: ({ "kind": "action", "id": "dm.message.react",
-									"label": qsTr("Add reaction"), "icon": "activity" })
+									"label": qsTr("Add reaction"), "icon": "reaction" })
 								visible: messageActions.targetCanReact
 								height: visible ? rowImplicitHeight : 0
 									onActionRequested: root.showQuickReactions(messageActions.targetId, -1)

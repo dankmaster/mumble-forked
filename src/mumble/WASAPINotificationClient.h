@@ -62,6 +62,9 @@ private:
 class WASAPINotificationClient : public QObject, public IMMNotificationClient {
 	Q_OBJECT
 public:
+	enum AudioConsumer : int { NoConsumer = 0, InputConsumer = 1, OutputConsumer = 2, AllConsumers = 3 };
+	Q_DECLARE_FLAGS(AudioConsumers, AudioConsumer)
+
 	/* IMMNotificationClient interface */
 	HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDevice);
 	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key);
@@ -73,14 +76,18 @@ public:
 	ULONG STDMETHODCALLTYPE Release();
 
 	/* Enlist/Unlist functionality */
-	void enlistDefaultDeviceAsUsed(LPCWSTR pwstrDefaultDevice, EDataFlow flow, ERole role);
+	void enlistDefaultDeviceAsUsed(LPCWSTR pwstrDefaultDevice, EDataFlow flow, ERole role,
+								 AudioConsumers consumers);
 	static constexpr bool defaultDeviceNotificationMatches(EDataFlow trackedFlow, ERole trackedRole,
 														 EDataFlow changedFlow, ERole changedRole) noexcept {
 		return trackedFlow == changedFlow && trackedRole == changedRole;
 	}
 
-	void enlistDeviceAsUsed(LPCWSTR pwstrDevice);
-	void enlistDeviceAsUsed(const QString &device);
+	void enlistDeviceAsUsed(LPCWSTR pwstrDevice, AudioConsumers consumers);
+	void enlistDeviceAsUsed(const QString &device, AudioConsumers consumers);
+	void setConsumersNeedingPreferredRecovery(EDataFlow flow, AudioConsumers consumers, bool needed);
+	void markConsumersHealthy(AudioConsumers consumers);
+	void requestRecovery(AudioConsumers consumers, const QString &reason, int delayMs = 750);
 
 	void unlistDevice(LPCWSTR pwstrDevice);
 
@@ -89,7 +96,7 @@ public:
 	/// MainWindow brackets Audio::start with these calls after Audio::stop has
 	/// joined the old backends. A default-device event during that generation is
 	/// dispatched once the current Audio::start has returned.
-	void beginAudioResetRebuild();
+	AudioConsumers beginAudioResetRebuild();
 	void finishAudioResetRebuild();
 
 	/**
@@ -107,25 +114,33 @@ private:
 	static WASAPINotificationClient &doGet();
 	static void doGetOnce();
 
-	void restartAudioLocked();
+	void requestRecoveryLocked(AudioConsumers consumers, const QString &reason, int delayMs);
 	static constexpr quint32 defaultDeviceNotificationKey(EDataFlow flow, ERole role) noexcept {
 		return (static_cast< quint32 >(flow) << 16U) | static_cast< quint32 >(role);
 	}
 
 	/* _fu = Non locking versions */
 	void _clearUsedDeviceLists();
-	void _enlistDeviceAsUsed(const QString &device);
+	void _clearConsumers(AudioConsumers consumers);
+	void _enlistDeviceAsUsed(const QString &device, AudioConsumers consumers);
 
-	QStringList usedDefaultDevices;
-	QStringList usedDevices;
-	QHash< quint32, QString > usedDefaultDevicesByFlowAndRole;
+	QHash< QString, AudioConsumers > usedDevices;
+	QHash< quint32, AudioConsumers > usedDefaultDevicesByFlowAndRole;
+	QHash< int, AudioConsumers > consumersNeedingPreferredRecoveryByFlow;
+	AudioConsumers queuedConsumers                    = NoConsumer;
+	AudioConsumers followupConsumers                  = NoConsumer;
+	int queuedDelayMs                                  = 750;
+	int inputRecoveryFailures                          = 0;
+	int outputRecoveryFailures                         = 0;
 	WASAPIRestartDispatchGate restartDispatchGate;
 	IMMDeviceEnumerator *pEnumerator;
 	LONG _cRef;
 	QMutex listsMutex;
 
 signals:
-	void doResetAudio();
+	void doResetAudio(int delayMs);
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(WASAPINotificationClient::AudioConsumers)
 
 #endif // WASAPINOTIFICATIONCLIENT_H_

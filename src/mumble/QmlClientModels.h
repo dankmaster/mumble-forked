@@ -22,6 +22,14 @@
 class ClientActionRegistry;
 class QTimer;
 
+namespace ModernMotd {
+	QString serverStateKey(const QByteArray &serverDigest, const QString &host, quint16 port);
+	QVariantMap serverViewState(const QString &serializedStates, const QString &serverKey);
+	QString withServerViewState(const QString &serializedStates, const QString &serverKey,
+							const QVariantMap &state);
+	QVariantList documentBlocks(const QString &html);
+}
+
 namespace QmlVisualFixtureMutation {
 	inline constexpr char OverrideProperty[] = "_mumbleVisualFixtureOverride";
 	inline constexpr char WriteProperty[] = "_mumbleVisualFixtureWrite";
@@ -49,6 +57,7 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
 	Q_PROPERTY(QVariantMap stonks READ stonks WRITE setStonks NOTIFY stonksChanged)
 	Q_PROPERTY(QVariantList motdSegments READ motdSegments NOTIFY motdSegmentsChanged)
+	Q_PROPERTY(QVariantList motdBlocks READ motdBlocks NOTIFY motdBlocksChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
 	Q_PROPERTY(bool hasMotd READ hasMotd NOTIFY hasMotdChanged)
 	Q_PROPERTY(bool motdExpanded READ motdExpanded WRITE setMotdExpanded NOTIFY motdExpandedChanged)
@@ -83,6 +92,7 @@ public:
 	QVariantMap stonks() const;
 	QString motdHtml() const;
 	QVariantList motdSegments() const;
+	QVariantList motdBlocks() const;
 	QString motdSummary() const;
 	bool hasMotd() const;
 	bool motdExpanded() const;
@@ -142,6 +152,7 @@ signals:
 	void stonksChanged();
 	void motdHtmlChanged();
 	void motdSegmentsChanged();
+	void motdBlocksChanged();
 	void motdSummaryChanged();
 	void hasMotdChanged();
 	void motdExpandedChanged();
@@ -176,6 +187,7 @@ private:
 	QString m_motdHtml;
 	QString m_motdContentSignature;
 	QVariantList m_motdSegments;
+	QVariantList m_motdBlocks;
 	quint64 m_motdParseGeneration = 0;
 	QString m_motdSummary;
 	bool m_hasMotd = false;
@@ -370,6 +382,7 @@ class RoomModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+	void clearConnectionState();
 	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
 	void replaceDirectMessageStates(const QVariantList &conversations);
 	void selectScope(const QString &scopeToken);
@@ -409,6 +422,7 @@ public:
 	Q_INVOKABLE bool isRoomExpanded(const QString &scopeToken) const;
 	Q_INVOKABLE void setRoomExpanded(const QString &scopeToken, bool expanded);
 	Q_INVOKABLE void toggleRoomExpanded(const QString &scopeToken);
+	void clearConnectionState();
 	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
 	void replaceDirectMessageStates(const QVariantList &conversations);
 	void selectScope(const QString &scopeToken);

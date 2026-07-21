@@ -481,7 +481,7 @@ function Assert-QmlAccessibilityEvidence {
 		$menuContainers = @($nodes | Where-Object {
 			([string]$_.role).Equals("PopupMenu", [StringComparison]::OrdinalIgnoreCase)
 		})
-		$expectedMenuContainerCount = if ($surface -eq "menu-app-server") { 2 } else { 1 }
+		$expectedMenuContainerCount = 1
 		if ($menuContainers.Count -ne $expectedMenuContainerCount) {
 			throw "Menu surface '$CaseId' exposes $($menuContainers.Count) PopupMenu containers; " +
 				"expected exactly $expectedMenuContainerCount."
@@ -495,13 +495,13 @@ function Assert-QmlAccessibilityEvidence {
 	}
 	$requiredSurfaceNames = switch ($surface) {
 		"menu-app-server" { @(
-			"Server", "Server information…", "Search…", "Connect to a server…",
+			"Server information…", "Search…", "Connect to a server…",
 			"Disconnect…", "Access tokens…"
 		) }
 		# The profile surface presents grouped submenus first. Nested actions such
 		# as Disconnect are covered by component/controller tests; they are not
 		# visible semantic nodes until their top-level group is opened.
-		"menu-profile" { @("Demo User", "Presence", "Account and app") }
+		"menu-profile" { @("Demo User", "Presence", "Profile") }
 		"menu-room" { @("Send room message…", "Copy room URL", "Edit room…", "Share your screen…") }
 		"menu-text-room" { @("Mark read") }
 		"menu-chat-background" { @("Send room message…", "Copy room URL") }
@@ -513,9 +513,9 @@ function Assert-QmlAccessibilityEvidence {
 			"Search this conversation", "Search messages in this conversation", "No matches",
 			"Close conversation search"
 		) }
-		"settings-audio-input" { @("Settings", "Audio Input", "Input device", "Cancel", "Apply", "Done") }
+		"settings-audio-input" { @("Settings", "Audio Input", "Quick setup", "Cancel", "Apply", "Done") }
 		"settings-audio-input-advanced" { @(
-			"Settings", "Audio Input", "Input gate", "Stop transmitting below",
+			"Settings", "Audio Input", "Input gate", "Stop threshold",
 			"Hide advanced settings", "Cancel", "Apply", "Done"
 		) }
 		"settings-audio-output" { @("Settings", "Audio Output", "Device", "Cancel", "Apply", "Done") }
@@ -795,7 +795,7 @@ function Assert-QmlAccessibilityEvidence {
 		[string]$_.name -eq "Server message of the day" -and
 		([string]$_.role).Equals("Pane", [StringComparison]::OrdinalIgnoreCase)
 	})
-	$motdShouldBeVisible = $MotdVariant -in @("expanded", "collapsed", "changed")
+	$motdShouldBeVisible = $MotdVariant -in @("expanded", "collapsed", "changed", "history-visible")
 	if ($motdShouldBeVisible -and $motdPanes.Count -ne 1) {
 		throw "MOTD case '$CaseId' does not expose exactly one welcome pane to accessibility."
 	}
@@ -810,9 +810,6 @@ function Assert-QmlAccessibilityEvidence {
 	}
 	if (-not $motdShouldBeVisible -and $motdPanes.Count -ne 0) {
 		throw "Case '$CaseId' exposes a welcome pane for MOTD variant '$MotdVariant' while it should be hidden."
-	}
-	if ($MotdVariant -eq "history-hidden" -and "Show welcome message" -notin $names) {
-		throw "History-hidden MOTD case '$CaseId' does not expose its restore affordance to accessibility."
 	}
 	if ($RichPreviewVariant -ne "none" -and -not $isMediaSurface) {
 		$matchingPreviewCards = @($nodes | Where-Object {
@@ -1274,8 +1271,8 @@ foreach ($case in $selectedCases) {
 	$expectMotd = $motdVariant -ne "none"
 	$expectMotdExpanded = $expectMotd -and $motdVariant -ne "collapsed"
 	$expectMotdChanged = $motdVariant -eq "changed"
-	$expectUserHistory = [string]$case.state -eq "connected" -and $motdVariant -in @("none", "history-hidden")
-	$expectMotdVisible = $expectMotd -and $motdVariant -ne "history-hidden"
+	$expectUserHistory = [string]$case.state -eq "connected" -and $motdVariant -in @("none", "history-visible")
+	$expectMotdVisible = $expectMotd
 	if ([bool]$applied.motd_present -ne $expectMotd -or
 		[bool]$applied.motd_expanded -ne $expectMotdExpanded -or
 		[bool]$applied.motd_changed -ne $expectMotdChanged -or

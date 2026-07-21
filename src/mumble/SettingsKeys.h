@@ -128,9 +128,14 @@ const SettingsKey ENABLE_LINK_PREVIEWS_KEY          = { "enable_link_previews" }
 const SettingsKey SCREEN_SHARE_DIAGNOSTICS_KEY      = { "screen_share_diagnostics" };
 
 // WASAPI
-const SettingsKey WASAPI_INPUT_KEY  = { "wasapi_input" };
-const SettingsKey WASAPI_OUTPUT_KEY = { "wasapi_output" };
-const SettingsKey WASAPI_ROLE_KEY   = { "wasapi_role" };
+const SettingsKey WASAPI_INPUT_KEY                   = { "wasapi_input" };
+const SettingsKey WASAPI_OUTPUT_KEY                  = { "wasapi_output" };
+const SettingsKey WASAPI_ROLE_KEY                    = { "wasapi_role" };
+const SettingsKey WASAPI_INPUT_IDENTITY_KEY          = { "wasapi_input_identity" };
+const SettingsKey WASAPI_OUTPUT_IDENTITY_KEY         = { "wasapi_output_identity" };
+const SettingsKey WASAPI_INPUT_ROUTING_POLICY_KEY    = { "wasapi_input_routing_policy" };
+const SettingsKey WASAPI_OUTPUT_ROUTING_POLICY_KEY   = { "wasapi_output_routing_policy" };
+const SettingsKey WASAPI_LATENCY_PROFILE_KEY         = { "wasapi_latency_profile" };
 
 // ALSA
 const SettingsKey ALSA_INPUT_KEY  = { "alsa_input" };
@@ -203,6 +208,7 @@ const SettingsKey MODERN_MINIMAL_VIEW_STATE_KEY           = { "minimal_view_wind
 const SettingsKey MODERN_SHELL_MOTD_EXPANDED_KEY          = { "modern_shell_motd_expanded" };
 const SettingsKey MODERN_SHELL_MOTD_DISMISSED_SIGNATURE_KEY = { "modern_shell_motd_dismissed_signature" };
 const SettingsKey MODERN_SHELL_MOTD_LAST_SEEN_SIGNATURE_KEY = { "modern_shell_motd_last_seen_signature" };
+const SettingsKey MODERN_SHELL_MOTD_SERVER_STATES_KEY     = { "modern_shell_motd_server_states" };
 const SettingsKey MODERN_SHELL_THEME_KEY                  = { "modern_shell_theme" };
 const SettingsKey MODERN_SHELL_DENSITY_KEY                = { "modern_shell_density" };
 const SettingsKey MODERN_SHELL_CLASSIC_USER_ICONS_KEY     = { "modern_shell_classic_user_icons" };
@@ -211,7 +217,9 @@ const SettingsKey MODERN_SHELL_ACCENT_KEY                 = { "modern_shell_acce
 const SettingsKey MODERN_SHELL_CUSTOM_ACCENT_KEY          = { "modern_shell_custom_accent" };
 const SettingsKey MODERN_SHELL_CUSTOM_ACCENT_STRENGTH_KEY = { "modern_shell_custom_accent_strength" };
 const SettingsKey MODERN_SHELL_TICKER_BANNER_ENABLED_KEY  = { "modern_shell_ticker_banner_enabled" };
-const SettingsKey MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY   = { "modern_shell_ticker_always_scroll" };
+const SettingsKey MODERN_SHELL_TICKER_PLACEMENT_KEY       = { "modern_shell_ticker_placement" };
+const SettingsKey MODERN_SHELL_TICKER_DIRECTION_KEY       = { "modern_shell_ticker_direction" };
+const SettingsKey MODERN_SHELL_TICKER_SPEED_KEY           = { "modern_shell_ticker_speed" };
 const SettingsKey CONFIG_GEOMETRY_KEY                     = { "config_geometry" };
 const SettingsKey IMAGE_PREVIEW_GEOMETRY_KEY              = { "image_preview_geometry" };
 const SettingsKey WINDOW_LAYOUT_KEY                       = { "window_layout" };
@@ -257,6 +265,7 @@ const SettingsKey DATABASE_LOCATION_KEY                  = { "database_location"
 const SettingsKey IMAGE_DIRECTORY_KEY                    = { "image_directory" };
 const SettingsKey SERVER_PING_CONSENT_MESSAGE_VIEWED_KEY = { "viewed_server_ping_consent_message" };
 const SettingsKey AUDIO_WIZARD_SHOWN_KEY                 = { "audio_wizard_has_been_shown" };
+const SettingsKey MODERN_AUDIO_SETUP_VERSION_KEY         = { "modern_audio_setup_version" };
 const SettingsKey CRASH_EMAIL_ADDRESS_KEY                = { "crash_report_email_address" };
 
 

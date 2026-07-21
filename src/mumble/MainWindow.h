@@ -304,6 +304,7 @@ public:
 	void scheduleQmlShellStateSyncInternal(bool immediate);
 	void runQmlShellStateSync();
 	void enterQmlShellSteadyState();
+	void clearQmlConnectionState();
 	void applyQmlStonksProbeState(QVariantMap state);
 	void applyQmlConnectionStateProbe(QVariantMap state);
 	void applyQmlScreenShareStateProbe(QVariantMap state);
@@ -519,6 +520,11 @@ public:
 	void requestOlderPersistentChatHistory();
 	void setPersistentChatWelcomeText(const QString &message);
 	QString modernPersistentChatWelcomeHtml();
+	QString modernMotdRenderableHtml(const QString &message, QStringList *registeredImageUrls = nullptr);
+	QString modernMotdServerStateKey() const;
+	QVariantMap modernMotdServerViewState() const;
+	void persistModernMotdServerViewState(const QVariantMap &state);
+	void migrateLegacyModernMotdServerViewState();
 	void updatePersistentChatWelcome();
 	void clearPersistentChatView(const QString &message, const QString &title = QString(),
 								 const QStringList &hints = QStringList());
@@ -571,6 +577,8 @@ public:
 	bool requestPersistentChatRichProviderPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatSteamAppPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatSteamReviewPreview(const QString &previewKey, const QString &appId);
+	bool requestPersistentChatIsThereAnyDealPreview(const QString &previewKey, const QString &appId);
+	bool requestPersistentChatIsThereAnyDealOverview(const QString &previewKey, const QString &gameId);
 	bool requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditDashManifestPreview(const QString &previewKey, const QString &videoId,
@@ -827,6 +835,7 @@ public:
 	bool startModernForkUpdateDownload(const QJsonObject &info);
 	bool restartForPreparedForkUpdate();
 	void openModernStonksDialog();
+	void openModernStonksPortfolio();
 	void requestStonksState(const QString &period = QString(),
 							std::optional< unsigned int > userID = std::nullopt);
 	void handleStonksState(const MumbleProto::StonksState &state);
@@ -834,7 +843,9 @@ public:
 	void requestStonksTickerQuote(const QString &symbol);
 	void finishStonksTickerQuote(const QString &symbol, quint64 requestToken, QVariantMap quote);
 	void publishStonksTickerQuotes();
-	QVariantMap buildModernStonksDialog() const;
+	QVariantMap modernSettingsStonksContext() const;
+	QVariantMap modernSettingsMotdContext() const;
+	QVariantMap buildModernStonksDialog(const QString &initialTab = QString()) const;
 	bool handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload);
 	bool openModernDeleteMessageDialog(unsigned int messageID, const PersistentChatTarget &target,
 									   const MumbleProto::ChatMessage &message);
@@ -1211,7 +1222,7 @@ protected:
 	void publishModernDialogState(const QVariantMap &state);
 	void refreshModernDialogVoiceMeters();
 	void openModernConnectDialog();
-	void openModernSettingsDialog(const QString &pageName = QString());
+	void openModernSettingsDialog(const QString &pageName = QString(), bool audioInputOnboarding = false);
 	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);
 	bool openModernSslCertificateWarningDialog(const QString &host, unsigned short port,
 											   const QList< QSslCertificate > &certificates,
@@ -1499,6 +1510,7 @@ public slots:
 	void pttReleased();
 	void whisperReleased(QVariant scdata);
 	void onResetAudio();
+	void scheduleWASAPIAudioReset(int delayMs);
 	void showRaiseWindow();
 	void on_qaFilterToggle_triggered();
 	/// Opens a save dialog for the image selected from the log or persistent chat history.

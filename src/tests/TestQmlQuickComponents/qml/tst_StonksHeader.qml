@@ -33,7 +33,8 @@ TestCase {
 			"supported": true,
 			"enabled": true,
 			"tickerBannerEnabled": true,
-			"tickerBannerAlwaysScroll": true,
+			"tickerDirection": "left",
+			"tickerSpeed": "normal",
 			"automationHeaderVisible": true,
 			"textChannelId": 7,
 			"feedPreferences": { "showPins": true, "showMine": true, "showPopular": true },
@@ -58,7 +59,8 @@ TestCase {
 		const state = populatedState()
 		loader.item.stonks = state
 		loader.item.tickerBannerEnabled = state.tickerBannerEnabled
-		loader.item.tickerBannerAlwaysScroll = state.tickerBannerAlwaysScroll
+		loader.item.tickerDirection = state.tickerDirection
+		loader.item.tickerSpeed = state.tickerSpeed
 		openSpy.clear()
 		tryCompare(loader.item, "supported", true)
 		tryCompare(loader.item, "enabledForServer", true)
@@ -78,24 +80,23 @@ TestCase {
 		tryCompare(header, "visible", true)
 	}
 
-	function test_ticker_scrolls_continuously_and_can_fall_back_to_overflow_only() {
+	function test_ticker_supports_every_explicit_direction_and_speed() {
 		const header = loader.item
-		header.tickerBannerAlwaysScroll = true
-		tryCompare(header, "marqueeShouldRun", true)
-		tryCompare(header, "marqueeRunning", true)
-
-		header.tickerBannerAlwaysScroll = false
-		const singleTickerState = populatedState()
-		singleTickerState.personalTickers = []
-		singleTickerState.popularTickers = []
-		header.stonks = singleTickerState
-		loader.width = 680
-		tryCompare(header, "marqueeShouldRun", false)
-		tryCompare(header, "marqueeRunning", false)
-
-		loader.width = 170
-		tryCompare(header, "marqueeShouldRun", true)
-		tryCompare(header, "marqueeRunning", true)
+		const directions = ["left", "right", "up", "down"]
+		for (let index = 0; index < directions.length; ++index) {
+			header.tickerDirection = directions[index]
+			compare(header.horizontalMovement, index < 2)
+			tryCompare(header, "movementShouldRun", true)
+			tryCompare(header, "tickerRunning", true)
+		}
+		header.tickerSpeed = "verySlow"
+		compare(header.pixelsPerSecond(), 12)
+		header.tickerSpeed = "slow"
+		compare(header.pixelsPerSecond(), 18)
+		header.tickerSpeed = "normal"
+		compare(header.pixelsPerSecond(), 28)
+		header.tickerSpeed = "fast"
+		compare(header.pixelsPerSecond(), 42)
 	}
 
 	function test_automation_fixture_disables_marquee_without_hiding_tickers() {
@@ -103,11 +104,11 @@ TestCase {
 		const state = populatedState()
 		state.disableTickerAnimation = true
 		header.stonks = state
-		header.tickerBannerAlwaysScroll = true
+		header.tickerDirection = "down"
 
 		tryCompare(header, "automationAnimationDisabled", true)
-		tryCompare(header, "marqueeShouldRun", false)
-		tryCompare(header, "marqueeRunning", false)
+		tryCompare(header, "movementShouldRun", false)
+		tryCompare(header, "tickerRunning", false)
 		tryCompare(header, "visible", true)
 		compare(header.visibleTickerRows.length, 3)
 	}
@@ -115,9 +116,9 @@ TestCase {
 	function test_populated_state_is_visible_typed_and_keyboard_accessible() {
 		const header = loader.item
 		compare(header.visibleTickerRows.length, 3)
-		verify(findChild(header, "stonksHeaderTicker_RKLB") !== null)
-		verify(findChild(header, "stonksHeaderTicker_AMD") !== null)
-		verify(findChild(header, "stonksHeaderTicker_ERIC-B.ST") !== null)
+		verify(findChild(header, "stonksTicker_RKLB") !== null)
+		verify(findChild(header, "stonksTicker_AMD") !== null)
+		verify(findChild(header, "stonksTicker_ERIC-B.ST") !== null)
 		compare(header.Accessible.role, Accessible.Button)
 		compare(header.Accessible.name, "Open Stonks ticker details")
 		header.forceActiveFocus()

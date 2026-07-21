@@ -196,6 +196,17 @@ void Audio::restartInput() {
 	}
 }
 
+void Audio::restartOutput() {
+	stopOutput();
+	startOutput();
+	if (Global::get().ao && Global::get().pluginManager) {
+		QObject::connect(Global::get().ao.get(), &AudioOutput::audioSourceFetched, Global::get().pluginManager,
+						 &PluginManager::on_audioSourceFetched, Qt::DirectConnection);
+		QObject::connect(Global::get().ao.get(), &AudioOutput::audioOutputAboutToPlay, Global::get().pluginManager,
+						 &PluginManager::on_audioOutputAboutToPlay, Qt::DirectConnection);
+	}
+}
+
 void Audio::start(const QString &input, const QString &output) {
 	startInput(input);
 	startOutput(output);

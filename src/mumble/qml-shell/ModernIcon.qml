@@ -9,126 +9,131 @@ Item {
 	property int size: 18
 	Accessible.ignored: true
 
+	// Paths are adapted from Tabler Icons 3.45.0 (MIT), using its native
+	// 24 x 24 grid and rounded 2 px outline language. Keeping the paths in one
+	// component preserves theme-driven colors without rasterizing SVG assets.
 	function pathForName(iconName) {
 		switch (iconName) {
 		case "activity":
-			return "M3 12 H7 L9.5 5 L14.5 19 L17 12 H21"
+			return "M3 12h4.5l1.5 -6l4 12l2 -9l1.5 3h4.5"
 		case "action":
-			return "M13 2 L4 14 H11 L10 22 L20 9 H13 Z"
+			return "M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11"
 		case "add":
-			return "M12 5 V19 M5 12 H19"
+			return "M12 5l0 14 M5 12l14 0"
 		case "attach":
-			return "M21.4 11.6 L12 21 A6 6 0 0 1 3.5 12.5 L13 3 A4 4 0 0 1 18.7 8.7 L9.2 18.2 A2 2 0 0 1 6.4 15.4 L15.2 6.6"
+			return "M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"
 		case "certificate":
-			return "M6 3 H18 V14 H6 Z M9 7 H15 M9 10 H13 M10 14 V21 L12 19 L14 21 V14"
+			return "M12 15a3 3 0 1 0 6 0a3 3 0 1 0 -6 0 M13 17.5v4.5l2 -1.5l2 1.5v-4.5 M10 19h-5a2 2 0 0 1 -2 -2v-10c0 -1.1 .9 -2 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -1 1.73 M6 9l12 0 M6 12l3 0 M6 15l2 0"
 		case "check":
-			return "M5 12 L9 16 L19 6"
+			return "M5 12l5 5l10 -10"
 		case "chevron-down":
-			return "M6 9 L12 15 L18 9"
+			return "M6 9l6 6l6 -6"
 		case "chevron-up":
-			return "M6 15 L12 9 L18 15"
+			return "M6 15l6 -6l6 6"
 		case "close":
-			return "M6 6 L18 18 M18 6 L6 18"
+			return "M18 6l-12 12 M6 6l12 12"
 		case "connect":
-			return "M8 3 V8 M16 3 V8 M6 8 H18 V11 A6 6 0 0 1 6 11 Z M12 17 V21"
+			return "M7 12l5 5l-1.5 1.5a3.536 3.536 0 1 1 -5 -5l1.5 -1.5 M17 12l-5 -5l1.5 -1.5a3.536 3.536 0 1 1 5 5l-1.5 1.5 M3 21l2.5 -2.5 M18.5 5.5l2.5 -2.5 M10 11l-2 2 M13 14l-2 2"
 		case "copy":
-			return "M8 8 H20 V20 H8 Z M4 16 V4 H16"
+			return "M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667l0 -8.666 M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1"
 		case "deafen":
-			return "M4 14 V12 A8 8 0 0 1 20 12 V14 M4 14 H7 V20 H5 A1 1 0 0 1 4 19 Z M20 14 H17 V20 H19 A1 1 0 0 0 20 19 Z"
+			return "M4 15a2 2 0 0 1 2 -2h1a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2l0 -3 M15 15a2 2 0 0 1 2 -2h1a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2l0 -3 M4 15v-3a8 8 0 0 1 16 0v3"
 		case "delete":
-			return "M4 7 H20 M9 7 V4 H15 V7 M7 7 L8 21 H16 L17 7 M10 11 V17 M14 11 V17"
+			return "M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"
 		case "direct":
-			return "M20 11.5 A8 8 0 0 1 11.5 19.5 A8.5 8.5 0 1 1 20 11.5 Z M7 20 L4 21 L5 18"
+			return "M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1"
 		case "disconnect":
-			return "M5 5 L19 19 M8 3 V7 M16 3 V7 M7 8 H17 V10 M12 17 V21"
+			return "M20 16l-4 4 M7 12l5 5l-1.5 1.5a3.536 3.536 0 1 1 -5 -5l1.5 -1.5 M17 12l-5 -5l1.5 -1.5a3.536 3.536 0 1 1 5 5l-1.5 1.5 M3 21l2.5 -2.5 M18.5 5.5l2.5 -2.5 M10 11l-2 2 M13 14l-2 2 M16 16l4 4"
 		case "download":
-			return "M12 3 V15 M7 10 L12 15 L17 10 M5 20 H19"
+			return "M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12"
 		case "edit":
-			return "M4 20 L8.5 19 L19 8.5 L15.5 5 L5 15.5 Z M13.5 7 L17 10.5"
+			return "M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1 M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415 M16 5l3 3"
 		case "external":
-			return "M14 5 H19 V10 M19 5 L11 13 M18 13 V19 H5 V6 H11"
+			return "M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6 M11 13l9 -9 M15 4h5v5"
 		case "fullscreen":
-			return "M8 3 H3 V8 M16 3 H21 V8 M21 16 V21 H16 M3 16 V21 H8"
+			return "M4 8v-2a2 2 0 0 1 2 -2h2 M4 16v2a2 2 0 0 0 2 2h2 M16 4h2a2 2 0 0 1 2 2v2 M16 20h2a2 2 0 0 0 2 -2v-2"
 		case "fullscreen-exit":
-			return "M3 8 H8 V3 M21 8 H16 V3 M16 21 V16 H21 M8 21 V16 H3"
+			return "M15 19v-2a2 2 0 0 1 2 -2h2 M15 5v2a2 2 0 0 0 2 2h2 M5 15h2a2 2 0 0 1 2 2v2 M5 9h2a2 2 0 0 0 2 -2v-2"
 		case "history":
-			return "M12 3 A9 9 0 1 1 3 12 A9 9 0 0 1 12 3 Z M12 7 V12 L16 14"
+			return "M12 8l0 4l2 2 M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"
 		case "eye":
-			return "M2.5 12 S6 6 12 6 S21.5 12 21.5 12 S18 18 12 18 S2.5 12 2.5 12 Z M12 9 A3 3 0 1 1 12 15 A3 3 0 0 1 12 9 Z"
+			return "M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0 M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"
 		case "eye-off":
-			return "M3 3 L21 21 M10.6 6.2 A9.8 9.8 0 0 1 12 6 C18 6 21.5 12 21.5 12 A15 15 0 0 1 18.8 15.3 M14.2 14.2 A3 3 0 0 1 9.8 9.8 M6.1 6.8 A15 15 0 0 0 2.5 12 S6 18 12 18 A9 9 0 0 0 14 17.8"
+			return "M10.585 10.587a2 2 0 0 0 2.829 2.828 M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87 M3 3l18 18"
 		case "info":
-			return "M12 3 A9 9 0 1 1 12 21 A9 9 0 0 1 12 3 Z M12 10 V17 M12 7 H12.01"
+			return "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0 M12 9h.01 M11 12h1v4h1"
 		case "join":
-			return "M13 5 H20 V19 H13 M4 12 H15 M11 8 L15 12 L11 16"
+			return "M9 8v-2a2 2 0 0 1 2 -2h7a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-7a2 2 0 0 1 -2 -2v-2 M3 12h13l-3 -3 M13 15l3 -3"
 		case "key":
-			return "M14 8 A5 5 0 1 1 9 13 L3 19 V21 H6 L8 19 H10 L12 17 V14"
+			return "M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0 M15 9h.01"
 		case "link":
-			return "M9 15 L7.5 16.5 A4 4 0 0 1 1.8 10.8 L5.3 7.3 A4 4 0 0 1 11 7 M15 9 L16.5 7.5 A4 4 0 0 1 22.2 13.2 L18.7 16.7 A4 4 0 0 1 13 17 M8 12 H16"
+			return "M9 15l6 -6 M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464 M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463"
 		case "menu":
-			return "M4 7 H20 M4 12 H20 M4 17 H20"
+			return "M4 6l16 0 M4 12l16 0 M4 18l16 0"
 		case "message":
-			return "M4 4 H20 V17 H9 L4 21 Z M8 9 H16 M8 13 H14"
+			return "M8 9h8 M8 13h6 M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12"
 		case "minimize":
-			return "M5 12 H19"
+			return "M5 12l14 0"
 		case "microphone":
-			return "M12 3 A3 3 0 0 1 15 6 V12 A3 3 0 0 1 9 12 V6 A3 3 0 0 1 12 3 Z M5 11 A7 7 0 0 0 19 11 M12 18 V21 M8 21 H16"
+			return "M9 5a3 3 0 0 1 3 -3a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3a3 3 0 0 1 -3 -3l0 -5 M5 10a7 7 0 0 0 14 0 M8 21l8 0 M12 17l0 4"
 		case "more":
-			return "M5 12 H5.01 M12 12 H12.01 M19 12 H19.01"
+			return "M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"
 		case "move":
-			return "M12 3 V21 M8 7 L12 3 L16 7 M8 17 L12 21 L16 17 M3 12 H21 M7 8 L3 12 L7 16 M17 8 L21 12 L17 16"
+			return "M18 9l3 3l-3 3 M15 12h6 M6 9l-3 3l3 3 M3 12h6 M9 18l3 3l3 -3 M12 15v6 M15 6l-3 -3l-3 3 M12 3v6"
 		case "mute":
-			return "M9 9 V6 A3 3 0 0 1 14.7 4.7 M15 10 V11 A3 3 0 0 1 14.6 12.5 M5 11 A7 7 0 0 0 16.5 16.4 M19 11 A7 7 0 0 1 18.3 14 M12 18 V21 M8 21 H16 M3 3 L21 21"
+			return "M3 3l18 18 M9 5a3 3 0 0 1 6 0v5a3 3 0 0 1 -.13 .874m-2 2a3 3 0 0 1 -3.87 -2.872v-1 M5 10a7 7 0 0 0 10.846 5.85m2 -2a6.967 6.967 0 0 0 1.152 -3.85 M8 21l8 0 M12 17l0 4"
 		case "next":
-			return "M9 6 L15 12 L9 18"
+			return "M9 6l6 6l-6 6"
 		case "pin":
-			return "M8 3 H16 L15 8 L19 12 H13 V21 L11 19 V12 H5 L9 8 Z"
+			return "M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4 M9 15l-4.5 4.5 M14.5 4l5.5 5.5"
 		case "pause":
-			return "M9 5 V19 M15 5 V19"
+			return "M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12 M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"
 		case "play":
-			return "M8 5 L19 12 L8 19 Z"
+			return "M7 4v16l13 -8l-13 -8"
 		case "plugin":
-			return "M8 3 H13 V7 A2 2 0 1 0 17 7 V12 H21 V17 H16 V21 H11 V17 A2 2 0 1 0 7 17 V12 H3 V7 H8 Z"
+			return "M4 7h3a1 1 0 0 0 1 -1v-1a2 2 0 0 1 4 0v1a1 1 0 0 0 1 1h3a1 1 0 0 1 1 1v3a1 1 0 0 0 1 1h1a2 2 0 0 1 0 4h-1a1 1 0 0 0 -1 1v3a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-1a2 2 0 0 0 -4 0v1a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h1a2 2 0 0 0 0 -4h-1a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1"
 		case "previous":
-			return "M15 6 L9 12 L15 18"
+			return "M15 6l-6 6l6 6"
 		case "quit":
-			return "M12 3 V12 M7.1 5.8 A8 8 0 1 0 16.9 5.8"
+			return "M7 6a7.75 7.75 0 1 0 10 0 M12 4l0 8"
 		case "record":
-			return "M12 5 A7 7 0 1 1 12 19 A7 7 0 0 1 12 5 Z M12 9 A3 3 0 1 1 12 15 A3 3 0 0 1 12 9 Z"
+			return "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"
+		case "reaction":
+			return "M8 14s1.5 2 4 2s4 -2 4 -2 M9 9h.01 M15 9h.01 M16 5h6 M19 2v6 M21 12a9 9 0 1 1 -9 -9"
 		case "refresh":
 		case "retry":
-			return "M20 7 V12 H15 M19 12 A7 7 0 1 1 17.9 6.2 L20 8"
+			return "M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4 M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"
 		case "reply":
-			return "M9 8 L4 12 L9 16 M5 12 H13 A7 7 0 0 1 20 19"
+			return "M9 14l-4 -4l4 -4 M5 10h11a4 4 0 1 1 0 8h-1"
 		case "screen-share":
-			return "M3 4 H21 V16 H3 Z M8 21 H16 M12 16 V21 M9 10 L12 7 L15 10 M12 7 V14"
+			return "M21 12v3a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10a1 1 0 0 1 1 -1h9 M7 20l10 0 M9 16l0 4 M15 16l0 4 M17 4h4v4 M16 9l5 -5"
 		case "search":
-			return "M18 11 A7 7 0 1 1 4 11 A7 7 0 0 1 18 11 Z M16 16 L20 20"
+			return "M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0 M21 21l-6 -6"
 		case "send":
-			return "M3 4 L22 12 L3 20 L7 12 Z M7 12 H16"
+			return "M10 14l11 -11 M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5"
 		case "settings":
-			return "M4 7 H10 M14 7 H20 M4 12 H15 M19 12 H20 M4 17 H7 M11 17 H20 M10 5 V9 M15 10 V14 M7 15 V19"
+			return "M12 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0 M4 6l8 0 M16 6l4 0 M6 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0 M4 12l2 0 M10 12l10 0 M15 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0 M4 18l11 0 M19 18l1 0"
 		case "shield":
-			return "M12 3 L20 6 V11 C20 16 16.5 19.5 12 21 C7.5 19.5 4 16 4 11 V6 Z M9 12 L11 14 L15 10"
+			return "M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06 M15 19l2 2l4 -4"
 		case "terminal":
-			return "M4 5 H20 V19 H4 Z M7 9 L10 12 L7 15 M12 15 H17"
+			return "M8 9l3 3l-3 3 M13 15l3 0 M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12"
 		case "text-room":
-			return "M9 3 L7 21 M17 3 L15 21 M4 9 H20 M3 15 H19"
+			return "M5 9l14 0 M5 15l14 0 M11 4l-4 16 M17 4l-4 16"
 		case "unlink":
-			return "M3 3 L21 21 M8.5 15.5 L7.5 16.5 A4 4 0 0 1 1.8 10.8 L5.3 7.3 A4 4 0 0 1 8.4 6.2 M15.6 17.8 A4 4 0 0 0 18.7 16.7 L22.2 13.2 A4 4 0 0 0 16.5 7.5 L15.5 8.5"
+			return "M17 22v-2 M9 15l6 -6 M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464 M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463 M20 17h2 M2 7h2 M7 2v2"
 		case "user":
-			return "M12 4 A4 4 0 1 1 12 12 A4 4 0 0 1 12 4 Z M4 21 A8 7 0 0 1 20 21"
+			return "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0 M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"
 		case "user-add":
-			return "M9 4 A4 4 0 1 1 9 12 A4 4 0 0 1 9 4 Z M2 21 A7 7 0 0 1 14 16 M18 8 V16 M14 12 H22"
+			return "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0 M16 19h6 M19 16v6 M6 21v-2a4 4 0 0 1 4 -4h4"
 		case "user-remove":
-			return "M9 4 A4 4 0 1 1 9 12 A4 4 0 0 1 9 4 Z M2 21 A7 7 0 0 1 14 16 M14 12 H22"
+			return "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0 M6 21v-2a4 4 0 0 1 4 -4h4c.348 0 .686 .045 1.009 .128 M16 19h6"
 		case "voice-room":
 		case "volume":
-			return "M4 10 V14 H8 L13 18 V6 L8 10 Z M16 9 A4 4 0 0 1 16 15 M18.5 6.5 A8 8 0 0 1 18.5 17.5"
+			return "M15 8a5 5 0 0 1 0 8 M17.7 5a9 9 0 0 1 0 14 M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5"
 		case "volume-off":
-			return "M4 10 V14 H8 L13 18 V6 L8 10 Z M17 9 L21 13 M21 9 L17 13"
+			return "M15 8a5 5 0 0 1 1.912 4.934m-1.377 2.602a5 5 0 0 1 -.535 .464 M17.7 5a9 9 0 0 1 2.362 11.086m-1.676 2.299a9 9 0 0 1 -.686 .615 M9.069 5.054l.431 -.554a.8 .8 0 0 1 1.5 .5v2m0 4v8a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l1.294 -1.664 M3 3l18 18"
 		case "warning":
-			return "M12 3 L22 20 H2 Z M12 9 V14 M12 17 H12.01"
+			return "M12 9v4 M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0 M12 16h.01"
 		default:
 			return ""
 		}
@@ -146,13 +151,15 @@ Item {
 		width: 24
 		height: 24
 		scale: Math.max(0, root.size) / 24
-		visible: root.pathData.length > 0 && root.name !== "more" && root.size > 0
+		visible: root.pathData.length > 0 && root.size > 0
 		antialiasing: true
+		preferredRendererType: Shape.CurveRenderer
 		Accessible.ignored: true
 
 		ShapePath {
 			strokeColor: root.color
-			strokeWidth: 2
+			// Optical compensation keeps 11-16 px glyphs from becoming hairlines.
+			strokeWidth: root.size <= 16 ? 2.25 : 2
 			capStyle: ShapePath.RoundCap
 			joinStyle: ShapePath.RoundJoin
 			fillColor: "transparent"
@@ -163,22 +170,4 @@ Item {
 		}
 	}
 
-	Row {
-		id: moreIcon
-		objectName: "modernMoreIcon"
-		anchors.centerIn: parent
-		visible: root.name === "more" && root.size > 0
-		spacing: Math.max(2, Math.round(root.size / 6))
-		Accessible.ignored: true
-
-		Repeater {
-			model: 3
-			delegate: Rectangle {
-				width: Math.max(2, Math.round(root.size / 8))
-				height: width
-				radius: width / 2
-				color: root.color
-			}
-		}
-	}
 }

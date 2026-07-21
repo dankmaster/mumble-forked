@@ -15,6 +15,7 @@
 	PROCESS(misc, DATABASE_LOCATION_KEY, qsDatabaseLocation)                        \
 	PROCESS(misc, IMAGE_DIRECTORY_KEY, qsImagePath)                                 \
 	PROCESS(misc, AUDIO_WIZARD_SHOWN_KEY, audioWizardShown)                         \
+	PROCESS(misc, MODERN_AUDIO_SETUP_VERSION_KEY, modernAudioSetupVersion)           \
 	PROCESS(misc, SERVER_PING_CONSENT_MESSAGE_VIEWED_KEY, bPingServersDialogViewed) \
 	PROCESS(misc, CRASH_EMAIL_ADDRESS_KEY, crashReportEmail)
 
@@ -115,10 +116,15 @@
 	PROCESS(network, SCREEN_SHARE_DIAGNOSTICS_KEY, bScreenShareDiagnostics)
 
 
-#define AUDIO_BACKEND_SETTINGS                                        \
-	PROCESS(audio_backend, WASAPI_INPUT_KEY, qsWASAPIInput)           \
-	PROCESS(audio_backend, WASAPI_OUTPUT_KEY, qsWASAPIOutput)         \
-	PROCESS(audio_backend, WASAPI_ROLE_KEY, qsWASAPIRole)             \
+#define AUDIO_BACKEND_SETTINGS                                                               \
+	PROCESS(audio_backend, WASAPI_INPUT_KEY, qsWASAPIInput)                                  \
+	PROCESS(audio_backend, WASAPI_OUTPUT_KEY, qsWASAPIOutput)                                \
+	PROCESS(audio_backend, WASAPI_ROLE_KEY, qsWASAPIRole)                                    \
+	PROCESS(audio_backend, WASAPI_INPUT_IDENTITY_KEY, qsWASAPIInputDeviceIdentity)           \
+	PROCESS(audio_backend, WASAPI_OUTPUT_IDENTITY_KEY, qsWASAPIOutputDeviceIdentity)         \
+	PROCESS(audio_backend, WASAPI_INPUT_ROUTING_POLICY_KEY, qsWASAPIInputRoutingPolicy)      \
+	PROCESS(audio_backend, WASAPI_OUTPUT_ROUTING_POLICY_KEY, qsWASAPIOutputRoutingPolicy)    \
+	PROCESS(audio_backend, WASAPI_LATENCY_PROFILE_KEY, qsWASAPILatencyProfile)               \
 	PROCESS(audio_backend, ALSA_INPUT_KEY, qsALSAInput)               \
 	PROCESS(audio_backend, ALSA_OUTPUT_KEY, qsALSAOutput)             \
 	PROCESS(audio_backend, PIPEWIRE_INPUT_KEY, pipeWireInput)         \
@@ -182,6 +188,7 @@
 	PROCESS(ui, MODERN_SHELL_MOTD_EXPANDED_KEY, bModernShellMotdExpanded)                 \
 	PROCESS(ui, MODERN_SHELL_MOTD_DISMISSED_SIGNATURE_KEY, qsModernShellMotdDismissedSignature) \
 	PROCESS(ui, MODERN_SHELL_MOTD_LAST_SEEN_SIGNATURE_KEY, qsModernShellMotdLastSeenSignature) \
+	PROCESS(ui, MODERN_SHELL_MOTD_SERVER_STATES_KEY, qsModernShellMotdServerStates)       \
 	PROCESS(ui, MODERN_SHELL_THEME_KEY, qsModernShellTheme)                               \
 	PROCESS(ui, MODERN_SHELL_DENSITY_KEY, qsModernShellDensity)                           \
 	PROCESS(ui, MODERN_SHELL_CLASSIC_USER_ICONS_KEY, bModernShellClassicUserIcons)         \
@@ -190,7 +197,9 @@
 	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_KEY, qsModernShellCustomAccent)                 \
 	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_STRENGTH_KEY, iModernShellCustomAccentStrength) \
 	PROCESS(ui, MODERN_SHELL_TICKER_BANNER_ENABLED_KEY, bModernShellTickerBannerEnabled)  \
-	PROCESS(ui, MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY, bModernShellTickerBannerAlwaysScroll) \
+	PROCESS(ui, MODERN_SHELL_TICKER_PLACEMENT_KEY, qsModernShellTickerPlacement)          \
+	PROCESS(ui, MODERN_SHELL_TICKER_DIRECTION_KEY, qsModernShellTickerDirection)          \
+	PROCESS(ui, MODERN_SHELL_TICKER_SPEED_KEY, qsModernShellTickerSpeed)                  \
 	PROCESS(ui, CONFIG_GEOMETRY_KEY, qbaConfigGeometry)                                   \
 	PROCESS(ui, IMAGE_PREVIEW_GEOMETRY_KEY, qbaImagePreviewGeometry)                      \
 	PROCESS(ui, WINDOW_LAYOUT_KEY, wlWindowLayout)                                        \

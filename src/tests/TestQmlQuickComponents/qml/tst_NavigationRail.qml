@@ -103,6 +103,7 @@ TestCase {
         property string selfName: "Tester"
 		property bool selfMuted: false
 		property bool selfDeafened: false
+		property var stonks: ({ "supported": true })
 		property var selfMenu: ({
 			"avatarUrl": "image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8"
 		})
@@ -183,6 +184,7 @@ TestCase {
 				"selectionState": selection,
 				"uiCommands": commands,
 				"clientSession": session,
+				"stonksEnabled": true,
 				"commitOnSelection": true
 			})
         }
@@ -224,8 +226,16 @@ TestCase {
 		signalName: "settingsRequested"
 	}
 
+	SignalSpy {
+		id: stonksSpy
+		target: loader.item
+		signalName: "stonksRequested"
+	}
+
     function init() {
 		tryVerify(function() { return loader.item !== null })
+		loader.item.alignedHeaderHeight = Theme.railHeaderHeight
+		loader.item.alignedFooterHeight = Theme.railFooterHeight
 		// Drain delegate rebind/reuse work from the previous test before resetting
 		// the command probe. Otherwise a queued release from a recycled row can
 		// make the following pointer-drag assertion observe stale target state.
@@ -244,6 +254,7 @@ TestCase {
 		profileMenuSpy.clear()
 		serverMenuSpy.clear()
 		settingsSpy.clear()
+		stonksSpy.clear()
         commands.selectedScope = ""
 		commands.selectedRailKind = ""
         commands.selectedParticipant = ""
@@ -274,7 +285,8 @@ TestCase {
 		loader.item.activeParticipantMenuKey = ""
 		loader.item.accessibilitySuppressed = false
 		loader.item.settingsEnabled = true
-		const profile = findChild(loader.item, "profileMenuButton")
+		loader.item.stonksEnabled = true
+		const profile = findChild(loader.item, "selfIdentityButton")
 		if (profile !== null)
 			profile.forceActiveFocus()
 	}
@@ -457,7 +469,10 @@ TestCase {
 		verify(header !== null && badge !== null && monogram !== null && serverImage !== null
 			&& serverName !== null)
 		verify(pill !== null && dot !== null && connectionLabel !== null)
-		verify(header.height >= 98)
+		compare(header.height, Theme.railHeaderHeight)
+		const badgePosition = badge.mapToItem(header, 0, 0)
+		const namePosition = serverName.mapToItem(header, 0, 0)
+		verify(badgePosition.x < namePosition.x)
 		compare(monogram.text, "1M")
 		compare(String(monogram.color), String(Theme.onAccent))
 		compare(serverImage.source.toString(), session.serverImageUrl)
@@ -783,7 +798,7 @@ TestCase {
 
 	function test_external_scope_transition_reveals_selection_without_stealing_focus() {
 		const navigationList = findChild(loader.item, "navigationRooms")
-		const profile = findChild(loader.item, "profileMenuButton")
+		const profile = findChild(loader.item, "selfIdentityButton")
 		verify(navigationList !== null && profile !== null)
 		profile.forceActiveFocus()
 		tryVerify(function() { return profile.activeFocus })
@@ -1111,7 +1126,7 @@ TestCase {
 		const share = findChild(loader.item, "navigationRoomShare_room-lobby")
 		const actions = findChild(loader.item, "navigationRoomActions_room-lobby")
 		const join = findChild(loader.item, "navigationRoomJoin_room-games")
-		const profile = findChild(loader.item, "profileMenuButton")
+		const profile = findChild(loader.item, "selfIdentityButton")
 		verify(profile !== null)
 		profile.forceActiveFocus()
 		tryCompare(profile, "activeFocus", true)
@@ -1168,7 +1183,7 @@ TestCase {
 	}
 
 	function test_open_context_menu_keeps_its_anchor_actions_visible() {
-		const profile = findChild(loader.item, "profileMenuButton")
+		const profile = findChild(loader.item, "selfIdentityButton")
 		const roomActions = findChild(loader.item, "navigationRoomActions_room-lobby")
 		const participantActions = findChild(loader.item, "navigationParticipantActions_42")
 		verify(profile !== null && roomActions !== null && participantActions !== null)
@@ -1297,9 +1312,11 @@ TestCase {
 		compare(commands.participantActionsRequestKey, "42:listener:channel:2")
 	}
 
-	function test_profile_button_requests_accessible_profile_menu() {
-		const button = findChild(loader.item, "profileMenuButton")
+	function test_profile_identity_requests_accessible_profile_menu() {
+		const button = findChild(loader.item, "selfIdentityButton")
 		verify(button !== null)
+		compare(button.Accessible.role, Accessible.Button)
+		verify(button.Accessible.name.indexOf("Tester") >= 0)
 		button.forceActiveFocus()
 		keyClick(Qt.Key_Return)
 		compare(profileMenuSpy.count, 1)
@@ -1330,6 +1347,29 @@ TestCase {
 		compare(settingsSpy.count, 2)
 	}
 
+	function test_stonks_portfolio_is_a_direct_profile_card_action() {
+		const button = findChild(loader.item, "stonksPortfolioButton")
+		verify(button !== null)
+		compare(button.visible, true)
+		compare(button.iconName, "activity")
+		compare(button.Accessible.role, Accessible.Button)
+		compare(button.Accessible.name, "Open Stonks portfolio")
+		verify(button.Accessible.description.indexOf("leaderboard") >= 0)
+
+		mouseClick(button)
+		compare(stonksSpy.count, 1)
+		compare(settingsSpy.count, 0)
+		compare(profileMenuSpy.count, 0)
+
+		button.forceActiveFocus()
+		tryCompare(button, "activeFocus", true)
+		keyClick(Qt.Key_Return)
+		compare(stonksSpy.count, 2)
+
+		loader.item.stonksEnabled = false
+		tryCompare(button, "visible", false)
+	}
+
 	function test_self_controls_expose_mute_and_deafen_without_opening_profile_menu() {
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")
@@ -1355,10 +1395,11 @@ TestCase {
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")
 		const settingsButton = findChild(loader.item, "settingsButton")
-		const profileButton = findChild(loader.item, "profileMenuButton")
+		const stonksButton = findChild(loader.item, "stonksPortfolioButton")
+		const profileButton = findChild(loader.item, "selfIdentityButton")
 		verify(dock !== null && avatar !== null && presence !== null && actionGroup !== null)
 		verify(nameLabel !== null && statusLabel !== null)
-		verify(muteButton !== null && deafenButton !== null && settingsButton !== null
+		verify(muteButton !== null && deafenButton !== null && stonksButton !== null && settingsButton !== null
 			&& profileButton !== null)
 		compare(dock.Accessible.role, Accessible.Grouping)
 		verify(dock.Accessible.name.indexOf("Tester") >= 0)
@@ -1373,16 +1414,18 @@ TestCase {
 		compare(String(presence.color), String(Theme.success))
 		tryCompare(dock, "color", Theme.selfCardHover)
 
-		muteButton.forceActiveFocus()
+		profileButton.forceActiveFocus()
+		tryCompare(profileButton, "activeFocus", true)
+		keyClick(Qt.Key_Tab)
 		tryCompare(muteButton, "activeFocus", true)
 		keyClick(Qt.Key_Tab)
 		tryCompare(deafenButton, "activeFocus", true)
 		keyClick(Qt.Key_Tab)
-		tryCompare(settingsButton, "activeFocus", true)
+		tryCompare(stonksButton, "activeFocus", true)
 		keyClick(Qt.Key_Tab)
-		tryCompare(profileButton, "activeFocus", true)
-		keyClick(Qt.Key_Backtab)
 		tryCompare(settingsButton, "activeFocus", true)
+		keyClick(Qt.Key_Backtab)
+		tryCompare(stonksButton, "activeFocus", true)
 		keyClick(Qt.Key_Backtab)
 		tryCompare(deafenButton, "activeFocus", true)
 

@@ -64,6 +64,7 @@ public:
 	RoomModel *roomModel() const;
 	NavigationRailModel *navigationModel() const;
 	ParticipantModel *participantModel() const;
+	void clearConnectionState();
 	ChatTimelineModel *chatModel() const;
 	ComposerController *composerController() const;
 	ToastController *toastController() const;

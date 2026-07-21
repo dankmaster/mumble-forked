@@ -28,13 +28,12 @@ CheckBox {
 			: control.hovered ? Theme.surfaceBorder : Theme.divider
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
-		Text {
+		ModernIcon {
 			anchors.centerIn: parent
 			visible: control.checked
-			text: "✓"
+			name: "check"
+			size: control.dense ? 11 : 12
 			color: control.enabled ? Theme.contrastText(Theme.accent) : Theme.textMuted
-			font.pixelSize: 13
-			font.bold: true
 		}
 	}
 

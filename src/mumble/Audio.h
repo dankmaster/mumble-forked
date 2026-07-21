@@ -69,6 +69,8 @@ void restartInput();
 
 void startOutput(const QString &output = QString());
 void stopOutput();
+/// Recreates only render output and restores its direct plugin callbacks.
+void restartOutput();
 
 void start(const QString &input = QString(), const QString &output = QString());
 void stop();

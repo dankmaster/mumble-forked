@@ -28,8 +28,10 @@ ColumnLayout {
 	readonly property var snapshots: stonks.snapshots || []
 	readonly property var latestSnapshot: snapshots.length > 0 ? snapshots[0] : null
 	readonly property var tickerSettings: stonks.feature || stonks || ({})
-	readonly property bool tickerBannerEnabled: tickerSettings.tickerBannerEnabled === true
-	readonly property bool tickerBannerAlwaysScroll: tickerSettings.tickerBannerAlwaysScroll !== false
+	property bool tickerBannerEnabled: false
+	property string tickerPlacement: "bottom"
+	property string tickerDirection: "left"
+	property string tickerSpeed: "normal"
 	readonly property bool loading: stonks.loading === true
 	readonly property bool contentAvailable: stonks.supported !== false
 		&& (stonks.enabled !== false || stonks.canAdmin === true)
@@ -39,7 +41,8 @@ ColumnLayout {
 			{ "id": "portfolio", "label": qsTr("Portfolio") },
 			{ "id": "leaderboard", "label": qsTr("Leaderboard") },
 			{ "id": "following", "label": qsTr("Following") },
-			{ "id": "audit", "label": qsTr("Audit") }
+			{ "id": "audit", "label": qsTr("Audit") },
+			{ "id": "settings", "label": qsTr("Settings") }
 		]
 		if (stonks.canAdmin === true)
 			items.push({ "id": "admin", "label": qsTr("Admin") })
@@ -275,6 +278,48 @@ ColumnLayout {
 		dialogState.invokeAction(action, payload)
 	}
 
+	function optionIndex(options, value) {
+		for (let index = 0; index < options.length; ++index) {
+			if (String(options[index].value) === String(value))
+				return index
+		}
+		return 0
+	}
+
+	function tickerPlacementOptions() {
+		return [
+			{ "value": "windowTop", "label": qsTr("Top of window") },
+			{ "value": "top", "label": qsTr("Top of content") },
+			{ "value": "aboveComposer", "label": qsTr("Above message field") },
+			{ "value": "bottom", "label": qsTr("Bottom of window") }
+		]
+	}
+
+	function tickerDirectionOptions() {
+		return [
+			{ "value": "left", "label": qsTr("Left") },
+			{ "value": "right", "label": qsTr("Right") },
+			{ "value": "up", "label": qsTr("Up") },
+			{ "value": "down", "label": qsTr("Down") }
+		]
+	}
+
+	function tickerSpeedOptions() {
+		return [
+			{ "value": "verySlow", "label": qsTr("Very slow") },
+			{ "value": "slow", "label": qsTr("Slow") },
+			{ "value": "normal", "label": qsTr("Normal") },
+			{ "value": "fast", "label": qsTr("Fast") }
+		]
+	}
+
+	function synchronizeTickerSettings() {
+		tickerBannerEnabled = tickerSettings.tickerBannerEnabled === true
+		tickerPlacement = String(tickerSettings.tickerPlacement || "bottom")
+		tickerDirection = String(tickerSettings.tickerDirection || "left")
+		tickerSpeed = String(tickerSettings.tickerSpeed || "normal")
+	}
+
 	function syncConfirmationPopup() {
 		if (confirmationVisible && !confirmationPopup.visible)
 			confirmationPopup.open()
@@ -359,13 +404,19 @@ ColumnLayout {
 	}
 
 	onStonksChanged: {
+		const requestedInitialTab = String(stonks.initialTab || "")
+		if (requestedInitialTab.length > 0)
+			selectTab(requestedInitialTab)
 		if (activeTab === "admin" && stonks.canAdmin !== true)
 			activeTab = "overview"
+		synchronizeTickerSettings()
 		Qt.callLater(synchronizeDraft)
 		Qt.callLater(synchronizeAdmin)
 	}
 	onConfirmationVisibleChanged: syncConfirmationPopup()
 	Component.onCompleted: {
+		selectTab(stonks.initialTab || "overview")
+		synchronizeTickerSettings()
 		Qt.callLater(synchronizeDraft)
 		Qt.callLater(synchronizeAdmin)
 		Qt.callLater(syncConfirmationPopup)
@@ -601,79 +652,6 @@ ColumnLayout {
 			color: Theme.textMuted
 		}
 
-		RowLayout {
-			Layout.fillWidth: true
-			Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("Ticker feed"); color: Theme.textStrong; font.bold: true }
-			ModernCheckBox {
-				objectName: "stonksFeedMine"
-				text: qsTr("Mine")
-				checked: (root.stonks.feedPreferences || {}).showMine !== false
-				onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": checked,
-					"showPopular": (root.stonks.feedPreferences || {}).showPopular !== false,
-					"showPins": (root.stonks.feedPreferences || {}).showPins !== false })
-			}
-			ModernCheckBox {
-				objectName: "stonksFeedPopular"
-				text: qsTr("Popular")
-				checked: (root.stonks.feedPreferences || {}).showPopular !== false
-				onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": (root.stonks.feedPreferences || {}).showMine !== false,
-					"showPopular": checked, "showPins": (root.stonks.feedPreferences || {}).showPins !== false })
-			}
-			ModernCheckBox {
-				objectName: "stonksFeedPins"
-				text: qsTr("Pinned")
-				checked: (root.stonks.feedPreferences || {}).showPins !== false
-				onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": (root.stonks.feedPreferences || {}).showMine !== false,
-					"showPopular": (root.stonks.feedPreferences || {}).showPopular !== false, "showPins": checked })
-			}
-		}
-		Rectangle {
-			Layout.fillWidth: true
-			Layout.preferredHeight: tickerBannerSettingsLayout.implicitHeight + 24
-			color: Theme.strip
-			border.color: root.tickerBannerEnabled ? Theme.accent : Theme.divider
-			radius: Theme.innerRadius
-			RowLayout {
-				id: tickerBannerSettingsLayout
-				anchors.fill: parent
-				anchors.margins: 12
-				spacing: 12
-				ColumnLayout {
-					Layout.fillWidth: true
-					spacing: 3
-					Label {
-						Layout.fillWidth: true
-						textFormat: Text.PlainText
-						text: qsTr("Stonks ticker banner")
-						color: Theme.textStrong
-						font.bold: true
-					}
-					Label {
-						Layout.fillWidth: true
-						textFormat: Text.PlainText
-						text: qsTr("Show your selected ticker feed in the conversation header. Off by default on this client.")
-						color: Theme.textMuted
-						font.pixelSize: 10
-						wrapMode: Text.Wrap
-					}
-				}
-				ModernCheckBox {
-					objectName: "stonksTickerBannerEnabled"
-					text: qsTr("Show banner")
-					checked: root.tickerBannerEnabled
-					onToggled: dialogState.invokeAction("setTickerBannerEnabled",
-						{ "tickerBannerEnabled": checked })
-				}
-				ModernCheckBox {
-					objectName: "stonksTickerBannerAlwaysScroll"
-					text: qsTr("Keep moving")
-					checked: root.tickerBannerAlwaysScroll
-					enabled: root.tickerBannerEnabled
-					onToggled: dialogState.invokeAction("setTickerBannerAlwaysScroll",
-						{ "tickerBannerAlwaysScroll": checked })
-				}
-			}
-		}
 		Flow {
 			Layout.fillWidth: true
 			Layout.preferredHeight: childrenRect.height
@@ -701,6 +679,163 @@ ColumnLayout {
 							Accessible.name: tickerCard.pinned ? qsTr("Unpin %1").arg(modelData.symbol) : qsTr("Pin %1").arg(modelData.symbol)
 							onClicked: dialogState.invokeAction("setTickerPin", { "symbol": modelData.symbol, "pinned": !tickerCard.pinned })
 						}
+					}
+				}
+			}
+		}
+	}
+
+	ColumnLayout {
+		id: settingsPanel
+		objectName: "stonksPanel_settings"
+		Layout.fillWidth: true
+		visible: root.contentAvailable && !root.loading && root.activeTab === "settings"
+		spacing: 12
+
+		Rectangle {
+			Layout.fillWidth: true
+			Layout.preferredHeight: tickerPresentationLayout.implicitHeight + 24
+			color: Theme.strip
+			border.color: root.tickerBannerEnabled ? Theme.accent : Theme.divider
+			radius: Theme.innerRadius
+			ColumnLayout {
+				id: tickerPresentationLayout
+				anchors.fill: parent
+				anchors.margins: 12
+				spacing: 10
+				RowLayout {
+					Layout.fillWidth: true
+					ColumnLayout {
+						Layout.fillWidth: true
+						spacing: 3
+						Label {
+							Layout.fillWidth: true
+							textFormat: Text.PlainText
+							text: qsTr("Ticker strip")
+							color: Theme.textStrong
+							font.bold: true
+						}
+						Label {
+							Layout.fillWidth: true
+							textFormat: Text.PlainText
+							text: qsTr("Off by default. Changes are saved and shown immediately.")
+							color: Theme.textMuted
+							font.pixelSize: 10
+							wrapMode: Text.Wrap
+						}
+					}
+					ModernCheckBox {
+						objectName: "stonksTickerBannerEnabled"
+						text: qsTr("Show ticker")
+						checked: root.tickerBannerEnabled
+						onToggled: {
+							root.tickerBannerEnabled = checked
+							dialogState.invokeAction("setTickerPresentation",
+								{ "tickerBannerEnabled": checked })
+						}
+					}
+				}
+
+				GridLayout {
+					Layout.fillWidth: true
+					columns: root.width >= 620 ? 3 : 1
+					columnSpacing: 12
+					rowSpacing: 8
+					ColumnLayout {
+						Layout.fillWidth: true
+						Label { textFormat: Text.PlainText; text: qsTr("Placement"); color: Theme.textMuted; font.pixelSize: 10 }
+						ModernComboBox {
+							id: tickerPlacementSelect
+							objectName: "stonksTickerPlacement"
+							Layout.fillWidth: true
+							model: root.tickerPlacementOptions()
+							textRole: "label"
+							valueRole: "value"
+							currentIndex: root.optionIndex(model, root.tickerPlacement)
+							onActivated: {
+								root.tickerPlacement = String(currentValue)
+								dialogState.invokeAction("setTickerPresentation",
+									{ "tickerPlacement": root.tickerPlacement })
+							}
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Label { textFormat: Text.PlainText; text: qsTr("Direction"); color: Theme.textMuted; font.pixelSize: 10 }
+						ModernComboBox {
+							id: tickerDirectionSelect
+							objectName: "stonksTickerDirection"
+							Layout.fillWidth: true
+							model: root.tickerDirectionOptions()
+							textRole: "label"
+							valueRole: "value"
+							currentIndex: root.optionIndex(model, root.tickerDirection)
+							onActivated: {
+								root.tickerDirection = String(currentValue)
+								dialogState.invokeAction("setTickerPresentation",
+									{ "tickerDirection": root.tickerDirection })
+							}
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Label { textFormat: Text.PlainText; text: qsTr("Speed"); color: Theme.textMuted; font.pixelSize: 10 }
+						ModernComboBox {
+							id: tickerSpeedSelect
+							objectName: "stonksTickerSpeed"
+							Layout.fillWidth: true
+							model: root.tickerSpeedOptions()
+							textRole: "label"
+							valueRole: "value"
+							currentIndex: root.optionIndex(model, root.tickerSpeed)
+							onActivated: {
+								root.tickerSpeed = String(currentValue)
+								dialogState.invokeAction("setTickerPresentation",
+									{ "tickerSpeed": root.tickerSpeed })
+							}
+						}
+					}
+				}
+			}
+		}
+
+		Rectangle {
+			Layout.fillWidth: true
+			Layout.preferredHeight: tickerSourcesLayout.implicitHeight + 24
+			color: Theme.panel
+			border.color: Theme.divider
+			radius: Theme.innerRadius
+			ColumnLayout {
+				id: tickerSourcesLayout
+				anchors.fill: parent
+				anchors.margins: 12
+				spacing: 8
+				Label { textFormat: Text.PlainText; text: qsTr("Ticker feed"); color: Theme.textStrong; font.bold: true }
+				Flow {
+					Layout.fillWidth: true
+					Layout.preferredHeight: childrenRect.height
+					spacing: 12
+					ModernCheckBox {
+						objectName: "stonksFeedMine"
+						text: qsTr("Mine")
+						checked: (root.stonks.feedPreferences || {}).showMine !== false
+						onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": checked,
+							"showPopular": (root.stonks.feedPreferences || {}).showPopular !== false,
+							"showPins": (root.stonks.feedPreferences || {}).showPins !== false })
+					}
+					ModernCheckBox {
+						objectName: "stonksFeedPopular"
+						text: qsTr("Popular")
+						checked: (root.stonks.feedPreferences || {}).showPopular !== false
+						onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": (root.stonks.feedPreferences || {}).showMine !== false,
+							"showPopular": checked, "showPins": (root.stonks.feedPreferences || {}).showPins !== false })
+					}
+					ModernCheckBox {
+						objectName: "stonksFeedPins"
+						text: qsTr("Pinned")
+						checked: (root.stonks.feedPreferences || {}).showPins !== false
+						onToggled: dialogState.invokeAction("setFeedPreferences", { "showMine": (root.stonks.feedPreferences || {}).showMine !== false,
+							"showPopular": (root.stonks.feedPreferences || {}).showPopular !== false, "showPins": checked })
 					}
 				}
 			}
@@ -822,7 +957,7 @@ ColumnLayout {
 						}
 						ModernIconButton {
 							objectName: "stonksPositionRemove_" + positionCard.index
-							text: "×"
+							iconName: "close"
 							enabled: root.canEditPortfolio()
 							Accessible.name: qsTr("Remove position %1").arg(positionCard.index + 1)
 							onClicked: root.removePosition(positionCard.index)

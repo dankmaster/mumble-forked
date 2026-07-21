@@ -107,6 +107,7 @@ namespace {
 		return {
 			{ "backend_id", identity.backendId.toStdString() },
 			{ "physical_id", identity.physicalId.toStdString() },
+			{ "stable_hardware_id", identity.stableHardwareId.toStdString() },
 			{ "display_name", identity.displayName.toStdString() },
 			{ "follows_system_default", identity.followsSystemDefault },
 			{ "stable", identity.stable },
@@ -117,6 +118,7 @@ namespace {
 		DeviceIdentity identity;
 		identity.backendId            = QString::fromStdString(json.at("backend_id").get< std::string >());
 		identity.physicalId           = QString::fromStdString(json.at("physical_id").get< std::string >());
+		identity.stableHardwareId = QString::fromStdString(json.value("stable_hardware_id", std::string()));
 		identity.displayName          = QString::fromStdString(json.value("display_name", std::string()));
 		identity.followsSystemDefault = json.value("follows_system_default", false);
 		identity.stable               = json.value("stable", true);
@@ -376,7 +378,8 @@ bool runtimeAutoAdaptationEnabled(const DefaultPreference &preference) noexcept 
 }
 
 bool DeviceIdentity::operator==(const DeviceIdentity &other) const {
-	return backendId == other.backendId && physicalId == other.physicalId && displayName == other.displayName
+	return backendId == other.backendId && physicalId == other.physicalId && stableHardwareId == other.stableHardwareId
+		   && displayName == other.displayName
 		   && followsSystemDefault == other.followsSystemDefault && stable == other.stable;
 }
 
@@ -431,13 +434,18 @@ QString stableDeviceKey(const DeviceIdentity &identity) {
 	QCryptographicHash hash(QCryptographicHash::Sha256);
 	hash.addData(identity.backendId.toUtf8());
 	hash.addData(QByteArrayView("\0", 1));
-	hash.addData(identity.physicalId.toUtf8());
+	hash.addData((identity.stableHardwareId.isEmpty() ? identity.physicalId : identity.stableHardwareId).toUtf8());
 	return QString::fromLatin1(hash.result().toHex());
 }
 
 bool deviceIdentitiesMatch(const DeviceIdentity &first, const DeviceIdentity &second) noexcept {
-	return !first.backendId.isEmpty() && !first.physicalId.isEmpty() && first.backendId == second.backendId
-		   && first.physicalId == second.physicalId;
+	if (first.backendId.isEmpty() || second.backendId.isEmpty() || first.backendId != second.backendId) {
+		return false;
+	}
+	if (!first.stableHardwareId.isEmpty() && !second.stableHardwareId.isEmpty()) {
+		return first.stableHardwareId == second.stableHardwareId;
+	}
+	return !first.physicalId.isEmpty() && first.physicalId == second.physicalId;
 }
 
 const DeviceProfileState *findDeviceProfile(const Settings &settings, const DeviceIdentity &identity) noexcept {
@@ -755,11 +763,19 @@ bool markDeviceProfileUsed(Settings &settings, const DeviceIdentity &identity, c
 		return false;
 	}
 	for (DeviceProfileState &state : settings.deviceProfiles) {
-		if (!deviceIdentitiesMatch(state.identity, identity) || state.lastUsedEpochMs >= nowEpochMs) {
+		if (!deviceIdentitiesMatch(state.identity, identity)) {
 			continue;
 		}
-		state.lastUsedEpochMs = nowEpochMs;
-		return true;
+		bool changed = false;
+		if (state.identity.stableHardwareId.isEmpty() && !identity.stableHardwareId.isEmpty()) {
+			state.identity = identity;
+			changed = true;
+		}
+		if (state.lastUsedEpochMs < nowEpochMs) {
+			state.lastUsedEpochMs = nowEpochMs;
+			changed = true;
+		}
+		return changed;
 	}
 	return false;
 }

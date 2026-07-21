@@ -19,8 +19,8 @@ Item {
 	readonly property int optionCount: reactionRepeater.count
 	signal reactionRequested(string emoji)
 
-	implicitWidth: reactionFlow.implicitWidth
-	implicitHeight: reactionFlow.implicitHeight
+	implicitWidth: reactionRow.implicitWidth
+	implicitHeight: reactionRow.implicitHeight
 	visible: expanded
 	Accessible.role: Accessible.Grouping
 	Accessible.name: qsTr("Quick reactions")
@@ -39,10 +39,9 @@ Item {
 		return reactionRepeater.itemAt(index)
 	}
 
-	Flow {
-		id: reactionFlow
-		width: root.width
-		spacing: Theme.space2
+	Row {
+		id: reactionRow
+		spacing: Theme.space1
 
 		Repeater {
 			id: reactionRepeater
@@ -79,7 +78,8 @@ Item {
 					textFormat: Text.PlainText
 					text: reactionOption.modelData.emoji
 					color: Theme.textStrong
-					font.pixelSize: 18
+					font.family: Qt.platform.os === "windows" ? "Segoe UI Emoji" : ""
+					font.pixelSize: 19
 					horizontalAlignment: Text.AlignHCenter
 					verticalAlignment: Text.AlignVCenter
 					Accessible.ignored: true

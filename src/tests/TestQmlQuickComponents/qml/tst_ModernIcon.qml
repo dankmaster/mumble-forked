@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import QtTest
 import Mumble.Theme 1.0
 
@@ -47,6 +48,7 @@ TestCase {
 		compare(shape.width, 24)
 		compare(shape.height, 24)
 		compare(shape.scale, 1)
+		compare(shape.preferredRendererType, Shape.CurveRenderer)
 		const searchPath = loader.item.pathData
 		verify(searchPath.length > 0)
 
@@ -69,13 +71,10 @@ TestCase {
 		verify(!iconShape().visible)
 	}
 
-	function test_more_icon_uses_stable_primitive_dots() {
+	function test_more_icon_uses_tabler_vector_path() {
 		loader.item.name = "more"
 		verify(loader.item.pathData.length > 0)
-		verify(!iconShape().visible)
-		const dots = findChild(loader.item, "modernMoreIcon")
-		verify(dots !== null)
-		verify(dots.visible)
+		verify(iconShape().visible)
 	}
 
 	function test_semantic_navigation_and_media_icons_have_vector_paths() {
@@ -94,7 +93,7 @@ TestCase {
 		const names = [
 			"action", "add", "certificate", "connect", "copy", "delete", "disconnect", "edit",
 			"eye", "eye-off", "history", "info", "join", "key", "link", "message", "minimize", "move", "pin",
-			"plugin", "quit", "record", "refresh", "reply", "screen-share", "send", "settings", "shield",
+			"plugin", "quit", "reaction", "record", "refresh", "reply", "screen-share", "send", "settings", "shield",
 			"terminal", "unlink", "user", "user-add", "user-remove", "volume"
 		]
 		for (let index = 0; index < names.length; ++index) {

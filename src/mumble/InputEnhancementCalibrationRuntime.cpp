@@ -624,6 +624,13 @@ bool CalibrationRuntimeBridge::evaluateCandidates(std::span< const CalibrationSe
 	return finished;
 }
 
+CalibrationSession::BlindComparison CalibrationRuntimeBridge::blindComparison() noexcept {
+	pauseCallback();
+	const CalibrationSession::BlindComparison comparison = m_session.blindComparison();
+	publishState();
+	return comparison;
+}
+
 CalibrationSession::BlindPair CalibrationRuntimeBridge::blindPair() noexcept {
 	pauseCallback();
 	const CalibrationSession::BlindPair pair = m_session.blindPair();

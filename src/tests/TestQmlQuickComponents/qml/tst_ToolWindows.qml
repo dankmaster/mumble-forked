@@ -454,6 +454,39 @@ TestCase {
 		tool.destroy()
 	}
 
+	function test_attachmentViewerTimesOutAndRetriesOriginalWithoutDroppingPreview() {
+		const tool = createTool("qrc:/qml-shell/AttachmentViewer.qml", {
+			"attachment": {
+				"url": "",
+				"thumbnailUrl": "image://mumble/original-preview?g=1",
+				"alt": "Original preview",
+				"assetId": "42",
+				"hydrationMessageId": "9",
+				"width": 1600,
+				"height": 900,
+				"originalState": "loading"
+			},
+			"originalLoadTimeout": 100
+		})
+		let originalRetryRequests = 0
+		tool.originalRetryRequested.connect(function() { originalRetryRequests += 1 })
+		const originalStatusLabel = findChild(tool.contentItem, "attachmentViewerOriginalStatusLabel")
+		const originalRetryButton = findChild(tool.contentItem, "attachmentViewerOriginalRetryButton")
+		verify(originalStatusLabel !== null && originalRetryButton !== null)
+		compare(originalStatusLabel.text, "Loading full resolution…")
+		compare(originalRetryButton.visible, false)
+		tryCompare(tool, "originalTimedOut", true)
+		tryCompare(originalRetryButton, "visible", true)
+		compare(originalStatusLabel.text, "Preview shown · full resolution delayed")
+		compare(originalRetryButton.Accessible.name, "Retry loading the full-resolution image")
+		mouseClick(originalRetryButton)
+		compare(originalRetryRequests, 1)
+		compare(tool.originalTimedOut, false)
+		compare(String(findChild(tool.contentItem, "attachmentViewerImage").source),
+			"image://mumble/original-preview?g=1")
+		tool.destroy()
+	}
+
 	function test_imageViewerRejectsRemoteSourcesAndShowsKeyboardFocus() {
 		dialogState.setSpecialState("imageViewer", {
 			"imageViewer": {

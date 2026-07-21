@@ -1436,7 +1436,7 @@ TestCase {
 		verify(openButton !== null && openButton.visible)
 		compare(openButton.Accessible.role, Accessible.Link)
 		compare(openButton.Accessible.name, "Open: Release notes")
-		openButton.forceActiveFocus()
+		openButton.forceActiveFocus(Qt.TabFocusReason)
 		tryCompare(openButton, "activeFocus", true)
 		compare(openButton.background.border.width, Theme.focusRingWidth)
 		compare(openButton.background.border.color, Theme.focus)
@@ -2119,7 +2119,7 @@ TestCase {
 		compare(hero.source.toString(), "image://mumble/steam-hero?g=1")
 	}
 
-	function test_steam_gallery_keeps_bounded_selectable_thumbnails() {
+	function test_steam_gallery_is_visible_and_selectable_without_expanding_the_card() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready", "title": "Hades II", "url": "https://store.steampowered.com/app/1",
@@ -2135,8 +2135,8 @@ TestCase {
 				"steamAppName": "Hades II", "steamPrice": "29,99 €" }
 		}
 		card.previewIdentity = "message:steam-gallery"
-		card.userExpanded = true
-		tryVerify(function() { return card.expanded && card.implicitHeight > 0 })
+		card.userExpanded = false
+		tryVerify(function() { return !card.expanded && card.implicitHeight > 0 })
 		previewLoader.height = Math.ceil(card.implicitHeight)
 		wait(0)
 		const rail = findChild(card, "previewSteamMediaRail")
@@ -2159,6 +2159,37 @@ TestCase {
 		second.clicked()
 		compare(card.selectedMediaIndex, 1)
 		compare(second.Accessible.selected, true)
+		const counter = findChild(card, "providerSteamMediaCounter")
+		compare(counter.text, "2 / 3")
+		const heroAction = findChild(card, "providerSteamHeroAction")
+		verify(heroAction !== null)
+		heroAction.clicked()
+		tryCompare(directMediaSpy, "count", 1)
+		compare(directMediaSpy.signalArguments[0][0], "https://cdn.example.test/trailer.mp4")
+	}
+
+	function test_steam_best_price_opens_isthereanydeal_offer() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Hades II", "url": "https://store.steampowered.com/app/1",
+			"mediaItems": [{ "kind": "image", "url": "image://mumble/steam-hero?g=1" }],
+			"metadata": { "provider": "steam", "previewKind": "gameStoreProduct",
+				"steamAppName": "Hades II", "steamPrice": "29,99 €",
+				"steamBestPrice": "24,99 EUR", "steamBestShop": "Fanatical",
+				"steamBestDealUrl": "https://itad.link/deal/",
+				"steamDealComparisonUrl": "https://isthereanydeal.com/game/hades-ii/",
+				"steamHistoricalLowPrice": "19,99 EUR", "steamHistoricalLowShop": "Steam" }
+		}
+		card.previewIdentity = "message:steam-deal"
+		const deal = findChild(card, "providerSteamBestDeal")
+		verify(deal !== null)
+		tryCompare(deal, "visible", true)
+		compare(findChild(card, "providerSteamBestDealPrice").text, "24,99 EUR · Fanatical")
+		compare(findChild(card, "providerSteamHistoricalLow").text,
+			"Historical low: 19,99 EUR at Steam")
+		deal.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], "https://itad.link/deal/")
 	}
 
 	function test_steam_manifest_only_trailers_keep_managed_posters_and_lazy_media_contract() {
@@ -2207,9 +2238,29 @@ TestCase {
 		const tile = findChild(gallery, "attachment_asset:1")
 		verify(tile !== null)
 		verify(tile.x >= -0.5 && tile.x + tile.width <= gallery.width + 0.5)
-		verify(tile.height >= 96 && tile.height <= 240)
+		verify(tile.height >= 96 && tile.height <= 200)
 		const action = findChild(gallery, "attachmentAction_asset:1")
 		compare(action.Accessible.description, "Attachment 1 of 1")
+	}
+
+	function test_attachment_thumbnail_stays_compact_in_regular_chat() {
+		attachmentLoader.width = 620
+		const gallery = attachmentLoader.item
+		gallery.attachments = [{
+			"id": "portrait-preview",
+			"kind": "image",
+			"thumbnailUrl": "image://mumble/portrait-preview?g=1",
+			"width": 1440,
+			"height": 1800,
+			"alt": "Portrait preview"
+		}]
+		const tile = findChild(gallery, "attachment_portrait-preview")
+		const image = findChild(gallery, "attachmentImage_portrait-preview")
+		verify(tile !== null && image !== null)
+		verify(tile.width <= 400)
+		verify(tile.height <= 240)
+		verify(image.width < tile.width && image.height < tile.height,
+			"The thumbnail should retain a quiet inset instead of touching the card border")
 	}
 
 	function test_attachment_gallery_bounds_items_and_surfaces_rejected_images() {

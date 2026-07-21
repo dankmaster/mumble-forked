@@ -20,6 +20,14 @@ TestCase {
 			"maximumHeight": 260,
 			"groups": [
 				{
+					"id": "primary-settings",
+					"label": "",
+					"items": [
+						{ "kind": "action", "id": "configure.settings", "label": "Settings",
+							"enabled": true, "icon": "settings" }
+					]
+				},
+				{
 					"id": "server",
 					"label": "Server",
 					"items": [
@@ -143,21 +151,23 @@ TestCase {
 
 	function test_semantic_groups_preserve_headers_actions_and_separators() {
 		const entries = menuLoader.item.renderedEntries
-		compare(entries.length, 3)
+		compare(entries.length, 4)
 		compare(entries[0].kind, "header")
-		compare(entries[1].kind, "submenu")
-		compare(entries[1].label, "Server")
-		compare(entries[1].icon, "connect")
-		compare(entries[1].items[0].id, "server.connect")
-		compare(entries[1].items[1].kind, "separator")
-		compare(entries[1].items[2].id, "server.disconnect")
-		compare(entries[1].items[3].id, "server.administration")
-		compare(entries[1].items[3].kind, "action")
+		compare(entries[1].kind, "action")
+		compare(entries[1].id, "configure.settings")
 		compare(entries[2].kind, "submenu")
-		compare(entries[2].label, "Configure")
-		compare(entries[2].icon, "settings")
-		compare(entries[2].items[0].id, "configure.settings")
-		verify(entries[2].items.every(function(entry) { return entry.id !== "hidden" }))
+		compare(entries[2].label, "Server")
+		compare(entries[2].icon, "connect")
+		compare(entries[2].items[0].id, "server.connect")
+		compare(entries[2].items[1].kind, "separator")
+		compare(entries[2].items[2].id, "server.disconnect")
+		compare(entries[2].items[3].id, "server.administration")
+		compare(entries[2].items[3].kind, "action")
+		compare(entries[3].kind, "submenu")
+		compare(entries[3].label, "Configure")
+		compare(entries[3].icon, "settings")
+		compare(entries[3].items[0].id, "configure.settings")
+		verify(entries[3].items.every(function(entry) { return entry.id !== "hidden" }))
 	}
 
 	function test_group_rows_render_representative_typed_action_icons() {
@@ -346,6 +356,36 @@ TestCase {
 		compare(actionSpy.count, 0)
 	}
 
+	function test_pointer_activation_selects_inline_action_and_closes_stale_submenu() {
+		const menu = menuLoader.item
+		mouseMove(testCase, testCase.width - 2, testCase.height - 2)
+		wait(0)
+		menu.x = 24
+		menu.y = 24
+		menu.open()
+		tryVerify(function() { return menu.visible })
+
+		const serverMenu = menuForGroup("server")
+		const serverTrigger = triggerForMenu(serverMenu)
+		const settingsItem = menu.itemAt(1)
+		const settingsBackground = findChild(settingsItem, "payloadFocusBackground")
+		verify(serverMenu !== null && serverTrigger !== null)
+		verify(settingsItem !== null && settingsBackground !== null)
+		compare(settingsItem.payload.id, "configure.settings")
+
+		serverMenu.reconcileEntries()
+		verify(serverMenu.generatedEntryCount > 0)
+		verify(serverTrigger.openAttachedSubmenu(false))
+		tryVerify(function() { return serverMenu.visible })
+		compare(menu.activeSubmenu, serverMenu)
+
+		verify(menu.activatePointerItem(settingsItem))
+		compare(menu.currentIndex, 1)
+		compare(settingsBackground.color, Theme.popupSelected)
+		tryVerify(function() { return !serverMenu.visible })
+		compare(menu.activeSubmenu, null)
+	}
+
 	function test_stable_payload_refresh_reuses_the_compiled_submenu_tree() {
 		const menu = menuLoader.item
 		const originalGroups = menu.groups
@@ -362,8 +402,8 @@ TestCase {
 		compare(administrationMenu.sharedSubmenuComponent, sharedFactory)
 
 		const refreshedGroups = JSON.parse(JSON.stringify(originalGroups))
-		refreshedGroups[0].items[1].label = "Connect now"
-		refreshedGroups[0].items[1].enabled = false
+		refreshedGroups[1].items[1].label = "Connect now"
+		refreshedGroups[1].items[1].enabled = false
 		try {
 			menu.groups = refreshedGroups
 			tryCompare(itemForActionInMenu(serverMenu, "server.connect"), "text", "Connect now")

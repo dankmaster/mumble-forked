@@ -19,6 +19,17 @@ ColumnLayout {
 	readonly property int playbackExpiryMs: 12000
 	readonly property string leftToken: String(field.inputEnhancementCalibrationLeftPlaybackToken || "")
 	readonly property string rightToken: String(field.inputEnhancementCalibrationRightPlaybackToken || "")
+	readonly property var comparisonOptions: {
+		const published = field.inputEnhancementCalibrationPlaybackOptions || []
+		if (published.length > 0)
+			return published
+		const fallback = []
+		if (leftToken.length > 0)
+			fallback.push({ "label": "A", "playbackToken": leftToken })
+		if (rightToken.length > 0)
+			fallback.push({ "label": "B", "playbackToken": rightToken })
+		return fallback
+	}
 	readonly property int calibrationState: Number(field.inputEnhancementCalibrationState || 0)
 	readonly property string workerState: String(field.inputEnhancementCalibrationWorkerState || "idle")
 	readonly property int workerProgress: Math.max(0,
@@ -29,8 +40,15 @@ ColumnLayout {
 	readonly property bool workerActive: workerState === "running" || workerState === "cancelling"
 	readonly property bool captureActive: calibrationState >= 1 && calibrationState <= 9
 	readonly property bool comparisonReady: (calibrationState === 10 || calibrationState === 11)
-		&& leftToken.length > 0 && rightToken.length > 0 && leftToken !== rightToken
+		&& comparisonOptions.length >= 2
 	readonly property bool refreshTimerRunning: refreshTimer.running
+	readonly property bool startAvailable: field.inputEnhancementCalibrationAvailable === undefined
+		? true : !!field.inputEnhancementCalibrationAvailable
+	readonly property string unavailableReason: String(
+		field.inputEnhancementCalibrationUnavailableReason || "")
+	readonly property int calibrationStep: calibrationState <= 0 || calibrationState >= 12 ? 0
+		: calibrationState <= 2 ? 1 : calibrationState <= 4 ? 2 : calibrationState <= 6 ? 3
+		: calibrationState <= 8 ? 4 : 5
 
 	readonly property string startActionId: String(field.inputEnhancementCalibrationStartActionId || "")
 	readonly property string advanceActionId: String(field.inputEnhancementCalibrationAdvanceActionId || "")
@@ -95,13 +113,20 @@ ColumnLayout {
 	}
 
 	function validateActivePlayback() {
-		if (!comparisonReady || (activePlaybackToken !== leftToken && activePlaybackToken !== rightToken))
+		let tokenStillAvailable = false
+		for (let index = 0; index < comparisonOptions.length; ++index) {
+			if (activePlaybackToken === String((comparisonOptions[index] || {}).playbackToken || "")) {
+				tokenStillAvailable = true
+				break
+			}
+		}
+		if (!comparisonReady || !tokenStillAvailable)
 			stopPlayback()
 	}
 
 	function stateHeading() {
 		switch (calibrationState) {
-		case 0: return qsTr("Tune input enhancement")
+		case 0: return qsTr("2 · Processing calibration")
 		case 1:
 		case 2: return qsTr("Check microphone level")
 		case 3:
@@ -133,7 +158,10 @@ ColumnLayout {
 	function stateDescription() {
 		switch (calibrationState) {
 		case 0:
-			return qsTr("A short local recording is used to compare profiles for this microphone.")
+			return startAvailable
+				? qsTr("Record one guided sample, then hear each safe processing profile after the same enhancement and Opus path used for outgoing voice.")
+				: (unavailableReason.length > 0 ? unavailableReason
+					: qsTr("Apply this microphone's input settings before calibrating."))
 		case 1:
 		case 2:
 			return levelStatusText()
@@ -142,7 +170,7 @@ ColumnLayout {
 		case 4:
 			return qsTr("Room sound captured. Continue to the voice sample.")
 		case 5:
-			return qsTr("Speak naturally for 12 seconds. Include these neutral sounds: s, sh, f — p, t, k.")
+			return qsTr("Recording starts immediately. Read the text below once at your normal call volume; repeat from the beginning if time remains.")
 		case 6:
 			return qsTr("Voice sample captured. Continue when you are ready.")
 		case 7:
@@ -156,11 +184,14 @@ ColumnLayout {
 				return qsTr("Stopping local analysis safely…")
 			if (workerState === "failed")
 				return errorText.length > 0 ? errorText : qsTr("Local analysis failed. Cancel and try again.")
-			return qsTr("The samples are ready. Start local analysis to prepare a loudness-matched blind pair.")
+			return qsTr("The samples are ready. Start local analysis to prepare loudness-matched versions of every safe profile.")
 		case 10:
-			return qsTr("Listen to A and B, then choose the version you prefer. Profile names stay hidden.")
+			return qsTr("Listen to every version, then choose the sound you prefer. Profile names stay hidden until you choose.")
 		case 11:
-			return qsTr("Your choice is staged only. Apply it to save this microphone's calibration.")
+			return String(field.inputEnhancementCalibrationSelectedProfile || "").length > 0
+				? qsTr("You chose %1. Apply it to save this microphone's processing profile.")
+					.arg(String(field.inputEnhancementCalibrationSelectedProfile))
+				: qsTr("Your choice is staged only. Apply it to save this microphone's processing profile.")
 		case 12:
 			return probationRunning
 				? qsTr("The chosen profile is active and completing a short safety check.")
@@ -186,6 +217,7 @@ ColumnLayout {
 	Component.onDestruction: stopPlayback()
 
 	visible: startActionId.length > 0 || calibrationState !== 0 || errorText.length > 0
+		|| unavailableReason.length > 0
 	Layout.fillWidth: true
 	spacing: Math.max(6, Theme.spacing - 3)
 
@@ -217,6 +249,17 @@ ColumnLayout {
 	}
 
 	Label {
+		objectName: "inputEnhancementCalibrationStep"
+		Layout.fillWidth: true
+		visible: root.calibrationStep > 0
+		textFormat: Text.PlainText
+		text: qsTr("Processing step %1 of 5").arg(root.calibrationStep)
+		color: Theme.accent
+		font.pixelSize: 10
+		font.weight: Font.DemiBold
+	}
+
+	Label {
 		objectName: "inputEnhancementCalibrationStatus"
 		Layout.fillWidth: true
 		textFormat: Text.PlainText
@@ -230,10 +273,48 @@ ColumnLayout {
 		objectName: "inputEnhancementCalibrationPrivacy"
 		Layout.fillWidth: true
 		textFormat: Text.PlainText
-		text: qsTr("Calibration audio stays in memory on this device, is never sent to the server, and is erased when calibration ends.")
+		text: qsTr("Audio stays in memory on this device, is never sent to the server, and is erased when calibration ends. A local Opus round trip reproduces processing and codec sound; network delay, jitter, and packet loss are not added.")
 		color: Theme.textMuted
 		font.pixelSize: 10
 		wrapMode: Text.Wrap
+	}
+
+	Rectangle {
+		objectName: "inputEnhancementCalibrationReadingPrompt"
+		Layout.fillWidth: true
+		implicitHeight: readingPromptContent.implicitHeight + Theme.space3 * 2
+		visible: root.calibrationState === 5
+		radius: Theme.innerRadius
+		color: Theme.accentSubtle
+		border.width: 1
+		border.color: Theme.withAlpha(Theme.accent, 0.42)
+
+		ColumnLayout {
+			id: readingPromptContent
+			anchors.fill: parent
+			anchors.margins: Theme.space3
+			spacing: Theme.space1
+
+			Label {
+				Layout.fillWidth: true
+				text: qsTr("READ ALOUD · ABOUT 12 SECONDS")
+				textFormat: Text.PlainText
+				color: Theme.accent
+				font.pixelSize: 10
+				font.weight: Font.DemiBold
+			}
+
+			Label {
+				objectName: "inputEnhancementCalibrationReadingText"
+				Layout.fillWidth: true
+				text: qsTr("Please pack five blue boxes by the quiet window. Soft rain, quick footsteps, keyboard clicks, and a humming fan should stay behind my clear, natural voice.")
+				textFormat: Text.PlainText
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontBody
+				font.weight: Font.Medium
+				wrapMode: Text.Wrap
+			}
+		}
 	}
 
 	ModernCheckBox {
@@ -289,7 +370,7 @@ ColumnLayout {
 		ModernButton {
 			objectName: "inputEnhancementCalibrationStart"
 			visible: root.calibrationState === 0 || root.calibrationState >= 12
-			enabled: root.startActionId.length > 0 && !root.probationRunning
+			enabled: root.startActionId.length > 0 && root.startAvailable && !root.probationRunning
 			text: root.calibrationState === 0 ? qsTr("Start calibration") : qsTr("Calibrate again")
 			tone: "accent"
 			onClicked: root.startCalibration()
@@ -325,36 +406,31 @@ ColumnLayout {
 			onClicked: root.invoke(root.evaluateActionId, {})
 		}
 
-		ModernButton {
-			objectName: "inputEnhancementCalibrationPlayA"
-			visible: root.comparisonReady
-			text: root.activePlaybackToken === root.leftToken ? qsTr("Stop A") : qsTr("Play A")
-			tone: root.activePlaybackToken === root.leftToken ? "warning" : "secondary"
-			onClicked: root.play(root.leftToken)
-		}
+		Repeater {
+			model: root.comparisonReady ? root.comparisonOptions : []
 
-		ModernButton {
-			objectName: "inputEnhancementCalibrationPreferA"
-			visible: root.calibrationState === 10 && root.comparisonReady && root.selectActionId.length > 0
-			text: qsTr("Prefer A")
-			tone: "accent"
-			onClicked: root.select(root.leftToken)
-		}
+			Row {
+				readonly property var option: modelData || ({})
+				readonly property string optionLabel: String(option.label || String.fromCharCode(65 + index))
+				readonly property string optionToken: String(option.playbackToken || "")
+				spacing: Math.max(4, Math.round(Theme.spacing / 3))
 
-		ModernButton {
-			objectName: "inputEnhancementCalibrationPlayB"
-			visible: root.comparisonReady
-			text: root.activePlaybackToken === root.rightToken ? qsTr("Stop B") : qsTr("Play B")
-			tone: root.activePlaybackToken === root.rightToken ? "warning" : "secondary"
-			onClicked: root.play(root.rightToken)
-		}
+				ModernButton {
+					objectName: "inputEnhancementCalibrationPlay" + parent.optionLabel
+					text: root.activePlaybackToken === parent.optionToken
+						? qsTr("Stop %1").arg(parent.optionLabel) : qsTr("Play %1").arg(parent.optionLabel)
+					tone: root.activePlaybackToken === parent.optionToken ? "warning" : "secondary"
+					onClicked: root.play(parent.optionToken)
+				}
 
-		ModernButton {
-			objectName: "inputEnhancementCalibrationPreferB"
-			visible: root.calibrationState === 10 && root.comparisonReady && root.selectActionId.length > 0
-			text: qsTr("Prefer B")
-			tone: "accent"
-			onClicked: root.select(root.rightToken)
+				ModernButton {
+					objectName: "inputEnhancementCalibrationPrefer" + parent.optionLabel
+					visible: root.calibrationState === 10 && root.selectActionId.length > 0
+					text: qsTr("Choose %1").arg(parent.optionLabel)
+					tone: "accent"
+					onClicked: root.select(parent.optionToken)
+				}
+			}
 		}
 
 		ModernButton {

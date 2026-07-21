@@ -23,6 +23,7 @@ private slots:
 	void synchronizeRowsUsesIncrementalSignals();
 	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
+	void connectionResetDropsRowsBeforeSameIdsAreReused();
 	void navigationRailFlattensRoomsAndParticipantsIncrementally();
 	void navigationRailPresentationStateStaysStableAndIncremental();
 	void roomRowsExposeActionsOnlySource();
@@ -62,6 +63,8 @@ private slots:
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void sessionParsesManagedMotdImagesAndTracksSourceIdentity();
+	void sessionParsesSemanticMotdDocument();
+	void motdServerViewStateIsIsolatedByServer();
 	void sessionAppliesTypedConnectionState();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
@@ -510,6 +513,58 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 	QCOMPARE(participants.rowCount(), 1);
 	QCOMPARE(participantChangedSpy.count(), 1);
 	QCOMPARE(participantResetSpy.count(), 0);
+}
+
+void TestQmlClientModels::connectionResetDropsRowsBeforeSameIdsAreReused() {
+	RoomModel rooms;
+	NavigationRailModel navigation;
+	ParticipantModel participants;
+
+	const QVariantMap oldUser {
+		{ QStringLiteral("participantKey"), QStringLiteral("user:7") },
+		{ QStringLiteral("session"), 7 },
+		{ QStringLiteral("scopeToken"), QStringLiteral("0:1") },
+		{ QStringLiteral("label"), QStringLiteral("Old server user") }
+	};
+	const QVariantMap oldRoom {
+		{ QStringLiteral("token"), QStringLiteral("0:1") },
+		{ QStringLiteral("label"), QStringLiteral("Lobby") },
+		{ QStringLiteral("participants"), QVariantList { oldUser } }
+	};
+	rooms.replaceRoomStates({ oldRoom }, {});
+	navigation.replaceRoomStates({ oldRoom }, {});
+	participants.replaceParticipantStates({ oldUser });
+	navigation.setRoomExpanded(QStringLiteral("0:1"), false);
+
+	rooms.clearConnectionState();
+	navigation.clearConnectionState();
+	participants.clear();
+
+	QCOMPARE(rooms.rowCount(), 0);
+	QCOMPARE(navigation.rowCount(), 0);
+	QCOMPARE(participants.rowCount(), 0);
+	QVERIFY(navigation.isRoomExpanded(QStringLiteral("0:1")));
+
+	const QVariantMap newUser {
+		{ QStringLiteral("participantKey"), QStringLiteral("user:11") },
+		{ QStringLiteral("session"), 11 },
+		{ QStringLiteral("scopeToken"), QStringLiteral("0:1") },
+		{ QStringLiteral("label"), QStringLiteral("New server user") }
+	};
+	const QVariantMap newRoom {
+		{ QStringLiteral("token"), QStringLiteral("0:1") },
+		{ QStringLiteral("label"), QStringLiteral("Lobby") },
+		{ QStringLiteral("participants"), QVariantList { newUser } }
+	};
+	rooms.replaceRoomStates({ newRoom }, {});
+	navigation.replaceRoomStates({ newRoom }, {});
+	participants.replaceParticipantStates({ newUser });
+
+	QCOMPARE(rooms.rowCount(), 1);
+	QCOMPARE(navigation.rowCount(), 2);
+	QCOMPARE(participants.rowCount(), 1);
+	QCOMPARE(navigation.get(1).value(QStringLiteral("title")).toString(), QStringLiteral("New server user"));
+	QCOMPARE(participants.get(0).value(QStringLiteral("participantSession")).toString(), QStringLiteral("11"));
 }
 
 void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
@@ -2815,6 +2870,7 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	QSignalSpy imageSpy(&session, &ClientSessionController::serverImageUrlChanged);
 	QSignalSpy motdSpy(&session, &ClientSessionController::motdHtmlChanged);
 	QSignalSpy motdSegmentsSpy(&session, &ClientSessionController::motdSegmentsChanged);
+	QSignalSpy motdBlocksSpy(&session, &ClientSessionController::motdBlocksChanged);
 	session.setConnected(false);
 	QCOMPARE(spy.count(), 0);
 	session.setConnected(true);
@@ -2827,8 +2883,12 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	QCOMPARE(session.motdHtml(), QStringLiteral("<p>Welcome</p>"));
 	QTRY_COMPARE_WITH_TIMEOUT(motdSegmentsSpy.count(), 1, 5000);
 	QTRY_COMPARE_WITH_TIMEOUT(session.motdSegments().size(), 1, 5000);
+	QTRY_COMPARE_WITH_TIMEOUT(motdBlocksSpy.count(), 1, 5000);
+	QTRY_COMPARE_WITH_TIMEOUT(session.motdBlocks().size(), 1, 5000);
 	QCOMPARE(session.motdSegments().first().toMap().value(QStringLiteral("text")).toString(),
 			 QStringLiteral("Welcome"));
+	QCOMPARE(session.motdBlocks().first().toMap().value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("paragraph"));
 	QCOMPARE(session.motdSummary(), QStringLiteral("Welcome"));
 	session.setServerMonogram(QStringLiteral("  1M  "));
 	session.setServerMonogram(QStringLiteral("1M"));
@@ -2885,6 +2945,68 @@ void TestQmlClientModels::sessionParsesManagedMotdImagesAndTracksSourceIdentity(
 	QVERIFY(!session.motdSignature().isEmpty());
 	QCOMPARE(session.motdActions().constLast().toMap().value(QStringLiteral("payload")).toMap()
 		.value(QStringLiteral("signature")).toString(), session.motdSignature());
+}
+
+void TestQmlClientModels::sessionParsesSemanticMotdDocument() {
+	ClientSessionController session;
+	QSignalSpy blocksSpy(&session, &ClientSessionController::motdBlocksChanged);
+	const QString renderedHtml = QStringLiteral(
+		"<h2>Welcome aboard</h2>"
+		"<p style='text-align:center'>Pick a room and say hello.</p>"
+		"<ul><li><b>Be kind</b></li><li>Have fun</li></ul>"
+		"<p><img src='image://mumble/motd-inline?g=2' alt='Server crest'/></p>");
+	session.setMotdContent(renderedHtml, QStringLiteral("semantic motd v1"));
+	QTRY_VERIFY_WITH_TIMEOUT(blocksSpy.count() >= 1, 5000);
+	QTRY_COMPARE_WITH_TIMEOUT(session.motdBlocks().size(), 5, 5000);
+
+	const QVariantList blocks = session.motdBlocks();
+	QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("heading"));
+	QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("headingLevel")).toInt(), 2);
+	QCOMPARE(blocks.at(1).toMap().value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("paragraph"));
+	QCOMPARE(blocks.at(1).toMap().value(QStringLiteral("alignment")).toString(),
+			 QStringLiteral("center"));
+	for (int index = 2; index <= 3; ++index) {
+		QCOMPARE(blocks.at(index).toMap().value(QStringLiteral("kind")).toString(),
+				 QStringLiteral("list-item"));
+		QVERIFY(!blocks.at(index).toMap().value(QStringLiteral("marker")).toString().isEmpty());
+	}
+	QCOMPARE(blocks.at(4).toMap().value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("image"));
+	QCOMPARE(blocks.at(4).toMap().value(QStringLiteral("plainText")).toString(),
+			 QStringLiteral("Server crest"));
+	QCOMPARE(ModernMotd::documentBlocks(renderedHtml), blocks);
+}
+
+void TestQmlClientModels::motdServerViewStateIsIsolatedByServer() {
+	const QString firstKey = ModernMotd::serverStateKey(QByteArrayLiteral("server-a"), {}, 0);
+	const QString secondKey = ModernMotd::serverStateKey(QByteArrayLiteral("server-b"), {}, 0);
+	QVERIFY(!firstKey.isEmpty());
+	QVERIFY(firstKey != secondKey);
+	QCOMPARE(ModernMotd::serverStateKey({}, QStringLiteral(" MUMBLE.EXAMPLE.COM "), 64738),
+			 ModernMotd::serverStateKey({}, QStringLiteral("mumble.example.com"), 64738));
+
+	QString serialized;
+	serialized = ModernMotd::withServerViewState(serialized, firstKey,
+		QVariantMap { { QStringLiteral("expanded"), true },
+			{ QStringLiteral("dismissedSignature"), QStringLiteral("v1:first") },
+			{ QStringLiteral("lastSeenSignature"), QStringLiteral("v1:first") } });
+	QVariantMap first = ModernMotd::serverViewState(serialized, firstKey);
+	QVERIFY(first.value(QStringLiteral("exists")).toBool());
+	QVERIFY(first.value(QStringLiteral("expanded")).toBool());
+	QCOMPARE(first.value(QStringLiteral("dismissedSignature")).toString(), QStringLiteral("v1:first"));
+	QVERIFY(!ModernMotd::serverViewState(serialized, secondKey)
+		.value(QStringLiteral("exists")).toBool());
+
+	serialized = ModernMotd::withServerViewState(serialized, secondKey,
+		QVariantMap { { QStringLiteral("expanded"), false },
+			{ QStringLiteral("dismissedSignature"), QStringLiteral("v1:second") },
+			{ QStringLiteral("lastSeenSignature"), QStringLiteral("v1:second") } });
+	first = ModernMotd::serverViewState(serialized, firstKey);
+	const QVariantMap second = ModernMotd::serverViewState(serialized, secondKey);
+	QCOMPARE(first.value(QStringLiteral("dismissedSignature")).toString(), QStringLiteral("v1:first"));
+	QCOMPARE(second.value(QStringLiteral("dismissedSignature")).toString(), QStringLiteral("v1:second"));
 }
 
 void TestQmlClientModels::sessionAppliesTypedConnectionState() {

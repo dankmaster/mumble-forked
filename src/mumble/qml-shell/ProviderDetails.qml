@@ -17,6 +17,8 @@ FocusScope {
 	property string previewDescription: ""
 	property string previewImageSource: ""
 	property bool expanded: false
+	property var steamMediaItems: []
+	property int steamMediaIndex: 0
 	readonly property bool compactLayout: width < 440
 	readonly property string stableKind: normalizedStableKind()
 	readonly property string stableProvider: normalizedStableProvider()
@@ -140,6 +142,26 @@ FocusScope {
 	readonly property string steamDiscountLabel: normalizedDiscount(firstValue([
 		"steamDiscountPercent", "gameStoreDiscount"
 	]))
+	readonly property int boundedSteamMediaIndex: Math.max(0,
+		Math.min(steamMediaIndex, steamMediaItems.length - 1))
+	readonly property var steamCurrentMedia: steamMediaItems.length > 0
+		? steamMediaItems[boundedSteamMediaIndex] : ({})
+	readonly property string steamCurrentMediaKind: safeText(steamCurrentMedia.kind, 32).toLowerCase()
+	readonly property string steamCurrentMediaTitle: safeText(steamCurrentMedia.title, 256)
+	readonly property string steamBestPrice: safeText(firstValue(["steamBestPrice"]), 128)
+	readonly property string steamBestShop: safeText(firstValue(["steamBestShop"]), 128)
+	readonly property string steamBestDealUrl: safeExternalUrl(firstValue([
+		"steamBestDealUrl", "steamDealComparisonUrl"
+	]))
+	readonly property string steamComparisonUrl: safeExternalUrl(firstValue([
+		"steamDealComparisonUrl"
+	]))
+	readonly property string steamHistoricalLow: safeText(firstValue([
+		"steamHistoricalLowPrice"
+	]), 128)
+	readonly property string steamHistoricalLowShop: safeText(firstValue([
+		"steamHistoricalLowShop"
+	]), 128)
 	readonly property string googleMode: normalizedGoogleMode()
 	readonly property string googleModeLabel: safeText(firstValue([
 		"googleSearchModeLabel"
@@ -151,6 +173,8 @@ FocusScope {
 		qsTr("Videos"), qsTr("Shopping")]
 
 	signal externalOpenRequested(string url)
+	signal steamMediaSelectionRequested(int index)
+	signal steamMediaOpenRequested(int index)
 
 	objectName: "providerDetails"
 	implicitHeight: hasDetails ? detailsColumn.implicitHeight : 0
@@ -1508,6 +1532,7 @@ FocusScope {
 				}
 
 				Rectangle {
+					id: steamHero
 					objectName: "providerSteamHero"
 					Layout.fillWidth: true
 					Layout.preferredHeight: visible ? (root.compactLayout ? 132 : 176) : 0
@@ -1534,6 +1559,181 @@ FocusScope {
 						anchors.fill: parent
 						color: root.withAlpha(Theme.mediaCanvas, 0.08)
 						Accessible.ignored: true
+					}
+					Button {
+						objectName: "providerSteamHeroAction"
+						anchors.fill: parent
+						z: 1
+						visible: root.steamMediaItems.length > 0
+						hoverEnabled: true
+						background: Rectangle {
+							color: parent.down ? root.withAlpha(Theme.embedSelection, 0.34)
+								: parent.hovered ? root.withAlpha(Theme.embedHover, 0.18) : "transparent"
+						}
+						contentItem: Item {}
+						Accessible.name: root.steamCurrentMediaKind === "video"
+							? qsTr("Play %1").arg(root.steamCurrentMediaTitle || qsTr("Steam trailer"))
+							: qsTr("Open %1").arg(root.steamCurrentMediaTitle || qsTr("Steam screenshot"))
+						onClicked: root.steamMediaOpenRequested(root.boundedSteamMediaIndex)
+					}
+					Rectangle {
+						anchors.fill: parent
+						z: 2
+						visible: root.steamMediaItems.length > 1 || root.steamCurrentMediaKind === "video"
+						color: "transparent"
+						gradient: Gradient {
+							GradientStop { position: 0.55; color: "transparent" }
+							GradientStop { position: 1.0; color: root.withAlpha(Theme.embedOverlayBase, 0.78) }
+						}
+						Accessible.ignored: true
+					}
+					Rectangle {
+						z: 3
+						anchors.centerIn: parent
+						width: 54
+						height: 54
+						radius: width / 2
+						visible: root.steamCurrentMediaKind === "video"
+						color: root.withAlpha(root.providerAccent, 0.94)
+						border.color: root.withAlpha(Theme.mediaOverlayTextStrong, 0.8)
+						ModernIcon {
+							anchors.centerIn: parent
+							name: "play"
+							size: Theme.avatarSmall
+							color: Theme.contrastText(parent.color)
+							Accessible.ignored: true
+						}
+						Accessible.ignored: true
+					}
+					ModernIconButton {
+						objectName: "providerSteamPreviousMedia"
+						anchors.left: parent.left
+						anchors.leftMargin: Theme.space2
+						anchors.verticalCenter: parent.verticalCenter
+						z: 4
+						visible: root.steamMediaItems.length > 1
+						enabled: root.boundedSteamMediaIndex > 0
+						iconName: "previous"
+						Accessible.name: qsTr("Previous Steam media")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex - 1)
+					}
+					ModernIconButton {
+						objectName: "providerSteamNextMedia"
+						anchors.right: parent.right
+						anchors.rightMargin: Theme.space2
+						anchors.verticalCenter: parent.verticalCenter
+						z: 4
+						visible: root.steamMediaItems.length > 1
+						enabled: root.boundedSteamMediaIndex + 1 < root.steamMediaItems.length
+						iconName: "next"
+						Accessible.name: qsTr("Next Steam media")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex + 1)
+					}
+					Label {
+						z: 4
+						anchors.left: parent.left
+						anchors.right: steamMediaCounter.left
+						anchors.bottom: parent.bottom
+						anchors.margins: Theme.space2
+						visible: root.steamCurrentMediaTitle.length > 0
+						text: root.steamCurrentMediaTitle
+						textFormat: Text.PlainText
+						color: Theme.mediaOverlayTextStrong
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+					Label {
+						id: steamMediaCounter
+						objectName: "providerSteamMediaCounter"
+						z: 4
+						anchors.right: parent.right
+						anchors.bottom: parent.bottom
+						anchors.margins: Theme.space2
+						visible: root.steamMediaItems.length > 1
+						text: qsTr("%1 / %2").arg(root.boundedSteamMediaIndex + 1)
+							.arg(root.steamMediaItems.length)
+						textFormat: Text.PlainText
+						color: Theme.mediaOverlayTextStrong
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						Accessible.ignored: true
+					}
+				}
+
+				ListView {
+					id: steamMediaRail
+					objectName: "previewSteamMediaRail"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? 56 : 0
+					visible: root.steamMediaItems.length > 1
+					orientation: ListView.Horizontal
+					spacing: Theme.space1
+					clip: true
+					boundsBehavior: Flickable.StopAtBounds
+					model: root.steamMediaItems
+					currentIndex: root.boundedSteamMediaIndex
+					Accessible.role: Accessible.List
+					Accessible.name: qsTr("Steam media gallery")
+					delegate: Button {
+						id: steamMediaThumbnail
+						required property var modelData
+						required property int index
+						readonly property string mediaKind: root.safeText(modelData.kind, 32).toLowerCase()
+						readonly property string posterSource: root.safeManagedImageSource(modelData.thumbnail
+							|| modelData.poster || (mediaKind === "image" ? modelData.url : ""))
+						objectName: "previewSteamMediaThumbnail_" + index
+						width: 88
+						height: 52
+						hoverEnabled: true
+						background: Rectangle {
+							radius: Theme.space1
+							color: steamMediaThumbnail.down ? Theme.embedSelection
+								: steamMediaThumbnail.hovered ? Theme.embedHover : Theme.embedSurface
+							border.width: steamMediaThumbnail.index === root.boundedSteamMediaIndex ? 2 : 1
+							border.color: steamMediaThumbnail.index === root.boundedSteamMediaIndex
+								? root.providerAccent : Theme.embedBorder
+						}
+						contentItem: Item {
+							clip: true
+							Image {
+								anchors.fill: parent
+								anchors.margins: Theme.space1
+								source: steamMediaThumbnail.posterSource
+								asynchronous: true
+								cache: false
+								fillMode: Image.PreserveAspectCrop
+								visible: status === Image.Ready
+							}
+							Rectangle {
+								anchors.left: parent.left
+								anchors.bottom: parent.bottom
+								anchors.margins: Theme.space1
+								visible: steamMediaThumbnail.mediaKind === "video"
+								width: steamPlayLabel.implicitWidth + Theme.space1 * 2
+								height: Theme.space4
+								radius: height / 2
+								color: root.withAlpha(Theme.embedOverlayBase, 0.88)
+								Label {
+									id: steamPlayLabel
+									objectName: "previewSteamPlayLabel_" + index
+									anchors.centerIn: parent
+									text: qsTr("PLAY")
+									textFormat: Text.PlainText
+									color: Theme.mediaOverlayTextStrong
+									font.pixelSize: 9
+									font.bold: true
+									Accessible.ignored: true
+								}
+							}
+						}
+						Accessible.role: Accessible.ListItem
+						Accessible.name: mediaKind === "video"
+							? qsTr("Steam trailer %1").arg(index + 1)
+							: qsTr("Steam screenshot %1").arg(index + 1)
+						Accessible.selected: index === root.boundedSteamMediaIndex
+						onClicked: root.steamMediaSelectionRequested(index)
 					}
 				}
 
@@ -1723,6 +1923,82 @@ FocusScope {
 							Accessible.ignored: true
 						}
 					}
+				}
+
+				Button {
+					id: steamBestDealButton
+					objectName: "providerSteamBestDeal"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? steamBestDealContent.implicitHeight + Theme.space2 * 2 : 0
+					visible: root.steamBestDealUrl.length > 0 || root.steamComparisonUrl.length > 0
+					hoverEnabled: true
+					background: Rectangle {
+						radius: Theme.innerRadius
+						color: steamBestDealButton.down ? Theme.embedSelection
+							: steamBestDealButton.hovered ? Theme.embedHover : Theme.panel
+						border.color: root.steamBestPrice.length > 0
+							? root.withAlpha(Theme.success, 0.65) : root.providerAccentBorder
+					}
+					contentItem: RowLayout {
+						id: steamBestDealContent
+						spacing: Theme.space2
+						ColumnLayout {
+							Layout.fillWidth: true
+							Layout.minimumWidth: 0
+							spacing: 0
+							Label {
+								Layout.fillWidth: true
+								text: root.steamBestPrice.length > 0
+									? qsTr("BEST CURRENT PRICE") : qsTr("COMPARE STORE PRICES")
+								textFormat: Text.PlainText
+								color: root.steamBestPrice.length > 0 ? Theme.success : root.providerForeground
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								font.letterSpacing: 0.6
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerSteamBestDealPrice"
+								Layout.fillWidth: true
+								text: root.steamBestPrice.length > 0
+									? [root.steamBestPrice, root.steamBestShop]
+										.filter(function(value) { return value.length > 0 }).join(" · ")
+									: qsTr("Check IsThereAnyDeal")
+								textFormat: Text.PlainText
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontTitle
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerSteamHistoricalLow"
+								Layout.fillWidth: true
+								visible: root.steamHistoricalLow.length > 0
+								text: qsTr("Historical low: %1%2").arg(root.steamHistoricalLow)
+									.arg(root.steamHistoricalLowShop.length > 0
+										? qsTr(" at %1").arg(root.steamHistoricalLowShop) : "")
+								textFormat: Text.PlainText
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+						ModernIcon {
+							name: "external"
+							size: Theme.avatarSmall
+							color: root.providerForeground
+							Accessible.ignored: true
+						}
+					}
+					Accessible.name: root.steamBestPrice.length > 0
+						? qsTr("Best current price %1 at %2").arg(root.steamBestPrice).arg(root.steamBestShop)
+						: qsTr("Compare prices on IsThereAnyDeal")
+					Accessible.description: root.steamHistoricalLow.length > 0
+						? qsTr("Historical low %1").arg(root.steamHistoricalLow) : ""
+					onClicked: root.externalOpenRequested(root.steamBestDealUrl.length > 0
+						? root.steamBestDealUrl : root.steamComparisonUrl)
 				}
 
 				Label {
@@ -2213,13 +2489,11 @@ FocusScope {
 						visible: root.metadata && root.metadata.xVerified === true
 						radius: width / 2
 						color: root.providerAccent
-						Label {
+						ModernIcon {
 							anchors.centerIn: parent
-							text: "✓"
-							textFormat: Text.PlainText
+							name: "check"
+							size: 11
 							color: Theme.contrastText(parent.color)
-							font.pixelSize: 11
-							font.bold: true
 							Accessible.ignored: true
 						}
 					}
@@ -3082,13 +3356,11 @@ FocusScope {
 							radius: width / 2
 							color: root.variant === "twitch" ? Theme.success : root.providerAccent
 							Accessible.ignored: true
-							Label {
+							ModernIcon {
 								anchors.centerIn: parent
-								text: "✓"
-								textFormat: Text.PlainText
+								name: "check"
+								size: 11
 								color: Theme.contrastText(parent.color)
-								font.pixelSize: 11
-								font.bold: true
 								Accessible.ignored: true
 							}
 						}

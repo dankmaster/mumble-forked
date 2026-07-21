@@ -1553,6 +1553,11 @@ struct ModernServerIdentityImageLoadResult {
 	QString error;
 };
 
+struct ModernMotdImageLoadResult {
+	QString html;
+	QString error;
+};
+
 QString modernShellServerImageDataUrl(const QByteArray &imageBytes) {
 	if (imageBytes.isEmpty() || !Global::get().mw || !Global::get().mw->qmlShellHost()
 		|| !Global::get().mw->qmlShellHost()->imagePipeline()) {
@@ -1674,6 +1679,34 @@ ModernServerIdentityImageLoadResult modernShellServerIdentityImageFromLocalPath(
 		modernShellNormalizeServerIdentityImageBytes(sourceBytes, &result.error);
 	if (normalized) {
 		result.imageBytes = *normalized;
+	}
+	return result;
+}
+
+ModernMotdImageLoadResult modernMotdImageFromLocalPath(const QString &path, const int maximumLength) {
+	ModernMotdImageLoadResult result;
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 8 * 1024 * 1024) {
+		result.error = QCoreApplication::translate("MainWindow", "Choose a readable image smaller than 8 MB.");
+		return result;
+	}
+	QImageReader reader(&file);
+	reader.setAutoTransform(true);
+	QSize targetSize = reader.size();
+	if (targetSize.isValid() && (targetSize.width() > 1920 || targetSize.height() > 1920)) {
+		targetSize.scale(1920, 1920, Qt::KeepAspectRatio);
+		reader.setScaledSize(targetSize);
+	}
+	const QImage image = reader.read();
+	if (image.isNull()) {
+		result.error = QCoreApplication::translate("MainWindow",
+											 "Choose a readable PNG, JPEG, WebP, or GIF image.");
+		return result;
+	}
+	result.html = Log::imageToImg(image, maximumLength);
+	if (result.html.isEmpty()) {
+		result.error = QCoreApplication::translate(
+			"MainWindow", "The image cannot fit within this server's MOTD size limit.");
 	}
 	return result;
 }
@@ -4110,6 +4143,46 @@ QUrl steamAppReviewsUrl(const QString &appId) {
 
 QString steamStoreAppUrl(const QString &appId) {
 	return QStringLiteral("https://store.steampowered.com/app/%1/").arg(appId);
+}
+
+QString isThereAnyDealApiKey() {
+	return qEnvironmentVariable("MUMBLE_ISTHEREANYDEAL_API_KEY").trimmed();
+}
+
+QUrl isThereAnyDealLookupUrl(const QString &appId) {
+	QUrl url(QStringLiteral("https://api.isthereanydeal.com/games/lookup/v1"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("appid"), appId);
+	url.setQuery(query);
+	return url;
+}
+
+QUrl isThereAnyDealOverviewUrl() {
+	QUrl url(QStringLiteral("https://api.isthereanydeal.com/games/overview/v2"));
+	const QString localeName = QLocale::system().name();
+	if (localeName.size() >= 5 && localeName.at(2) == QLatin1Char('_')) {
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("country"), localeName.mid(3, 2).toUpper());
+		url.setQuery(query);
+	}
+	return url;
+}
+
+QString isThereAnyDealSearchUrl(const QString &title) {
+	QUrl url(QStringLiteral("https://isthereanydeal.com/search/"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("q"), title.trimmed());
+	url.setQuery(query);
+	return url.toString(QUrl::FullyEncoded);
+}
+
+QString isThereAnyDealPriceText(const QJsonObject &price) {
+	const QJsonValue amountValue = price.value(QStringLiteral("amount"));
+	if (!amountValue.isDouble()) {
+		return QString();
+	}
+	const QString currency = price.value(QStringLiteral("currency")).toString().trimmed().toUpper();
+	return QLocale::system().toCurrencyString(amountValue.toDouble(), currency);
 }
 
 std::optional< qlonglong > steamJsonInteger(const QJsonObject &object, const QString &key) {
@@ -14771,6 +14844,8 @@ namespace {
 			   || normalized == QLatin1String("ui") || normalized == QLatin1String("UserInterface")
 			   || normalized == QLatin1String("messages") || normalized == QLatin1String("MessagesSounds")
 			   || normalized == QLatin1String("MessagesAndSounds") || normalized == QLatin1String("keys")
+			   || normalized == QLatin1String("motd") || normalized == QLatin1String("Motd")
+			   || normalized == QLatin1String("MOTD") || normalized == QLatin1String("ServerMotd")
 			   || normalized == QLatin1String("PluginConfig") || normalized == QLatin1String("plugins")
 			   || normalized == QLatin1String("about");
 	}
@@ -14896,6 +14971,20 @@ namespace {
 									const int rows = 4, const bool enabled = true) {
 		QVariantMap field = modernDialogField(id, label, QStringLiteral("textarea"), value, enabled);
 		field.insert(QStringLiteral("rows"), rows);
+		return field;
+	}
+
+	QVariantMap modernMotdEditorField(const QString &id, const QString &label, const QString &value,
+									 const bool canEdit, const bool showSaveAction,
+									 const int maximumLength, const QString &hint = QString()) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("motdEditor"), value, canEdit);
+		field.insert(QStringLiteral("originalValue"), value);
+		field.insert(QStringLiteral("canEdit"), canEdit);
+		field.insert(QStringLiteral("showSaveAction"), showSaveAction);
+		field.insert(QStringLiteral("maximumLength"), maximumLength);
+		if (!hint.isEmpty()) {
+			field.insert(QStringLiteral("hint"), hint);
+		}
 		return field;
 	}
 
@@ -16074,14 +16163,43 @@ namespace {
 		return name;
 	}
 
+	QString normalizedStonksTickerPlacement(QString placement) {
+		placement = placement.trimmed();
+		return placement == QLatin1String("windowTop") || placement == QLatin1String("top")
+				   || placement == QLatin1String("aboveComposer")
+				   || placement == QLatin1String("bottom")
+			   ? placement
+			   : QStringLiteral("bottom");
+	}
+
+	QString normalizedStonksTickerDirection(QString direction) {
+		direction = direction.trimmed().toLower();
+		return direction == QLatin1String("left") || direction == QLatin1String("right")
+				   || direction == QLatin1String("up") || direction == QLatin1String("down")
+			   ? direction
+			   : QStringLiteral("left");
+	}
+
+	QString normalizedStonksTickerSpeed(QString speed) {
+		speed = speed.trimmed();
+		return speed == QLatin1String("verySlow") || speed == QLatin1String("slow")
+				   || speed == QLatin1String("normal") || speed == QLatin1String("fast")
+			   ? speed
+			   : QStringLiteral("normal");
+	}
+
 	QVariantMap stonksHeaderState() {
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
 		state.insert(QStringLiteral("enabled"), Global::get().bStonksEnabled);
 		state.insert(QStringLiteral("tickerBannerEnabled"),
 					 Global::get().s.bModernShellTickerBannerEnabled);
-		state.insert(QStringLiteral("tickerBannerAlwaysScroll"),
-					 Global::get().s.bModernShellTickerBannerAlwaysScroll);
+		state.insert(QStringLiteral("tickerPlacement"),
+					 normalizedStonksTickerPlacement(Global::get().s.qsModernShellTickerPlacement));
+		state.insert(QStringLiteral("tickerDirection"),
+					 normalizedStonksTickerDirection(Global::get().s.qsModernShellTickerDirection));
+		state.insert(QStringLiteral("tickerSpeed"),
+					 normalizedStonksTickerSpeed(Global::get().s.qsModernShellTickerSpeed));
 		state.insert(QStringLiteral("textChannelId"), Global::get().uiStonksTextChannelID);
 		state.insert(QStringLiteral("socialAnnouncementsEnabled"),
 					 Global::get().bStonksSocialAnnouncementsEnabled);
@@ -16373,7 +16491,12 @@ namespace {
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(settings));
 		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
-		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
+		dto.insert(QStringLiteral("tickerPlacement"),
+				   normalizedStonksTickerPlacement(settings.qsModernShellTickerPlacement));
+		dto.insert(QStringLiteral("tickerDirection"),
+				   normalizedStonksTickerDirection(settings.qsModernShellTickerDirection));
+		dto.insert(QStringLiteral("tickerSpeed"),
+				   normalizedStonksTickerSpeed(settings.qsModernShellTickerSpeed));
 		return dto;
 	}
 
@@ -16581,7 +16704,7 @@ void MainWindow::openNextModernStartupDialog() {
 
 	const QString next = m_modernStartupDialogQueue.takeFirst();
 	if (next == QLatin1String("audioInput")) {
-		openModernSettingsDialog(QStringLiteral("AudioInput"));
+		openModernSettingsDialog(QStringLiteral("AudioInput"), true);
 		return;
 	}
 	if (next == QLatin1String("certificate")) {
@@ -16940,13 +17063,20 @@ void MainWindow::publishModernConnectServerPingState() {
 	publishModernDialogState(m_modernDialogController->state());
 }
 
-void MainWindow::openModernSettingsDialog(const QString &pageName) {
+void MainWindow::openModernSettingsDialog(const QString &pageName, const bool audioInputOnboarding) {
 	stopInputEnhancementCalibrationPlayback();
 	if (!m_modernDialogController) {
 		m_modernDialogController = std::make_unique< ModernDialogController >();
 	}
+	// Fetch the authoritative ACL-backed canAdmin state even when Stonks is
+	// currently disabled, so an authorized user can enable it from Settings.
+	if (stonksLedgerFeatureSupported()) {
+		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
+	}
 
-	publishModernDialogState(m_modernDialogController->openSettings(Global::get().s, pageName));
+	publishModernDialogState(
+		m_modernDialogController->openSettings(Global::get().s, pageName, audioInputOnboarding,
+										   modernSettingsStonksContext(), modernSettingsMotdContext()));
 }
 
 void MainWindow::openModernPluginUpdateDialog(const QVariantList &updates) {
@@ -17244,7 +17374,49 @@ bool MainWindow::openModernSslHandshakeFailureDialog(const QString &reason) {
 }
 
 
-QVariantMap MainWindow::buildModernStonksDialog() const {
+QVariantMap MainWindow::modernSettingsStonksContext() const {
+	const QVariantMap state = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
+	QVariantMap context;
+	context.insert(QStringLiteral("connected"), Global::get().sh && Global::get().sh->isRunning());
+	context.insert(QStringLiteral("supported"),
+				   stonksLedgerFeatureSupported() && state.value(QStringLiteral("supported"), true).toBool());
+	context.insert(QStringLiteral("canAdmin"), state.value(QStringLiteral("canAdmin")).toBool());
+	context.insert(QStringLiteral("enabled"), state.value(QStringLiteral("enabled"), true).toBool());
+	context.insert(QStringLiteral("socialAnnouncementsEnabled"),
+				   state.value(QStringLiteral("socialAnnouncementsEnabled"), true).toBool());
+	context.insert(QStringLiteral("textChannelId"), state.value(QStringLiteral("textChannelId")).toUInt());
+	context.insert(QStringLiteral("textChannels"), state.value(QStringLiteral("textChannels")).toList());
+	return context;
+}
+
+QVariantMap MainWindow::modernSettingsMotdContext() const {
+	const bool connected = Global::get().sh && Global::get().sh->isRunning() && Global::get().uiSession != 0;
+	const unsigned int advertisedMaximum = std::max(Global::get().uiMessageLength, Global::get().uiImageLength);
+	const int maximumLength = static_cast< int >(
+		std::min(advertisedMaximum > 0 ? advertisedMaximum : 100000U, 1000000U));
+	QString serverName = Global::get().qsServerDisplayName.trimmed();
+	if (serverName.isEmpty()) {
+		if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+			rootChannel && rootChannel->qsName != tr("Root")) {
+			serverName = rootChannel->qsName.trimmed();
+		}
+	}
+	if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
+
+	QVariantMap context;
+	context.insert(QStringLiteral("connected"), connected);
+	// welcome_text is part of the original Mumble ServerConfig API. Therefore the
+	// tab is useful with both this fork and an unmodified upstream server.
+	context.insert(QStringLiteral("available"), connected);
+	context.insert(QStringLiteral("canEdit"), connected && canManagePersistentTextChannels());
+	context.insert(QStringLiteral("serverName"), serverName);
+	context.insert(QStringLiteral("html"), m_persistentChatWelcomeText);
+	context.insert(QStringLiteral("originalHtml"), m_persistentChatWelcomeText);
+	context.insert(QStringLiteral("maximumLength"), std::max(maximumLength, 1024));
+	return context;
+}
+
+QVariantMap MainWindow::buildModernStonksDialog(const QString &initialTab) const {
 	QVariantMap state = m_stonksState;
 	const bool loadingInitialState = state.isEmpty() && stonksLedgerFeatureSupported();
 	if (state.isEmpty()) {
@@ -17278,6 +17450,10 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 		}
 	}
 	state.insert(QStringLiteral("feature"), stonksHeaderState());
+	const QString requestedTab = initialTab.trimmed();
+	if (!requestedTab.isEmpty()) {
+		state.insert(QStringLiteral("initialTab"), requestedTab);
+	}
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
@@ -17325,6 +17501,15 @@ void MainWindow::openModernStonksDialog() {
 	openModernGenericDialog(buildModernStonksDialog());
 }
 
+void MainWindow::openModernStonksPortfolio() {
+	if (!stonksLedgerFeatureSupported()) {
+		openModernStonksDialog();
+		return;
+	}
+	requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
+	openModernGenericDialog(buildModernStonksDialog(QStringLiteral("portfolio")));
+}
+
 void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 	m_stonksState          = stonksStateDto(state);
 	m_stonksSelectedPeriod = m_stonksState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
@@ -17343,6 +17528,9 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 	if (m_modernDialogController
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
+	} else if (m_modernDialogController
+			   && m_modernDialogController->setSettingsStonksContext(modernSettingsStonksContext())) {
+		publishModernDialogState(m_modernDialogController->state());
 	}
 	refreshStonksTickerQuotes();
 }
@@ -17571,26 +17759,27 @@ void MainWindow::openModernDeveloperConsoleDialog() {
 
 bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload) {
 	const QString action = actionID.trimmed();
-	if (action == QLatin1String("setTickerBannerAlwaysScroll")) {
-		Global::get().s.bModernShellTickerBannerAlwaysScroll =
-			payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
+	if (action == QLatin1String("setTickerPresentation")
+		|| action == QLatin1String("setTickerBannerEnabled")) {
+		if (payload.contains(QStringLiteral("tickerBannerEnabled"))) {
+			Global::get().s.bModernShellTickerBannerEnabled =
+				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
+		}
+		if (payload.contains(QStringLiteral("tickerPlacement"))) {
+			Global::get().s.qsModernShellTickerPlacement =
+				normalizedStonksTickerPlacement(payload.value(QStringLiteral("tickerPlacement")).toString());
+		}
+		if (payload.contains(QStringLiteral("tickerDirection"))) {
+			Global::get().s.qsModernShellTickerDirection =
+				normalizedStonksTickerDirection(payload.value(QStringLiteral("tickerDirection")).toString());
+		}
+		if (payload.contains(QStringLiteral("tickerSpeed"))) {
+			Global::get().s.qsModernShellTickerSpeed =
+				normalizedStonksTickerSpeed(payload.value(QStringLiteral("tickerSpeed")).toString());
+		}
 		Global::get().s.save();
 		scheduleQmlRoomStateUpdate();
-		if (m_modernDialogController
-			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
-			openModernGenericDialog(buildModernStonksDialog());
-		}
-		return true;
-	}
-	if (action == QLatin1String("setTickerBannerEnabled")) {
-		Global::get().s.bModernShellTickerBannerEnabled =
-			payload.value(QStringLiteral("tickerBannerEnabled"), false).toBool();
-		Global::get().s.save();
 		refreshStonksTickerQuotes();
-		if (m_modernDialogController
-			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
-			openModernGenericDialog(buildModernStonksDialog());
-		}
 		return true;
 	}
 
@@ -17693,6 +17882,12 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		return true;
 	}
 	if (action == QLatin1String("configure")) {
+		if (!stonksLedgerFeatureSupported()
+			|| !m_stonksState.value(QStringLiteral("canAdmin")).toBool()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"),
+							   tr("The server has not granted you permission to administer Stonks."));
+			return true;
+		}
 		message.set_action(MumbleProto::StonksActionConfigure);
 		message.set_enabled(payload.value(QStringLiteral("enabled"), Global::get().bStonksEnabled).toBool());
 		message.set_text_channel_id(payload.value(QStringLiteral("textChannelId")).toUInt());
@@ -18412,8 +18607,12 @@ void MainWindow::openModernServerSettingsDialog(const QVariantMap &fieldValues, 
 	};
 
 	QVariantList chatFields {
-		modernTextareaField(QStringLiteral("server.welcomeText"), tr("Welcome text"),
-							 valueOrDefault(QStringLiteral("server.welcomeText"), m_persistentChatWelcomeText).toString(), 4),
+		modernMotdEditorField(
+			QStringLiteral("server.welcomeText"), tr("Message of the day"),
+			valueOrDefault(QStringLiteral("server.welcomeText"), m_persistentChatWelcomeText).toString(), true, false,
+			std::max(1024, static_cast< int >(std::min(std::max(Global::get().uiMessageLength,
+															 Global::get().uiImageLength), 1000000U))),
+			tr("Uses standard Mumble welcome_text HTML and remains visible to original Mumble clients.")),
 		modernDialogField(QStringLiteral("server.allowHtml"), tr("Allow HTML"), QStringLiteral("checkbox"),
 						  valueOrDefault(QStringLiteral("server.allowHtml"), Global::get().bAllowHTML)),
 		modernDialogField(QStringLiteral("server.persistentGlobalChat"), tr("Server-wide chat"),
@@ -18473,7 +18672,7 @@ void MainWindow::openModernServerSettingsDialog(const QVariantMap &fieldValues, 
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("saveServerSettings"), tr("Apply"), true,
 										  QStringLiteral("accent")) },
-		QStringLiteral("saveServerSettings"), QSize(760, 700));
+		QStringLiteral("saveServerSettings"), QSize(900, 760));
 	if (!errors.isEmpty()) {
 		dialog.insert(QStringLiteral("errors"), errors);
 	}
@@ -20270,7 +20469,136 @@ void MainWindow::commitAsyncPluginInstall(const QString &operationID,
 }
 
 bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
-																 const QVariantMap &fieldValues, const QVariantMap &payload) {
+															 const QVariantMap &fieldValues, const QVariantMap &payload) {
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("stonks.openPortfolio")) {
+		openModernStonksPortfolio();
+		return true;
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("motd.preview")) {
+		if (!m_modernDialogController || !modernSettingsMotdContext().value(QStringLiteral("available")).toBool()) {
+			return true;
+		}
+		const QString html = payload.value(QStringLiteral("html"),
+			fieldValues.value(QStringLiteral("motd.html"))).toString();
+		QStringList registeredImageUrls;
+		const QString renderableHtml = modernMotdRenderableHtml(html, &registeredImageUrls);
+		const QVariantList blocks = ModernMotd::documentBlocks(renderableHtml);
+		const QString summary = persistentChatPlainTextSummary(html);
+		if (m_modernDialogController->setSettingsMotdPreview(html, blocks, summary)) {
+			publishModernDialogState(m_modernDialogController->state());
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("motd.save")) {
+		const QVariantMap liveContext = modernSettingsMotdContext();
+		if (!liveContext.value(QStringLiteral("available")).toBool()
+			|| !liveContext.value(QStringLiteral("canEdit")).toBool() || !Global::get().sh) {
+			publishModernToast(QStringLiteral("error"), tr("Server MOTD"),
+							   tr("Root Write permission is required to edit this server MOTD."));
+			return true;
+		}
+		const QString html = payload.value(QStringLiteral("html")).toString();
+		if (html.size() > liveContext.value(QStringLiteral("maximumLength"), 100000).toInt()) {
+			publishModernToast(QStringLiteral("error"), tr("Server MOTD"),
+							   tr("The MOTD is larger than this server allows."));
+			return true;
+		}
+		MumbleProto::ServerConfig config;
+		config.set_welcome_text(u8(html));
+		Global::get().sh->sendMessage(config);
+		setPersistentChatWelcomeText(html);
+		if (m_modernDialogController) {
+			m_modernDialogController->setSettingsMotdContext(modernSettingsMotdContext());
+			publishModernDialogState(m_modernDialogController->state());
+		}
+		publishModernToast(QStringLiteral("success"), tr("Server MOTD"), tr("MOTD saved to the server."));
+		return true;
+	}
+
+	if ((dialogID == QLatin1String("settings") || dialogID == QLatin1String("serverSettings"))
+		&& actionID == QLatin1String("motd.insertImage")) {
+		if (!Global::get().sh || !Global::get().sh->isRunning() || !canManagePersistentTextChannels()) {
+			publishModernToast(QStringLiteral("error"), tr("Server MOTD"),
+							   tr("Root Write permission is required to add an MOTD image."));
+			return true;
+		}
+		const QString fieldID = dialogID == QLatin1String("settings") ? QStringLiteral("motd.html")
+																	: QStringLiteral("server.welcomeText");
+		QString html = payload.value(QStringLiteral("html"), fieldValues.value(fieldID)).toString();
+		const int maximumLength = qBound(
+			1024, payload.value(QStringLiteral("maximumLength"),
+						 modernSettingsMotdContext().value(QStringLiteral("maximumLength"), 100000)).toInt(),
+			1000000);
+		const int selectionStart = qBound(0, payload.value(QStringLiteral("selectionStart")).toInt(), html.size());
+		const int selectionEnd = qBound(selectionStart, payload.value(QStringLiteral("selectionEnd")).toInt(),
+										 html.size());
+		const QString path = QFileDialog::getOpenFileName(
+			nullptr, tr("Choose MOTD image"), getImagePath(), tr("Images (*.png *.jpg *.jpeg *.webp *.gif)"));
+		if (path.isEmpty()) {
+			return true;
+		}
+
+		const QString operationID = QStringLiteral("motd-image:%1").arg(++m_qmlOperationRevision);
+		if (m_qmlShellHost && m_qmlShellHost->operationModel()) {
+			m_qmlShellHost->operationModel()->startOperation(
+				operationID, tr("Server MOTD"), tr("Preparing the selected image"), false);
+		}
+		auto *watcher = new QFutureWatcher< ModernMotdImageLoadResult >(this);
+		connect(watcher, &QFutureWatcher< ModernMotdImageLoadResult >::finished, this,
+			[this, watcher, operationID, dialogID, fieldID, html, selectionStart, selectionEnd, maximumLength]() {
+				const ModernMotdImageLoadResult imageResult = watcher->result();
+				watcher->deleteLater();
+				if (m_qmlShellHost && m_qmlShellHost->operationModel()) {
+					m_qmlShellHost->operationModel()->finishOperation(
+						operationID, imageResult.error.isEmpty(),
+						imageResult.error.isEmpty() ? QString() : QStringLiteral("motd-image-invalid"),
+						imageResult.error.isEmpty() ? tr("The image was added to the MOTD draft.") : imageResult.error);
+				}
+				if (!imageResult.error.isEmpty()) {
+					publishModernToast(QStringLiteral("error"), tr("Server MOTD"), imageResult.error);
+					return;
+				}
+				if (!m_modernDialogController || m_modernDialogController->activeDialogID() != dialogID
+					|| !canManagePersistentTextChannels()) {
+					return;
+				}
+				QString updated = html;
+				updated.replace(selectionStart, selectionEnd - selectionStart, imageResult.html);
+				if (updated.size() > maximumLength) {
+					publishModernToast(QStringLiteral("error"), tr("Server MOTD"),
+									   tr("The image and existing MOTD exceed the server's size limit."));
+					return;
+				}
+				publishModernDialogState(m_modernDialogController->updateField(dialogID, fieldID, updated));
+			});
+		watcher->setFuture(QtConcurrent::run([path, maximumLength]() {
+			return modernMotdImageFromLocalPath(path, maximumLength);
+		}));
+		return true;
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("stonks.updateClient")) {
+		return handleModernStonksDialogAction(QStringLiteral("setTickerPresentation"), payload);
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("stonks.applyServer")) {
+		const QVariantMap liveContext = modernSettingsStonksContext();
+		if (!liveContext.value(QStringLiteral("connected")).toBool()
+			|| !liveContext.value(QStringLiteral("supported")).toBool()
+			|| !liveContext.value(QStringLiteral("canAdmin")).toBool()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"),
+							   tr("The server has not granted you permission to administer Stonks."));
+			return true;
+		}
+		if (handleModernStonksDialogAction(QStringLiteral("configure"), payload)) {
+			publishModernToast(QStringLiteral("info"), tr("Stonks"),
+							   tr("Applying Stonks settings to the server..."));
+		}
+		return true;
+	}
+
 	if (dialogID == QLatin1String("settings")
 		&& actionID == QLatin1String("stopInputEnhancementCalibrationPlayback")) {
 		stopInputEnhancementCalibrationPlayback();
@@ -21034,6 +21362,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			Global::get().qsServerMonogram    = monogram;
 			Global::get().qbaServerImage      = *serverImage;
 			Global::get().sh->sendMessage(config);
+			setPersistentChatWelcomeText(fieldValues.value(QStringLiteral("server.welcomeText")).toString());
 			refreshQmlServerIdentity();
 			scheduleQmlRoomStateUpdate();
 			publishModernToast(QStringLiteral("success"), tr("Server settings"), tr("Server settings saved."));
@@ -21546,7 +21875,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 	}
 
 	if (action == QLatin1String("configure.audioWizard")) {
-		openModernSettingsDialog(QStringLiteral("AudioInput"));
+		openModernSettingsDialog(QStringLiteral("AudioInput"), true);
 		scheduleQmlRoomStateUpdate();
 		return true;
 	}
@@ -21560,6 +21889,10 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 	}
 	if (action == QLatin1String("server.stonks")) {
 		openModernStonksDialog();
+		return true;
+	}
+	if (action == QLatin1String("server.stonksPortfolio")) {
+		openModernStonksPortfolio();
 		return true;
 	}
 	if (action == QLatin1String("server.information")) {
@@ -22297,6 +22630,16 @@ void MainWindow::enterQmlShellSteadyState() {
 		runQmlShellStateSync();
 	}
 	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
+}
+
+void MainWindow::clearQmlConnectionState() {
+	if (m_qmlRoomStateFlushTimer && m_qmlRoomStateFlushTimer->isActive()) {
+		m_qmlRoomStateFlushTimer->stop();
+	}
+	m_qmlRoomStateDirty = false;
+	if (m_qmlShellHost) {
+		m_qmlShellHost->clearConnectionState();
+	}
 }
 
 void MainWindow::applyQmlStonksProbeState(QVariantMap state) {
@@ -24638,11 +24981,13 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		stonksState.insert(it.key(), it.value());
 	}
 	appState.insert(QStringLiteral("stonks"), stonksState);
-	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
+	const QVariantMap motdViewState = modernMotdServerViewState();
+	appState.insert(QStringLiteral("motdExpanded"),
+					motdViewState.value(QStringLiteral("expanded")).toBool());
 	appState.insert(QStringLiteral("motdDismissedSignature"),
-					Global::get().s.qsModernShellMotdDismissedSignature);
+					motdViewState.value(QStringLiteral("dismissedSignature")).toString());
 	appState.insert(QStringLiteral("motdLastSeenSignature"),
-					Global::get().s.qsModernShellMotdLastSeenSignature);
+					motdViewState.value(QStringLiteral("lastSeenSignature")).toString());
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 			appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -26902,16 +27247,14 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		}
 		return true;
 	} else if (actionId == QLatin1String("motd.show")) {
-		if (!Global::get().s.bModernShellMotdExpanded) {
-			Global::get().s.bModernShellMotdExpanded = true;
-			Global::get().s.save();
-		}
+		QVariantMap state = modernMotdServerViewState();
+		state.insert(QStringLiteral("expanded"), true);
+		persistModernMotdServerViewState(state);
 		handled = true;
 	} else if (actionId == QLatin1String("motd.hide")) {
-		if (Global::get().s.bModernShellMotdExpanded) {
-			Global::get().s.bModernShellMotdExpanded = false;
-			Global::get().s.save();
-		}
+		QVariantMap state = modernMotdServerViewState();
+		state.insert(QStringLiteral("expanded"), false);
+		persistModernMotdServerViewState(state);
 		handled = true;
 	} else if (actionId == QLatin1String("server.connect")) {
 		openModernConnectDialog();
@@ -26933,7 +27276,7 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		scheduleQmlRoomStateUpdate();
 		return true;
 	} else if (actionId == QLatin1String("configure.audioWizard")) {
-		openModernSettingsDialog(QStringLiteral("AudioInput"));
+		openModernSettingsDialog(QStringLiteral("AudioInput"), true);
 		scheduleQmlRoomStateUpdate();
 		return true;
 	} else if (actionId == QLatin1String("help.developerConsole")) {
@@ -27365,28 +27708,22 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		const QString dismissedSignature = normalizedActionID == QLatin1String("motd.restore")
 										 ? QString()
 										 : contentSignature;
-		bool settingsChanged = false;
-		if (Global::get().s.qsModernShellMotdDismissedSignature != dismissedSignature) {
-			Global::get().s.qsModernShellMotdDismissedSignature = dismissedSignature;
-			settingsChanged                                     = true;
+		QVariantMap state = modernMotdServerViewState();
+		state.insert(QStringLiteral("dismissedSignature"), dismissedSignature);
+		if (!contentSignature.isEmpty()) {
+			state.insert(QStringLiteral("lastSeenSignature"), contentSignature);
 		}
-		if (!contentSignature.isEmpty()
-			&& Global::get().s.qsModernShellMotdLastSeenSignature != contentSignature) {
-			Global::get().s.qsModernShellMotdLastSeenSignature = contentSignature;
-			settingsChanged                                    = true;
-		}
-		if (settingsChanged) {
-			Global::get().s.save();
-		}
+		persistModernMotdServerViewState(state);
 		scheduleQmlRoomStateUpdate();
 		return true;
 	}
 
 	if (normalizedActionID == QLatin1String("motd.markSeen")) {
 		const QString signature = motdSignatureFromPayload();
-		if (!signature.isEmpty() && Global::get().s.qsModernShellMotdLastSeenSignature != signature) {
-			Global::get().s.qsModernShellMotdLastSeenSignature = signature;
-			Global::get().s.save();
+		if (!signature.isEmpty()) {
+			QVariantMap state = modernMotdServerViewState();
+			state.insert(QStringLiteral("lastSeenSignature"), signature);
+			persistModernMotdServerViewState(state);
 		}
 		scheduleQmlRoomStateUpdate();
 		return true;
@@ -27397,9 +27734,10 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 	if (normalizedActionID == QLatin1String("motd.show")
 		|| normalizedActionID == QLatin1String("motd.hide")) {
 		const QString signature = motdSignatureFromPayload();
-		if (!signature.isEmpty() && Global::get().s.qsModernShellMotdLastSeenSignature != signature) {
-			Global::get().s.qsModernShellMotdLastSeenSignature = signature;
-			Global::get().s.save();
+		if (!signature.isEmpty()) {
+			QVariantMap state = modernMotdServerViewState();
+			state.insert(QStringLiteral("lastSeenSignature"), signature);
+			persistModernMotdServerViewState(state);
 		}
 		return false;
 	}
@@ -27531,13 +27869,21 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 			Global::get().s.iModernShellCustomAccentStrength =
 				normalizedModernShellCustomAccentStrength(payload.value(QStringLiteral("customAccentStrength")).toInt());
 		}
-		if (payload.contains(QStringLiteral("tickerBannerAlwaysScroll"))) {
-			Global::get().s.bModernShellTickerBannerAlwaysScroll =
-				payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
-		}
 		if (payload.contains(QStringLiteral("tickerBannerEnabled"))) {
 			Global::get().s.bModernShellTickerBannerEnabled =
 				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
+		}
+		if (payload.contains(QStringLiteral("tickerPlacement"))) {
+			Global::get().s.qsModernShellTickerPlacement =
+				normalizedStonksTickerPlacement(payload.value(QStringLiteral("tickerPlacement")).toString());
+		}
+		if (payload.contains(QStringLiteral("tickerDirection"))) {
+			Global::get().s.qsModernShellTickerDirection =
+				normalizedStonksTickerDirection(payload.value(QStringLiteral("tickerDirection")).toString());
+		}
+		if (payload.contains(QStringLiteral("tickerSpeed"))) {
+			Global::get().s.qsModernShellTickerSpeed =
+				normalizedStonksTickerSpeed(payload.value(QStringLiteral("tickerSpeed")).toString());
 		}
 		Global::get().s.save();
 		if (m_qmlShellHost) m_qmlShellHost->themeController()->refresh();
@@ -28213,6 +28559,79 @@ void MainWindow::warmupPersistentChatHistory() {
 	warmupModernDirectMessageHistory();
 }
 
+QString MainWindow::modernMotdServerStateKey() const {
+	QByteArray digest;
+	QString host;
+	QString username;
+	QString password;
+	unsigned short port = 0;
+	if (Global::get().sh) {
+		digest = Global::get().sh->serverDigest();
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+	}
+	return ModernMotd::serverStateKey(digest, host, port);
+}
+
+QVariantMap MainWindow::modernMotdServerViewState() const {
+	return ModernMotd::serverViewState(Global::get().s.qsModernShellMotdServerStates,
+										 modernMotdServerStateKey());
+}
+
+void MainWindow::persistModernMotdServerViewState(const QVariantMap &state) {
+	const QString key = modernMotdServerStateKey();
+	if (key.isEmpty()) return;
+	const QString serialized =
+		ModernMotd::withServerViewState(Global::get().s.qsModernShellMotdServerStates, key, state);
+	if (serialized == Global::get().s.qsModernShellMotdServerStates) return;
+	Global::get().s.qsModernShellMotdServerStates = serialized;
+	Global::get().s.save();
+}
+
+void MainWindow::migrateLegacyModernMotdServerViewState() {
+	const bool hasLegacyState = Global::get().s.bModernShellMotdExpanded
+		|| !Global::get().s.qsModernShellMotdDismissedSignature.trimmed().isEmpty()
+		|| !Global::get().s.qsModernShellMotdLastSeenSignature.trimmed().isEmpty();
+	if (!hasLegacyState) return;
+
+	const QString key = modernMotdServerStateKey();
+	if (key.isEmpty()) return;
+	const QVariantMap existing = ModernMotd::serverViewState(
+		Global::get().s.qsModernShellMotdServerStates, key);
+	if (!existing.value(QStringLiteral("exists")).toBool()) {
+		QVariantMap migrated {
+			{ QStringLiteral("expanded"), Global::get().s.bModernShellMotdExpanded },
+			{ QStringLiteral("dismissedSignature"),
+			  Global::get().s.qsModernShellMotdDismissedSignature },
+			{ QStringLiteral("lastSeenSignature"),
+			  Global::get().s.qsModernShellMotdLastSeenSignature }
+		};
+		Global::get().s.qsModernShellMotdServerStates = ModernMotd::withServerViewState(
+			Global::get().s.qsModernShellMotdServerStates, key, migrated);
+	}
+
+	Global::get().s.bModernShellMotdExpanded = false;
+	Global::get().s.qsModernShellMotdDismissedSignature.clear();
+	Global::get().s.qsModernShellMotdLastSeenSignature.clear();
+	Global::get().s.save();
+}
+
+QString MainWindow::modernMotdRenderableHtml(const QString &message, QStringList *registeredImageUrls) {
+	const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost ? m_qmlShellHost->imagePipeline() : nullptr;
+	if (!pipeline) return persistentChatContentHtml(message);
+
+	const auto replaceInlineDataImage = [pipeline, registeredImageUrls](
+		const QString &source, const QString &altText, const PersistentChatInlineDataImageInfo &) {
+		const QString token = persistentChatInlineDataImageToken(source);
+		const QString providerUrl = pipeline->registerDataUrl(
+			source, QStringLiteral("motd-inline-data:%1").arg(token));
+		if (providerUrl.isEmpty()) return QString();
+		if (registeredImageUrls) registeredImageUrls->push_back(providerUrl);
+		return QString::fromLatin1("<img src=\"%1\" alt=\"%2\" />")
+			.arg(providerUrl.toHtmlEscaped(), altText.toHtmlEscaped());
+	};
+	return persistentChatContentHtml(message, replaceInlineDataImage);
+}
+
 void MainWindow::setPersistentChatWelcomeText(const QString &message) {
 	if (m_persistentChatWelcomeText != message) {
 		m_persistentChatMotdExpanded = false;
@@ -28220,6 +28639,7 @@ void MainWindow::setPersistentChatWelcomeText(const QString &message) {
 		m_modernPersistentChatWelcomeImageUrls.clear();
 	}
 	m_persistentChatWelcomeText = message;
+	if (!message.trimmed().isEmpty()) migrateLegacyModernMotdServerViewState();
 	updatePersistentChatWelcome();
 }
 
@@ -28237,23 +28657,8 @@ QString MainWindow::modernPersistentChatWelcomeHtml() {
 		m_modernPersistentChatWelcomeImageUrls.clear();
 	}
 
-	const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost ? m_qmlShellHost->imagePipeline() : nullptr;
-	if (!pipeline) {
-		return persistentChatContentHtml(m_persistentChatWelcomeText);
-	}
-
-	const auto replaceInlineDataImage = [this, pipeline](const QString &source, const QString &altText,
-											 const PersistentChatInlineDataImageInfo &) {
-		const QString token = persistentChatInlineDataImageToken(source);
-		const QString providerUrl = pipeline->registerDataUrl(
-			source, QStringLiteral("motd-inline-data:%1").arg(token));
-		if (providerUrl.isEmpty()) return QString();
-		m_modernPersistentChatWelcomeImageUrls.push_back(providerUrl);
-		return QString::fromLatin1("<img src=\"%1\" alt=\"%2\" />")
-			.arg(providerUrl.toHtmlEscaped(), altText.toHtmlEscaped());
-	};
-	m_modernPersistentChatWelcomeHtml =
-		persistentChatContentHtml(m_persistentChatWelcomeText, replaceInlineDataImage);
+	m_modernPersistentChatWelcomeHtml = modernMotdRenderableHtml(
+		m_persistentChatWelcomeText, &m_modernPersistentChatWelcomeImageUrls);
 	m_modernPersistentChatWelcomeHtmlValid = true;
 	return m_modernPersistentChatWelcomeHtml;
 }
@@ -31644,6 +32049,13 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 						QStringLiteral("steamRecommendationsTotal"),
 						QStringLiteral("steamMetacriticScore"),
 						QStringLiteral("steamMetacriticUrl"),
+						QStringLiteral("steamDealComparisonUrl"),
+						QStringLiteral("steamBestPrice"),
+						QStringLiteral("steamBestShop"),
+						QStringLiteral("steamBestDiscountPercent"),
+						QStringLiteral("steamBestDealUrl"),
+						QStringLiteral("steamHistoricalLowPrice"),
+						QStringLiteral("steamHistoricalLowShop"),
 						QStringLiteral("steamReviewSummary"),
 						QStringLiteral("steamReviewScore"),
 						QStringLiteral("steamReviewTotal"),
@@ -31662,6 +32074,8 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 					metadata.insert(QStringLiteral("steamStoreUrl"), steamStoreAppUrl(*appId));
 					if (!name.isEmpty()) {
 						metadata.insert(QStringLiteral("steamAppName"), name);
+						metadata.insert(QStringLiteral("steamDealComparisonUrl"),
+										isThereAnyDealSearchUrl(name));
 					}
 					if (!developer.isEmpty()) {
 						metadata.insert(QStringLiteral("steamDeveloper"), developer);
@@ -31760,7 +32174,7 @@ bool MainWindow::requestPersistentChatSteamReviewPreview(const QString &previewK
 	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, appId]() {
 		const QByteArray data = reply->readAll();
 		const bool success    = reply->error() == QNetworkReply::NoError;
 		reply->deleteLater();
@@ -31771,7 +32185,7 @@ bool MainWindow::requestPersistentChatSteamReviewPreview(const QString &previewK
 		}
 
 		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
+		previewIt->remoteMediaFinished  = false;
 
 		if (success && !data.isEmpty()) {
 			QJsonParseError error;
@@ -31783,6 +32197,158 @@ bool MainWindow::requestPersistentChatSteamReviewPreview(const QString &previewK
 					applySteamReviewMetadata(*previewIt, querySummary);
 					previewIt->metadataFinished = true;
 					previewIt->failed           = false;
+				}
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+		if (!requestPersistentChatIsThereAnyDealPreview(previewKey, appId)) {
+			auto finalPreviewIt = m_persistentChatPreviews.find(previewKey);
+			if (finalPreviewIt != m_persistentChatPreviews.end()) {
+				finalPreviewIt->remoteMediaFinished = true;
+				publishPersistentChatPreviewUpdate(previewKey);
+			}
+		}
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatIsThereAnyDealPreview(const QString &previewKey, const QString &appId) {
+	const QString apiKey = isThereAnyDealApiKey();
+	if (previewKey.isEmpty() || appId.trimmed().isEmpty() || apiKey.isEmpty()) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+
+	QNetworkRequest request(isThereAnyDealLookupUrl(appId));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
+	request.setRawHeader(QByteArrayLiteral("ITAD-API-Key"), apiKey.toUtf8());
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+		previewIt->remoteMediaRequested = false;
+
+		QString gameId;
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject root = document.object();
+				if (root.value(QStringLiteral("found")).toBool(false)) {
+					gameId = root.value(QStringLiteral("game")).toObject().value(QStringLiteral("id"))
+							 .toString().trimmed();
+				}
+			}
+		}
+
+		if (!gameId.isEmpty() && requestPersistentChatIsThereAnyDealOverview(previewKey, gameId)) {
+			return;
+		}
+
+		previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt != m_persistentChatPreviews.end()) {
+			previewIt->remoteMediaFinished = true;
+			publishPersistentChatPreviewUpdate(previewKey);
+		}
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatIsThereAnyDealOverview(const QString &previewKey, const QString &gameId) {
+	const QString apiKey = isThereAnyDealApiKey();
+	if (previewKey.isEmpty() || gameId.trimmed().isEmpty() || apiKey.isEmpty()) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+
+	QNetworkRequest request(isThereAnyDealOverviewUrl());
+	preparePreviewRequest(request);
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
+	request.setRawHeader(QByteArrayLiteral("ITAD-API-Key"), apiKey.toUtf8());
+	const QByteArray body = QJsonDocument(QJsonArray { gameId }).toJson(QJsonDocument::Compact);
+	QNetworkReply *reply  = startPersistentChatPreviewPost(request, body, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, gameId]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject root = document.object();
+				for (const QJsonValue &value : root.value(QStringLiteral("prices")).toArray()) {
+					const QJsonObject entry = value.toObject();
+					if (entry.value(QStringLiteral("id")).toString() != gameId) {
+						continue;
+					}
+
+					QVariantMap metadata      = previewIt->metadata;
+					const QJsonObject current = entry.value(QStringLiteral("current")).toObject();
+					const QJsonObject lowest  = entry.value(QStringLiteral("lowest")).toObject();
+					const QString currentPrice =
+						isThereAnyDealPriceText(current.value(QStringLiteral("price")).toObject());
+					const QString currentShop =
+						current.value(QStringLiteral("shop")).toObject().value(QStringLiteral("name"))
+							.toString().trimmed();
+					const QString currentUrl = current.value(QStringLiteral("url")).toString().trimmed();
+					const int currentCut     = current.value(QStringLiteral("cut")).toInt(0);
+					const QString lowestPrice =
+						isThereAnyDealPriceText(lowest.value(QStringLiteral("price")).toObject());
+					const QString lowestShop =
+						lowest.value(QStringLiteral("shop")).toObject().value(QStringLiteral("name"))
+							.toString().trimmed();
+					const QString comparisonUrl =
+						entry.value(QStringLiteral("urls")).toObject().value(QStringLiteral("game"))
+							.toString().trimmed();
+
+					if (!currentPrice.isEmpty()) metadata.insert(QStringLiteral("steamBestPrice"), currentPrice);
+					if (!currentShop.isEmpty()) metadata.insert(QStringLiteral("steamBestShop"), currentShop);
+					if (!currentUrl.isEmpty()) metadata.insert(QStringLiteral("steamBestDealUrl"), currentUrl);
+					if (currentCut > 0) metadata.insert(QStringLiteral("steamBestDiscountPercent"), currentCut);
+					if (!lowestPrice.isEmpty()) metadata.insert(QStringLiteral("steamHistoricalLowPrice"), lowestPrice);
+					if (!lowestShop.isEmpty()) metadata.insert(QStringLiteral("steamHistoricalLowShop"), lowestShop);
+					if (!comparisonUrl.isEmpty()) {
+						metadata.insert(QStringLiteral("steamDealComparisonUrl"), comparisonUrl);
+					}
+					metadata.insert(QStringLiteral("steamDealSource"), QStringLiteral("IsThereAnyDeal"));
+					previewIt->metadata         = metadata;
+					previewIt->metadataFinished = true;
+					break;
 				}
 			}
 		}
@@ -39609,15 +40175,27 @@ void MainWindow::whisperReleased(QVariant scdata) {
 void MainWindow::onResetAudio() {
 	qWarning("MainWindow: Start audio reset");
 	stopInputEnhancementCalibrationPlayback();
-	Audio::stop();
 #ifdef Q_OS_WIN
-	WASAPINotificationClient::get().beginAudioResetRebuild();
+	const int consumers = int(WASAPINotificationClient::get().beginAudioResetRebuild());
+#else
+	const int consumers = 3;
 #endif
-	Audio::start();
+	if ((consumers & 3) == 3) {
+		Audio::stop();
+		Audio::start();
+	} else if (consumers & 1) {
+		Audio::restartInput();
+	} else if (consumers & 2) {
+		Audio::restartOutput();
+	}
 #ifdef Q_OS_WIN
 	WASAPINotificationClient::get().finishAudioResetRebuild();
 #endif
 	qWarning("MainWindow: Audio reset complete");
+}
+
+void MainWindow::scheduleWASAPIAudioReset(const int delayMs) {
+	QTimer::singleShot(qMax(0, delayMs), this, &MainWindow::onResetAudio);
 }
 
 /**
@@ -39627,6 +40205,7 @@ void MainWindow::onResetAudio() {
 void MainWindow::serverConnected() {
 	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	m_reconnectSoundBlocker.reset();
+	clearQmlConnectionState();
 
 	Global::get().uiSession                  = 0;
 	Global::get().pPermissions               = ChanACL::None;
@@ -39797,6 +40376,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	appendModernShellConnectTrace(QStringLiteral("serverDisconnected enter err=%1 reason=%2")
 									  .arg(static_cast< int >(err))
 									  .arg(reason));
+	clearQmlConnectionState();
 	// clear ChannelListener
 	Global::get().channelListenerManager->clear();
 	clearUserTextureRequests();

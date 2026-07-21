@@ -18,6 +18,9 @@
 #include "Utils.h"
 #include "Global.h"
 
+#include <QtCore/QMutex>
+#include <QtCore/QMutexLocker>
+
 // Now that Win7 is published, which includes public versions of these
 // interfaces, we simply inherit from those but use the "old" IIDs.
 
@@ -171,7 +174,7 @@ bool getAndCheckMixFormat(const char *sourceName, const char *deviceName, IAudio
 	} else {
 		if ((*waveFormatEx)->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
 			*sampleFormat = SAMPLEFORMAT::SampleFloat;
-		} else if ((*waveFormatEx)->wFormatTag != WAVE_FORMAT_PCM) {
+		} else if ((*waveFormatEx)->wFormatTag == WAVE_FORMAT_PCM) {
 			*sampleFormat = SAMPLEFORMAT::SampleShort;
 		} else {
 			qWarning() << sourceName << ":" << deviceName
@@ -201,6 +204,49 @@ bool getAndCheckMixFormat(const char *sourceName, const char *deviceName, IAudio
 	return true;
 }
 
+static HRESULT initializeSharedAudioClient(IAudioClient *audioClient, const WAVEFORMATEX *format,
+											 const REFERENCE_TIME legacyBufferDuration, const DWORD streamFlags,
+											 const char *sourceName) {
+	const Mumble::WASAPI::LatencyProfile profile =
+		Mumble::WASAPI::latencyProfileFromName(Global::get().s.qsWASAPILatencyProfile);
+	if (profile != Mumble::WASAPI::LatencyProfile::Stable) {
+		IAudioClient3 *audioClient3 = nullptr;
+		HRESULT queryResult = audioClient->QueryInterface(__uuidof(IAudioClient3),
+												 reinterpret_cast< void ** >(&audioClient3));
+		if (SUCCEEDED(queryResult) && audioClient3) {
+			UINT32 defaultFrames = 0;
+			UINT32 fundamentalFrames = 0;
+			UINT32 minimumFrames = 0;
+			UINT32 maximumFrames = 0;
+			queryResult = audioClient3->GetSharedModeEnginePeriod(format, &defaultFrames, &fundamentalFrames,
+															 &minimumFrames, &maximumFrames);
+			if (SUCCEEDED(queryResult)) {
+				const UINT32 selectedFrames = WASAPISystem::selectSharedModePeriod(
+					profile, defaultFrames, fundamentalFrames, minimumFrames, maximumFrames);
+				if (selectedFrames > 0) {
+					const HRESULT initializeResult =
+						audioClient3->InitializeSharedAudioStream(streamFlags, selectedFrames, format, nullptr);
+					if (SUCCEEDED(initializeResult)) {
+						qWarning("%s: IAudioClient3 period %u frames (%u us), profile=%s", sourceName,
+								 selectedFrames,
+								 format->nSamplesPerSec > 0
+									 ? static_cast< unsigned int >((quint64(selectedFrames) * 1000000ULL)
+																	  / format->nSamplesPerSec)
+									 : 0U,
+								 qPrintable(Mumble::WASAPI::latencyProfileName(profile)));
+						audioClient3->Release();
+						return initializeResult;
+					}
+					qWarning("%s: IAudioClient3 initialization failed: hr=0x%08lx; using stable initialization",
+							 sourceName, initializeResult);
+				}
+			}
+			audioClient3->Release();
+		}
+	}
+	return audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, streamFlags, legacyBufferDuration, 0, format, nullptr);
+}
+
 
 AudioInput *WASAPIInputRegistrar::create() {
 	return new WASAPIInput();
@@ -226,7 +272,23 @@ const QList< audioDevice > WASAPIInputRegistrar::getDeviceChoices() {
 }
 
 void WASAPIInputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s) {
+	const QString previousChoice = s.qsWASAPIInput;
 	s.qsWASAPIInput = choice.toString();
+	if (s.qsWASAPIInput.isEmpty()) {
+		s.qsWASAPIInputDeviceIdentity.clear();
+		s.qsWASAPIInputRoutingPolicy = Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::FollowDefault);
+	} else {
+		const QString descriptor = Mumble::WASAPI::serializeDeviceDescriptor(
+			WASAPISystem::descriptorForEndpoint(s.qsWASAPIInput, eCapture));
+		if (!descriptor.isEmpty() || previousChoice != s.qsWASAPIInput) {
+			s.qsWASAPIInputDeviceIdentity = descriptor;
+		}
+		if (Mumble::WASAPI::routingPolicyFromName(s.qsWASAPIInputRoutingPolicy, true)
+			== Mumble::WASAPI::RoutingPolicy::FollowDefault) {
+			s.qsWASAPIInputRoutingPolicy =
+				Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::PreferSelected);
+		}
+	}
 }
 
 Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIdentity() {
@@ -234,7 +296,8 @@ Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIden
 }
 
 Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIdentity(const Settings &settings) {
-	return WASAPISystem::resolveInputDeviceIdentity(settings.qsWASAPIInput, WASAPIRoleFromSettings());
+	return WASAPISystem::resolveInputDeviceIdentity(settings.qsWASAPIInput, WASAPIRoleFromSettings(),
+		settings.qsWASAPIInputDeviceIdentity, settings.qsWASAPIInputRoutingPolicy);
 }
 
 bool WASAPIInputRegistrar::canEcho(EchoCancelOptionID echoOptionIDs, const QString &outputSystem) const {
@@ -276,7 +339,24 @@ const QList< audioDevice > WASAPIOutputRegistrar::getDeviceChoices() {
 }
 
 void WASAPIOutputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s) {
+	const QString previousChoice = s.qsWASAPIOutput;
 	s.qsWASAPIOutput = choice.toString();
+	if (s.qsWASAPIOutput.isEmpty()) {
+		s.qsWASAPIOutputDeviceIdentity.clear();
+		s.qsWASAPIOutputRoutingPolicy =
+			Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::FollowDefault);
+	} else {
+		const QString descriptor = Mumble::WASAPI::serializeDeviceDescriptor(
+			WASAPISystem::descriptorForEndpoint(s.qsWASAPIOutput, eRender));
+		if (!descriptor.isEmpty() || previousChoice != s.qsWASAPIOutput) {
+			s.qsWASAPIOutputDeviceIdentity = descriptor;
+		}
+		if (Mumble::WASAPI::routingPolicyFromName(s.qsWASAPIOutputRoutingPolicy, true)
+			== Mumble::WASAPI::RoutingPolicy::FollowDefault) {
+			s.qsWASAPIOutputRoutingPolicy =
+				Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::PreferSelected);
+		}
+	}
 }
 
 bool WASAPIOutputRegistrar::canMuteOthers() const {
@@ -348,6 +428,208 @@ const QHash< QString, QString > WASAPISystem::getDevices(EDataFlow dataflow) {
 	return devices;
 }
 
+namespace {
+	QMutex g_wasapiRuntimeStateMutex;
+	QHash< int, Mumble::WASAPI::RuntimeState > g_wasapiRuntimeStates;
+
+	QString propertyString(IPropertyStore *properties, const PROPERTYKEY &key) {
+		if (!properties) {
+			return QString();
+		}
+		PROPVARIANT value;
+		PropVariantInit(&value);
+		QString result;
+		if (SUCCEEDED(properties->GetValue(key, &value))) {
+			if (value.vt == VT_LPWSTR && value.pwszVal) {
+				result = QString::fromWCharArray(value.pwszVal);
+			} else if (value.vt == VT_BSTR && value.bstrVal) {
+				result = QString::fromWCharArray(value.bstrVal);
+			}
+		}
+		PropVariantClear(&value);
+		return result;
+	}
+
+	QString propertyGuid(IPropertyStore *properties, const PROPERTYKEY &key) {
+		if (!properties) {
+			return QString();
+		}
+		PROPVARIANT value;
+		PropVariantInit(&value);
+		QString result;
+		if (SUCCEEDED(properties->GetValue(key, &value)) && value.vt == VT_CLSID && value.puuid) {
+			wchar_t buffer[64] = {};
+			if (StringFromGUID2(*value.puuid, buffer, ARRAYSIZE(buffer)) > 0) {
+				result = QString::fromWCharArray(buffer);
+			}
+		}
+		PropVariantClear(&value);
+		return result;
+	}
+
+	int propertyInt(IPropertyStore *properties, const PROPERTYKEY &key) {
+		if (!properties) {
+			return -1;
+		}
+		PROPVARIANT value;
+		PropVariantInit(&value);
+		int result = -1;
+		if (SUCCEEDED(properties->GetValue(key, &value))) {
+			if (value.vt == VT_UI4) {
+				result = static_cast< int >(value.ulVal);
+			} else if (value.vt == VT_I4) {
+				result = static_cast< int >(value.lVal);
+			}
+		}
+		PropVariantClear(&value);
+		return result;
+	}
+
+	Mumble::WASAPI::DeviceDescriptor descriptorForDevice(IMMDevice *device, const EDataFlow dataFlow) {
+		Mumble::WASAPI::DeviceDescriptor descriptor;
+		descriptor.dataFlow = static_cast< int >(dataFlow);
+		if (!device) {
+			return descriptor;
+		}
+		LPWSTR endpointId = nullptr;
+		if (SUCCEEDED(device->GetId(&endpointId)) && endpointId) {
+			descriptor.endpointId = QString::fromWCharArray(endpointId);
+			CoTaskMemFree(endpointId);
+		}
+		IPropertyStore *properties = nullptr;
+		if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties)) && properties) {
+			descriptor.displayName     = propertyString(properties, PKEY_Device_FriendlyName);
+			descriptor.containerId     = propertyGuid(properties, PKEY_Device_ContainerId);
+			descriptor.parentInstanceId = propertyString(properties, PKEY_Device_Parent);
+			descriptor.adapterName     = propertyString(properties, PKEY_DeviceInterface_FriendlyName);
+			descriptor.association     = propertyString(properties, PKEY_AudioEndpoint_Association);
+			descriptor.formFactor      = propertyInt(properties, PKEY_AudioEndpoint_FormFactor);
+			properties->Release();
+		}
+		return descriptor;
+	}
+
+	void publishRuntimeState(const EDataFlow dataFlow, Mumble::WASAPI::RuntimeState state) {
+		QMutexLocker lock(&g_wasapiRuntimeStateMutex);
+		g_wasapiRuntimeStates.insert(static_cast< int >(dataFlow), std::move(state));
+	}
+
+	void publishStreamFailure(const EDataFlow dataFlow, const HRESULT hr) {
+		QMutexLocker lock(&g_wasapiRuntimeStateMutex);
+		Mumble::WASAPI::RuntimeState &state = g_wasapiRuntimeStates[static_cast< int >(dataFlow)];
+		state.streamActive = false;
+		state.lastError = QObject::tr("The Windows audio stream stopped (0x%1); Mumble is retrying.")
+						  .arg(static_cast< quint32 >(hr), 8, 16, QLatin1Char('0'));
+	}
+
+	void rememberResolvedDescriptor(const EDataFlow dataFlow, const QString &configuredEndpointId,
+									 const Mumble::WASAPI::DeviceDescriptor &selectedDescriptor,
+									 const QString &persistedIdentity, const bool reboundByFingerprint) {
+		if (!Global::get().mw || configuredEndpointId.isEmpty() || selectedDescriptor.endpointId.isEmpty()) {
+			return;
+		}
+		const QString serializedDescriptor = Mumble::WASAPI::serializeDeviceDescriptor(selectedDescriptor);
+		if (serializedDescriptor.isEmpty() || (!reboundByFingerprint && serializedDescriptor == persistedIdentity)) {
+			return;
+		}
+		QMetaObject::invokeMethod(Global::get().mw,
+			[dataFlow, configuredEndpointId, selectedDescriptor, serializedDescriptor, reboundByFingerprint]() {
+				Settings &settings = Global::get().s;
+				QString *endpoint = dataFlow == eCapture ? &settings.qsWASAPIInput : &settings.qsWASAPIOutput;
+				QString *identity = dataFlow == eCapture ? &settings.qsWASAPIInputDeviceIdentity
+														 : &settings.qsWASAPIOutputDeviceIdentity;
+				if (endpoint->compare(configuredEndpointId, Qt::CaseInsensitive) != 0) {
+					return;
+				}
+				bool changed = *identity != serializedDescriptor;
+				*identity = serializedDescriptor;
+				if (reboundByFingerprint && endpoint->compare(selectedDescriptor.endpointId, Qt::CaseInsensitive) != 0) {
+					*endpoint = selectedDescriptor.endpointId;
+					changed = true;
+				}
+				if (changed) {
+					settings.save();
+				}
+			},
+			Qt::QueuedConnection);
+	}
+} // namespace
+
+QList< Mumble::WASAPI::DeviceDescriptor > WASAPISystem::getDeviceDescriptors(const EDataFlow dataflow,
+																	 const DWORD stateMask) {
+	QList< Mumble::WASAPI::DeviceDescriptor > descriptors;
+	IMMDeviceEnumerator *enumerator = nullptr;
+	IMMDeviceCollection *collection = nullptr;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+							  reinterpret_cast< void ** >(&enumerator));
+	if (!enumerator || FAILED(hr)) {
+		return descriptors;
+	}
+	hr = enumerator->EnumAudioEndpoints(dataflow, stateMask, &collection);
+	if (collection && SUCCEEDED(hr)) {
+		UINT count = 0;
+		if (SUCCEEDED(collection->GetCount(&count))) {
+			for (UINT index = 0; index < count; ++index) {
+				IMMDevice *device = nullptr;
+				if (SUCCEEDED(collection->Item(index, &device)) && device) {
+					descriptors.push_back(descriptorForDevice(device, dataflow));
+					device->Release();
+				}
+			}
+		}
+		collection->Release();
+	}
+	enumerator->Release();
+	return descriptors;
+}
+
+Mumble::WASAPI::DeviceDescriptor WASAPISystem::descriptorForEndpoint(const QString &endpointId,
+																	 const EDataFlow dataflow) {
+	for (const Mumble::WASAPI::DeviceDescriptor &descriptor : getDeviceDescriptors(dataflow, DEVICE_STATEMASK_ALL)) {
+		if (descriptor.endpointId.compare(endpointId, Qt::CaseInsensitive) == 0) {
+			return descriptor;
+		}
+	}
+	return {};
+}
+
+Mumble::WASAPI::DeviceDescriptor WASAPISystem::defaultDeviceDescriptor(const EDataFlow dataflow, const ERole role) {
+	Mumble::WASAPI::DeviceDescriptor descriptor;
+	IMMDeviceEnumerator *enumerator = nullptr;
+	IMMDevice *device = nullptr;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+							  reinterpret_cast< void ** >(&enumerator));
+	if (enumerator && SUCCEEDED(hr) && SUCCEEDED(enumerator->GetDefaultAudioEndpoint(dataflow, role, &device)) && device) {
+		descriptor = descriptorForDevice(device, dataflow);
+		device->Release();
+	}
+	if (enumerator) {
+		enumerator->Release();
+	}
+	return descriptor;
+}
+
+Mumble::WASAPI::RuntimeState WASAPISystem::runtimeState(const EDataFlow dataflow) {
+	QMutexLocker lock(&g_wasapiRuntimeStateMutex);
+	return g_wasapiRuntimeStates.value(static_cast< int >(dataflow));
+}
+
+UINT32 WASAPISystem::selectSharedModePeriod(const Mumble::WASAPI::LatencyProfile profile,
+											const UINT32 defaultFrames, const UINT32 fundamentalFrames,
+											const UINT32 minimumFrames, const UINT32 maximumFrames) {
+	if (profile == Mumble::WASAPI::LatencyProfile::Stable || fundamentalFrames == 0 || minimumFrames == 0
+		|| maximumFrames < minimumFrames) {
+		return 0;
+	}
+	UINT32 selected = profile == Mumble::WASAPI::LatencyProfile::Low ? minimumFrames : defaultFrames;
+	selected        = qBound(minimumFrames, selected, maximumFrames);
+	const UINT32 remainder = selected % fundamentalFrames;
+	if (remainder != 0) {
+		selected += fundamentalFrames - remainder;
+	}
+	return qMin(selected, maximumFrames);
+}
+
 WASAPIInput::WASAPIInput(){};
 
 WASAPIInput::~WASAPIInput() {
@@ -356,7 +638,8 @@ WASAPIInput::~WASAPIInput() {
 }
 
 static Mumble::InputEnhancement::DeviceIdentity identityForWASAPIDevice(IMMDevice *device,
-																				 const bool followsSystemDefault) {
+																	 const EDataFlow dataFlow,
+																	 const bool followsSystemDefault) {
 	Mumble::InputEnhancement::DeviceIdentity identity;
 	identity.backendId            = QStringLiteral("WASAPI");
 	identity.followsSystemDefault = followsSystemDefault;
@@ -384,13 +667,16 @@ static Mumble::InputEnhancement::DeviceIdentity identityForWASAPIDevice(IMMDevic
 	}
 
 	identity.stable = !identity.physicalId.isEmpty();
+	identity.stableHardwareId = Mumble::WASAPI::stableHardwareId(descriptorForDevice(device, dataFlow));
 	return identity;
 }
 
 static IMMDevice *openNamedOrDefaultDevice(
-	const QString &name, EDataFlow dataFlow, ERole role,
+	const QString &name, EDataFlow dataFlow, ERole role, const QString &persistedIdentity = QString(),
+	const QString &routingPolicyName = QStringLiteral("prefer"),
+	const WASAPINotificationClient::AudioConsumers consumers = WASAPINotificationClient::NoConsumer,
 	Mumble::InputEnhancement::DeviceIdentity *resolvedIdentity = nullptr, const bool enlistNotifications = true,
-	const bool namedDeviceFollowsSystemDefault = false) {
+	const bool publishState = true) {
 	HRESULT hr;
 	IMMDeviceEnumerator *pEnumerator = nullptr;
 
@@ -398,67 +684,129 @@ static IMMDevice *openNamedOrDefaultDevice(
 						  reinterpret_cast< void ** >(&pEnumerator));
 	if (!pEnumerator || FAILED(hr)) {
 		qWarning("WASAPI: Failed to instantiate enumerator: hr=0x%08lx", hr);
+		if (enlistNotifications && consumers != WASAPINotificationClient::NoConsumer) {
+			WASAPINotificationClient::get().setConsumersNeedingPreferredRecovery(dataFlow, consumers, true);
+			WASAPINotificationClient::get().requestRecovery(
+				consumers, QStringLiteral("endpoint_enumerator_stream_failed_0x%1")
+							   .arg(static_cast< quint32 >(hr), 8, 16, QLatin1Char('0')),
+				750);
+		}
 		return nullptr;
 	}
 
 	IMMDevice *pDevice = nullptr;
-	bool followsSystemDefault = name.isEmpty() || namedDeviceFollowsSystemDefault;
-	// Try to find a device pointer for |name|.
-	if (!name.isEmpty()) {
-		std::vector< wchar_t > devname;
-		devname.resize(name.length() + 1);
-		int len      = name.toWCharArray(devname.data());
-		devname[len] = 0;
-		hr           = pEnumerator->GetDevice(devname.data(), &pDevice);
-		if (FAILED(hr)) {
-			qWarning("WASAPI: Failed to open selected device %s %ls (df=%d, e=%d, hr=0x%08lx), falling back to default",
-					 qPrintable(name), devname.data(), dataFlow, role, hr);
-			followsSystemDefault = true;
+	const Mumble::WASAPI::RoutingPolicy routingPolicy =
+		Mumble::WASAPI::routingPolicyFromName(routingPolicyName, !name.isEmpty());
+	const Mumble::WASAPI::DeviceDescriptor preferredDescriptor =
+		Mumble::WASAPI::deserializeDeviceDescriptor(persistedIdentity);
+	const QList< Mumble::WASAPI::DeviceDescriptor > candidates = WASAPISystem::getDeviceDescriptors(dataFlow);
+	Mumble::WASAPI::DeviceDescriptor selectedDescriptor;
+	bool followsSystemDefault = routingPolicy == Mumble::WASAPI::RoutingPolicy::FollowDefault;
+	bool usingFallback = false;
+	bool reboundByFingerprint = false;
+
+	if (!followsSystemDefault) {
+		for (const Mumble::WASAPI::DeviceDescriptor &candidate : candidates) {
+			if (candidate.endpointId.compare(name, Qt::CaseInsensitive) == 0) {
+				selectedDescriptor = candidate;
+				break;
+			}
 		}
+		if (selectedDescriptor.endpointId.isEmpty() && preferredDescriptor.hasStableFingerprint()) {
+			const Mumble::WASAPI::MatchResult match =
+				Mumble::WASAPI::findUniqueBestDeviceMatch(preferredDescriptor, candidates);
+			if (match.matched()) {
+				selectedDescriptor   = candidates.at(match.index);
+				reboundByFingerprint = selectedDescriptor.endpointId.compare(name, Qt::CaseInsensitive) != 0;
+			}
+		}
+		if (selectedDescriptor.endpointId.isEmpty()
+			&& routingPolicy == Mumble::WASAPI::RoutingPolicy::PreferSelected) {
+			selectedDescriptor = WASAPISystem::defaultDeviceDescriptor(dataFlow, role);
+			followsSystemDefault = true;
+			usingFallback = true;
+		}
+	} else {
+		selectedDescriptor = WASAPISystem::defaultDeviceDescriptor(dataFlow, role);
 	}
 
-	// Use the default device if |pDevice| is still nullptr.
-	// We retrieve the actual device name for the currently selected default device and
-	// open the device by it's real name to work around triggering the automatic
-	// ducking behavior.
-	if (!pDevice) {
-		followsSystemDefault = true;
-		hr = pEnumerator->GetDefaultAudioEndpoint(dataFlow, role, &pDevice);
+	Mumble::WASAPI::RuntimeState runtimeState;
+	runtimeState.configuredEndpointId = name;
+	runtimeState.preferredDisplayName = preferredDescriptor.displayName;
+	runtimeState.activeEndpointId     = selectedDescriptor.endpointId;
+	runtimeState.activeDisplayName    = selectedDescriptor.displayName;
+	runtimeState.policy               = routingPolicy;
+	runtimeState.preferredAvailable   = followsSystemDefault && !usingFallback
+											? !selectedDescriptor.endpointId.isEmpty()
+											: !usingFallback && !selectedDescriptor.endpointId.isEmpty();
+	runtimeState.usingFallback        = usingFallback;
+	runtimeState.reboundByFingerprint = reboundByFingerprint;
+	runtimeState.streamActive         = false;
+	if (selectedDescriptor.endpointId.isEmpty()) {
+		runtimeState.lastError = routingPolicy == Mumble::WASAPI::RoutingPolicy::StrictSelected
+								 ? QObject::tr("Selected device is unavailable; strict routing paused this stream.")
+								 : QObject::tr("No active Windows audio endpoint is available.");
+	} else if (usingFallback) {
+		runtimeState.lastError = QObject::tr("The preferred device is unavailable; using the Windows communications device temporarily.");
+	}
+	if (publishState) {
+		publishRuntimeState(dataFlow, runtimeState);
+	}
+
+	if (enlistNotifications && consumers != WASAPINotificationClient::NoConsumer) {
+		WASAPINotificationClient::get().setConsumersNeedingPreferredRecovery(dataFlow, consumers,
+			usingFallback || selectedDescriptor.endpointId.isEmpty());
+	}
+	if (selectedDescriptor.endpointId.isEmpty()) {
+		goto cleanup;
+	}
+
+	{
+		std::vector< wchar_t > endpointId(static_cast< std::size_t >(selectedDescriptor.endpointId.size()) + 1);
+		const int length = selectedDescriptor.endpointId.toWCharArray(endpointId.data());
+		endpointId[static_cast< std::size_t >(length)] = L'\0';
+		hr = pEnumerator->GetDevice(endpointId.data(), &pDevice);
 		if (FAILED(hr)) {
-			qWarning("WASAPI: Failed to open device: df=%d, e=%d, hr=0x%08lx", dataFlow, role, hr);
+			qWarning("WASAPI: Failed to open resolved device %s (df=%d, e=%d, hr=0x%08lx)",
+					 qPrintable(selectedDescriptor.endpointId), dataFlow, role, hr);
+			if (enlistNotifications && consumers != WASAPINotificationClient::NoConsumer) {
+				WASAPINotificationClient::get().setConsumersNeedingPreferredRecovery(dataFlow, consumers, true);
+				WASAPINotificationClient::get().requestRecovery(
+					consumers, QStringLiteral("endpoint_open_stream_failed_0x%1")
+								   .arg(static_cast< quint32 >(hr), 8, 16, QLatin1Char('0')),
+					750);
+			}
+			if (publishState) {
+				runtimeState.preferredAvailable = false;
+				runtimeState.streamActive       = false;
+				runtimeState.lastError = QObject::tr("The Windows audio endpoint changed while opening; Mumble is retrying.");
+				publishRuntimeState(dataFlow, runtimeState);
+			}
 			goto cleanup;
 		}
-		wchar_t *devname = nullptr;
-		hr               = pDevice->GetId(&devname);
-		if (FAILED(hr)) {
-			qWarning("WASAPI: Failed to query device: df=%d, e=%d, hr=0x%08lx", dataFlow, role, hr);
-			goto cleanup;
-		}
-		pDevice->Release();
-		pDevice = nullptr;
-		hr = pEnumerator->GetDevice(devname, &pDevice);
-		if (FAILED(hr)) {
-			qWarning("WASAPI: Failed to reopen default device: df=%d, e=%d, hr=0x%08lx", dataFlow, role, hr);
-			CoTaskMemFree(devname);
-			goto cleanup;
-		}
-		CoTaskMemFree(devname);
 	}
 
 	if (pDevice) {
+		if (enlistNotifications && !usingFallback && !followsSystemDefault) {
+			rememberResolvedDescriptor(dataFlow, name, selectedDescriptor, persistedIdentity, reboundByFingerprint);
+		}
 		const Mumble::InputEnhancement::DeviceIdentity identity =
-			identityForWASAPIDevice(pDevice, followsSystemDefault);
+			identityForWASAPIDevice(pDevice, dataFlow, followsSystemDefault);
 		if (resolvedIdentity) {
 			*resolvedIdentity = identity;
 		}
-		if (enlistNotifications && !identity.physicalId.isEmpty()) {
+		if (publishState) {
+			runtimeState.streamActive = true;
+			publishRuntimeState(dataFlow, runtimeState);
+		}
+		if (enlistNotifications && consumers != WASAPINotificationClient::NoConsumer && !identity.physicalId.isEmpty()) {
 			if (followsSystemDefault) {
 				std::vector< wchar_t > endpointId(static_cast< std::size_t >(identity.physicalId.size()) + 1);
 				const int length = identity.physicalId.toWCharArray(endpointId.data());
 				endpointId[static_cast< std::size_t >(length)] = L'\0';
-				WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(endpointId.data(), dataFlow, role);
+				WASAPINotificationClient::get().enlistDefaultDeviceAsUsed(endpointId.data(), dataFlow, role, consumers);
 			} else {
-				WASAPINotificationClient::get().enlistDeviceAsUsed(identity.physicalId);
+				WASAPINotificationClient::get().enlistDeviceAsUsed(identity.physicalId, consumers);
 			}
 		}
 	}
@@ -471,9 +819,11 @@ cleanup:
 }
 
 Mumble::InputEnhancement::DeviceIdentity WASAPISystem::resolveInputDeviceIdentity(const QString &configuredDevice,
-																				   const ERole role) {
+																	   const ERole role, const QString &persistedIdentity,
+																	   const QString &routingPolicy) {
 	Mumble::InputEnhancement::DeviceIdentity identity;
-	IMMDevice *device = openNamedOrDefaultDevice(configuredDevice, eCapture, role, &identity, false);
+	IMMDevice *device = openNamedOrDefaultDevice(configuredDevice, eCapture, role, persistedIdentity, routingPolicy,
+		WASAPINotificationClient::NoConsumer, &identity, false, false);
 	if (device) {
 		device->Release();
 	}
@@ -481,7 +831,7 @@ Mumble::InputEnhancement::DeviceIdentity WASAPISystem::resolveInputDeviceIdentit
 }
 
 void WASAPIInput::run() {
-	HRESULT hr;
+	HRESULT hr = S_OK;
 	IMMDevice *pMicDevice                   = nullptr;
 	IAudioClient *pMicAudioClient           = nullptr;
 	IAudioCaptureClient *pMicCaptureClient  = nullptr;
@@ -524,15 +874,19 @@ void WASAPIInput::run() {
 	const QString plannedInputId = plannedInputIdentity.stable ? plannedInputIdentity.physicalId
 															  : Global::get().s.qsWASAPIInput;
 	Mumble::InputEnhancement::DeviceIdentity openedInputIdentity;
-	pMicDevice = openNamedOrDefaultDevice(plannedInputId, eCapture, WASAPIRoleFromSettings(), &openedInputIdentity,
-										true, plannedInputIdentity.followsSystemDefault);
+	pMicDevice = openNamedOrDefaultDevice(plannedInputId, eCapture, WASAPIRoleFromSettings(),
+		Global::get().s.qsWASAPIInputDeviceIdentity, Global::get().s.qsWASAPIInputRoutingPolicy,
+		WASAPINotificationClient::InputConsumer, &openedInputIdentity, true, true);
 	if (!pMicDevice)
 		goto cleanup;
 	confirmOpenedInputDeviceIdentity(std::move(openedInputIdentity));
 
 	// Open echo capture device.
 	if (doecho) {
-		pEchoDevice = openNamedOrDefaultDevice(Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings());
+		pEchoDevice = openNamedOrDefaultDevice(
+			Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings(),
+			Global::get().s.qsWASAPIOutputDeviceIdentity, Global::get().s.qsWASAPIOutputRoutingPolicy,
+			WASAPINotificationClient::InputConsumer);
 		if (!pEchoDevice)
 			doecho = false;
 	}
@@ -586,8 +940,8 @@ void WASAPIInput::run() {
 			goto cleanup;
 		}
 
-		hr = pMicAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 0, 0, micpwfx,
-										 nullptr);
+		hr = initializeSharedAudioClient(pMicAudioClient, micpwfx, 0, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+										 "WASAPIInput: Mic");
 		if (FAILED(hr)) {
 			qWarning("WASAPIInput: Mic Initialize failed: hr=0x%08lx", hr);
 			if (hr == E_ACCESSDENIED) {
@@ -638,9 +992,8 @@ void WASAPIInput::run() {
 			goto cleanup;
 		}
 
-		hr = pEchoAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
-										  AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0,
-										  echopwfx, nullptr);
+		hr = initializeSharedAudioClient(pEchoAudioClient, echopwfx, 0,
+			AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOOPBACK, "WASAPIInput: Echo");
 		if (FAILED(hr)) {
 			qWarning("WASAPIInput: Echo Initialize failed: hr=0x%08lx", hr);
 			goto cleanup;
@@ -672,6 +1025,7 @@ void WASAPIInput::run() {
 	}
 
 	initializeMixer();
+	WASAPINotificationClient::get().markConsumersHealthy(WASAPINotificationClient::InputConsumer);
 	// Only a fully started microphone/echo chain counts as use for per-device
 	// profile retention. Identity mismatch handling stays above, before the first
 	// callback, but failed Activate/Initialize/Start attempts must not affect LRU.
@@ -768,6 +1122,12 @@ void WASAPIInput::run() {
 	}
 
 cleanup:
+	if (FAILED(hr) && bRunning) {
+		publishStreamFailure(eCapture, hr);
+		WASAPINotificationClient::get().requestRecovery(WASAPINotificationClient::InputConsumer,
+			QStringLiteral("capture_stream_failed_0x%1").arg(static_cast< quint32 >(hr), 8, 16, QLatin1Char('0')),
+			750);
+	}
 	if (micpwfx && !exclusive)
 		CoTaskMemFree(micpwfx);
 	if (echopwfx)
@@ -981,7 +1341,7 @@ cleanup:
 }
 
 void WASAPIOutput::run() {
-	HRESULT hr;
+	HRESULT hr = S_OK;
 	IMMDevice *pDevice                = nullptr;
 	IAudioClient *pAudioClient        = nullptr;
 	IAudioRenderClient *pRenderClient = nullptr;
@@ -1012,7 +1372,9 @@ void WASAPIOutput::run() {
 	}
 
 	// Open the output device.
-	pDevice = openNamedOrDefaultDevice(Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings());
+	pDevice = openNamedOrDefaultDevice(Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings(),
+		Global::get().s.qsWASAPIOutputDeviceIdentity, Global::get().s.qsWASAPIOutputRoutingPolicy,
+		WASAPINotificationClient::OutputConsumer);
 	if (!pDevice)
 		goto cleanup;
 
@@ -1110,8 +1472,8 @@ void WASAPIOutput::run() {
 			CoTaskMemFree(closestFormat);
 		}
 
-		hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, bufferDuration, 0,
-									  pwfx, nullptr);
+		hr = initializeSharedAudioClient(pAudioClient, pwfx, bufferDuration, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+									 "WASAPIOutput");
 		if (FAILED(hr)) {
 			qWarning("WASAPIOutput: Initialize failed: hr=0x%08lx", hr);
 			goto cleanup;
@@ -1136,7 +1498,7 @@ void WASAPIOutput::run() {
 		goto cleanup;
 	}
 
-	pAudioClient->SetEventHandle(hEvent);
+	hr = pAudioClient->SetEventHandle(hEvent);
 	if (FAILED(hr)) {
 		qWarning("WASAPIOutput: Failed to set event: hr=0x%08lx", hr);
 		goto cleanup;
@@ -1147,6 +1509,7 @@ void WASAPIOutput::run() {
 		qWarning("WASAPIOutput: Failed to start: hr=0x%08lx", hr);
 		goto cleanup;
 	}
+	WASAPINotificationClient::get().markConsumersHealthy(WASAPINotificationClient::OutputConsumer);
 
 	if (pwfxe) {
 		for (int i = 0; i < 32; i++) {
@@ -1231,6 +1594,12 @@ void WASAPIOutput::run() {
 	}
 
 cleanup:
+	if (FAILED(hr) && bRunning) {
+		publishStreamFailure(eRender, hr);
+		WASAPINotificationClient::get().requestRecovery(WASAPINotificationClient::OutputConsumer,
+			QStringLiteral("render_stream_failed_0x%1").arg(static_cast< quint32 >(hr), 8, 16, QLatin1Char('0')),
+			750);
+	}
 	if (pwfx)
 		CoTaskMemFree(pwfx);
 

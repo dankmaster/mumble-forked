@@ -6,6 +6,7 @@ ComboBox {
 	id: control
 	property bool invalid: false
 	property bool dense: false
+	property string toolTipText: ""
 	function optionAt(index) {
 		if (index < 0 || !control.model)
 			return ({})
@@ -23,6 +24,10 @@ ComboBox {
 	leftPadding: Theme.space3
 	rightPadding: indicator.width + Theme.space3
 	font.pixelSize: Theme.fontBody
+	ToolTip.visible: hovered && !popup.visible && toolTipText.length > 0
+	ToolTip.text: toolTipText
+	ToolTip.delay: 500
+	ToolTip.timeout: 15000
 
 	delegate: ItemDelegate {
 		required property int index
@@ -37,6 +42,8 @@ ComboBox {
 		Accessible.description: optionDescription
 		ToolTip.visible: hovered && optionDescription.length > 0
 		ToolTip.text: optionDescription
+		ToolTip.delay: 350
+		ToolTip.timeout: 15000
 		contentItem: Text {
 			text: control.textAt(index)
 			color: !parent.enabled ? Theme.textMuted
@@ -51,12 +58,12 @@ ComboBox {
 		}
 	}
 
-	indicator: Text {
+	indicator: ModernIcon {
 		x: control.width - width - Theme.space3
 		y: Math.round((control.height - height) / 2)
-		text: "⌄"
+		name: "chevron-down"
+		size: 14
 		color: control.enabled ? Theme.textMain : Theme.textMuted
-		font.pixelSize: 16
 	}
 
 	contentItem: Text {

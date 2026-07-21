@@ -1303,6 +1303,8 @@ if(wasapi)
 		PRIVATE
 			"WASAPI.cpp"
 			"WASAPI.h"
+			"WASAPIDeviceRouting.cpp"
+			"WASAPIDeviceRouting.h"
 			"WASAPINotificationClient.cpp"
 			"WASAPINotificationClient.h"
 	)

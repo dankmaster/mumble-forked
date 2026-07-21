@@ -11,8 +11,11 @@ ApplicationWindow {
 	required property var attachment
 	signal saveRequested(var attachment)
 	signal refreshRequested(var attachment)
+	signal originalRetryRequested(var attachment)
 	property string lastRefreshSource: ""
 	property bool retryingSource: false
+	property bool originalTimedOut: false
+	property int originalLoadTimeout: 15000
 	property real zoom: 1.0
 	property real panX: 0
 	property real panY: 0
@@ -30,8 +33,10 @@ ApplicationWindow {
 	readonly property bool loadFailed: loadStatus === Image.Error || renderSource.length === 0
 	readonly property bool compactLayout: width < 560 || height < 440
 	readonly property string originalState: safeText(attachment ? attachment.originalState : "", 32).toLowerCase()
-	readonly property bool originalLoading: originalState === "loading" && fullSource.length === 0
-	readonly property bool originalFailed: originalState === "error" && fullSource.length === 0
+	readonly property bool originalPending: originalState === "loading" && fullSource.length === 0
+	readonly property bool originalLoading: originalPending && !originalTimedOut
+	readonly property bool originalFailed: (originalState === "error" || originalTimedOut)
+		&& fullSource.length === 0
 	readonly property bool canSaveOriginal: attachment && (safeText(attachment.inlineToken, 128).length > 0
 		|| safeText(attachment.assetId !== undefined ? attachment.assetId : attachment.assetID, 128).length > 0)
 
@@ -119,6 +124,11 @@ ApplicationWindow {
 		}
 	}
 
+	function retryOriginal() {
+		originalTimedOut = false
+		originalRetryRequested(attachment)
+	}
+
 	function declaredImageSize() {
 		const width = Math.max(0, Number(attachment ? attachment.width : 0))
 		const height = Math.max(0, Number(attachment ? attachment.height : 0))
@@ -172,6 +182,8 @@ ApplicationWindow {
 	}
 
 	onLoadFailedChanged: focusRetryIfFailed()
+	onOriginalStateChanged: if (originalState !== "loading") originalTimedOut = false
+	onFullSourceChanged: if (fullSource.length > 0) originalTimedOut = false
 	onVisibleChanged: focusRetryIfFailed()
 	onActiveChanged: if (active) focusRetryIfFailed()
 	onWidthChanged: Qt.callLater(clampPan)
@@ -197,6 +209,14 @@ ApplicationWindow {
 	Shortcut {
 		sequence: "Escape"
 		onActivated: viewer.close()
+	}
+
+	Timer {
+		id: originalLoadTimer
+		interval: Math.max(100, viewer.originalLoadTimeout)
+		running: viewer.originalPending && !viewer.originalTimedOut
+		repeat: false
+		onTriggered: viewer.originalTimedOut = true
 	}
 
     Rectangle {
@@ -401,19 +421,44 @@ ApplicationWindow {
 				anchors.topMargin: Theme.space3
 				z: 5
 				visible: viewer.originalLoading || viewer.originalFailed
-				width: originalStatusLabel.implicitWidth + Theme.space3 * 2
+				width: originalStatusContent.implicitWidth + Theme.space3 * 2
 				height: Theme.controlHeight
 				radius: height / 2
 				color: Theme.panel
 				border.color: viewer.originalFailed ? Theme.warning : Theme.surfaceBorder
-				Label {
-					id: originalStatusLabel
+				Row {
+					id: originalStatusContent
 					anchors.centerIn: parent
-					textFormat: Text.PlainText
-					text: viewer.originalLoading ? qsTr("Loading original image…")
-						: qsTr("Showing preview · original unavailable")
-					color: viewer.originalFailed ? Theme.warning : Theme.textMuted
-					font.pixelSize: Theme.fontCaption
+					spacing: Theme.space2
+					ModernBusyIndicator {
+						width: 16
+						height: 16
+						anchors.verticalCenter: parent.verticalCenter
+						running: viewer.originalLoading
+						visible: running
+					}
+					Label {
+						id: originalStatusLabel
+						objectName: "attachmentViewerOriginalStatusLabel"
+						anchors.verticalCenter: parent.verticalCenter
+						textFormat: Text.PlainText
+						text: viewer.originalLoading ? qsTr("Loading full resolution…")
+							: viewer.originalTimedOut ? qsTr("Preview shown · full resolution delayed")
+							: qsTr("Preview shown · full resolution unavailable")
+						color: viewer.originalFailed ? Theme.warning : Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+					}
+					ModernButton {
+						id: originalRetryButton
+						objectName: "attachmentViewerOriginalRetryButton"
+						anchors.verticalCenter: parent.verticalCenter
+						visible: viewer.originalFailed
+						dense: true
+						tone: "retry"
+						text: qsTr("Retry")
+						Accessible.name: qsTr("Retry loading the full-resolution image")
+						onClicked: viewer.retryOriginal()
+					}
 				}
 			}
 
@@ -438,7 +483,7 @@ ApplicationWindow {
 					spacing: Theme.space1
 					ModernIconButton {
 						objectName: "attachmentViewerZoomOut"
-						text: "−"
+						iconName: "minimize"
 						enabled: viewer.zoom > 0.251
 						Accessible.name: qsTr("Zoom out")
 						onClicked: viewer.zoomBy(1 / 1.2)
@@ -459,7 +504,7 @@ ApplicationWindow {
 					}
 					ModernIconButton {
 						objectName: "attachmentViewerZoomIn"
-						text: "+"
+						iconName: "add"
 						enabled: viewer.zoom < 11.999
 						Accessible.name: qsTr("Zoom in")
 						onClicked: viewer.zoomBy(1.2)

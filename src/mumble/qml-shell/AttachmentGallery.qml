@@ -175,16 +175,19 @@ Item {
 					|| String(attachmentTile.index)
                 readonly property real requestedWidth: Number(modelData.width) > 0 ? Number(modelData.width) : 240
                 readonly property real requestedHeight: Number(modelData.height) > 0 ? Number(modelData.height) : 160
-                readonly property real aspectRatio: Math.max(0.2, Math.min(5,
-                    requestedHeight / Math.max(1, requestedWidth)))
+				readonly property real aspectRatio: Math.max(0.2, Math.min(5,
+					requestedHeight / Math.max(1, requestedWidth)))
+				readonly property real maximumPreviewWidth: Math.min(root.compactLayout ? 360 : 400,
+					Math.max(1, gallery.width))
 
 				objectName: "attachment_" + stableId
 				width: imageAttachment
 					? Math.max(1, Math.min(Math.max(requestedWidth, 180),
-						Math.min(440, Math.max(1, gallery.width))))
+						maximumPreviewWidth))
 					: Math.max(1, Math.min(360, Math.max(1, gallery.width)))
 				height: imageAttachment
-					? Math.min(320, Math.max(root.compactLayout ? 108 : 132,
+					? Math.min(root.compactLayout ? 200 : 240,
+						Math.max(root.compactLayout ? 108 : 128,
 						Math.round(width * aspectRatio)))
 					: 82
 				radius: Theme.innerRadius
@@ -199,7 +202,7 @@ Item {
                     id: attachmentImage
 					objectName: "attachmentImage_" + attachmentTile.stableId
                     anchors.fill: parent
-					anchors.margins: attachmentTile.border.width
+					anchors.margins: attachmentTile.border.width + Theme.space1
 					visible: attachmentTile.imageAttachment
 				source: root.resourceActive && attachmentTile.imageAttachment
 						? root.safeRenderImageSource(attachmentTile.sourceUrl) : ""
@@ -207,7 +210,9 @@ Item {
                     cache: false
 					sourceSize: Qt.size(Math.min(1024, width * Screen.devicePixelRatio),
 										Math.min(768, height * Screen.devicePixelRatio))
-                    fillMode: Image.PreserveAspectFit
+					fillMode: Image.PreserveAspectFit
+					smooth: true
+					mipmap: true
                     onStatusChanged: if (status === Image.Error && source.toString().length > 0)
                                          root.attachmentRefreshRequested()
                 }

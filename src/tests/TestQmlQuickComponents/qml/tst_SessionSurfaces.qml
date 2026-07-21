@@ -32,6 +32,13 @@ TestCase {
 			{ "text": " to the test server. " },
 			{ "text": "Open", "href": "https://example.com/welcome" }
 		]
+		property var motdBlocks: [{
+			"kind": "paragraph",
+			"segments": motdSegments,
+			"plainText": "Welcome to the test server. Open",
+			"alignment": "left",
+			"indent": 0
+		}]
         property string motdSummary: "Welcome to the test server."
         property string motdSignature: "v1:42:abcd"
         property var motdActions: [
@@ -138,8 +145,7 @@ TestCase {
         session.motdExpanded = false
         session.motdDismissed = false
         session.motdChanged = true
-		motdLoader.item.hiddenForHistory = false
-		motdLoader.item.maximumImageHeight = 68
+		motdLoader.item.maximumImageHeight = 180
 		connectionLoader.item.showDisconnectedAction = true
 		connectionLoader.item.animationsEnabled = true
 		connectionLoader.item.height = connectionLoader.height
@@ -148,6 +154,13 @@ TestCase {
 			{ "text": " to the test server. " },
 			{ "text": "Open", "href": "https://example.com/welcome" }
 		]
+		session.motdBlocks = [{
+			"kind": "paragraph",
+			"segments": session.motdSegments,
+			"plainText": "Welcome to the test server. Open",
+			"alignment": "left",
+			"indent": 0
+		}]
 		session.motdSummary = "Welcome to the test server."
         session.motdActions = [
             { "id": "motd.show", "label": "Expand", "enabled": true,
@@ -347,18 +360,16 @@ TestCase {
 		compare(motdActionSpy.count, 0)
     }
 
-	function test_motd_history_policy_hides_without_dismissing() {
+	function test_motd_visibility_is_owned_only_by_server_content_and_dismissal() {
 		const panel = motdLoader.item
-		panel.hiddenForHistory = true
 		verify(panel.hasContent)
 		verify(!panel.dismissed)
-		verify(!panel.surfaceVisible)
-		verify(!panel.contentVisible)
-		compare(panel.implicitHeight, 0)
-
-		panel.hiddenForHistory = false
 		verify(panel.surfaceVisible)
 		verify(panel.contentVisible)
+		session.motdDismissed = true
+		verify(!panel.surfaceVisible)
+		session.motdDismissed = false
+		verify(panel.surfaceVisible)
 	}
 
     function test_motd_probe_rejects_unknown_action() {
@@ -395,11 +406,36 @@ TestCase {
 		const collapse = findChild(motdLoader.item, "motdAction_motd.hide")
 		verify(collapse !== null)
 		compare(collapse.iconName, "chevron-up")
-		const text = findChild(motdLoader.item, "richMessageBodyText")
-		verify(text !== null)
-		verify(text.text.indexOf("Welcome") >= 0)
-		verify(text.text.indexOf("<img") < 0)
-		verify(text.text.indexOf("https://example.com/welcome") >= 0)
+		const documentColumn = findChild(motdLoader.item, "motdDocumentColumn")
+		verify(documentColumn !== null)
+		const documentBlock = findChild(documentColumn, "motdBlockBody")
+		verify(documentBlock !== null)
+		verify(documentBlock.plainText.indexOf("Welcome") >= 0)
+		verify(documentBlock.renderedHtml.indexOf("<img") < 0)
+		verify(documentBlock.renderedHtml.indexOf("https://example.com/welcome") >= 0)
+	}
+
+	function test_motd_semantic_document_exposes_heading_and_list_structure() {
+		session.motdBlocks = [
+			{ "kind": "heading", "headingLevel": 2,
+			  "segments": [{ "text": "Welcome aboard", "bold": true }],
+			  "plainText": "Welcome aboard", "alignment": "left" },
+			{ "kind": "list-item", "marker": "\u2022",
+			  "segments": [{ "text": "Choose a room" }],
+			  "plainText": "Choose a room", "alignment": "left" }
+		]
+		session.motdExpanded = true
+		const panel = motdLoader.item
+		const documentColumn = findChild(panel, "motdDocumentColumn")
+		verify(documentColumn !== null)
+		const headingBlock = findChild(documentColumn, "motdDocumentBlock_heading")
+		verify(headingBlock !== null)
+		compare(headingBlock.Accessible.role, Accessible.Heading)
+		compare(headingBlock.Accessible.name, "Welcome aboard")
+		const marker = findChild(documentColumn, "motdListMarker")
+		verify(marker !== null)
+		verify(marker.visible)
+		compare(marker.text, "\u2022")
 	}
 
 	function test_motd_expanded_body_renders_managed_inline_images() {
@@ -409,31 +445,41 @@ TestCase {
 			  "width": 640, "height": 360, "alt": "Server welcome art" },
 			{ "text": "Details below the image." }
 		]
+		session.motdBlocks = [
+			{ "kind": "paragraph", "segments": [{ "text": "Welcome above the image." }],
+			  "plainText": "Welcome above the image.", "alignment": "left" },
+			{ "kind": "image", "segments": [{ "kind": "image",
+			  "source": "image://mumble/motd-inline?g=1", "width": 640, "height": 360,
+			  "alt": "Server welcome art" }], "plainText": "Server welcome art",
+			  "alignment": "center" },
+			{ "kind": "paragraph", "segments": [{ "text": "Details below the image." }],
+			  "plainText": "Details below the image.", "alignment": "left" }
+		]
 		session.motdExpanded = true
 		const panel = motdLoader.item
 		const richBody = findChild(panel, "motdStructuredBody")
 		verify(richBody !== null, "MOTD rich body was not created")
 		tryCompare(richBody, "hasImages", true)
+		tryCompare(richBody, "heroLayout", true)
+		const hero = findChild(panel, "motdHeroLayout")
+		verify(hero !== null)
+		verify(hero.visible)
 		const structured = findChild(panel, "richMessageStructuredBody")
 		verify(structured !== null)
-		const image = findChild(panel, "richMessageInlineImage_1")
-		const card = findChild(panel, "richMessageImageCard_1")
+		const image = findChild(panel, "richMessageInlineImage_0")
+		const card = findChild(panel, "richMessageImageCard_0")
 		verify(image !== null, "managed MOTD image was not created")
 		verify(card !== null, "managed MOTD image card was not created")
 		compare(image.source.toString(), "image://mumble/motd-inline?g=1")
 		compare(image.Accessible.ignored, true)
 		compare(card.Accessible.role, Accessible.Graphic)
 		compare(card.Accessible.name, "Server welcome art")
-		compare(richBody.maximumImageWidth, 560)
-		compare(richBody.maximumImageHeight, 68)
-		compare(richBody.imageBorderWidth, 0)
-		compare(richBody.imageSurfaceColor, panel.color)
-		compare(richBody.textHorizontalAlignment, Text.AlignLeft)
+		compare(richBody.maximumImageWidth, 640)
+		compare(richBody.maximumImageHeight, 180)
 		tryVerify(function() {
-			return structured.width > 600 && card.width < structured.width - Theme.space4
+			return structured.width >= 100 && card.width <= 180
 		})
-		verify(card.width < structured.width - Theme.space4)
-		verify(card.implicitHeight <= 68 + Theme.space1 * 2 + 0.5)
+		verify(card.implicitHeight <= 140 + Theme.space2 * 2 + 0.5)
 		const heading = findChild(panel, "motdHeading")
 		verify(heading !== null)
 		const headingOrigin = heading.mapToItem(panel, 0, 0)
@@ -441,9 +487,9 @@ TestCase {
 			"expanded MOTD heading should follow the information badge")
 		verify(headingOrigin.x <= 10 + 24 + Theme.space2 + 1,
 			"expanded MOTD heading should stay aligned to the production header grid")
-		const textBelowImage = findChild(panel, "richMessageTextBlock_2")
-		verify(textBelowImage !== null)
-		compare(textBelowImage.horizontalAlignment, Text.AlignLeft)
+		const heroText = findChild(panel, "motdHeroText")
+		verify(heroText !== null)
+		compare(heroText.children.length >= 2, true)
 		const actions = findChild(panel, "motdActionFlow")
 		verify(actions !== null)
 		const actionOrigin = actions.mapToItem(panel, 0, 0)

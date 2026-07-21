@@ -33,16 +33,28 @@ TestCase {
 		loader.item.highlighted = false;
 		loader.item.checked = false;
 		loader.item.enabled = true;
-        loader.item.forceActiveFocus();
+		loader.item.forceActiveFocus(Qt.TabFocusReason);
         tryCompare(loader.item, "activeFocus", true);
     }
 
     function test_focus_keyboard_and_accessibility() {
+		compare(loader.item.visualFocus, true);
         compare(loader.item.Accessible.role, Accessible.Button);
         compare(loader.item.Accessible.name, "Continue");
         keyClick(Qt.Key_Space);
         compare(clickedSpy.count, 1);
     }
+
+	function test_pointer_activation_does_not_leave_a_focus_ring() {
+		testCase.forceActiveFocus(Qt.OtherFocusReason);
+		mouseClick(loader.item);
+		// Some Qt Quick styles do not assign mouse focus to text buttons by default.
+		// Exercise the mouse-focus visual contract explicitly in either case.
+		loader.item.forceActiveFocus(Qt.MouseFocusReason);
+		tryCompare(loader.item, "activeFocus", true);
+		compare(loader.item.visualFocus, false);
+		compare(loader.item.background.border.width, 1);
+	}
 
 	function test_return_and_keypad_enter_activate_once() {
 		keyClick(Qt.Key_Return)

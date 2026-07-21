@@ -7,7 +7,9 @@
 #include "InputEnhancementSettings.h"
 #include "JSONSerialization.h"
 #include "Settings.h"
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+#	include "WASAPI.h"
+#	include "WASAPIDeviceRouting.h"
 #	include "WASAPINotificationClient.h"
 #endif
 
@@ -104,6 +106,10 @@ private slots:
 	void unmanagedBuildZeroNeuralBindingRemainsHashBound();
 	void manualProfileChangeArmsExactProbationAndRollsBack();
 	void wasapiDefaultDeviceRolesMatchExactly();
+	void wasapiSettingsRoundTrip();
+	void wasapiDeviceRoutingMatchesStableHardwareOnly();
+	void wasapiStableDeviceProfileSurvivesEndpointChurn();
+	void wasapiLatencyProfilesSelectValidEnginePeriods();
 	void abnormalExitRollsBackPendingValidation();
 	void abnormalExitWithoutExactLastKnownGoodUsesOriginal();
 	void abnormalExitRollbackIsDurablyPersisted();
@@ -111,7 +117,7 @@ private slots:
 };
 
 void TestInputEnhancementSettings::wasapiDefaultDeviceRolesMatchExactly() {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
 	QVERIFY(WASAPINotificationClient::defaultDeviceNotificationMatches(
 		eCapture, eConsole, eCapture, eConsole));
 	QVERIFY(WASAPINotificationClient::defaultDeviceNotificationMatches(
@@ -150,6 +156,110 @@ void TestInputEnhancementSettings::wasapiDefaultDeviceRolesMatchExactly() {
 	QVERIFY(gate.requestRestart());
 #else
 	QSKIP("WASAPI role matching is Windows-only");
+#endif
+}
+
+void TestInputEnhancementSettings::wasapiSettingsRoundTrip() {
+	::Settings original;
+	original.qsWASAPIInputDeviceIdentity  = QStringLiteral("{\"input\":true}");
+	original.qsWASAPIOutputDeviceIdentity = QStringLiteral("{\"output\":true}");
+	original.qsWASAPIInputRoutingPolicy   = QStringLiteral("strict");
+	original.qsWASAPIOutputRoutingPolicy  = QStringLiteral("follow");
+	original.qsWASAPILatencyProfile       = QStringLiteral("low");
+
+	const nlohmann::json persisted = original;
+	const ::Settings restored      = persisted.get< ::Settings >();
+	QCOMPARE(restored.qsWASAPIInputDeviceIdentity, original.qsWASAPIInputDeviceIdentity);
+	QCOMPARE(restored.qsWASAPIOutputDeviceIdentity, original.qsWASAPIOutputDeviceIdentity);
+	QCOMPARE(restored.qsWASAPIInputRoutingPolicy, original.qsWASAPIInputRoutingPolicy);
+	QCOMPARE(restored.qsWASAPIOutputRoutingPolicy, original.qsWASAPIOutputRoutingPolicy);
+	QCOMPARE(restored.qsWASAPILatencyProfile, original.qsWASAPILatencyProfile);
+}
+
+void TestInputEnhancementSettings::wasapiDeviceRoutingMatchesStableHardwareOnly() {
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	using namespace Mumble::WASAPI;
+	DeviceDescriptor preferred;
+	preferred.endpointId      = QStringLiteral("old-endpoint");
+	preferred.displayName     = QStringLiteral("Headset microphone");
+	preferred.parentInstanceId = QStringLiteral("USB\\VID_1234&PID_5678");
+	preferred.dataFlow        = static_cast< int >(eCapture);
+	preferred.formFactor      = 4;
+
+	const QString serialized = serializeDeviceDescriptor(preferred);
+	QVERIFY(!serialized.isEmpty());
+	QVERIFY(deserializeDeviceDescriptor(serialized) == preferred);
+
+	DeviceDescriptor rebound = preferred;
+	rebound.endpointId       = QStringLiteral("new-endpoint");
+	rebound.displayName      = QStringLiteral("Renamed headset microphone");
+	DeviceDescriptor unrelated = preferred;
+	unrelated.endpointId       = QStringLiteral("other-endpoint");
+	unrelated.parentInstanceId = QStringLiteral("USB\\VID_ABCD&PID_EF01");
+
+	QCOMPARE(stableHardwareId(rebound), stableHardwareId(preferred));
+	QCOMPARE(routingPolicyFromName(QStringLiteral("strict"), true), RoutingPolicy::StrictSelected);
+	QCOMPARE(routingPolicyFromName(QStringLiteral("prefer"), false), RoutingPolicy::FollowDefault);
+	const MatchResult match = findUniqueBestDeviceMatch(preferred, { unrelated, rebound });
+	QVERIFY(match.matched());
+	QCOMPARE(match.index, 1);
+
+	DeviceDescriptor duplicate = rebound;
+	duplicate.endpointId       = QStringLiteral("duplicate-endpoint");
+	const MatchResult ambiguous = findUniqueBestDeviceMatch(preferred, { rebound, duplicate });
+	QVERIFY(!ambiguous.matched());
+	QVERIFY(ambiguous.ambiguous);
+
+	DeviceDescriptor nameOnly = preferred;
+	nameOnly.endpointId.clear();
+	nameOnly.parentInstanceId.clear();
+	nameOnly.containerId.clear();
+	nameOnly.adapterName.clear();
+	nameOnly.association.clear();
+	QCOMPARE(deviceMatchScore(preferred, nameOnly), 0);
+#else
+	QSKIP("WASAPI routing is Windows-only");
+#endif
+}
+
+void TestInputEnhancementSettings::wasapiStableDeviceProfileSurvivesEndpointChurn() {
+	using namespace Mumble::InputEnhancement;
+	DeviceIdentity original;
+	original.backendId       = QStringLiteral("WASAPI");
+	original.physicalId      = QStringLiteral("old-endpoint");
+	original.stableHardwareId = QStringLiteral("wasapi-hw:headset");
+	original.stable          = true;
+
+	DeviceProfileState state;
+	state.identity   = original;
+	state.preference = preference(Profile::Balanced, 64, 43);
+	Mumble::InputEnhancement::Settings settings;
+	QVERIFY(upsertDeviceProfile(settings, state));
+
+	DeviceIdentity rebound = original;
+	rebound.physicalId     = QStringLiteral("new-endpoint");
+	rebound.displayName    = QStringLiteral("Renamed headset microphone");
+	const DeviceProfileState *matched = findDeviceProfile(settings, rebound);
+	QVERIFY(matched);
+	QCOMPARE(matched->preference, state.preference);
+	QCOMPARE(stableDeviceKey(original), stableDeviceKey(rebound));
+
+	Mumble::InputEnhancement::Settings legacy;
+	state.identity.stableHardwareId.clear();
+	QVERIFY(upsertDeviceProfile(legacy, state));
+	QVERIFY(markDeviceProfileUsed(legacy, original, 1234));
+	QCOMPARE(legacy.deviceProfiles.constFirst().identity.stableHardwareId, original.stableHardwareId);
+}
+
+void TestInputEnhancementSettings::wasapiLatencyProfilesSelectValidEnginePeriods() {
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	using namespace Mumble::WASAPI;
+	QCOMPARE(WASAPISystem::selectSharedModePeriod(LatencyProfile::Stable, 480, 48, 96, 960), 0U);
+	QCOMPARE(WASAPISystem::selectSharedModePeriod(LatencyProfile::Balanced, 500, 48, 96, 960), 528U);
+	QCOMPARE(WASAPISystem::selectSharedModePeriod(LatencyProfile::Low, 480, 48, 96, 960), 96U);
+	QCOMPARE(WASAPISystem::selectSharedModePeriod(LatencyProfile::Low, 480, 0, 96, 960), 0U);
+#else
+	QSKIP("WASAPI latency profiles are Windows-only");
 #endif
 }
 

@@ -56,9 +56,9 @@ ToolButton {
 				? Theme.withAlpha(Theme.mediaOverlayTextStrong, 0.12) : Theme.surfaceHover)
 			: "transparent"
 		border.color: !control.enabled ? (control.overlay ? "transparent" : Theme.divider)
-			: control.activeFocus ? Theme.focus
+			: control.visualFocus ? Theme.focus
 			: control.selected ? control.toneColor : "transparent"
-		border.width: control.activeFocus ? Theme.focusRingWidth : 1
+		border.width: control.visualFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
 		Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
 	}

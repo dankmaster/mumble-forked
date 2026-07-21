@@ -46,6 +46,8 @@ bool runtimeAutoAdaptationEnabled(const DefaultPreference &preference) noexcept;
 struct DeviceIdentity {
 	QString backendId;
 	QString physicalId;
+	/// Optional backend-provided identity that survives endpoint-id churn.
+	QString stableHardwareId;
 	QString displayName;
 	bool followsSystemDefault = false;
 	bool stable               = true;

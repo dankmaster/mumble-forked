@@ -123,6 +123,13 @@ ApplicationWindow {
 	readonly property var settingsActionEntry: resolvedSettingsAction()
 	readonly property bool settingsActionEnabled: settingsActionEntry.enabled === undefined
 		|| !!settingsActionEntry.enabled
+	readonly property var stonksTickerState: clientSession.stonks || ({})
+	readonly property bool stonksShortcutEnabled: !!clientSession.connected
+		&& stonksTickerState.supported === true
+	readonly property bool stonksTickerEnabled: stonksTickerState.tickerBannerEnabled === true
+	readonly property string stonksTickerPlacement: String(stonksTickerState.tickerPlacement || "bottom")
+	readonly property string stonksTickerDirection: String(stonksTickerState.tickerDirection || "left")
+	readonly property string stonksTickerSpeed: String(stonksTickerState.tickerSpeed || "normal")
 	property string contextScopeToken: ""
 	property string contextScopeKind: ""
 	property var contextScopeActions: []
@@ -133,6 +140,8 @@ ApplicationWindow {
 	property string contextParticipantScopeToken: ""
 	property bool conversationSearchOpen: false
 	property string quickReactionMessageId: ""
+	property var quickReactionAnchorItem: null
+	property var quickReactionActiveReactions: []
 	property string automationMenuVariant: ""
 	property var automationMenuSurface: null
 	property var automationMenuFocusItem: null
@@ -156,7 +165,6 @@ ApplicationWindow {
 	// so they can exercise loading/playback/error chrome without creating a
 	// Chromium renderer or touching the network.
 	property string visualMediaFixtureMode: ""
-	property bool motdHistoryOverride: false
 	property string motdSeenRequestSignature: ""
 	property url mediaSessionWindowComponentUrl: Qt.resolvedUrl("MediaSessionWindow.qml")
 	property Item mediaWindowFailureFocusReturnItem: null
@@ -182,15 +190,13 @@ ApplicationWindow {
 	onMediaRuntimeReadyChanged: mediaSessionWindowLoader.syncRuntimePresentation()
 	onMediaRuntimePreparingChanged: mediaSessionWindowLoader.syncRuntimePresentation()
 	onMediaRuntimeErrorChanged: mediaSessionWindowLoader.syncRuntimePresentation()
-	readonly property bool motdHiddenForHistory: !!clientSession.hasMotd
-		&& !clientSession.motdDismissed && !!chatModel.hasUserHistory && !motdHistoryOverride
 	readonly property bool activeScopeHasScreenShare:
 		String((activeScope.screenShare || {}).streamId || "").length > 0
 
 	function maybeMarkMotdSeen() {
 		const signature = String(clientSession.motdSignature || "").trim()
 		if (root.visualFixtureOverrideActive || !clientSession.hasMotd
-				|| clientSession.motdDismissed || root.motdHiddenForHistory
+				|| clientSession.motdDismissed
 				|| clientSession.motdChanged || signature.length === 0
 				|| String(clientSession.motdLastSeenSignature || "").length > 0
 				|| String(clientSession.motdDismissedSignature || "").length > 0
@@ -202,7 +208,7 @@ ApplicationWindow {
 			if (root.motdSeenRequestSignature !== signature
 					|| String(clientSession.motdSignature || "").trim() !== signature
 					|| !clientSession.hasMotd || clientSession.motdDismissed
-					|| root.motdHiddenForHistory || clientSession.motdChanged)
+					|| clientSession.motdChanged)
 				return
 			uiCommands.invokeAppAction("motd.markSeen", { "signature": signature })
 		})
@@ -317,18 +323,12 @@ ApplicationWindow {
 
 	function handleMotdAction(actionId, payload) {
 		const normalized = String(actionId || "").trim()
-		if (normalized === "motd.show" || normalized === "motd.hide"
-				|| normalized === "motd.restore")
-			root.motdHistoryOverride = true
 		uiCommands.invokeAppAction(normalized, payload || {})
 	}
 
 	Connections {
 		target: clientSession
 		function onMotdSignatureChanged() {
-			// A manual reveal only applies to the MOTD revision the user chose to
-			// open. New server content returns to the history-aware default.
-			root.motdHistoryOverride = false
 			if (root.motdSeenRequestSignature !== String(clientSession.motdSignature || ""))
 				root.motdSeenRequestSignature = ""
 			Qt.callLater(function() { root.maybeMarkMotdSeen() })
@@ -344,13 +344,11 @@ ApplicationWindow {
 
 	Connections {
 		target: chatModel
-		function onHasUserHistoryChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
 		function onDataChanged() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 		function onModelReset() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 		function onRowsInserted() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 	}
 
-	onMotdHiddenForHistoryChanged: Qt.callLater(function() { root.maybeMarkMotdSeen() })
 	Component.onCompleted: Qt.callLater(function() { root.maybeMarkMotdSeen() })
 
 	function messageStartsGroup(row, source, title) {
@@ -497,8 +495,10 @@ ApplicationWindow {
 		const assetId = String(rawAssetId === undefined || rawAssetId === null ? "" : rawAssetId).trim()
 		const inlineToken = String(attachment.inlineToken || "").trim()
 		const messageId = String(hydrationMessageId || attachment.hydrationMessageId || "").trim()
+		const reportedOriginalState = String(attachment.originalState || "").trim().toLowerCase()
 		const requestOriginal = (assetId.length > 0 || inlineToken.length > 0)
 			&& messageId.length > 0 && fullSource.length === 0
+			&& reportedOriginalState !== "error"
 		attachmentViewerPayload = {
 			"id": attachment.id,
 			"url": fullSource,
@@ -526,6 +526,31 @@ ApplicationWindow {
 			else
 				uiCommands.requestChatInlineImage(inlineToken, messageId)
 		}
+		return true
+	}
+
+	function retryAttachmentOriginal(attachment) {
+		if (!attachment)
+			return false
+		let rawAssetId = attachment.assetId
+		if (rawAssetId === undefined || rawAssetId === null || String(rawAssetId).length === 0)
+			rawAssetId = attachment.assetID
+		const assetId = String(rawAssetId === undefined || rawAssetId === null ? "" : rawAssetId).trim()
+		const inlineToken = String(attachment.inlineToken || "").trim()
+		const messageId = String(attachment.hydrationMessageId || "").trim()
+		if (messageId.length === 0 || (assetId.length === 0 && inlineToken.length === 0))
+			return false
+
+		const nextPayload = ({})
+		for (const key in attachment)
+			nextPayload[key] = attachment[key]
+		nextPayload.originalState = "loading"
+		nextPayload.originalError = ""
+		attachmentViewerPayload = nextPayload
+		if (assetId.length > 0)
+			uiCommands.requestChatAttachmentImage(assetId, messageId)
+		else
+			uiCommands.requestChatInlineImage(inlineToken, messageId)
 		return true
 	}
 
@@ -560,29 +585,59 @@ ApplicationWindow {
 		return false
 	}
 
-	function showQuickReactions(messageId, row) {
+	function resetQuickReactionState() {
+		quickReactionMessageId = ""
+		quickReactionAnchorItem = null
+		quickReactionActiveReactions = []
+	}
+
+	function closeQuickReactions() {
+		resetQuickReactionState()
+		if (globalQuickReactionPopup.opened)
+			globalQuickReactionPopup.close()
+	}
+
+	function positionQuickReactionPopup() {
+		const anchor = quickReactionAnchorItem
+		const overlay = globalQuickReactionPopup.parent
+		if (!anchor || !overlay)
+			return false
+		const point = anchor.mapToItem(overlay, 0, 0)
+		const margin = Theme.space2
+		const gap = Theme.space1
+		const desiredX = point.x + anchor.width - globalQuickReactionPopup.width
+		globalQuickReactionPopup.x = Math.max(margin,
+			Math.min(overlay.width - globalQuickReactionPopup.width - margin, desiredX))
+		const belowY = point.y + anchor.height + gap
+		const aboveY = point.y - globalQuickReactionPopup.height - gap
+		globalQuickReactionPopup.y = belowY + globalQuickReactionPopup.height + margin <= overlay.height
+			? belowY : Math.max(margin, aboveY)
+		return true
+	}
+
+	function showQuickReactions(messageId, row, anchorItem, activeReactions) {
 		const stableId = String(messageId || "")
-		if (stableId.length === 0)
+		if (stableId.length === 0 || !anchorItem)
 			return
 		quickReactionMessageId = stableId
-		let targetRow = Number(row)
-		if (targetRow < 0)
-			targetRow = chatModel.rowForStableId(stableId)
-		if (targetRow < 0)
-			return
+		quickReactionAnchorItem = anchorItem
+		quickReactionActiveReactions = activeReactions || []
 		Qt.callLater(function() {
-			timeline.positionViewAtIndex(targetRow, ListView.End)
-			timeline.forceLayout()
+			if (root.quickReactionMessageId !== stableId || !root.positionQuickReactionPopup())
+				return
+			if (!globalQuickReactionPopup.opened)
+				globalQuickReactionPopup.open()
+			Qt.callLater(function() { root.positionQuickReactionPopup() })
 		})
 	}
 
-	function toggleQuickReactions(messageId, row) {
+	function toggleQuickReactions(messageId, row, anchorItem, activeReactions) {
 		const stableId = String(messageId || "")
 		if (quickReactionMessageId === stableId) {
-			quickReactionMessageId = ""
+			closeQuickReactions()
 			return
 		}
-		showQuickReactions(stableId, row)
+		showQuickReactions(stableId, row, anchorItem, activeReactions)
 	}
 
 	function isImageAttachment(attachment) {
@@ -796,43 +851,6 @@ ApplicationWindow {
 		return null
 	}
 
-	function menuItemsWithoutAction(items, actionId) {
-		const output = []
-		const source = items || []
-		for (let index = 0; index < source.length; ++index) {
-			const entry = source[index] || ({})
-			if (String(entry.id || "") === actionId)
-				continue
-			let filtered = entry
-			if (entry.items) {
-				filtered = Object.assign({}, filtered, {
-					"items": menuItemsWithoutAction(entry.items, actionId)
-				})
-			}
-			if (entry.submenu && entry.submenu.items) {
-				filtered = Object.assign({}, filtered, {
-					"submenu": Object.assign({}, entry.submenu, {
-						"items": menuItemsWithoutAction(entry.submenu.items, actionId)
-					})
-				})
-			}
-			output.push(filtered)
-		}
-		return output
-	}
-
-	function menuGroupsWithoutAction(groups, actionId) {
-		const output = []
-		const source = groups || []
-		for (let index = 0; index < source.length; ++index) {
-			const group = source[index] || ({})
-			output.push(Object.assign({}, group, {
-				"items": menuItemsWithoutAction(group.items, actionId)
-			}))
-		}
-		return output
-	}
-
 	function resolvedSettingsAction() {
 		const fromApplicationMenu = menuActionInGroups(clientSession.appMenus || [],
 			"configure.settings")
@@ -846,45 +864,41 @@ ApplicationWindow {
 		})
 	}
 
-	function promotedSettingsAction() {
-		return Object.assign({}, root.settingsActionEntry, {
-			"kind": "action",
-			"id": "configure.settings",
-			"label": qsTr("Settings"),
-			"hint": qsTr("Audio, appearance, notifications, plugins, and more"),
-			"icon": "settings"
-		})
-	}
-
 	function applicationMenuGroups() {
-		let groups = (clientSession.appMenus || []).slice()
-		if (activeScope.canMarkRead && Number(activeScope.unreadCount || 0) > 0) {
+		const source = clientSession.appMenus || []
+		const groups = []
+		let helpGroup = null
+		for (let index = 0; index < source.length; ++index) {
+			const group = source[index] || ({})
+			const groupId = String(group.id || "")
+			// The server identity card owns this menu. App preferences have one
+			// discoverable home in the footer Settings button, while identity lives
+			// under the self card and conversation actions live in the room header.
+			if (groupId === "configure")
+				continue
+			if (groupId === "help") {
+				helpGroup = group
+				continue
+			}
+			if (groupId === "server") {
+				// Server actions are the primary content, so render them directly instead
+				// of making the user open a redundant Server submenu first.
+				groups.push(Object.assign({}, group, { "label": "" }))
+			} else {
+				groups.push(group)
+			}
+		}
+		const audioStats = menuActionById(
+			((clientSession.selfMenu || ({})).actions || []), "self.audioStats")
+		if (audioStats) {
 			groups.push({
-				"id": "active-conversation",
-				"label": qsTr("Conversation"),
-				"items": [{
-					"kind": "action", "id": "activeScope.markRead",
-					"label": qsTr("Mark read"), "enabled": true
-				}]
+				"id": "diagnostics", "label": qsTr("Diagnostics"), "icon": "activity",
+				"items": [ audioStats ]
 			})
 		}
-		groups = menuGroupsWithoutAction(groups, "configure.settings")
-		groups = groups.map(function(group) {
-			if (String((group || ({})).id || "") !== "configure")
-				return group
-			// Once Settings is promoted, this group contains certificate/avatar
-			// identity actions. Do not leave a second, ambiguous Configure route.
-			return Object.assign({}, group, {
-				"label": qsTr("Identity"), "icon": "certificate"
-			})
-		})
-		// An empty group label is intentionally rendered inline by SemanticMenu.
-		// Settings is therefore the first actionable row instead of being buried
-		// one level below the legacy-named Configure group.
-		return [{
-			"id": "primary-settings", "label": "",
-			"items": [ promotedSettingsAction() ]
-		}].concat(groups)
+		if (helpGroup)
+			groups.push(helpGroup)
+		return groups
 	}
 
 	function requestSettings() {
@@ -903,9 +917,16 @@ ApplicationWindow {
 		const state = clientSession.selfMenu || ({})
 		const groups = []
 		const presence = state.presence || []
-		// The footer has a dedicated Settings control. Keep all profile, voice and
-		// identity actions here, but do not repeat the same Settings row in this menu.
-		const actions = menuItemsWithoutAction(state.actions || [], "configure.settings")
+		const actions = []
+		const profileActionIds = [
+			"self.comment", "self.avatarChange", "self.avatarRemove",
+			"self.register", "configure.certificate"
+		]
+		for (let index = 0; index < profileActionIds.length; ++index) {
+			const action = menuActionById(state.actions || [], profileActionIds[index])
+			if (action)
+				actions.push(action)
+		}
 		if (presence.length > 0) {
 			groups.push({
 				"id": "presence",
@@ -917,7 +938,7 @@ ApplicationWindow {
 		if (actions.length > 0) {
 			groups.push({
 				"id": "profile-actions",
-				"label": qsTr("Account and app"),
+				"label": qsTr("Profile"),
 				"icon": "user",
 				"items": actions
 			})
@@ -1083,13 +1104,27 @@ ApplicationWindow {
 
 	function chatBackgroundMenuEntries() {
 		const result = []
+		const selfActions = (clientSession.selfMenu || ({})).actions || []
+		const conversationActionIds = [
+			"self.recording", "self.prioritySpeaker"
+		]
+		for (let index = 0; index < conversationActionIds.length; ++index) {
+			const action = menuActionById(selfActions, conversationActionIds[index])
+			if (action)
+				result.push(action)
+		}
 		if (activeScope.canLoadOlder) {
+			if (result.length > 0)
+				result.push({ "kind": "separator" })
 			result.push({
 				"kind": "action", "id": "activeScope.loadOlder",
 				"label": qsTr("Load older messages"),
 				"enabled": activeScope.loadingState !== "older"
 			})
 		}
+		if (result.length > 0 && root.contextScopeActions.length > 0
+				&& String((result[result.length - 1] || ({})).kind || "") !== "separator")
+			result.push({ "kind": "separator" })
 		for (let index = 0; index < root.contextScopeActions.length; ++index)
 			result.push(root.contextScopeActions[index])
 		return result
@@ -1140,12 +1175,7 @@ ApplicationWindow {
 			normalized = "appServer"
 		else if (alias === "app" || alias === "room" || alias === "message")
 			normalized = alias
-		// appServer is a real cascade state of the app menu. Reuse an already-open
-		// parent so a pending exit transition cannot dismiss the freshly opened
-		// child. All unrelated or unavailable live contexts still start clean.
-		const reuseOpenAppMenu = normalized === "appServer" && appMenuPopup.visible
-		if (!reuseOpenAppMenu)
-			closeProductMenus()
+		closeProductMenus()
 		automationMenuVariant = normalized
 		automationMenuSurface = null
 		automationMenuFocusItem = null
@@ -1153,32 +1183,20 @@ ApplicationWindow {
 		let menu = null
 		if (normalized === "app" || normalized === "appServer") {
 			menu = appMenuPopup
-			if (!reuseOpenAppMenu)
-				openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
+			openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
 			if (normalized === "appServer") {
-				let serverMenu = null
-				let serverOpener = null
+				let firstServerAction = null
 				for (let index = 0; index < appMenuPopup.count; ++index) {
-					const candidate = appMenuPopup.menuAt(index)
-					if (candidate && candidate.menuPayload
-							&& String(candidate.menuPayload.id || "")
-								=== "semantic-menu-group-server") {
-						serverMenu = candidate
-						serverOpener = appMenuPopup.itemAt(index)
+					const candidate = appMenuPopup.itemAt(index)
+					if (candidate && candidate.payload
+							&& String(candidate.payload.id || "").substring(0, 7) === "server.") {
+						firstServerAction = candidate
 						break
 					}
 				}
-				handled = !!serverMenu && !!serverOpener
-					&& appMenuPopup.openSubmenuFor(serverOpener, serverMenu, true)
-				if (handled) {
-					menu = serverMenu
-					// Keep the cascade anchored to its real parent row. On item-backed
-					// Windows popups, repeatedly restoring focus directly to a dynamic
-					// child delegate can dismiss the complete menu tree. Keyboard users
-					// still enter the submenu through Right/Enter; deterministic visual
-					// capture focuses the Server opener while proving the child surface.
-					automationMenuFocusItem = serverOpener
-				}
+				handled = !!firstServerAction
+				if (handled)
+					automationMenuFocusItem = firstServerAction
 			}
 		} else if (normalized === "profile") {
 			menu = profileMenuPopup
@@ -1737,10 +1755,42 @@ ApplicationWindow {
         onTriggered: root.flushPreviewHydrationQueue()
     }
 
+	Popup {
+		id: globalQuickReactionPopup
+		objectName: "globalMessageQuickReactionPopup"
+		parent: Overlay.overlay
+		modal: false
+		focus: true
+		padding: Theme.space1
+		margins: Theme.space2
+		width: globalQuickReactionBar.implicitWidth + leftPadding + rightPadding
+		height: globalQuickReactionBar.implicitHeight + topPadding + bottomPadding
+		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+		background: Rectangle {
+			radius: height / 2
+			color: Theme.surfaceRaised
+			border.color: Theme.divider
+			border.width: 1
+		}
+		contentItem: QuickReactionBar {
+			id: globalQuickReactionBar
+			objectName: "globalMessageQuickReactionBar"
+			expanded: globalQuickReactionPopup.opened
+			activeReactions: root.quickReactionActiveReactions
+			onReactionRequested: emoji => {
+				const targetId = root.quickReactionMessageId
+				root.closeQuickReactions()
+				if (targetId.length > 0)
+					uiCommands.toggleMessageReaction(targetId, emoji)
+			}
+		}
+		onClosed: root.resetQuickReactionState()
+	}
+
     Connections {
         target: activeScope
 		function onScopeTokenChanged() {
-			root.quickReactionMessageId = ""
+			root.closeQuickReactions()
 			root.clearPreviewHydrationQueue()
 			timeline.beginScopeChange()
 			if (root.conversationSearchOpen)
@@ -1831,6 +1881,7 @@ ApplicationWindow {
 			attachment: root.attachmentViewerPayload || ({})
 			transientParent: root
 			onSaveRequested: attachment => root.downloadAttachment(attachment, false)
+			onOriginalRetryRequested: attachment => root.retryAttachmentOriginal(attachment)
 			onRefreshRequested: attachment => root.queuePreviewHydration(
 				String(attachment.hydrationMessageId || ""), true)
 			onClosing: root.attachmentViewerPayload = null
@@ -2030,6 +2081,7 @@ ApplicationWindow {
 			visualFixtureMode: root.visualFixtureOverrideActive
 			commitOnSelection: true
 			settingsEnabled: root.settingsActionEnabled
+			stonksEnabled: root.stonksShortcutEnabled
 			// The drawer is the semantic owner while navigationModalActive is true;
 			// suppressing it through the global modal flag leaves screen readers with
 			// only an empty Window node. Suppress it only for a different product
@@ -2046,6 +2098,7 @@ ApplicationWindow {
 			onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
 				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 			onSettingsRequested: root.requestSettings()
+			onStonksRequested: uiCommands.invokeAppAction("server.stonksPortfolio", {})
 			onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 			onServerMenuRequested: anchorPoint => root.openApplicationMenu(anchorPoint)
 		}
@@ -2127,13 +2180,16 @@ ApplicationWindow {
 	PayloadMenu {
 		id: chatBackgroundMenuPopup
 		objectName: "chatBackgroundMenu"
-		accessibleName: qsTr("Conversation menu")
+		accessibleName: qsTr("Conversation options")
 		preferredWidth: 280
 		maximumHeight: Math.max(160, root.height - 32)
 		entries: root.chatBackgroundMenuEntries()
 		onActionRequested: (actionId, payload) => {
 			if (actionId === "activeScope.loadOlder")
 				uiCommands.requestOlderMessages()
+			else if (String(actionId || "").substring(0, 5) === "self.")
+				uiCommands.invokeAppAction(actionId,
+					payload && payload.payload ? payload.payload : ({}))
 			else if (root.contextScopeToken.length > 0)
 				uiCommands.invokeScopeAction(root.contextScopeToken, actionId)
 		}
@@ -2206,7 +2262,7 @@ ApplicationWindow {
 		anchors.bottom: parent.bottom
 		// Keep transient feedback clear of the composer even while replies,
 		// attachments, autocomplete, or multiline input expand it.
-		anchors.bottomMargin: composerSurface.height + 22
+		anchors.bottomMargin: composerSurface.height + bottomStonksTicker.height + 22
 		width: Math.min(implicitWidth, Math.max(1, parent.width - Theme.space4 * 2))
 		maximumWidth: Math.min(680, Math.max(280, parent.width - Theme.space4 * 2))
 		controller: toastState
@@ -2234,6 +2290,8 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
+			anchors.topMargin: windowTopStonksTicker.height
+			anchors.bottomMargin: bottomStonksTicker.height
             spacing: 0
 			layoutDirection: Theme.railSide === "left" ? Qt.RightToLeft : Qt.LeftToRight
 
@@ -2277,7 +2335,7 @@ ApplicationWindow {
                     Column {
                         anchors.left: parent.left
 						anchors.leftMargin: root.narrowShell ? Theme.space3 : Theme.space5
-						anchors.right: stonksHeader.visible ? stonksHeader.left : headerActions.left
+						anchors.right: headerActions.left
 						anchors.rightMargin: Theme.space2
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
@@ -2299,22 +2357,6 @@ ApplicationWindow {
 							width: parent.width
                         }
                     }
-					StonksHeader {
-						id: stonksHeader
-						objectName: "stonksConversationHeader"
-						anchors.right: headerActions.left
-						anchors.rightMargin: Theme.space2
-						anchors.verticalCenter: parent.verticalCenter
-						width: Math.max(140, Math.min(root.narrowShell ? 190 : 480,
-							parent.width - headerActions.width - (root.narrowShell ? 170 : 300)))
-						stonks: clientSession.stonks || ({})
-						tickerBannerEnabled: stonks.tickerBannerEnabled === true
-						tickerBannerAlwaysScroll: stonks.tickerBannerAlwaysScroll !== false
-						scopeToken: activeScope.scopeToken
-						scopeLabel: activeScope.label
-						narrowLayout: root.narrowShell || width < 300
-						onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
-					}
 					Row {
 						id: headerActions
 						anchors.right: parent.right
@@ -2350,9 +2392,8 @@ ApplicationWindow {
 							objectName: "motdToggleButton"
 							visible: !!clientSession.hasMotd
 							dense: true
-							checked: visible && !clientSession.motdDismissed && !root.motdHiddenForHistory
+							checked: visible && !clientSession.motdDismissed
 							readonly property bool revealsWelcome: clientSession.motdDismissed
-								|| root.motdHiddenForHistory
 							text: qsTr("MOTD")
 							Accessible.name: revealsWelcome
 								? qsTr("Show welcome message") : qsTr("Hide welcome message")
@@ -2409,7 +2450,7 @@ ApplicationWindow {
 								Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
 							}
 							onClicked: {
-								const reveal = clientSession.motdDismissed || root.motdHiddenForHistory
+								const reveal = clientSession.motdDismissed
 								root.handleMotdAction(reveal ? "motd.restore" : "motd.dismiss",
 									{ "signature": String(clientSession.motdSignature || "") })
 							}
@@ -2471,23 +2512,24 @@ ApplicationWindow {
 						}
 					ModernIconButton {
 						id: appMenuButton
-						objectName: "visualFixtureApplicationMenu"
+						objectName: "conversationOptionsButton"
 						iconName: "more"
 						Accessible.ignored: root.backgroundAccessibilitySuppressed
-                        Accessible.name: qsTr("Application menu")
+						Accessible.name: qsTr("Conversation options")
+						Accessible.description: qsTr("Actions for %1").arg(
+							activeScope.label || qsTr("this conversation"))
 						Accessible.focusable: true
 						Accessible.focused: activeFocus
-							onClicked: {
-								root.openApplicationMenu(
-									appMenuButton.mapToItem(null, appMenuButton.width, appMenuButton.height),
-									appMenuButton)
-							}
-                    }
+						ToolTip.visible: hovered
+						ToolTip.text: Accessible.name
+							onClicked: root.openChatBackgroundMenu(
+								appMenuButton.mapToItem(null, appMenuButton.width, appMenuButton.height))
 					}
-                    SemanticMenu {
-                        id: appMenuPopup
+					}
+					SemanticMenu {
+						id: appMenuPopup
 						objectName: "applicationMenu"
-						accessibleName: qsTr("Application menu")
+						accessibleName: qsTr("Server menu")
 						parent: root.contentItem
 						preferredWidth: 292
 						maximumHeight: Math.max(280, root.height - 104)
@@ -2501,15 +2543,27 @@ ApplicationWindow {
 							: qsTr("Choose a server to get started")
 						headerTone: clientSession.connected ? "success" : ""
 						groups: root.applicationMenuGroups()
-						onActionRequested: (actionId, payload) => {
-							if (actionId === "activeScope.markRead")
-								uiCommands.markActiveScopeRead()
-							else
-								uiCommands.invokeAppAction(actionId,
-									payload && payload.payload ? payload.payload : ({}))
-						}
+						onActionRequested: (actionId, payload) =>
+							uiCommands.invokeAppAction(actionId,
+								payload && payload.payload ? payload.payload : ({}))
                     }
                 }
+
+				StonksHeader {
+					id: topStonksTicker
+					objectName: "stonksTickerTop"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					stonks: root.stonksTickerState
+					tickerBannerEnabled: root.stonksTickerEnabled && root.stonksTickerPlacement === "top"
+					tickerDirection: root.stonksTickerDirection
+					tickerSpeed: root.stonksTickerSpeed
+					scopeToken: activeScope.scopeToken
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					docked: true
+					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+				}
 
 				ConversationSearchBar {
 					id: conversationSearchBar
@@ -2560,7 +2614,6 @@ ApplicationWindow {
 					maximumImageHeight: root.height <= 560
 						? (root.activeScopeHasScreenShare ? 32 : root.compactNavigation ? 34 : 40)
 						: root.compactNavigation ? 56 : 68
-					hiddenForHistory: root.motdHiddenForHistory
 					visualFixtureMode: root.visualFixtureOverrideActive
 					session: clientSession
 					onActionRequested: (actionId, payload) => root.handleMotdAction(actionId, payload)
@@ -2633,6 +2686,15 @@ ApplicationWindow {
 					MiddleDragScrollHandler {
 						targetFlickable: timeline
 						horizontalEnabled: false
+						onScrollingStarted: {
+							bottomFollowTimer.stop()
+							timeline.stickToBottom = false
+							timeline.releasePrependAnchor()
+						}
+						onScrollingEnded: {
+							timeline.stickToBottom = timeline.isNearBottom()
+							timeline.requestBottomFollow()
+						}
 					}
 					// Build a small amount of chat content outside the viewport while
 					// the chat surface is otherwise idle. Complex rich-message delegates
@@ -2829,6 +2891,7 @@ ApplicationWindow {
 							requestBottomFollow()
 					}
 					onMovementStarted: {
+						root.closeQuickReactions()
 						// QQuickListView reports its own insert displacement as movement.
 						// Preserve the pre-structural anchor through that transition, while
 						// ordinary wheel, drag and flick movement still cancels restoration.
@@ -3140,6 +3203,14 @@ ApplicationWindow {
 						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
 						readonly property bool hasMessageActions: canReply || canReact || canDelete
 							|| !!source.deliveryCanRetry
+						readonly property bool hasReactions: !!reactions && reactions.length > 0
+						readonly property bool quickReactionsExpanded: canReact
+							&& root.quickReactionMessageId === stableId
+						readonly property bool hasEmbeddedFooterContent: hasReactions || wideContent
+							|| hasReplyContent || hasDeliveryStatus
+							|| (own && !systemMessage && timestamp.length > 0)
+						readonly property bool usesCompactActionOverlay: hasMessageActions
+							&& !wideContent
 						readonly property bool performancePreviewMaterialized: messagePreviewLoader.status === Loader.Ready
 							&& !!messagePreviewLoader.item
 						readonly property bool performanceAttachmentMaterialized: messageAttachmentLoader.status === Loader.Ready
@@ -3302,6 +3373,8 @@ ApplicationWindow {
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
+									Layout.rightMargin: messageDelegate.usesCompactActionOverlay
+										? compactMessageActionTray.width + Theme.space2 : 0
 									resourceActive: !messageDelegate.accessibilityPooled
 									animationsEnabled: !root.visualFixtureOverrideActive
 									hoverEffectsEnabled: !root.visualFixtureOverrideActive
@@ -3336,7 +3409,7 @@ ApplicationWindow {
 								Label {
 									textFormat: Text.PlainText
                                     Layout.fillWidth: true
-                                    visible: messageDelegate.deleted
+									visible: messageDelegate.deleted
                                     text: qsTr("Message deleted")
                                     color: Theme.textMuted
                                     wrapMode: Text.Wrap
@@ -3474,67 +3547,78 @@ ApplicationWindow {
 										}
 									}
                                 }
-                                Flow {
-                                    Layout.fillWidth: true
-									spacing: Theme.chatMetadataSpacing
-									visible: !!reactions && reactions.length > 0
-                                    Repeater {
-                                        model: reactions || []
-										delegate: Button {
-											id: reactionButton
-                                            required property var modelData
-											implicitWidth: contentItem.implicitWidth + Theme.space3
-											implicitHeight: Math.max(24, Theme.avatarSmall)
-											enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
-											hoverEnabled: true
-											activeFocusOnTab: true
-											focusPolicy: Qt.StrongFocus
-											Accessible.name: qsTr("%1 reaction, %2").arg(modelData.emoji || "")
-												.arg(modelData.count || 0)
-											background: Rectangle {
-												radius: reactionButton.implicitHeight / 2
-												color: !reactionButton.enabled ? Theme.panel
-													: reactionButton.modelData.selfReacted ? Theme.selected
-													: reactionButton.down ? Theme.accentSubtle
-													: reactionButton.hovered ? Theme.surfaceHover : Theme.strip
-												border.color: reactionButton.activeFocus ? Theme.focus : Theme.divider
-												border.width: reactionButton.activeFocus ? Theme.focusRingWidth : 1
-											}
-											contentItem: Label {
-												textFormat: Text.PlainText
-												text: (reactionButton.modelData.emoji || "") + " "
-													+ (reactionButton.modelData.count || 0)
-												color: reactionButton.enabled ? Theme.textMain : Theme.textMuted
-												font.pixelSize: Theme.fontCaption
-												horizontalAlignment: Text.AlignHCenter
-												verticalAlignment: Text.AlignVCenter
-											}
-											onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId,
-																			 modelData.emoji)
-                                        }
-                                    }
-                                }
-								QuickReactionBar {
-									objectName: "messageQuickReactions-" + messageDelegate.stableId
-									Layout.fillWidth: true
-									expanded: messageDelegate.canReact
+								RowLayout {
+									id: messageFooter
+									objectName: "chatMessageFooter"
+									readonly property bool quickReactionsExpanded: messageDelegate.canReact
 										&& root.quickReactionMessageId === messageDelegate.stableId
-									activeReactions: messageDelegate.reactions || []
-									onReactionRequested: emoji => {
-										uiCommands.toggleMessageReaction(messageDelegate.stableId, emoji)
-										root.quickReactionMessageId = ""
-									}
-								}
-										RowLayout {
-											id: messageActionRow
-											objectName: "chatMessageActionRow"
-											Layout.fillWidth: true
-											visible: messageDelegate.hasMessageActions
-												|| (messageDelegate.own && !messageDelegate.systemMessage
-													&& timestamp.length > 0)
-											spacing: Theme.chatMetadataSpacing
+									Layout.fillWidth: true
+									Layout.rightMargin: messageDelegate.usesCompactActionOverlay
+										? compactMessageActionTray.width + Theme.space2 : 0
+									visible: messageDelegate.hasEmbeddedFooterContent
+									spacing: Theme.space2
 
-											Item { Layout.fillWidth: true }
+									Flow {
+										id: messageReactionFlow
+										Layout.fillWidth: true
+										Layout.alignment: Qt.AlignVCenter
+										spacing: Theme.chatMetadataSpacing
+										visible: messageDelegate.hasReactions
+										Repeater {
+											model: reactions || []
+											delegate: Button {
+												id: reactionButton
+												required property var modelData
+												implicitWidth: contentItem.implicitWidth + Theme.space2 * 2
+												implicitHeight: Math.max(30, Theme.avatarSmall)
+												enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
+												hoverEnabled: true
+												activeFocusOnTab: true
+												focusPolicy: Qt.StrongFocus
+												Accessible.name: qsTr("%1 reaction, %2").arg(modelData.emoji || "")
+													.arg(modelData.count || 0)
+												background: Rectangle {
+													radius: reactionButton.implicitHeight / 2
+													color: !reactionButton.enabled ? Theme.panel
+														: reactionButton.modelData.selfReacted ? Theme.selected
+														: reactionButton.down ? Theme.accentSubtle
+														: reactionButton.hovered ? Theme.surfaceHover : Theme.strip
+													border.color: reactionButton.activeFocus ? Theme.focus : Theme.divider
+													border.width: reactionButton.activeFocus ? Theme.focusRingWidth : 1
+												}
+												contentItem: Row {
+													spacing: Theme.space1
+													Label {
+														objectName: "messageReactionEmoji"
+														anchors.verticalCenter: parent.verticalCenter
+														textFormat: Text.PlainText
+														text: String(reactionButton.modelData.emoji || "")
+														color: reactionButton.enabled ? Theme.textStrong : Theme.textMuted
+														font.family: Qt.platform.os === "windows" ? "Segoe UI Emoji" : ""
+														font.pixelSize: 17
+														verticalAlignment: Text.AlignVCenter
+													}
+													Label {
+														objectName: "messageReactionCount"
+														anchors.verticalCenter: parent.verticalCenter
+														textFormat: Text.PlainText
+														text: String(Number(reactionButton.modelData.count || 0))
+														color: reactionButton.enabled ? Theme.textMain : Theme.textMuted
+														font.pixelSize: Theme.fontCaption
+														font.weight: Font.DemiBold
+														verticalAlignment: Text.AlignVCenter
+													}
+												}
+												onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId,
+													modelData.emoji)
+											}
+										}
+									}
+
+									Item {
+										Layout.fillWidth: true
+										visible: !messageReactionFlow.visible
+									}
 											Label {
 												textFormat: Text.PlainText
 												text: [timestamp, status].filter(value => String(value).length > 0).join(" · ")
@@ -3545,9 +3629,28 @@ ApplicationWindow {
 												font.pixelSize: Theme.fontCaption
 												Accessible.name: text
 											}
+									Rectangle {
+										id: messageActionTray
+										objectName: "chatMessageActionTray"
+										Layout.alignment: Qt.AlignVCenter
+										Layout.preferredWidth: messageActionButtons.implicitWidth + Theme.space1
+										Layout.preferredHeight: 34
+										visible: messageDelegate.hasMessageActions
+											&& (messageDelegate.hovered || messageFooter.quickReactionsExpanded)
+											&& !messageDelegate.usesCompactActionOverlay
+										radius: height / 2
+										color: Theme.strip
+										border.color: Theme.divider
+										border.width: 1
+
+										Row {
+											id: messageActionButtons
+											anchors.centerIn: parent
+											spacing: 0
 											ModernIconButton {
 												objectName: "messageReplyButton"
-												visible: messageDelegate.canReply && messageDelegate.hovered
+												visible: messageDelegate.canReply
+													&& (messageDelegate.hovered || messageFooter.quickReactionsExpanded)
 												dense: true
 												iconName: "reply"
 												text: qsTr("Reply")
@@ -3560,15 +3663,20 @@ ApplicationWindow {
 													&& (messageDelegate.hovered
 														|| root.quickReactionMessageId === messageDelegate.stableId)
 												dense: true
-												iconName: "add"
-												text: qsTr("Add reaction")
+												iconName: "reaction"
+												selected: messageFooter.quickReactionsExpanded
+												text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
 												Accessible.name: text
+												ToolTip.visible: hovered
+												ToolTip.text: text
 												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
-													messageDelegate.index)
+													messageDelegate.index, messageReactButton,
+													messageDelegate.reactions || [])
 											}
 											ModernIconButton {
 												objectName: "messageRetryButton"
-												visible: !!messageDelegate.source.deliveryCanRetry && messageDelegate.hovered
+												visible: !!messageDelegate.source.deliveryCanRetry
+													&& (messageDelegate.hovered || messageFooter.quickReactionsExpanded)
 												dense: true
 												iconName: "retry"
 												text: qsTr("Retry")
@@ -3577,7 +3685,8 @@ ApplicationWindow {
 											}
 											ModernIconButton {
 												objectName: "messageDeleteButton"
-												visible: messageDelegate.canDelete && messageDelegate.hovered
+												visible: messageDelegate.canDelete
+													&& (messageDelegate.hovered || messageFooter.quickReactionsExpanded)
 												dense: true
 												iconName: "delete"
 												text: qsTr("Delete")
@@ -3585,17 +3694,6 @@ ApplicationWindow {
 												Accessible.name: text
 												onClicked: uiCommands.deleteMessage(messageDelegate.stableId)
 											}
-											ModernIconButton {
-												id: messageActionsButton
-												objectName: "messageActionsButton"
-												visible: messageDelegate.hasMessageActions
-												dense: true
-												iconName: "more"
-												text: qsTr("Message actions")
-												opacity: messageDelegate.hovered || activeFocus ? 1 : 0.62
-												Accessible.name: text
-												Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
-												onClicked: messageDelegate.openMessageActions()
 											ModernMenu {
 												id: messageActions
 												objectName: "messageActionsMenu-" + messageDelegate.stableId
@@ -3615,10 +3713,13 @@ ApplicationWindow {
 												}
 												PayloadMenuItem {
 													payload: ({ "kind": "action", "id": "message.react",
-														"label": qsTr("Add reaction"), "icon": "activity" })
+													"label": qsTr("Add reaction"), "icon": "reaction" })
 													visible: messageActions.targetCanReact
 													height: visible ? rowImplicitHeight : 0
-												onActionRequested: root.showQuickReactions(messageActions.targetId, -1)
+												onActionRequested: root.showQuickReactions(messageActions.targetId, -1,
+													messageDelegate.usesCompactActionOverlay
+														? compactMessageReactButton : messageReactButton,
+													messageDelegate.reactions || [])
 												}
 												PayloadMenuItem {
 													payload: ({ "kind": "action", "id": "message.retry",
@@ -3633,12 +3734,79 @@ ApplicationWindow {
 													visible: messageActions.targetCanDelete
 													height: visible ? rowImplicitHeight : 0
 													onActionRequested: uiCommands.deleteMessage(messageActions.targetId)
+													}
 												}
-											}
 											}
 										}
 									}
-                            }
+									}
+								Rectangle {
+									id: compactMessageActionTray
+									objectName: "chatCompactMessageActionTray"
+									anchors.bottom: parent.bottom
+									anchors.right: parent.right
+									anchors.bottomMargin: Theme.space1
+									anchors.rightMargin: Theme.space1
+									width: compactMessageActionButtons.implicitWidth + Theme.space1
+									height: 34
+									visible: messageDelegate.usesCompactActionOverlay
+										&& (messageDelegate.hovered || messageDelegate.quickReactionsExpanded)
+									radius: height / 2
+									color: Theme.strip
+									border.color: Theme.divider
+									border.width: 1
+									z: 2
+
+									Row {
+										id: compactMessageActionButtons
+										anchors.centerIn: parent
+										spacing: 0
+
+										ModernIconButton {
+											objectName: "compactMessageReplyButton"
+											visible: messageDelegate.canReply
+											dense: true
+											iconName: "reply"
+											text: qsTr("Reply")
+											Accessible.name: text
+											onClicked: uiCommands.replyToMessage(messageDelegate.stableId)
+										}
+										ModernIconButton {
+											objectName: "compactMessageReactButton"
+											visible: messageDelegate.canReact
+											dense: true
+											iconName: "reaction"
+											selected: messageDelegate.quickReactionsExpanded
+											text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
+											Accessible.name: text
+											ToolTip.visible: hovered
+											ToolTip.text: text
+											onClicked: root.toggleQuickReactions(messageDelegate.stableId,
+												messageDelegate.index, compactMessageReactButton,
+												messageDelegate.reactions || [])
+										}
+										ModernIconButton {
+											objectName: "compactMessageRetryButton"
+											visible: !!messageDelegate.source.deliveryCanRetry
+											dense: true
+											iconName: "retry"
+											text: qsTr("Retry")
+											Accessible.name: text
+											onClicked: uiCommands.retryMessage(messageDelegate.stableId)
+										}
+										ModernIconButton {
+											objectName: "compactMessageDeleteButton"
+											visible: messageDelegate.canDelete
+											dense: true
+											iconName: "delete"
+											text: qsTr("Delete")
+											tone: "danger"
+											Accessible.name: text
+											onClicked: uiCommands.deleteMessage(messageDelegate.stableId)
+										}
+									}
+								}
+								}
                         }
                     }
 					}
@@ -3741,6 +3909,23 @@ ApplicationWindow {
 					}
 				}
 
+				StonksHeader {
+					id: aboveComposerStonksTicker
+					objectName: "stonksTickerAboveComposer"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					stonks: root.stonksTickerState
+					tickerBannerEnabled: root.stonksTickerEnabled
+						&& root.stonksTickerPlacement === "aboveComposer"
+					tickerDirection: root.stonksTickerDirection
+					tickerSpeed: root.stonksTickerSpeed
+					scopeToken: activeScope.scopeToken
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					docked: true
+					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+				}
+
 				Rectangle {
 					id: composerSurface
                     Layout.fillWidth: true
@@ -3812,9 +3997,9 @@ ApplicationWindow {
 									color: Theme.textStrong
 									font.pixelSize: Theme.fontBody
 									font.weight: Font.DemiBold
-								}
-							}
-						}
+					}
+				}
+            }
 					}
                     RowLayout {
 						anchors.top: parent.top
@@ -4144,6 +4329,7 @@ ApplicationWindow {
                         }
                     }
                 }
+
             }
 
 		NavigationRail {
@@ -4160,6 +4346,7 @@ ApplicationWindow {
 				clientSession: root.navigationSession
 				visualFixtureMode: root.visualFixtureOverrideActive
 				settingsEnabled: root.settingsActionEnabled
+				stonksEnabled: root.stonksShortcutEnabled
 				activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
 					? root.contextScopeToken : ""
 				activeParticipantMenuKey: participantMenuPopup.visible
@@ -4170,9 +4357,49 @@ ApplicationWindow {
 				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
 					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 				onSettingsRequested: root.requestSettings()
+				onStonksRequested: uiCommands.invokeAppAction("server.stonksPortfolio", {})
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 				onServerMenuRequested: anchorPoint => root.openApplicationMenu(anchorPoint)
 			}
+		}
+
+		StonksHeader {
+			id: windowTopStonksTicker
+			objectName: "stonksTickerWindowTop"
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.top: parent.top
+			height: visible ? implicitHeight : 0
+			stonks: root.stonksTickerState
+			tickerBannerEnabled: root.stonksTickerEnabled
+				&& root.stonksTickerPlacement === "windowTop"
+			tickerDirection: root.stonksTickerDirection
+			tickerSpeed: root.stonksTickerSpeed
+			scopeToken: activeScope.scopeToken
+			scopeLabel: activeScope.label
+			narrowLayout: root.narrowShell
+			docked: true
+			z: 2
+			onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+		}
+
+		StonksHeader {
+			id: bottomStonksTicker
+			objectName: "stonksTickerBottom"
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.bottom: parent.bottom
+			height: visible ? implicitHeight : 0
+			stonks: root.stonksTickerState
+			tickerBannerEnabled: root.stonksTickerEnabled && root.stonksTickerPlacement === "bottom"
+			tickerDirection: root.stonksTickerDirection
+			tickerSpeed: root.stonksTickerSpeed
+			scopeToken: activeScope.scopeToken
+			scopeLabel: activeScope.label
+			narrowLayout: root.narrowShell
+			docked: true
+			z: 2
+			onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
 		}
 
 		MouseArea {
@@ -4196,7 +4423,7 @@ ApplicationWindow {
 			anchors.rightMargin: Theme.space4 + (desktopNavigationRail.visible
 				&& Theme.railSide !== "left" ? desktopNavigationRail.width : 0)
 			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space4
+			anchors.bottomMargin: Theme.space4 + bottomStonksTicker.height
 			active: directMessages && directMessages.trayOpen
 			visible: active && status === Loader.Ready
 			z: 40

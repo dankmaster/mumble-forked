@@ -770,7 +770,12 @@ Rectangle {
     function normalizedMediaItems() {
         if (!preview)
             return []
-		const sourceItems = Array.isArray(preview.mediaItems) ? preview.mediaItems : []
+        // C++ exposes this value as a QVariantList. It is array-like in QML,
+        // but Array.isArray() returns false for it and used to silently discard
+        // every gallery item in the real client while JavaScript-only tests
+        // continued to pass.
+        const sourceItems = preview.mediaItems && preview.mediaItems.length !== undefined
+            ? preview.mediaItems : []
         const result = []
         for (let index = 0; index < sourceItems.length && result.length < 16; ++index) {
             const item = sourceItems[index] || {}
@@ -1865,90 +1870,6 @@ Rectangle {
 			}
 		}
 
-		ListView {
-			id: steamMediaRail
-			objectName: "previewSteamMediaRail"
-			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? 52 : 0
-			visible: root.expanded && providerDetails.steamPresentation
-				&& root.mediaItems.length > 1 && !root.inlinePlaybackActive
-			orientation: ListView.Horizontal
-			spacing: Theme.space1
-			clip: true
-			boundsBehavior: Flickable.StopAtBounds
-			model: root.mediaItems
-			currentIndex: root.selectedMediaIndex
-			Accessible.role: Accessible.List
-			Accessible.name: qsTr("Steam media gallery")
-			delegate: Button {
-				id: steamMediaThumbnail
-				required property var modelData
-				required property int index
-				readonly property string mediaKind: root.safeText(modelData.kind, 32).toLowerCase()
-				readonly property string posterSource: root.safeRenderImageSource(modelData.thumbnail
-					|| modelData.poster || (mediaKind === "image" ? modelData.url : ""))
-				objectName: "previewSteamMediaThumbnail_" + index
-				width: 82
-				height: 48
-				hoverEnabled: true
-				background: Rectangle {
-					radius: Theme.space1
-					color: steamMediaThumbnail.down ? Theme.embedSelection
-						: steamMediaThumbnail.hovered ? Theme.embedHover : Theme.embedSurface
-					border.width: steamMediaThumbnail.index === root.selectedMediaIndex ? 2 : 1
-					border.color: steamMediaThumbnail.index === root.selectedMediaIndex
-						? providerDetails.providerAccent : Theme.embedBorder
-				}
-				contentItem: Item {
-					clip: true
-					Image {
-						anchors.fill: parent
-						anchors.margins: Theme.space1
-						source: steamMediaThumbnail.posterSource
-						asynchronous: true
-						cache: false
-						fillMode: Image.PreserveAspectCrop
-						visible: status === Image.Ready
-					}
-					ModernIcon {
-						anchors.centerIn: parent
-						visible: steamMediaThumbnail.posterSource.length === 0
-						name: steamMediaThumbnail.mediaKind === "video" ? "play" : "external"
-						size: Theme.avatarSmall
-						color: providerDetails.providerAccent
-						Accessible.ignored: true
-					}
-					Rectangle {
-						anchors.left: parent.left
-						anchors.bottom: parent.bottom
-						anchors.margins: Theme.space1
-						visible: steamMediaThumbnail.mediaKind === "video"
-						width: steamPlayLabel.implicitWidth + Theme.space1 * 2
-						height: Theme.space4
-						radius: height / 2
-						color: root.withAlpha(Theme.embedOverlayBase, 0.88)
-						Label {
-							id: steamPlayLabel
-							objectName: "previewSteamPlayLabel_" + index
-							anchors.centerIn: parent
-							text: qsTr("PLAY")
-							textFormat: Text.PlainText
-							color: Theme.mediaOverlayTextStrong
-							font.pixelSize: 9
-							font.bold: true
-							Accessible.ignored: true
-						}
-					}
-				}
-				Accessible.role: Accessible.ListItem
-				Accessible.name: mediaKind === "video"
-					? qsTr("Steam trailer %1").arg(index + 1)
-					: qsTr("Steam screenshot %1").arg(index + 1)
-				Accessible.selected: index === root.selectedMediaIndex
-				onClicked: root.selectedMediaIndex = index
-			}
-		}
-
 		ProviderDetails {
 			id: providerDetails
 			Layout.fillWidth: true
@@ -1960,7 +1881,14 @@ Rectangle {
 			previewDescription: root.sanitizedDescription
 			previewImageSource: root.mediaRequiresReveal ? "" : root.imageSource
 			expanded: root.expanded
+			steamMediaItems: root.mediaItems
+			steamMediaIndex: root.selectedMediaIndex
 			onExternalOpenRequested: (url) => root.externalOpenRequested(url)
+			onSteamMediaSelectionRequested: (index) => root.selectedMediaIndex = index
+			onSteamMediaOpenRequested: (index) => {
+				root.selectedMediaIndex = index
+				Qt.callLater(function() { root.requestCurrentMedia() })
+			}
 		}
 
 		RowLayout {

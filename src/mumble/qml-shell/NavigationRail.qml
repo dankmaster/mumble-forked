@@ -20,6 +20,7 @@ Rectangle {
 	property bool commitOnSelection: false
 	property bool accessibilitySuppressed: false
 	property bool settingsEnabled: true
+	property bool stonksEnabled: false
 	// The desktop shell supplies the matching conversation chrome heights so
 	// the horizontal dividers form one continuous line regardless of whether
 	// the rail is placed on the left or the right. Drawer instances keep the
@@ -47,6 +48,7 @@ Rectangle {
 	signal participantMenuRequested(string sessionId, var actions, var anchorPoint,
 		string entryKind, string scopeToken, string rowKey)
 	signal settingsRequested()
+	signal stonksRequested()
 	signal profileMenuRequested(var anchorPoint)
 	signal serverMenuRequested(var anchorPoint)
 	Accessible.ignored: accessibilitySuppressed
@@ -669,8 +671,8 @@ Rectangle {
 
 	function focusInitialItem() {
 		if (rooms.count <= 0) {
-			Qt.callLater(function() { profileMenuButton.forceActiveFocus() })
-			return profileMenuButton.objectName
+			Qt.callLater(function() { selfIdentityButton.forceActiveFocus() })
+			return selfIdentityButton.objectName
 		}
 		let selectedIndex = selectedNavigationIndex()
 		const firstActionableIndex = firstVisibleNavigationIndex()
@@ -758,20 +760,19 @@ Rectangle {
 				height: 1
 				color: Theme.divider
 			}
-			ColumnLayout {
+			RowLayout {
 				anchors.left: parent.left
 				anchors.right: parent.right
-				anchors.top: parent.top
-				anchors.leftMargin: 18
-				anchors.rightMargin: 18
-				anchors.topMargin: Theme.railHeaderTopInset
-				spacing: Theme.railHeaderSpacing
+				anchors.verticalCenter: parent.verticalCenter
+				anchors.leftMargin: Theme.space4
+				anchors.rightMargin: Theme.space4
+				spacing: Theme.space3
 				Rectangle {
 					id: serverBadge
 					objectName: "navigationServerBadge"
 					readonly property string imageSource: navigationRail.safeAvatarSource(
 						clientSession.serverImageUrl || "")
-					Layout.alignment: Qt.AlignHCenter
+					Layout.alignment: Qt.AlignVCenter
 					Layout.preferredWidth: Theme.railBadgeSize
 					Layout.preferredHeight: Layout.preferredWidth
 					radius: Theme.railBadgeRadius
@@ -828,62 +829,65 @@ Rectangle {
 					ToolTip.visible: serverBadgeHover.hovered
 					ToolTip.text: Accessible.name
 				}
-				Label {
-					objectName: "navigationServerName"
+				ColumnLayout {
 					Layout.fillWidth: true
-					textFormat: Text.PlainText
-					text: clientSession.serverName
-					color: Theme.textStrong
-					font.bold: true
-					font.pixelSize: Theme.fontBody + 1
-					elide: Text.ElideRight
-					horizontalAlignment: Text.AlignHCenter
-					Accessible.ignored: true
-				}
-				Rectangle {
-					id: connectionPill
-					objectName: "navigationConnectionPill"
-					readonly property color statusColor: navigationRail.toneColor(
-						clientSession.connectionTone,
-						clientSession.connected ? Theme.success : Theme.textFaint)
-					Layout.alignment: Qt.AlignHCenter
-					Layout.preferredWidth: Math.min(parent.width,
-						connectionPillContent.implicitWidth + 16)
-					Layout.preferredHeight: 22
-					radius: 11
-					color: Theme.withAlpha(statusColor, 0.08)
-					border.width: 1
-					border.color: Theme.withAlpha(statusColor, 0.24)
-					Accessible.role: Accessible.StaticText
-					Accessible.name: clientSession.connectionLabel
-					Accessible.description: clientSession.connectionDetail
-					RowLayout {
-						id: connectionPillContent
-						anchors.centerIn: parent
-						spacing: 6
-						Rectangle {
-							objectName: "navigationConnectionDot"
-							Layout.preferredWidth: 7
-							Layout.preferredHeight: 7
-							radius: 4
-							color: connectionPill.statusColor
-							Accessible.ignored: true
-						}
-						Label {
-							objectName: "navigationConnectionLabel"
-							textFormat: Text.PlainText
-							text: clientSession.connectionLabel
-							color: Theme.textMuted
-							font.pixelSize: Theme.fontCaption
-							font.bold: true
-							elide: Text.ElideRight
-							Accessible.ignored: true
-						}
+					Layout.alignment: Qt.AlignVCenter
+					spacing: Theme.railHeaderSpacing
+					Label {
+						objectName: "navigationServerName"
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: clientSession.serverName
+						color: Theme.textStrong
+						font.bold: true
+						font.pixelSize: Theme.fontBody + 1
+						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
-					HoverHandler { id: connectionPillHover }
-					ToolTip.visible: connectionPillHover.hovered
-						&& String(clientSession.connectionDetail || "").length > 0
-					ToolTip.text: clientSession.connectionDetail
+					Rectangle {
+						id: connectionPill
+						objectName: "navigationConnectionPill"
+						readonly property color statusColor: navigationRail.toneColor(
+							clientSession.connectionTone,
+							clientSession.connected ? Theme.success : Theme.textFaint)
+						Layout.preferredWidth: Math.min(parent.width,
+							connectionPillContent.implicitWidth + 16)
+						Layout.preferredHeight: 20
+						radius: 10
+						color: Theme.withAlpha(statusColor, 0.08)
+						border.width: 1
+						border.color: Theme.withAlpha(statusColor, 0.24)
+						Accessible.role: Accessible.StaticText
+						Accessible.name: clientSession.connectionLabel
+						Accessible.description: clientSession.connectionDetail
+						RowLayout {
+							id: connectionPillContent
+							anchors.centerIn: parent
+							spacing: 6
+							Rectangle {
+								objectName: "navigationConnectionDot"
+								Layout.preferredWidth: 7
+								Layout.preferredHeight: 7
+								radius: 4
+								color: connectionPill.statusColor
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "navigationConnectionLabel"
+								textFormat: Text.PlainText
+								text: clientSession.connectionLabel
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+						HoverHandler { id: connectionPillHover }
+						ToolTip.visible: connectionPillHover.hovered
+							&& String(clientSession.connectionDetail || "").length > 0
+						ToolTip.text: clientSession.connectionDetail
+					}
 				}
 			}
         }
@@ -977,7 +981,7 @@ Rectangle {
 			// keyboard users move the current row with arrows without tabbing through
 			// every delegate on a large server.
 			activeFocusOnTab: activeFocus || count > 0
-			KeyNavigation.tab: selfMuteButton
+			KeyNavigation.tab: selfIdentityButton
 			KeyNavigation.backtab: navigationFilterField
 			Accessible.role: Accessible.List
 			Accessible.name: qsTr("Rooms and participants")
@@ -2194,8 +2198,8 @@ Rectangle {
 			objectName: "navigationSelfDock"
             Layout.fillWidth: true
 			Layout.preferredHeight: navigationRail.alignedFooterHeight
-			color: selfMuteButton.activeFocus || selfDeafenButton.activeFocus
-				|| settingsButton.activeFocus || profileMenuButton.activeFocus
+			color: selfIdentityButton.activeFocus || selfMuteButton.activeFocus || selfDeafenButton.activeFocus
+				|| stonksButton.activeFocus || settingsButton.activeFocus
 				? Theme.selfCardHover : Theme.selfCardBackground
 			border.width: 0
 			Behavior on color { ColorAnimation { duration: Theme.motionFast } }
@@ -2219,85 +2223,131 @@ Rectangle {
 				anchors.topMargin: 7
 				anchors.bottomMargin: 7
 				spacing: 10
-				Rectangle {
-					id: selfAvatar
-					objectName: "selfAvatar"
-					Layout.preferredWidth: Theme.avatarMedium
+				Item {
+					id: selfIdentityButton
+					objectName: "selfIdentityButton"
+					Layout.fillWidth: true
 					Layout.preferredHeight: Theme.avatarMedium
-					radius: Math.max(8, Theme.innerRadius - 2)
-					clip: true
-					color: Theme.accentSubtle
-					border.width: 1
-					border.color: selfAvatarImage.status === Image.Ready
-						? Theme.quietBorder : Theme.withAlpha(Theme.accent, 0.58)
-					readonly property string avatarSource: navigationRail.safeAvatarSource(
-						((clientSession.selfMenu || ({})).avatarUrl) || "")
-					Image {
-						id: selfAvatarImage
-						objectName: "selfAvatarImage"
-						anchors.fill: parent
-						source: selfAvatar.avatarSource
-						sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
-							Math.max(1, Math.ceil(height * 2)))
-						asynchronous: true
-						cache: false
-						fillMode: Image.PreserveAspectCrop
-						visible: status === Image.Ready
+					activeFocusOnTab: true
+					KeyNavigation.tab: selfMuteButton
+					KeyNavigation.backtab: rooms
+					Accessible.role: Accessible.Button
+					Accessible.name: qsTr("Open profile for %1").arg(clientSession.selfName)
+					Accessible.description: clientSession.selfStatusLabel
+					Accessible.onPressAction: navigationRail.profileMenuRequested(
+						selfIdentityButton.mapToItem(null, width / 2, 0))
+					Keys.onReturnPressed: event => {
+						navigationRail.profileMenuRequested(
+							selfIdentityButton.mapToItem(null, width / 2, 0))
+						event.accepted = true
 					}
-					Label {
-						objectName: "selfAvatarFallback"
-						anchors.centerIn: parent
-						visible: selfAvatarImage.status !== Image.Ready
-						textFormat: Text.PlainText
-						text: clientSession.selfName.length > 0
-							? clientSession.selfName.slice(0, 1).toUpperCase() : "?"
-						color: Theme.textStrong
-						font.pixelSize: Theme.fontLabel
-						font.bold: true
-						Accessible.ignored: true
+					Keys.onSpacePressed: event => {
+						navigationRail.profileMenuRequested(
+							selfIdentityButton.mapToItem(null, width / 2, 0))
+						event.accepted = true
+					}
+					HoverHandler {
+						id: selfIdentityHover
+						cursorShape: Qt.PointingHandCursor
+					}
+					TapHandler {
+						onTapped: navigationRail.profileMenuRequested(
+							selfIdentityButton.mapToItem(null, width / 2, 0))
 					}
 					Rectangle {
-						objectName: "selfPresenceDot"
-						anchors.right: parent.right
-						anchors.bottom: parent.bottom
-						anchors.rightMargin: -1
-						anchors.bottomMargin: -1
-						width: 9
-						height: 9
-						radius: width / 2
-						color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
-							: clientSession.connected ? Theme.success : Theme.textFaint
-						border.width: 2
-						border.color: selfDock.color
+						anchors.fill: parent
+						anchors.margins: -4
+						radius: Theme.innerRadius
+						color: selfIdentityButton.activeFocus || selfIdentityHover.hovered
+							? Theme.selfCardHover : "transparent"
+						border.width: selfIdentityButton.activeFocus ? Theme.focusRingWidth : 0
+						border.color: Theme.focus
 						Accessible.ignored: true
+					}
+					RowLayout {
+						anchors.fill: parent
+						spacing: 10
+						Rectangle {
+							id: selfAvatar
+							objectName: "selfAvatar"
+							Layout.preferredWidth: Theme.avatarMedium
+							Layout.preferredHeight: Theme.avatarMedium
+							radius: Math.max(8, Theme.innerRadius - 2)
+							clip: true
+							color: Theme.accentSubtle
+							border.width: 1
+							border.color: selfAvatarImage.status === Image.Ready
+								? Theme.quietBorder : Theme.withAlpha(Theme.accent, 0.58)
+							readonly property string avatarSource: navigationRail.safeAvatarSource(
+								((clientSession.selfMenu || ({})).avatarUrl) || "")
+							Image {
+								id: selfAvatarImage
+								objectName: "selfAvatarImage"
+								anchors.fill: parent
+								source: selfAvatar.avatarSource
+								sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
+									Math.max(1, Math.ceil(height * 2)))
+								asynchronous: true
+								cache: false
+								fillMode: Image.PreserveAspectCrop
+								visible: status === Image.Ready
+							}
+							Label {
+								objectName: "selfAvatarFallback"
+								anchors.centerIn: parent
+								visible: selfAvatarImage.status !== Image.Ready
+								textFormat: Text.PlainText
+								text: clientSession.selfName.length > 0
+									? clientSession.selfName.slice(0, 1).toUpperCase() : "?"
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								Accessible.ignored: true
+							}
+							Rectangle {
+								objectName: "selfPresenceDot"
+								anchors.right: parent.right
+								anchors.bottom: parent.bottom
+								anchors.rightMargin: -1
+								anchors.bottomMargin: -1
+								width: 9
+								height: 9
+								radius: width / 2
+								color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
+									: clientSession.connected ? Theme.success : Theme.textFaint
+								border.width: 2
+								border.color: selfDock.color
+								Accessible.ignored: true
+							}
+						}
+						ColumnLayout {
+							Layout.fillWidth: true
+							spacing: 1
+							Label {
+								objectName: "selfNameLabel"
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: clientSession.selfName
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontBody
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "selfStatusLabel"
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: clientSession.selfStatusLabel
+								color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
+									: clientSession.connected ? Theme.success : Theme.microLabelText
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
 					}
 				}
-                ColumnLayout {
-                    Layout.fillWidth: true
-					spacing: 1
-					Label {
-						objectName: "selfNameLabel"
-						Layout.fillWidth: true
-						textFormat: Text.PlainText
-						text: clientSession.selfName
-						color: Theme.textStrong
-						font.pixelSize: Theme.fontBody
-						font.bold: true
-						elide: Text.ElideRight
-						Accessible.ignored: true
-					}
-					Label {
-						objectName: "selfStatusLabel"
-						Layout.fillWidth: true
-						textFormat: Text.PlainText
-						text: clientSession.selfStatusLabel
-						color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
-							: clientSession.connected ? Theme.success : Theme.microLabelText
-						font.pixelSize: Theme.fontCaption
-						elide: Text.ElideRight
-						Accessible.ignored: true
-					}
-                }
 				RowLayout {
 					id: selfActions
 					objectName: "selfActionGroup"
@@ -2310,7 +2360,7 @@ Rectangle {
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
 					KeyNavigation.tab: selfDeafenButton
-					KeyNavigation.backtab: rooms
+					KeyNavigation.backtab: selfIdentityButton
 					iconName: clientSession.selfMuted ? "mute" : "microphone"
 					dense: true
 					selected: !!clientSession.selfMuted
@@ -2328,7 +2378,7 @@ Rectangle {
 					objectName: "selfDeafenButton"
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
-					KeyNavigation.tab: settingsButton
+					KeyNavigation.tab: stonksButton.visible ? stonksButton : settingsButton
 					KeyNavigation.backtab: selfMuteButton
 					iconName: "deafen"
 					dense: true
@@ -2342,13 +2392,44 @@ Rectangle {
 					onClicked: uiCommands.toggleSelfDeaf()
 				}
 				ModernIconButton {
+					id: stonksButton
+					hoverEnabled: !navigationRail.visualFixtureMode
+					objectName: "stonksPortfolioButton"
+					visible: navigationRail.stonksEnabled
+					activeFocusOnTab: visible
+					focusPolicy: visible ? Qt.StrongFocus : Qt.NoFocus
+					KeyNavigation.tab: settingsButton
+					KeyNavigation.backtab: selfDeafenButton
+					iconName: "activity"
+					dense: true
+					opacity: hovered || activeFocus ? 1 : 0.78
+					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+					Accessible.name: qsTr("Open Stonks portfolio")
+					Accessible.description: qsTr("Portfolio, leaderboard, following, and market pins")
+					ToolTip.visible: hovered
+					ToolTip.text: qsTr("Stonks portfolio")
+					onClicked: navigationRail.stonksRequested()
+					Keys.onReturnPressed: event => {
+						navigationRail.stonksRequested()
+						event.accepted = true
+					}
+					Keys.onEnterPressed: event => {
+						navigationRail.stonksRequested()
+						event.accepted = true
+					}
+					Keys.onSpacePressed: event => {
+						navigationRail.stonksRequested()
+						event.accepted = true
+					}
+				}
+				ModernIconButton {
 					id: settingsButton
 					hoverEnabled: !navigationRail.visualFixtureMode
 					objectName: "settingsButton"
 					activeFocusOnTab: true
 					focusPolicy: Qt.StrongFocus
-					KeyNavigation.tab: profileMenuButton
-					KeyNavigation.backtab: selfDeafenButton
+					KeyNavigation.tab: rooms
+					KeyNavigation.backtab: stonksButton.visible ? stonksButton : selfDeafenButton
 					iconName: "settings"
 					dense: true
 					enabled: navigationRail.settingsEnabled
@@ -2370,44 +2451,6 @@ Rectangle {
 					Keys.onSpacePressed: event => {
 						navigationRail.settingsRequested()
 						event.accepted = true
-					}
-				}
-				ModernIconButton {
-					id: profileMenuButton
-					hoverEnabled: !navigationRail.visualFixtureMode
-					objectName: "profileMenuButton"
-					activeFocusOnTab: true
-					focusPolicy: Qt.StrongFocus
-					KeyNavigation.backtab: settingsButton
-					iconName: "more"
-					dense: true
-					opacity: hovered || activeFocus ? 1 : 0.72
-					Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
-					Accessible.name: qsTr("Profile menu")
-					onClicked: navigationRail.profileMenuRequested(
-						profileMenuButton.mapToItem(null, width / 2, 0))
-					Keys.onReturnPressed: event => {
-						navigationRail.profileMenuRequested(
-							profileMenuButton.mapToItem(null, width / 2, 0))
-						event.accepted = true
-					}
-					Keys.onEnterPressed: event => {
-						navigationRail.profileMenuRequested(
-							profileMenuButton.mapToItem(null, width / 2, 0))
-						event.accepted = true
-					}
-					Keys.onSpacePressed: event => {
-						navigationRail.profileMenuRequested(
-							profileMenuButton.mapToItem(null, width / 2, 0))
-						event.accepted = true
-					}
-					Keys.onPressed: event => {
-						if (event.key === Qt.Key_Menu
-							|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
-							navigationRail.profileMenuRequested(
-								profileMenuButton.mapToItem(null, width / 2, 0))
-							event.accepted = true
-						}
 					}
 				}
 				}

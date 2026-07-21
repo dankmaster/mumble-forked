@@ -22,7 +22,7 @@
     { "id": "motd-light-expanded", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "connected", "motd_variant": "expanded" },
     { "id": "motd-dark-collapsed", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected", "motd_variant": "collapsed" },
     { "id": "motd-light-changed", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "connected", "motd_variant": "changed" },
-    { "id": "motd-dark-history-hidden", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected", "motd_variant": "history-hidden" },
+    { "id": "motd-dark-history-visible", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected", "motd_variant": "history-visible" },
     { "id": "motd-compact-short-expanded", "width": 760, "height": 520, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "compact", "state": "connected", "motd_variant": "expanded", "navigation_open": false },
     { "id": "preview-dark-youtube", "width": 1280, "height": 900, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected", "rich_preview_variant": "youtube", "presentation_family": "embed", "case_variant": "youtube" },
     { "id": "preview-light-youtube", "width": 1280, "height": 900, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "connected", "rich_preview_variant": "youtube", "presentation_family": "embed", "case_variant": "youtube" },

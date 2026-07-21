@@ -126,7 +126,7 @@ namespace {
 
 	QStringList supportedMotdVariants() {
 		return { QStringLiteral("none"), QStringLiteral("expanded"), QStringLiteral("collapsed"),
-				 QStringLiteral("changed"), QStringLiteral("history-hidden") };
+				 QStringLiteral("changed"), QStringLiteral("history-visible") };
 	}
 
 	QStringList supportedRichPreviewVariants() {
@@ -781,7 +781,9 @@ namespace {
 			{ QStringLiteral("feedPreferences"), QVariantMap { { QStringLiteral("showMine"), true },
 				{ QStringLiteral("showPopular"), true }, { QStringLiteral("showPins"), true } } },
 			{ QStringLiteral("feature"), QVariantMap { { QStringLiteral("tickerBannerEnabled"), true },
-				{ QStringLiteral("tickerBannerAlwaysScroll"), false } } },
+				{ QStringLiteral("tickerPlacement"), QStringLiteral("bottom") },
+				{ QStringLiteral("tickerDirection"), QStringLiteral("left") },
+				{ QStringLiteral("tickerSpeed"), QStringLiteral("normal") } } },
 			{ QStringLiteral("textChannelId"), 7 }, { QStringLiteral("socialAnnouncementsEnabled"), true },
 			{ QStringLiteral("textChannels"), QVariantList { QVariantMap {
 				{ QStringLiteral("textChannelId"), 7 }, { QStringLiteral("name"), QStringLiteral("stonks") } } } },
@@ -1165,6 +1167,12 @@ namespace {
 			const QString hero = registerVisualPreviewImage(host, variant, title,
 				QStringLiteral("Steam store fixture"), QColor(QStringLiteral("#123c69")),
 				QColor(QStringLiteral("#66c0f4")));
+			const QString screenshot = registerVisualPreviewImage(host, QStringLiteral("steam-screenshot"), title,
+				QStringLiteral("Steam gallery screenshot"), QColor(QStringLiteral("#3b1d5f")),
+				QColor(QStringLiteral("#ecb365")));
+			const QString trailerPoster = registerVisualPreviewImage(host, QStringLiteral("steam-trailer"), title,
+				QStringLiteral("Steam trailer poster"), QColor(QStringLiteral("#182848")),
+				QColor(QStringLiteral("#d94f70")));
 			preview.insert(QStringLiteral("url"), QStringLiteral("https://store.steampowered.com/app/fixture"));
 			preview.insert(QStringLiteral("title"), title);
 			preview.insert(QStringLiteral("subtitle"), QStringLiteral("Steam"));
@@ -1181,6 +1189,13 @@ namespace {
 				{ QStringLiteral("steamPrice"), QStringLiteral("29,99 €") },
 				{ QStringLiteral("steamOriginalPrice"), QStringLiteral("39,99 €") },
 				{ QStringLiteral("steamDiscountPercent"), 25 },
+				{ QStringLiteral("steamBestPrice"), QStringLiteral("24,99 €") },
+				{ QStringLiteral("steamBestShop"), QStringLiteral("Fanatical") },
+				{ QStringLiteral("steamBestDealUrl"), QStringLiteral("https://itad.link/visual-fixture/") },
+				{ QStringLiteral("steamDealComparisonUrl"),
+					QStringLiteral("https://isthereanydeal.com/game/hades-ii/") },
+				{ QStringLiteral("steamHistoricalLowPrice"), QStringLiteral("19,99 €") },
+				{ QStringLiteral("steamHistoricalLowShop"), QStringLiteral("Steam") },
 				{ QStringLiteral("steamPlatforms"), QStringLiteral("Windows") },
 				{ QStringLiteral("steamReviewSummary"), QStringLiteral("Very Positive") },
 				{ QStringLiteral("steamReviewPercent"), 92 },
@@ -1191,7 +1206,22 @@ namespace {
 				{ QStringLiteral("gameStoreTags"),
 					QVariantList { QStringLiteral("Action roguelike"), QStringLiteral("Mythology") } }
 			});
-			attachImage(hero, title);
+			preview.insert(QStringLiteral("thumbnailUrl"), hero);
+			preview.insert(QStringLiteral("mediaItems"), QVariantList {
+				QVariantMap { { QStringLiteral("kind"), QStringLiteral("image") },
+					{ QStringLiteral("mime"), QStringLiteral("image/png") },
+					{ QStringLiteral("url"), hero }, { QStringLiteral("thumbnail"), hero },
+					{ QStringLiteral("title"), QStringLiteral("Cover") } },
+				QVariantMap { { QStringLiteral("kind"), QStringLiteral("video") },
+					{ QStringLiteral("mime"), QStringLiteral("video/mp4") },
+					{ QStringLiteral("url"), QStringLiteral("https://cdn.example.test/hades-ii-trailer.mp4") },
+					{ QStringLiteral("poster"), trailerPoster }, { QStringLiteral("thumbnail"), trailerPoster },
+					{ QStringLiteral("title"), QStringLiteral("Official trailer") } },
+				QVariantMap { { QStringLiteral("kind"), QStringLiteral("image") },
+					{ QStringLiteral("mime"), QStringLiteral("image/png") },
+					{ QStringLiteral("url"), screenshot }, { QStringLiteral("thumbnail"), screenshot },
+					{ QStringLiteral("title"), QStringLiteral("Gameplay screenshot") } }
+			});
 			return preview;
 		}
 		if (variant == QLatin1String("google")) {
@@ -1893,7 +1923,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		const bool expectExpanded = expectMotd && motdVariant != QLatin1String("collapsed");
 		const bool expectChanged = motdVariant == QLatin1String("changed");
 		const bool expectUserHistory = state == QLatin1String("connected")
-			&& (motdVariant == QLatin1String("none") || motdVariant == QLatin1String("history-hidden"));
+			&& (motdVariant == QLatin1String("none") || motdVariant == QLatin1String("history-visible"));
 		if (m_host->sessionController()->hasMotd() != expectMotd
 			|| (expectMotd && m_host->sessionController()->motdExpanded() != expectExpanded)
 			|| m_host->sessionController()->motdChanged() != expectChanged
@@ -2312,8 +2342,6 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	const QVariantMap chatFixtureState = visualChatFixtureState(m_host, surfaceVariant, prependFixtureState);
 	fixtureOverrideRollback.committed = true;
 	++m_generation;
-	const bool motdHiddenForHistory = m_host->sessionController()->hasMotd()
-		&& m_host->chatModel()->hasUserHistory();
 	return { { QStringLiteral("case_id"), caseId }, { QStringLiteral("state"), state },
 			 { QStringLiteral("theme"), theme }, { QStringLiteral("layout"), layout },
 			 { QStringLiteral("density"), density },
@@ -2345,7 +2373,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			 { QStringLiteral("motd_changed"), m_host->sessionController()->motdChanged() },
 			 { QStringLiteral("motd_has_user_history"), m_host->chatModel()->hasUserHistory() },
 			 { QStringLiteral("motd_visible"), m_host->sessionController()->hasMotd()
-				&& !m_host->sessionController()->motdDismissed() && !motdHiddenForHistory },
+				&& !m_host->sessionController()->motdDismissed() },
 			 { QStringLiteral("manual_plugin_state"), manualPluginState },
 			 { QStringLiteral("recorder_state"), recorderState },
 			 { QStringLiteral("toast_state"), toastState },
@@ -3027,6 +3055,11 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 				visualMenuAction(QStringLiteral("self.presence.deafened"), QStringLiteral("Deafened"),
 					QStringLiteral("danger"), true, false) } },
 			{ QStringLiteral("actions"), QVariantList {
+				visualMenuAction(QStringLiteral("self.recording"), QStringLiteral("Record…")),
+				visualMenuAction(QStringLiteral("self.audioStats"), QStringLiteral("Audio Statistics")),
+				visualMenuAction(QStringLiteral("self.comment"), QStringLiteral("Change Comment")),
+				visualMenuAction(QStringLiteral("self.avatarChange"), QStringLiteral("Change Avatar")),
+				visualMenuAction(QStringLiteral("configure.certificate"), QStringLiteral("Certificate…")),
 				visualMenuAction(QStringLiteral("server.disconnect"), QStringLiteral("Disconnect"),
 					QStringLiteral("danger")) } }
 		});
@@ -3069,6 +3102,7 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		});
 		if (motdVariant != QLatin1String("none")) {
 			const QString fixtureMotd = QStringLiteral(
+				"<p><img src='qrc:/mumble.svg' width='128' height='128' alt='Mumble server mark'/></p>"
 				"<h2>Welcome to Mumble</h2>"
 				"<p>This deterministic server message verifies the native Qt Quick welcome surface.</p>"
 				"<p><b>Tip:</b> Choose a room on the left, then say hello.</p>");
@@ -3150,7 +3184,7 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		scope->applyState(scopeState);
 		participants->replaceParticipantStates(fixtureParticipants);
 		const bool systemMessages = motdVariant != QLatin1String("none")
-			&& motdVariant != QLatin1String("history-hidden");
+			&& motdVariant != QLatin1String("history-visible");
 		const QVariantMap richPreview = visualRichPreview(m_host, richPreviewVariant, richPreviewSize);
 		QString fixtureBodyText = QStringLiteral("Qt Quick is ready for review.");
 		QString fixtureBodyHtml;

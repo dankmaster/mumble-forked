@@ -45,8 +45,8 @@ TestCase {
 
 	function setInputEnhancementCalibrationState(state, overrides) {
 		const field = {
-			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
-			"value": { "available": true, "amplitude": 40 }, "staticMeter": true,
+			"id": "audio.inputEnhancementCalibration", "type": "inputEnhancementCalibration",
+			"label": "Enhancement calibration",
 			"inputEnhancementCalibrationState": state,
 			"inputEnhancementCalibrationWorkerState": "idle",
 			"inputEnhancementCalibrationStartActionId": "startInputEnhancementCalibration",
@@ -64,7 +64,7 @@ TestCase {
 		};
 		const additions = overrides || {};
 		Object.keys(additions).forEach(function(key) { field[key] = additions[key]; });
-		dialogState.setSections([{ "title": "Input enhancement", "fields": [field] }]);
+		dialogState.setSections([{ "title": "Microphone processing", "fields": [field] }]);
 	}
 
 	function test_before_open_can_defer_modal_until_host_is_ready() {
@@ -1011,6 +1011,19 @@ TestCase {
 		})
 	}
 
+	function test_stonks_client_fields_route_immediate_settings_actions() {
+		dialogState.setSections([{ "title": "Ticker strip", "fields": [{
+			"id": "stonks.client.enabled", "type": "checkbox",
+			"label": "Show the Stonks ticker", "value": false
+		}] }])
+		const tickerToggle = findChild(loader.item.contentItem, "dialogField_stonks.client.enabled")
+		tryVerify(function() { return tickerToggle !== null && tickerToggle.visible })
+		loader.item.updateFieldValue("stonks.client.enabled", true)
+		compare(dialogState.lastAction, "stonks.updateClient")
+		compare(dialogState.lastPayload.fieldId, "stonks.client.enabled")
+		compare(dialogState.lastPayload.value, true)
+	}
+
 	function test_range_uses_slider_metadata_live_value_keyboard_and_typed_updates() {
 		dialogState.setSections([{ "id": "levels", "title": "Levels", "fields": [{
 			"id": "audio.level", "type": "range", "label": "Input level", "value": 40,
@@ -1044,7 +1057,7 @@ TestCase {
 		keyClick(Qt.Key_Right)
 		tryCompare(slider, "value", 45)
 		tryCompare(valueLabel, "text", "45%")
-		compare(dialogState.fieldValue("audio.level"), 45)
+		tryVerify(function() { return dialogState.fieldValue("audio.level") === 45 })
 		compare(typeof dialogState.fieldValue("audio.level"), "number")
 
 		compare(number.stepSize, 10)
@@ -1166,6 +1179,14 @@ TestCase {
 		compare(dialogState.lastAction, "removeServerImage")
 		compare(dialogState.lastPayload.fieldId, "server.image")
 
+		dialogState.setSections([{ "id": "value-image", "fields": [{
+			"id": "value.only.image", "type": "imagePicker", "label": "Existing server image",
+			"value": "image://mumble/value-only"
+		}]}])
+		const valueImage = findChild(loader.item.contentItem, "dialogImagePreviewContent_value.only.image")
+		tryVerify(function() { return valueImage !== null })
+		compare(String(valueImage.source), "image://mumble/value-only")
+
 		dialogState.setSections([{ "id": "invalid-image", "fields": [{
 			"id": "unsafe.image", "type": "imagePicker", "label": "Unsafe image",
 			"value": "token", "previewSource": "https://example.test/image.png"
@@ -1176,6 +1197,52 @@ TestCase {
 		compare(validation.Accessible.role, Accessible.AlertMessage)
 		verify(validation.text.length > 0)
 		compare(invalidPreview.border.color, Theme.danger)
+	}
+
+	function test_motd_editor_switches_between_permission_aware_edit_and_read_only_modes() {
+		dialogState.setSections([{ "id": "motd", "fields": [{
+			"id": "motd.html", "type": "motdEditor", "label": "Message of the day",
+			"value": "<h2>Welcome</h2>", "originalValue": "<h2>Welcome</h2>",
+			"canEdit": true, "enabled": true, "showSaveAction": true,
+			"maximumLength": 100000,
+			"previewSourceHtml": "<h2>Welcome</h2>",
+			"previewSummary": "Welcome",
+			"previewBlocks": [{ "kind": "heading", "headingLevel": 2,
+				"segments": [{ "text": "Welcome", "bold": true }],
+				"plainText": "Welcome", "alignment": "center" }]
+		}]}])
+		let editor = null
+		let preview = null
+		let save = null
+		tryVerify(function() {
+			editor = findChild(loader.item.contentItem, "motdSourceEditor")
+			preview = findChild(loader.item.contentItem, "motdLivePreview")
+			save = findChild(loader.item.contentItem, "motdSaveButton")
+			return editor !== null && preview !== null && save !== null
+		})
+		verify(!editor.readOnly)
+		compare(editor.text, "<h2>Welcome</h2>")
+		verify(save.visible)
+		verify(findChild(loader.item.contentItem, "motdPreviewDocumentBody") !== null)
+		editor.text = "<p>Updated</p>"
+		tryVerify(function() { return dialogState.fieldValue("motd.html") === "<p>Updated</p>" })
+
+		dialogState.setSections([{ "id": "motd", "fields": [{
+			"id": "motd.html", "type": "motdEditor", "label": "Message of the day",
+			"value": "<p>Read only</p>", "originalValue": "<p>Read only</p>",
+			"canEdit": false, "enabled": false, "showSaveAction": false,
+			"maximumLength": 100000,
+			"previewSourceHtml": "<p>Read only</p>",
+			"previewSummary": "Read only",
+			"previewBlocks": [{ "kind": "paragraph",
+				"segments": [{ "text": "Read only" }],
+				"plainText": "Read only", "alignment": "left" }]
+		}]}])
+		tryVerify(function() {
+			editor = findChild(loader.item.contentItem, "motdSourceEditor")
+			save = findChild(loader.item.contentItem, "motdSaveButton")
+			return editor !== null && editor.readOnly && save !== null && !save.visible
+		})
 	}
 
 	function test_section_presentation_metadata_selects_tokenized_surfaces() {
@@ -1761,8 +1828,6 @@ TestCase {
 			"value": { "available": true, "connected": true, "amplitude": 72, "signalToNoise": 48,
 				"hybrid": 63, "transmitting": true, "peakCleanMicDb": -17 },
 			"vadSource": 2, "silenceThreshold": 18, "speechThreshold": 62, "voiceHold": 37, "active": true,
-			"recommendedVadSource": 1, "recommendedInputGateMode": 1,
-			"recommendedNoiseCancelMode": 3, "recommendedMaxAmplification": 6400,
 			"staticMeter": false, "calibrationActionId": "finishAudioSetupWizard",
 			"calibrationLabel": "Audio setup", "replayStartActionId": "startVoiceReplay",
 			"replayStopActionId": "stopVoiceReplay", "replayLabel": "Replay"
@@ -1798,16 +1863,22 @@ TestCase {
 		compare(fill.width, fixtureWidth)
 
 		const setup = findChild(loader.item.contentItem, "voiceMeterCalibration_audio.inputMeter");
-		verify(setup !== null && setup.visible);
+		const guidedSetup = findChild(loader.item.contentItem, "voiceActivationSetup");
+		verify(setup !== null && setup.visible && guidedSetup !== null);
 		mouseClick(setup);
+		compare(guidedSetup.setupState, 1);
+		guidedSetup.cancelSetup();
+		guidedSetup.selectedMethod = 1;
+		guidedSetup.suggestedStopThreshold = 18;
+		guidedSetup.suggestedStartThreshold = 62;
+		guidedSetup.applySuggestion();
 		compare(dialogState.lastAction, "finishAudioSetupWizard");
 		compare(dialogState.lastPayload.silenceThreshold, 18);
 		compare(dialogState.lastPayload.speechThreshold, 62);
 		compare(dialogState.lastPayload.voiceHold, 37);
 		compare(dialogState.lastPayload.vadSource, 1);
-		compare(dialogState.lastPayload.inputGateMode, 1);
-		compare(dialogState.lastPayload.noiseCancelMode, 3);
-		compare(dialogState.lastPayload.maxAmplification, 6400);
+		compare(dialogState.lastPayload.inputGateMode, 0);
+		compare(Object.keys(dialogState.lastPayload).length, 5);
 
 		const replay = findChild(loader.item.contentItem, "voiceMeterReplay_audio.inputMeter");
 		verify(replay !== null && replay.visible);
@@ -1816,23 +1887,62 @@ TestCase {
 		compare(dialogState.lastPayload.mode, "server");
 	}
 
+	function test_guided_voice_setup_recommends_detection_from_room_and_voice_samples() {
+		dialogState.setSections([{ "title": "Voice detection", "fields": [{
+			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
+			"value": { "available": true, "amplitude": 20, "signalToNoise": 10, "hybrid": 9 },
+			"staticMeter": true, "calibrationActionId": "finishAudioSetupWizard"
+		}]}]);
+		const setup = findChild(loader.item.contentItem, "voiceActivationSetup");
+		tryVerify(function() { return setup !== null; });
+
+		setup.ambientPeaks = [18, 8, 7];
+		setup.voiceSums = [520, 720, 500];
+		setup.voicePeaks = [70, 88, 68];
+		setup.voiceSamples = 10;
+		setup.chooseMethod();
+		compare(setup.suggestedMethod, 1);
+		verify(setup.suggestedStartThreshold > setup.suggestedStopThreshold);
+
+		setup.ambientPeaks = [12, 7, 6];
+		setup.voiceSums = [680, 120, 100];
+		setup.voicePeaks = [82, 18, 15];
+		setup.voiceSamples = 10;
+		setup.chooseMethod();
+		compare(setup.suggestedMethod, 0);
+
+		setup.ambientPeaks = [38, 34, 10];
+		setup.voiceSums = [650, 540, 520];
+		setup.voicePeaks = [80, 72, 70];
+		setup.voiceSamples = 10;
+		setup.chooseMethod();
+		compare(setup.suggestedMethod, 2);
+	}
+
 	function test_input_enhancement_blind_comparison_routes_only_opaque_tokens() {
 		dialogState.setSections([{ "title": "Input enhancement", "fields": [{
-			"id": "audio.inputMeter", "type": "voiceMeter", "label": "Current voice input",
-			"value": { "available": true, "amplitude": 40 }, "staticMeter": true,
+			"id": "audio.inputEnhancementCalibration", "type": "inputEnhancementCalibration",
+			"label": "Enhancement calibration",
 			"inputEnhancementCalibrationState": 10,
-			"inputEnhancementCalibrationLeftPlaybackToken": "18446744073709551001",
-			"inputEnhancementCalibrationRightPlaybackToken": "18446744073709551002",
+			"inputEnhancementCalibrationPlaybackOptions": [
+				{ "label": "A", "playbackToken": "18446744073709551001" },
+				{ "label": "B", "playbackToken": "18446744073709551002" },
+				{ "label": "C", "playbackToken": "18446744073709551003" },
+				{ "label": "D", "playbackToken": "18446744073709551004" }
+			],
 			"inputEnhancementCalibrationSelectActionId": "selectInputEnhancementCalibration"
 		}]}]);
 
 		const comparison = findChild(loader.item.contentItem, "inputEnhancementCalibration");
 		const playA = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayA");
 		const playB = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayB");
+		const playC = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayC");
+		const playD = findChild(loader.item.contentItem, "inputEnhancementCalibrationPlayD");
 		const preferB = findChild(loader.item.contentItem, "inputEnhancementCalibrationPreferB");
 		const privacy = findChild(loader.item.contentItem, "inputEnhancementCalibrationPrivacy");
 		tryVerify(function() {
 			return comparison !== null && comparison.visible && playA !== null && playB !== null
+				&& playC !== null && playD !== null
 				&& preferB !== null && privacy !== null;
 		});
 		verify(privacy.text.indexOf("never sent to the server") >= 0);
@@ -1861,11 +1971,14 @@ TestCase {
 		compare(dialogState.lastAction, "selectInputEnhancementCalibration");
 		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551002");
 		compare(playB.text, "Play B");
+		playD.clicked();
+		compare(dialogState.lastAction, "playInputEnhancementCalibration");
+		compare(String(dialogState.lastPayload.playbackToken), "18446744073709551004");
 	}
 
 	function test_input_enhancement_calibration_renders_every_runtime_state() {
 		const expectedHeadings = [
-			"Tune input enhancement", "Check microphone level", "Check microphone level",
+			"2 · Processing calibration", "Check microphone level", "Check microphone level",
 			"Capture room sound", "Capture room sound", "Capture your voice", "Capture your voice",
 			"Capture local noise", "Capture local noise", "Compare safe candidates", "Blind comparison",
 			"Selection ready", "Calibration applied", "Calibration cancelled", "Calibration stopped",
@@ -1890,9 +2003,13 @@ TestCase {
 		}
 
 		setInputEnhancementCalibrationState(5);
-		const voicePrompt = findChild(loader.item.contentItem, "inputEnhancementCalibrationStatus");
-		tryVerify(function() { return voicePrompt !== null && voicePrompt.text.indexOf("s, sh, f") >= 0; });
-		verify(voicePrompt.text.indexOf("p, t, k") >= 0);
+		const readingPrompt = findChild(loader.item.contentItem, "inputEnhancementCalibrationReadingPrompt");
+		const readingText = findChild(loader.item.contentItem, "inputEnhancementCalibrationReadingText");
+		tryVerify(function() {
+			return readingPrompt !== null && readingPrompt.visible && readingText !== null
+				&& readingText.text.indexOf("five blue boxes") >= 0;
+		});
+		verify(readingText.text.indexOf("quick footsteps") >= 0);
 	}
 
 	function test_input_enhancement_calibration_routes_guided_actions_and_refresh() {
@@ -1951,10 +2068,8 @@ TestCase {
 			"inputEnhancementCalibrationTransmissionBlocked": true
 		});
 		const progress = findChild(loader.item.contentItem, "inputEnhancementCalibrationEvaluationProgress");
-		const legacyReplay = findChild(loader.item.contentItem, "voiceMeterReplay_audio.inputMeter");
 		tryVerify(function() {
-			return progress !== null && progress.visible && progress.value === 45
-				&& legacyReplay !== null && legacyReplay.visible && !legacyReplay.enabled;
+			return progress !== null && progress.visible && progress.value === 45;
 		});
 
 		setInputEnhancementCalibrationState(11, {

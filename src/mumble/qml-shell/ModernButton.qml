@@ -60,10 +60,10 @@ Button {
 			: control.emphasized ? (control.hovered ? control.hoverToneColor : control.toneColor)
 			: control.hovered ? Theme.surfaceHover : Theme.surfaceRaised
 		border.color: !control.enabled ? Theme.divider
-			: control.activeFocus ? Theme.focus
+			: control.visualFocus ? Theme.focus
 			: control.emphasized ? Qt.rgba(control.toneColor.r, control.toneColor.g, control.toneColor.b, 0.72)
 			: Theme.surfaceBorder
-		border.width: control.activeFocus ? Theme.focusRingWidth : 1
+		border.width: control.visualFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
     }
 }

@@ -33,12 +33,27 @@ TestCase {
 	}
 
 	function test_icon_button_selection_and_focus() {
+		fieldLoader.item.forceActiveFocus(Qt.OtherFocusReason)
 		iconLoader.item.text = "⋯"
 		iconLoader.item.selected = true
-		iconLoader.item.forceActiveFocus()
+		iconLoader.item.forceActiveFocus(Qt.TabFocusReason)
 		tryCompare(iconLoader.item, "activeFocus", true)
+		compare(iconLoader.item.visualFocus, true)
 		tryCompare(iconLoader.item.background, "color", Theme.accentSubtle, 500)
 		compare(iconLoader.item.background.border.width, Theme.focusRingWidth)
+	}
+
+	function test_icon_button_pointer_focus_does_not_linger_visually() {
+		const button = iconLoader.item
+		button.enabled = true
+		button.selected = false
+		button.overlay = false
+		testCase.forceActiveFocus(Qt.OtherFocusReason)
+		mouseClick(button)
+		tryCompare(button, "activeFocus", true)
+		compare(button.visualFocus, false)
+		tryCompare(button.background.border, "color", Qt.rgba(0, 0, 0, 0), 500)
+		compare(button.background.border.width, 1)
 	}
 
 	function test_disabled_icon_button_overrides_selected_accent() {
@@ -112,6 +127,8 @@ TestCase {
 
 	function test_combo_popup_delegate_enables_explicit_hover_state() {
 		comboLoader.item.enabled = true
+		comboLoader.item.toolTipText = "Explains the selected control"
+		compare(comboLoader.item.toolTipText, "Explains the selected control")
 		comboLoader.item.model = ["One", "Two"]
 		comboLoader.item.popup.open()
 		tryVerify(function() {

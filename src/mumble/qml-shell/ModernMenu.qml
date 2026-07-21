@@ -188,6 +188,31 @@ Menu {
 			parentMenu["setPointerNavigationActive"](value)
 	}
 
+	function activatePointerItem(target) {
+		if (!target || !target.visible || !target.enabled)
+			return false
+		let targetIndex = -1
+		for (let index = 0; index < count; ++index) {
+			if (itemAt(index) === target) {
+				targetIndex = index
+				break
+			}
+		}
+		if (targetIndex < 0)
+			return false
+		// QQuickMenu does not update currentIndex reliably for dynamically
+		// inserted rows on every supported Qt release. Keep pointer hover
+		// deterministic instead of leaving the previous row highlighted.
+		currentIndex = targetIndex
+		const previous = activeSubmenu
+		if (previous && previous.openerItem !== target) {
+			activeSubmenu = null
+			if (previous.visible)
+				previous.close()
+		}
+		return true
+	}
+
 	function openWithInitialFocus() {
 		open()
 		Qt.callLater(function() {

@@ -1002,8 +1002,11 @@ int main(int argc, char **argv) {
 
 	a.setQuitOnLastWindowClosed(false);
 
-	const bool showModernAudioSetup = !Global::get().s.audioWizardShown;
-	Global::get().s.audioWizardShown = true;
+	constexpr unsigned int currentModernAudioSetupVersion = 1;
+	const bool showModernAudioSetup = !Global::get().s.audioWizardShown
+									  || Global::get().s.modernAudioSetupVersion < currentModernAudioSetupVersion;
+	Global::get().s.audioWizardShown         = true;
+	Global::get().s.modernAudioSetupVersion = currentModernAudioSetupVersion;
 
 	bool showModernCertificateSetup = false;
 	if (!CertService::validate(Global::get().s.kpCertificate)) {

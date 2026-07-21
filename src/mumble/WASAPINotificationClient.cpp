@@ -29,8 +29,9 @@ HRESULT STDMETHODCALLTYPE WASAPINotificationClient::OnDefaultDeviceChanged(EData
 			 << device;
 
 	QMutexLocker lock(&listsMutex);
-	if (usedDefaultDevicesByFlowAndRole.contains(defaultDeviceNotificationKey(flow, role))) {
-		restartAudioLocked();
+	const AudioConsumers consumers = usedDefaultDevicesByFlowAndRole.value(defaultDeviceNotificationKey(flow, role));
+	if (consumers != NoConsumer) {
+		requestRecoveryLocked(consumers, QStringLiteral("default_device_changed"), 350);
 	}
 	return S_OK;
 }
@@ -43,11 +44,12 @@ HRESULT STDMETHODCALLTYPE WASAPINotificationClient::OnPropertyValueChanged(LPCWS
 	const bool channelConfigChanged = (key == PKEY_AudioEndpoint_PhysicalSpeakers);
 
 	QMutexLocker lock(&listsMutex);
-	if ((formatChanged || channelConfigChanged) && usedDevices.contains(device)) {
+	const AudioConsumers consumers = usedDevices.value(device);
+	if ((formatChanged || channelConfigChanged) && consumers != NoConsumer) {
 		qDebug() << "WASAPINotificationClient: Property changed device=" << device << "formatChanged=" << formatChanged
 				 << "channelConfigChanged=" << channelConfigChanged;
 
-		restartAudioLocked();
+		requestRecoveryLocked(consumers, QStringLiteral("device_format_changed"), 350);
 	}
 	return S_OK;
 }
@@ -57,8 +59,12 @@ HRESULT STDMETHODCALLTYPE WASAPINotificationClient::OnDeviceAdded(LPCWSTR pwstrD
 	qDebug() << "WASAPINotificationClient: Device added=" << device;
 
 	QMutexLocker lock(&listsMutex);
-	if (usedDevices.contains(device)) {
-		restartAudioLocked();
+	AudioConsumers consumers = usedDevices.value(device);
+	for (const AudioConsumers recoveryConsumers : consumersNeedingPreferredRecoveryByFlow) {
+		consumers |= recoveryConsumers;
+	}
+	if (consumers != NoConsumer) {
+		requestRecoveryLocked(consumers, QStringLiteral("device_added"), 750);
 	}
 
 	return S_OK;
@@ -67,6 +73,11 @@ HRESULT STDMETHODCALLTYPE WASAPINotificationClient::OnDeviceAdded(LPCWSTR pwstrD
 HRESULT STDMETHODCALLTYPE WASAPINotificationClient::OnDeviceRemoved(LPCWSTR pwstrDeviceId) {
 	const QString device = QString::fromWCharArray(pwstrDeviceId);
 	qDebug() << "WASAPINotificationClient: Device removed=" << device;
+	QMutexLocker lock(&listsMutex);
+	const AudioConsumers consumers = usedDevices.value(device);
+	if (consumers != NoConsumer) {
+		requestRecoveryLocked(consumers, QStringLiteral("device_removed"), 750);
+	}
 	return S_OK;
 }
 
@@ -114,41 +125,87 @@ ULONG STDMETHODCALLTYPE WASAPINotificationClient::Release() {
 }
 
 void WASAPINotificationClient::enlistDefaultDeviceAsUsed(LPCWSTR pwstrDefaultDevice, const EDataFlow flow,
-														 const ERole role) {
+														 const ERole role, const AudioConsumers consumers) {
 	const QString device = QString::fromWCharArray(pwstrDefaultDevice);
 	QMutexLocker lock(&listsMutex);
-	if (!usedDefaultDevices.contains(device)) {
-		usedDefaultDevices.append(device);
-	}
-	usedDefaultDevicesByFlowAndRole.insert(defaultDeviceNotificationKey(flow, role), device);
-	_enlistDeviceAsUsed(device);
+	usedDefaultDevicesByFlowAndRole[defaultDeviceNotificationKey(flow, role)] |= consumers;
+	_enlistDeviceAsUsed(device, consumers);
 }
 
-void WASAPINotificationClient::enlistDeviceAsUsed(LPCWSTR pwstrDevice) {
+void WASAPINotificationClient::enlistDeviceAsUsed(LPCWSTR pwstrDevice, const AudioConsumers consumers) {
 	const QString device = QString::fromWCharArray(pwstrDevice);
 	QMutexLocker lock(&listsMutex);
-	_enlistDeviceAsUsed(device);
+	_enlistDeviceAsUsed(device, consumers);
 }
 
-void WASAPINotificationClient::_enlistDeviceAsUsed(const QString &device) {
-	if (!usedDevices.contains(device)) {
-		usedDevices.append(device);
+void WASAPINotificationClient::_enlistDeviceAsUsed(const QString &device, const AudioConsumers consumers) {
+	usedDevices[device] |= consumers;
+}
+
+void WASAPINotificationClient::enlistDeviceAsUsed(const QString &device, const AudioConsumers consumers) {
+	QMutexLocker lock(&listsMutex);
+	_enlistDeviceAsUsed(device, consumers);
+}
+
+void WASAPINotificationClient::setConsumersNeedingPreferredRecovery(const EDataFlow flow,
+													 const AudioConsumers consumers, const bool needed) {
+	QMutexLocker lock(&listsMutex);
+	AudioConsumers &flowConsumers = consumersNeedingPreferredRecoveryByFlow[static_cast< int >(flow)];
+	if (needed) {
+		flowConsumers |= consumers;
+	} else {
+		flowConsumers &= ~consumers;
+		if (flowConsumers == NoConsumer) {
+			consumersNeedingPreferredRecoveryByFlow.remove(static_cast< int >(flow));
+		}
 	}
 }
 
-void WASAPINotificationClient::enlistDeviceAsUsed(const QString &device) {
+void WASAPINotificationClient::markConsumersHealthy(const AudioConsumers consumers) {
 	QMutexLocker lock(&listsMutex);
-	_enlistDeviceAsUsed(device);
+	if (consumers.testFlag(InputConsumer)) {
+		inputRecoveryFailures = 0;
+	}
+	if (consumers.testFlag(OutputConsumer)) {
+		outputRecoveryFailures = 0;
+	}
+}
+
+void WASAPINotificationClient::requestRecovery(const AudioConsumers consumers, const QString &reason,
+														const int delayMs) {
+	QMutexLocker lock(&listsMutex);
+	requestRecoveryLocked(consumers, reason, delayMs);
 }
 
 void WASAPINotificationClient::unlistDevice(LPCWSTR pwstrDevice) {
 	const QString device = QString::fromWCharArray(pwstrDevice);
 	QMutexLocker lock(&listsMutex);
-	usedDevices.removeOne(device);
-	usedDefaultDevices.removeOne(device);
+	usedDevices.remove(device);
+}
+
+void WASAPINotificationClient::clearUsedDefaultDeviceList() {
+	QMutexLocker lock(&listsMutex);
+	usedDefaultDevicesByFlowAndRole.clear();
+}
+
+void WASAPINotificationClient::_clearUsedDeviceLists() {
+	usedDevices.clear();
+	usedDefaultDevicesByFlowAndRole.clear();
+}
+
+void WASAPINotificationClient::_clearConsumers(const AudioConsumers consumers) {
+	for (auto iterator = usedDevices.begin(); iterator != usedDevices.end();) {
+		iterator.value() &= ~consumers;
+		if (iterator.value() == NoConsumer) {
+			iterator = usedDevices.erase(iterator);
+		} else {
+			++iterator;
+		}
+	}
 	for (auto iterator = usedDefaultDevicesByFlowAndRole.begin();
 		 iterator != usedDefaultDevicesByFlowAndRole.end();) {
-		if (iterator.value() == device) {
+		iterator.value() &= ~consumers;
+		if (iterator.value() == NoConsumer) {
 			iterator = usedDefaultDevicesByFlowAndRole.erase(iterator);
 		} else {
 			++iterator;
@@ -156,40 +213,36 @@ void WASAPINotificationClient::unlistDevice(LPCWSTR pwstrDevice) {
 	}
 }
 
-void WASAPINotificationClient::clearUsedDefaultDeviceList() {
-	QMutexLocker lock(&listsMutex);
-	usedDefaultDevices.clear();
-	usedDefaultDevicesByFlowAndRole.clear();
-}
-
-void WASAPINotificationClient::_clearUsedDeviceLists() {
-	usedDefaultDevices.clear();
-	usedDevices.clear();
-	usedDefaultDevicesByFlowAndRole.clear();
-}
-
 void WASAPINotificationClient::clearUsedDeviceLists() {
 	QMutexLocker lock(&listsMutex);
 	_clearUsedDeviceLists();
 }
 
-void WASAPINotificationClient::beginAudioResetRebuild() {
+WASAPINotificationClient::AudioConsumers WASAPINotificationClient::beginAudioResetRebuild() {
 	QMutexLocker lock(&listsMutex);
+	const AudioConsumers consumers = queuedConsumers == NoConsumer ? AudioConsumers(AllConsumers) : queuedConsumers;
+	queuedConsumers = NoConsumer;
+	_clearConsumers(consumers);
 	restartDispatchGate.beginRebuildAfterOldAudioStopped();
+	return consumers;
 }
 
 void WASAPINotificationClient::finishAudioResetRebuild() {
 	bool dispatchFollowup = false;
+	int followupDelayMs   = 350;
 	{
 		QMutexLocker lock(&listsMutex);
 		dispatchFollowup = restartDispatchGate.finishRebuildStartAndTakeFollowup();
 		if (dispatchFollowup) {
-			_clearUsedDeviceLists();
+			queuedConsumers   = followupConsumers == NoConsumer ? AudioConsumers(AllConsumers) : followupConsumers;
+			followupConsumers = NoConsumer;
+			queuedDelayMs     = 350;
+			followupDelayMs   = queuedDelayMs;
 		}
 	}
 	if (dispatchFollowup) {
 		qWarning("WASAPINotificationClient: Triggering follow-up audio reset");
-		emit doResetAudio();
+		emit doResetAudio(followupDelayMs);
 	}
 }
 
@@ -224,21 +277,46 @@ WASAPINotificationClient::WASAPINotificationClient() : QObject(), pEnumerator(0)
 		return;
 	}
 
-	Global::get().mw->connect(this, SIGNAL(doResetAudio()), SLOT(onResetAudio()), Qt::QueuedConnection);
+	Global::get().mw->connect(this, SIGNAL(doResetAudio(int)), SLOT(scheduleWASAPIAudioReset(int)),
+							 Qt::QueuedConnection);
 
 	pEnumerator->RegisterEndpointNotificationCallback(this);
 }
 
 WASAPINotificationClient::~WASAPINotificationClient() {
-	if (pEnumerator)
+	if (pEnumerator) {
+		pEnumerator->UnregisterEndpointNotificationCallback(this);
 		pEnumerator->Release();
+	}
 }
 
-void WASAPINotificationClient::restartAudioLocked() {
+void WASAPINotificationClient::requestRecoveryLocked(const AudioConsumers consumers, const QString &reason,
+															  const int delayMs) {
+	if (consumers == NoConsumer) {
+		return;
+	}
+	int effectiveDelay = qMax(0, delayMs);
+	if (reason.contains(QLatin1String("stream_failed"))) {
+		int exponent = 0;
+		if (consumers.testFlag(InputConsumer)) {
+			exponent = qMax(exponent, qMin(inputRecoveryFailures++, 5));
+		}
+		if (consumers.testFlag(OutputConsumer)) {
+			exponent = qMax(exponent, qMin(outputRecoveryFailures++, 5));
+		}
+		effectiveDelay = qMin(30000, qMax(effectiveDelay, 750 * (1 << exponent)));
+	}
+	const bool wasIdle = !restartDispatchGate.restartPending();
+	if (restartDispatchGate.rebuildInProgress()) {
+		followupConsumers |= consumers;
+	} else {
+		queuedConsumers |= consumers;
+		queuedDelayMs = wasIdle ? effectiveDelay : qMin(queuedDelayMs, effectiveDelay);
+	}
 	if (!restartDispatchGate.requestRestart()) {
 		return;
 	}
-	qWarning("WASAPINotificationClient: Triggering audio reset");
-	_clearUsedDeviceLists();
-	emit doResetAudio();
+	qWarning() << "WASAPINotificationClient: Scheduling audio recovery consumers=" << int(consumers)
+			   << "delayMs=" << effectiveDelay << "reason=" << reason;
+	emit doResetAudio(effectiveDelay);
 }

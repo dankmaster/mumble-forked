@@ -180,6 +180,12 @@ void TestInputEnhancementCalibrationRuntime::callbackCaptureBlocksTransmissionAn
 		selection(Profile::Crisp, 65, 70, 33),
 	};
 	QVERIFY(bridge.evaluateCandidates(candidates));
+	const CalibrationSession::BlindComparison comparison = bridge.blindComparison();
+	QCOMPARE(comparison.count, candidates.size());
+	for (std::size_t index = 0; index < comparison.count; ++index) {
+		QVERIFY(comparison.playbackTokens[index] != 0);
+		QVERIFY(!bridge.playbackForToken(comparison.playbackTokens[index]).empty());
+	}
 	const CalibrationSession::BlindPair pair = bridge.blindPair();
 	QVERIFY(pair.leftPlaybackToken != 0);
 	QVERIFY(!bridge.playbackForToken(pair.leftPlaybackToken).empty());

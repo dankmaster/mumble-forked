@@ -28,6 +28,7 @@
 #include "PersistentChatController.h"
 #include "Settings.h"
 #include "ScreenShareViewBackend.h"
+#include "ServerHandler.h"
 #include "Version.h"
 #include "VersionCheck.h"
 
@@ -2056,7 +2057,9 @@ namespace {
 		state.insert(QStringLiteral("leaderboardDescription"),
 					 QObject::tr("Probe leaderboard comparing latest portfolio saves over 30 days."));
 		state.insert(QStringLiteral("tickerBannerEnabled"), true);
-		state.insert(QStringLiteral("tickerBannerAlwaysScroll"), false);
+		state.insert(QStringLiteral("tickerPlacement"), QStringLiteral("bottom"));
+		state.insert(QStringLiteral("tickerDirection"), QStringLiteral("left"));
+		state.insert(QStringLiteral("tickerSpeed"), QStringLiteral("normal"));
 		state.insert(QStringLiteral("disableTickerAnimation"), true);
 		state.insert(QStringLiteral("automationHeaderVisible"), true);
 		state.insert(QStringLiteral("disableQuoteLookup"), true);
@@ -2323,11 +2326,14 @@ namespace {
 			return summary;
 		}
 
-		if (action == QLatin1String("setTickerBannerAlwaysScroll")) {
-			summary.insert(QStringLiteral("serverAction"), QStringLiteral("setTickerBannerAlwaysScroll"));
+		if (action == QLatin1String("setTickerPresentation")) {
+			summary.insert(QStringLiteral("serverAction"), QStringLiteral("setTickerPresentation"));
 			summary.insert(QStringLiteral("protoAction"), QStringLiteral("localSettings"));
-			summary.insert(QStringLiteral("tickerBannerAlwaysScroll"),
-						   payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool());
+			summary.insert(QStringLiteral("tickerBannerEnabled"),
+						   payload.value(QStringLiteral("tickerBannerEnabled")));
+			summary.insert(QStringLiteral("tickerPlacement"), payload.value(QStringLiteral("tickerPlacement")));
+			summary.insert(QStringLiteral("tickerDirection"), payload.value(QStringLiteral("tickerDirection")));
+			summary.insert(QStringLiteral("tickerSpeed"), payload.value(QStringLiteral("tickerSpeed")));
 			return summary;
 		}
 
@@ -2688,13 +2694,22 @@ namespace {
 		return QStringLiteral("v1:%1:%2").arg(text.length()).arg(QString::number(hash, 16));
 	}
 
+	QString automationMotdServerStateKey() {
+		QByteArray digest;
+		QString host;
+		QString username;
+		QString password;
+		unsigned short port = 0;
+		if (Global::get().sh) {
+			digest = Global::get().sh->serverDigest();
+			Global::get().sh->getConnectionInfo(host, port, username, password);
+		}
+		return ModernMotd::serverStateKey(digest, host, port);
+	}
+
 	QVariantMap automationMotdSettingsState(MainWindow *window) {
-		QVariantMap state;
-		state.insert(QStringLiteral("expanded"), Global::get().s.bModernShellMotdExpanded);
-		state.insert(QStringLiteral("dismissedSignature"),
-					 Global::get().s.qsModernShellMotdDismissedSignature);
-		state.insert(QStringLiteral("lastSeenSignature"),
-					 Global::get().s.qsModernShellMotdLastSeenSignature);
+		QVariantMap state = ModernMotd::serverViewState(
+			Global::get().s.qsModernShellMotdServerStates, automationMotdServerStateKey());
 
 		if (window && window->qmlShellHost()) {
 			ClientSessionController *session = window->qmlShellHost()->sessionController();
@@ -2708,17 +2723,17 @@ namespace {
 		return state;
 	}
 
-	void restoreAutomationMotdSettings(MainWindow *window, const bool expanded, const QString &dismissedSignature,
-									   const QString &lastSeenSignature) {
-		Global::get().s.bModernShellMotdExpanded = expanded;
-		Global::get().s.qsModernShellMotdDismissedSignature = dismissedSignature;
-		Global::get().s.qsModernShellMotdLastSeenSignature = lastSeenSignature;
+	void restoreAutomationMotdSettings(MainWindow *window, const QString &serializedStates) {
+		Global::get().s.qsModernShellMotdServerStates = serializedStates;
 		Global::get().s.save();
 		if (window && window->qmlShellHost()) {
+			const QVariantMap state = automationMotdSettingsState(window);
 			ClientSessionController *session = window->qmlShellHost()->sessionController();
-			session->setMotdExpanded(expanded);
-			session->setMotdDismissedSignature(dismissedSignature);
-			session->setMotdLastSeenSignature(lastSeenSignature);
+			session->setMotdExpanded(state.value(QStringLiteral("expanded")).toBool());
+			session->setMotdDismissedSignature(
+				state.value(QStringLiteral("dismissedSignature")).toString());
+			session->setMotdLastSeenSignature(
+				state.value(QStringLiteral("lastSeenSignature")).toString());
 		}
 	}
 
@@ -2729,46 +2744,47 @@ namespace {
 			return result;
 		}
 
-		const bool originalExpanded = Global::get().s.bModernShellMotdExpanded;
-		const QString originalDismissed = Global::get().s.qsModernShellMotdDismissedSignature;
-		const QString originalLastSeen = Global::get().s.qsModernShellMotdLastSeenSignature;
+		const QString originalStates = Global::get().s.qsModernShellMotdServerStates;
 		const QString signature = QStringLiteral("automation-motd-persistence");
 
 		const auto restoreOriginal = [&]() {
-			restoreAutomationMotdSettings(window, originalExpanded, originalDismissed, originalLastSeen);
+			restoreAutomationMotdSettings(window, originalStates);
 		};
 
 		const bool hideHandled = window->handleModernShellAppAction(QStringLiteral("motd.hide"));
 		result.insert(QStringLiteral("hideHandled"), hideHandled);
-		result.insert(QStringLiteral("hidePersisted"), !Global::get().s.bModernShellMotdExpanded);
+		result.insert(QStringLiteral("hidePersisted"),
+			!automationMotdSettingsState(window).value(QStringLiteral("expanded")).toBool());
 
 		const bool showHandled = window->handleModernShellAppAction(QStringLiteral("motd.show"));
 		result.insert(QStringLiteral("showHandled"), showHandled);
-		result.insert(QStringLiteral("showPersisted"), Global::get().s.bModernShellMotdExpanded);
+		result.insert(QStringLiteral("showPersisted"),
+			automationMotdSettingsState(window).value(QStringLiteral("expanded")).toBool());
 
 		const QVariantMap payload { { QStringLiteral("signature"), signature } };
 		const bool dismissHandled = window->handleModernShellAppActionPayload(QStringLiteral("motd.dismiss"), payload);
 		result.insert(QStringLiteral("dismissHandled"), dismissHandled);
+		const QVariantMap dismissedState = automationMotdSettingsState(window);
 		result.insert(QStringLiteral("dismissPersisted"),
-					  Global::get().s.qsModernShellMotdDismissedSignature == signature);
+					  dismissedState.value(QStringLiteral("dismissedSignature")).toString() == signature);
 		result.insert(QStringLiteral("dismissMarksSeen"),
-					  Global::get().s.qsModernShellMotdLastSeenSignature == signature);
+					  dismissedState.value(QStringLiteral("lastSeenSignature")).toString() == signature);
 
 		const bool restoreHandled = window->handleModernShellAppActionPayload(QStringLiteral("motd.restore"), payload);
 		result.insert(QStringLiteral("restoreHandled"), restoreHandled);
 		result.insert(QStringLiteral("restorePersisted"),
-					  Global::get().s.qsModernShellMotdDismissedSignature.isEmpty());
+					  automationMotdSettingsState(window)
+						  .value(QStringLiteral("dismissedSignature")).toString().isEmpty());
 
 		const bool markSeenHandled = window->handleModernShellAppActionPayload(QStringLiteral("motd.markSeen"), payload);
 		result.insert(QStringLiteral("markSeenHandled"), markSeenHandled);
 		result.insert(QStringLiteral("markSeenPersisted"),
-					  Global::get().s.qsModernShellMotdLastSeenSignature == signature);
+					  automationMotdSettingsState(window)
+						  .value(QStringLiteral("lastSeenSignature")).toString() == signature);
 
 		restoreOriginal();
 		result.insert(QStringLiteral("restoredOriginal"),
-					  Global::get().s.bModernShellMotdExpanded == originalExpanded
-						  && Global::get().s.qsModernShellMotdDismissedSignature == originalDismissed
-						  && Global::get().s.qsModernShellMotdLastSeenSignature == originalLastSeen);
+					  Global::get().s.qsModernShellMotdServerStates == originalStates);
 		return result;
 	}
 
@@ -7568,10 +7584,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (!state.contains(QStringLiteral("expanded"))) {
 			return errorResponse(tr("Missing MOTD expanded state."));
 		}
-		restoreAutomationMotdSettings(
-			m_mainWindow, state.value(QStringLiteral("expanded")).toBool(),
-			state.value(QStringLiteral("dismissedSignature")).toString(),
-			state.value(QStringLiteral("lastSeenSignature")).toString());
+		const QString serializedStates = ModernMotd::withServerViewState(
+			Global::get().s.qsModernShellMotdServerStates, automationMotdServerStateKey(), state);
+		restoreAutomationMotdSettings(m_mainWindow, serializedStates);
 
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("state"), automationMotdSettingsState(m_mainWindow));

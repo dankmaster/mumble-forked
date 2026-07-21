@@ -76,9 +76,8 @@ bool CalibrationSession::start(const Selection &previousSelection, bool captureO
 	m_blindSeed                 = blindSeed;
 	m_failureReason             = FailureReason::None;
 	m_candidateCount            = 0;
-	m_leftCandidate             = 0;
-	m_rightCandidate            = 0;
-	m_blindPair                 = {};
+	m_comparisonCandidates      = {};
+	m_blindComparison           = {};
 	resetLevelCheck();
 	m_state = State::LevelCheck;
 	return true;
@@ -236,14 +235,9 @@ bool CalibrationSession::finishEvaluation() noexcept {
 		return false;
 	}
 
-	std::size_t best   = maximumCandidates;
-	std::size_t second = maximumCandidates;
-	auto better        = [this](std::size_t lhs, std::size_t rhs) noexcept {
-        if (rhs == maximumCandidates) {
-            return true;
-        }
-        const CandidateResult &left  = m_candidates[lhs].result;
-        const CandidateResult &right = m_candidates[rhs].result;
+	auto better = [this](std::size_t lhs, std::size_t rhs) noexcept {
+		const CandidateResult &left  = m_candidates[lhs].result;
+		const CandidateResult &right = m_candidates[rhs].result;
         if (left.objectiveScore != right.objectiveScore) {
             return left.objectiveScore > right.objectiveScore;
         }
@@ -254,29 +248,50 @@ bool CalibrationSession::finishEvaluation() noexcept {
 		if (!m_candidates[index].result.eligible) {
 			continue;
 		}
-		if (better(index, best)) {
-			second = best;
-			best   = index;
-		} else if (better(index, second)) {
-			second = index;
+		std::size_t position = m_blindComparison.count;
+		while (position > 0 && better(index, m_comparisonCandidates[position - 1])) {
+			m_comparisonCandidates[position] = m_comparisonCandidates[position - 1];
+			--position;
 		}
+		m_comparisonCandidates[position] = index;
+		++m_blindComparison.count;
 	}
 
-	if (best == maximumCandidates || second == maximumCandidates) {
+	if (m_blindComparison.count < 2) {
 		fail(FailureReason::EvaluationFailed);
 		return false;
 	}
 
-	const bool swapSides           = (mixToken(m_blindSeed ^ 0x6a09e667f3bcc909ULL) & 1U) != 0;
-	m_leftCandidate                = swapSides ? second : best;
-	m_rightCandidate               = swapSides ? best : second;
-	m_blindPair.leftPlaybackToken  = mixToken(m_blindSeed ^ 0xbb67ae8584caa73bULL);
-	m_blindPair.rightPlaybackToken = mixToken(m_blindSeed ^ 0x3c6ef372fe94f82bULL);
-	if (m_blindPair.leftPlaybackToken == 0) {
-		m_blindPair.leftPlaybackToken = 1;
+	// Shuffle the score-sorted eligible set so neither the profile order nor the
+	// objective ranking leaks through the A/B/C/D labels.
+	for (std::size_t remaining = m_blindComparison.count; remaining > 1; --remaining) {
+		const std::uint64_t random =
+			mixToken(m_blindSeed ^ 0x6a09e667f3bcc909ULL ^ static_cast< std::uint64_t >(remaining));
+		const std::size_t swapWith = static_cast< std::size_t >(random % remaining);
+		std::swap(m_comparisonCandidates[remaining - 1], m_comparisonCandidates[swapWith]);
 	}
-	if (m_blindPair.rightPlaybackToken == 0 || m_blindPair.rightPlaybackToken == m_blindPair.leftPlaybackToken) {
-		m_blindPair.rightPlaybackToken = m_blindPair.leftPlaybackToken ^ 0xa54ff53a5f1d36f1ULL;
+
+	for (std::size_t slot = 0; slot < m_blindComparison.count; ++slot) {
+		std::uint64_t token = mixToken(m_blindSeed ^ 0xbb67ae8584caa73bULL
+								   ^ (0x9e3779b97f4a7c15ULL * static_cast< std::uint64_t >(slot + 1)));
+		if (token == 0) {
+			token = static_cast< std::uint64_t >(slot + 1);
+		}
+		bool unique = false;
+		while (!unique) {
+			unique = true;
+			for (std::size_t prior = 0; prior < slot; ++prior) {
+				if (m_blindComparison.playbackTokens[prior] == token) {
+					++token;
+					if (token == 0) {
+						++token;
+					}
+					unique = false;
+					break;
+				}
+			}
+		}
+		m_blindComparison.playbackTokens[slot] = token;
 	}
 	m_state = State::BlindComparison;
 	return true;
@@ -290,11 +305,19 @@ bool CalibrationSession::failEvaluation() noexcept {
 	return true;
 }
 
-CalibrationSession::BlindPair CalibrationSession::blindPair() const noexcept {
+CalibrationSession::BlindComparison CalibrationSession::blindComparison() const noexcept {
 	if (m_state != State::BlindComparison && m_state != State::DraftReady) {
 		return {};
 	}
-	return m_blindPair;
+	return m_blindComparison;
+}
+
+CalibrationSession::BlindPair CalibrationSession::blindPair() const noexcept {
+	const BlindComparison comparison = blindComparison();
+	if (comparison.count < 2) {
+		return {};
+	}
+	return { comparison.playbackTokens[0], comparison.playbackTokens[1] };
 }
 
 const CalibrationSession::Selection *
@@ -302,11 +325,11 @@ const CalibrationSession::Selection *
 	if (m_state != State::BlindComparison && m_state != State::DraftReady) {
 		return nullptr;
 	}
-	if (playbackToken == m_blindPair.leftPlaybackToken && m_leftCandidate < m_candidateCount) {
-		return &m_candidates[m_leftCandidate].result.selection;
-	}
-	if (playbackToken == m_blindPair.rightPlaybackToken && m_rightCandidate < m_candidateCount) {
-		return &m_candidates[m_rightCandidate].result.selection;
+	for (std::size_t slot = 0; slot < m_blindComparison.count; ++slot) {
+		if (playbackToken == m_blindComparison.playbackTokens[slot]
+			&& m_comparisonCandidates[slot] < m_candidateCount) {
+			return &m_candidates[m_comparisonCandidates[slot]].result.selection;
+		}
 	}
 	return nullptr;
 }
@@ -440,10 +463,11 @@ void CalibrationSession::resetLevelCheck() noexcept {
 }
 
 void CalibrationSession::enterEvaluation() noexcept {
-	m_candidateCount = 0;
-	m_blindPair      = {};
-	m_hasDraft       = false;
-	m_state          = State::Evaluating;
+	m_candidateCount       = 0;
+	m_comparisonCandidates = {};
+	m_blindComparison      = {};
+	m_hasDraft             = false;
+	m_state                = State::Evaluating;
 }
 
 void CalibrationSession::fail(FailureReason reason) noexcept {

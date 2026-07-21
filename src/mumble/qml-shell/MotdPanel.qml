@@ -7,16 +7,15 @@ Rectangle {
     id: root
 
     property var session: null
-    property real maximumBodyHeight: 260
-	property real maximumImageHeight: compactLayout ? 56 : 68
-	property bool hiddenForHistory: false
+    property real maximumBodyHeight: compactLayout ? 280 : 360
+	property real maximumImageHeight: compactLayout ? 120 : 180
 	property bool visualFixtureMode: false
     signal actionRequested(string actionId, var payload)
     signal linkRequested(url link)
 
     readonly property bool hasContent: !!session && !!session.hasMotd
     readonly property bool dismissed: !!session && !!session.motdDismissed
-	readonly property bool surfaceVisible: hasContent && !dismissed && !hiddenForHistory
+	readonly property bool surfaceVisible: hasContent && !dismissed
     readonly property bool expanded: !!session && !!session.motdExpanded
 	readonly property bool contentVisible: surfaceVisible
     readonly property string signature: session ? String(session.motdSignature || "") : ""
@@ -276,21 +275,17 @@ Rectangle {
 			ScrollBar.vertical.policy: structuredBody.implicitHeight > root.maximumBodyHeight
 				? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
 
-			RichMessageBody {
+			MotdDocumentBody {
 				id: structuredBody
 				objectName: "motdStructuredBody"
 				width: Math.max(1, motdScroll.availableWidth)
-				maximumImageWidth: 560
+				maximumImageWidth: 640
 				maximumImageHeight: root.maximumImageHeight
-				imagePadding: Theme.space1
-				imageSurfaceColor: root.color
-				imageBorderColor: "transparent"
-				imageBorderWidth: 0
-				segments: root.session && root.session.motdSegments
-					? root.session.motdSegments : []
+				blocks: root.session && root.session.motdBlocks
+					? root.session.motdBlocks : []
+				fallbackText: root.summary
 				animationsEnabled: !root.visualFixtureMode
 				hoverEffectsEnabled: !root.visualFixtureMode
-				textColor: Theme.textMain
 				onLinkRequested: function(link) {
 					const safeLink = root.safeExternalUrl(link)
 					if (safeLink.length > 0)

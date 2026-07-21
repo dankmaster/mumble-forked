@@ -57,7 +57,7 @@ SpinBox {
 		height: Math.floor((control.height - 2) / 2)
 		color: !control.enabled ? "transparent"
 			: control.up.pressed ? Theme.accentSubtle : control.up.hovered ? Theme.surfaceHover : "transparent"
-		Text { anchors.centerIn: parent; text: "+"; color: control.enabled ? Theme.textMain : Theme.textMuted; font.pixelSize: 12 }
+		ModernIcon { anchors.centerIn: parent; name: "add"; size: 11; color: control.enabled ? Theme.textMain : Theme.textMuted }
 	}
 
 	down.indicator: Rectangle {
@@ -67,7 +67,7 @@ SpinBox {
 		height: Math.floor((control.height - 2) / 2)
 		color: !control.enabled ? "transparent"
 			: control.down.pressed ? Theme.accentSubtle : control.down.hovered ? Theme.surfaceHover : "transparent"
-		Text { anchors.centerIn: parent; text: "−"; color: control.enabled ? Theme.textMain : Theme.textMuted; font.pixelSize: 12 }
+		ModernIcon { anchors.centerIn: parent; name: "minimize"; size: 11; color: control.enabled ? Theme.textMain : Theme.textMuted }
 	}
 
 	background: Rectangle {

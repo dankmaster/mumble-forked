@@ -242,6 +242,18 @@ struct Settings {
 
 	QString qsWASAPIInput  = {};
 	QString qsWASAPIOutput = {};
+	/// Compact, version-tolerant descriptors used to find the same physical
+	/// endpoint after Windows assigns it a new opaque MMDevice endpoint id.
+	QString qsWASAPIInputDeviceIdentity  = {};
+	QString qsWASAPIOutputDeviceIdentity = {};
+	/// "follow" follows the Windows communications endpoint, "prefer" uses a
+	/// temporary default fallback, and "strict" pauses when the selected device
+	/// is unavailable. Existing explicit selections migrate to "prefer".
+	QString qsWASAPIInputRoutingPolicy  = QStringLiteral("prefer");
+	QString qsWASAPIOutputRoutingPolicy = QStringLiteral("prefer");
+	/// "stable" preserves the legacy buffer request. "balanced" and "low" use
+	/// IAudioClient3 engine periods when Windows and the driver support them.
+	QString qsWASAPILatencyProfile = QStringLiteral("stable");
 	/// qsWASAPIRole is configured via 'wasapi/role'.
 	/// It is a string explaining Mumble's purpose for opening
 	/// the audio device. This can be used to force Windows
@@ -323,6 +335,7 @@ struct Settings {
 	bool bModernShellMotdExpanded             = false;
 	QString qsModernShellMotdDismissedSignature;
 	QString qsModernShellMotdLastSeenSignature;
+	QString qsModernShellMotdServerStates;
 	QString qsModernShellTheme                = QStringLiteral("dark");
 	QString qsModernShellDensity              = QStringLiteral("comfortable");
 	bool bModernShellClassicUserIcons         = false;
@@ -331,7 +344,11 @@ struct Settings {
 	QString qsModernShellCustomAccent         = QStringLiteral("#5ec8b0");
 	int iModernShellCustomAccentStrength      = 50;
 	bool bModernShellTickerBannerEnabled      = false;
-	bool bModernShellTickerBannerAlwaysScroll = true;
+	// Stonks is an explicit client opt-in. Presentation choices are retained
+	// while the strip is off so enabling it never resets the user's layout.
+	QString qsModernShellTickerPlacement       = QStringLiteral("bottom");
+	QString qsModernShellTickerDirection       = QStringLiteral("left");
+	QString qsModernShellTickerSpeed           = QStringLiteral("normal");
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};
 	WindowLayout wlWindowLayout               = LayoutModern;
@@ -483,6 +500,8 @@ struct Settings {
 
 	/// Whether the audio wizard has been shown to the user yet (at some point during Mumble's installation)
 	bool audioWizardShown = false;
+	/// Last completed revision of the Modern microphone setup. New revisions may be shown once to existing users.
+	unsigned int modernAudioSetupVersion = 0;
 
 	/// Path to SQLite-DB
 	QString qsDatabaseLocation = {};

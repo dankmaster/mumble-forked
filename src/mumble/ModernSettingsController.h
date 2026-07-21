@@ -43,10 +43,14 @@ public:
 		QVariantMap externalActionPayload;
 	};
 
-	void open(const Settings &settings, const QString &pageName = QString());
+	void open(const Settings &settings, const QString &pageName = QString(), bool audioInputOnboarding = false,
+			  const QVariantMap &stonksContext = QVariantMap(), const QVariantMap &motdContext = QVariantMap());
 	QVariantMap state() const;
 	void updateField(const QString &fieldID, const QVariant &value);
 	ActionResult invokeAction(const QString &actionID, const QVariantMap &payload);
+	void setStonksContext(const QVariantMap &stonksContext);
+	void setMotdContext(const QVariantMap &motdContext);
+	bool setMotdPreview(const QString &sourceHtml, const QVariantList &blocks, const QString &summary);
 	/// Reconciles externally completed plugin load/unload operations with both the current draft and
 	/// its reset baseline. This keeps an already open settings dialog from presenting a state that the
 	/// plugin manager could not actually reach.
@@ -58,6 +62,8 @@ public:
 private:
 	Settings m_original;
 	Settings m_draft;
+	QVariantMap m_stonksContext;
+	QVariantMap m_motdContext;
 	QList< Mumble::ModernTheme::ThemeDefinition > m_modernThemeCatalog;
 	QString m_activePage = QStringLiteral("look");
 	int m_shortcutCaptureIndex = -1;
@@ -67,6 +73,7 @@ private:
 	std::optional< float > m_voiceReplayPreviousMaxPacketDelay;
 	bool m_runtimePreviewDiffersFromOriginal = false;
 	bool m_appearancePreviewActive = false;
+	bool m_audioInputOnboarding = false;
 	std::unique_ptr< Mumble::InputEnhancement::CalibrationEvaluationWorker >
 		m_inputEnhancementCalibrationWorker;
 	std::optional< Mumble::InputEnhancement::DefaultPreference >

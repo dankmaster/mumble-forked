@@ -21,6 +21,50 @@ TestCase {
 		compare(component.status, Component.Ready, component.errorString())
 	}
 
+	function test_failed_original_image_stays_terminal_until_explicit_retry() {
+		verify(/reportedOriginalState[\s\S]*reportedOriginalState !== "error"/.test(mainSource))
+		verify(/function\s+retryAttachmentOriginal\(attachment\)[\s\S]*originalState = "loading"[\s\S]*requestChat(?:Attachment|Inline)Image/.test(mainSource))
+		verify(/onOriginalRetryRequested:\s*attachment => root\.retryAttachmentOriginal\(attachment\)/.test(mainSource))
+	}
+
+	function test_message_reaction_separates_emoji_from_count_typography() {
+		verify(/objectName:\s*"messageReactionEmoji"[\s\S]*font\.family:\s*Qt\.platform\.os === "windows" \? "Segoe UI Emoji"/.test(mainSource))
+		verify(/objectName:\s*"messageReactionCount"[\s\S]*font\.weight:\s*Font\.DemiBold/.test(mainSource))
+	}
+
+	function test_message_footer_keeps_reaction_chips_next_to_the_action_tray() {
+		verify(/id:\s*messageFooter[\s\S]*id:\s*messageReactionFlow[\s\S]*id:\s*messageActionTray/.test(mainSource))
+		verify(/id:\s*messageActionTray[\s\S]*radius:\s*height\s*\/\s*2[\s\S]*border\.color:\s*Theme\.divider/.test(mainSource))
+	}
+
+	function test_message_actions_are_direct_without_an_overflow_button() {
+		verify(!/objectName:\s*"(?:message|compactMessage)ActionsButton"/.test(mainSource))
+		verify(/objectName:\s*"messageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
+		verify(/objectName:\s*"messageReplyButton"[\s\S]*visible:\s*messageDelegate\.canReply[\s\S]*messageFooter\.quickReactionsExpanded/.test(mainSource))
+		verify(/objectName:\s*"compactMessageReplyButton"[\s\S]*visible:\s*messageDelegate\.canReply/.test(mainSource))
+	}
+
+	function test_plain_text_actions_do_not_add_an_empty_footer_row() {
+		verify(/readonly property bool hasEmbeddedFooterContent:[\s\S]*readonly property bool usesCompactActionOverlay:/.test(mainSource))
+		verify(!/readonly property bool hasEmbeddedFooterContent:[^\n]*(?:\n[^\n]*){0,3}quickReactionMessageId/.test(mainSource))
+		verify(/readonly property bool usesCompactActionOverlay:\s*hasMessageActions[\s\S]*&&\s*!wideContent/.test(mainSource))
+		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent/.test(mainSource))
+		verify(/id:\s*messageFooter[\s\S]*Layout\.rightMargin:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*compactMessageActionTray\.width/.test(mainSource))
+		verify(/objectName:\s*"chatCompactMessageActionTray"[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay/.test(mainSource))
+		verify(/id:\s*compactMessageActionTray[\s\S]*anchors\.bottom:\s*parent\.bottom/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]*Layout\.rightMargin:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*compactMessageActionTray\.width/.test(mainSource))
+		verify(/objectName:\s*"compactMessageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
+	}
+
+	function test_all_quick_reactions_use_one_anchored_popup_without_scrolling() {
+		verify(/property var quickReactionAnchorItem:\s*null/.test(mainSource))
+		verify(/id:\s*globalQuickReactionPopup[\s\S]*parent:\s*Overlay\.overlay[\s\S]*id:\s*globalQuickReactionBar/.test(mainSource))
+		verify(/function positionQuickReactionPopup\(\)[\s\S]*anchor\.mapToItem\(overlay[\s\S]*const aboveY/.test(mainSource))
+		verify(/function showQuickReactions\(messageId, row, anchorItem, activeReactions\)/.test(mainSource))
+		verify(!/function showQuickReactions[\s\S]{0,900}positionViewAtIndex/.test(mainSource))
+		verify(!/id:\s*(?:inlineQuickReactions|floatingQuickReactionPopup)/.test(mainSource))
+	}
+
 	function test_draft_upload_exposes_localized_status_and_progress() {
 		verify(/readonly property int baseHeight:\s*Math\.max\(72,\s*Theme\.railFooterHeight\)[\s\S]*Layout\.preferredHeight:\s*\(activeScope\.hasPendingReply\s*\?\s*baseHeight \+ 44\s*:\s*baseHeight\)/.test(mainSource))
 		verify(/readonly property string normalizedStatus:[\s\S]*readonly property real boundedProgress:/.test(mainSource))
@@ -37,6 +81,14 @@ TestCase {
 		verify(/id:\s*shellHeader[\s\S]*Layout\.preferredHeight:\s*root\.compactNavigation[\s\S]*Theme\.railHeaderHeight/.test(mainSource))
 		verify(/id:\s*desktopNavigationRail[\s\S]*alignedHeaderHeight:\s*shellHeader\.height[\s\S]*alignedFooterHeight:\s*composerSurface\.height/.test(mainSource))
 		verify(/layoutDirection:\s*Theme\.railSide === "left"\s*\?\s*Qt\.RightToLeft\s*:\s*Qt\.LeftToRight/.test(mainSource))
+	}
+
+	function test_window_edge_stonks_tickers_span_both_conversation_and_profile_columns() {
+		verify(/RowLayout\s*\{[\s\S]{0,180}anchors\.fill:\s*parent[\s\S]{0,180}anchors\.topMargin:\s*windowTopStonksTicker\.height[\s\S]{0,100}anchors\.bottomMargin:\s*bottomStonksTicker\.height/.test(mainSource))
+		verify(/id:\s*windowTopStonksTicker[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.top:\s*parent\.top/.test(mainSource))
+		verify(/id:\s*bottomStonksTicker[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.bottom:\s*parent\.bottom/.test(mainSource))
+		verify(/id:\s*topStonksTicker[\s\S]{0,220}Layout\.fillWidth:\s*true[\s\S]{0,260}root\.stonksTickerPlacement === "top"/.test(mainSource))
+		verify(/id:\s*aboveComposerStonksTicker[\s\S]{0,320}root\.stonksTickerPlacement === "aboveComposer"/.test(mainSource))
 	}
 
 	function test_draft_upload_state_is_accessible_and_actions_lock_while_sending() {

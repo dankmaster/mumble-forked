@@ -12,6 +12,7 @@ Window {
 	property var beforeOpen: null
 	property string presentedDialogId: ""
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
+	property bool visibilitySyncPending: false
 	readonly property string surfaceId: "product-dialog.window"
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
 	readonly property bool productOpen: controller && controller.open
@@ -128,6 +129,20 @@ Window {
 		}
 	}
 
+	// Opening a second QQuickWindow synchronously from the controller callback can
+	// re-enter the threaded scene-graph exposure path while the owning window is
+	// still dispatching the menu action. Defer the native show until that callback
+	// has unwound so each render loop can complete its current synchronization.
+	function scheduleVisibilitySync() {
+		if (visibilitySyncPending)
+			return
+		visibilitySyncPending = true
+		Qt.callLater(function() {
+			visibilitySyncPending = false
+			syncVisibility()
+		})
+	}
+
 	function applyInitialFocus() {
 		return hostedDialog.applyInitialFocus()
 	}
@@ -139,7 +154,7 @@ Window {
 		return String(hostedDialog.applyInitialFocus() || "")
 	}
 
-	Component.onCompleted: syncVisibility()
+	Component.onCompleted: scheduleVisibilitySync()
 	onScreenChanged: Qt.callLater(function() {
 		if (productWindow.visible && !productWindow.geometryStore)
 			productWindow.ensureUsableGeometry(false, false)
@@ -159,7 +174,7 @@ Window {
 
 	Connections {
 		target: controller
-		function onStateChanged() { productWindow.syncVisibility() }
+		function onStateChanged() { productWindow.scheduleVisibilitySync() }
 	}
 
 	Item {

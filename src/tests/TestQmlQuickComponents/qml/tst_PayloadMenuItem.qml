@@ -96,6 +96,16 @@ TestCase {
 		compare(focusBackground.border.color, Theme.focus)
 	}
 
+	function test_pointer_hover_fills_the_complete_action_row() {
+		const focusBackground = findChild(actionLoader.item, "payloadFocusBackground")
+		verify(focusBackground !== null)
+		mouseMove(testCase, testCase.width - 2, testCase.height - 2)
+		mouseMove(actionLoader.item, actionLoader.item.width / 2,
+			actionLoader.item.height / 2)
+		tryCompare(actionLoader.item, "hovered", true)
+		compare(focusBackground.color, Theme.popupSelected)
+	}
+
 	function test_danger_action_uses_semantic_icon_and_text_tone() {
 		const icon = findChild(dangerLoader.item, "payloadLeadingIcon")
 		const label = findChild(dangerLoader.item, "payloadPrimaryLabel")

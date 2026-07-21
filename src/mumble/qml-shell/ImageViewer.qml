@@ -298,7 +298,7 @@ ApplicationWindow {
 					spacing: Theme.space1
 					ModernIconButton {
 						objectName: "imageViewerZoomOut"
-						text: "−"; enabled: viewer.zoom > 0.251
+						iconName: "minimize"; enabled: viewer.zoom > 0.251
 						Accessible.name: qsTr("Zoom out")
 						onClicked: viewer.zoomBy(1 / 1.2)
 					}
@@ -311,7 +311,7 @@ ApplicationWindow {
 					}
 					ModernIconButton {
 						objectName: "imageViewerZoomIn"
-						text: "+"; enabled: viewer.zoom < 9.999
+						iconName: "add"; enabled: viewer.zoom < 9.999
 						Accessible.name: qsTr("Zoom in")
 						onClicked: viewer.zoomBy(1.2)
 					}

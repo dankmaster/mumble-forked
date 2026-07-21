@@ -183,6 +183,7 @@ public:
 	bool evaluateCandidates(std::span< const CalibrationSession::Selection > candidates);
 	bool evaluateCandidates(std::span< const CalibrationSession::Selection > candidates,
 							const CalibrationEvaluationObserver &observer);
+	CalibrationSession::BlindComparison blindComparison() noexcept;
 	CalibrationSession::BlindPair blindPair() noexcept;
 	std::span< const float > playbackForToken(std::uint64_t playbackToken) noexcept;
 	bool selectBlindWinner(std::uint64_t playbackToken) noexcept;

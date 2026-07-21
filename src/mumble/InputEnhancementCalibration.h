@@ -109,6 +109,13 @@ public:
 		std::uint64_t rightPlaybackToken = 0;
 	};
 
+	/// All locally evaluated candidates that are safe to audition. Their order
+	/// and opaque playback handles reveal no profile identity to the UI.
+	struct BlindComparison final {
+		std::array< std::uint64_t, maximumCandidates > playbackTokens = {};
+		std::size_t count                                                = 0;
+	};
+
 	/// Allocates the fixed 28-second PCM arena. This happens outside the audio
 	/// thread; all subsequent PCM ingestion is allocation-free.
 	CalibrationSession();
@@ -146,6 +153,8 @@ public:
 	/// Lets the local evaluator terminate safely when model/Opus processing
 	/// fails. This restores the prior selection and wipes captured PCM.
 	bool failEvaluation() noexcept;
+	BlindComparison blindComparison() const noexcept;
+	/// Compatibility view of the first two entries in blindComparison().
 	BlindPair blindPair() const noexcept;
 
 	/// Intended for the local playback backend, not for presentation in the UI.
@@ -213,9 +222,8 @@ private:
 
 	std::array< CandidateSlot, maximumCandidates > m_candidates = {};
 	std::size_t m_candidateCount                                = 0;
-	std::size_t m_leftCandidate                                 = 0;
-	std::size_t m_rightCandidate                                = 0;
-	BlindPair m_blindPair;
+	std::array< std::size_t, maximumCandidates > m_comparisonCandidates = {};
+	BlindComparison m_blindComparison;
 };
 
 } // namespace Mumble::InputEnhancement

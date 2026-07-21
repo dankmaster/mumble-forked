@@ -278,6 +278,19 @@ UiCommandController *QmlShellHost::commandController() const { return m_commandC
 RoomModel *QmlShellHost::roomModel() const { return m_roomModel.get(); }
 NavigationRailModel *QmlShellHost::navigationModel() const { return m_navigationModel.get(); }
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }
+
+void QmlShellHost::clearConnectionState() {
+	// Channel IDs and user session IDs are scoped to one server connection. Clear
+	// the retained state before another server can publish rows with the same IDs,
+	// otherwise Qt Quick may reuse an old delegate as if it represented the same
+	// room or participant.
+	m_selectionState->applySelection({}, -1, {}, {}, {});
+	m_roomModel->clearConnectionState();
+	m_navigationModel->clearConnectionState();
+	m_participantModel->clear();
+	m_composerController->setAutocompleteSources({}, {});
+}
+
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 ComposerController *QmlShellHost::composerController() const { return m_composerController.get(); }
 ToastController *QmlShellHost::toastController() const { return m_toastController.get(); }

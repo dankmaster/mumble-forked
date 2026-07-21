@@ -8,6 +8,7 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
+#include "WASAPIDeviceRouting.h"
 
 #include "win.h"
 
@@ -36,8 +37,16 @@ public:
 	static const QHash< QString, QString > getDevices(EDataFlow dataflow);
 	static const QHash< QString, QString > getInputDevices();
 	static const QHash< QString, QString > getOutputDevices();
+	static QList< Mumble::WASAPI::DeviceDescriptor > getDeviceDescriptors(EDataFlow dataflow,
+															 DWORD stateMask = DEVICE_STATE_ACTIVE);
+	static Mumble::WASAPI::DeviceDescriptor descriptorForEndpoint(const QString &endpointId, EDataFlow dataflow);
+	static Mumble::WASAPI::DeviceDescriptor defaultDeviceDescriptor(EDataFlow dataflow, ERole role);
+	static Mumble::WASAPI::RuntimeState runtimeState(EDataFlow dataflow);
+	static UINT32 selectSharedModePeriod(Mumble::WASAPI::LatencyProfile profile, UINT32 defaultFrames,
+									 UINT32 fundamentalFrames, UINT32 minimumFrames, UINT32 maximumFrames);
 	static Mumble::InputEnhancement::DeviceIdentity resolveInputDeviceIdentity(const QString &configuredDevice,
-																			 ERole role);
+														 ERole role, const QString &persistedIdentity = QString(),
+														 const QString &routingPolicy = QStringLiteral("prefer"));
 };
 
 class WASAPIInput : public AudioInput {

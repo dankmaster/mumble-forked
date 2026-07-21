@@ -40,7 +40,13 @@ public:
 
 	QVariantMap openConnect(const QList< FavoriteServer > &favorites, const Settings &settings,
 							const QMap< UnresolvedServerAddress, unsigned int > &pingCache = {});
-	QVariantMap openSettings(const Settings &settings, const QString &pageName = QString());
+	QVariantMap openSettings(const Settings &settings, const QString &pageName = QString(),
+						 bool audioInputOnboarding = false,
+						 const QVariantMap &stonksContext = QVariantMap(),
+						 const QVariantMap &motdContext = QVariantMap());
+	bool setSettingsStonksContext(const QVariantMap &stonksContext);
+	bool setSettingsMotdContext(const QVariantMap &motdContext);
+	bool setSettingsMotdPreview(const QString &sourceHtml, const QVariantList &blocks, const QString &summary);
 	QVariantMap openFailedConnection(const QVariantMap &context);
 	QVariantMap openDisconnectConfirmation(const QString &serverLabel = QString());
 	QVariantMap openQuitConfirmation(bool connected, bool allowMinimize);
