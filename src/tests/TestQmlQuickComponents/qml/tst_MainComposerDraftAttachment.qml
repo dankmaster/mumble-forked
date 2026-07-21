@@ -165,8 +165,19 @@ TestCase {
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
-		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:[\s\S]*timeline\.scopePresentationPending[\s\S]*Preparing conversation/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled"/.test(mainSource))
+	}
+
+	function test_empty_and_lightweight_scopes_skip_the_presentation_delay() {
+		verify(/function\s+scheduleScopePresentationFastPath\(\)[\s\S]*scopePresentationFastPathTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+rowNeedsDeferredPresentation\(row\)[\s\S]*bodyHydrationPending[\s\S]*Object\.keys\(preview\)[\s\S]*attachments\.length/.test(mainSource))
+		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*activeScope\.loading[\s\S]*count\s*===\s*0[\s\S]*return\s+true[\s\S]*contentHeight\s*>\s*height\s*\+\s*0\.5[\s\S]*itemAtIndex\(0\)[\s\S]*itemAtIndex\(count\s*-\s*1\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationFastPath\s*=\s*true[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
+		verify(/id:\s*scopePresentationFastPathTimer[\s\S]*interval:\s*0[\s\S]*completeScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/function\s+onLoadingChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/function\s+onCountChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/"presentationFastPath":\s*timeline\.scopePresentationFastPath/.test(mainSource))
 	}
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {

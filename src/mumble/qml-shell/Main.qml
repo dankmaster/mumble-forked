@@ -1706,6 +1706,7 @@ ApplicationWindow {
 			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
 			"presentationPending": timeline.scopePresentationPending,
 			"presentationFinalizing": timeline.scopePresentationFinalizing,
+			"presentationFastPath": timeline.scopePresentationFastPath,
 			"observationActive": timeline.scopePresentationObservationActive,
 			"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
 			"generation": timeline.scopePresentationGeneration,
@@ -1831,6 +1832,9 @@ ApplicationWindow {
 			timeline.beginScopeChange()
 			if (root.conversationSearchOpen)
 				root.closeConversationSearch(false)
+		}
+		function onLoadingChanged() {
+			timeline.scheduleScopePresentationFastPath()
 		}
     }
 
@@ -2760,6 +2764,7 @@ ApplicationWindow {
 					// expose the fully anchored tail in a single frame.
 					property bool scopePresentationPending: false
 					property bool scopePresentationFinalizing: false
+					property bool scopePresentationFastPath: false
 					property bool scopePresentationObservationActive: false
 					property bool scopePresentationForcedByDeadline: false
 					property int scopePresentationGeneration: 0
@@ -2799,6 +2804,7 @@ ApplicationWindow {
 					function beginScopeChange() {
 						releasePrependAnchor()
 						bottomFollowTimer.stop()
+						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
 						scopePresentationFinalizeQuietTimer.stop()
@@ -2807,6 +2813,7 @@ ApplicationWindow {
 						++scopePresentationGeneration
 						scopePresentationPending = true
 						scopePresentationFinalizing = false
+						scopePresentationFastPath = false
 						scopePresentationObservationActive = false
 						scopePresentationForcedByDeadline = false
 						scopePresentationMutationCount = 0
@@ -2824,6 +2831,75 @@ ApplicationWindow {
 						scopeResetPending = true
 						scopePresentationQuietTimer.start()
 						scopePresentationDeadlineTimer.start()
+						scheduleScopePresentationFastPath()
+					}
+
+					function scheduleScopePresentationFastPath() {
+						if (scopePresentationPending && !scopePresentationFinalizing)
+							scopePresentationFastPathTimer.restart()
+					}
+
+					function rowNeedsDeferredPresentation(row) {
+						if (!row)
+							return false
+						const source = row.source || ({})
+						if (source.bodyHydrationPending === true)
+							return true
+						const preview = row.preview || ({})
+						if (Object.keys(preview).length > 0)
+							return true
+						const attachments = row.attachments || []
+						return attachments.length > 0
+					}
+
+					function canCompleteScopePresentationFastPath() {
+						if (!scopePresentationPending || scopePresentationFinalizing
+								|| activeScope.loading)
+							return false
+						if (count === 0)
+							return true
+						if (height <= 1)
+							return false
+						forceLayout()
+						if (contentHeight > height + 0.5 || pendingScopeHydrationCount() > 0)
+							return false
+						// Both endpoints exist only when the complete lightweight conversation
+						// has been materialized. Scrollable or still-estimated histories retain
+						// the stabilization gate even if their current height estimate is small.
+						if (!itemAtIndex(0) || !itemAtIndex(count - 1))
+							return false
+						for (let index = 0; index < count; ++index) {
+							if (rowNeedsDeferredPresentation(chatModel.get(index)))
+								return false
+						}
+						return true
+					}
+
+					function completeScopePresentationFastPath() {
+						if (!canCompleteScopePresentationFastPath())
+							return false
+						scopePresentationFastPathTimer.stop()
+						scopePresentationQuietTimer.stop()
+						scopePresentationDeadlineTimer.stop()
+						scopePresentationFinalizeQuietTimer.stop()
+						scopePresentationFinalizeDeadlineTimer.stop()
+						scopeReuseResetActive = false
+						forceLayout()
+						if (count > 0) {
+							positionTailImmediately()
+							restoringBottom = true
+							containTailMessageWhenPossible()
+							restoringBottom = false
+						}
+						scopeResetPending = false
+						scopePresentationCompletedAt = Date.now()
+						scopePresentationFastPath = true
+						scopePresentationPending = false
+						scopePresentationFinalizing = false
+						scopePresentationObservationActive = count > 0
+						if (scopePresentationObservationActive)
+							scopePresentationObservationTimer.restart()
+						return true
 					}
 
 					function noteScopePresentationMutation() {
@@ -2858,6 +2934,7 @@ ApplicationWindow {
 						}
 						scopePresentationFinalizing = true
 						scopePresentationForcedByDeadline = !!forcedByDeadline
+						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
 						// Re-enable steady-state delegate reuse while the conversation is still
@@ -3099,6 +3176,13 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: scopePresentationFastPathTimer
+						interval: 0
+						repeat: false
+						onTriggered: timeline.completeScopePresentationFastPath()
+					}
+
+					Timer {
 						id: scopePresentationQuietTimer
 						interval: 120
 						repeat: false
@@ -3239,8 +3323,10 @@ ApplicationWindow {
 								timeline.requestBottomFollow()
 						}
 						function onCountChanged() {
-							if (timeline.scopePresentationPending)
+							if (timeline.scopePresentationPending) {
 								timeline.noteScopePresentationMutation()
+								timeline.scheduleScopePresentationFastPath()
+							}
 							if (timeline.count === 0) {
 								timeline.releasePrependAnchor()
 								timeline.stickToBottom = true
@@ -4059,7 +4145,7 @@ ApplicationWindow {
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
 						readonly property bool visualLoading: activeScope.loading
-							|| timeline.scopePresentationPending
+							|| (timeline.scopePresentationPending && chatModel.count > 0)
 						visible: (timeline.scopePresentationPending || chatModel.count === 0)
 							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
