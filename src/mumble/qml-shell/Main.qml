@@ -3121,7 +3121,11 @@ ApplicationWindow {
 
 					Timer {
 						id: scopePresentationFinalizeDeadlineTimer
-						interval: 500
+						// Tail materialization can briefly collapse ListView's height estimate
+						// while rich delegates are rebuilt. The ordinary 120 ms quiet window
+						// still reveals warm scopes quickly; this deadline only bounds a cold,
+						// continuously mutating scope before it can hold the loading surface.
+						interval: 1500
 						repeat: false
 						onTriggered: timeline.completeScopePresentationFinalization(true)
 					}

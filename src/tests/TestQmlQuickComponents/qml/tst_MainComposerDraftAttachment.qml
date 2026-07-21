@@ -162,7 +162,7 @@ TestCase {
 		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationFinalizeQuietTimer\.start\(\)[\s\S]*scopePresentationFinalizeDeadlineTimer\.start\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeQuietTimer[\s\S]*interval:\s*120[\s\S]*completeScopePresentationFinalization\(false\)/.test(mainSource))
-		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
+		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:[\s\S]*timeline\.scopePresentationPending[\s\S]*Preparing conversation/.test(mainSource))
