@@ -22429,7 +22429,8 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 		const ModernSettingsController::AppearancePreview &appearance = *result.appearanceToPreview;
 		m_qmlShellHost->themeController()->applyProductAppearance(
 			appearance.theme, appearance.density, appearance.accent,
-			appearance.customAccent, appearance.customAccentStrength);
+			appearance.customAccent, appearance.customAccentStrength,
+			appearance.railSide, appearance.classicUserIcons);
 	}
 	if (result.connectionRequest) {
 		if (dialogID == QLatin1String("failedConnection") && !Global::get().s.bSuppressIdentity) {

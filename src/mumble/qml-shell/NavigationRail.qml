@@ -26,6 +26,7 @@ Rectangle {
 	// outside-to-inside reading order on either side of the conversation.
 	property string railSide: Theme.railSide
 	readonly property bool railOnLeft: railSide === "left"
+	property bool classicUserIcons: Theme.classicUserIcons
 	// The desktop shell supplies the matching conversation chrome heights so
 	// the horizontal dividers form one continuous line regardless of whether
 	// the rail is placed on the left or the right. Drawer instances keep the
@@ -455,6 +456,18 @@ Rectangle {
 	function safeAvatarSource(value) {
 		const source = String(value || "").trim()
 		return /^(image:\/\/mumble\/|data:image\/)/i.test(source) ? source : ""
+	}
+
+	function classicParticipantIconSource(entryKind, talkState) {
+		if (String(entryKind || "").toLowerCase() === "listener")
+			return "qrc:/native/talking_off.svg"
+		switch (String(talkState || "").toLowerCase()) {
+		case "talking": return "qrc:/native/talking_on.svg"
+		case "whispering": return "qrc:/native/talking_whisper.svg"
+		case "shouting": return "qrc:/native/talking_shout.svg"
+		case "mutedtalking": return "qrc:/native/muted_self.svg"
+		default: return "qrc:/native/talking_off.svg"
+		}
 	}
 
 	function serverMonogram(value) {
@@ -1869,6 +1882,8 @@ Rectangle {
 					|| participantJoinButton.activeFocus || participantActionsButton.activeFocus
 				readonly property string avatarSource: navigationRail.safeAvatarSource(
 					payload.avatarUrl || sourceState.avatarUrl || "")
+				readonly property string classicIconSource: navigationRail.classicParticipantIconSource(
+					entryKind, talkState)
 				readonly property bool selectedParticipant: selectionState.selectedUserSession !== undefined
 					&& String(selectionState.selectedUserSession) === participantSession
 				function focusRow() {
@@ -1920,11 +1935,13 @@ Rectangle {
 						objectName: "navigationParticipantAvatar_" + participantDelegate.participantObjectKey
 						Layout.preferredWidth: 26
 						Layout.preferredHeight: 26
-						radius: 13
-						clip: true
-						color: participantDelegate.isListener
+						radius: navigationRail.classicUserIcons ? 0 : 13
+						clip: !navigationRail.classicUserIcons
+						color: navigationRail.classicUserIcons ? "transparent"
+							: participantDelegate.isListener
 							? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12) : Theme.strip
-						border.width: participantDelegate.talking || participantDelegate.isListener
+						border.width: navigationRail.classicUserIcons ? 0
+							: participantDelegate.talking || participantDelegate.isListener
 							? 2 : participantDelegate.isSelf ? 1 : 0
 						border.color: participantDelegate.isListener ? Theme.accent
 							: participantDelegate.talking
@@ -1939,13 +1956,27 @@ Rectangle {
 							asynchronous: true
 							cache: false
 							fillMode: Image.PreserveAspectCrop
-							visible: status === Image.Ready
+							visible: !navigationRail.classicUserIcons && status === Image.Ready
+						}
+						Image {
+							id: participantClassicIcon
+							objectName: "navigationParticipantClassicIcon_"
+								+ participantDelegate.participantObjectKey
+							anchors.fill: parent
+							anchors.margins: 1
+							source: participantDelegate.classicIconSource
+							sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
+								Math.max(1, Math.ceil(height * 2)))
+							fillMode: Image.PreserveAspectFit
+							visible: navigationRail.classicUserIcons
+							Accessible.ignored: true
 						}
 						Label {
 							objectName: "navigationParticipantAvatarFallback_"
 								+ participantDelegate.participantObjectKey
 							anchors.centerIn: parent
-							visible: participantAvatarImage.status !== Image.Ready
+							visible: !navigationRail.classicUserIcons
+								&& participantAvatarImage.status !== Image.Ready
 							textFormat: Text.PlainText
 							text: roomDelegate.title.length > 0
 								? roomDelegate.title.slice(0, 1).toUpperCase() : "?"
@@ -1966,6 +1997,7 @@ Rectangle {
 							color: participantDelegate.isListener ? Theme.accent
 								: participantDelegate.talking
 								? navigationRail.toneColor(participantDelegate.talkTone, Theme.success) : Theme.textMuted
+							visible: !navigationRail.classicUserIcons
 						}
 					}
 					ColumnLayout {

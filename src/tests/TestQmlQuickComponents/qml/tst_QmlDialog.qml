@@ -963,8 +963,19 @@ TestCase {
 				"id": "look.modernAccent", "type": "select", "presentation": "accentGrid",
 				"label": "Accent", "value": "auto", "options": [
 					{ "value": "auto", "label": "Auto", "automatic": true,
+						"themeLabel": "Dark", "hint": "Follows the selected theme",
 						"swatch": { "accent": "#5ec8b0" } },
 					{ "value": "blue", "label": "Blue", "swatch": { "accent": "#73b7ff" } }
+				]
+			},
+			{
+				"id": "look.modernClassicUserIcons", "type": "checkbox",
+				"label": "Use classic user icons", "value": false
+			},
+			{
+				"id": "look.modernRailSide", "type": "select", "presentation": "segmented",
+				"label": "Rail side", "value": "right", "options": [
+					{ "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
 				]
 			}
 		] }])
@@ -973,11 +984,14 @@ TestCase {
 		const darkCard = findChild(loader.item.contentItem, "dialogThemeOption_dark")
 		const lightCard = findChild(loader.item.contentItem, "dialogThemeOption_light")
 		const autoAccent = findChild(loader.item.contentItem, "dialogAccentOption_auto")
+		const autoThemeLabel = findChild(loader.item.contentItem, "dialogAccentAutomaticTheme_auto")
 		const blueAccent = findChild(loader.item.contentItem, "dialogAccentOption_blue")
 		tryVerify(function() {
 			return overview !== null && overview.visible && overview.height >= 120
-				&& darkCard !== null && lightCard !== null && autoAccent !== null && blueAccent !== null
+				&& darkCard !== null && lightCard !== null && autoAccent !== null
+				&& autoThemeLabel !== null && blueAccent !== null
 		})
+		compare(autoThemeLabel.text, "Dark")
 		compare(darkCard.Accessible.role, Accessible.RadioButton)
 		compare(darkCard.Accessible.checked, true)
 		verify(lightCard.enabled)
@@ -1010,6 +1024,15 @@ TestCase {
 			return liveOverview !== null
 				&& String(liveOverview.border.color).toLowerCase() === "#73b7ff"
 		})
+
+		loader.item.updateFieldValue("look.modernRailSide", "left")
+		compare(dialogState.lastAction, "look.previewAppearance")
+		compare(dialogState.lastPayload.fieldId, "look.modernRailSide")
+		compare(String(dialogState.lastPayload.value), "left")
+		loader.item.updateFieldValue("look.modernClassicUserIcons", true)
+		compare(dialogState.lastAction, "look.previewAppearance")
+		compare(dialogState.lastPayload.fieldId, "look.modernClassicUserIcons")
+		compare(dialogState.lastPayload.value, true)
 	}
 
 	function test_stonks_client_fields_route_immediate_settings_actions() {

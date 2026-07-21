@@ -17,6 +17,11 @@ namespace {
 			   : QStringLiteral("comfortable");
 	}
 
+	QString normalizedRailSide(const QString &railSide) {
+		return railSide.trimmed().compare(QLatin1String("left"), Qt::CaseInsensitive) == 0
+			? QStringLiteral("left") : QStringLiteral("right");
+	}
+
 	QColor mixColors(const QColor &base, const QColor &overlay, const qreal overlayRatio) {
 		const qreal ratio = qBound< qreal >(0.0, overlayRatio, 1.0);
 		return QColor::fromRgbF(base.redF() * (1.0 - ratio) + overlay.redF() * ratio,
@@ -53,34 +58,31 @@ QmlThemeController::QmlThemeController(QObject *parent) : QObject(parent) {
 void QmlThemeController::refresh() {
 	if (property(QmlVisualFixtureMutation::OverrideProperty).toBool()
 		&& !property(QmlVisualFixtureMutation::WriteProperty).toBool()) return;
-	const std::optional< UiThemeTokens > activeTokens = activeUiThemeTokens();
-	if (!activeTokens) {
+	if (!Global::g_global_struct) {
 		return;
 	}
 
 	const QString themeId = Mumble::ModernTheme::normalizedThemeId(Global::get().s.qsModernShellTheme);
 	const QString densityId = normalizedDensityId(Global::get().s.qsModernShellDensity);
 	const QString accentId = Mumble::ModernTheme::normalizedAccentId(Global::get().s.qsModernShellAccent);
-	const QString requestedRailSide = Global::get().s.qsModernShellRailSide.trimmed().toLower();
-	const QString railSide = requestedRailSide == QLatin1String("left")
-		? QStringLiteral("left") : QStringLiteral("right");
-	const bool railSideChanged = m_railSide != railSide;
-	m_railSide = railSide;
+	UiThemeTokens tokens = uiThemeTokensForThemeId(themeId);
 	Mumble::ModernTheme::ThemeMetrics metrics;
 	QColor shellBackground;
 	QString themeSource = QStringLiteral("modernShell");
 	if (const auto customTheme = Mumble::ModernTheme::customTheme(themeId); customTheme) {
+		tokens = uiThemeTokensForThemeDefinition(*customTheme);
 		metrics = customTheme->metrics;
 		shellBackground = customTheme->palette.shellBackground;
 		themeSource = QStringLiteral("customTheme");
 	}
-	applyProductTokens(*activeTokens, metrics, shellBackground, themeId, themeSource, densityId, accentId,
-		Global::get().s.qsModernShellCustomAccent, Global::get().s.iModernShellCustomAccentStrength);
-	if (railSideChanged) emit themeStateChanged();
+	applyProductTokens(tokens, metrics, shellBackground, themeId, themeSource, densityId, accentId,
+		Global::get().s.qsModernShellCustomAccent, Global::get().s.iModernShellCustomAccentStrength,
+		Global::get().s.qsModernShellRailSide, Global::get().s.bModernShellClassicUserIcons);
 }
 
 bool QmlThemeController::applyProductAppearance(const QString &theme, const QString &density, const QString &accent,
-												 const QString &customAccent, const int customAccentStrength) {
+												 const QString &customAccent, const int customAccentStrength,
+												 const QString &railSide, const bool classicUserIcons) {
 	const QString themeId = Mumble::ModernTheme::normalizedThemeId(theme);
 	const QString densityId = normalizedDensityId(density);
 	const QString accentId = Mumble::ModernTheme::normalizedAccentId(accent);
@@ -96,7 +98,7 @@ bool QmlThemeController::applyProductAppearance(const QString &theme, const QStr
 		themeSource = QStringLiteral("customTheme");
 	}
 	applyProductTokens(tokens, metrics, shellBackground, themeId, themeSource, densityId, accentId,
-		customAccent, customAccentStrength);
+		customAccent, customAccentStrength, railSide, classicUserIcons);
 	return true;
 }
 
@@ -104,7 +106,8 @@ void QmlThemeController::applyProductTokens(UiThemeTokens tokens, Mumble::Modern
 											 const QColor &shellBackground, const QString &themeId,
 											 const QString &themeSource, const QString &densityId,
 											 const QString &accentId, const QString &customAccent,
-											 const int customAccentStrength) {
+											 const int customAccentStrength, const QString &railSide,
+											 const bool classicUserIcons) {
 	applyUiThemeAccentOverride(tokens, accentId, customAccent, customAccentStrength);
 
 	if (densityId == QLatin1String("compact")) {
@@ -118,11 +121,15 @@ void QmlThemeController::applyProductTokens(UiThemeTokens tokens, Mumble::Modern
 	}
 
 	const bool densityChangedValue = m_densityId != densityId || m_compact != (densityId == QLatin1String("compact"));
-	const bool metadataChanged = m_themeId != themeId || m_themeSource != themeSource || m_accentId != accentId;
+	const QString normalizedRail = normalizedRailSide(railSide);
+	const bool metadataChanged = m_themeId != themeId || m_themeSource != themeSource || m_accentId != accentId
+		|| m_railSide != normalizedRail || m_classicUserIcons != classicUserIcons;
 	m_themeId = themeId;
 	m_themeSource = themeSource;
 	m_densityId = densityId;
 	m_accentId = accentId;
+	m_railSide = normalizedRail;
+	m_classicUserIcons = classicUserIcons;
 	m_compact = densityId == QLatin1String("compact");
 	applyTokens(tokens, metrics, shellBackground);
 	if (densityChangedValue) emit densityChanged();
@@ -207,6 +214,8 @@ QVariantMap QmlThemeController::state() const {
 		{ QStringLiteral("density"), m_densityId },
 		{ QStringLiteral("accent"), m_accentId },
 		{ QStringLiteral("railSide"), m_railSide },
+		{ QStringLiteral("userIcons"), m_classicUserIcons ? QStringLiteral("classic") : QStringLiteral("avatars") },
+		{ QStringLiteral("classicUserIcons"), m_classicUserIcons },
 		{ QStringLiteral("compact"), m_compact },
 		{ QStringLiteral("effectiveTokens"), effectiveTokens },
 		{ QStringLiteral("themeTokens"), effectiveTokens }
@@ -308,7 +317,8 @@ bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const Q
 		themeId = QStringLiteral("visual-custom");
 	}
 	applyProductTokens(tokens, {}, {}, themeId,
-		QStringLiteral("visualFixture"), densityId, QStringLiteral("auto"), QStringLiteral("#5ec8b0"), 50);
+		QStringLiteral("visualFixture"), densityId, QStringLiteral("auto"), QStringLiteral("#5ec8b0"), 50,
+		m_railSide, m_classicUserIcons);
 	return true;
 }
 

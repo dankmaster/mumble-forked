@@ -24,6 +24,8 @@ public:
 	struct AppearancePreview {
 		QString theme;
 		QString density;
+		bool classicUserIcons = false;
+		QString railSide;
 		QString accent;
 		QString customAccent;
 		int customAccentStrength = 50;

@@ -926,6 +926,8 @@ Dialog {
 		const id = String(fieldId || "")
 		return id === "look.modernTheme"
 			|| id === "look.modernDensity"
+			|| id === "look.modernClassicUserIcons"
+			|| id === "look.modernRailSide"
 			|| id === "look.modernAccent"
 			|| id === "look.modernCustomAccent"
 			|| id === "look.modernCustomAccentStrength"
@@ -4146,6 +4148,8 @@ Dialog {
 						Accessible.description: modelData.hint || ""
 						Accessible.checked: selected
 						onClicked: dialog.updateFieldValue(accentGridRoot.field.id, modelData.value)
+						ToolTip.visible: hovered && String(modelData.hint || "").length > 0
+						ToolTip.text: String(modelData.hint || "")
 						background: Rectangle {
 							radius: 9
 							color: accentCard.selected ? Theme.selected
@@ -4165,14 +4169,29 @@ Dialog {
 								border.color: Theme.textStrong
 								border.width: accentCard.modelData.automatic ? 1 : 0
 							}
-							Label {
+							ColumnLayout {
 								Layout.fillWidth: true
-								textFormat: Text.PlainText
-								text: accentCard.modelData.label || String(accentCard.modelData.value)
-								color: Theme.textStrong
-								font.pixelSize: Theme.fontCaption
-								font.bold: accentCard.selected
-								elide: Text.ElideRight
+								spacing: 0
+								Label {
+									Layout.fillWidth: true
+									textFormat: Text.PlainText
+									text: accentCard.modelData.label || String(accentCard.modelData.value)
+									color: Theme.textStrong
+									font.pixelSize: Theme.fontCaption
+									font.bold: accentCard.selected
+									elide: Text.ElideRight
+								}
+								Label {
+									Layout.fillWidth: true
+									objectName: "dialogAccentAutomaticTheme_"
+										+ String(accentCard.modelData.value || accentCard.index)
+									visible: !!accentCard.modelData.automatic
+									textFormat: Text.PlainText
+									text: String(accentCard.modelData.themeLabel || qsTr("Theme accent"))
+									color: Theme.textMuted
+									font.pixelSize: 8
+									elide: Text.ElideRight
+								}
 							}
 						}
 					}

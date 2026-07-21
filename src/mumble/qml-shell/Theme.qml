@@ -80,6 +80,7 @@ QtObject {
 	readonly property string densityId: uiTheme ? uiTheme.densityId : "comfortable"
 	readonly property string accentId: uiTheme ? uiTheme.accentId : "auto"
 	readonly property string railSide: uiTheme ? uiTheme.railSide : "right"
+	readonly property bool classicUserIcons: uiTheme ? uiTheme.classicUserIcons : false
 	readonly property bool compact: uiTheme ? uiTheme.compact : false
 	readonly property bool spacious: densityId === "spacious"
 	readonly property bool comfortable: !compact && !spacious
