@@ -52,7 +52,6 @@ Log::Log(QObject *p) : QObject(p) {
 	qdDate   = QDate::currentDate();
 
 	QObject::connect(this, &Log::highlightSpawned, Global::get().mw, &MainWindow::highlightWindow);
-	QObject::connect(this, &Log::serverLogEntryAppended, Global::get().mw, &MainWindow::appendModernServerLogEntry);
 }
 
 // Display order in settingsscreen, allows to insert new events without breaking config-compatibility with older

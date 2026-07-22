@@ -199,6 +199,13 @@ void TestForkFeature::serverLogStreamContract() {
 	const QString clientMessages = QString::fromUtf8(clientMessagesFile.readAll());
 	QVERIFY(clientMessages.contains(QStringLiteral("void MainWindow::msgServerLogState")));
 	QVERIFY(clientMessages.contains(QStringLiteral("applyModernServerLogState(msg)")));
+
+	const QString clientLogPath = QFINDTESTDATA("../../mumble/Log.cpp");
+	QVERIFY2(!clientLogPath.isEmpty(), "Client Log.cpp test data was not found");
+	QFile clientLogFile(clientLogPath);
+	QVERIFY(clientLogFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString clientLog = QString::fromUtf8(clientLogFile.readAll());
+	QVERIFY(!clientLog.contains(QStringLiteral("appendModernServerLogEntry")));
 }
 
 QTEST_MAIN(TestForkFeature)
