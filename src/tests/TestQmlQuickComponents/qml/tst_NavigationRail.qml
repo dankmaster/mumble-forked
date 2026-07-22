@@ -90,6 +90,28 @@ TestCase {
 		property var selectedVoiceChannelId: undefined
 	}
 
+	Component {
+		id: isolatedNavigationRowsComponent
+		ListModel { dynamicRoles: true }
+	}
+
+	Component {
+		id: isolatedSelectionComponent
+		QtObject {
+			property string scopeToken: ""
+			property var selectedUserSession: undefined
+			property var selectedVoiceChannelId: undefined
+		}
+	}
+
+	Component {
+		id: isolatedRailLoaderComponent
+		Loader {
+			anchors.fill: parent
+			z: 100
+		}
+	}
+
     QtObject {
         id: session
 		property string serverName: "Test server"
@@ -896,6 +918,68 @@ TestCase {
 		compare(commands.selectScopeFromRailCount, 0)
 		compare(commands.selectParticipantCount, 0)
 		compare(committedSpy.count, 0)
+	}
+
+	function test_late_selected_tool_insertion_reveals_current_scope_without_stealing_focus() {
+		const isolatedRows = createTemporaryObject(
+			isolatedNavigationRowsComponent, testCase)
+		const isolatedSelection = createTemporaryObject(
+			isolatedSelectionComponent, testCase)
+		const isolatedLoader = createTemporaryObject(
+			isolatedRailLoaderComponent, testCase)
+		verify(isolatedRows !== null && isolatedSelection !== null
+			&& isolatedLoader !== null)
+
+		for (let index = 0; index < 10; ++index) {
+			isolatedRows.append({
+				"stableId": "late-room-" + index,
+				"scopeToken": "late:" + index,
+				"title": "Late room " + index,
+				"subtitle": "Available before selection",
+				"kind": "text", "sectionKind": "text", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "source": { "actions": [] } }
+			})
+		}
+		isolatedSelection.scopeToken = "text:late-tool"
+		isolatedLoader.setSource("qrc:/qml-shell/NavigationRail.qml", {
+			"navigationModel": isolatedRows,
+			"selectionState": isolatedSelection,
+			"uiCommands": commands,
+			"clientSession": session,
+			"stonksEnabled": true,
+			"commitOnSelection": true
+		})
+		tryVerify(function() { return isolatedLoader.item !== null })
+		const navigationList = findChild(isolatedLoader.item, "navigationRooms")
+		const profile = findChild(isolatedLoader.item, "selfIdentityButton")
+		verify(navigationList !== null && profile !== null)
+		profile.forceActiveFocus()
+		tryVerify(function() { return profile.activeFocus })
+		// Let the first reveal attempt finish before the selected model row exists.
+		wait(0)
+
+		const selectedIndex = isolatedRows.count
+		isolatedRows.append({
+			"stableId": "late-selected-tool", "scopeToken": "text:late-tool",
+			"title": "#TestStuff", "subtitle": "Debug text room",
+			"kind": "text", "sectionKind": "tool", "selected": false,
+			"depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+
+		tryCompare(navigationList, "currentIndex", selectedIndex)
+		navigationList.forceLayout()
+		tryVerify(function() {
+			const selectedRow = navigationList.itemAtIndex(selectedIndex)
+			if (!selectedRow)
+				return false
+			const origin = selectedRow.mapToItem(navigationList, 0, 0)
+			return origin.y >= -0.5
+				&& origin.y + selectedRow.height <= navigationList.height + 0.5
+		})
+		verify(profile.activeFocus)
+		compare(commands.selectScopeFromRailCount, 0)
 	}
 
 	function test_pointer_and_action_focus_synchronize_roving_index() {

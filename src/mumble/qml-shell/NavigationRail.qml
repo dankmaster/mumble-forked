@@ -40,6 +40,7 @@ Rectangle {
 	property string localFilterText: ""
 	property var localRoomExpansion: ({})
 	property int navigationPresentationRevision: 0
+	property bool selectionRevealPending: false
 	readonly property string effectiveFilterText: {
 		const revision = navigationPresentationRevision
 		if (navigationModel && navigationModel.filterText !== undefined)
@@ -58,6 +59,7 @@ Rectangle {
 	signal profileMenuRequested(var anchorPoint)
 	signal serverMenuRequested(var anchorPoint)
 	Accessible.ignored: accessibilitySuppressed
+	Component.onCompleted: scheduleSelectionReveal()
 
 
 	function normalizedFilterText() {
@@ -637,9 +639,31 @@ Rectangle {
 		return -1
 	}
 
+	function navigationSelectionRequested() {
+		const scopeToken = selectionState.scopeToken === undefined
+			|| selectionState.scopeToken === null ? "" : String(selectionState.scopeToken)
+		return scopeToken.length > 0
+			|| (selectionState.selectedUserSession !== undefined
+				&& selectionState.selectedUserSession !== null)
+			|| (selectionState.selectedVoiceChannelId !== undefined
+				&& selectionState.selectedVoiceChannelId !== null)
+	}
+
+	function scheduleSelectionReveal() {
+		if (!navigationSelectionRequested()) {
+			selectionRevealPending = false
+			return
+		}
+		selectionRevealPending = true
+		Qt.callLater(navigationRail.revealCurrentSelection)
+	}
+
 	function revealCurrentSelection() {
 		const selectedIndex = selectedNavigationIndex()
-		return selectedIndex >= 0 && setCurrentNavigationIndex(selectedIndex)
+		const revealed = selectedIndex >= 0 && setCurrentNavigationIndex(selectedIndex)
+		if (revealed)
+			selectionRevealPending = false
+		return revealed
 	}
 
 	function navigationPageStep() {
@@ -668,7 +692,17 @@ Rectangle {
 			return false
 		if (rooms.currentIndex !== targetIndex)
 			rooms.currentIndex = targetIndex
+		rooms.forceLayout()
 		rooms.positionViewAtIndex(targetIndex, ListView.Contain)
+		// Newly inserted rows can still gain their section header height after the
+		// first view-position pass. Re-apply containment once layout has settled,
+		// but never pull the rail back if the user has already moved elsewhere.
+		Qt.callLater(function() {
+			if (rooms.currentIndex !== targetIndex)
+				return
+			rooms.forceLayout()
+			rooms.positionViewAtIndex(targetIndex, ListView.Contain)
+		})
 		return true
 	}
 
@@ -710,18 +744,21 @@ Rectangle {
 		target: selectionState
 		ignoreUnknownSignals: true
 		function onScopeTokenChanged() {
-			Qt.callLater(navigationRail.revealCurrentSelection)
+			navigationRail.scheduleSelectionReveal()
 		}
 		function onSelectedUserSessionChanged() {
-			Qt.callLater(navigationRail.revealCurrentSelection)
+			navigationRail.scheduleSelectionReveal()
 		}
 		function onSelectedVoiceChannelIdChanged() {
-			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+			navigationRail.scheduleSelectionReveal()
 		}
 	}
 	Connections {
 		target: navigationModel
 		ignoreUnknownSignals: true
+		function onModelReset() {
+			navigationRail.scheduleSelectionReveal()
+		}
 		function onFilterTextChanged() {
 			++navigationRail.navigationPresentationRevision
 			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
@@ -1020,6 +1057,10 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
 			model: navigationModel
+			onCountChanged: {
+				if (navigationRail.selectionRevealPending)
+					navigationRail.scheduleSelectionReveal()
+			}
 			clip: true
 			// The virtualized list is the navigator's single tab stop. Rows remain
 			// directly focusable by pointer, automation and focusInitialItem(), while
