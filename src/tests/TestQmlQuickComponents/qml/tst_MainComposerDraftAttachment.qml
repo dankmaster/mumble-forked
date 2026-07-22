@@ -67,7 +67,7 @@ TestCase {
 	}
 
 	function test_draft_upload_exposes_localized_status_and_progress() {
-		verify(/readonly property int baseHeight:\s*Math\.max\(72,\s*Theme\.railFooterHeight\)[\s\S]*Layout\.preferredHeight:\s*\(activeScope\.hasPendingReply\s*\?\s*baseHeight \+ 44\s*:\s*baseHeight\)/.test(mainSource))
+		verify(/visible:\s*!activeScope\.activity[\s\S]*readonly property int baseHeight:\s*Math\.max\(90,\s*Theme\.railFooterHeight\)[\s\S]*Layout\.preferredHeight:\s*visible\s*\?\s*\(activeScope\.hasPendingReply\s*\?\s*baseHeight \+ 44\s*:\s*baseHeight\)/.test(mainSource))
 		verify(/readonly property string normalizedStatus:[\s\S]*readonly property real boundedProgress:/.test(mainSource))
 		verify(/qsTr\("Uploading · %1%"\)\.arg\(progressPercent\)/.test(mainSource))
 		verify(/qsTr\("Preparing attachment…"\)/.test(mainSource))
@@ -80,7 +80,7 @@ TestCase {
 
 	function test_desktop_rail_and_conversation_dividers_share_geometry_on_both_sides() {
 		verify(/id:\s*shellHeader[\s\S]*Layout\.preferredHeight:\s*root\.compactNavigation[\s\S]*Theme\.railHeaderHeight/.test(mainSource))
-		verify(/id:\s*desktopNavigationRail[\s\S]*alignedHeaderHeight:\s*shellHeader\.height[\s\S]*alignedFooterHeight:\s*composerSurface\.height/.test(mainSource))
+		verify(/id:\s*desktopNavigationRail[\s\S]*alignedHeaderHeight:\s*shellHeader\.height[\s\S]*alignedFooterHeight:\s*Math\.max\(Theme\.railFooterHeight,\s*composerSurface\.height\)/.test(mainSource))
 		verify(/layoutDirection:\s*Theme\.railSide === "left"\s*\?\s*Qt\.RightToLeft\s*:\s*Qt\.LeftToRight/.test(mainSource))
 	}
 
@@ -165,8 +165,20 @@ TestCase {
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
-		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled"/.test(mainSource))
+	}
+
+	function test_activity_is_a_read_only_log_surface_without_conversation_loading_chrome() {
+		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*if\s*\(activeScope\.activity\)[\s\S]*return\s+true/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No activity yet"\)[\s\S]*qsTr\("Connection events, notices, and diagnostics will appear here\."\)/.test(mainSource))
+		verify(/id:\s*composerSurface[\s\S]*visible:\s*!activeScope\.activity[\s\S]*Layout\.preferredHeight:\s*visible\s*\?/.test(mainSource))
+	}
+
+	function test_composer_keeps_its_destination_visible_while_typing() {
+		verify(/objectName:\s*"composerTargetRow"[\s\S]*objectName:\s*"composerTargetLabel"[\s\S]*qsTr\("To: %1"\)\.arg\(activeScope\.label\)/.test(mainSource))
+		verify(/objectName:\s*"composerTargetKindLabel"[\s\S]*text:\s*activeScope\.kindLabel/.test(mainSource))
+		verify(/Accessible\.description:\s*qsTr\("Sending to %1\. %2"\)[\s\S]*arg\(activeScope\.label\)\.arg\(activeScope\.composerHint\)/.test(mainSource))
 	}
 
 	function test_empty_and_lightweight_scopes_skip_the_presentation_delay() {

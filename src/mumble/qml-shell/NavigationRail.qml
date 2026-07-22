@@ -357,7 +357,9 @@ Rectangle {
 		let matches = 0
 		for (let index = 0; index < count; ++index) {
 			const room = navigationModel.get(index)
-			if (room && String(room.kind) === kind && navigationRowIsVisible(room))
+			if (room && String(room.kind) !== "participant"
+					&& String(room.sectionKind || room.kind) === kind
+					&& navigationRowIsVisible(room))
 				++matches
 		}
 		return matches
@@ -1207,7 +1209,8 @@ Rectangle {
 				readonly property bool startsVisibleSection: navigationVisible
 					&& navigationRail.rowStartsVisibleSection(index, sectionKind)
 				readonly property string sectionVisualLabel: sectionKind === "voice" ? qsTr("VOICE ROOMS")
-					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES") : qsTr("TEXT ROOMS")
+					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES")
+					: sectionKind === "tool" ? qsTr("TOOLS") : qsTr("TEXT ROOMS")
 				readonly property int sectionHeaderHeight: startsVisibleSection ? 34 : 0
 				readonly property bool joined: !!payload.joined || payload.status === "joined"
 				readonly property bool canJoin: kind === "voice" && !joined
@@ -1380,7 +1383,8 @@ Rectangle {
 							anchors.centerIn: parent
 							name: kind === "voice" ? "voice-room"
 								: kind === "direct" ? "direct"
-								: title === qsTr("Activity") ? "activity" : "text-room"
+								: title === qsTr("Activity") ? "activity"
+								: sectionKind === "tool" ? "terminal" : "text-room"
 							color: selected ? Theme.accent : joined ? Theme.success : Theme.textMuted
 							size: 14
 						}
