@@ -200,27 +200,35 @@ if(zeroconf)
 endif()
 
 if(ice)
-	# Ice 3.8 ships a config package that imports all available targets in one
-	# pass. In particular, IceSSL is no longer a separate library because its
-	# transport is part of Ice itself. Prefer that package to avoid repeatedly
-	# importing its targets, but retain the module-based lookup for older Ice
-	# installations that still provide IceSSL as a separate component.
-	find_package(Ice CONFIG QUIET)
-	if(NOT Ice_FOUND)
-		find_pkg(Ice
-			COMPONENTS
-				Ice
-				IceSSL
-			OPTIONAL_COMPONENTS
-				IceDiscovery
-				IceLocatorDiscovery
-				IceUtil
-			REQUIRED
+	# An explicit Ice_HOME selects CMake's FindIce module so a supported,
+	# isolated Ice 3.7 toolchain can be used even when the host also has an
+	# incompatible Ice config package installed globally.
+	if(Ice_HOME)
+		find_package(Ice MODULE REQUIRED
+			COMPONENTS Ice IceSSL
+			OPTIONAL_COMPONENTS IceDiscovery IceLocatorDiscovery IceUtil
 		)
+	else()
+		# Probe config packages in one pass because some of them cannot safely be
+		# imported once per component. Fall back to CMake's module for older Ice
+		# installations that do not ship a config package.
+		find_package(Ice CONFIG QUIET)
+		if(NOT Ice_FOUND)
+			find_package(Ice MODULE REQUIRED
+				COMPONENTS Ice IceSSL
+				OPTIONAL_COMPONENTS IceDiscovery IceLocatorDiscovery IceUtil
+			)
+		endif()
 	endif()
 
 	if(NOT TARGET Ice::Ice)
 		message(FATAL_ERROR "The discovered Ice package does not provide the required Ice::Ice target.")
+	endif()
+	if(Ice_VERSION VERSION_GREATER_EQUAL 3.8)
+		message(FATAL_ERROR
+			"Ice ${Ice_VERSION} is not supported by Mumble's legacy Ice admin API. "
+			"Use an Ice 3.7 development toolchain or configure with -Dice=OFF."
+		)
 	endif()
 
 	# The config package uses the singular variable while CMake's FindIce
@@ -244,15 +252,10 @@ if(ice)
 		list(APPEND SLICE_INCLUDE_ARGS "-I${SLICE_DIR}")
 	endforeach()
 
-	set(SLICE2CPP_ARGS ${SLICE_INCLUDE_ARGS} ${ICE_FILE})
-	if(Ice_VERSION VERSION_LESS 3.8)
-		list(PREPEND SLICE2CPP_ARGS "--checksum")
-	endif()
-
 	add_custom_command(
 		OUTPUT ${ICE_GENERATED_FILES}
 		COMMAND ${Ice_SLICE2CPP_EXECUTABLE}
-		ARGS ${SLICE2CPP_ARGS}
+		ARGS "--checksum" ${SLICE_INCLUDE_ARGS} ${ICE_FILE}
 		MAIN_DEPENDENCY ${ICE_FILE}
 		COMMENT "Generating Ice files"
 		VERBATIM
@@ -300,7 +303,7 @@ if(ice)
 	target_link_libraries(mumble_server_object_lib
 		PUBLIC
 			Ice::Ice
-			$<TARGET_NAME_IF_EXISTS:Ice::IceSSL>
+			Ice::IceSSL
 			$<TARGET_NAME_IF_EXISTS:Ice::IceDiscovery>
 			$<TARGET_NAME_IF_EXISTS:Ice::IceLocatorDiscovery>
 			$<TARGET_NAME_IF_EXISTS:Ice::IceUtil>

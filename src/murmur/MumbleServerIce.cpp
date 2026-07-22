@@ -29,9 +29,8 @@
 #include <openssl/err.h>
 
 #include <Ice/Ice.h>
-#if ICE_INT_VERSION < 30800
-#	include <Ice/SliceChecksums.h>
-#endif
+#include <Ice/SliceChecksums.h>
+#include <IceUtil/IceUtil.h>
 
 #include <cassert>
 #include <chrono>
@@ -2556,11 +2555,7 @@ static void impl_Meta_getSliceChecksums(const ::MumbleServer::AMD_Meta_getSliceC
 										const Ice::ObjectAdapterPtr) {
 	ICE_IMPL_BEGIN
 
-#if ICE_INT_VERSION < 30800
 	cb->ice_response(::Ice::sliceChecksums());
-#else
-	cb->ice_response(::Ice::SliceChecksumDict {});
-#endif
 
 	ICE_IMPL_END
 }
