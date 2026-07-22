@@ -828,6 +828,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qsModernShellMotdDismissedSignature, "ui/modernShellMotdDismissedSignature");
 	LOAD(qsModernShellMotdLastSeenSignature, "ui/modernShellMotdLastSeenSignature");
 	LOAD(qsModernShellMotdServerStates, "ui/modernShellMotdServerStates");
+	LOAD(qslModernShellCollapsedNavigationSections, "ui/modernShellCollapsedNavigationSections");
 	LOAD(qsModernShellTheme, "ui/modernShellTheme");
 	LOAD(qsModernShellDensity, "ui/modernShellDensity");
 	LOAD(bModernShellClassicUserIcons, "ui/modernShellClassicUserIcons");

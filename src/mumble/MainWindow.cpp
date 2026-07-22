@@ -13615,7 +13615,14 @@ void MainWindow::applyShellLayout() {
 	{
 		if (!m_qmlShellHost) {
 			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
+			ClientSessionController *session = m_qmlShellHost->sessionController();
 			UiCommandController *commands = m_qmlShellHost->commandController();
+			connect(session, &ClientSessionController::collapsedNavigationSectionsChanged, this, [session]() {
+				const QStringList collapsedSections = session->collapsedNavigationSections();
+				if (Global::get().s.qslModernShellCollapsedNavigationSections == collapsedSections) return;
+				Global::get().s.qslModernShellCollapsedNavigationSections = collapsedSections;
+				Global::get().s.save();
+			});
 			commands->setScopeActionsProvider([this](const QString &scopeToken, const QString &kind) {
 				return buildQmlScopeActions(scopeToken, kind);
 			});
@@ -25280,6 +25287,8 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		stonksState.insert(it.key(), it.value());
 	}
 	appState.insert(QStringLiteral("stonks"), stonksState);
+	appState.insert(QStringLiteral("collapsedNavigationSections"),
+					Global::get().s.qslModernShellCollapsedNavigationSections);
 	const QVariantMap motdViewState = modernMotdServerViewState();
 	appState.insert(QStringLiteral("motdExpanded"),
 					motdViewState.value(QStringLiteral("expanded")).toBool());

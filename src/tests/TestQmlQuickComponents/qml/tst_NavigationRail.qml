@@ -125,10 +125,20 @@ TestCase {
         property string selfName: "Tester"
 		property bool selfMuted: false
 		property bool selfDeafened: false
+		property var collapsedNavigationSections: []
 		property var stonks: ({ "supported": true })
 		property var selfMenu: ({
 			"avatarUrl": "image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8"
 		})
+		function setNavigationSectionExpanded(sectionKind, expanded) {
+			const sections = collapsedNavigationSections.slice()
+			const index = sections.indexOf(sectionKind)
+			if (expanded && index >= 0)
+				sections.splice(index, 1)
+			else if (!expanded && index < 0)
+				sections.push(sectionKind)
+			collapsedNavigationSections = sections
+		}
     }
 
     QtObject {
@@ -304,7 +314,8 @@ TestCase {
 		selection.selectedVoiceChannelId = undefined
 		selection.scopeToken = ""
 		loader.item.localRoomExpansion = ({})
-		loader.item.toolsExpanded = true
+		session.collapsedNavigationSections = []
+		loader.item.localCollapsedNavigationSections = []
 		loader.item.setNavigationFilter("")
 		loader.item.activeScopeMenuToken = ""
 		loader.item.activeParticipantMenuKey = ""
@@ -1184,7 +1195,10 @@ TestCase {
 		compare(directSection.Accessible.name, "DIRECT MESSAGES · 1")
 		for (const kind of [ "voice", "tool", "direct" ]) {
 			const visualLabel = findChild(loader.item, "navigationSectionLabel_" + kind)
+			const toggleIcon = findChild(loader.item, "navigationSectionToggle_" + kind)
+			const toggleMouse = findChild(loader.item, "navigationSectionToggleMouse_" + kind)
 			verify(visualLabel !== null)
+			verify(toggleIcon !== null && toggleMouse !== null && toggleMouse.enabled)
 			verify(visualLabel.Accessible.ignored)
 			verify(String(visualLabel.text).indexOf(" · ") < 0)
 			compare(String(visualLabel.color), String(Theme.withAlpha(Theme.accent, 0.76)))
@@ -1221,6 +1235,55 @@ TestCase {
 		tryCompare(semanticParticipant, "activeFocus", true)
 		compare(participant.border.width, Theme.focusRingWidth)
 		compare(participant.border.color, Theme.focus)
+	}
+
+	function test_voice_and_direct_sections_collapse_through_shared_session_state() {
+		const rail = loader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		const voiceToggle = findChild(rail, "navigationSectionToggleMouse_voice")
+		verify(navigationList !== null && voiceToggle !== null)
+
+		mouseClick(voiceToggle, voiceToggle.width / 2, voiceToggle.height / 2, Qt.LeftButton)
+		tryVerify(function() {
+			return session.collapsedNavigationSections.indexOf("voice") >= 0
+				&& !rail.sectionExpandedFor("voice")
+		})
+		tryVerify(function() {
+			return !rail.navigationIndexHasContent(0) && rail.navigationIndexIsVisible(0)
+				&& !rail.navigationIndexIsVisible(1) && !rail.navigationIndexIsVisible(2)
+		})
+		const lobby = navigationList.itemAtIndex(0)
+		verify(lobby !== null)
+		compare(lobby.height, lobby.sectionHeaderHeight)
+		compare(lobby.Accessible.role, Accessible.Button)
+		compare(lobby.Accessible.name, "VOICE ROOMS")
+		verify(lobby.Accessible.description.indexOf("2 voice rooms") >= 0)
+
+		selection.scopeToken = "channel:2"
+		tryVerify(function() {
+			return rail.navigationIndexHasContent(2) && rail.navigationIndexIsVisible(2)
+		})
+		verify(!rail.sectionExpandedFor("voice"))
+		selection.scopeToken = ""
+		rail.setSectionExpanded("voice", true)
+		tryVerify(function() {
+			return rail.navigationIndexHasContent(0) && rail.navigationIndexHasContent(2)
+		})
+
+		rail.setSectionExpanded("direct", false)
+		tryVerify(function() {
+			return session.collapsedNavigationSections.indexOf("direct") >= 0
+				&& !rail.sectionExpandedFor("direct")
+		})
+		navigationList.positionViewAtIndex(5, ListView.Contain)
+		navigationList.forceLayout()
+		let direct = null
+		tryVerify(function() {
+			direct = findChild(rail, "navigationRoom_room-direct")
+			return direct !== null && !direct.sectionContentVisible
+				&& direct.height === direct.sectionHeaderHeight
+		})
+		compare(direct.Accessible.name, "DIRECT MESSAGES")
 	}
 
 	function test_tools_section_collapses_without_losing_selected_tool_context() {
@@ -1282,10 +1345,56 @@ TestCase {
 			compare(commands.selectScopeFromRailCount, 0)
 		} finally {
 			selection.scopeToken = ""
-			rail.toolsExpanded = true
+			rail.setToolsExpanded(true)
 			navigationRows.remove(5)
 			navigationList.forceLayout()
 		}
+	}
+
+	function test_slightly_scrolled_top_section_header_keeps_its_full_surface() {
+		const isolatedRows = createTemporaryObject(
+			isolatedNavigationRowsComponent, testCase)
+		const isolatedSelection = createTemporaryObject(
+			isolatedSelectionComponent, testCase)
+		const isolatedLoader = createTemporaryObject(
+			isolatedRailLoaderComponent, testCase)
+		verify(isolatedRows !== null && isolatedSelection !== null
+			&& isolatedLoader !== null)
+		for (let index = 0; index < 20; ++index) {
+			isolatedRows.append({
+				"stableId": "header-scroll-" + index,
+				"scopeToken": "header-scroll:" + index,
+				"title": "Header scroll room " + index,
+				"subtitle": "", "kind": "text", "sectionKind": "text",
+				"selected": false, "depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "source": { "actions": [] } }
+			})
+		}
+		isolatedLoader.setSource("qrc:/qml-shell/NavigationRail.qml", {
+			"navigationModel": isolatedRows,
+			"selectionState": isolatedSelection,
+			"uiCommands": commands,
+			"clientSession": session,
+			"stonksEnabled": true,
+			"commitOnSelection": true
+		})
+		tryVerify(function() { return isolatedLoader.item !== null })
+		const rail = isolatedLoader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		verify(navigationList !== null)
+		navigationList.currentIndex = 0
+		navigationList.positionViewAtBeginning()
+		navigationList.forceLayout()
+		wait(0)
+		navigationList.contentY = 8
+		tryVerify(function() { return Math.abs(navigationList.contentY - 8) <= 0.5 })
+		const section = findChild(rail, "navigationSection_text")
+		const firstRoom = navigationList.itemAtIndex(0)
+		verify(section !== null && firstRoom !== null)
+		const origin = section.mapToItem(navigationList, 0, 0)
+		verify(Math.abs(origin.y) <= 0.5,
+			"A slightly scrolled heading must be pinned to the viewport instead of clipping")
+		verify(Math.abs(firstRoom.sectionHeaderViewportOffset - navigationList.contentY) <= 0.5)
 	}
 
 	function test_section_geometry_recovers_after_hidden_layout_change() {

@@ -56,6 +56,8 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(QVariantMap selfMenu READ selfMenu WRITE setSelfMenu NOTIFY selfMenuChanged)
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
 	Q_PROPERTY(QVariantMap stonks READ stonks WRITE setStonks NOTIFY stonksChanged)
+	Q_PROPERTY(QStringList collapsedNavigationSections READ collapsedNavigationSections
+				   WRITE setCollapsedNavigationSections NOTIFY collapsedNavigationSectionsChanged)
 	Q_PROPERTY(QVariantList motdSegments READ motdSegments NOTIFY motdSegmentsChanged)
 	Q_PROPERTY(QVariantList motdBlocks READ motdBlocks NOTIFY motdBlocksChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
@@ -90,6 +92,7 @@ public:
 	QVariantMap selfMenu() const;
 	QVariantMap updateBanner() const;
 	QVariantMap stonks() const;
+	QStringList collapsedNavigationSections() const;
 	QString motdHtml() const;
 	QVariantList motdSegments() const;
 	QVariantList motdBlocks() const;
@@ -122,6 +125,8 @@ public:
 	void setSelfMenu(const QVariantMap &value);
 	void setUpdateBanner(const QVariantMap &value);
 	void setStonks(const QVariantMap &value);
+	void setCollapsedNavigationSections(const QStringList &value);
+	Q_INVOKABLE void setNavigationSectionExpanded(const QString &sectionKind, bool expanded);
 	void setMotdHtml(const QString &value);
 	void setMotdContent(const QString &html, const QString &signatureIdentity);
 	void setMotdSummary(const QString &value);
@@ -150,6 +155,7 @@ signals:
 	void selfMenuChanged();
 	void updateBannerChanged();
 	void stonksChanged();
+	void collapsedNavigationSectionsChanged();
 	void motdHtmlChanged();
 	void motdSegmentsChanged();
 	void motdBlocksChanged();
@@ -184,6 +190,7 @@ private:
 	QVariantMap m_selfMenu;
 	QVariantMap m_updateBanner;
 	QVariantMap m_stonks;
+	QStringList m_collapsedNavigationSections;
 	QString m_motdHtml;
 	QString m_motdContentSignature;
 	QVariantList m_motdSegments;

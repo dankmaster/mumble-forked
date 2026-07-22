@@ -39,7 +39,8 @@ Rectangle {
 	property string activeScopeMenuToken: ""
 	property string localFilterText: ""
 	property var localRoomExpansion: ({})
-	property bool toolsExpanded: true
+	property var localCollapsedNavigationSections: []
+	readonly property bool toolsExpanded: sectionExpandedFor("tool")
 	property int navigationPresentationRevision: 0
 	property bool selectionRevealPending: false
 	readonly property string effectiveFilterText: {
@@ -323,17 +324,63 @@ Rectangle {
 		setRoomExpanded(scopeToken, !roomExpandedFor(scopeToken, payload))
 	}
 
-	function setToolsExpanded(expanded) {
+	function isCollapsibleSection(sectionKind) {
+		return [ "voice", "text", "direct", "tool" ].indexOf(
+			String(sectionKind || "").trim().toLowerCase()) >= 0
+	}
+
+	function collapsedNavigationSectionKinds() {
+		const source = clientSession && clientSession.collapsedNavigationSections !== undefined
+			? clientSession.collapsedNavigationSections : localCollapsedNavigationSections
+		const sections = []
+		for (let index = 0; source && index < Number(source.length || 0); ++index) {
+			const normalized = String(source[index] || "").trim().toLowerCase()
+			if (isCollapsibleSection(normalized) && sections.indexOf(normalized) < 0)
+				sections.push(normalized)
+		}
+		return sections
+	}
+
+	function sectionExpandedFor(sectionKind) {
+		const revision = navigationPresentationRevision
+		const normalized = String(sectionKind || "").trim().toLowerCase()
+		return !isCollapsibleSection(normalized)
+			|| collapsedNavigationSectionKinds().indexOf(normalized) < 0
+	}
+
+	function setSectionExpanded(sectionKind, expanded) {
+		const normalized = String(sectionKind || "").trim().toLowerCase()
 		const accepted = !!expanded
-		if (toolsExpanded === accepted)
+		if (!isCollapsibleSection(normalized) || sectionExpandedFor(normalized) === accepted)
 			return
-		toolsExpanded = accepted
+		if (clientSession && typeof clientSession.setNavigationSectionExpanded === "function") {
+			clientSession.setNavigationSectionExpanded(normalized, accepted)
+		} else {
+			const sections = collapsedNavigationSectionKinds()
+			const existingIndex = sections.indexOf(normalized)
+			if (accepted && existingIndex >= 0)
+				sections.splice(existingIndex, 1)
+			else if (!accepted && existingIndex < 0)
+				sections.push(normalized)
+			if (clientSession && clientSession.collapsedNavigationSections !== undefined)
+				clientSession.collapsedNavigationSections = sections
+			else
+				localCollapsedNavigationSections = sections
+		}
 		++navigationPresentationRevision
 		Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
 	}
 
+	function toggleSectionExpanded(sectionKind) {
+		setSectionExpanded(sectionKind, !sectionExpandedFor(sectionKind))
+	}
+
+	function setToolsExpanded(expanded) {
+		setSectionExpanded("tool", expanded)
+	}
+
 	function toggleToolsExpanded() {
-		setToolsExpanded(!toolsExpanded)
+		toggleSectionExpanded("tool")
 	}
 
 	function requestScopeMenu(scopeToken, kind, payload, anchorPoint) {
@@ -379,6 +426,18 @@ Rectangle {
 				++matches
 		}
 		return matches
+	}
+
+	function sectionItemCountDescription(kind, count) {
+		const section = String(kind || "")
+		const amount = Number(count || 0)
+		if (section === "voice")
+			return amount === 1 ? qsTr("1 voice room") : qsTr("%1 voice rooms").arg(amount)
+		if (section === "direct")
+			return amount === 1 ? qsTr("1 direct message") : qsTr("%1 direct messages").arg(amount)
+		if (section === "tool")
+			return amount === 1 ? qsTr("1 tool") : qsTr("%1 tools").arg(amount)
+		return amount === 1 ? qsTr("1 text room") : qsTr("%1 text rooms").arg(amount)
 	}
 
 	function navigationIndexForScope(scopeToken) {
@@ -724,8 +783,10 @@ Rectangle {
 		const row = navigationModel.get(index)
 		if (!row || !navigationRowIsVisible(row))
 			return false
-		return String(row.sectionKind || row.kind || "") !== "tool"
-			|| toolsExpanded || navigationRowIsSelected(row) || normalizedFilterText().length > 0
+		const sectionKind = String(row.sectionKind || row.kind || "")
+		const scopeToken = String(row.scopeToken || (row.payload || ({})).scopeToken || "")
+		return sectionExpandedFor(sectionKind) || navigationRowIsSelected(row)
+			|| roomMatchesVoiceSelection(scopeToken) || normalizedFilterText().length > 0
 	}
 
 	function navigationIndexIsVisible(index) {
@@ -734,7 +795,7 @@ Rectangle {
 			return false
 		const sectionKind = String(row.sectionKind || row.kind || "")
 		return navigationIndexHasContent(index)
-			|| (sectionKind === "tool" && rowStartsVisibleSection(index, sectionKind))
+			|| (isCollapsibleSection(sectionKind) && rowStartsVisibleSection(index, sectionKind))
 	}
 
 	function focusNavigationIndex(index, focusReason) {
@@ -1141,8 +1202,8 @@ Rectangle {
 						navigationRail.stepVisibleNavigationIndex(currentIndex,
 							navigationRail.navigationPageStep()))
 				} else if ((event.key === Qt.Key_Left || event.key === Qt.Key_Right)
-						&& currentItem && currentItem.sectionKind === "tool") {
-					navigationRail.setToolsExpanded(event.key === Qt.Key_Right)
+						&& currentItem && navigationRail.isCollapsibleSection(currentItem.sectionKind)) {
+					navigationRail.setSectionExpanded(currentItem.sectionKind, event.key === Qt.Key_Right)
 					event.accepted = true
 				} else if ((event.key === Qt.Key_Menu
 						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))
@@ -1191,8 +1252,9 @@ Rectangle {
 					forceActiveFocus(focusReason === undefined ? Qt.OtherFocusReason : focusReason)
 				}
 				function activateSelection() {
-					if (!sectionContentVisible && startsVisibleSection && sectionKind === "tool") {
-						navigationRail.toggleToolsExpanded()
+					if (!sectionContentVisible && startsVisibleSection
+							&& navigationRail.isCollapsibleSection(sectionKind)) {
+						navigationRail.toggleSectionExpanded(sectionKind)
 						return
 					}
 					if (isParticipant) {
@@ -1297,6 +1359,14 @@ Rectangle {
 					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES")
 					: sectionKind === "tool" ? qsTr("TOOLS") : qsTr("TEXT ROOMS")
 				readonly property int sectionHeaderHeight: startsVisibleSection ? 34 : 0
+				// Keep a heading whole when selection reveal leaves only its upper padding
+				// outside the viewport. The header may cover that same amount of row
+				// padding, but never leaves clipped title glyphs at the top edge.
+				readonly property real sectionHeaderViewportOffset: {
+					const clippedHeight = rooms.contentY - y
+					return startsVisibleSection && clippedHeight > 0
+						&& clippedHeight < sectionHeaderHeight ? clippedHeight : 0
+				}
 				readonly property bool joined: !!payload.joined || payload.status === "joined"
 				readonly property bool canJoin: kind === "voice" && !joined
 					&& (payload.canJoin === undefined || !!payload.canJoin)
@@ -1358,7 +1428,8 @@ Rectangle {
 				Accessible.role: sectionContentVisible ? Accessible.ListItem : Accessible.Button
 				Accessible.name: sectionContentVisible ? title : sectionVisualLabel
 				Accessible.description: !sectionContentVisible
-					? qsTr("Collapsed section with %1 tools").arg(navigationRail.roomCountForKind("tool"))
+					? qsTr("Collapsed section with %1").arg(navigationRail.sectionItemCountDescription(
+						sectionKind, navigationRail.roomCountForKind(sectionKind)))
 					: isParticipant ? participantDelegate.accessibleDetails() : accessibleRoomDetails()
 				Accessible.selected: sectionContentVisible
 					&& (isParticipant ? participantDelegate.selectedParticipant : selected)
@@ -1378,19 +1449,21 @@ Rectangle {
 					anchors.left: parent.left
 					anchors.right: parent.right
 					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionHeaderViewportOffset
 					height: roomDelegate.sectionHeaderHeight
 					visible: roomDelegate.startsVisibleSection
 					z: 12
-					Accessible.role: roomDelegate.sectionKind === "tool"
+					Accessible.role: navigationRail.isCollapsibleSection(roomDelegate.sectionKind)
 						? Accessible.Button : Accessible.Heading
 					Accessible.name: roomDelegate.sectionVisualLabel + " · "
 						+ navigationRail.roomCountForKind(roomDelegate.sectionKind)
-					Accessible.description: roomDelegate.sectionKind === "tool"
-						? (navigationRail.toolsExpanded ? qsTr("Expanded") : qsTr("Collapsed")) : ""
+					Accessible.description: navigationRail.isCollapsibleSection(roomDelegate.sectionKind)
+						? (navigationRail.sectionExpandedFor(roomDelegate.sectionKind)
+							? qsTr("Expanded") : qsTr("Collapsed")) : ""
+					Accessible.onPressAction: if (navigationRail.isCollapsibleSection(roomDelegate.sectionKind))
+						navigationRail.toggleSectionExpanded(roomDelegate.sectionKind)
 					Accessible.ignored: navigationRail.accessibilitySuppressed || !visible
 						|| !roomDelegate.accessibilityViewportVisible || !roomDelegate.sectionContentVisible
-					Accessible.onPressAction: if (roomDelegate.sectionKind === "tool")
-						navigationRail.toggleToolsExpanded()
 
 					Rectangle {
 						anchors.fill: parent
@@ -1416,27 +1489,30 @@ Rectangle {
 					}
 					ModernIcon {
 						id: sectionToggle
-						objectName: visible ? "navigationSectionToggle_tool" : ""
+						objectName: visible ? "navigationSectionToggle_" + roomDelegate.sectionKind : ""
 						anchors.right: parent.right
 						anchors.rightMargin: 8
 						anchors.bottom: parent.bottom
 						anchors.bottomMargin: Theme.space1
-						visible: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
+						visible: roomDelegate.startsVisibleSection
+							&& navigationRail.isCollapsibleSection(roomDelegate.sectionKind)
 						name: "next"
 						size: 14
-						rotation: navigationRail.toolsExpanded ? 90 : 0
+						rotation: navigationRail.sectionExpandedFor(roomDelegate.sectionKind) ? 90 : 0
 						color: Theme.withAlpha(Theme.accent, 0.76)
 						Behavior on rotation { NumberAnimation { duration: Theme.motionFast } }
 						Accessible.ignored: true
 					}
 					MouseArea {
-						objectName: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
-							? "navigationSectionToggleMouse_tool" : ""
+						objectName: roomDelegate.startsVisibleSection
+							&& navigationRail.isCollapsibleSection(roomDelegate.sectionKind)
+							? "navigationSectionToggleMouse_" + roomDelegate.sectionKind : ""
 						anchors.fill: parent
-						enabled: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
+						enabled: roomDelegate.startsVisibleSection
+							&& navigationRail.isCollapsibleSection(roomDelegate.sectionKind)
 						hoverEnabled: enabled && !navigationRail.visualFixtureMode
 						cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-						onClicked: navigationRail.toggleToolsExpanded()
+						onClicked: navigationRail.toggleSectionExpanded(roomDelegate.sectionKind)
 					}
 				}
 				Rectangle {

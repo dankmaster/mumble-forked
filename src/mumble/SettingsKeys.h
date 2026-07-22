@@ -211,6 +211,9 @@ const SettingsKey MODERN_SHELL_MOTD_EXPANDED_KEY          = { "modern_shell_motd
 const SettingsKey MODERN_SHELL_MOTD_DISMISSED_SIGNATURE_KEY = { "modern_shell_motd_dismissed_signature" };
 const SettingsKey MODERN_SHELL_MOTD_LAST_SEEN_SIGNATURE_KEY = { "modern_shell_motd_last_seen_signature" };
 const SettingsKey MODERN_SHELL_MOTD_SERVER_STATES_KEY     = { "modern_shell_motd_server_states" };
+const SettingsKey MODERN_SHELL_COLLAPSED_NAVIGATION_SECTIONS_KEY = {
+	"modern_shell_collapsed_navigation_sections"
+};
 const SettingsKey MODERN_SHELL_THEME_KEY                  = { "modern_shell_theme" };
 const SettingsKey MODERN_SHELL_DENSITY_KEY                = { "modern_shell_density" };
 const SettingsKey MODERN_SHELL_CLASSIC_USER_ICONS_KEY     = { "modern_shell_classic_user_icons" };

@@ -67,6 +67,7 @@ private slots:
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
+	void sessionNormalizesCollapsedNavigationSections();
 	void sessionParsesManagedMotdImagesAndTracksSourceIdentity();
 	void sessionParsesSemanticMotdDocument();
 	void motdServerViewStateIsIsolatedByServer();
@@ -3180,6 +3181,36 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 		{ QStringLiteral("serverImageUrl"), QString() } });
 	QCOMPARE(session.serverMonogram(), QStringLiteral("TS"));
 	QVERIFY(session.serverImageUrl().isEmpty());
+}
+
+void TestQmlClientModels::sessionNormalizesCollapsedNavigationSections() {
+	ClientSessionController session;
+	QSignalSpy spy(&session, &ClientSessionController::collapsedNavigationSectionsChanged);
+	QVERIFY(session.collapsedNavigationSections().isEmpty());
+
+	session.setCollapsedNavigationSections({ QStringLiteral(" TOOL "), QStringLiteral("voice"),
+											QStringLiteral("unknown"), QStringLiteral("tool"),
+											QStringLiteral("direct") });
+	QCOMPARE(session.collapsedNavigationSections(),
+			 QStringList({ QStringLiteral("voice"), QStringLiteral("direct"), QStringLiteral("tool") }));
+	QCOMPARE(spy.count(), 1);
+
+	session.setNavigationSectionExpanded(QStringLiteral("VOICE"), true);
+	QCOMPARE(session.collapsedNavigationSections(),
+			 QStringList({ QStringLiteral("direct"), QStringLiteral("tool") }));
+	session.setNavigationSectionExpanded(QStringLiteral("text"), false);
+	QCOMPARE(session.collapsedNavigationSections(),
+			 QStringList({ QStringLiteral("text"), QStringLiteral("direct"), QStringLiteral("tool") }));
+	QCOMPARE(spy.count(), 3);
+
+	session.applyState({ { QStringLiteral("collapsedNavigationSections"),
+						 QStringList { QStringLiteral("tool"), QStringLiteral("voice"),
+										QStringLiteral("voice") } } });
+	QCOMPARE(session.collapsedNavigationSections(),
+			 QStringList({ QStringLiteral("voice"), QStringLiteral("tool") }));
+	QCOMPARE(spy.count(), 4);
+	session.setNavigationSectionExpanded(QStringLiteral("unsupported"), false);
+	QCOMPARE(spy.count(), 4);
 }
 
 void TestQmlClientModels::sessionParsesManagedMotdImagesAndTracksSourceIdentity() {

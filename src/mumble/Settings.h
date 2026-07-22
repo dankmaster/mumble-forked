@@ -340,6 +340,9 @@ struct Settings {
 	QString qsModernShellMotdDismissedSignature;
 	QString qsModernShellMotdLastSeenSignature;
 	QString qsModernShellMotdServerStates;
+	// Section visibility is client-local presentation state. Store collapsed
+	// section kinds so new sections remain expanded by default.
+	QStringList qslModernShellCollapsedNavigationSections;
 	QString qsModernShellTheme                = QStringLiteral("dark");
 	QString qsModernShellDensity              = QStringLiteral("comfortable");
 	bool bModernShellClassicUserIcons         = false;

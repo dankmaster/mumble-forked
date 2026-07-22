@@ -191,6 +191,8 @@
 	PROCESS(ui, MODERN_SHELL_MOTD_DISMISSED_SIGNATURE_KEY, qsModernShellMotdDismissedSignature) \
 	PROCESS(ui, MODERN_SHELL_MOTD_LAST_SEEN_SIGNATURE_KEY, qsModernShellMotdLastSeenSignature) \
 	PROCESS(ui, MODERN_SHELL_MOTD_SERVER_STATES_KEY, qsModernShellMotdServerStates)       \
+	PROCESS(ui, MODERN_SHELL_COLLAPSED_NAVIGATION_SECTIONS_KEY,                           \
+			qslModernShellCollapsedNavigationSections)                                    \
 	PROCESS(ui, MODERN_SHELL_THEME_KEY, qsModernShellTheme)                               \
 	PROCESS(ui, MODERN_SHELL_DENSITY_KEY, qsModernShellDensity)                           \
 	PROCESS(ui, MODERN_SHELL_CLASSIC_USER_ICONS_KEY, bModernShellClassicUserIcons)         \
