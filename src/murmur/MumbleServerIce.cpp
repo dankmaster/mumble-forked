@@ -32,7 +32,6 @@
 #if ICE_INT_VERSION < 30800
 #	include <Ice/SliceChecksums.h>
 #endif
-#include <IceUtil/IceUtil.h>
 
 #include <cassert>
 #include <chrono>
