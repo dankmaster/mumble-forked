@@ -2641,7 +2641,7 @@ void Server::log(const QString &msg) const {
 	qWarning("%d => %s", iServerNum, msg.toUtf8().constData());
 
 	Server *server = const_cast< Server * >(this);
-	if (QThread::currentThread() == server->QObject::thread()) {
+	if (QThread::currentThread() == server->thread()) {
 		server->broadcastServerLogEntry(msg, timestampMs);
 	} else {
 		QMetaObject::invokeMethod(
@@ -2712,7 +2712,7 @@ void Server::syncServerLogStateForUser(ServerUser *user, const bool force) {
 			MumbleProto::ServerLogEntry *protoEntry = state.add_entries();
 			protoEntry->set_sequence(nextServerLogSequence());
 			protoEntry->set_timestamp_ms(static_cast< quint64 >(it->timestampMs));
-			protoEntry->set_text(it->text.toStdString());
+			protoEntry->set_text(u8(it->text));
 		}
 	}
 
@@ -2732,7 +2732,7 @@ void Server::broadcastServerLogEntry(const QString &text, const qint64 timestamp
 	MumbleProto::ServerLogEntry *entry = state.add_entries();
 	entry->set_sequence(nextServerLogSequence());
 	entry->set_timestamp_ms(static_cast< quint64 >(std::max< qint64 >(0, timestampMs)));
-	entry->set_text(boundedText.toStdString());
+	entry->set_text(u8(boundedText));
 
 	for (ServerUser *user : qhUsers) {
 		if (!user || user->sState != ServerUser::Authenticated || !user->bServerLogStreamActive

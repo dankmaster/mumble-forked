@@ -20,3 +20,22 @@ This changes only the channel's navigation placement and debug labeling. The
 channel remains a normal server-owned persistent text channel, including its
 history, unread state, permissions, and composer behavior. Restart the client
 after changing the environment variable.
+
+## Activity server log
+
+`Activity` is the server's actual Murmur log, not a client-side approximation.
+When both endpoints negotiate `server_log_stream`, Murmur sends a bounded recent
+backlog followed by live entries using the exact text passed to `Server::log`.
+The client renders the text literally and keeps the surface read-only.
+
+Access is controlled by the root-only `Use tools` ACL permission. The server
+checks the effective root permission before sending any backlog or live entry,
+stops delivery immediately after revocation, and sends a reset so the client
+drops entries it is no longer allowed to retain. Old clients and old servers do
+not receive or expose the stream. `Use tools` remains default-deny for ordinary
+users; root administrators and SuperUser retain access through the existing
+root permission rules.
+
+The initial backlog is capped at 200 entries and 512 KiB, individual entries at
+32 KiB, and the client retains at most 2,000 entries per connection. These limits
+keep a noisy server from growing the client timeline without bound.
