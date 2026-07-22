@@ -122,6 +122,8 @@
 	PROCESS(audio_backend, WASAPI_ROLE_KEY, qsWASAPIRole)                                    \
 	PROCESS(audio_backend, WASAPI_INPUT_IDENTITY_KEY, qsWASAPIInputDeviceIdentity)           \
 	PROCESS(audio_backend, WASAPI_OUTPUT_IDENTITY_KEY, qsWASAPIOutputDeviceIdentity)         \
+	PROCESS(audio_backend, WASAPI_INPUT_PRIORITIES_KEY, qsWASAPIInputDevicePriorities)       \
+	PROCESS(audio_backend, WASAPI_OUTPUT_PRIORITIES_KEY, qsWASAPIOutputDevicePriorities)     \
 	PROCESS(audio_backend, WASAPI_INPUT_ROUTING_POLICY_KEY, qsWASAPIInputRoutingPolicy)      \
 	PROCESS(audio_backend, WASAPI_OUTPUT_ROUTING_POLICY_KEY, qsWASAPIOutputRoutingPolicy)    \
 	PROCESS(audio_backend, WASAPI_LATENCY_PROFILE_KEY, qsWASAPILatencyProfile)               \

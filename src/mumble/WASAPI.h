@@ -45,8 +45,9 @@ public:
 	static UINT32 selectSharedModePeriod(Mumble::WASAPI::LatencyProfile profile, UINT32 defaultFrames,
 									 UINT32 fundamentalFrames, UINT32 minimumFrames, UINT32 maximumFrames);
 	static Mumble::InputEnhancement::DeviceIdentity resolveInputDeviceIdentity(const QString &configuredDevice,
-														 ERole role, const QString &persistedIdentity = QString(),
-														 const QString &routingPolicy = QStringLiteral("prefer"));
+													 ERole role, const QString &persistedIdentity = QString(),
+													 const QString &routingPolicy = QStringLiteral("prefer"),
+													 const QString &persistedPriorities = QString());
 };
 
 class WASAPIInput : public AudioInput {

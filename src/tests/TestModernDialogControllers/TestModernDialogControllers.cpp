@@ -26,6 +26,9 @@
 #include "GlobalShortcutTypes.h"
 #include "Log.h"
 #include "MainWindow.h"
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+#	include "WASAPIDeviceRouting.h"
+#endif
 
 namespace {
 QString readTestSource(const QString &path) {
@@ -531,6 +534,34 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	for (const QVariant &latencyOption : latencyOptions) {
 		QVERIFY(latencyOption.toMap().value(QStringLiteral("hint")).toString().size() > 100);
 	}
+	const QVariantMap priorityField = findSettingsFieldById(
+		wasapiController.state().value(QStringLiteral("sections")).toList(),
+		QStringLiteral("audio.wasapiOutputPriorities"));
+	QCOMPARE(priorityField.value(QStringLiteral("type")).toString(), QStringLiteral("devicePriorityList"));
+	QVERIFY(priorityField.value(QStringLiteral("tooltip")).toString().contains(QStringLiteral("endpoint identifier")));
+
+	Mumble::WASAPI::DeviceDescriptor primary;
+	primary.endpointId       = QStringLiteral("primary-endpoint");
+	primary.displayName      = QStringLiteral("AceZone Wireless");
+	primary.parentInstanceId = QStringLiteral("USB\\VID_3842&PID_2600");
+	primary.dataFlow         = 0; // eRender
+	primary.formFactor       = 1;
+	Mumble::WASAPI::DeviceDescriptor backup = primary;
+	backup.endpointId       = QStringLiteral("backup-endpoint");
+	backup.displayName      = QStringLiteral("Desktop speakers");
+	backup.parentInstanceId = QStringLiteral("HDAUDIO\\FUNC_01");
+	wasapiController.updateField(
+		QStringLiteral("audio.wasapiOutputPriorities"),
+		QVariantList { Mumble::WASAPI::serializeDeviceDescriptor(primary),
+					   Mumble::WASAPI::serializeDeviceDescriptor(backup) });
+	const QList< Mumble::WASAPI::DeviceDescriptor > savedPriorities =
+		Mumble::WASAPI::deserializeDevicePriorityList(wasapiController.draft().qsWASAPIOutputDevicePriorities);
+	QCOMPARE(savedPriorities.size(), 2);
+	QCOMPARE(savedPriorities.at(0).endpointId, primary.endpointId);
+	QCOMPARE(savedPriorities.at(1).endpointId, backup.endpointId);
+	QCOMPARE(wasapiController.draft().qsWASAPIOutput, primary.endpointId);
+	QCOMPARE(wasapiController.draft().qsWASAPIOutputDeviceIdentity,
+			 Mumble::WASAPI::serializeDeviceDescriptor(primary));
 #endif
 
 	ModernSettingsController keyController;

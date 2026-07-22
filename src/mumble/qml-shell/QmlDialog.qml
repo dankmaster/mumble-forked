@@ -2345,6 +2345,7 @@ Dialog {
                                             if (type === "note") return noteField
 											if (type === "voiceMeter") return voiceMeterField
 											if (type === "inputEnhancementCalibration") return inputEnhancementCalibrationField
+											if (type === "devicePriorityList") return devicePriorityListField
 											if (type === "readonly" || type === "status") return readonlyField
                                             if (type === "checkbox" || type === "toggle") return checkboxField
 											if (type === "select" || type === "combo" || type === "dropdown") {
@@ -2887,8 +2888,8 @@ Dialog {
 			}
 		}
     }
-    Component {
-        id: selectField
+	Component {
+		id: selectField
         ColumnLayout {
             id: selectRoot
             property var field
@@ -2931,7 +2932,161 @@ Dialog {
 				wrapMode: Text.Wrap
 			}
         }
-    }
+	}
+	Component {
+		id: devicePriorityListField
+		ColumnLayout {
+			id: priorityRoot
+			property var field: ({})
+			width: parent ? parent.width : 0
+			spacing: Theme.space2
+
+			function values() {
+				return Array.from(field.value || [])
+			}
+			function optionFor(value) {
+				const options = field.options || []
+				for (let i = 0; i < options.length; ++i) {
+					if (String(options[i].value) === String(value))
+						return options[i]
+				}
+				return ({ "label": qsTr("Remembered device"), "value": value, "enabled": false })
+			}
+			function commit(values) {
+				dialog.updateFieldValue(field.id, values)
+			}
+			function move(from, delta) {
+				const next = values()
+				const to = from + delta
+				if (from < 0 || from >= next.length || to < 0 || to >= next.length)
+					return
+				const moved = next.splice(from, 1)[0]
+				next.splice(to, 0, moved)
+				commit(next)
+			}
+			function removeAt(index) {
+				const next = values()
+				if (index < 0 || index >= next.length)
+					return
+				next.splice(index, 1)
+				commit(next)
+			}
+			function contains(value) {
+				const current = values()
+				for (let i = 0; i < current.length; ++i) {
+					if (String(current[i]) === String(value))
+						return true
+				}
+				return false
+			}
+
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: priorityRoot.field.label || qsTr("Device priority")
+				color: Theme.textMuted
+				font.pixelSize: 11
+			}
+			Repeater {
+				model: priorityRoot.field.value || []
+				delegate: Rectangle {
+					id: priorityRow
+					required property int index
+					required property var modelData
+					readonly property var deviceOption: priorityRoot.optionFor(modelData)
+					readonly property string deviceLabel: String(deviceOption.label || qsTr("Remembered device"))
+					Layout.fillWidth: true
+					implicitHeight: priorityRowLayout.implicitHeight + Theme.space2 * 2
+					radius: Theme.innerRadius
+					color: Theme.surfaceRaised
+					border.color: Theme.surfaceBorder
+					RowLayout {
+						id: priorityRowLayout
+						anchors.fill: parent
+						anchors.margins: Theme.space2
+						spacing: Theme.space2
+						Label {
+							textFormat: Text.PlainText
+							text: String(priorityRow.index + 1)
+							color: Theme.accent
+							font.bold: true
+							Layout.preferredWidth: 18
+							Accessible.ignored: true
+						}
+						Label {
+							Layout.fillWidth: true
+							textFormat: Text.PlainText
+							text: priorityRow.deviceLabel
+							color: priorityRow.deviceOption.enabled === false ? Theme.textMuted : Theme.textMain
+							elide: Text.ElideRight
+							Accessible.name: qsTr("Priority %1: %2").arg(priorityRow.index + 1).arg(text)
+						}
+						ModernButton {
+							objectName: "devicePriorityUp_" + priorityRow.index
+							text: qsTr("Up")
+							dense: true
+							enabled: priorityRow.index > 0
+							Accessible.name: qsTr("Move %1 up").arg(priorityRow.deviceLabel)
+							onClicked: priorityRoot.move(priorityRow.index, -1)
+						}
+						ModernButton {
+							objectName: "devicePriorityDown_" + priorityRow.index
+							text: qsTr("Down")
+							dense: true
+							enabled: priorityRow.index + 1 < priorityRoot.values().length
+							Accessible.name: qsTr("Move %1 down").arg(priorityRow.deviceLabel)
+							onClicked: priorityRoot.move(priorityRow.index, 1)
+						}
+						ModernButton {
+							objectName: "devicePriorityRemove_" + priorityRow.index
+							text: qsTr("Remove")
+							dense: true
+							Accessible.name: qsTr("Remove %1 from priority list").arg(priorityRow.deviceLabel)
+							onClicked: priorityRoot.removeAt(priorityRow.index)
+						}
+					}
+				}
+			}
+			RowLayout {
+				Layout.fillWidth: true
+				spacing: Theme.space2
+				ModernComboBox {
+					id: priorityAddCombo
+					objectName: "devicePriorityAddChoice_" + String(priorityRoot.field.id || "")
+					Layout.fillWidth: true
+					model: priorityRoot.field.options || []
+					textRole: "label"
+					valueRole: "value"
+					Accessible.name: qsTr("Known device to add")
+					Accessible.description: String(priorityRoot.field.tooltip || priorityRoot.field.hint || "")
+				}
+				ModernButton {
+					objectName: "devicePriorityAdd_" + String(priorityRoot.field.id || "")
+					text: qsTr("Add")
+					dense: true
+					enabled: priorityAddCombo.currentIndex >= 0
+						&& priorityAddCombo.optionEnabled(priorityAddCombo.currentIndex)
+						&& !priorityRoot.contains(priorityAddCombo.currentValue)
+					Accessible.name: qsTr("Add device to priority list")
+					onClicked: {
+						const next = priorityRoot.values()
+						next.push(priorityAddCombo.currentValue)
+						priorityRoot.commit(next)
+					}
+				}
+			}
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: String(priorityRoot.field.hint || "")
+				visible: text.length > 0
+				color: Theme.textMuted
+				font.pixelSize: 10
+				wrapMode: Text.Wrap
+				Accessible.ignored: true
+			}
+		}
+	}
 	Component {
 		id: segmentedField
 		ColumnLayout {
