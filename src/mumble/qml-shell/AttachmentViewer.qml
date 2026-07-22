@@ -420,7 +420,9 @@ ApplicationWindow {
 				anchors.top: parent.top
 				anchors.topMargin: Theme.space3
 				z: 5
-				visible: viewer.originalLoading || viewer.originalFailed
+				// Keep the preview interactive while the original swaps in silently. Only
+				// surface a status when the background request needs user attention.
+				visible: viewer.originalFailed
 				width: originalStatusContent.implicitWidth + Theme.space3 * 2
 				height: Theme.controlHeight
 				radius: height / 2
@@ -430,20 +432,12 @@ ApplicationWindow {
 					id: originalStatusContent
 					anchors.centerIn: parent
 					spacing: Theme.space2
-					ModernBusyIndicator {
-						width: 16
-						height: 16
-						anchors.verticalCenter: parent.verticalCenter
-						running: viewer.originalLoading
-						visible: running
-					}
 					Label {
 						id: originalStatusLabel
 						objectName: "attachmentViewerOriginalStatusLabel"
 						anchors.verticalCenter: parent.verticalCenter
 						textFormat: Text.PlainText
-						text: viewer.originalLoading ? qsTr("Loading full resolution…")
-							: viewer.originalTimedOut ? qsTr("Preview shown · full resolution delayed")
+						text: viewer.originalTimedOut ? qsTr("Preview shown · full resolution delayed")
 							: qsTr("Preview shown · full resolution unavailable")
 						color: viewer.originalFailed ? Theme.warning : Theme.textMuted
 						font.pixelSize: Theme.fontCaption

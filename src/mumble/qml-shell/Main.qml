@@ -7,6 +7,7 @@ ApplicationWindow {
 	id: root
 	onClosing: close => close.accepted = false
     property var attachmentViewerPayload: null
+	property var attachmentViewerHydrationModel: null
     property var pendingPreviewHydrationIds: ({})
 	property var richPreviewSizePresets: ({})
     property bool pendingPreviewHydrationHighPriority: false
@@ -344,7 +345,7 @@ ApplicationWindow {
 	}
 
 	Connections {
-		target: chatModel
+		target: root.attachmentViewerHydrationModel || chatModel
 		function onDataChanged() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 		function onModelReset() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
 		function onRowsInserted() { Qt.callLater(function() { root.refreshOpenAttachmentFromModel() }) }
@@ -482,7 +483,7 @@ ApplicationWindow {
 		return "id:" + String(attachment.id || "").trim()
 	}
 
-	function openAttachment(attachment, titleOverride, hydrationMessageId) {
+	function openAttachment(attachment, titleOverride, hydrationMessageId, hydrationModel) {
 		if (!attachment)
 			return false
 		const fullSource = safeRenderImageSource(attachment.url)
@@ -500,6 +501,7 @@ ApplicationWindow {
 		const requestOriginal = (assetId.length > 0 || inlineToken.length > 0)
 			&& messageId.length > 0 && fullSource.length === 0
 			&& reportedOriginalState !== "error"
+		attachmentViewerHydrationModel = hydrationModel || chatModel
 		attachmentViewerPayload = {
 			"id": attachment.id,
 			"url": fullSource,
@@ -563,10 +565,14 @@ ApplicationWindow {
 		const identity = attachmentIdentity(current)
 		if (messageId.length === 0 || identity.length === 0)
 			return false
-		const rowIndex = chatModel.rowForStableId(messageId)
+		const sourceModel = attachmentViewerHydrationModel || chatModel
+		if (!sourceModel || typeof sourceModel.rowForStableId !== "function"
+				|| typeof sourceModel.get !== "function")
+			return false
+		const rowIndex = sourceModel.rowForStableId(messageId)
 		if (rowIndex < 0)
 			return false
-		const row = chatModel.get(rowIndex)
+		const row = sourceModel.get(rowIndex)
 		const candidates = row && row.attachments ? row.attachments : []
 		for (let index = 0; index < candidates.length; ++index) {
 			const candidate = candidates[index]
@@ -581,7 +587,7 @@ ApplicationWindow {
 				=== String(current.originalState || "")
 			if (nextSource.length === 0 || (sameSources && sameOriginalState))
 				return false
-			return openAttachment(candidate, current.alt || current.name, messageId)
+			return openAttachment(candidate, current.alt || current.name, messageId, sourceModel)
 		}
 		return false
 	}
@@ -1924,7 +1930,10 @@ ApplicationWindow {
 			onOriginalRetryRequested: attachment => root.retryAttachmentOriginal(attachment)
 			onRefreshRequested: attachment => root.queuePreviewHydration(
 				String(attachment.hydrationMessageId || ""), true)
-			onClosing: root.attachmentViewerPayload = null
+			onClosing: {
+				root.attachmentViewerPayload = null
+				root.attachmentViewerHydrationModel = null
+			}
         }
     }
     Loader {
@@ -4832,7 +4841,8 @@ ApplicationWindow {
 				onManagedImageOpenRequested: (source, title, messageId) =>
 					root.openManagedPreviewImage(source, title, messageId)
 				onManagedAttachmentOpenRequested: (attachment, messageId) =>
-					root.openAttachment(attachment, "", messageId)
+					root.openAttachment(attachment, "", messageId,
+						directMessages ? directMessages.timelineModel : null)
 				onWatchTogetherRequested: (url, provider, title) =>
 					root.startWatchTogether(url, provider, title)
 				onPreviewSizePresetRequested: (preferenceKey, preset) =>

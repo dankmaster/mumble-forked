@@ -27,6 +27,14 @@ TestCase {
 		verify(/onOriginalRetryRequested:\s*attachment => root\.retryAttachmentOriginal\(attachment\)/.test(mainSource))
 	}
 
+	function test_attachment_viewer_tracks_the_model_that_opened_it() {
+		verify(/property var attachmentViewerHydrationModel:\s*null/.test(mainSource))
+		verify(/target:\s*root\.attachmentViewerHydrationModel \|\| chatModel/.test(mainSource))
+		verify(/function\s+openAttachment\(attachment, titleOverride, hydrationMessageId, hydrationModel\)/.test(mainSource))
+		verify(/const sourceModel = attachmentViewerHydrationModel \|\| chatModel[\s\S]*sourceModel\.rowForStableId[\s\S]*sourceModel\.get/.test(mainSource))
+		verify(/onManagedAttachmentOpenRequested:[\s\S]*directMessages \? directMessages\.timelineModel : null/.test(mainSource))
+	}
+
 	function test_message_reaction_separates_emoji_from_count_typography() {
 		verify(/objectName:\s*"messageReactionEmoji"[\s\S]*font\.family:\s*Qt\.platform\.os === "windows" \? "Segoe UI Emoji"/.test(mainSource))
 		verify(/objectName:\s*"messageReactionCount"[\s\S]*font\.weight:\s*Font\.DemiBold/.test(mainSource))

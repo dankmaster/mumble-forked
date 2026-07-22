@@ -397,7 +397,9 @@ TestCase {
 		tool.saveRequested.connect(function() { saveRequests += 1 })
 		tool.refreshRequested.connect(function() { refreshRequests += 1 })
 		const originalStatus = findChild(tool.contentItem, "attachmentViewerOriginalStatus")
-		verify(originalStatus !== null && originalStatus.visible)
+		verify(originalStatus !== null)
+		compare(originalStatus.visible, false,
+			"Background original loading must not cover an already usable preview")
 		compare(tool.safeRenderImageSource(managed), managed)
 		compare(tool.safeRenderImageSource("file:///C:/Temp/unmanaged.gif"), "")
 		tool.attachment = { "url": managed, "alt": "Managed animation", "assetId": "42",
@@ -471,11 +473,14 @@ TestCase {
 		let originalRetryRequests = 0
 		tool.originalRetryRequested.connect(function() { originalRetryRequests += 1 })
 		const originalStatusLabel = findChild(tool.contentItem, "attachmentViewerOriginalStatusLabel")
+		const originalStatus = findChild(tool.contentItem, "attachmentViewerOriginalStatus")
 		const originalRetryButton = findChild(tool.contentItem, "attachmentViewerOriginalRetryButton")
-		verify(originalStatusLabel !== null && originalRetryButton !== null)
-		compare(originalStatusLabel.text, "Loading full resolution…")
+		verify(originalStatusLabel !== null && originalStatus !== null && originalRetryButton !== null)
+		compare(originalStatus.visible, false,
+			"The usable preview must stay free of loading chrome while the original swaps in")
 		compare(originalRetryButton.visible, false)
 		tryCompare(tool, "originalTimedOut", true)
+		tryCompare(originalStatus, "visible", true)
 		tryCompare(originalRetryButton, "visible", true)
 		compare(originalStatusLabel.text, "Preview shown · full resolution delayed")
 		compare(originalRetryButton.Accessible.name, "Retry loading the full-resolution image")
