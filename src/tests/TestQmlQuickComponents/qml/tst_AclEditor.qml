@@ -83,7 +83,8 @@ TestCase {
 				],
 				"permissions": [
 					{ "id": "speak", "label": "Speak" },
-					{ "id": "enter", "label": "Enter room" }
+					{ "id": "enter", "label": "Enter room" },
+					{ "id": 2097152, "label": "Use tools" }
 				]
 			}
 		}
@@ -122,6 +123,29 @@ TestCase {
 		tryCompare(permissionCard, "accessibilityExposed", true)
 		tryCompare(barrier, "active", false)
 		tryCompare(allow.Accessible, "ignored", false)
+	}
+
+	function test_tools_acl_permission_card_round_trips_numeric_bit() {
+		const editor = loader.item
+		let permissionCard = null
+		let allow = null
+		let deny = null
+		tryVerify(function() {
+			permissionCard = findChild(editor, "aclPermissionCard_2097152")
+			allow = findChild(editor, "aclRulePermissionAllow_0_2097152")
+			deny = findChild(editor, "aclRulePermissionDeny_0_2097152")
+			return permissionCard !== null && allow !== null && deny !== null
+		})
+		verify(!allow.checked && !deny.checked)
+		mouseClick(allow, allow.width / 2, allow.height / 2, Qt.LeftButton)
+		tryVerify(function() {
+			return editor.aclModel.acls[0].allow.indexOf(2097152) >= 0
+		})
+		verify(allow.checked)
+		mouseClick(allow, allow.width / 2, allow.height / 2, Qt.LeftButton)
+		tryVerify(function() {
+			return editor.aclModel.acls[0].allow.indexOf(2097152) < 0
+		})
 	}
 
 	function test_large_acl_collections_are_bounded_and_virtualized() {

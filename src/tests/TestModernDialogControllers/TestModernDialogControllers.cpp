@@ -26,6 +26,9 @@
 #include "GlobalShortcutTypes.h"
 #include "Log.h"
 #include "MainWindow.h"
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+#	include "WASAPIDeviceRouting.h"
+#endif
 
 namespace {
 QString readTestSource(const QString &path) {
@@ -515,11 +518,31 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 	Settings wasapiSettings          = settings;
+	wasapiSettings.qsAudioInput      = QStringLiteral("WASAPI");
 	wasapiSettings.qsAudioOutput     = QStringLiteral("WASAPI");
+	ModernSettingsController wasapiInputController;
+	wasapiInputController.open(wasapiSettings, QStringLiteral("audioInput"));
+	const QVariantList wasapiInputSections =
+		wasapiInputController.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap simpleMicrophoneField =
+		findSettingsFieldById(wasapiInputSections, QStringLiteral("audio.inputDevice"));
+	QCOMPARE(simpleMicrophoneField.value(QStringLiteral("type")).toString(), QStringLiteral("select"));
+	QVERIFY(!simpleMicrophoneField.value(QStringLiteral("advanced")).toBool());
+	const QVariantMap inputPriorityField =
+		findSettingsFieldById(wasapiInputSections, QStringLiteral("audio.wasapiInputPriorities"));
+	QCOMPARE(inputPriorityField.value(QStringLiteral("type")).toString(), QStringLiteral("devicePriorityList"));
+	QVERIFY(inputPriorityField.value(QStringLiteral("advanced")).toBool());
+
 	ModernSettingsController wasapiController;
 	wasapiController.open(wasapiSettings, QStringLiteral("audioOutput"));
+	const QVariantList wasapiOutputSections =
+		wasapiController.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap simpleOutputDeviceField =
+		findSettingsFieldById(wasapiOutputSections, QStringLiteral("audio.outputDevice"));
+	QCOMPARE(simpleOutputDeviceField.value(QStringLiteral("type")).toString(), QStringLiteral("select"));
+	QVERIFY(!simpleOutputDeviceField.value(QStringLiteral("advanced")).toBool());
 	const QVariantMap latencyField = findSettingsFieldById(
-		wasapiController.state().value(QStringLiteral("sections")).toList(),
+		wasapiOutputSections,
 		QStringLiteral("audio.wasapiLatencyProfile"));
 	QVERIFY(!latencyField.isEmpty());
 	QVERIFY(latencyField.value(QStringLiteral("tooltip")).toString().contains(QStringLiteral("server ping")));
@@ -531,6 +554,38 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	for (const QVariant &latencyOption : latencyOptions) {
 		QVERIFY(latencyOption.toMap().value(QStringLiteral("hint")).toString().size() > 100);
 	}
+	const QVariantMap priorityField = findSettingsFieldById(
+		wasapiOutputSections,
+		QStringLiteral("audio.wasapiOutputPriorities"));
+	QCOMPARE(priorityField.value(QStringLiteral("type")).toString(), QStringLiteral("devicePriorityList"));
+	QVERIFY(priorityField.value(QStringLiteral("advanced")).toBool());
+	QVERIFY(priorityField.value(QStringLiteral("tooltip")).toString().contains(QStringLiteral("endpoint identifier")));
+	const QVariantMap outputRoutingField =
+		findSettingsFieldById(wasapiOutputSections, QStringLiteral("audio.wasapiOutputRouting"));
+	QVERIFY(outputRoutingField.value(QStringLiteral("advanced")).toBool());
+
+	Mumble::WASAPI::DeviceDescriptor primary;
+	primary.endpointId       = QStringLiteral("primary-endpoint");
+	primary.displayName      = QStringLiteral("AceZone Wireless");
+	primary.parentInstanceId = QStringLiteral("USB\\VID_3842&PID_2600");
+	primary.dataFlow         = 0; // eRender
+	primary.formFactor       = 1;
+	Mumble::WASAPI::DeviceDescriptor backup = primary;
+	backup.endpointId       = QStringLiteral("backup-endpoint");
+	backup.displayName      = QStringLiteral("Desktop speakers");
+	backup.parentInstanceId = QStringLiteral("HDAUDIO\\FUNC_01");
+	wasapiController.updateField(
+		QStringLiteral("audio.wasapiOutputPriorities"),
+		QVariantList { Mumble::WASAPI::serializeDeviceDescriptor(primary),
+					   Mumble::WASAPI::serializeDeviceDescriptor(backup) });
+	const QList< Mumble::WASAPI::DeviceDescriptor > savedPriorities =
+		Mumble::WASAPI::deserializeDevicePriorityList(wasapiController.draft().qsWASAPIOutputDevicePriorities);
+	QCOMPARE(savedPriorities.size(), 2);
+	QCOMPARE(savedPriorities.at(0).endpointId, primary.endpointId);
+	QCOMPARE(savedPriorities.at(1).endpointId, backup.endpointId);
+	QCOMPARE(wasapiController.draft().qsWASAPIOutput, primary.endpointId);
+	QCOMPARE(wasapiController.draft().qsWASAPIOutputDeviceIdentity,
+			 Mumble::WASAPI::serializeDeviceDescriptor(primary));
 #endif
 
 	ModernSettingsController keyController;

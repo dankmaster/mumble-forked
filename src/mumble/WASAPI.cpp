@@ -276,12 +276,26 @@ void WASAPIInputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s) 
 	s.qsWASAPIInput = choice.toString();
 	if (s.qsWASAPIInput.isEmpty()) {
 		s.qsWASAPIInputDeviceIdentity.clear();
+		s.qsWASAPIInputDevicePriorities.clear();
 		s.qsWASAPIInputRoutingPolicy = Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::FollowDefault);
 	} else {
 		const QString descriptor = Mumble::WASAPI::serializeDeviceDescriptor(
 			WASAPISystem::descriptorForEndpoint(s.qsWASAPIInput, eCapture));
 		if (!descriptor.isEmpty() || previousChoice != s.qsWASAPIInput) {
 			s.qsWASAPIInputDeviceIdentity = descriptor;
+			const Mumble::WASAPI::DeviceDescriptor selected =
+				Mumble::WASAPI::deserializeDeviceDescriptor(descriptor);
+			QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+				Mumble::WASAPI::deserializeDevicePriorityList(s.qsWASAPIInputDevicePriorities);
+			const QString selectedHardwareId = Mumble::WASAPI::stableHardwareId(selected);
+			priorities.removeIf([&selectedHardwareId](const Mumble::WASAPI::DeviceDescriptor &candidate) {
+				return !selectedHardwareId.isEmpty()
+					   && Mumble::WASAPI::stableHardwareId(candidate) == selectedHardwareId;
+			});
+			if (selected.hasStableFingerprint()) {
+				priorities.prepend(selected);
+			}
+			s.qsWASAPIInputDevicePriorities = Mumble::WASAPI::serializeDevicePriorityList(priorities);
 		}
 		if (Mumble::WASAPI::routingPolicyFromName(s.qsWASAPIInputRoutingPolicy, true)
 			== Mumble::WASAPI::RoutingPolicy::FollowDefault) {
@@ -297,7 +311,8 @@ Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIden
 
 Mumble::InputEnhancement::DeviceIdentity WASAPIInputRegistrar::resolveDeviceIdentity(const Settings &settings) {
 	return WASAPISystem::resolveInputDeviceIdentity(settings.qsWASAPIInput, WASAPIRoleFromSettings(),
-		settings.qsWASAPIInputDeviceIdentity, settings.qsWASAPIInputRoutingPolicy);
+		settings.qsWASAPIInputDeviceIdentity, settings.qsWASAPIInputRoutingPolicy,
+		settings.qsWASAPIInputDevicePriorities);
 }
 
 bool WASAPIInputRegistrar::canEcho(EchoCancelOptionID echoOptionIDs, const QString &outputSystem) const {
@@ -343,6 +358,7 @@ void WASAPIOutputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s)
 	s.qsWASAPIOutput = choice.toString();
 	if (s.qsWASAPIOutput.isEmpty()) {
 		s.qsWASAPIOutputDeviceIdentity.clear();
+		s.qsWASAPIOutputDevicePriorities.clear();
 		s.qsWASAPIOutputRoutingPolicy =
 			Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::FollowDefault);
 	} else {
@@ -350,6 +366,19 @@ void WASAPIOutputRegistrar::setDeviceChoice(const QVariant &choice, Settings &s)
 			WASAPISystem::descriptorForEndpoint(s.qsWASAPIOutput, eRender));
 		if (!descriptor.isEmpty() || previousChoice != s.qsWASAPIOutput) {
 			s.qsWASAPIOutputDeviceIdentity = descriptor;
+			const Mumble::WASAPI::DeviceDescriptor selected =
+				Mumble::WASAPI::deserializeDeviceDescriptor(descriptor);
+			QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+				Mumble::WASAPI::deserializeDevicePriorityList(s.qsWASAPIOutputDevicePriorities);
+			const QString selectedHardwareId = Mumble::WASAPI::stableHardwareId(selected);
+			priorities.removeIf([&selectedHardwareId](const Mumble::WASAPI::DeviceDescriptor &candidate) {
+				return !selectedHardwareId.isEmpty()
+					   && Mumble::WASAPI::stableHardwareId(candidate) == selectedHardwareId;
+			});
+			if (selected.hasStableFingerprint()) {
+				priorities.prepend(selected);
+			}
+			s.qsWASAPIOutputDevicePriorities = Mumble::WASAPI::serializeDevicePriorityList(priorities);
 		}
 		if (Mumble::WASAPI::routingPolicyFromName(s.qsWASAPIOutputRoutingPolicy, true)
 			== Mumble::WASAPI::RoutingPolicy::FollowDefault) {
@@ -524,7 +553,8 @@ namespace {
 
 	void rememberResolvedDescriptor(const EDataFlow dataFlow, const QString &configuredEndpointId,
 									 const Mumble::WASAPI::DeviceDescriptor &selectedDescriptor,
-									 const QString &persistedIdentity, const bool reboundByFingerprint) {
+									 const QString &persistedIdentity, const QString &persistedPriorities,
+									 const int selectedPriorityIndex, const bool reboundByFingerprint) {
 		if (!Global::get().mw || configuredEndpointId.isEmpty() || selectedDescriptor.endpointId.isEmpty()) {
 			return;
 		}
@@ -533,11 +563,38 @@ namespace {
 			return;
 		}
 		QMetaObject::invokeMethod(Global::get().mw,
-			[dataFlow, configuredEndpointId, selectedDescriptor, serializedDescriptor, reboundByFingerprint]() {
+			[dataFlow, configuredEndpointId, selectedDescriptor, serializedDescriptor, persistedPriorities,
+			 selectedPriorityIndex, reboundByFingerprint]() {
 				Settings &settings = Global::get().s;
 				QString *endpoint = dataFlow == eCapture ? &settings.qsWASAPIInput : &settings.qsWASAPIOutput;
 				QString *identity = dataFlow == eCapture ? &settings.qsWASAPIInputDeviceIdentity
-														 : &settings.qsWASAPIOutputDeviceIdentity;
+													 : &settings.qsWASAPIOutputDeviceIdentity;
+				QString *prioritiesJson = dataFlow == eCapture ? &settings.qsWASAPIInputDevicePriorities
+														  : &settings.qsWASAPIOutputDevicePriorities;
+				if (!persistedPriorities.isEmpty()) {
+					if (*prioritiesJson != persistedPriorities) {
+						return;
+					}
+					QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+						Mumble::WASAPI::deserializeDevicePriorityList(*prioritiesJson);
+					if (selectedPriorityIndex < 0 || selectedPriorityIndex >= priorities.size()) {
+						return;
+					}
+					priorities[selectedPriorityIndex] = selectedDescriptor;
+					const QString updatedPriorities = Mumble::WASAPI::serializeDevicePriorityList(priorities);
+					bool changed = *prioritiesJson != updatedPriorities;
+					*prioritiesJson = updatedPriorities;
+					if (selectedPriorityIndex == 0) {
+						changed = changed || *identity != serializedDescriptor
+								  || endpoint->compare(selectedDescriptor.endpointId, Qt::CaseInsensitive) != 0;
+						*identity = serializedDescriptor;
+						*endpoint = selectedDescriptor.endpointId;
+					}
+					if (changed) {
+						settings.save();
+					}
+					return;
+				}
 				if (endpoint->compare(configuredEndpointId, Qt::CaseInsensitive) != 0) {
 					return;
 				}
@@ -674,6 +731,7 @@ static Mumble::InputEnhancement::DeviceIdentity identityForWASAPIDevice(IMMDevic
 static IMMDevice *openNamedOrDefaultDevice(
 	const QString &name, EDataFlow dataFlow, ERole role, const QString &persistedIdentity = QString(),
 	const QString &routingPolicyName = QStringLiteral("prefer"),
+	const QString &persistedPriorities = QString(),
 	const WASAPINotificationClient::AudioConsumers consumers = WASAPINotificationClient::NoConsumer,
 	Mumble::InputEnhancement::DeviceIdentity *resolvedIdentity = nullptr, const bool enlistNotifications = true,
 	const bool publishState = true) {
@@ -697,27 +755,35 @@ static IMMDevice *openNamedOrDefaultDevice(
 	IMMDevice *pDevice = nullptr;
 	const Mumble::WASAPI::RoutingPolicy routingPolicy =
 		Mumble::WASAPI::routingPolicyFromName(routingPolicyName, !name.isEmpty());
-	const Mumble::WASAPI::DeviceDescriptor preferredDescriptor =
+	QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+		Mumble::WASAPI::deserializeDevicePriorityList(persistedPriorities);
+	const Mumble::WASAPI::DeviceDescriptor legacyPreferredDescriptor =
 		Mumble::WASAPI::deserializeDeviceDescriptor(persistedIdentity);
+	if (priorities.isEmpty() && legacyPreferredDescriptor.hasStableFingerprint()) {
+		priorities.push_back(legacyPreferredDescriptor);
+	}
+	const Mumble::WASAPI::DeviceDescriptor preferredDescriptor =
+		priorities.isEmpty() ? legacyPreferredDescriptor : priorities.constFirst();
 	const QList< Mumble::WASAPI::DeviceDescriptor > candidates = WASAPISystem::getDeviceDescriptors(dataFlow);
 	Mumble::WASAPI::DeviceDescriptor selectedDescriptor;
 	bool followsSystemDefault = routingPolicy == Mumble::WASAPI::RoutingPolicy::FollowDefault;
 	bool usingFallback = false;
 	bool reboundByFingerprint = false;
+	int selectedPriorityIndex = -1;
 
 	if (!followsSystemDefault) {
-		for (const Mumble::WASAPI::DeviceDescriptor &candidate : candidates) {
-			if (candidate.endpointId.compare(name, Qt::CaseInsensitive) == 0) {
-				selectedDescriptor = candidate;
-				break;
-			}
-		}
-		if (selectedDescriptor.endpointId.isEmpty() && preferredDescriptor.hasStableFingerprint()) {
-			const Mumble::WASAPI::MatchResult match =
-				Mumble::WASAPI::findUniqueBestDeviceMatch(preferredDescriptor, candidates);
-			if (match.matched()) {
-				selectedDescriptor   = candidates.at(match.index);
-				reboundByFingerprint = selectedDescriptor.endpointId.compare(name, Qt::CaseInsensitive) != 0;
+		const Mumble::WASAPI::PriorityMatchResult priorityMatch =
+			Mumble::WASAPI::findFirstAvailablePriority(priorities, candidates);
+		if (priorityMatch.matched()) {
+			selectedDescriptor   = candidates.at(priorityMatch.candidateIndex);
+			selectedPriorityIndex = priorityMatch.priorityIndex;
+			reboundByFingerprint = priorityMatch.reboundByFingerprint;
+		} else if (priorities.isEmpty()) {
+			for (const Mumble::WASAPI::DeviceDescriptor &candidate : candidates) {
+				if (candidate.endpointId.compare(name, Qt::CaseInsensitive) == 0) {
+					selectedDescriptor = candidate;
+					break;
+				}
 			}
 		}
 		if (selectedDescriptor.endpointId.isEmpty()
@@ -740,14 +806,17 @@ static IMMDevice *openNamedOrDefaultDevice(
 											? !selectedDescriptor.endpointId.isEmpty()
 											: !usingFallback && !selectedDescriptor.endpointId.isEmpty();
 	runtimeState.usingFallback        = usingFallback;
+	runtimeState.usingSecondaryPriority = selectedPriorityIndex > 0;
 	runtimeState.reboundByFingerprint = reboundByFingerprint;
 	runtimeState.streamActive         = false;
+	runtimeState.activePriorityIndex  = selectedPriorityIndex;
+	runtimeState.priorityCount        = priorities.size();
 	if (selectedDescriptor.endpointId.isEmpty()) {
 		runtimeState.lastError = routingPolicy == Mumble::WASAPI::RoutingPolicy::StrictSelected
-								 ? QObject::tr("Selected device is unavailable; strict routing paused this stream.")
+								 ? QObject::tr("No priority-list device is available; strict routing paused this stream.")
 								 : QObject::tr("No active Windows audio endpoint is available.");
 	} else if (usingFallback) {
-		runtimeState.lastError = QObject::tr("The preferred device is unavailable; using the Windows communications device temporarily.");
+		runtimeState.lastError = QObject::tr("No priority-list device is available; using the Windows communications device temporarily.");
 	}
 	if (publishState) {
 		publishRuntimeState(dataFlow, runtimeState);
@@ -755,7 +824,7 @@ static IMMDevice *openNamedOrDefaultDevice(
 
 	if (enlistNotifications && consumers != WASAPINotificationClient::NoConsumer) {
 		WASAPINotificationClient::get().setConsumersNeedingPreferredRecovery(dataFlow, consumers,
-			usingFallback || selectedDescriptor.endpointId.isEmpty());
+			usingFallback || selectedPriorityIndex > 0 || selectedDescriptor.endpointId.isEmpty());
 	}
 	if (selectedDescriptor.endpointId.isEmpty()) {
 		goto cleanup;
@@ -788,7 +857,8 @@ static IMMDevice *openNamedOrDefaultDevice(
 
 	if (pDevice) {
 		if (enlistNotifications && !usingFallback && !followsSystemDefault) {
-			rememberResolvedDescriptor(dataFlow, name, selectedDescriptor, persistedIdentity, reboundByFingerprint);
+			rememberResolvedDescriptor(dataFlow, name, selectedDescriptor, persistedIdentity, persistedPriorities,
+				selectedPriorityIndex, reboundByFingerprint);
 		}
 		const Mumble::InputEnhancement::DeviceIdentity identity =
 			identityForWASAPIDevice(pDevice, dataFlow, followsSystemDefault);
@@ -819,10 +889,12 @@ cleanup:
 }
 
 Mumble::InputEnhancement::DeviceIdentity WASAPISystem::resolveInputDeviceIdentity(const QString &configuredDevice,
-																	   const ERole role, const QString &persistedIdentity,
-																	   const QString &routingPolicy) {
+																			   const ERole role, const QString &persistedIdentity,
+																			   const QString &routingPolicy,
+																			   const QString &persistedPriorities) {
 	Mumble::InputEnhancement::DeviceIdentity identity;
 	IMMDevice *device = openNamedOrDefaultDevice(configuredDevice, eCapture, role, persistedIdentity, routingPolicy,
+		persistedPriorities,
 		WASAPINotificationClient::NoConsumer, &identity, false, false);
 	if (device) {
 		device->Release();
@@ -876,6 +948,7 @@ void WASAPIInput::run() {
 	Mumble::InputEnhancement::DeviceIdentity openedInputIdentity;
 	pMicDevice = openNamedOrDefaultDevice(plannedInputId, eCapture, WASAPIRoleFromSettings(),
 		Global::get().s.qsWASAPIInputDeviceIdentity, Global::get().s.qsWASAPIInputRoutingPolicy,
+		Global::get().s.qsWASAPIInputDevicePriorities,
 		WASAPINotificationClient::InputConsumer, &openedInputIdentity, true, true);
 	if (!pMicDevice)
 		goto cleanup;
@@ -886,6 +959,7 @@ void WASAPIInput::run() {
 		pEchoDevice = openNamedOrDefaultDevice(
 			Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings(),
 			Global::get().s.qsWASAPIOutputDeviceIdentity, Global::get().s.qsWASAPIOutputRoutingPolicy,
+			Global::get().s.qsWASAPIOutputDevicePriorities,
 			WASAPINotificationClient::InputConsumer);
 		if (!pEchoDevice)
 			doecho = false;
@@ -1374,6 +1448,7 @@ void WASAPIOutput::run() {
 	// Open the output device.
 	pDevice = openNamedOrDefaultDevice(Global::get().s.qsWASAPIOutput, eRender, WASAPIRoleFromSettings(),
 		Global::get().s.qsWASAPIOutputDeviceIdentity, Global::get().s.qsWASAPIOutputRoutingPolicy,
+		Global::get().s.qsWASAPIOutputDevicePriorities,
 		WASAPINotificationClient::OutputConsumer);
 	if (!pDevice)
 		goto cleanup;

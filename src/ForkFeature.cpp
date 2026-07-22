@@ -22,6 +22,7 @@ namespace ForkFeatures {
 				{ MumbleProto::ForkFeatureClientAssistedLinkPreviews, 2, FallbackPolicy::ServerOnly,
 				  "client_assisted_link_previews" },
 				{ MumbleProto::ForkFeatureInAppFeedback, 3, FallbackPolicy::ServerOnly, "in_app_feedback" },
+				{ MumbleProto::ForkFeatureToolsAcl, 3, FallbackPolicy::ServerOnly, "tools_acl" },
 			};
 			return table;
 		}

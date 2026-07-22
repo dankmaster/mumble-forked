@@ -246,6 +246,10 @@ struct Settings {
 	/// endpoint after Windows assigns it a new opaque MMDevice endpoint id.
 	QString qsWASAPIInputDeviceIdentity  = {};
 	QString qsWASAPIOutputDeviceIdentity = {};
+	/// Ordered JSON descriptor lists. The first available physical device wins;
+	/// the legacy single identity remains populated for compatibility.
+	QString qsWASAPIInputDevicePriorities  = {};
+	QString qsWASAPIOutputDevicePriorities = {};
 	/// "follow" follows the Windows communications endpoint, "prefer" uses a
 	/// temporary default fallback, and "strict" pauses when the selected device
 	/// is unavailable. Existing explicit selections migrate to "prefer".

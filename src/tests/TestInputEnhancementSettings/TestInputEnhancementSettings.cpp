@@ -163,6 +163,8 @@ void TestInputEnhancementSettings::wasapiSettingsRoundTrip() {
 	::Settings original;
 	original.qsWASAPIInputDeviceIdentity  = QStringLiteral("{\"input\":true}");
 	original.qsWASAPIOutputDeviceIdentity = QStringLiteral("{\"output\":true}");
+	original.qsWASAPIInputDevicePriorities  = QStringLiteral("[{\"inputPriority\":true}]");
+	original.qsWASAPIOutputDevicePriorities = QStringLiteral("[{\"outputPriority\":true}]");
 	original.qsWASAPIInputRoutingPolicy   = QStringLiteral("strict");
 	original.qsWASAPIOutputRoutingPolicy  = QStringLiteral("follow");
 	original.qsWASAPILatencyProfile       = QStringLiteral("low");
@@ -171,6 +173,8 @@ void TestInputEnhancementSettings::wasapiSettingsRoundTrip() {
 	const ::Settings restored      = persisted.get< ::Settings >();
 	QCOMPARE(restored.qsWASAPIInputDeviceIdentity, original.qsWASAPIInputDeviceIdentity);
 	QCOMPARE(restored.qsWASAPIOutputDeviceIdentity, original.qsWASAPIOutputDeviceIdentity);
+	QCOMPARE(restored.qsWASAPIInputDevicePriorities, original.qsWASAPIInputDevicePriorities);
+	QCOMPARE(restored.qsWASAPIOutputDevicePriorities, original.qsWASAPIOutputDevicePriorities);
 	QCOMPARE(restored.qsWASAPIInputRoutingPolicy, original.qsWASAPIInputRoutingPolicy);
 	QCOMPARE(restored.qsWASAPIOutputRoutingPolicy, original.qsWASAPIOutputRoutingPolicy);
 	QCOMPARE(restored.qsWASAPILatencyProfile, original.qsWASAPILatencyProfile);
@@ -217,6 +221,31 @@ void TestInputEnhancementSettings::wasapiDeviceRoutingMatchesStableHardwareOnly(
 	nameOnly.adapterName.clear();
 	nameOnly.association.clear();
 	QCOMPARE(deviceMatchScore(preferred, nameOnly), 0);
+
+	DeviceDescriptor backup = preferred;
+	backup.endpointId       = QStringLiteral("backup-old-endpoint");
+	backup.displayName      = QStringLiteral("Desk microphone");
+	backup.parentInstanceId = QStringLiteral("USB\\VID_9999&PID_0001");
+	DeviceDescriptor backupLive = backup;
+	backupLive.endpointId       = QStringLiteral("backup-live-endpoint");
+	const QList< DeviceDescriptor > priorities { preferred, backup };
+	const QString serializedPriorities = serializeDevicePriorityList(priorities);
+	QVERIFY(!serializedPriorities.isEmpty());
+	const QList< DeviceDescriptor > restoredPriorities = deserializeDevicePriorityList(serializedPriorities);
+	QCOMPARE(restoredPriorities.size(), priorities.size());
+	QVERIFY(restoredPriorities.at(0) == priorities.at(0));
+	QVERIFY(restoredPriorities.at(1) == priorities.at(1));
+
+	const PriorityMatchResult backupMatch = findFirstAvailablePriority(priorities, { unrelated, backupLive });
+	QVERIFY(backupMatch.matched());
+	QCOMPARE(backupMatch.priorityIndex, 1);
+	QCOMPARE(backupMatch.candidateIndex, 1);
+	QVERIFY(backupMatch.reboundByFingerprint);
+
+	const PriorityMatchResult primaryMatch = findFirstAvailablePriority(priorities, { backupLive, rebound });
+	QVERIFY(primaryMatch.matched());
+	QCOMPARE(primaryMatch.priorityIndex, 0);
+	QCOMPARE(primaryMatch.candidateIndex, 1);
 #else
 	QSKIP("WASAPI routing is Windows-only");
 #endif

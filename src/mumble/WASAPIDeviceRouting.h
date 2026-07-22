@@ -36,6 +36,15 @@ struct MatchResult {
 	bool matched() const { return index >= 0 && !ambiguous; }
 };
 
+struct PriorityMatchResult {
+	int priorityIndex  = -1;
+	int candidateIndex = -1;
+	int score          = 0;
+	bool reboundByFingerprint = false;
+
+	bool matched() const { return priorityIndex >= 0 && candidateIndex >= 0; }
+};
+
 struct RuntimeState {
 	QString configuredEndpointId;
 	QString preferredDisplayName;
@@ -45,8 +54,11 @@ struct RuntimeState {
 	RoutingPolicy policy = RoutingPolicy::FollowDefault;
 	bool preferredAvailable = true;
 	bool usingFallback       = false;
+	bool usingSecondaryPriority = false;
 	bool reboundByFingerprint = false;
 	bool streamActive         = false;
+	int activePriorityIndex   = -1;
+	int priorityCount         = 0;
 };
 
 QString routingPolicyName(RoutingPolicy policy);
@@ -56,6 +68,8 @@ LatencyProfile latencyProfileFromName(const QString &name);
 
 QString serializeDeviceDescriptor(const DeviceDescriptor &descriptor);
 DeviceDescriptor deserializeDeviceDescriptor(const QString &json);
+QString serializeDevicePriorityList(const QList< DeviceDescriptor > &descriptors);
+QList< DeviceDescriptor > deserializeDevicePriorityList(const QString &json);
 QString stableHardwareId(const DeviceDescriptor &descriptor);
 
 /// Scores a live endpoint against a persisted physical-device descriptor.
@@ -63,6 +77,11 @@ QString stableHardwareId(const DeviceDescriptor &descriptor);
 int deviceMatchScore(const DeviceDescriptor &preferred, const DeviceDescriptor &candidate);
 MatchResult findUniqueBestDeviceMatch(const DeviceDescriptor &preferred,
 									 const QList< DeviceDescriptor > &candidates);
+/// Resolves the first available persisted device, preserving list order. An
+/// ambiguous physical-device match is treated as unavailable and the next
+/// priority is considered instead.
+PriorityMatchResult findFirstAvailablePriority(const QList< DeviceDescriptor > &priorities,
+											 const QList< DeviceDescriptor > &candidates);
 
 } // namespace Mumble::WASAPI
 

@@ -6,6 +6,7 @@
 #include "WASAPIDeviceRouting.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QCryptographicHash>
 
@@ -17,6 +18,32 @@ namespace {
 
 	bool sameNonEmpty(const QString &first, const QString &second) {
 		return !first.trimmed().isEmpty() && normalized(first) == normalized(second);
+	}
+
+	QJsonObject descriptorToJson(const DeviceDescriptor &descriptor) {
+		QJsonObject object;
+		object.insert(QStringLiteral("endpoint_id"), descriptor.endpointId);
+		object.insert(QStringLiteral("display_name"), descriptor.displayName);
+		object.insert(QStringLiteral("container_id"), descriptor.containerId);
+		object.insert(QStringLiteral("parent_instance_id"), descriptor.parentInstanceId);
+		object.insert(QStringLiteral("adapter_name"), descriptor.adapterName);
+		object.insert(QStringLiteral("association"), descriptor.association);
+		object.insert(QStringLiteral("data_flow"), descriptor.dataFlow);
+		object.insert(QStringLiteral("form_factor"), descriptor.formFactor);
+		return object;
+	}
+
+	DeviceDescriptor descriptorFromJson(const QJsonObject &object) {
+		DeviceDescriptor descriptor;
+		descriptor.endpointId       = object.value(QStringLiteral("endpoint_id")).toString();
+		descriptor.displayName      = object.value(QStringLiteral("display_name")).toString();
+		descriptor.containerId      = object.value(QStringLiteral("container_id")).toString();
+		descriptor.parentInstanceId = object.value(QStringLiteral("parent_instance_id")).toString();
+		descriptor.adapterName      = object.value(QStringLiteral("adapter_name")).toString();
+		descriptor.association      = object.value(QStringLiteral("association")).toString();
+		descriptor.dataFlow         = object.value(QStringLiteral("data_flow")).toInt(-1);
+		descriptor.formFactor       = object.value(QStringLiteral("form_factor")).toInt(-1);
+		return descriptor;
 	}
 } // namespace
 
@@ -81,16 +108,7 @@ QString serializeDeviceDescriptor(const DeviceDescriptor &descriptor) {
 	if (!descriptor.hasStableFingerprint()) {
 		return QString();
 	}
-	QJsonObject object;
-	object.insert(QStringLiteral("endpoint_id"), descriptor.endpointId);
-	object.insert(QStringLiteral("display_name"), descriptor.displayName);
-	object.insert(QStringLiteral("container_id"), descriptor.containerId);
-	object.insert(QStringLiteral("parent_instance_id"), descriptor.parentInstanceId);
-	object.insert(QStringLiteral("adapter_name"), descriptor.adapterName);
-	object.insert(QStringLiteral("association"), descriptor.association);
-	object.insert(QStringLiteral("data_flow"), descriptor.dataFlow);
-	object.insert(QStringLiteral("form_factor"), descriptor.formFactor);
-	return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+	return QString::fromUtf8(QJsonDocument(descriptorToJson(descriptor)).toJson(QJsonDocument::Compact));
 }
 
 DeviceDescriptor deserializeDeviceDescriptor(const QString &json) {
@@ -100,16 +118,37 @@ DeviceDescriptor deserializeDeviceDescriptor(const QString &json) {
 	if (error.error != QJsonParseError::NoError || !document.isObject()) {
 		return descriptor;
 	}
-	const QJsonObject object = document.object();
-	descriptor.endpointId      = object.value(QStringLiteral("endpoint_id")).toString();
-	descriptor.displayName     = object.value(QStringLiteral("display_name")).toString();
-	descriptor.containerId     = object.value(QStringLiteral("container_id")).toString();
-	descriptor.parentInstanceId = object.value(QStringLiteral("parent_instance_id")).toString();
-	descriptor.adapterName     = object.value(QStringLiteral("adapter_name")).toString();
-	descriptor.association     = object.value(QStringLiteral("association")).toString();
-	descriptor.dataFlow        = object.value(QStringLiteral("data_flow")).toInt(-1);
-	descriptor.formFactor      = object.value(QStringLiteral("form_factor")).toInt(-1);
-	return descriptor;
+	return descriptorFromJson(document.object());
+}
+
+QString serializeDevicePriorityList(const QList< DeviceDescriptor > &descriptors) {
+	QJsonArray array;
+	for (const DeviceDescriptor &descriptor : descriptors) {
+		if (descriptor.hasStableFingerprint()) {
+			array.push_back(descriptorToJson(descriptor));
+		}
+	}
+	return array.isEmpty() ? QString()
+						 : QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+QList< DeviceDescriptor > deserializeDevicePriorityList(const QString &json) {
+	QList< DeviceDescriptor > descriptors;
+	QJsonParseError error;
+	const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &error);
+	if (error.error != QJsonParseError::NoError || !document.isArray()) {
+		return descriptors;
+	}
+	for (const QJsonValue &value : document.array()) {
+		if (!value.isObject()) {
+			continue;
+		}
+		const DeviceDescriptor descriptor = descriptorFromJson(value.toObject());
+		if (descriptor.hasStableFingerprint()) {
+			descriptors.push_back(descriptor);
+		}
+	}
+	return descriptors;
 }
 
 QString stableHardwareId(const DeviceDescriptor &descriptor) {
@@ -192,6 +231,24 @@ MatchResult findUniqueBestDeviceMatch(const DeviceDescriptor &preferred,
 		result.index = -1;
 	}
 	return result;
+}
+
+PriorityMatchResult findFirstAvailablePriority(const QList< DeviceDescriptor > &priorities,
+											 const QList< DeviceDescriptor > &candidates) {
+	for (int priorityIndex = 0; priorityIndex < priorities.size(); ++priorityIndex) {
+		const MatchResult match = findUniqueBestDeviceMatch(priorities.at(priorityIndex), candidates);
+		if (!match.matched()) {
+			continue;
+		}
+		PriorityMatchResult result;
+		result.priorityIndex  = priorityIndex;
+		result.candidateIndex = match.index;
+		result.score          = match.score;
+		result.reboundByFingerprint = priorities.at(priorityIndex).endpointId.compare(
+			candidates.at(match.index).endpointId, Qt::CaseInsensitive) != 0;
+		return result;
+	}
+	return {};
 }
 
 } // namespace Mumble::WASAPI

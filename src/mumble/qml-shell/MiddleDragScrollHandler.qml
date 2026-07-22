@@ -20,6 +20,15 @@ MouseArea {
 	property double lastTickTimestamp: 0
 	property bool gestureActive: false
 	property bool scrolling: false
+	// Traditional mouse wheels arrive as coarse 120-unit angle steps. Let product
+	// surfaces opt into a frame-synchronised interpolation for those steps so a
+	// virtualized list does not have to construct and present a new row in the
+	// same instant. Pixel-based touchpads remain on Flickable's native path.
+	property bool smoothWheelEnabled: false
+	property real wheelStep: 96
+	property real wheelResponse: 28
+	property real wheelTargetY: 0
+	property bool wheelAnimationActive: false
 	signal scrollingStarted()
 	signal scrollingEnded()
 
@@ -57,6 +66,9 @@ MouseArea {
 		pointerY = y
 		lastTickTimestamp = Date.now()
 		gestureActive = true
+		// A middle drag takes ownership without briefly ending the active scrolling
+		// state between the wheel animation and the pointer-driven continuation.
+		cancelSmoothWheel()
 	}
 
 	function dragTo(x, y) {
@@ -71,6 +83,20 @@ MouseArea {
 		const direction = offset < 0 ? -1 : 1
 		return direction * Math.min(maximumSpeed,
 			(magnitude - deadZone) * speedPerPixel)
+	}
+
+	function beginScrollingActivity() {
+		if (scrolling)
+			return
+		scrolling = true
+		scrollingStarted()
+	}
+
+	function endScrollingActivityIfIdle() {
+		if (!scrolling || gestureActive || wheelAnimationActive)
+			return
+		scrolling = false
+		scrollingEnded()
 	}
 
 	function advanceScroll(elapsedMilliseconds) {
@@ -91,21 +117,85 @@ MouseArea {
 				targetFlickable.contentY + verticalVelocity * elapsedSeconds)
 		const moved = Math.abs(targetFlickable.contentX - previousContentX) > 0.01
 			|| Math.abs(targetFlickable.contentY - previousContentY) > 0.01
-		if (moved && !scrolling) {
-			scrolling = true
-			scrollingStarted()
-		}
+		if (moved)
+			beginScrollingActivity()
 		return moved
+	}
+
+	function shouldSmoothWheel(angleDeltaY, pixelDeltaY) {
+		if (!smoothWheelEnabled || !verticalEnabled)
+			return false
+		const pixels = Math.abs(Number(pixelDeltaY) || 0)
+		const angle = Math.abs(Number(angleDeltaY) || 0)
+		// High-resolution wheels and precision touchpads already provide fine-grained
+		// deltas. Only replace the coarse, conventional mouse-wheel step.
+		return pixels < 0.01 && angle >= 120
+	}
+
+	function queueSmoothWheelDelta(angleDeltaY) {
+		if (!smoothWheelEnabled || !verticalEnabled)
+			return false
+		const angle = Number(angleDeltaY) || 0
+		if (Math.abs(angle) < 0.01)
+			return false
+		targetFlickable.cancelFlick()
+		const baseY = wheelAnimationActive ? wheelTargetY : targetFlickable.contentY
+		const nextTargetY = clampedContentY(baseY - (angle / 120) * wheelStep)
+		if (!wheelAnimationActive
+				&& Math.abs(nextTargetY - targetFlickable.contentY) <= 0.01)
+			return false
+		wheelTargetY = nextTargetY
+		wheelAnimationActive = true
+		beginScrollingActivity()
+		return true
+	}
+
+	function finishSmoothWheel() {
+		if (!wheelAnimationActive)
+			return
+		wheelAnimationActive = false
+		wheelTargetY = clampedContentY(targetFlickable.contentY)
+		endScrollingActivityIfIdle()
+	}
+
+	function cancelSmoothWheel() {
+		finishSmoothWheel()
+	}
+
+	function advanceSmoothWheel(elapsedSeconds) {
+		if (!wheelAnimationActive)
+			return false
+		wheelTargetY = clampedContentY(wheelTargetY)
+		const currentY = targetFlickable.contentY
+		const distance = wheelTargetY - currentY
+		if (Math.abs(distance) <= 0.35) {
+			targetFlickable.contentY = wheelTargetY
+			finishSmoothWheel()
+			return false
+		}
+		// FrameAnimation supplies real elapsed time, so the curve feels the same on
+		// 60/120/144 Hz displays. Cap delayed frames to avoid a catch-up teleport if
+		// a rich delegate or the process briefly stalls.
+		const frameSeconds = Math.max(0,
+			Math.min(1 / 30, Number(elapsedSeconds) || 0))
+		if (frameSeconds <= 0)
+			return false
+		const response = Math.max(1, Number(wheelResponse) || 1)
+		const progress = 1 - Math.exp(-response * frameSeconds)
+		const nextY = clampedContentY(currentY + distance * progress)
+		targetFlickable.contentY = nextY
+		if (Math.abs(wheelTargetY - targetFlickable.contentY) <= 0.35) {
+			targetFlickable.contentY = wheelTargetY
+			finishSmoothWheel()
+		}
+		return Math.abs(targetFlickable.contentY - currentY) > 0.01
 	}
 
 	function endDrag() {
 		if (!gestureActive)
 			return
 		gestureActive = false
-		if (scrolling) {
-			scrolling = false
-			scrollingEnded()
-		}
+		endScrollingActivityIfIdle()
 	}
 
 	onPressed: event => {
@@ -135,8 +225,23 @@ MouseArea {
 		}
 	}
 
+	FrameAnimation {
+		id: smoothWheelFrame
+		running: handler.enabled && handler.wheelAnimationActive
+		onTriggered: handler.advanceSmoothWheel(frameTime)
+	}
+
 	onWheel: event => {
-		// The underlying Flickable keeps native wheel/touchpad kinetics.
+		const angleY = event.angleDelta ? event.angleDelta.y : 0
+		const pixelY = event.pixelDelta ? event.pixelDelta.y : 0
+		if (shouldSmoothWheel(angleY, pixelY)) {
+			event.accepted = queueSmoothWheelDelta(angleY)
+			return
+		}
+		// The underlying Flickable keeps native precision-wheel/touchpad kinetics.
+		cancelSmoothWheel()
 		event.accepted = false
 	}
+
+	onEnabledChanged: if (!enabled) cancelSmoothWheel()
 }

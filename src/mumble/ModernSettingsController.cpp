@@ -353,6 +353,14 @@ namespace {
 		return field;
 	}
 
+	QVariantMap devicePriorityField(const QString &id, const QString &label, const QVariantList &value,
+									const QVariantList &options, const QString &hint) {
+		QVariantMap field = fieldItem(id, label, QStringLiteral("devicePriorityList"), value);
+		field.insert(QStringLiteral("options"), options);
+		field.insert(QStringLiteral("hint"), hint);
+		return field;
+	}
+
 	QVariantMap noteField(const QString &text) {
 		QVariantMap field;
 		field.insert(QStringLiteral("type"), QStringLiteral("note"));
@@ -466,6 +474,8 @@ namespace {
 			  QObject::tr("Shows the live signal used by voice activation and the current stop/start thresholds.") },
 			{ QStringLiteral("audio.inputSystem"), QObject::tr("Select the audio backend used for microphone capture.") },
 			{ QStringLiteral("audio.inputDevice"), QObject::tr("Select which microphone or capture source Mumble uses.") },
+			{ QStringLiteral("audio.wasapiInputPriorities"),
+			  QObject::tr("Mumble tries these known microphones from top to bottom and recognizes the same physical device when Windows changes its endpoint identifier.") },
 			{ QStringLiteral("audio.wasapiInputRouting"),
 			  QObject::tr("Choose whether Windows default fallback is allowed when the selected microphone disappears.") },
 			{ QStringLiteral("audio.exclusiveInput"),
@@ -534,6 +544,8 @@ namespace {
 			  QObject::tr("Undo an automatic idle mute or deafen when activity resumes.") },
 			{ QStringLiteral("audio.outputSystem"), QObject::tr("Select the audio backend used for playback.") },
 			{ QStringLiteral("audio.outputDevice"), QObject::tr("Select which speakers or headset Mumble uses.") },
+			{ QStringLiteral("audio.wasapiOutputPriorities"),
+			  QObject::tr("Mumble tries these known output devices from top to bottom and recognizes the same physical device when Windows changes its endpoint identifier.") },
 			{ QStringLiteral("audio.wasapiOutputRouting"),
 			  QObject::tr("Choose whether Windows default fallback is allowed when the selected output disappears.") },
 			{ QStringLiteral("audio.wasapiLatencyProfile"),
@@ -1474,6 +1486,98 @@ namespace {
 	}
 
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	QList< Mumble::WASAPI::DeviceDescriptor > wasapiPriorities(const QString &serializedPriorities,
+																 const QString &legacyIdentity) {
+		QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+			Mumble::WASAPI::deserializeDevicePriorityList(serializedPriorities);
+		if (priorities.isEmpty()) {
+			const Mumble::WASAPI::DeviceDescriptor legacy =
+				Mumble::WASAPI::deserializeDeviceDescriptor(legacyIdentity);
+			if (legacy.hasStableFingerprint()) {
+				priorities.push_back(legacy);
+			}
+		}
+		return priorities;
+	}
+
+	QVariantList wasapiPriorityValues(const QList< Mumble::WASAPI::DeviceDescriptor > &priorities) {
+		QVariantList values;
+		for (const Mumble::WASAPI::DeviceDescriptor &descriptor : priorities) {
+			const QString serialized = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+			if (!serialized.isEmpty()) {
+				values.push_back(serialized);
+			}
+		}
+		return values;
+	}
+
+	QVariantList wasapiPriorityOptions(const EDataFlow flow,
+										 const QList< Mumble::WASAPI::DeviceDescriptor > &priorities) {
+		QVariantList options;
+		QSet< QString > hardwareIds;
+		const QList< Mumble::WASAPI::DeviceDescriptor > live = WASAPISystem::getDeviceDescriptors(flow);
+		for (const Mumble::WASAPI::DeviceDescriptor &descriptor : priorities) {
+			const QString serialized = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+			const QString hardwareId = Mumble::WASAPI::stableHardwareId(descriptor);
+			if (serialized.isEmpty() || hardwareId.isEmpty() || hardwareIds.contains(hardwareId)) {
+				continue;
+			}
+			hardwareIds.insert(hardwareId);
+			const Mumble::WASAPI::MatchResult match =
+				Mumble::WASAPI::findUniqueBestDeviceMatch(descriptor, live);
+			const bool available = match.matched();
+			const QString label = available ? live.at(match.index).displayName
+											: QObject::tr("%1 (currently unavailable)").arg(descriptor.displayName);
+			options.push_back(optionItem(serialized, label, available));
+		}
+		for (const Mumble::WASAPI::DeviceDescriptor &descriptor : live) {
+			const QString serialized = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+			const QString hardwareId = Mumble::WASAPI::stableHardwareId(descriptor);
+			if (serialized.isEmpty() || hardwareId.isEmpty() || hardwareIds.contains(hardwareId)) {
+				continue;
+			}
+			hardwareIds.insert(hardwareId);
+			options.push_back(optionItem(serialized, descriptor.displayName));
+		}
+		return options;
+	}
+
+	void applyWasapiPriorityValues(Settings &settings, const EDataFlow flow, const QVariant &value) {
+		QList< Mumble::WASAPI::DeviceDescriptor > priorities;
+		QSet< QString > hardwareIds;
+		for (const QVariant &item : value.toList()) {
+			const Mumble::WASAPI::DeviceDescriptor descriptor =
+				Mumble::WASAPI::deserializeDeviceDescriptor(item.toString());
+			const QString hardwareId = Mumble::WASAPI::stableHardwareId(descriptor);
+			if (hardwareId.isEmpty() || hardwareIds.contains(hardwareId)) {
+				continue;
+			}
+			hardwareIds.insert(hardwareId);
+			priorities.push_back(descriptor);
+		}
+
+		QString &endpoint = flow == eCapture ? settings.qsWASAPIInput : settings.qsWASAPIOutput;
+		QString &identity = flow == eCapture ? settings.qsWASAPIInputDeviceIdentity
+											 : settings.qsWASAPIOutputDeviceIdentity;
+		QString &serializedPriorities = flow == eCapture ? settings.qsWASAPIInputDevicePriorities
+													 : settings.qsWASAPIOutputDevicePriorities;
+		QString &policy = flow == eCapture ? settings.qsWASAPIInputRoutingPolicy
+										 : settings.qsWASAPIOutputRoutingPolicy;
+		serializedPriorities = Mumble::WASAPI::serializeDevicePriorityList(priorities);
+		if (priorities.isEmpty()) {
+			endpoint.clear();
+			identity.clear();
+			policy = Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::FollowDefault);
+			return;
+		}
+		endpoint = priorities.constFirst().endpointId;
+		identity = Mumble::WASAPI::serializeDeviceDescriptor(priorities.constFirst());
+		if (Mumble::WASAPI::routingPolicyFromName(policy, true)
+			== Mumble::WASAPI::RoutingPolicy::FollowDefault) {
+			policy = Mumble::WASAPI::routingPolicyName(Mumble::WASAPI::RoutingPolicy::PreferSelected);
+		}
+	}
+
 	ERole wasapiRole(const Settings &settings) {
 		const QString role = settings.qsWASAPIRole.trimmed().toLower();
 		if (role == QLatin1String("console")) return eConsole;
@@ -1485,10 +1589,10 @@ namespace {
 		return QVariantList {
 			optionItem(0, QObject::tr("Follow Windows communications device"), true,
 					   QObject::tr("Automatically follows the Windows default for Mumble's selected audio role.")),
-			optionItem(1, QObject::tr("Prefer selected device"), true,
-					   QObject::tr("Uses the selected device when available and a temporary Windows fallback otherwise.")),
-			optionItem(2, QObject::tr("Selected device only"), true,
-					   QObject::tr("Pauses this stream instead of switching to another microphone or speaker."))
+			optionItem(1, QObject::tr("Priority list, then Windows fallback"), true,
+					   QObject::tr("Tries known devices in order, then temporarily uses the Windows communications device.")),
+			optionItem(2, QObject::tr("Priority list only"), true,
+					   QObject::tr("Tries known devices in order and pauses this stream when none are available."))
 		};
 	}
 
@@ -1539,8 +1643,13 @@ namespace {
 			text = QObject::tr("Preferred device unavailable. Currently using %1 temporarily.")
 					   .arg(state.activeDisplayName.isEmpty() ? QObject::tr("the Windows communications device")
 															  : state.activeDisplayName);
+		} else if (state.usingSecondaryPriority) {
+			text = QObject::tr("Using priority %1 of %2: %3. Mumble will return to a higher-priority device when it becomes available.")
+					   .arg(state.activePriorityIndex + 1)
+					   .arg(state.priorityCount)
+					   .arg(state.activeDisplayName);
 		} else if (!state.preferredAvailable && state.policy == Mumble::WASAPI::RoutingPolicy::StrictSelected) {
-			text = QObject::tr("Selected device unavailable. This audio stream is paused by strict routing.");
+			text = QObject::tr("No priority-list device is available. This audio stream is paused by strict routing.");
 		} else if (state.reboundByFingerprint) {
 			text = QObject::tr("Reconnected to %1 after Windows assigned it a new endpoint identifier.")
 					   .arg(state.activeDisplayName);
@@ -3041,6 +3150,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 																			 m_draft);
 		}
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	} else if (id == QLatin1String("audio.wasapiInputPriorities")) {
+		applyWasapiPriorityValues(m_draft, eCapture, value);
 	} else if (id == QLatin1String("audio.wasapiInputRouting")) {
 		const int index = qBound(0, value.toInt(), 2);
 		const Mumble::WASAPI::RoutingPolicy policy = index == 0 ? Mumble::WASAPI::RoutingPolicy::FollowDefault
@@ -3050,11 +3161,14 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (policy == Mumble::WASAPI::RoutingPolicy::FollowDefault) {
 			m_draft.qsWASAPIInput.clear();
 			m_draft.qsWASAPIInputDeviceIdentity.clear();
+			m_draft.qsWASAPIInputDevicePriorities.clear();
 		} else if (m_draft.qsWASAPIInput.isEmpty()) {
 			const Mumble::WASAPI::DeviceDescriptor descriptor =
 				WASAPISystem::defaultDeviceDescriptor(eCapture, wasapiRole(m_draft));
 			m_draft.qsWASAPIInput = descriptor.endpointId;
 			m_draft.qsWASAPIInputDeviceIdentity = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+			m_draft.qsWASAPIInputDevicePriorities =
+				Mumble::WASAPI::serializeDevicePriorityList({ descriptor });
 		}
 #endif
 	} else if (id == QLatin1String("audio.outputSystem")) {
@@ -3072,6 +3186,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 																			   m_draft);
 		}
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	} else if (id == QLatin1String("audio.wasapiOutputPriorities")) {
+		applyWasapiPriorityValues(m_draft, eRender, value);
 	} else if (id == QLatin1String("audio.wasapiOutputRouting")) {
 		const int index = qBound(0, value.toInt(), 2);
 		const Mumble::WASAPI::RoutingPolicy policy = index == 0 ? Mumble::WASAPI::RoutingPolicy::FollowDefault
@@ -3081,11 +3197,14 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		if (policy == Mumble::WASAPI::RoutingPolicy::FollowDefault) {
 			m_draft.qsWASAPIOutput.clear();
 			m_draft.qsWASAPIOutputDeviceIdentity.clear();
+			m_draft.qsWASAPIOutputDevicePriorities.clear();
 		} else if (m_draft.qsWASAPIOutput.isEmpty()) {
 			const Mumble::WASAPI::DeviceDescriptor descriptor =
 				WASAPISystem::defaultDeviceDescriptor(eRender, wasapiRole(m_draft));
 			m_draft.qsWASAPIOutput = descriptor.endpointId;
 			m_draft.qsWASAPIOutputDeviceIdentity = Mumble::WASAPI::serializeDeviceDescriptor(descriptor);
+			m_draft.qsWASAPIOutputDevicePriorities =
+				Mumble::WASAPI::serializeDevicePriorityList({ descriptor });
 		}
 	} else if (id == QLatin1String("audio.wasapiLatencyProfile")) {
 		const int index = qBound(0, value.toInt(), 2);
@@ -4557,22 +4676,33 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 			return section;
 		};
 
-		QVariantList microphoneFields {
-			enabledField(selectField(QStringLiteral("audio.inputDevice"), QObject::tr("Microphone"), inputDevice,
-								 deviceOptions(inputDevices)), !inputDevices.isEmpty())
-		};
+		QVariantList microphoneFields;
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 		if (selectedInputSystem == QLatin1String("WASAPI")) {
+			microphoneFields.push_back(enabledField(selectField(
+				QStringLiteral("audio.inputDevice"), QObject::tr("Microphone"), inputDevice,
+				deviceOptions(inputDevices)), !inputDevices.isEmpty()));
+			const QList< Mumble::WASAPI::DeviceDescriptor > priorities = wasapiPriorities(
+				m_draft.qsWASAPIInputDevicePriorities, m_draft.qsWASAPIInputDeviceIdentity);
+			microphoneFields.push_back(advancedField(devicePriorityField(
+				QStringLiteral("audio.wasapiInputPriorities"), QObject::tr("Microphone priority"),
+				wasapiPriorityValues(priorities), wasapiPriorityOptions(eCapture, priorities),
+				QObject::tr("Mumble uses the first available known microphone. Use the arrows to set the order; Windows endpoint-ID changes do not create a new physical device."))));
 			microphoneFields.push_back(wasapiRuntimeStatusField(eCapture));
-		}
+		} else
 #endif
+		{
+			microphoneFields.push_back(enabledField(selectField(
+				QStringLiteral("audio.inputDevice"), QObject::tr("Microphone"), inputDevice,
+				deviceOptions(inputDevices)), !inputDevices.isEmpty()));
+		}
 		microphoneFields.push_back(advancedField(selectField(QStringLiteral("audio.inputSystem"),
 														 QObject::tr("Audio system"), inputSystem,
 														 systemOptions(inputSystems))));
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 		if (selectedInputSystem == QLatin1String("WASAPI")) {
 			microphoneFields.push_back(advancedField(selectField(
-				QStringLiteral("audio.wasapiInputRouting"), QObject::tr("When the microphone disconnects"),
+				QStringLiteral("audio.wasapiInputRouting"), QObject::tr("When no listed microphone is available"),
 				wasapiRoutingIndex(m_draft.qsWASAPIInputRoutingPolicy, !m_draft.qsWASAPIInput.isEmpty()),
 				wasapiRoutingOptions())));
 		}
@@ -4792,19 +4922,31 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 
 		QVariantList outputDeviceFields {
 			selectField(QStringLiteral("audio.outputSystem"), QObject::tr("Output system"), outputSystem,
-						systemOptions(outputSystems)),
-			enabledField(selectField(QStringLiteral("audio.outputDevice"), QObject::tr("Output device"), outputDevice,
-								 deviceOptions(outputDevices)), !outputDevices.isEmpty())
+						systemOptions(outputSystems))
 		};
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 		if (selectedOutputSystem == QLatin1String("WASAPI")) {
-			outputDeviceFields.push_back(selectField(
-				QStringLiteral("audio.wasapiOutputRouting"), QObject::tr("When the output device disconnects"),
+			outputDeviceFields.push_back(enabledField(selectField(
+				QStringLiteral("audio.outputDevice"), QObject::tr("Output device"), outputDevice,
+				deviceOptions(outputDevices)), !outputDevices.isEmpty()));
+			const QList< Mumble::WASAPI::DeviceDescriptor > priorities = wasapiPriorities(
+				m_draft.qsWASAPIOutputDevicePriorities, m_draft.qsWASAPIOutputDeviceIdentity);
+			outputDeviceFields.push_back(advancedField(devicePriorityField(
+				QStringLiteral("audio.wasapiOutputPriorities"), QObject::tr("Output device priority"),
+				wasapiPriorityValues(priorities), wasapiPriorityOptions(eRender, priorities),
+				QObject::tr("Mumble uses the first available known output. Use the arrows to set the order; Windows endpoint-ID changes do not create a new physical device."))));
+			outputDeviceFields.push_back(advancedField(selectField(
+				QStringLiteral("audio.wasapiOutputRouting"), QObject::tr("When no listed output is available"),
 				wasapiRoutingIndex(m_draft.qsWASAPIOutputRoutingPolicy, !m_draft.qsWASAPIOutput.isEmpty()),
-				wasapiRoutingOptions()));
+				wasapiRoutingOptions())));
 			outputDeviceFields.push_back(wasapiRuntimeStatusField(eRender));
-		}
+		} else
 #endif
+		{
+			outputDeviceFields.push_back(enabledField(selectField(
+				QStringLiteral("audio.outputDevice"), QObject::tr("Output device"), outputDevice,
+				deviceOptions(outputDevices)), !outputDevices.isEmpty()));
+		}
 		outputDeviceFields.push_back(advancedField(enabledField(
 			boolField(QStringLiteral("audio.exclusiveOutput"), QObject::tr("Use exclusive output mode"),
 					  m_draft.bExclusiveOutput), outputCanExclusive)));

@@ -2717,6 +2717,7 @@ ApplicationWindow {
 						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
 							if (pressed) {
+								timelineScrollHandler.cancelSmoothWheel()
 								bottomFollowTimer.stop()
 								timeline.stickToBottom = false
 								timeline.releasePrependAnchor()
@@ -2727,8 +2728,11 @@ ApplicationWindow {
 						}
 					}
 					MiddleDragScrollHandler {
+						id: timelineScrollHandler
 						targetFlickable: timeline
 						horizontalEnabled: false
+						smoothWheelEnabled: true
+						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
 						onScrollingStarted: {
 							bottomFollowTimer.stop()
 							timeline.stickToBottom = false
@@ -2856,6 +2860,10 @@ ApplicationWindow {
 						if (!scopePresentationPending || scopePresentationFinalizing
 								|| activeScope.loading)
 							return false
+						// Activity rows are already materialized client log entries. They do
+						// not need the rich-message hydration gate used by conversations.
+						if (activeScope.activity)
+							return true
 						if (count === 0)
 							return true
 						if (height <= 1)
@@ -4144,9 +4152,11 @@ ApplicationWindow {
 						width: Math.max(1, Math.min(380, timeline.width
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
-						readonly property bool visualLoading: activeScope.loading
+						readonly property bool visualLoading: !activeScope.activity && (activeScope.loading
 							|| (timeline.scopePresentationPending && chatModel.count > 0)
-						visible: (timeline.scopePresentationPending || chatModel.count === 0)
+						)
+						visible: (activeScope.activity ? chatModel.count === 0
+							: timeline.scopePresentationPending || chatModel.count === 0)
 							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
 						z: 5
@@ -4180,6 +4190,7 @@ ApplicationWindow {
 								text: emptyConversationState.visualLoading
 									? (activeScope.loading ? qsTr("Loading conversation")
 										: qsTr("Preparing conversation"))
+									: activeScope.activity ? qsTr("No activity yet")
 									: !clientSession.connected ? qsTr("Connect to Mumble")
 									: activeScope.canSend ? qsTr("This conversation is quiet")
 									: qsTr("Choose a conversation")
@@ -4197,6 +4208,8 @@ ApplicationWindow {
 									? (activeScope.loading
 										? qsTr("Messages will appear here when history is ready.")
 										: qsTr("Recent messages are being laid out."))
+									: activeScope.activity
+										? qsTr("Connection events, notices, and diagnostics will appear here.")
 									: !clientSession.connected ? qsTr("Open the server browser to load rooms and messages.")
 									: activeScope.canSend ? qsTr("Be the first to write in %1.").arg(activeScope.label)
 									: qsTr("Select a text room, voice room, or direct message to get started.")
@@ -4266,15 +4279,18 @@ ApplicationWindow {
 				Rectangle {
 					id: composerSurface
                     Layout.fillWidth: true
+					visible: !activeScope.activity
+					enabled: visible
+					Accessible.ignored: !visible
 					// Reply copy, attachments, autocomplete, and the input row all keep
 					// their own minimum height. Reserve the complete reply row plus the
 					// intervening layout gap so compact combinations never overflow the
 					// composer's semantic or visual bounds.
-					readonly property int baseHeight: Math.max(72, Theme.railFooterHeight)
-					Layout.preferredHeight: (activeScope.hasPendingReply ? baseHeight + 44 : baseHeight)
+					readonly property int baseHeight: Math.max(90, Theme.railFooterHeight)
+					Layout.preferredHeight: visible ? (activeScope.hasPendingReply ? baseHeight + 44 : baseHeight)
 						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * Theme.composerLineHeight
 						+ (composer.attachments.count > 0 ? 58 : 0)
-						+ (composer.autocompleteItems.length > 0 ? 34 : 0)
+						+ (composer.autocompleteItems.length > 0 ? 34 : 0) : 0
 					color: Theme.chatCanvas
 					border.width: 0
 					Rectangle {
@@ -4380,6 +4396,37 @@ ApplicationWindow {
                                 anchors.fill: parent
 								anchors.margins: Theme.space2
 								spacing: Theme.chatMetadataSpacing
+								RowLayout {
+									id: composerTargetRow
+									objectName: "composerTargetRow"
+									Layout.fillWidth: true
+									Layout.preferredHeight: 16
+									spacing: Theme.chatMetadataSpacing
+									ModernIcon {
+										Layout.alignment: Qt.AlignVCenter
+										name: "send"
+										size: 12
+										color: Theme.accent
+									}
+									Label {
+										objectName: "composerTargetLabel"
+										Layout.fillWidth: true
+										textFormat: Text.PlainText
+										text: qsTr("To: %1").arg(activeScope.label)
+										color: Theme.textStrong
+										font.pixelSize: Theme.fontCaption
+										font.weight: Font.DemiBold
+										elide: Text.ElideRight
+									}
+									Label {
+										objectName: "composerTargetKindLabel"
+										Layout.alignment: Qt.AlignVCenter
+										textFormat: Text.PlainText
+										text: activeScope.kindLabel
+										color: Theme.textMuted
+										font.pixelSize: Theme.fontCaption
+									}
+								}
 								Rectangle {
 									id: composerReplySurface
 									objectName: "composerReplySurface"
@@ -4620,7 +4667,8 @@ ApplicationWindow {
 								Accessible.name: activeScope.composerPlaceholder.length > 0
 												 ? activeScope.composerPlaceholder
 												 : qsTr("Message composer")
-								Accessible.description: activeScope.composerHint
+								Accessible.description: qsTr("Sending to %1. %2")
+									.arg(activeScope.label).arg(activeScope.composerHint)
 								Accessible.focusable: true
 								Accessible.focused: activeFocus
                                 background: null
@@ -4675,7 +4723,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
 			visible: !root.compactNavigation
 			alignedHeaderHeight: shellHeader.height
-			alignedFooterHeight: composerSurface.height
+			alignedFooterHeight: Math.max(Theme.railFooterHeight, composerSurface.height)
 			accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 				navigationModel: root.navigationRailModel
 				selectionState: root.navigationSelectionState

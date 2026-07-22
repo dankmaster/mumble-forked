@@ -824,6 +824,51 @@ bool modernShellStaticModeEnabled() {
 	return enabled;
 }
 
+bool modernShellToolsAclSupported() {
+	return Mumble::ForkFeatures::serverAllowsClientFeature(Global::get().qlSupportedForkFeatures,
+												MumbleProto::ForkFeatureToolsAcl);
+}
+
+bool modernShellToolsAllowed() {
+	return modernShellToolsAclSupported() && Global::get().pPermissions.testFlag(ChanACL::UseTools);
+}
+
+QStringList modernShellToolTextChannelSelectors() {
+	QStringList selectors;
+	const QString configured = qEnvironmentVariable("MUMBLE_MODERN_TOOL_TEXT_CHANNELS");
+	for (QString selector : configured.split(QRegularExpression(QStringLiteral("[,;\\r\\n]")), Qt::SkipEmptyParts)) {
+		selector = selector.trimmed();
+		if (selector.startsWith(QLatin1Char('#'))) {
+			selector.remove(0, 1);
+		}
+		selector = selector.trimmed().toCaseFolded();
+		if (!selector.isEmpty() && !selectors.contains(selector)) {
+			selectors.push_back(selector);
+		}
+	}
+	return selectors;
+}
+
+bool modernShellTextChannelIsTool(const QStringList &selectors, const QString &channelName,
+								  const unsigned int channelID) {
+	const QString normalizedName = channelName.trimmed().toCaseFolded();
+	for (const QString &selector : selectors) {
+		if (selector == normalizedName) {
+			return true;
+		}
+		if (!selector.startsWith(QLatin1String("id:"))) {
+			continue;
+		}
+		bool ok                 = false;
+		const qulonglong parsed = selector.mid(3).trimmed().toULongLong(&ok);
+		if (ok && parsed <= std::numeric_limits< unsigned int >::max()
+			&& static_cast< unsigned int >(parsed) == channelID) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void appendModernShellConnectTrace(const QString &message) {
 	if (qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") == 0) {
 		return;
@@ -15684,6 +15729,9 @@ namespace {
 				&& (permission == ChanACL::ResetUserContent || permission == ChanACL::Listen)) {
 				continue;
 			}
+			if (permission == ChanACL::UseTools && !modernShellToolsAclSupported()) {
+				continue;
+			}
 			QVariantMap item;
 			item.insert(QStringLiteral("id"), static_cast< int >(bit));
 			item.insert(QStringLiteral("label"), name);
@@ -24441,6 +24489,13 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	const Channel *selfVoiceChannel = currentVoiceChannel();
 	const ClientUser *selfUser      = ClientUser::get(Global::get().uiSession);
 	const bool canUsePersistedReactions = selfUser && selfUser->iId >= 0;
+	bool debugToolTextRoom              = false;
+	if (!target.serverLog && target.scope == MumbleProto::TextChannel) {
+		const auto textChannel = m_persistentTextChannels.constFind(target.scopeID);
+		debugToolTextRoom      = textChannel != m_persistentTextChannels.cend()
+							&& modernShellTextChannelIsTool(modernShellToolTextChannelSelectors(), textChannel->name,
+															textChannel->textChannelID);
+	}
 	QString loadingStateKey;
 	QString loadingLabel;
 	if (target.valid && !target.serverLog && !target.directMessage && !target.ephemeralTextPath
@@ -24472,7 +24527,7 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	} else if (target.directMessage) {
 		kindLabel = tr("Direct message");
 	} else if (target.scope == MumbleProto::TextChannel) {
-		kindLabel = tr("Text room");
+		kindLabel = debugToolTextRoom ? tr("Debug text room") : tr("Text room");
 	} else if (target.scope == MumbleProto::Channel) {
 		kindLabel = tr("Voice room");
 	} else if (target.scope == MumbleProto::Aggregate || target.scope == MumbleProto::ServerGlobal) {
@@ -24529,12 +24584,16 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	if (target.readOnly) {
 		scopeMeta.push_back(tr("Read-only"));
 	}
+	if (debugToolTextRoom) {
+		scopeMeta.push_back(tr("Tool channel"));
+	}
 
 	const int activeScopeValue =
 		target.serverLog ? LocalServerLogScope
 						 : (target.directMessage ? LocalDirectMessageScope : static_cast< int >(target.scope));
 	const unsigned int activeScopeID = target.directMessage && target.user ? target.user->uiSession : target.scopeID;
 	activeScope.insert(QStringLiteral("kindLabel"), kindLabel);
+	activeScope.insert(QStringLiteral("activity"), target.serverLog);
 	activeScope.insert(QStringLiteral("scopeToken"), modernShellScopeToken(activeScopeValue, activeScopeID));
 	activeScope.insert(QStringLiteral("railSelection"),
 					   target.scope == MumbleProto::Channel && m_persistentChatTargetUsesVoiceTree
@@ -25169,10 +25228,13 @@ QVariantMap MainWindow::buildQmlRoomState() {
 			   || (!target.serverLog && !target.directMessage && target.valid
 				   && static_cast< int >(target.scope) == scopeValue && target.scopeID == scopeID);
 	};
+	const QStringList toolTextChannelSelectors = modernShellToolTextChannelSelectors();
+	const bool canUseTools = modernShellToolsAllowed();
 	const auto appendTextRoom = [&](const int scopeValue, const unsigned int scopeID, const QString &roomLabel,
 									const QString &description, const QString &kindLabel,
 									const MumbleProto::ChatScope unreadScope = MumbleProto::Channel,
-									const bool joined = false) {
+									const bool joined = false, const QString &sectionKind = QStringLiteral("text"),
+									const bool debugTool = false) {
 		const bool voiceChatMirror = scopeValue == static_cast< int >(MumbleProto::Channel);
 		const bool textRailSelected = selectedScope(scopeValue, scopeID)
 									  && !(voiceChatMirror && m_persistentChatTargetUsesVoiceTree);
@@ -25184,6 +25246,10 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		room.insert(QStringLiteral("selected"), textRailSelected);
 		room.insert(QStringLiteral("joined"), joined);
 		room.insert(QStringLiteral("kindLabel"), kindLabel);
+		room.insert(QStringLiteral("sectionKind"), sectionKind);
+		if (debugTool) {
+			room.insert(QStringLiteral("badges"), QVariantList{ tr("Debug") });
+		}
 		if (scopeValue == static_cast< int >(MumbleProto::TextChannel)
 			|| scopeValue == static_cast< int >(MumbleProto::Channel)) {
 			room.insert(QStringLiteral("unreadCount"),
@@ -25194,30 +25260,13 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		textRooms.push_back(room);
 	};
 
-	appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
-				   tr("Server log, connection status, notices, and client diagnostics."), tr("Activity"));
+	if (canUseTools) {
+		appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
+					   tr("Server log, connection status, notices, and client diagnostics."), tr("Activity"),
+					   MumbleProto::Channel, false, QStringLiteral("tool"));
+	}
 
 	if (hasPersistentChatCapabilities()) {
-		QSet< unsigned int > voiceChatTextRoomIDs;
-		const auto appendVoiceChatTextRoom = [&](const Channel *channel) {
-			if (!channel || voiceChatTextRoomIDs.contains(channel->iId)) {
-				return;
-			}
-
-			voiceChatTextRoomIDs.insert(channel->iId);
-			const QString topic = qmlVoiceRoomTopicSummary(channel);
-			appendTextRoom(static_cast< int >(MumbleProto::Channel), channel->iId, channel->qsName,
-						   voiceRoomChatListDescription(channel, topic), tr("Voice room"), MumbleProto::Channel,
-						   joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId);
-		};
-		appendVoiceChatTextRoom(joinedVoiceChannel);
-		if (target.scope == MumbleProto::Channel) {
-			appendVoiceChatTextRoom(target.channel);
-		}
-		if (m_persistentChatTargetUsesVoiceTree) {
-			appendVoiceChatTextRoom(selectedVoiceTreeChannel());
-		}
-
 		QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
 		std::sort(textChannels.begin(), textChannels.end(),
 				  [](const PersistentTextChannel &lhs, const PersistentTextChannel &rhs) {
@@ -25231,11 +25280,16 @@ QVariantMap MainWindow::buildQmlRoomState() {
 					  return lhs.textChannelID < rhs.textChannelID;
 				  });
 		for (const PersistentTextChannel &textChannel : textChannels) {
+			const bool debugTool =
+				modernShellTextChannelIsTool(toolTextChannelSelectors, textChannel.name, textChannel.textChannelID);
+			if (debugTool && !canUseTools) {
+				continue;
+			}
 			appendTextRoom(static_cast< int >(MumbleProto::TextChannel), textChannel.textChannelID,
 						   tr("#%1").arg(textChannel.name),
-						   textChannel.description.isEmpty() ? tr("Persistent text channel")
-															 : textChannel.description,
-						   tr("Text room"), MumbleProto::TextChannel);
+						   textChannel.description.isEmpty() ? tr("Persistent text channel") : textChannel.description,
+						   debugTool ? tr("Debug text room") : tr("Text room"), MumbleProto::TextChannel, false,
+						   debugTool ? QStringLiteral("tool") : QStringLiteral("text"), debugTool);
 		}
 
 	}
@@ -26531,6 +26585,15 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 	int scopeValue       = 0;
 	unsigned int scopeID = 0;
 	if (!parseModernShellScopeToken(scopeToken, scopeValue, scopeID)) {
+		return false;
+	}
+	bool configuredToolTextChannel = false;
+	if (scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+		const auto channel = m_persistentTextChannels.constFind(scopeID);
+		configuredToolTextChannel = channel != m_persistentTextChannels.cend()
+			&& modernShellTextChannelIsTool(modernShellToolTextChannelSelectors(), channel->name, scopeID);
+	}
+	if ((scopeValue == LocalServerLogScope || configuredToolTextChannel) && !modernShellToolsAllowed()) {
 		return false;
 	}
 
@@ -29619,6 +29682,11 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		? static_cast< unsigned int >(selectedScopeIDValue) : 0;
 
 	if (selectedScopeValue.has_value() && *selectedScopeValue == LocalServerLogScope) {
+		if (connected && !modernShellToolsAllowed()) {
+			target.label       = tr("No conversation selected");
+			target.description = tr("Ask a server administrator for the Use tools permission.");
+			return target;
+		}
 		return activityTarget();
 	}
 
@@ -29653,6 +29721,16 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 	const int scopeValue = *selectedScopeValue;
 	if (scopeValue == LocalServerLogScope) {
 		return activityTarget();
+	}
+	if (connected && scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+		const auto channel = m_persistentTextChannels.constFind(selectedScopeID);
+		if (channel != m_persistentTextChannels.cend()
+			&& modernShellTextChannelIsTool(modernShellToolTextChannelSelectors(), channel->name, selectedScopeID)
+			&& !modernShellToolsAllowed()) {
+			target.label       = tr("No conversation selected");
+			target.description = tr("Ask a server administrator for the Use tools permission.");
+			return target;
+		}
 	}
 
 	bool selectedModernDirectConversationAvailable = false;

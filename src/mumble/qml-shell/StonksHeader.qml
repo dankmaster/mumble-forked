@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -276,6 +278,10 @@ AbstractButton {
 				Row {
 					id: horizontalTrack
 					objectName: "stonksTickerHorizontalTrack"
+					readonly property real sequenceTravel: horizontalPrimary.width + spacing
+					readonly property int requiredCopyCount: sequenceTravel > 0
+						? Math.max(2, Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
+						: 2
 					anchors.verticalCenter: parent.verticalCenter
 					spacing: Theme.space4
 					visible: root.horizontalMovement
@@ -288,12 +294,14 @@ AbstractButton {
 							delegate: tickerDelegate
 						}
 					}
-					Row {
-						id: horizontalDuplicate
-						spacing: Theme.space4
-						Repeater {
-							model: root.tickerRows
-							delegate: tickerDelegate
+					Repeater {
+						model: horizontalTrack.requiredCopyCount - 1
+						delegate: Row {
+							spacing: Theme.space4
+							Repeater {
+								model: root.tickerRows
+								delegate: tickerDelegate
+							}
 						}
 					}
 				}
@@ -301,6 +309,10 @@ AbstractButton {
 				Column {
 					id: verticalTrack
 					objectName: "stonksTickerVerticalTrack"
+					readonly property real sequenceTravel: verticalPrimary.height + spacing
+					readonly property int requiredCopyCount: sequenceTravel > 0
+						? Math.max(2, Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
+						: 2
 					width: parent.width
 					spacing: Theme.space2
 					visible: !root.horizontalMovement
@@ -313,13 +325,15 @@ AbstractButton {
 							delegate: tickerDelegate
 						}
 					}
-					Column {
-						id: verticalDuplicate
-						width: parent.width
-						spacing: Theme.space2
-						Repeater {
-							model: root.tickerRows
-							delegate: tickerDelegate
+					Repeater {
+						model: verticalTrack.requiredCopyCount - 1
+						delegate: Column {
+							width: verticalTrack.width
+							spacing: Theme.space2
+							Repeater {
+								model: root.tickerRows
+								delegate: tickerDelegate
+							}
 						}
 					}
 				}
@@ -329,7 +343,7 @@ AbstractButton {
 					objectName: "stonksTickerHorizontalAnimation"
 					target: horizontalTrack
 					property: "x"
-					readonly property real travel: horizontalPrimary.width + horizontalTrack.spacing
+					readonly property real travel: horizontalTrack.sequenceTravel
 					from: root.tickerDirection === "right" ? -travel : 0
 					to: root.tickerDirection === "right" ? 0 : -travel
 					duration: root.animationDuration(travel)
@@ -340,7 +354,7 @@ AbstractButton {
 							root.restartTickerAnimation()
 					}
 					running: root.visible && root.horizontalMovement && root.movementShouldRun
-						&& tickerViewport.visible
+						&& tickerViewport.visible && travel > 0
 					onRunningChanged: {
 						if (!running)
 							horizontalTrack.x = 0
@@ -354,7 +368,7 @@ AbstractButton {
 					objectName: "stonksTickerVerticalAnimation"
 					target: verticalTrack
 					property: "y"
-					readonly property real travel: verticalPrimary.height + verticalTrack.spacing
+					readonly property real travel: verticalTrack.sequenceTravel
 					from: root.tickerDirection === "down" ? -travel : 0
 					to: root.tickerDirection === "down" ? 0 : -travel
 					duration: root.animationDuration(travel)
@@ -365,7 +379,7 @@ AbstractButton {
 							root.restartTickerAnimation()
 					}
 					running: root.visible && !root.horizontalMovement && root.movementShouldRun
-						&& tickerViewport.visible
+						&& tickerViewport.visible && travel > 0
 					onRunningChanged: {
 						if (!running)
 							verticalTrack.y = 0

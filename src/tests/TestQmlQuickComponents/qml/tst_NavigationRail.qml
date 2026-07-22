@@ -70,7 +70,7 @@ TestCase {
 			})
 			append({
 				"stableId": "room-activity", "scopeToken": "-2:0", "title": "Activity",
-				"subtitle": "Server notices", "kind": "text", "sectionKind": "text", "selected": false,
+				"subtitle": "Server notices", "kind": "text", "sectionKind": "tool", "selected": false,
 				"depth": 0, "unreadCount": 0, "status": "",
 				"payload": { "rowKind": "room", "source": { "actions": [] } }
 			})
@@ -88,6 +88,28 @@ TestCase {
 		property string scopeToken: ""
 		property var selectedUserSession: undefined
 		property var selectedVoiceChannelId: undefined
+	}
+
+	Component {
+		id: isolatedNavigationRowsComponent
+		ListModel { dynamicRoles: true }
+	}
+
+	Component {
+		id: isolatedSelectionComponent
+		QtObject {
+			property string scopeToken: ""
+			property var selectedUserSession: undefined
+			property var selectedVoiceChannelId: undefined
+		}
+	}
+
+	Component {
+		id: isolatedRailLoaderComponent
+		Loader {
+			anchors.fill: parent
+			z: 100
+		}
 	}
 
     QtObject {
@@ -282,6 +304,7 @@ TestCase {
 		selection.selectedVoiceChannelId = undefined
 		selection.scopeToken = ""
 		loader.item.localRoomExpansion = ({})
+		loader.item.toolsExpanded = true
 		loader.item.setNavigationFilter("")
 		loader.item.activeScopeMenuToken = ""
 		loader.item.activeParticipantMenuKey = ""
@@ -898,6 +921,68 @@ TestCase {
 		compare(committedSpy.count, 0)
 	}
 
+	function test_late_selected_tool_insertion_reveals_current_scope_without_stealing_focus() {
+		const isolatedRows = createTemporaryObject(
+			isolatedNavigationRowsComponent, testCase)
+		const isolatedSelection = createTemporaryObject(
+			isolatedSelectionComponent, testCase)
+		const isolatedLoader = createTemporaryObject(
+			isolatedRailLoaderComponent, testCase)
+		verify(isolatedRows !== null && isolatedSelection !== null
+			&& isolatedLoader !== null)
+
+		for (let index = 0; index < 10; ++index) {
+			isolatedRows.append({
+				"stableId": "late-room-" + index,
+				"scopeToken": "late:" + index,
+				"title": "Late room " + index,
+				"subtitle": "Available before selection",
+				"kind": "text", "sectionKind": "text", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "source": { "actions": [] } }
+			})
+		}
+		isolatedSelection.scopeToken = "text:late-tool"
+		isolatedLoader.setSource("qrc:/qml-shell/NavigationRail.qml", {
+			"navigationModel": isolatedRows,
+			"selectionState": isolatedSelection,
+			"uiCommands": commands,
+			"clientSession": session,
+			"stonksEnabled": true,
+			"commitOnSelection": true
+		})
+		tryVerify(function() { return isolatedLoader.item !== null })
+		const navigationList = findChild(isolatedLoader.item, "navigationRooms")
+		const profile = findChild(isolatedLoader.item, "selfIdentityButton")
+		verify(navigationList !== null && profile !== null)
+		profile.forceActiveFocus()
+		tryVerify(function() { return profile.activeFocus })
+		// Let the first reveal attempt finish before the selected model row exists.
+		wait(0)
+
+		const selectedIndex = isolatedRows.count
+		isolatedRows.append({
+			"stableId": "late-selected-tool", "scopeToken": "text:late-tool",
+			"title": "#TestStuff", "subtitle": "Debug text room",
+			"kind": "text", "sectionKind": "tool", "selected": false,
+			"depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+
+		tryCompare(navigationList, "currentIndex", selectedIndex)
+		navigationList.forceLayout()
+		tryVerify(function() {
+			const selectedRow = navigationList.itemAtIndex(selectedIndex)
+			if (!selectedRow)
+				return false
+			const origin = selectedRow.mapToItem(navigationList, 0, 0)
+			return origin.y >= -0.5
+				&& origin.y + selectedRow.height <= navigationList.height + 0.5
+		})
+		verify(profile.activeFocus)
+		compare(commands.selectScopeFromRailCount, 0)
+	}
+
 	function test_pointer_and_action_focus_synchronize_roving_index() {
 		const navigationList = findChild(loader.item, "navigationRooms")
 		const gamesMouse = findChild(loader.item, "navigationRoomMouse_room-games")
@@ -1089,15 +1174,15 @@ TestCase {
 		verify(navigationList !== null)
 		compare(navigationList.section.property, "")
 		const voiceSection = findChild(loader.item, "navigationSection_voice")
-		const textSection = findChild(loader.item, "navigationSection_text")
+		const toolSection = findChild(loader.item, "navigationSection_tool")
 		const directSection = findChild(loader.item, "navigationSection_direct")
 		verify(voiceSection !== null)
-		verify(textSection !== null)
+		verify(toolSection !== null)
 		verify(directSection !== null)
 		compare(voiceSection.Accessible.name, "VOICE ROOMS · 2")
-		compare(textSection.Accessible.name, "TEXT ROOMS · 1")
+		compare(toolSection.Accessible.name, "TOOLS · 1")
 		compare(directSection.Accessible.name, "DIRECT MESSAGES · 1")
-		for (const kind of [ "voice", "text", "direct" ]) {
+		for (const kind of [ "voice", "tool", "direct" ]) {
 			const visualLabel = findChild(loader.item, "navigationSectionLabel_" + kind)
 			verify(visualLabel !== null)
 			verify(visualLabel.Accessible.ignored)
@@ -1105,7 +1190,7 @@ TestCase {
 			compare(String(visualLabel.color), String(Theme.withAlpha(Theme.accent, 0.76)))
 		}
 		compare(findChild(loader.item, "navigationSectionLabel_voice").text, "VOICE ROOMS")
-		compare(findChild(loader.item, "navigationSectionLabel_text").text, "TEXT ROOMS")
+		compare(findChild(loader.item, "navigationSectionLabel_tool").text, "TOOLS")
 
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const participant = findChild(loader.item, "navigationParticipant_42")
@@ -1138,12 +1223,77 @@ TestCase {
 		compare(participant.border.color, Theme.focus)
 	}
 
+	function test_tools_section_collapses_without_losing_selected_tool_context() {
+		const rail = loader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		verify(navigationList !== null)
+		navigationRows.insert(5, {
+			"stableId": "room-test-stuff", "scopeToken": "text:9", "title": "#TestStuff",
+			"subtitle": "Debug text room", "kind": "text", "sectionKind": "tool",
+			"selected": false, "depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+		try {
+			navigationList.forceLayout()
+			navigationList.positionViewAtIndex(4, ListView.Contain)
+			wait(0)
+			let activity = null
+			let testStuff = null
+			let toggleMouse = null
+			let toggleIcon = null
+			tryVerify(function() {
+				activity = findChild(rail, "navigationRoom_room-activity")
+				testStuff = findChild(rail, "navigationRoom_room-test-stuff")
+				toggleMouse = findChild(rail, "navigationSectionToggleMouse_tool")
+				toggleIcon = findChild(rail, "navigationSectionToggle_tool")
+				return activity !== null && testStuff !== null
+					&& toggleMouse !== null && toggleIcon !== null
+			})
+
+			verify(toggleMouse.enabled && toggleMouse.width > 0 && toggleMouse.height > 0)
+			mouseClick(activity, activity.width - 15, activity.sectionHeaderHeight / 2, Qt.LeftButton)
+			tryCompare(rail, "toolsExpanded", false)
+			tryVerify(function() {
+				return !activity.sectionContentVisible && activity.height === activity.sectionHeaderHeight
+					&& !testStuff.sectionContentVisible && testStuff.height === 0
+			})
+			compare(activity.Accessible.role, Accessible.Button)
+			compare(activity.Accessible.name, "TOOLS")
+			verify(activity.Accessible.description.indexOf("2 tools") >= 0)
+			tryCompare(toggleIcon, "rotation", 0)
+			rail.setNavigationFilter("#teststuff")
+			tryVerify(function() { return testStuff.sectionContentVisible && testStuff.height > 0 })
+			rail.setNavigationFilter("")
+			tryVerify(function() { return !testStuff.sectionContentVisible && testStuff.height === 0 })
+
+			navigationList.currentIndex = 4
+			navigationList.forceActiveFocus(Qt.TabFocusReason)
+			keyClick(Qt.Key_Right)
+			tryCompare(rail, "toolsExpanded", true)
+			tryVerify(function() { return activity.sectionContentVisible && testStuff.sectionContentVisible })
+			tryCompare(toggleIcon, "rotation", 90)
+			keyClick(Qt.Key_Left)
+			tryCompare(rail, "toolsExpanded", false)
+
+			selection.scopeToken = "text:9"
+			tryCompare(navigationList, "currentIndex", 5)
+			tryVerify(function() { return testStuff.sectionContentVisible && testStuff.height > 0 })
+			verify(!rail.toolsExpanded)
+			compare(commands.selectScopeFromRailCount, 0)
+		} finally {
+			selection.scopeToken = ""
+			rail.toolsExpanded = true
+			navigationRows.remove(5)
+			navigationList.forceLayout()
+		}
+	}
+
 	function test_section_geometry_recovers_after_hidden_layout_change() {
 		const rail = loader.item
 		const navigationList = findChild(rail, "navigationRooms")
 		const voiceSection = findChild(rail, "navigationSection_voice")
-		const textSection = findChild(rail, "navigationSection_text")
-		verify(navigationList !== null && voiceSection !== null && textSection !== null)
+		const toolSection = findChild(rail, "navigationSection_tool")
+		verify(navigationList !== null && voiceSection !== null && toolSection !== null)
 
 		rail.visible = false
 		testCase.width = 420
@@ -1151,8 +1301,8 @@ TestCase {
 		rail.visible = true
 		tryVerify(function() {
 			const voiceOrigin = voiceSection.mapToItem(navigationList, 0, 0)
-			const textOrigin = textSection.mapToItem(navigationList, 0, 0)
-			return textOrigin.y >= voiceOrigin.y + voiceSection.height
+			const toolOrigin = toolSection.mapToItem(navigationList, 0, 0)
+			return toolOrigin.y >= voiceOrigin.y + voiceSection.height
 		}, 5000, "Section headings remained stacked after the rail was restored")
 		testCase.width = 340
 		testCase.height = 620

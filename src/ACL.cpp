@@ -213,11 +213,14 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 					if (allow & SelfRegister) {
 						granted |= SelfRegister;
 					}
+					if (allow & UseTools) {
+						granted |= UseTools;
+					}
 				}
 
 				// Every other regular ACL is handled here
 				if (apply) {
-					granted |= (allow & ~(Kick | Ban | ResetUserContent | Register | SelfRegister | Cached));
+					granted |= (allow & ~(Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools | Cached));
 					granted &= ~deny;
 				}
 			}
@@ -232,7 +235,7 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 		granted |= Traverse | Enter | MuteDeafen | Move | MakeChannel | LinkChannel | TextMessage | MakeTempChannel
 				   | Listen | DeleteTextMessage;
 		if (chan->iId == 0)
-			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister;
+			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools;
 	}
 
 	if (cache) {
@@ -322,6 +325,9 @@ QString ChanACL::whatsThis(Perm p) {
 		case Listen:
 			return tr("This represents the permission to use the listen-feature allowing to listen to a channel "
 					  "without being in it.");
+		case UseTools:
+			return tr("This represents the permission to open server tools, including Activity and configured debug "
+					  "text rooms. This permission can only be granted on the root channel.");
 		default:
 			break;
 	}
@@ -381,6 +387,8 @@ QString ChanACL::permName(Perm p) {
 			return tr("Register Self");
 		case Listen:
 			return tr("Listen");
+		case UseTools:
+			return tr("Use tools");
 		default:
 			break;
 	}

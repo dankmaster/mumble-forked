@@ -50,6 +50,9 @@ enum ForkFeature {
 	// Client-to-server feedback reports that Murmur can forward to an
 	// administrator-configured issue tracker.
 	ForkFeatureInAppFeedback = 6;
+	// Server-authoritative root ACL permission for Modern-shell tools such as
+	// Activity and administrator-configured debug text rooms.
+	ForkFeatureToolsAcl = 7;
 }
 
 message Version {

@@ -39,7 +39,9 @@ Rectangle {
 	property string activeScopeMenuToken: ""
 	property string localFilterText: ""
 	property var localRoomExpansion: ({})
+	property bool toolsExpanded: true
 	property int navigationPresentationRevision: 0
+	property bool selectionRevealPending: false
 	readonly property string effectiveFilterText: {
 		const revision = navigationPresentationRevision
 		if (navigationModel && navigationModel.filterText !== undefined)
@@ -58,6 +60,7 @@ Rectangle {
 	signal profileMenuRequested(var anchorPoint)
 	signal serverMenuRequested(var anchorPoint)
 	Accessible.ignored: accessibilitySuppressed
+	Component.onCompleted: scheduleSelectionReveal()
 
 
 	function normalizedFilterText() {
@@ -320,6 +323,19 @@ Rectangle {
 		setRoomExpanded(scopeToken, !roomExpandedFor(scopeToken, payload))
 	}
 
+	function setToolsExpanded(expanded) {
+		const accepted = !!expanded
+		if (toolsExpanded === accepted)
+			return
+		toolsExpanded = accepted
+		++navigationPresentationRevision
+		Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+	}
+
+	function toggleToolsExpanded() {
+		setToolsExpanded(!toolsExpanded)
+	}
+
 	function requestScopeMenu(scopeToken, kind, payload, anchorPoint) {
 		scopeMenuRequested(scopeToken, kind, (payload.source && payload.source.actions) || [], anchorPoint)
 	}
@@ -357,7 +373,9 @@ Rectangle {
 		let matches = 0
 		for (let index = 0; index < count; ++index) {
 			const room = navigationModel.get(index)
-			if (room && String(room.kind) === kind && navigationRowIsVisible(room))
+			if (room && String(room.kind) !== "participant"
+					&& String(room.sectionKind || room.kind) === kind
+					&& navigationRowIsVisible(room))
 				++matches
 		}
 		return matches
@@ -376,7 +394,7 @@ Rectangle {
 
 	function firstVisibleNavigationIndex() {
 		for (let index = 0; index < Number(navigationModel.count || 0); ++index) {
-			if (navigationRowIsVisible(navigationModel.get(index)))
+			if (navigationIndexIsVisible(index))
 				return index
 		}
 		return -1
@@ -384,7 +402,7 @@ Rectangle {
 
 	function lastVisibleNavigationIndex() {
 		for (let index = Number(navigationModel.count || 0) - 1; index >= 0; --index) {
-			if (navigationRowIsVisible(navigationModel.get(index)))
+			if (navigationIndexIsVisible(index))
 				return index
 		}
 		return -1
@@ -394,7 +412,7 @@ Rectangle {
 		const step = direction < 0 ? -1 : 1
 		for (let candidate = Number(index) + step;
 				candidate >= 0 && candidate < Number(navigationModel.count || 0); candidate += step) {
-			if (navigationRowIsVisible(navigationModel.get(candidate)))
+			if (navigationIndexIsVisible(candidate))
 				return candidate
 		}
 		return -1
@@ -419,7 +437,7 @@ Rectangle {
 		if (selected >= 0)
 			return setCurrentNavigationIndex(selected)
 		const current = navigationModel.get(rooms.currentIndex)
-		if (current && navigationRowIsVisible(current))
+		if (current && navigationIndexIsVisible(rooms.currentIndex))
 			return true
 		return setCurrentNavigationIndex(firstVisibleNavigationIndex())
 	}
@@ -629,15 +647,37 @@ Rectangle {
 	function selectedNavigationIndex() {
 		for (let index = 0; index < rooms.count; ++index) {
 			const row = navigationModel.get(index)
-			if (navigationRowIsSelected(row) && navigationRowIsVisible(row))
+			if (navigationRowIsSelected(row) && navigationIndexIsVisible(index))
 				return index
 		}
 		return -1
 	}
 
+	function navigationSelectionRequested() {
+		const scopeToken = selectionState.scopeToken === undefined
+			|| selectionState.scopeToken === null ? "" : String(selectionState.scopeToken)
+		return scopeToken.length > 0
+			|| (selectionState.selectedUserSession !== undefined
+				&& selectionState.selectedUserSession !== null)
+			|| (selectionState.selectedVoiceChannelId !== undefined
+				&& selectionState.selectedVoiceChannelId !== null)
+	}
+
+	function scheduleSelectionReveal() {
+		if (!navigationSelectionRequested()) {
+			selectionRevealPending = false
+			return
+		}
+		selectionRevealPending = true
+		Qt.callLater(navigationRail.revealCurrentSelection)
+	}
+
 	function revealCurrentSelection() {
 		const selectedIndex = selectedNavigationIndex()
-		return selectedIndex >= 0 && setCurrentNavigationIndex(selectedIndex)
+		const revealed = selectedIndex >= 0 && setCurrentNavigationIndex(selectedIndex)
+		if (revealed)
+			selectionRevealPending = false
+		return revealed
 	}
 
 	function navigationPageStep() {
@@ -652,7 +692,7 @@ Rectangle {
 		if (!Number.isFinite(requestedIndex) || requestedIndex < 0)
 			return false
 		let targetIndex = Math.max(0, Math.min(rooms.count - 1, Math.floor(requestedIndex)))
-		if (!navigationRowIsVisible(navigationModel.get(targetIndex))) {
+		if (!navigationIndexIsVisible(targetIndex)) {
 			const preferredDirection = Number(direction || 0)
 			if (preferredDirection !== 0)
 				targetIndex = nextVisibleNavigationIndex(targetIndex, preferredDirection)
@@ -666,8 +706,35 @@ Rectangle {
 			return false
 		if (rooms.currentIndex !== targetIndex)
 			rooms.currentIndex = targetIndex
+		rooms.forceLayout()
 		rooms.positionViewAtIndex(targetIndex, ListView.Contain)
+		// Newly inserted rows can still gain their section header height after the
+		// first view-position pass. Re-apply containment once layout has settled,
+		// but never pull the rail back if the user has already moved elsewhere.
+		Qt.callLater(function() {
+			if (rooms.currentIndex !== targetIndex)
+				return
+			rooms.forceLayout()
+			rooms.positionViewAtIndex(targetIndex, ListView.Contain)
+		})
 		return true
+	}
+
+	function navigationIndexHasContent(index) {
+		const row = navigationModel.get(index)
+		if (!row || !navigationRowIsVisible(row))
+			return false
+		return String(row.sectionKind || row.kind || "") !== "tool"
+			|| toolsExpanded || navigationRowIsSelected(row) || normalizedFilterText().length > 0
+	}
+
+	function navigationIndexIsVisible(index) {
+		const row = navigationModel.get(index)
+		if (!row || !navigationRowIsVisible(row))
+			return false
+		const sectionKind = String(row.sectionKind || row.kind || "")
+		return navigationIndexHasContent(index)
+			|| (sectionKind === "tool" && rowStartsVisibleSection(index, sectionKind))
 	}
 
 	function focusNavigationIndex(index, focusReason) {
@@ -708,18 +775,21 @@ Rectangle {
 		target: selectionState
 		ignoreUnknownSignals: true
 		function onScopeTokenChanged() {
-			Qt.callLater(navigationRail.revealCurrentSelection)
+			navigationRail.scheduleSelectionReveal()
 		}
 		function onSelectedUserSessionChanged() {
-			Qt.callLater(navigationRail.revealCurrentSelection)
+			navigationRail.scheduleSelectionReveal()
 		}
 		function onSelectedVoiceChannelIdChanged() {
-			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
+			navigationRail.scheduleSelectionReveal()
 		}
 	}
 	Connections {
 		target: navigationModel
 		ignoreUnknownSignals: true
+		function onModelReset() {
+			navigationRail.scheduleSelectionReveal()
+		}
 		function onFilterTextChanged() {
 			++navigationRail.navigationPresentationRevision
 			Qt.callLater(navigationRail.ensureCurrentNavigationVisible)
@@ -1018,6 +1088,10 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
 			model: navigationModel
+			onCountChanged: {
+				if (navigationRail.selectionRevealPending)
+					navigationRail.scheduleSelectionReveal()
+			}
 			clip: true
 			// The virtualized list is the navigator's single tab stop. Rows remain
 			// directly focusable by pointer, automation and focusInitialItem(), while
@@ -1066,6 +1140,10 @@ Rectangle {
 					event.accepted = navigationRail.setCurrentNavigationIndex(
 						navigationRail.stepVisibleNavigationIndex(currentIndex,
 							navigationRail.navigationPageStep()))
+				} else if ((event.key === Qt.Key_Left || event.key === Qt.Key_Right)
+						&& currentItem && currentItem.sectionKind === "tool") {
+					navigationRail.setToolsExpanded(event.key === Qt.Key_Right)
+					event.accepted = true
 				} else if ((event.key === Qt.Key_Menu
 						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))
 						&& currentItem) {
@@ -1113,6 +1191,10 @@ Rectangle {
 					forceActiveFocus(focusReason === undefined ? Qt.OtherFocusReason : focusReason)
 				}
 				function activateSelection() {
+					if (!sectionContentVisible && startsVisibleSection && sectionKind === "tool") {
+						navigationRail.toggleToolsExpanded()
+						return
+					}
 					if (isParticipant) {
 						participantDelegate.activateSelection()
 						return
@@ -1136,6 +1218,8 @@ Rectangle {
 						joinVoiceRoom()
 				}
 				function requestContextMenuAtCenter() {
+					if (!sectionContentVisible)
+						return
 					if (isParticipant)
 						navigationRail.requestParticipantMenu(participantDelegate.participantSession,
 							participantDelegate.stableId, payload,
@@ -1193,10 +1277,15 @@ Rectangle {
 				readonly property bool isParticipant: kind === "participant"
 				readonly property var navigationRowState: ({
 					"stableId": stableId, "scopeToken": scopeToken, "title": title,
-					"subtitle": subtitle, "kind": kind, "status": status,
+					"subtitle": subtitle, "kind": kind, "sectionKind": sectionKind, "status": status,
 					"selected": selected, "payload": payload
 				})
-				readonly property bool navigationVisible: navigationRail.navigationRowIsVisible(navigationRowState)
+				readonly property bool baseNavigationVisible:
+					navigationRail.navigationRowIsVisible(navigationRowState)
+				readonly property bool startsVisibleSection: baseNavigationVisible
+					&& navigationRail.rowStartsVisibleSection(index, sectionKind)
+				readonly property bool sectionContentVisible: navigationRail.navigationIndexHasContent(index)
+				readonly property bool navigationVisible: navigationRail.navigationIndexIsVisible(index)
 				// ListView keeps a small materialized buffer beyond its clipped viewport.
 				// Windows UIA reports those delegates at their unclipped scene bounds, so
 				// publish a row only while its complete semantic surface is visible.
@@ -1204,10 +1293,9 @@ Rectangle {
 					&& height > 0 && rooms.height > 0
 					&& y >= rooms.contentY - 0.5
 					&& y + height <= rooms.contentY + rooms.height + 0.5
-				readonly property bool startsVisibleSection: navigationVisible
-					&& navigationRail.rowStartsVisibleSection(index, sectionKind)
 				readonly property string sectionVisualLabel: sectionKind === "voice" ? qsTr("VOICE ROOMS")
-					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES") : qsTr("TEXT ROOMS")
+					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES")
+					: sectionKind === "tool" ? qsTr("TOOLS") : qsTr("TEXT ROOMS")
 				readonly property int sectionHeaderHeight: startsVisibleSection ? 34 : 0
 				readonly property bool joined: !!payload.joined || payload.status === "joined"
 				readonly property bool canJoin: kind === "voice" && !joined
@@ -1248,8 +1336,8 @@ Rectangle {
 					? "navigationParticipantSemantic_" + participantDelegate.participantObjectKey
 					: "navigationRoom_" + stableId
 				width: rooms.width - 20
-				height: navigationVisible
-					? sectionHeaderHeight + (isParticipant ? Theme.participantRowHeight : roomRowHeight) : 0
+				height: navigationVisible ? sectionHeaderHeight + (sectionContentVisible
+					? (isParticipant ? Theme.participantRowHeight : roomRowHeight) : 0) : 0
 				visible: navigationVisible
 				enabled: navigationVisible
                 radius: 8
@@ -1267,11 +1355,13 @@ Rectangle {
 				opacity: roomMouse.drag.active ? 0.72 : 1.0
 				activeFocusOnTab: false
 				onActiveFocusChanged: if (activeFocus) makeCurrent()
-				Accessible.role: Accessible.ListItem
-				Accessible.name: title
-				Accessible.description: isParticipant ? participantDelegate.accessibleDetails()
-					: accessibleRoomDetails()
-				Accessible.selected: isParticipant ? participantDelegate.selectedParticipant : selected
+				Accessible.role: sectionContentVisible ? Accessible.ListItem : Accessible.Button
+				Accessible.name: sectionContentVisible ? title : sectionVisualLabel
+				Accessible.description: !sectionContentVisible
+					? qsTr("Collapsed section with %1 tools").arg(navigationRail.roomCountForKind("tool"))
+					: isParticipant ? participantDelegate.accessibleDetails() : accessibleRoomDetails()
+				Accessible.selected: sectionContentVisible
+					&& (isParticipant ? participantDelegate.selectedParticipant : selected)
 				Accessible.focused: activeFocus
 				Accessible.onPressAction: activateSelection()
 				Binding {
@@ -1291,11 +1381,16 @@ Rectangle {
 					height: roomDelegate.sectionHeaderHeight
 					visible: roomDelegate.startsVisibleSection
 					z: 12
-					Accessible.role: Accessible.Heading
+					Accessible.role: roomDelegate.sectionKind === "tool"
+						? Accessible.Button : Accessible.Heading
 					Accessible.name: roomDelegate.sectionVisualLabel + " · "
 						+ navigationRail.roomCountForKind(roomDelegate.sectionKind)
+					Accessible.description: roomDelegate.sectionKind === "tool"
+						? (navigationRail.toolsExpanded ? qsTr("Expanded") : qsTr("Collapsed")) : ""
 					Accessible.ignored: navigationRail.accessibilitySuppressed || !visible
-						|| !roomDelegate.accessibilityViewportVisible
+						|| !roomDelegate.accessibilityViewportVisible || !roomDelegate.sectionContentVisible
+					Accessible.onPressAction: if (roomDelegate.sectionKind === "tool")
+						navigationRail.toggleToolsExpanded()
 
 					Rectangle {
 						anchors.fill: parent
@@ -1307,7 +1402,7 @@ Rectangle {
 							? "navigationSectionLabel_" + roomDelegate.sectionKind : ""
 						anchors.left: parent.left
 						anchors.leftMargin: 8
-						anchors.right: parent.right
+						anchors.right: sectionToggle.visible ? sectionToggle.left : parent.right
 						anchors.rightMargin: 8
 						anchors.bottom: parent.bottom
 						anchors.bottomMargin: Theme.space1
@@ -1319,6 +1414,30 @@ Rectangle {
 						elide: Text.ElideRight
 						Accessible.ignored: true
 					}
+					ModernIcon {
+						id: sectionToggle
+						objectName: visible ? "navigationSectionToggle_tool" : ""
+						anchors.right: parent.right
+						anchors.rightMargin: 8
+						anchors.bottom: parent.bottom
+						anchors.bottomMargin: Theme.space1
+						visible: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
+						name: "next"
+						size: 14
+						rotation: navigationRail.toolsExpanded ? 90 : 0
+						color: Theme.withAlpha(Theme.accent, 0.76)
+						Behavior on rotation { NumberAnimation { duration: Theme.motionFast } }
+						Accessible.ignored: true
+					}
+					MouseArea {
+						objectName: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
+							? "navigationSectionToggleMouse_tool" : ""
+						anchors.fill: parent
+						enabled: roomDelegate.startsVisibleSection && roomDelegate.sectionKind === "tool"
+						hoverEnabled: enabled && !navigationRail.visualFixtureMode
+						cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+						onClicked: navigationRail.toggleToolsExpanded()
+					}
 				}
 				Rectangle {
 					objectName: "navigationRoomSelectionAccent_" + stableId
@@ -1329,7 +1448,8 @@ Rectangle {
 					height: Math.max(16, roomDelegate.roomRowHeight - 10)
 					radius: 1
 					color: Theme.accent
-					visible: !roomDelegate.isParticipant && roomDelegate.selected
+					visible: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
+						&& roomDelegate.selected
 					z: 4
 					Accessible.ignored: true
 				}
@@ -1341,7 +1461,7 @@ Rectangle {
 					anchors.top: parent.top
 					anchors.topMargin: roomDelegate.sectionHeaderHeight
 					height: roomDelegate.roomRowHeight
-					visible: !roomDelegate.isParticipant
+					visible: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
 					anchors.leftMargin: 8 + Math.min(depth, 5) * 11
 					anchors.rightMargin: 6
 					spacing: 7
@@ -1380,7 +1500,8 @@ Rectangle {
 							anchors.centerIn: parent
 							name: kind === "voice" ? "voice-room"
 								: kind === "direct" ? "direct"
-								: title === qsTr("Activity") ? "activity" : "text-room"
+								: title === qsTr("Activity") ? "activity"
+								: sectionKind === "tool" ? "terminal" : "text-room"
 							color: selected ? Theme.accent : joined ? Theme.success : Theme.textMuted
 							size: 14
 						}
@@ -1633,7 +1754,8 @@ Rectangle {
 					anchors.top: parent.top
 					anchors.topMargin: roomDelegate.sectionHeaderHeight
 					height: roomDelegate.roomRowHeight
-					enabled: !roomDelegate.isParticipant && kind === "voice"
+					enabled: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
+						&& kind === "voice"
 					keys: ["mumble/participant", "mumble/voice-room"]
 					onDropped: drop => {
 						const sourcePayload = navigationRail.internalDragPayload(drop.source)
@@ -1667,7 +1789,7 @@ Rectangle {
 					anchors.top: parent.top
 					anchors.topMargin: roomDelegate.sectionHeaderHeight
 					height: roomDelegate.roomRowHeight
-					enabled: !roomDelegate.isParticipant
+					enabled: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
 					z: 2
 					hoverEnabled: true
 					acceptedButtons: Qt.LeftButton | Qt.RightButton
