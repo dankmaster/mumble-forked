@@ -33,6 +33,7 @@ TestCase {
 		loader.item.highlighted = false;
 		loader.item.checked = false;
 		loader.item.enabled = true;
+		loader.item.iconName = "";
 		loader.item.forceActiveFocus(Qt.TabFocusReason);
         tryCompare(loader.item, "activeFocus", true);
     }
@@ -54,6 +55,19 @@ TestCase {
 		tryCompare(loader.item, "activeFocus", true);
 		compare(loader.item.visualFocus, false);
 		compare(loader.item.background.border.width, 1);
+	}
+
+	function test_optional_leading_icon_keeps_text_and_accessibility() {
+		loader.item.iconName = "screen-share"
+		compare(loader.item.iconName, "screen-share")
+		const icon = findChild(loader.item, "modernButtonIcon")
+		const label = findChild(loader.item, "modernButtonLabel")
+		verify(icon !== null)
+		verify(label !== null)
+		compare(icon.name, "screen-share")
+		verify(icon.pathData.length > 0)
+		compare(label.text, "Continue")
+		compare(loader.item.Accessible.name, "Continue")
 	}
 
 	function test_return_and_keypad_enter_activate_once() {

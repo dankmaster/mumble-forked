@@ -43,6 +43,16 @@ TestCase {
 		compare(iconLoader.item.background.border.width, Theme.focusRingWidth)
 	}
 
+	function test_icon_button_derives_tooltip_from_accessible_name() {
+		const button = iconLoader.item
+		button.text = ""
+		button.Accessible.name = "Mute microphone"
+		compare(button.toolTipText, "Mute microphone")
+		compare(button.ToolTip.text, "Mute microphone")
+		compare(button.ToolTip.delay, 500)
+		compare(button.ToolTip.timeout, 15000)
+	}
+
 	function test_icon_button_pointer_focus_does_not_linger_visually() {
 		const button = iconLoader.item
 		button.enabled = true

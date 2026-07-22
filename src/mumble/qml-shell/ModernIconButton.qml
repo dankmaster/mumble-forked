@@ -9,6 +9,7 @@ ToolButton {
 	property string tone: "neutral"
 	property bool dense: false
 	property string iconName: ""
+	property string toolTipText: String(Accessible.name || text || "")
 	readonly property color toneColor: tone === "danger" ? Theme.danger
 		: tone === "success" ? Theme.success
 		: tone === "warning" ? Theme.warning : Theme.accent
@@ -20,6 +21,10 @@ ToolButton {
 	implicitHeight: implicitWidth
 	padding: 0
 	font.pixelSize: dense ? 15 : 18
+	ToolTip.visible: hovered && toolTipText.length > 0
+	ToolTip.text: toolTipText
+	ToolTip.delay: 500
+	ToolTip.timeout: 15000
 	scale: down ? 0.94 : 1.0
 	Behavior on scale { NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic } }
 

@@ -2429,6 +2429,7 @@ ApplicationWindow {
 							visible: !root.activeScopeHasScreenShare && !!share.visible
 								&& String(share.primaryActionId || "").length > 0
 							dense: true
+							iconName: "screen-share"
 							text: root.narrowShell ? qsTr("Share")
 								: String(share.primaryLabel || qsTr("Screen share"))
 							tone: String(share.primaryTone || "neutral")
@@ -2436,6 +2437,10 @@ ApplicationWindow {
 							Accessible.ignored: root.backgroundAccessibilitySuppressed
 							Accessible.name: String(share.primaryLabel || qsTr("Screen share"))
 							Accessible.description: String(share.primaryHint || "")
+							ToolTip.visible: hovered
+							ToolTip.text: String(share.primaryHint || Accessible.name)
+							ToolTip.delay: 500
+							ToolTip.timeout: 15000
 							onClicked: uiCommands.invokeScopeAction(activeScope.scopeToken,
 								String(share.primaryActionId || ""))
 						}
@@ -2444,6 +2449,7 @@ ApplicationWindow {
 							objectName: "motdToggleButton"
 							visible: !!clientSession.hasMotd
 							dense: true
+							iconName: "info"
 							checked: visible && !clientSession.motdDismissed
 							readonly property bool revealsWelcome: clientSession.motdDismissed
 							text: qsTr("MOTD")
@@ -2457,8 +2463,17 @@ ApplicationWindow {
 									? qsTr("Activate to show the server welcome message.")
 									: qsTr("Activate to hide the server welcome message."))
 							Accessible.checked: checked
+							ToolTip.visible: hovered
+							ToolTip.text: Accessible.name
+							ToolTip.delay: 500
+							ToolTip.timeout: 15000
 							contentItem: RowLayout {
 								spacing: 6
+								ModernIcon {
+									name: motdToggleButton.iconName
+									size: 16
+									color: motdToggleButton.enabled ? Theme.textStrong : Theme.textMuted
+								}
 								Label {
 									textFormat: Text.PlainText
 									text: motdToggleButton.text

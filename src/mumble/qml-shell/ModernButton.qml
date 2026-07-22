@@ -6,6 +6,7 @@ Button {
     id: control
 	property string tone: "neutral"
 	property bool dense: false
+	property string iconName: ""
 	readonly property color toneColor: {
 		const normalized = String(tone || "").toLowerCase()
 		if (normalized === "danger" || normalized === "error") return Theme.danger
@@ -44,14 +45,49 @@ Button {
 		event.accepted = true
 	}
 	Behavior on scale { NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic } }
-	contentItem: Text {
-		text: control.text
-		font: control.font
-		color: !control.enabled ? Theme.textMuted
+	contentItem: Item {
+		readonly property color color: !control.enabled ? Theme.textMuted
 			: control.emphasized ? Theme.contrastText(control.toneColor) : Theme.textStrong
-		horizontalAlignment: Text.AlignHCenter
-		verticalAlignment: Text.AlignVCenter
-		elide: Text.ElideRight
+		implicitWidth: buttonContent.desiredWidth
+		implicitHeight: buttonContent.desiredHeight
+
+		Row {
+			id: buttonContent
+			readonly property color foreground: !control.enabled ? Theme.textMuted
+				: control.emphasized ? Theme.contrastText(control.toneColor) : Theme.textStrong
+			readonly property real desiredWidth: (buttonIcon.visible
+				? buttonIcon.implicitWidth + spacing : 0) + buttonLabel.implicitWidth
+			readonly property real desiredHeight: Math.max(buttonIcon.visible
+				? buttonIcon.implicitHeight : 0, buttonLabel.implicitHeight)
+			anchors.centerIn: parent
+			width: Math.min(desiredWidth, parent.width)
+			height: parent.height
+			spacing: control.iconName.length > 0 ? Theme.space2 : 0
+
+			ModernIcon {
+				id: buttonIcon
+				objectName: "modernButtonIcon"
+				visible: control.iconName.length > 0
+				name: control.iconName
+				size: control.dense ? 16 : 18
+				color: buttonContent.foreground
+				y: Math.round((parent.height - height) / 2)
+			}
+
+			Text {
+				id: buttonLabel
+				objectName: "modernButtonLabel"
+				width: Math.min(implicitWidth, Math.max(0, parent.width
+					- (buttonIcon.visible ? buttonIcon.width + parent.spacing : 0)))
+				height: parent.height
+				text: control.text
+				font: control.font
+				color: buttonContent.foreground
+				horizontalAlignment: Text.AlignHCenter
+				verticalAlignment: Text.AlignVCenter
+				elide: Text.ElideRight
+			}
+		}
 	}
     background: Rectangle {
 		radius: Math.min(Theme.innerRadius, Math.round(control.implicitHeight / 3))
