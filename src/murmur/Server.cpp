@@ -188,6 +188,10 @@ Server::Server(unsigned int snum, const ::mumble::db::ConnectionParameter &conne
 	qtChatAssetRetention = new QTimer(this);
 	qtChatAssetRetention->setInterval(15 * 60 * 1000);
 	connect(qtChatAssetRetention, &QTimer::timeout, this, &Server::runChatAssetRetentionSweep);
+	qtStonksValuationRefresh = new QTimer(this);
+	connect(qtStonksValuationRefresh, &QTimer::timeout, this, [this]() {
+		scheduleStonksValuationRefresh(false);
+	});
 
 	iCodecAlpha = iCodecBeta = 0;
 	bPreferAlpha             = false;
@@ -215,6 +219,10 @@ Server::Server(unsigned int snum, const ::mumble::db::ConnectionParameter &conne
 		return;
 
 	qtChatAssetRetention->start();
+	if (bStonksEnabled && bStonksAutoValuationEnabled) {
+		qtStonksValuationRefresh->start(static_cast< int >(uiStonksValuationIntervalMinutes * 60U * 1000U));
+		QTimer::singleShot(2500, this, [this]() { scheduleStonksValuationRefresh(true); });
+	}
 
 	for (SslServer *ss : qlServer) {
 		sockaddr_storage addr;
@@ -454,6 +462,9 @@ void Server::readParams() {
 	bStonksEnabled                     = Meta::mp->bStonksEnabled;
 	uiStonksTextChannelID              = Meta::mp->uiStonksTextChannelID;
 	bStonksSocialAnnouncementsEnabled  = Meta::mp->bStonksSocialAnnouncementsEnabled;
+	bStonksAutoValuationEnabled        = Meta::mp->bStonksAutoValuationEnabled;
+	uiStonksValuationIntervalMinutes   = Meta::mp->uiStonksValuationIntervalMinutes;
+	uiStonksValuationHistoryDays       = Meta::mp->uiStonksValuationHistoryDays;
 	bFeedbackGitHubEnabled             = Meta::mp->bFeedbackGitHubEnabled;
 	qsFeedbackGitHubOwner              = Meta::mp->qsFeedbackGitHubOwner;
 	qsFeedbackGitHubRepo               = Meta::mp->qsFeedbackGitHubRepo;
@@ -581,6 +592,12 @@ void Server::readParams() {
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_text_channel_id", uiStonksTextChannelID);
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_social_announcements_enabled",
 								   bStonksSocialAnnouncementsEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_auto_valuation_enabled", bStonksAutoValuationEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_valuation_interval_minutes",
+								   uiStonksValuationIntervalMinutes);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_valuation_history_days", uiStonksValuationHistoryDays);
+	uiStonksValuationIntervalMinutes = std::clamp(uiStonksValuationIntervalMinutes, 15U, 1440U);
+	uiStonksValuationHistoryDays     = std::clamp(uiStonksValuationHistoryDays, 31U, 730U);
 	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_enabled", bFeedbackGitHubEnabled);
 	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_owner", qsFeedbackGitHubOwner);
 	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_repo", qsFeedbackGitHubRepo);
@@ -1226,6 +1243,13 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 		const bool enabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bStonksEnabled;
 		if (enabled != bStonksEnabled) {
 			bStonksEnabled = enabled;
+			if (enabled && bStonksAutoValuationEnabled) {
+				qtStonksValuationRefresh->start(
+					static_cast< int >(uiStonksValuationIntervalMinutes * 60U * 1000U));
+				scheduleStonksValuationRefresh(true);
+			} else {
+				qtStonksValuationRefresh->stop();
+			}
 			MumbleProto::ServerConfig mpsc;
 			mpsc.set_stonks_enabled(bStonksEnabled);
 			sendAll(mpsc);
@@ -1246,6 +1270,43 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 			bStonksSocialAnnouncementsEnabled = enabled;
 			MumbleProto::ServerConfig mpsc;
 			mpsc.set_stonks_social_announcements_enabled(bStonksSocialAnnouncementsEnabled);
+			sendAll(mpsc);
+		}
+	} else if (key == "stonks_auto_valuation_enabled") {
+		const bool enabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bStonksAutoValuationEnabled;
+		if (enabled != bStonksAutoValuationEnabled) {
+			bStonksAutoValuationEnabled = enabled;
+			if (bStonksEnabled && enabled) {
+				qtStonksValuationRefresh->start(
+					static_cast< int >(uiStonksValuationIntervalMinutes * 60U * 1000U));
+				scheduleStonksValuationRefresh(true);
+			} else {
+				qtStonksValuationRefresh->stop();
+			}
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_auto_valuation_enabled(enabled);
+			sendAll(mpsc);
+		}
+	} else if (key == "stonks_valuation_interval_minutes") {
+		const unsigned int minutes = std::clamp(
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiStonksValuationIntervalMinutes, 15U, 1440U);
+		if (minutes != uiStonksValuationIntervalMinutes) {
+			uiStonksValuationIntervalMinutes = minutes;
+			if (qtStonksValuationRefresh->isActive()) {
+				qtStonksValuationRefresh->start(static_cast< int >(minutes * 60U * 1000U));
+			}
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_valuation_interval_minutes(minutes);
+			sendAll(mpsc);
+		}
+	} else if (key == "stonks_valuation_history_days") {
+		const unsigned int days = std::clamp(
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiStonksValuationHistoryDays, 31U, 730U);
+		if (days != uiStonksValuationHistoryDays) {
+			uiStonksValuationHistoryDays = days;
+			scheduleStonksValuationRefresh(true);
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_valuation_history_days(days);
 			sendAll(mpsc);
 		}
 	} else if (key == "feedback_github_enabled") {
@@ -3100,6 +3161,8 @@ void Server::connectionClosed(QAbstractSocket::SocketError err, const QString &r
 		QWriteLocker wl(&qrwlVoiceThread);
 
 		qhUsers.remove(u->uiSession);
+		m_stonksSelectedPeriodBySession.remove(u->uiSession);
+		m_stonksSelectedUserBySession.remove(u->uiSession);
 		qhHostUsers[u->haAddress].remove(u);
 
 		quint16 port = (u->saiUdpAddress.ss_family == AF_INET6)

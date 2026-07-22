@@ -20,6 +20,7 @@
 #include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBStonksSnapshot.h"
 #include "murmur/database/DBStonksSnapshotPosition.h"
+#include "murmur/database/DBStonksValuation.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBLogEntry.h"
 #include "murmur/database/DBUserData.h"
@@ -154,6 +155,15 @@ public:
 		getLatestStonksSnapshotsByUser(unsigned int serverID);
 	std::vector< ::mumble::server::db::DBStonksSnapshotPosition >
 		getStonksSnapshotPositions(unsigned int serverID, unsigned int snapshotID);
+	void setStonksValuation(const ::mumble::server::db::DBStonksValuation &valuation);
+	void setStonksValuations(
+		const std::vector< ::mumble::server::db::DBStonksValuation > &valuations);
+	std::optional< ::mumble::server::db::DBStonksValuation >
+		getLatestStonksValuationForUser(unsigned int serverID, unsigned int userID);
+	std::vector< ::mumble::server::db::DBStonksValuation > getStonksValuationsForUser(
+		unsigned int serverID, unsigned int userID, std::chrono::system_clock::time_point earliestAt,
+		unsigned int maxEntries = 1000);
+	void pruneStonksValuations(unsigned int serverID, std::chrono::system_clock::time_point earliestAt);
 	::mumble::server::db::DBChatMessage
 		addChatMessage(unsigned int serverID, unsigned int threadID, const std::string &bodyText,
 					   ::mumble::server::db::ChatMessageBodyFormat bodyFormat =

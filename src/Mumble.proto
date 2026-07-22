@@ -764,6 +764,12 @@ message ServerConfig {
 	optional uint64 chat_asset_max_bytes = 30;
 	// Maximum number of native attachments accepted on one message.
 	optional uint32 chat_attachment_limit = 31;
+	// Whether the server automatically records and backfills Stonks portfolio valuations.
+	optional bool stonks_auto_valuation_enabled = 32 [default = true];
+	// Cadence for current Stonks portfolio valuations.
+	optional uint32 stonks_valuation_interval_minutes = 33 [default = 60];
+	// Retained/backfilled Stonks valuation horizon.
+	optional uint32 stonks_valuation_history_days = 34 [default = 400];
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -1224,6 +1230,17 @@ message StonksSnapshot {
 	optional bool positions_redacted = 9 [default = true];
 }
 
+message StonksValuationPoint {
+	optional uint32 portfolio_snapshot_id = 1;
+	optional uint64 valued_at = 2;
+	optional double total_value = 3;
+	optional string currency = 4;
+	optional string source = 5;
+	optional uint32 priced_positions = 6;
+	optional uint32 total_positions = 7;
+	optional bool estimated = 8 [default = false];
+}
+
 message StonksLeaderboardRow {
 	optional uint32 rank = 1;
 	optional uint32 user_id = 2;
@@ -1236,6 +1253,12 @@ message StonksLeaderboardRow {
 	optional uint64 end_snapshot_at = 9;
 	optional bool followed = 10 [default = false];
 	optional bool insufficient_history = 11 [default = false];
+	optional bool partial_period = 12 [default = false];
+	optional uint64 coverage_seconds = 13;
+	optional uint64 requested_seconds = 14;
+	optional uint32 sample_count = 15;
+	optional string method = 16;
+	optional bool estimated = 17 [default = false];
 }
 
 message StonksUserRef {
@@ -1307,6 +1330,9 @@ message StonksAction {
 	optional StonksPinnedTicker pinned_ticker = 10;
 	optional StonksFeedPreferences feed_preferences = 11;
 	optional bool pinned = 12 [default = true];
+	optional bool automatic_valuation_enabled = 13;
+	optional uint32 valuation_interval_minutes = 14;
+	optional uint32 valuation_history_days = 15;
 }
 
 message StonksState {
@@ -1337,6 +1363,14 @@ message StonksState {
 	// False unless this session negotiated and currently holds the root-only
 	// Use Stonks permission. Clients must treat omission as denied.
 	optional bool allowed = 25 [default = false];
+	repeated StonksValuationPoint valuation_points = 26;
+	optional bool automatic_valuation_enabled = 27 [default = true];
+	optional uint32 valuation_interval_minutes = 28 [default = 60];
+	optional uint32 valuation_history_days = 29 [default = 400];
+	optional string valuation_status = 30;
+	optional uint64 valuation_last_run_at = 31;
+	optional uint64 valuation_next_run_at = 32;
+	optional uint64 history_backfilled_from = 33;
 }
 
 enum FeedbackReportKind {

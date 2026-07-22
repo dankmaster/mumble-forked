@@ -16322,6 +16322,9 @@ namespace {
 		state.insert(QStringLiteral("textChannelId"), Global::get().uiStonksTextChannelID);
 		state.insert(QStringLiteral("socialAnnouncementsEnabled"),
 					 Global::get().bStonksSocialAnnouncementsEnabled);
+		state.insert(QStringLiteral("automaticValuationEnabled"), Global::get().bStonksAutoValuationEnabled);
+		state.insert(QStringLiteral("valuationIntervalMinutes"), Global::get().uiStonksValuationIntervalMinutes);
+		state.insert(QStringLiteral("valuationHistoryDays"), Global::get().uiStonksValuationHistoryDays);
 		return state;
 	}
 
@@ -16421,6 +16424,30 @@ namespace {
 		}
 		dto.insert(QStringLiteral("followed"), row.has_followed() && row.followed());
 		dto.insert(QStringLiteral("insufficientHistory"), row.has_insufficient_history() && row.insufficient_history());
+		dto.insert(QStringLiteral("partialPeriod"), row.has_partial_period() && row.partial_period());
+		dto.insert(QStringLiteral("coverageSeconds"),
+				   row.has_coverage_seconds() ? QVariant::fromValue< qulonglong >(row.coverage_seconds()) : QVariant());
+		dto.insert(QStringLiteral("requestedSeconds"),
+				   row.has_requested_seconds() ? QVariant::fromValue< qulonglong >(row.requested_seconds()) : QVariant());
+		dto.insert(QStringLiteral("sampleCount"), row.has_sample_count() ? row.sample_count() : 0u);
+		dto.insert(QStringLiteral("method"), row.has_method() ? u8(row.method()) : QString());
+		dto.insert(QStringLiteral("estimated"), row.has_estimated() && row.estimated());
+		return dto;
+	}
+
+	QVariantMap stonksValuationPointDto(const MumbleProto::StonksValuationPoint &point) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("portfolioSnapshotId"),
+				   point.has_portfolio_snapshot_id() ? point.portfolio_snapshot_id() : 0u);
+		dto.insert(QStringLiteral("valuedAt"),
+				   point.has_valued_at() ? QVariant::fromValue< qulonglong >(point.valued_at()) : QVariant());
+		dto.insert(QStringLiteral("totalValue"), point.has_total_value() ? point.total_value() : 0.0);
+		dto.insert(QStringLiteral("currency"), point.has_currency() ? u8(point.currency()) : QString());
+		dto.insert(QStringLiteral("source"), point.has_source() ? u8(point.source()) : QString());
+		dto.insert(QStringLiteral("pricedPositions"),
+				   point.has_priced_positions() ? point.priced_positions() : 0u);
+		dto.insert(QStringLiteral("totalPositions"), point.has_total_positions() ? point.total_positions() : 0u);
+		dto.insert(QStringLiteral("estimated"), point.has_estimated() && point.estimated());
 		return dto;
 	}
 
@@ -16642,6 +16669,22 @@ namespace {
 		dto.insert(QStringLiteral("canAdmin"), state.can_admin());
 		dto.insert(QStringLiteral("textChannelId"), state.has_text_channel_id() ? state.text_channel_id() : 0u);
 		dto.insert(QStringLiteral("socialAnnouncementsEnabled"), state.social_announcements_enabled());
+		dto.insert(QStringLiteral("automaticValuationSupported"), state.has_automatic_valuation_enabled());
+		dto.insert(QStringLiteral("automaticValuationEnabled"),
+				   state.has_automatic_valuation_enabled() && state.automatic_valuation_enabled());
+		dto.insert(QStringLiteral("valuationIntervalMinutes"), state.valuation_interval_minutes());
+		dto.insert(QStringLiteral("valuationHistoryDays"), state.valuation_history_days());
+		dto.insert(QStringLiteral("valuationStatus"),
+				   state.has_valuation_status() ? u8(state.valuation_status()) : QString());
+		dto.insert(QStringLiteral("valuationLastRunAt"),
+				   state.has_valuation_last_run_at()
+					   ? QVariant::fromValue< qulonglong >(state.valuation_last_run_at()) : QVariant());
+		dto.insert(QStringLiteral("valuationNextRunAt"),
+				   state.has_valuation_next_run_at()
+					   ? QVariant::fromValue< qulonglong >(state.valuation_next_run_at()) : QVariant());
+		dto.insert(QStringLiteral("historyBackfilledFrom"),
+				   state.has_history_backfilled_from()
+					   ? QVariant::fromValue< qulonglong >(state.history_backfilled_from()) : QVariant());
 		dto.insert(QStringLiteral("selectedPeriod"),
 				   state.has_selected_period() ? u8(state.selected_period()) : QStringLiteral("30d"));
 		dto.insert(QStringLiteral("status"), state.has_status() ? u8(state.status()) : QString());
@@ -16669,6 +16712,12 @@ namespace {
 			snapshots.push_back(stonksSnapshotDto(state.snapshots(i)));
 		}
 		dto.insert(QStringLiteral("snapshots"), snapshots);
+
+		QVariantList valuationPoints;
+		for (int i = 0; i < state.valuation_points_size(); ++i) {
+			valuationPoints.push_back(stonksValuationPointDto(state.valuation_points(i)));
+		}
+		dto.insert(QStringLiteral("valuationPoints"), valuationPoints);
 
 		QVariantList leaderboard;
 		for (int i = 0; i < state.leaderboard_size(); ++i) {
@@ -17554,6 +17603,7 @@ QVariantMap MainWindow::buildModernStonksDialog(const QString &initialTab) const
 		state.insert(QStringLiteral("periods"), QVariantList { QStringLiteral("1d"), QStringLiteral("7d"),
 															  QStringLiteral("30d"), QStringLiteral("ytd") });
 		state.insert(QStringLiteral("snapshots"), QVariantList());
+		state.insert(QStringLiteral("valuationPoints"), QVariantList());
 		state.insert(QStringLiteral("leaderboard"), QVariantList());
 		state.insert(QStringLiteral("following"), QVariantList());
 		state.insert(QStringLiteral("users"), QVariantList());
@@ -17583,10 +17633,10 @@ QVariantMap MainWindow::buildModernStonksDialog(const QString &initialTab) const
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
-		tr("Portfolio, leaderboard, following, and server settings."),
+		tr("Live portfolio value, verified tickers, performance history, and leaderboard."),
 		QVariantList(),
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
-		QStringLiteral("close"), QSize(760, 620));
+		QStringLiteral("close"), QSize(980, 760));
 	dialog.insert(QStringLiteral("stonks"), state);
 	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 	return dialog;
@@ -17933,13 +17983,15 @@ void MainWindow::publishStonksTickerQuotes() {
 		return;
 	}
 	QVariantMap quotes;
-	for (const QString &symbol : stonksTickerSymbols(m_stonksState)) {
-		if (m_stonksTickerQuoteCache.contains(symbol)) {
-			quotes.insert(symbol, m_stonksTickerQuoteCache.value(symbol));
-		}
+	for (auto it = m_stonksTickerQuoteCache.cbegin(); it != m_stonksTickerQuoteCache.cend(); ++it) {
+		quotes.insert(it.key(), it.value());
 	}
 	m_stonksState.insert(QStringLiteral("tickerQuotes"), quotes);
 	scheduleQmlRoomStateUpdate();
+	if (m_modernDialogController
+		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
+		openModernGenericDialog(buildModernStonksDialog());
+	}
 }
 
 void MainWindow::openModernDeveloperConsoleDialog() {
@@ -18012,6 +18064,17 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 	if (action == QLatin1String("refresh")) {
 		refreshStonksTickerQuotes(true);
 		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
+		return true;
+	}
+	if (action == QLatin1String("lookupTicker")) {
+		const QString symbol =
+			Mumble::Finance::normalizeTickerSymbol(payload.value(QStringLiteral("symbol")).toString());
+		if (symbol.isEmpty()) {
+			publishModernToast(QStringLiteral("error"), tr("Ticker lookup"), tr("Enter a valid ticker symbol."));
+			return true;
+		}
+		requestStonksTickerQuote(symbol);
+		publishStonksTickerQuotes();
 		return true;
 	}
 	if (action == QLatin1String("selectPeriod")) {
@@ -18112,6 +18175,15 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		message.set_social_announcements_enabled(
 			payload.value(QStringLiteral("socialAnnouncementsEnabled"),
 						  Global::get().bStonksSocialAnnouncementsEnabled).toBool());
+		message.set_automatic_valuation_enabled(
+			payload.value(QStringLiteral("automaticValuationEnabled"),
+						  Global::get().bStonksAutoValuationEnabled).toBool());
+		message.set_valuation_interval_minutes(
+			payload.value(QStringLiteral("valuationIntervalMinutes"),
+						  Global::get().uiStonksValuationIntervalMinutes).toUInt());
+		message.set_valuation_history_days(
+			payload.value(QStringLiteral("valuationHistoryDays"),
+						  Global::get().uiStonksValuationHistoryDays).toUInt());
 		Global::get().sh->sendMessage(message);
 		return true;
 	}
@@ -40779,6 +40851,9 @@ void MainWindow::serverConnected() {
 	Global::get().bStonksEnabled                  = true;
 	Global::get().uiStonksTextChannelID           = 0;
 	Global::get().bStonksSocialAnnouncementsEnabled = true;
+	Global::get().bStonksAutoValuationEnabled       = true;
+	Global::get().uiStonksValuationIntervalMinutes  = 60;
+	Global::get().uiStonksValuationHistoryDays      = 400;
 	Global::get().bFeedbackEnabled                = false;
 	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
@@ -40940,6 +41015,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().bStonksEnabled                  = true;
 	Global::get().uiStonksTextChannelID           = 0;
 	Global::get().bStonksSocialAnnouncementsEnabled = true;
+	Global::get().bStonksAutoValuationEnabled       = true;
+	Global::get().uiStonksValuationIntervalMinutes  = 60;
+	Global::get().uiStonksValuationHistoryDays      = 400;
 	Global::get().bFeedbackEnabled                = false;
 	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
@@ -41113,6 +41191,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().bStonksEnabled = true;
 	Global::get().uiStonksTextChannelID = 0;
 	Global::get().bStonksSocialAnnouncementsEnabled = true;
+	Global::get().bStonksAutoValuationEnabled = true;
+	Global::get().uiStonksValuationIntervalMinutes = 60;
+	Global::get().uiStonksValuationHistoryDays = 400;
 
 	if (!tlsDetails.errors.isEmpty()) {
 		for (const QSslError &e : tlsDetails.errors) {

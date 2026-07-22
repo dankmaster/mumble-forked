@@ -59,6 +59,7 @@
 #include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBStonksSnapshot.h"
 #include "murmur/database/DBStonksSnapshotPosition.h"
+#include "murmur/database/DBStonksValuation.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBChannelLink.h"
 #include "murmur/database/DBChannelListener.h"
@@ -76,6 +77,7 @@
 #include "murmur/database/StonksScoreTable.h"
 #include "murmur/database/StonksSnapshotPositionTable.h"
 #include "murmur/database/StonksSnapshotTable.h"
+#include "murmur/database/StonksValuationTable.h"
 #include "murmur/database/UserPropertyTable.h"
 #include "murmur/database/UserTable.h"
 
@@ -1318,6 +1320,18 @@ std::optional< ::msdb::DBStonksFeedPreferences > DBWrapper::getStonksFeedPrefere
 	}
 	m_serverDB.getStonksSnapshotPositionTable().setPositions(stored.serverID, stored.snapshotID, storedPositions);
 
+	if (!storedPositions.empty() && stored.totalValue > 0.0) {
+		::msdb::DBStonksValuation submitted(stored.serverID, stored.userID, stored.snapshotID);
+		submitted.valuedAt       = stored.createdAt;
+		submitted.totalValue     = stored.totalValue;
+		submitted.currency       = stored.currency;
+		submitted.source         = "submitted";
+		submitted.pricedPositions = static_cast< unsigned int >(storedPositions.size());
+		submitted.totalPositions  = static_cast< unsigned int >(storedPositions.size());
+		submitted.estimated       = false;
+		m_serverDB.getStonksValuationTable().setValuation(submitted);
+	}
+
 	transaction.commit();
 	return stored;
 
@@ -1343,6 +1357,7 @@ void DBWrapper::removeStonksSnapshot(unsigned int serverID, unsigned int snapsho
 	assertValidID(snapshotID);
 
 	::mdb::TransactionHolder transaction = m_serverDB.ensureTransaction();
+	m_serverDB.getStonksValuationTable().removeValuationsForSnapshot(serverID, snapshotID);
 	m_serverDB.getStonksSnapshotPositionTable().removePositions(serverID, snapshotID);
 	m_serverDB.getStonksSnapshotTable().removeSnapshot(serverID, snapshotID);
 	transaction.commit();
@@ -1406,6 +1421,69 @@ std::vector< ::msdb::DBStonksSnapshotPosition > DBWrapper::getStonksSnapshotPosi
 	assertValidID(snapshotID);
 
 	return m_serverDB.getStonksSnapshotPositionTable().getPositions(serverID, snapshotID);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksValuation(const ::msdb::DBStonksValuation &valuation) {
+	WRAPPER_BEGIN
+
+	assertValidID(valuation.serverID);
+	assertRegisteredUserExists(valuation.serverID, valuation.userID);
+	assertValidID(valuation.portfolioSnapshotID);
+
+	m_serverDB.getStonksValuationTable().setValuation(valuation);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksValuations(const std::vector< ::msdb::DBStonksValuation > &valuations) {
+	WRAPPER_BEGIN
+
+	::mdb::TransactionHolder transaction = m_serverDB.ensureTransaction();
+	for (const ::msdb::DBStonksValuation &valuation : valuations) {
+		assertValidID(valuation.serverID);
+		assertRegisteredUserExists(valuation.serverID, valuation.userID);
+		assertValidID(valuation.portfolioSnapshotID);
+		m_serverDB.getStonksValuationTable().setValuation(valuation);
+	}
+	transaction.commit();
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksValuation > DBWrapper::getLatestStonksValuationForUser(unsigned int serverID,
+																		 unsigned int userID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksValuationTable().getLatestValuationForUser(serverID, userID);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksValuation > DBWrapper::getStonksValuationsForUser(
+	unsigned int serverID, unsigned int userID, std::chrono::system_clock::time_point earliestAt,
+	unsigned int maxEntries) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+	assert(maxEntries <= static_cast< unsigned int >(std::numeric_limits< int >::max()));
+
+	return m_serverDB.getStonksValuationTable().getValuationsForUser(serverID, userID, earliestAt, maxEntries);
+
+	WRAPPER_END
+}
+
+void DBWrapper::pruneStonksValuations(unsigned int serverID,
+									 std::chrono::system_clock::time_point earliestAt) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	m_serverDB.getStonksValuationTable().removeValuationsBefore(serverID, earliestAt);
 
 	WRAPPER_END
 }

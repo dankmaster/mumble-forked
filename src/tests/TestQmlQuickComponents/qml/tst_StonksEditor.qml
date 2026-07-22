@@ -52,9 +52,22 @@ TestCase {
 						"quoteSourceUrl": "https://finance.yahoo.com/quote/AMD", "quoteConfidence": 0.9 }
 				]
 			}],
+			"valuationPoints": [
+				{ "portfolioSnapshotId": 77, "valuedAt": 1777334400, "totalValue": 2400,
+					"currency": "USD", "source": "historical", "pricedPositions": 2,
+					"totalPositions": 2, "estimated": true },
+				{ "portfolioSnapshotId": 77, "valuedAt": 1779926300, "totalValue": 2744.04,
+					"currency": "USD", "source": "automatic", "pricedPositions": 2,
+					"totalPositions": 2, "estimated": true },
+				{ "portfolioSnapshotId": 77, "valuedAt": 1779926400, "totalValue": 9999,
+					"currency": "USD", "source": "automatic", "pricedPositions": 1,
+					"totalPositions": 2, "estimated": true }
+			],
 			"leaderboard": [
-				{ "rank": 1, "userId": 2, "userName": "Bob", "period": "30d", "returnPercent": 18.42, "followed": true },
-				{ "rank": 2, "userId": 1, "userName": "Alice", "period": "30d", "returnPercent": 9.75, "followed": false }
+				{ "rank": 1, "userId": 2, "userName": "Bob", "period": "30d", "returnPercent": 18.42,
+					"followed": true, "coverageSeconds": 2592000, "sampleCount": 31, "estimated": true },
+				{ "rank": 2, "userId": 1, "userName": "Alice", "period": "30d", "returnPercent": 9.75,
+					"followed": false, "coverageSeconds": 2505600, "sampleCount": 30, "estimated": true }
 			],
 			"following": [{ "userId": 2, "userName": "Bob", "followed": true }],
 			"users": [
@@ -71,6 +84,11 @@ TestCase {
 			"feedPreferences": { "showMine": true, "showPopular": true, "showPins": true },
 			"textChannelId": 7,
 			"socialAnnouncementsEnabled": true,
+			"automaticValuationEnabled": true,
+			"valuationIntervalMinutes": 60,
+			"valuationHistoryDays": 400,
+			"valuationLastRunAt": 1779926300,
+			"valuationStatus": "Automatic history is up to date.",
 			"textChannels": [{ "textChannelId": 7, "name": "stonks" }, { "textChannelId": 8, "name": "trading" }],
 			"leaderboardDescription": "Portfolio returns over 30 days."
 		}
@@ -216,6 +234,44 @@ TestCase {
 		compare(dialogState.lastPayload.positions[0].marketValue, 1000)
 	}
 
+	function test_portfolio_ticker_lookup_hydrates_verified_quote() {
+		const editor = loader.item
+		editor.selectTab("portfolio")
+		editor.updatePosition(0, "symbol", "SAAB")
+		compare(editor.draftPositionModel.get(0).providerId, "manual")
+		compare(editor.draftPositionModel.get(0).price, 0)
+		compare(editor.draftPositionModel.get(0).marketValue, 0)
+		editor.requestTickerLookup(0)
+		compare(dialogState.lastAction, "lookupTicker")
+		compare(dialogState.lastPayload.symbol, "SAAB")
+		compare(editor.draftPositionModel.get(0).quoteStatus, "pending")
+
+		const refreshed = populatedState()
+		refreshed.tickerQuotes = {
+			"SAAB": { "ok": true, "pending": false, "symbol": "SAAB-B.ST",
+				"providerSymbol": "SAAB-B.ST", "providerId": "yahoo-finance",
+				"displayName": "Saab AB", "exchange": "Stockholm", "price": 586.8,
+				"currency": "SEK", "quoteTime": 1779926300,
+				"quoteSourceUrl": "https://finance.yahoo.com/quote/SAAB-B.ST",
+				"quoteConfidence": 1.0 }
+		}
+		editor.stonks = refreshed
+		editor.applyResolvedTickerQuotes()
+		compare(editor.draftPositionModel.get(0).symbol, "SAAB-B.ST")
+		compare(editor.draftPositionModel.get(0).providerId, "yahoo-finance")
+		compare(editor.draftPositionModel.get(0).price, 586.8)
+		compare(editor.draftPositionModel.get(0).quoteStatus, "verified")
+	}
+
+	function test_chart_prefers_automatic_valuation_points() {
+		const points = loader.item.chartPoints()
+		compare(points.length, 2)
+		compare(points[0].timestamp, 1777334400)
+		compare(points[1].value, 2744.04)
+		verify(points[0].estimated)
+		compare(loader.item.latestValuation.totalValue, 2744.04)
+	}
+
 	function test_destructive_actions_require_confirmation() {
 		const editor = loader.item
 		editor.selectTab("portfolio")
@@ -307,6 +363,9 @@ TestCase {
 		editor.adminEnabled = false
 		editor.adminAnnouncements = false
 		editor.adminTextChannelId = 8
+		editor.adminAutoValuation = false
+		editor.adminValuationInterval = 120
+		editor.adminValuationHistory = 500
 		const configure = findChild(editor, "stonksAdminConfigure")
 		verify(configure !== null)
 		configure.clicked()
@@ -314,5 +373,8 @@ TestCase {
 		compare(dialogState.lastPayload.enabled, false)
 		compare(dialogState.lastPayload.socialAnnouncementsEnabled, false)
 		compare(dialogState.lastPayload.textChannelId, 8)
+		compare(dialogState.lastPayload.automaticValuationEnabled, false)
+		compare(dialogState.lastPayload.valuationIntervalMinutes, 120)
+		compare(dialogState.lastPayload.valuationHistoryDays, 500)
 	}
 }

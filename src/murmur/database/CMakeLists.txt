@@ -26,6 +26,7 @@ add_library(mumble_server_database STATIC
 	"DBStonksScore.cpp"
 	"DBStonksSnapshot.cpp"
 	"DBStonksSnapshotPosition.cpp"
+	"DBStonksValuation.cpp"
 	"ACLCompat.cpp"
 
 	# Table implementations
@@ -57,6 +58,7 @@ add_library(mumble_server_database STATIC
 	"StonksScoreTable.cpp"
 	"StonksSnapshotTable.cpp"
 	"StonksSnapshotPositionTable.cpp"
+	"StonksValuationTable.cpp"
 )
 
 set_property(TARGET mumble_server_database PROPERTY INTERPROCEDURAL_OPTIMIZATION ${lto})

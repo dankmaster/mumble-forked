@@ -151,6 +151,9 @@ MetaParams::MetaParams() {
 	bStonksEnabled             = true;
 	uiStonksTextChannelID      = 0;
 	bStonksSocialAnnouncementsEnabled = true;
+	bStonksAutoValuationEnabled       = true;
+	uiStonksValuationIntervalMinutes  = 60;
+	uiStonksValuationHistoryDays      = 400;
 	bFeedbackGitHubEnabled     = false;
 	qsFeedbackGitHubOwner      = QLatin1String("dankmaster");
 	qsFeedbackGitHubRepo       = QLatin1String("mumble-forked");
@@ -438,6 +441,12 @@ void MetaParams::read(QString fname) {
 		typeCheckedFromSettings< unsigned int >("stonks_text_channel_id", uiStonksTextChannelID);
 	bStonksSocialAnnouncementsEnabled =
 		typeCheckedFromSettings("stonks_social_announcements_enabled", bStonksSocialAnnouncementsEnabled);
+	bStonksAutoValuationEnabled =
+		typeCheckedFromSettings("stonks_auto_valuation_enabled", bStonksAutoValuationEnabled);
+	uiStonksValuationIntervalMinutes = typeCheckedFromSettings< unsigned int >(
+		"stonks_valuation_interval_minutes", uiStonksValuationIntervalMinutes);
+	uiStonksValuationHistoryDays =
+		typeCheckedFromSettings< unsigned int >("stonks_valuation_history_days", uiStonksValuationHistoryDays);
 	bFeedbackGitHubEnabled = typeCheckedFromSettings("feedback_github_enabled", bFeedbackGitHubEnabled);
 	qsFeedbackGitHubOwner =
 		typeCheckedFromSettings("feedback_github_owner", qsFeedbackGitHubOwner).trimmed();
@@ -561,6 +570,11 @@ void MetaParams::read(QString fname) {
 	qmConfig.insert(QLatin1String("stonks_text_channel_id"), QString::number(uiStonksTextChannelID));
 	qmConfig.insert(QLatin1String("stonks_social_announcements_enabled"),
 					bStonksSocialAnnouncementsEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("stonks_auto_valuation_enabled"),
+					bStonksAutoValuationEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("stonks_valuation_interval_minutes"),
+					QString::number(uiStonksValuationIntervalMinutes));
+	qmConfig.insert(QLatin1String("stonks_valuation_history_days"), QString::number(uiStonksValuationHistoryDays));
 	qmConfig.insert(QLatin1String("feedback_github_enabled"),
 					bFeedbackGitHubEnabled ? QLatin1String("true") : QLatin1String("false"));
 	qmConfig.insert(QLatin1String("feedback_github_owner"), qsFeedbackGitHubOwner);

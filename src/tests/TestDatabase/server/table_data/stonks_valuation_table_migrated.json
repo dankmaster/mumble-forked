@@ -1,0 +1,18 @@
+{
+	"v6": {
+		"table_name": "stonks_valuations",
+		"column_names": [
+			"server_id",
+			"user_id",
+			"portfolio_snapshot_id",
+			"valued_at",
+			"total_value",
+			"currency",
+			"source",
+			"priced_positions",
+			"total_positions",
+			"estimated"
+		],
+		"rows": []
+	}
+}

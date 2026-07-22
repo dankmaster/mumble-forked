@@ -30,6 +30,7 @@
 #include "StonksScoreTable.h"
 #include "StonksSnapshotPositionTable.h"
 #include "StonksSnapshotTable.h"
+#include "StonksValuationTable.h"
 #include "UserProperty.h"
 #include "UserPropertyTable.h"
 #include "UserTable.h"
@@ -76,6 +77,7 @@ namespace server {
 				StonksScoreTable,
 				StonksSnapshotTable,
 				StonksSnapshotPositionTable,
+				StonksValuationTable,
 			};
 		}
 
@@ -192,6 +194,10 @@ namespace server {
 			id = addTable(std::make_unique< StonksSnapshotPositionTable >(m_sql, m_backend, getStonksSnapshotTable()));
 			assert(id == TableIndex::StonksSnapshotPositionTable);
 
+			id = addTable(std::make_unique< StonksValuationTable >(
+				m_sql, m_backend, getUserTable(), getStonksSnapshotTable()));
+			assert(id == TableIndex::StonksValuationTable);
+
 			// Mark id as unused in case the asserts are disabled (e.g. in release builds)
 			(void) id;
 		}
@@ -239,6 +245,7 @@ namespace server {
 		GET_TABLE_IMPL(StonksScoreTable)
 		GET_TABLE_IMPL(StonksSnapshotTable)
 		GET_TABLE_IMPL(StonksSnapshotPositionTable)
+		GET_TABLE_IMPL(StonksValuationTable)
 
 #undef GET_TABLE_IMPL
 

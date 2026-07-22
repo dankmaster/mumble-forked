@@ -195,6 +195,9 @@ public:
 	bool bStonksEnabled;
 	unsigned int uiStonksTextChannelID;
 	bool bStonksSocialAnnouncementsEnabled;
+	bool bStonksAutoValuationEnabled;
+	unsigned int uiStonksValuationIntervalMinutes;
+	unsigned int uiStonksValuationHistoryDays;
 	bool bFeedbackGitHubEnabled;
 	QString qsFeedbackGitHubOwner;
 	QString qsFeedbackGitHubRepo;

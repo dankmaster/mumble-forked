@@ -950,6 +950,18 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 		Global::get().bStonksSocialAnnouncementsEnabled = msg.stonks_social_announcements_enabled();
 		modernLayoutCompatibleAdvertised = true;
 	}
+	if (msg.has_stonks_auto_valuation_enabled()) {
+		Global::get().bStonksAutoValuationEnabled = msg.stonks_auto_valuation_enabled();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_stonks_valuation_interval_minutes()) {
+		Global::get().uiStonksValuationIntervalMinutes = msg.stonks_valuation_interval_minutes();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_stonks_valuation_history_days()) {
+		Global::get().uiStonksValuationHistoryDays = msg.stonks_valuation_history_days();
+		modernLayoutCompatibleAdvertised = true;
+	}
 	if (msg.has_feedback_enabled()) {
 		Global::get().bFeedbackEnabled = msg.feedback_enabled();
 		modernLayoutCompatibleAdvertised = true;

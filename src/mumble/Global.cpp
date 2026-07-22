@@ -152,6 +152,9 @@ Global::Global(const QString &qsConfigPath) {
 	bStonksEnabled                   = true;
 	uiStonksTextChannelID            = 0;
 	bStonksSocialAnnouncementsEnabled = true;
+	bStonksAutoValuationEnabled       = true;
+	uiStonksValuationIntervalMinutes  = 60;
+	uiStonksValuationHistoryDays      = 400;
 	bFeedbackEnabled                 = false;
 	uiFeedbackMaxLogBytes            = 200000;
 	uiFeedbackMaxBodyBytes           = 60000;

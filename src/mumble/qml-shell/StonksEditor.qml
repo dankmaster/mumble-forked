@@ -20,13 +20,27 @@ ColumnLayout {
 	property var modalHost: null
 	property bool adminEnabled: true
 	property bool adminAnnouncements: true
+	property bool adminAutoValuation: true
+	property int adminValuationInterval: 60
+	property int adminValuationHistory: 400
 	property int adminTextChannelId: 0
 	property int adminSelectedUserId: -1
 	property bool adminDirty: false
 	property alias draftPositionModel: portfolioPositions
 
 	readonly property var snapshots: stonks.snapshots || []
+	readonly property var valuationPoints: stonks.valuationPoints || []
 	readonly property var latestSnapshot: snapshots.length > 0 ? snapshots[0] : null
+	readonly property var latestValuation: {
+		for (let index = valuationPoints.length - 1; index >= 0; --index) {
+			const point = valuationPoints[index]
+			const totalPositions = numberValue(point.totalPositions)
+			if (numberValue(point.totalValue) > 0 && totalPositions > 0
+					&& numberValue(point.pricedPositions) === totalPositions)
+				return point
+		}
+		return null
+	}
 	readonly property var tickerSettings: stonks.feature || stonks || ({})
 	property bool tickerBannerEnabled: false
 	property string tickerPlacement: "bottom"
@@ -131,7 +145,9 @@ ColumnLayout {
 			"exchange": String(position && position.exchange || "").trim(),
 			"quoteTime": numberValue(position && position.quoteTime),
 			"quoteSourceUrl": String(position && position.quoteSourceUrl || "").trim(),
-			"quoteConfidence": numberValue(position && position.quoteConfidence)
+			"quoteConfidence": numberValue(position && position.quoteConfidence),
+			"quoteStatus": String(position && position.quoteStatus || ""),
+			"quoteError": String(position && position.quoteError || "")
 		}
 	}
 
@@ -161,6 +177,9 @@ ColumnLayout {
 			adminEnabled = stonks.enabled !== false
 			adminAnnouncements = stonks.socialAnnouncementsEnabled !== false
 			adminTextChannelId = numberValue(stonks.textChannelId)
+			adminAutoValuation = stonks.automaticValuationEnabled !== false
+			adminValuationInterval = Math.max(15, numberValue(stonks.valuationIntervalMinutes || 60))
+			adminValuationHistory = Math.max(31, numberValue(stonks.valuationHistoryDays || 400))
 		}
 		if (adminSelectedUserId < 0)
 			adminSelectedUserId = selectedUserId()
@@ -192,12 +211,79 @@ ColumnLayout {
 		if (index < 0 || index >= portfolioPositions.count)
 			return
 		portfolioPositions.setProperty(index, field, value)
+		if (field === "symbol") {
+			portfolioPositions.setProperty(index, "providerId", "manual")
+			portfolioPositions.setProperty(index, "providerSymbol", String(value || "").trim().toUpperCase())
+			portfolioPositions.setProperty(index, "displayName", "")
+			portfolioPositions.setProperty(index, "exchange", "")
+			portfolioPositions.setProperty(index, "price", 0)
+			portfolioPositions.setProperty(index, "marketValue", 0)
+			portfolioPositions.setProperty(index, "quoteTime", 0)
+			portfolioPositions.setProperty(index, "quoteSourceUrl", "")
+			portfolioPositions.setProperty(index, "quoteConfidence", 0)
+			portfolioPositions.setProperty(index, "quoteStatus", "")
+			portfolioPositions.setProperty(index, "quoteError", "")
+		}
 		if (field === "quantity" || field === "price") {
 			const position = portfolioPositions.get(index)
 			portfolioPositions.setProperty(index, "marketValue",
 				numberValue(position.quantity) * numberValue(position.price))
 		}
 		draftDirty = true
+	}
+
+	function requestTickerLookup(index) {
+		if (index < 0 || index >= portfolioPositions.count)
+			return
+		const symbol = String(portfolioPositions.get(index).symbol || "").trim().toUpperCase()
+		if (symbol.length === 0) {
+			portfolioPositions.setProperty(index, "quoteStatus", "error")
+			portfolioPositions.setProperty(index, "quoteError", qsTr("Enter a ticker first."))
+			return
+		}
+		portfolioPositions.setProperty(index, "quoteStatus", "pending")
+		portfolioPositions.setProperty(index, "quoteError", "")
+		dialogState.invokeAction("lookupTicker", { "symbol": symbol })
+	}
+
+	function applyResolvedTickerQuotes() {
+		const quotes = stonks.tickerQuotes || ({})
+		for (let index = 0; index < portfolioPositions.count; ++index) {
+			const position = portfolioPositions.get(index)
+			if (String(position.quoteStatus || "") !== "pending")
+				continue
+			const requestedSymbol = String(position.symbol || "").trim().toUpperCase()
+			const quote = quotes[requestedSymbol]
+			if (!quote || quote.pending === true)
+				continue
+			if (quote.ok !== true) {
+				portfolioPositions.setProperty(index, "quoteStatus", "error")
+				portfolioPositions.setProperty(index, "quoteError",
+					String(quote.error || qsTr("No verified price was returned.")))
+				continue
+			}
+
+			const resolvedSymbol = String(quote.symbol || requestedSymbol).trim().toUpperCase()
+			const quoteCurrency = String(quote.currency || draftCurrency || "USD").trim().toUpperCase()
+			portfolioPositions.setProperty(index, "symbol", resolvedSymbol)
+			portfolioPositions.setProperty(index, "providerSymbol",
+				String(quote.providerSymbol || resolvedSymbol))
+			portfolioPositions.setProperty(index, "providerId", String(quote.providerId || "yahoo-finance"))
+			portfolioPositions.setProperty(index, "displayName", String(quote.displayName || ""))
+			portfolioPositions.setProperty(index, "exchange", String(quote.exchange || ""))
+			portfolioPositions.setProperty(index, "price", numberValue(quote.price))
+			portfolioPositions.setProperty(index, "currency", quoteCurrency)
+			portfolioPositions.setProperty(index, "quoteTime", numberValue(quote.quoteTime))
+			portfolioPositions.setProperty(index, "quoteSourceUrl", String(quote.quoteSourceUrl || ""))
+			portfolioPositions.setProperty(index, "quoteConfidence", numberValue(quote.quoteConfidence))
+			portfolioPositions.setProperty(index, "marketValue",
+				numberValue(position.quantity) * numberValue(quote.price))
+			portfolioPositions.setProperty(index, "quoteStatus", "verified")
+			portfolioPositions.setProperty(index, "quoteError", "")
+			if (portfolioPositions.count === 1)
+				draftCurrency = quoteCurrency
+			draftDirty = true
+		}
 	}
 
 	function draftPositionsPayload() {
@@ -329,20 +415,55 @@ ColumnLayout {
 	}
 
 	function chartValues() {
-		const values = []
-		for (let index = snapshots.length - 1; index >= 0; --index)
-			values.push(numberValue(snapshots[index].totalValue))
-		return values
+		return chartPoints().map(function(point) { return point.value })
+	}
+
+	function chartPoints() {
+		const points = []
+		const useValuations = valuationPoints.length > 0
+		const source = useValuations ? valuationPoints : snapshots
+		for (let index = 0; index < source.length; ++index) {
+			const item = source[index]
+			if (useValuations && (numberValue(item.totalPositions) <= 0
+					|| numberValue(item.pricedPositions) !== numberValue(item.totalPositions)))
+				continue
+			const timestamp = numberValue(useValuations ? item.valuedAt : item.createdAt)
+			const value = numberValue(item.totalValue)
+			if (timestamp > 0 && value > 0)
+				points.push({ "timestamp": timestamp, "value": value,
+					"estimated": useValuations && item.estimated === true })
+		}
+		points.sort(function(left, right) { return left.timestamp - right.timestamp })
+		return points
+	}
+
+	function selectedLeaderboardRow() {
+		const rows = stonks.leaderboard || []
+		for (let index = 0; index < rows.length; ++index) {
+			if (Number(rows[index].userId) === selectedUserId())
+				return rows[index]
+		}
+		return null
+	}
+
+	function formatCoverage(row) {
+		if (!row || row.insufficientHistory)
+			return qsTr("Collecting history")
+		const days = Math.max(0, numberValue(row.coverageSeconds) / 86400)
+		return days >= 1
+			? qsTr("%1 days · %2 points").arg(days.toFixed(days >= 10 ? 0 : 1)).arg(row.sampleCount || 0)
+			: qsTr("%1 hours · %2 points").arg((days * 24).toFixed(1)).arg(row.sampleCount || 0)
 	}
 
 	function overviewStats() {
 		return [
-			{ "label": qsTr("Total value"), "value": latestSnapshot
-				? formatMoney(latestSnapshot.totalValue, latestSnapshot.currency) : "-" },
+			{ "label": qsTr("Current value"), "value": latestValuation
+				? formatMoney(latestValuation.totalValue, latestValuation.currency)
+				: latestSnapshot ? formatMoney(latestSnapshot.totalValue, latestSnapshot.currency) : "-" },
 			{ "label": qsTr("Last update"), "value": latestSnapshot
 				? formatTime(latestSnapshot.createdAt) : qsTr("Never") },
 			{ "label": qsTr("Owner"), "value": selectedUserName() },
-			{ "label": qsTr("Snapshots"), "value": String(snapshots.length) }
+			{ "label": qsTr("Data points"), "value": String(valuationPoints.length || snapshots.length) }
 		]
 	}
 
@@ -401,7 +522,10 @@ ColumnLayout {
 
 	function configurePayload() {
 		return { "enabled": adminEnabled, "socialAnnouncementsEnabled": adminAnnouncements,
-			"textChannelId": Number(adminTextChannelId || 0) }
+			"textChannelId": Number(adminTextChannelId || 0),
+			"automaticValuationEnabled": adminAutoValuation,
+			"valuationIntervalMinutes": Number(adminValuationInterval || 60),
+			"valuationHistoryDays": Number(adminValuationHistory || 400) }
 	}
 
 	onStonksChanged: {
@@ -413,6 +537,7 @@ ColumnLayout {
 		synchronizeTickerSettings()
 		Qt.callLater(synchronizeDraft)
 		Qt.callLater(synchronizeAdmin)
+		Qt.callLater(applyResolvedTickerQuotes)
 	}
 	onConfirmationVisibleChanged: syncConfirmationPopup()
 	Component.onCompleted: {
@@ -432,39 +557,56 @@ ColumnLayout {
 		Accessible.role: Accessible.Pane
 		Accessible.name: qsTr("Stonks content")
 
-	RowLayout {
+	Rectangle {
 		Layout.fillWidth: true
-		spacing: 8
-		ColumnLayout {
-			Layout.fillWidth: true
-			spacing: 2
-			Label {
-				Layout.fillWidth: true
-				textFormat: Text.PlainText
-				text: String(root.stonks.error || root.stonks.status || "")
-				visible: text.length > 0
-				color: root.stonks.error ? Theme.danger : Theme.textMuted
-				wrapMode: Text.Wrap
+		Layout.preferredHeight: statusLayout.implicitHeight + 20
+		color: root.stonks.error ? Theme.withAlpha(Theme.danger, 0.10) : Theme.panel
+		border.color: root.stonks.error ? Theme.danger : Theme.divider
+		radius: Theme.innerRadius
+		RowLayout {
+			id: statusLayout
+			anchors.fill: parent
+			anchors.margins: 10
+			spacing: 10
+			Rectangle {
+				width: 9
+				height: 9
+				radius: 5
+				color: root.stonks.error ? Theme.danger
+					: root.loading ? Theme.warning : root.stonks.automaticValuationEnabled === false
+						? Theme.textMuted : Theme.success
 			}
-			ModernProgressBar {
-				objectName: "stonksLoadingProgress"
+			ColumnLayout {
 				Layout.fillWidth: true
-				visible: root.loading
-				indeterminate: true
-				Accessible.name: qsTr("Loading Stonks data")
+				spacing: 3
+				Label {
+					Layout.fillWidth: true
+					textFormat: Text.PlainText
+					text: String(root.stonks.error || root.stonks.status
+						|| root.stonks.valuationStatus || qsTr("Portfolio history is up to date."))
+					color: root.stonks.error ? Theme.danger : Theme.textMain
+					wrapMode: Text.Wrap
+				}
+				ModernProgressBar {
+					objectName: "stonksLoadingProgress"
+					Layout.fillWidth: true
+					visible: root.loading
+					indeterminate: true
+					Accessible.name: qsTr("Loading Stonks data")
+				}
 			}
-		}
-		ModernButton {
-			objectName: "stonksRegister"
-			visible: root.stonks.registered !== true && root.contentAvailable
-			text: qsTr("Register")
-			onClicked: dialogState.invokeAction("register", {})
-		}
-		ModernButton {
-			id: stonksRefresh
-			objectName: "stonksRefresh"
-			text: qsTr("Refresh")
-			onClicked: dialogState.invokeAction("refresh", {})
+			ModernButton {
+				objectName: "stonksRegister"
+				visible: root.stonks.registered !== true && root.contentAvailable
+				text: qsTr("Register")
+				onClicked: dialogState.invokeAction("register", {})
+			}
+			ModernButton {
+				id: stonksRefresh
+				objectName: "stonksRefresh"
+				text: qsTr("Refresh")
+				onClicked: dialogState.invokeAction("refresh", {})
+			}
 		}
 	}
 
@@ -491,21 +633,28 @@ ColumnLayout {
 		}
 	}
 
-	Flow {
-		id: tabs
+	Rectangle {
 		Layout.fillWidth: true
-		Layout.preferredHeight: childrenRect.height
+		Layout.preferredHeight: tabs.implicitHeight + 12
 		visible: root.contentAvailable && !root.loading
-		spacing: 6
-		Repeater {
-			model: root.tabItems
-			delegate: ModernButton {
-				required property var modelData
-				objectName: "stonksTab_" + modelData.id
-				checkable: true
-				checked: root.activeTab === modelData.id
-				text: modelData.label
-				onClicked: root.selectTab(modelData.id)
+		color: Theme.strip
+		border.color: Theme.divider
+		radius: Theme.innerRadius
+		Flow {
+			id: tabs
+			anchors.fill: parent
+			anchors.margins: 6
+			spacing: 5
+			Repeater {
+				model: root.tabItems
+				delegate: ModernButton {
+					required property var modelData
+					objectName: "stonksTab_" + modelData.id
+					checkable: true
+					checked: root.activeTab === modelData.id
+					text: modelData.label
+					onClicked: root.selectTab(modelData.id)
+				}
 			}
 		}
 	}
@@ -516,6 +665,77 @@ ColumnLayout {
 		Layout.fillWidth: true
 		visible: root.contentAvailable && !root.loading && root.activeTab === "overview"
 		spacing: 12
+
+		Rectangle {
+			id: portfolioHero
+			readonly property var performance: root.selectedLeaderboardRow()
+			Layout.fillWidth: true
+			Layout.preferredHeight: heroLayout.implicitHeight + 30
+			color: Theme.surfaceRaised
+			border.color: Theme.withAlpha(Theme.accent, 0.55)
+			border.width: 1
+			radius: Theme.shellRadius
+			RowLayout {
+				id: heroLayout
+				anchors.fill: parent
+				anchors.margins: 15
+				spacing: 18
+				ColumnLayout {
+					Layout.fillWidth: true
+					spacing: 3
+					Label {
+						textFormat: Text.PlainText
+						text: qsTr("%1's portfolio").arg(root.selectedUserName())
+						color: Theme.textMuted
+						font.pixelSize: 11
+					}
+					Label {
+						textFormat: Text.PlainText
+						text: root.latestValuation
+							? root.formatMoney(root.latestValuation.totalValue, root.latestValuation.currency)
+							: root.latestSnapshot
+								? root.formatMoney(root.latestSnapshot.totalValue, root.latestSnapshot.currency) : "—"
+						color: Theme.textStrong
+						font.bold: true
+						font.pixelSize: 28
+					}
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: root.latestValuation
+							? qsTr("Valued %1 · %2").arg(root.formatTime(root.latestValuation.valuedAt))
+								.arg(root.latestValuation.estimated ? qsTr("estimated market data") : qsTr("submitted value"))
+							: qsTr("Waiting for the first automatic valuation")
+						color: Theme.textMuted
+						font.pixelSize: 10
+						wrapMode: Text.Wrap
+					}
+				}
+				ColumnLayout {
+					Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+					spacing: 3
+					Label {
+						Layout.alignment: Qt.AlignRight
+						textFormat: Text.PlainText
+						text: portfolioHero.performance && !portfolioHero.performance.insufficientHistory
+							? root.formatPercent(portfolioHero.performance.returnPercent) : "—"
+						color: !portfolioHero.performance || portfolioHero.performance.insufficientHistory
+							? Theme.textMuted : root.numberValue(portfolioHero.performance.returnPercent) >= 0
+								? Theme.success : Theme.danger
+						font.bold: true
+						font.pixelSize: 22
+					}
+					Label {
+						Layout.alignment: Qt.AlignRight
+						textFormat: Text.PlainText
+						text: String(root.stonks.selectedPeriod || "30d").toUpperCase() + " · "
+							+ root.formatCoverage(portfolioHero.performance)
+						color: Theme.textMuted
+						font.pixelSize: 10
+					}
+				}
+			}
+		}
 
 		GridLayout {
 			Layout.fillWidth: true
@@ -544,7 +764,8 @@ ColumnLayout {
 
 		Rectangle {
 			id: chartCard
-			property var values: root.chartValues()
+			property var points: root.chartPoints()
+			property var values: points.map(function(point) { return point.value })
 			Layout.fillWidth: true
 			Layout.preferredHeight: chartLayout.implicitHeight + 24
 			color: Theme.panel
@@ -560,19 +781,20 @@ ColumnLayout {
 					Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("Portfolio history"); color: Theme.textStrong; font.bold: true }
 					Label {
 						textFormat: Text.PlainText
-						text: root.snapshots.length === 1 ? qsTr("1 save")
-							: qsTr("%1 saves").arg(root.snapshots.length)
+						text: chartCard.points.length === 1 ? qsTr("1 point")
+							: qsTr("%1 points").arg(chartCard.points.length)
 						color: Theme.textMuted
 						font.pixelSize: 10
 					}
 				}
 				Canvas {
 					id: historyChart
+					property var points: chartCard.points
 					property var values: chartCard.values
 					Layout.fillWidth: true
 					Layout.preferredHeight: 126
 					visible: values.length > 0
-					onValuesChanged: requestPaint()
+					onPointsChanged: requestPaint()
 					onWidthChanged: requestPaint()
 					onHeightChanged: requestPaint()
 					onPaint: {
@@ -580,11 +802,13 @@ ColumnLayout {
 						ctx.clearRect(0, 0, width, height)
 						if (values.length === 0)
 							return
-						let minimum = values[0]
-						let maximum = values[0]
+						let minimum = points[0].value
+						let maximum = points[0].value
+						const firstTimestamp = points[0].timestamp
+						const lastTimestamp = points[points.length - 1].timestamp
 						for (let index = 1; index < values.length; ++index) {
-							minimum = Math.min(minimum, values[index])
-							maximum = Math.max(maximum, values[index])
+							minimum = Math.min(minimum, points[index].value)
+							maximum = Math.max(maximum, points[index].value)
 						}
 						const range = Math.max(1, maximum - minimum)
 						const inset = 8
@@ -594,15 +818,34 @@ ColumnLayout {
 							const y = Math.round(height * row / 4) + 0.5
 							ctx.beginPath(); ctx.moveTo(inset, y); ctx.lineTo(width - inset, y); ctx.stroke()
 						}
+						const coordinates = []
+						for (let index = 0; index < points.length; ++index) {
+							const x = points.length === 1 || lastTimestamp === firstTimestamp ? width / 2
+								: inset + (points[index].timestamp - firstTimestamp) * (width - inset * 2)
+									/ (lastTimestamp - firstTimestamp)
+							const y = points.length === 1 ? height / 2
+								: height - inset - (points[index].value - minimum) * (height - inset * 2) / range
+							coordinates.push({ "x": x, "y": y })
+						}
+						if (coordinates.length > 1) {
+							const gradient = ctx.createLinearGradient(0, 0, 0, height)
+							gradient.addColorStop(0, Theme.withAlpha(Theme.accent, 0.24))
+							gradient.addColorStop(1, Theme.withAlpha(Theme.accent, 0.01))
+							ctx.fillStyle = gradient
+							ctx.beginPath()
+							ctx.moveTo(coordinates[0].x, height - inset)
+							for (let index = 0; index < coordinates.length; ++index)
+								ctx.lineTo(coordinates[index].x, coordinates[index].y)
+							ctx.lineTo(coordinates[coordinates.length - 1].x, height - inset)
+							ctx.closePath()
+							ctx.fill()
+						}
 						ctx.strokeStyle = Theme.accent
 						ctx.lineWidth = 2.5
 						ctx.beginPath()
-						for (let index = 0; index < values.length; ++index) {
-							const x = values.length === 1 ? width / 2
-								: inset + index * (width - inset * 2) / (values.length - 1)
-							const y = values.length === 1 ? height / 2
-								: height - inset - (values[index] - minimum) * (height - inset * 2) / range
-							if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+						for (let index = 0; index < coordinates.length; ++index) {
+							if (index === 0) ctx.moveTo(coordinates[index].x, coordinates[index].y)
+							else ctx.lineTo(coordinates[index].x, coordinates[index].y)
 						}
 						ctx.stroke()
 						if (values.length === 1) {
@@ -617,7 +860,7 @@ ColumnLayout {
 					Layout.fillWidth: true
 					visible: chartCard.values.length === 0
 					textFormat: Text.PlainText
-					text: qsTr("Save a portfolio to start the history chart.")
+					text: qsTr("Save a portfolio to start automatic performance history.")
 					color: Theme.textMuted
 				}
 			}
@@ -855,15 +1098,29 @@ ColumnLayout {
 		visible: root.contentAvailable && !root.loading && root.activeTab === "portfolio"
 		spacing: 10
 
-		RowLayout {
+		Rectangle {
 			Layout.fillWidth: true
-			ColumnLayout {
-				Layout.fillWidth: true
-				spacing: 2
-				Label { textFormat: Text.PlainText; text: root.selectedUserName(); color: Theme.textStrong; font.bold: true; font.pixelSize: 15 }
-				Label { textFormat: Text.PlainText; text: root.latestSnapshot ? qsTr("Current save %1").arg(root.formatTime(root.latestSnapshot.createdAt)) : qsTr("No portfolio saves"); color: Theme.textMuted; font.pixelSize: 10 }
+			Layout.preferredHeight: portfolioSummaryLayout.implicitHeight + 24
+			color: Theme.surfaceRaised
+			border.color: Theme.withAlpha(Theme.accent, 0.45)
+			radius: Theme.shellRadius
+			RowLayout {
+				id: portfolioSummaryLayout
+				anchors.fill: parent
+				anchors.margins: 12
+				spacing: 16
+				ColumnLayout {
+					Layout.fillWidth: true
+					spacing: 3
+					Label { textFormat: Text.PlainText; text: root.selectedUserName(); color: Theme.textStrong; font.bold: true; font.pixelSize: 17 }
+					Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: root.latestSnapshot ? qsTr("Holdings last saved %1").arg(root.formatTime(root.latestSnapshot.createdAt)) : qsTr("Build the first tracked portfolio below"); color: Theme.textMuted; font.pixelSize: 10; wrapMode: Text.Wrap }
+				}
+				ColumnLayout {
+					Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+					Label { Layout.alignment: Qt.AlignRight; textFormat: Text.PlainText; text: qsTr("DRAFT VALUE"); color: Theme.textMuted; font.pixelSize: 9; font.bold: true }
+					Label { Layout.alignment: Qt.AlignRight; textFormat: Text.PlainText; text: root.formatMoney(root.draftTotal(), root.draftCurrency); color: Theme.accent; font.bold: true; font.pixelSize: 21 }
+				}
 			}
-			Label { textFormat: Text.PlainText; text: root.formatMoney(root.draftTotal(), root.draftCurrency); color: Theme.accent; font.bold: true; font.pixelSize: 16 }
 		}
 
 		GridLayout {
@@ -872,24 +1129,29 @@ ColumnLayout {
 			columnSpacing: 8
 			ColumnLayout {
 				Layout.fillWidth: true
-				Label { textFormat: Text.PlainText; text: qsTr("Currency"); color: Theme.textMuted; font.pixelSize: 10 }
+				Label { textFormat: Text.PlainText; text: qsTr("Portfolio currency"); color: Theme.textMuted; font.pixelSize: 10 }
 				ModernTextField {
 					objectName: "stonksPortfolioCurrency"
 					Layout.fillWidth: true
 					text: root.draftCurrency
 					enabled: root.canEditPortfolio()
-					onTextEdited: { root.draftCurrency = text.toUpperCase(); root.draftDirty = true }
+					onTextEdited: {
+						root.draftCurrency = text.toUpperCase()
+						for (let index = 0; index < portfolioPositions.count; ++index)
+							portfolioPositions.setProperty(index, "currency", root.draftCurrency)
+						root.draftDirty = true
+					}
 				}
 			}
 			ColumnLayout {
 				Layout.fillWidth: true
-				Label { textFormat: Text.PlainText; text: qsTr("Note"); color: Theme.textMuted; font.pixelSize: 10 }
+				Label { textFormat: Text.PlainText; text: qsTr("Portfolio note"); color: Theme.textMuted; font.pixelSize: 10 }
 				ModernTextField {
 					objectName: "stonksPortfolioNote"
 					Layout.fillWidth: true
 					text: root.draftNote
 					enabled: root.canEditPortfolio()
-					placeholderText: qsTr("Optional portfolio note")
+					placeholderText: qsTr("Strategy, target, or context (optional)")
 					onTextEdited: { root.draftNote = text; root.draftDirty = true }
 				}
 			}
@@ -907,59 +1169,44 @@ ColumnLayout {
 				required property string currency
 				required property string displayName
 				required property string providerId
+				required property string providerSymbol
 				required property string exchange
+				required property string quoteStatus
+				required property string quoteError
 				Layout.fillWidth: true
-				Layout.preferredHeight: positionLayout.implicitHeight + 20
-				color: Theme.panel
-				border.color: Theme.divider
+				Layout.preferredHeight: positionLayout.implicitHeight + 24
+				color: Theme.surfaceRaised
+				border.color: positionCard.quoteStatus === "verified" ? Theme.withAlpha(Theme.success, 0.70)
+					: positionCard.quoteStatus === "error" ? Theme.withAlpha(Theme.danger, 0.70) : Theme.divider
 				radius: Theme.innerRadius
 				ColumnLayout {
 					id: positionLayout
 					anchors.fill: parent
-					anchors.margins: 10
-					spacing: 6
-					GridLayout {
+					anchors.margins: 12
+					spacing: 9
+					RowLayout {
 						Layout.fillWidth: true
-						columns: root.width >= 650 ? 6 : 2
-						columnSpacing: 6
-						ModernTextField {
-							objectName: "stonksPositionSymbol_" + positionCard.index
-							Layout.fillWidth: true
-							placeholderText: qsTr("Symbol")
-							text: positionCard.symbol
-							enabled: root.canEditPortfolio()
-							onTextEdited: root.updatePosition(positionCard.index, "symbol", text.toUpperCase())
+						spacing: 8
+						Rectangle {
+							width: 30
+							height: 30
+							radius: 9
+							color: Theme.accentSubtle
+							Label { anchors.centerIn: parent; textFormat: Text.PlainText; text: String(positionCard.index + 1); color: Theme.accent; font.bold: true }
 						}
-						ModernTextField {
+						ColumnLayout {
 							Layout.fillWidth: true
-							placeholderText: qsTr("Quantity")
-							text: String(positionCard.quantity)
-							enabled: root.canEditPortfolio()
-							validator: DoubleValidator { bottom: 0 }
-							onTextEdited: root.updatePosition(positionCard.index, "quantity", root.numberValue(text))
-						}
-						ModernTextField {
-							Layout.fillWidth: true
-							placeholderText: qsTr("Price")
-							text: String(positionCard.price)
-							enabled: root.canEditPortfolio()
-							validator: DoubleValidator { bottom: 0 }
-							onTextEdited: root.updatePosition(positionCard.index, "price", root.numberValue(text))
-						}
-						ModernTextField {
-							Layout.fillWidth: true
-							placeholderText: qsTr("Value")
-							text: String(positionCard.marketValue)
-							enabled: root.canEditPortfolio()
-							validator: DoubleValidator { bottom: 0 }
-							onTextEdited: root.updatePosition(positionCard.index, "marketValue", root.numberValue(text))
-						}
-						ModernTextField {
-							Layout.fillWidth: true
-							placeholderText: qsTr("Currency")
-							text: positionCard.currency
-							enabled: root.canEditPortfolio()
-							onTextEdited: root.updatePosition(positionCard.index, "currency", text.toUpperCase())
+							spacing: 1
+							Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: positionCard.symbol || qsTr("New position"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: positionCard.quoteStatus === "verified" ? qsTr("Verified live quote")
+									: positionCard.quoteStatus === "pending" ? qsTr("Checking ticker and market…")
+										: qsTr("Enter a ticker, then fetch its live price")
+								color: positionCard.quoteStatus === "verified" ? Theme.success : Theme.textMuted
+								font.pixelSize: 9
+							}
 						}
 						ModernIconButton {
 							objectName: "stonksPositionRemove_" + positionCard.index
@@ -969,14 +1216,75 @@ ColumnLayout {
 							onClicked: root.removePosition(positionCard.index)
 						}
 					}
-					Label {
+					GridLayout {
 						Layout.fillWidth: true
-						textFormat: Text.PlainText
-						text: [positionCard.displayName, positionCard.providerId, positionCard.exchange].filter(function(value) { return String(value || "").length > 0 }).join(" · ")
-						visible: text.length > 0
-						color: Theme.textMuted
-						font.pixelSize: 9
-						elide: Text.ElideRight
+						visible: root.width >= 700
+						columns: 4
+						columnSpacing: 6
+						Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("TICKER"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+						Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("MARKET DATA"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+						Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("SHARES / UNITS"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+						Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: qsTr("PRICE / UNIT"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+					}
+					GridLayout {
+						Layout.fillWidth: true
+						columns: root.width >= 700 ? 4 : 2
+						columnSpacing: 6
+						ModernTextField {
+							objectName: "stonksPositionSymbol_" + positionCard.index
+							Layout.fillWidth: true
+							placeholderText: qsTr("Ticker · RKLB or SAAB-B.ST")
+							text: positionCard.symbol
+							enabled: root.canEditPortfolio()
+							onTextEdited: root.updatePosition(positionCard.index, "symbol", text.toUpperCase())
+						}
+						ModernButton {
+							objectName: "stonksPositionLookup_" + positionCard.index
+							text: positionCard.quoteStatus === "pending" ? qsTr("Checking…") : qsTr("Get live price")
+							enabled: root.canEditPortfolio() && positionCard.symbol.length > 0
+							tone: positionCard.quoteStatus === "verified" ? "success" : "neutral"
+							onClicked: root.requestTickerLookup(positionCard.index)
+						}
+						ModernTextField {
+							Layout.fillWidth: true
+							placeholderText: qsTr("Shares / units")
+							text: positionCard.quantity > 0 ? String(positionCard.quantity) : ""
+							enabled: root.canEditPortfolio()
+							validator: DoubleValidator { bottom: 0 }
+							onTextEdited: root.updatePosition(positionCard.index, "quantity", root.numberValue(text))
+						}
+						ModernTextField {
+							Layout.fillWidth: true
+							placeholderText: qsTr("Price per unit")
+							text: positionCard.price > 0 ? String(positionCard.price) : ""
+							enabled: root.canEditPortfolio()
+							validator: DoubleValidator { bottom: 0 }
+							onTextEdited: root.updatePosition(positionCard.index, "price", root.numberValue(text))
+						}
+					}
+					RowLayout {
+						Layout.fillWidth: true
+						ColumnLayout {
+							Layout.fillWidth: true
+							spacing: 2
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: [positionCard.displayName, positionCard.exchange,
+									positionCard.providerId === "yahoo-finance" ? qsTr("Yahoo Finance") : positionCard.providerId]
+									.filter(function(value) { return String(value || "").length > 0 }).join(" · ")
+								visible: text.length > 0
+								color: Theme.textMuted
+								font.pixelSize: 9
+								elide: Text.ElideRight
+							}
+							Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: positionCard.quoteError; visible: text.length > 0; color: Theme.danger; font.pixelSize: 10; wrapMode: Text.Wrap }
+						}
+						ColumnLayout {
+							Layout.alignment: Qt.AlignRight
+							Label { Layout.alignment: Qt.AlignRight; textFormat: Text.PlainText; text: qsTr("POSITION VALUE"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+							Label { Layout.alignment: Qt.AlignRight; textFormat: Text.PlainText; text: root.formatMoney(root.positionMarketValue(positionCard), positionCard.currency); color: Theme.textStrong; font.bold: true; font.pixelSize: 15 }
+						}
 					}
 				}
 			}
@@ -985,7 +1293,8 @@ ColumnLayout {
 		Label {
 			Layout.fillWidth: true
 			textFormat: Text.PlainText
-			text: root.draftValidation().length > 0 ? root.draftValidation() : qsTr("Ready to save")
+			text: root.draftValidation().length > 0 ? root.draftValidation()
+				: qsTr("Ready to save · future valuations and history refresh automatically")
 			color: root.draftValidation().length > 0 ? Theme.danger : Theme.success
 			wrapMode: Text.Wrap
 		}
@@ -993,7 +1302,7 @@ ColumnLayout {
 			Layout.fillWidth: true
 			Layout.preferredHeight: childrenRect.height
 			spacing: 8
-			ModernButton { objectName: "stonksPortfolioAdd"; text: qsTr("Add position"); enabled: root.canEditPortfolio(); onClicked: root.addPosition() }
+			ModernButton { objectName: "stonksPortfolioAdd"; text: qsTr("+ Add position"); enabled: root.canEditPortfolio(); onClicked: root.addPosition() }
 			ModernButton {
 				objectName: "stonksPortfolioClear"
 				text: qsTr("Clear portfolio")
@@ -1002,7 +1311,7 @@ ColumnLayout {
 					"currency": root.draftCurrency, "note": qsTr("Portfolio cleared") }, qsTr("Clear portfolio"),
 					qsTr("Clear the portfolio for %1?").arg(root.selectedUserName()))
 			}
-			ModernButton { objectName: "stonksPortfolioSave"; text: qsTr("Save portfolio"); enabled: root.draftValidation().length === 0; onClicked: root.savePortfolio() }
+			ModernButton { objectName: "stonksPortfolioSave"; text: qsTr("Save portfolio"); tone: "accent"; enabled: root.draftValidation().length === 0; onClicked: root.savePortfolio() }
 		}
 	}
 
@@ -1036,20 +1345,47 @@ ColumnLayout {
 				required property var modelData
 				Layout.fillWidth: true
 				Layout.preferredHeight: leaderboardLayout.implicitHeight + 18
-				color: Theme.panel
-				border.color: Theme.divider
+				color: !modelData.insufficientHistory && Number(modelData.rank || 0) <= 3
+					? Theme.withAlpha(Theme.accent, 0.08) : Theme.panel
+				border.color: !modelData.insufficientHistory && Number(modelData.rank || 0) <= 3
+					? Theme.withAlpha(Theme.accent, 0.45) : Theme.divider
 				radius: Theme.innerRadius
 				RowLayout {
 					id: leaderboardLayout
 					anchors.fill: parent
 					anchors.margins: 9
+					Rectangle {
+						Layout.preferredWidth: 38
+						Layout.preferredHeight: 38
+						radius: 12
+						color: modelData.insufficientHistory ? Theme.strip
+							: Number(modelData.rank || 0) <= 3 ? Theme.accentSubtle : Theme.surfaceRaised
+						Label {
+							anchors.centerIn: parent
+							textFormat: Text.PlainText
+							text: modelData.insufficientHistory ? "—" : String(modelData.rank || index + 1)
+							color: modelData.insufficientHistory ? Theme.textMuted : Theme.accent
+							font.bold: true
+							font.pixelSize: 15
+						}
+					}
 					ColumnLayout {
 						Layout.fillWidth: true
 						spacing: 2
-						Label { textFormat: Text.PlainText; text: (modelData.insufficientHistory ? "" : String(modelData.rank || index + 1) + ". ") + String(modelData.userName || qsTr("User")); color: Theme.textStrong; font.bold: true }
-						Label { textFormat: Text.PlainText; text: modelData.insufficientHistory ? qsTr("Insufficient history") : qsTr("PnL %1").arg(modelData.period || root.stonks.selectedPeriod || "30d"); color: Theme.textMuted; font.pixelSize: 10 }
+						Label { textFormat: Text.PlainText; text: String(modelData.userName || qsTr("User")); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
+						Label {
+							textFormat: Text.PlainText
+							text: modelData.insufficientHistory ? qsTr("Collecting enough history to rank")
+								: root.formatCoverage(modelData) + (modelData.partialPeriod ? qsTr(" · partial period") : "")
+							color: modelData.partialPeriod ? Theme.warning : Theme.textMuted
+							font.pixelSize: 10
+						}
 					}
-					Label { textFormat: Text.PlainText; text: modelData.insufficientHistory ? qsTr("Need PnL") : root.formatPercent(modelData.returnPercent); color: modelData.insufficientHistory ? Theme.textMuted : (root.numberValue(modelData.returnPercent) >= 0 ? Theme.success : Theme.danger); font.bold: true }
+					ColumnLayout {
+						Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+						Label { Layout.alignment: Qt.AlignRight; textFormat: Text.PlainText; text: modelData.insufficientHistory ? qsTr("Pending") : root.formatPercent(modelData.returnPercent); color: modelData.insufficientHistory ? Theme.textMuted : (root.numberValue(modelData.returnPercent) >= 0 ? Theme.success : Theme.danger); font.bold: true; font.pixelSize: 16 }
+						Label { Layout.alignment: Qt.AlignRight; visible: modelData.estimated === true; textFormat: Text.PlainText; text: qsTr("ESTIMATED TWR"); color: Theme.textMuted; font.pixelSize: 8; font.bold: true }
+					}
 					ModernButton {
 						visible: root.stonks.canAdmin === true
 						text: qsTr("View")
@@ -1219,6 +1555,49 @@ ColumnLayout {
 				Label { textFormat: Text.PlainText; text: qsTr("Server settings"); color: Theme.textStrong; font.bold: true }
 				ModernCheckBox { objectName: "stonksAdminEnabled"; text: qsTr("Stonks enabled"); checked: root.adminEnabled; onToggled: { root.adminEnabled = checked; root.adminDirty = true } }
 				ModernCheckBox { objectName: "stonksAdminAnnouncements"; text: qsTr("Social announcements"); checked: root.adminAnnouncements; onToggled: { root.adminAnnouncements = checked; root.adminDirty = true } }
+				ModernCheckBox { objectName: "stonksAdminAutoValuation"; text: qsTr("Automatic valuations and historical backfill"); checked: root.adminAutoValuation; onToggled: { root.adminAutoValuation = checked; root.adminDirty = true } }
+				GridLayout {
+					Layout.fillWidth: true
+					columns: root.width >= 620 ? 2 : 1
+					columnSpacing: 12
+					rowSpacing: 8
+					ColumnLayout {
+						Layout.fillWidth: true
+						Label { textFormat: Text.PlainText; text: qsTr("Valuation interval (minutes)"); color: Theme.textMuted; font.pixelSize: 10 }
+						ModernSpinBox {
+							objectName: "stonksAdminValuationInterval"
+							Layout.fillWidth: true
+							from: 15
+							to: 1440
+							editable: true
+							value: root.adminValuationInterval
+							Accessible.name: qsTr("Automatic valuation interval in minutes")
+							onValueModified: { root.adminValuationInterval = value; root.adminDirty = true }
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Label { textFormat: Text.PlainText; text: qsTr("History and retention (days)"); color: Theme.textMuted; font.pixelSize: 10 }
+						ModernSpinBox {
+							objectName: "stonksAdminValuationHistory"
+							Layout.fillWidth: true
+							from: 31
+							to: 730
+							editable: true
+							value: root.adminValuationHistory
+							Accessible.name: qsTr("Valuation history retention in days")
+							onValueModified: { root.adminValuationHistory = value; root.adminDirty = true }
+						}
+					}
+				}
+				Label {
+					Layout.fillWidth: true
+					textFormat: Text.PlainText
+					text: root.stonks.valuationStatus || qsTr("The server values current holdings automatically and backfills daily closes after startup or portfolio edits.")
+					color: Theme.textMuted
+					font.pixelSize: 10
+					wrapMode: Text.Wrap
+				}
 				ModernComboBox {
 					id: adminChannelSelect
 					objectName: "stonksAdminChannel"

@@ -38,6 +38,7 @@
 #include "database/DBStonksScore.h"
 #include "database/DBStonksSnapshot.h"
 #include "database/DBStonksSnapshotPosition.h"
+#include "database/DBStonksValuation.h"
 #include "database/GroupMemberTable.h"
 #include "database/GroupTable.h"
 #include "database/ChatMessageReactionTable.h"
@@ -54,6 +55,7 @@
 #include "database/StonksScoreTable.h"
 #include "database/StonksSnapshotTable.h"
 #include "database/StonksSnapshotPositionTable.h"
+#include "database/StonksValuationTable.h"
 #include "database/ServerTable.h"
 #include "database/UserProperty.h"
 #include "database/UserPropertyTable.h"
@@ -284,6 +286,7 @@ private slots:
 	void stonksPinnedTickerTable_general();
 	void stonksFeedPreferenceTable_general();
 	void stonksSnapshotTable_general();
+	void stonksValuationTable_general();
 
 	void database_schema_migration();
 	void database_future_schema_migration();
@@ -2245,6 +2248,69 @@ void ServerDatabaseTest::stonksSnapshotTable_general() {
 	invalid.currency   = "USD";
 	invalid.totalValue = 1.0;
 	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, snapshotTable.addSnapshot(invalid));
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksValuationTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	const unsigned int serverID = 0;
+	::msdb::DBUser user(serverID, 2);
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = serverID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(serverID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user, "Investor");
+
+	::msdb::StonksSnapshotTable &snapshotTable = db.getStonksSnapshotTable();
+	::msdb::StonksValuationTable &valuationTable = db.getStonksValuationTable();
+	::msdb::DBStonksSnapshot snapshot(serverID, snapshotTable.getFreeSnapshotID(serverID), user.registeredUserID);
+	snapshot.createdAt  = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	snapshot.currency   = "USD";
+	snapshot.totalValue = 1000.0;
+	snapshotTable.addSnapshot(snapshot);
+
+	::msdb::DBStonksValuation first(serverID, user.registeredUserID, snapshot.snapshotID);
+	first.valuedAt        = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	first.totalValue      = 1000.0;
+	first.currency        = "USD";
+	first.source          = "submitted";
+	first.pricedPositions = 1;
+	first.totalPositions  = 1;
+	valuationTable.setValuation(first);
+
+	::msdb::DBStonksValuation second = first;
+	second.valuedAt   = std::chrono::system_clock::time_point(std::chrono::seconds(200));
+	second.totalValue = 1100.0;
+	second.source     = "automatic";
+	second.estimated  = true;
+	valuationTable.setValuation(second);
+
+	// The primary key is the user/time bucket. Re-running a valuation replaces rather than duplicates it.
+	second.totalValue = 1110.0;
+	valuationTable.setValuation(second);
+
+	std::vector< ::msdb::DBStonksValuation > values = valuationTable.getValuationsForUser(
+		serverID, user.registeredUserID, std::chrono::system_clock::time_point(std::chrono::seconds(0)), 10);
+	QCOMPARE(values.size(), static_cast< std::size_t >(2));
+	QVERIFY(values == std::vector< ::msdb::DBStonksValuation >({ first, second }));
+	QVERIFY(valuationTable.getLatestValuationForUser(serverID, user.registeredUserID));
+	QVERIFY(*valuationTable.getLatestValuationForUser(serverID, user.registeredUserID) == second);
+
+	valuationTable.removeValuationsBefore(
+		serverID, std::chrono::system_clock::time_point(std::chrono::seconds(150)));
+	values = valuationTable.getValuationsForUser(
+		serverID, user.registeredUserID, std::chrono::system_clock::time_point(std::chrono::seconds(0)), 10);
+	QVERIFY(values == std::vector< ::msdb::DBStonksValuation >({ second }));
+
+	valuationTable.removeValuationsForSnapshot(serverID, snapshot.snapshotID);
+	QVERIFY(valuationTable.getValuationsForUser(
+		serverID, user.registeredUserID, std::chrono::system_clock::time_point(std::chrono::seconds(0)), 10).empty());
 
 	MUMBLE_END_TEST_CASE
 }

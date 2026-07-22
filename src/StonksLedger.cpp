@@ -12,6 +12,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <set>
 
 namespace {
 	struct PopularTickerAccumulator {
@@ -97,6 +100,13 @@ namespace {
 			return lhs.totalQuantity > rhs.totalQuantity;
 		}
 		return lhs.symbol.localeAwareCompare(rhs.symbol) < 0;
+	}
+
+	qint64 valuationBucketEnd(const qint64 timestamp, const qint64 bucketSeconds) {
+		if (timestamp <= 0 || bucketSeconds <= 0) {
+			return 0;
+		}
+		return ((timestamp / bucketSeconds) + 1) * bucketSeconds - 1;
 	}
 }
 
@@ -228,6 +238,218 @@ namespace Stonks {
 			summaries.resize(maxTickers);
 		}
 		return summaries;
+	}
+
+	std::vector< ValuationSample > buildValuationTimeline(
+		const std::vector< PortfolioRevision > &inputRevisions, const std::vector< QuoteSeries > &inputQuotes,
+		const qint64 earliestAt, const qint64 latestAt, const qint64 bucketSeconds,
+		const qint64 maximumQuoteAgeSeconds, const QString &source) {
+		if (inputRevisions.empty() || inputQuotes.empty() || earliestAt <= 0 || latestAt < earliestAt
+			|| bucketSeconds <= 0 || maximumQuoteAgeSeconds < 0) {
+			return {};
+		}
+
+		std::vector< PortfolioRevision > revisions = inputRevisions;
+		std::sort(revisions.begin(), revisions.end(), [](const PortfolioRevision &lhs, const PortfolioRevision &rhs) {
+			if (lhs.effectiveAt != rhs.effectiveAt) {
+				return lhs.effectiveAt < rhs.effectiveAt;
+			}
+			return lhs.revisionID < rhs.revisionID;
+		});
+
+		std::map< QString, QuoteSeries > quotes;
+		std::set< qint64 > buckets;
+		for (QuoteSeries series : inputQuotes) {
+			series.symbol   = Mumble::Finance::normalizeTickerSymbol(series.symbol);
+			series.currency = series.currency.trimmed().toUpper();
+			if (series.symbol.isEmpty()) {
+				continue;
+			}
+			std::stable_sort(series.points.begin(), series.points.end(), [](const QuotePoint &lhs, const QuotePoint &rhs) {
+				return lhs.timestamp < rhs.timestamp;
+			});
+			series.points.erase(std::remove_if(series.points.begin(), series.points.end(), [](const QuotePoint &point) {
+				return point.timestamp <= 0 || !std::isfinite(point.close) || point.close <= 0.0;
+			}), series.points.end());
+			std::vector< QuotePoint > uniquePoints;
+			uniquePoints.reserve(series.points.size());
+			for (const QuotePoint &point : series.points) {
+				if (!uniquePoints.empty() && uniquePoints.back().timestamp == point.timestamp) {
+					uniquePoints.back() = point;
+				} else {
+					uniquePoints.push_back(point);
+				}
+			}
+			series.points = std::move(uniquePoints);
+			for (const QuotePoint &point : series.points) {
+				const qint64 bucket = valuationBucketEnd(point.timestamp, bucketSeconds);
+				if (bucket >= earliestAt && bucket <= latestAt) {
+					buckets.insert(bucket);
+				}
+			}
+			quotes[series.symbol] = std::move(series);
+		}
+
+		for (const PortfolioRevision &revision : revisions) {
+			const qint64 bucket = valuationBucketEnd(revision.effectiveAt, bucketSeconds);
+			if (bucket >= earliestAt && bucket <= latestAt) {
+				buckets.insert(bucket);
+			}
+		}
+		const qint64 latestBucket = valuationBucketEnd(latestAt, bucketSeconds);
+		if (latestBucket >= earliestAt) {
+			buckets.insert(std::min(latestBucket, latestAt));
+		}
+
+		std::vector< ValuationSample > samples;
+		for (const qint64 valuedAt : buckets) {
+			auto revisionIt = std::upper_bound(
+				revisions.begin(), revisions.end(), valuedAt,
+				[](const qint64 timestamp, const PortfolioRevision &revision) { return timestamp < revision.effectiveAt; });
+			if (revisionIt == revisions.begin()) {
+				continue;
+			}
+			--revisionIt;
+			// The exact revision timestamp is persisted from the submitted portfolio value. Never replace that
+			// trustworthy boundary point with an estimated quote merely because it happens to land on a bucket end.
+			if (valuedAt == revisionIt->effectiveAt) {
+				continue;
+			}
+
+			ValuationSample sample;
+			sample.revisionID    = revisionIt->revisionID;
+			sample.valuedAt      = valuedAt;
+			sample.currency      = revisionIt->currency.trimmed().toUpper();
+			sample.source        = source.trimmed().isEmpty() ? QStringLiteral("automatic") : source.trimmed();
+			sample.totalPositions = static_cast< unsigned int >(revisionIt->positions.size());
+
+			for (const ValuationPosition &position : revisionIt->positions) {
+				const QString symbol = Mumble::Finance::normalizeTickerSymbol(position.symbol);
+				const auto quoteIt    = quotes.find(symbol);
+				if (quoteIt == quotes.end() || !std::isfinite(position.quantity) || position.quantity <= 0.0) {
+					continue;
+				}
+				const QString positionCurrency = position.currency.trimmed().toUpper();
+				if (!positionCurrency.isEmpty() && !quoteIt->second.currency.isEmpty()
+					&& positionCurrency != quoteIt->second.currency) {
+					continue;
+				}
+
+				const std::vector< QuotePoint > &points = quoteIt->second.points;
+				auto pointIt = std::upper_bound(points.begin(), points.end(), valuedAt,
+					[](const qint64 timestamp, const QuotePoint &point) { return timestamp < point.timestamp; });
+				if (pointIt == points.begin()) {
+					continue;
+				}
+				--pointIt;
+				if (valuedAt - pointIt->timestamp > maximumQuoteAgeSeconds) {
+					continue;
+				}
+				const double marketValue = position.quantity * pointIt->close;
+				if (!std::isfinite(marketValue) || marketValue <= 0.0) {
+					continue;
+				}
+				sample.totalValue += marketValue;
+				++sample.pricedPositions;
+			}
+
+			if (sample.pricedPositions > 0 && std::isfinite(sample.totalValue) && sample.totalValue > 0.0) {
+				samples.push_back(std::move(sample));
+			}
+		}
+
+		return samples;
+	}
+
+	std::optional< ReturnWindow > timeWeightedReturn(const std::vector< ValuationSample > &inputSamples,
+												 const qint64 cutoffAt, const qint64 latestAt,
+												 const qint64 baselineToleranceSeconds) {
+		if (cutoffAt <= 0 || latestAt <= cutoffAt || baselineToleranceSeconds < 0) {
+			return std::nullopt;
+		}
+
+		std::vector< ValuationSample > samples;
+		for (const ValuationSample &sample : inputSamples) {
+			if (sample.complete() && sample.valuedAt > 0 && sample.valuedAt <= latestAt) {
+				samples.push_back(sample);
+			}
+		}
+		std::sort(samples.begin(), samples.end(), [](const ValuationSample &lhs, const ValuationSample &rhs) {
+			if (lhs.valuedAt != rhs.valuedAt) {
+				return lhs.valuedAt < rhs.valuedAt;
+			}
+			return lhs.revisionID < rhs.revisionID;
+		});
+		if (samples.size() < 2) {
+			return std::nullopt;
+		}
+
+		std::size_t startIndex = samples.size();
+		for (std::size_t i = 0; i < samples.size(); ++i) {
+			if (samples[i].valuedAt <= cutoffAt) {
+				if (cutoffAt - samples[i].valuedAt <= baselineToleranceSeconds) {
+					startIndex = i;
+				}
+				continue;
+			}
+			if (startIndex == samples.size()) {
+				startIndex = i;
+			}
+			break;
+		}
+		if (startIndex >= samples.size() - 1) {
+			return std::nullopt;
+		}
+
+		const ValuationSample &start = samples[startIndex];
+		const ValuationSample &end   = samples.back();
+		if (latestAt - end.valuedAt > baselineToleranceSeconds) {
+			return std::nullopt;
+		}
+		double chainedGrowth         = 1.0;
+		unsigned int segmentCount    = 0;
+		std::size_t segmentStart     = startIndex;
+		for (std::size_t i = startIndex + 1; i <= samples.size(); ++i) {
+			const bool segmentEnded = i == samples.size() || samples[i].revisionID != samples[segmentStart].revisionID;
+			if (!segmentEnded) {
+				continue;
+			}
+			const ValuationSample &segmentFirst = samples[segmentStart];
+			const ValuationSample &segmentLast  = samples[i - 1];
+			if (segmentLast.valuedAt > segmentFirst.valuedAt && segmentFirst.totalValue > 0.0
+				&& segmentLast.totalValue > 0.0) {
+				const double growth = segmentLast.totalValue / segmentFirst.totalValue;
+				if (!std::isfinite(growth) || growth <= 0.0) {
+					return std::nullopt;
+				}
+				chainedGrowth *= growth;
+				++segmentCount;
+			}
+			segmentStart = i;
+		}
+
+		if (segmentCount == 0 || !std::isfinite(chainedGrowth)) {
+			return std::nullopt;
+		}
+
+		ReturnWindow result;
+		result.returnPercent    = (chainedGrowth - 1.0) * 100.0;
+		result.startValue       = start.totalValue;
+		result.endValue         = end.totalValue;
+		result.startAt          = start.valuedAt;
+		result.endAt            = end.valuedAt;
+		result.coverageSeconds  = std::max< qint64 >(0, end.valuedAt - start.valuedAt);
+		result.requestedSeconds = std::max< qint64 >(0, latestAt - cutoffAt);
+		result.sampleCount      = static_cast< unsigned int >(samples.size() - startIndex);
+		result.segmentCount     = segmentCount;
+		result.partialPeriod    = start.valuedAt > cutoffAt + baselineToleranceSeconds;
+		for (std::size_t i = startIndex; i < samples.size(); ++i) {
+			if (samples[i].source.compare(QStringLiteral("submitted"), Qt::CaseInsensitive) != 0) {
+				result.estimated = true;
+				break;
+			}
+		}
+		return result;
 	}
 } // namespace Stonks
 } // namespace Mumble

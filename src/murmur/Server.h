@@ -154,6 +154,9 @@ public:
 	bool bStonksEnabled = true;
 	unsigned int uiStonksTextChannelID = 0;
 	bool bStonksSocialAnnouncementsEnabled = true;
+	bool bStonksAutoValuationEnabled = true;
+	unsigned int uiStonksValuationIntervalMinutes = 60;
+	unsigned int uiStonksValuationHistoryDays = 400;
 	bool bFeedbackGitHubEnabled = false;
 	QString qsFeedbackGitHubOwner;
 	QString qsFeedbackGitHubRepo;
@@ -441,6 +444,15 @@ public:
 	};
 	QHash< QString, PendingChatEmbedAssist > qhPendingChatEmbedAssists;
 	QTimer *qtChatAssetRetention = nullptr;
+	QTimer *qtStonksValuationRefresh = nullptr;
+	bool m_stonksValuationRefreshInFlight = false;
+	bool m_stonksValuationRefreshQueued = false;
+	bool m_stonksValuationFullHistoryQueued = false;
+	qint64 m_stonksValuationLastRunAt = 0;
+	qint64 m_stonksValuationLastBackfillAt = 0;
+	QString m_stonksValuationStatus;
+	QHash< unsigned int, QString > m_stonksSelectedPeriodBySession;
+	QHash< unsigned int, unsigned int > m_stonksSelectedUserBySession;
 
 	std::vector< Ban > m_bans;
 
@@ -502,6 +514,9 @@ public:
 	void pruneChatHistoryLatestPageCache(unsigned int preserveThreadID = 0);
 	bool isStonksTextChannelID(unsigned int textChannelID);
 	bool hasStonksAccess(ServerUser *user, ChanACL::ACLCache *cache = nullptr);
+	void scheduleStonksValuationRefresh(bool fullHistory = false);
+	void runStonksValuationRefresh();
+	void broadcastStonksStates();
 	bool feedbackGitHubConfigured() const;
 	void sendFeedbackReportState(unsigned int session, const QString &clientReportID,
 								 MumbleProto::FeedbackReportKind kind, bool accepted,

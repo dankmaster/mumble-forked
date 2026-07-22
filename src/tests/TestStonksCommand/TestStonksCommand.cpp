@@ -19,6 +19,8 @@ private slots:
 	void parsesScoreCommands();
 	void parsesLeaderboardAndFollowCommands();
 	void computesLedgerPeriodsAndReturns();
+	void reconstructsValuationTimeline();
+	void computesTimeWeightedReturnsAcrossPortfolioChanges();
 	void formatsLedgerPositionSummaries();
 	void ranksPopularTickers();
 	void ignoresUnknownText();
@@ -99,6 +101,81 @@ void TestStonksCommand::computesLedgerPeriodsAndReturns() {
 
 	QVERIFY(!Mumble::Stonks::returnPercent(0.0, 150.0).has_value());
 	QVERIFY(!Mumble::Stonks::returnPercent(std::numeric_limits< double >::infinity(), 150.0).has_value());
+}
+
+void TestStonksCommand::reconstructsValuationTimeline() {
+	using namespace Mumble::Stonks;
+	PortfolioRevision revision;
+	revision.revisionID  = 7;
+	revision.userID      = 42;
+	revision.effectiveAt = 1;
+	revision.currency    = QStringLiteral("USD");
+	revision.positions   = {
+		{ QStringLiteral("RKLB"), QStringLiteral("USD"), 2.0 },
+		{ QStringLiteral("AMD"), QStringLiteral("USD"), 1.0 },
+	};
+
+	QuoteSeries rklb { QStringLiteral("rklb"), QStringLiteral("usd"), { { 10, 10.0 }, { 110, 11.0 } } };
+	QuoteSeries amd { QStringLiteral("AMD"), QStringLiteral("USD"), { { 10, 20.0 }, { 110, 25.0 } } };
+	const std::vector< ValuationSample > timeline =
+		buildValuationTimeline({ revision }, { rklb, amd }, 1, 199, 100, 200, QStringLiteral("historical"));
+
+	QCOMPARE(timeline.size(), static_cast< std::size_t >(2));
+	QCOMPARE(timeline.at(0).valuedAt, static_cast< qint64 >(99));
+	QCOMPARE(timeline.at(0).revisionID, 7u);
+	QCOMPARE(timeline.at(0).totalValue, 40.0);
+	QCOMPARE(timeline.at(0).pricedPositions, 2u);
+	QVERIFY(timeline.at(0).complete());
+	QCOMPARE(timeline.at(1).valuedAt, static_cast< qint64 >(199));
+	QCOMPARE(timeline.at(1).totalValue, 47.0);
+
+	revision.effectiveAt = 99;
+	const std::vector< ValuationSample > exactRevisionBoundary =
+		buildValuationTimeline({ revision }, { rklb, amd }, 1, 199, 100, 200, QStringLiteral("historical"));
+	QCOMPARE(exactRevisionBoundary.size(), static_cast< std::size_t >(1));
+	QCOMPARE(exactRevisionBoundary.at(0).valuedAt, static_cast< qint64 >(199));
+
+	revision.effectiveAt = 1;
+	amd.currency = QStringLiteral("SEK");
+	const std::vector< ValuationSample > currencyMismatch =
+		buildValuationTimeline({ revision }, { rklb, amd }, 1, 199, 100, 200, QStringLiteral("historical"));
+	QCOMPARE(currencyMismatch.size(), static_cast< std::size_t >(2));
+	QCOMPARE(currencyMismatch.at(0).pricedPositions, 1u);
+	QVERIFY(!currencyMismatch.at(0).complete());
+}
+
+void TestStonksCommand::computesTimeWeightedReturnsAcrossPortfolioChanges() {
+	using namespace Mumble::Stonks;
+	const std::vector< ValuationSample > samples {
+		{ 1, 1000, 100.0, QStringLiteral("USD"), QStringLiteral("historical"), 1, 1 },
+		{ 1, 2000, 110.0, QStringLiteral("USD"), QStringLiteral("historical"), 1, 1 },
+		// The contribution at the portfolio revision boundary must not count as investment return.
+		{ 2, 3000, 200.0, QStringLiteral("USD"), QStringLiteral("submitted"), 2, 2 },
+		{ 2, 5000, 220.0, QStringLiteral("USD"), QStringLiteral("automatic"), 2, 2 },
+	};
+	const std::optional< ReturnWindow > result = timeWeightedReturn(samples, 1000, 5000, 0);
+	QVERIFY(result.has_value());
+	QVERIFY(qAbs(result->returnPercent - 21.0) < 0.000001);
+	QCOMPARE(result->startValue, 100.0);
+	QCOMPARE(result->endValue, 220.0);
+	QCOMPARE(result->segmentCount, 2u);
+	QCOMPARE(result->sampleCount, 4u);
+	QVERIFY(!result->partialPeriod);
+	QVERIFY(result->estimated);
+
+	const std::vector< ValuationSample > partialSamples {
+		{ 3, 2500, 50.0, QStringLiteral("USD"), QStringLiteral("submitted"), 1, 1 },
+		{ 3, 5000, 55.0, QStringLiteral("USD"), QStringLiteral("automatic"), 1, 1 },
+	};
+	const std::optional< ReturnWindow > partial = timeWeightedReturn(partialSamples, 1000, 5000, 100);
+	QVERIFY(partial.has_value());
+	QVERIFY(partial->partialPeriod);
+	QVERIFY(qAbs(partial->returnPercent - 10.0) < 0.000001);
+
+	std::vector< ValuationSample > incomplete = partialSamples;
+	incomplete.at(1).pricedPositions          = 0;
+	QVERIFY(!timeWeightedReturn(incomplete, 1000, 5000, 100).has_value());
+	QVERIFY(!timeWeightedReturn(partialSamples, 1000, 10000, 100).has_value());
 }
 
 void TestStonksCommand::formatsLedgerPositionSummaries() {
