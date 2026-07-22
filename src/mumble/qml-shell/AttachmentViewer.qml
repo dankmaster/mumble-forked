@@ -37,6 +37,8 @@ ApplicationWindow {
 	readonly property bool originalLoading: originalPending && !originalTimedOut
 	readonly property bool originalFailed: (originalState === "error" || originalTimedOut)
 		&& fullSource.length === 0
+	readonly property real actualSizeZoom: Math.min(256, 1 / Math.max(0.0001, fitScale()))
+	readonly property real maximumZoom: Math.max(12, actualSizeZoom)
 	readonly property bool canSaveOriginal: attachment && (safeText(attachment.inlineToken, 128).length > 0
 		|| safeText(attachment.assetId !== undefined ? attachment.assetId : attachment.assetID, 128).length > 0)
 
@@ -130,19 +132,24 @@ ApplicationWindow {
 	}
 
 	function declaredImageSize() {
+		const sourceItem = viewer.managedAnimated ? animation : picture
+		const sourceSize = sourceItem.sourceSize
+		const sourceWidth = Math.max(0, Number(sourceSize.width || sourceItem.implicitWidth || 0))
+		const sourceHeight = Math.max(0, Number(sourceSize.height || sourceItem.implicitHeight || 0))
+		// Once the original has loaded, its decoded dimensions are authoritative.
+		// Attachment metadata remains the stable fit target while only the preview
+		// is available, avoiding a visible resize during the background swap.
+		if (fullSource.length > 0 && loadStatus === Image.Ready
+				&& sourceWidth > 0 && sourceHeight > 0)
+			return Qt.size(sourceWidth, sourceHeight)
 		const width = Math.max(0, Number(attachment ? attachment.width : 0))
 		const height = Math.max(0, Number(attachment ? attachment.height : 0))
 		if (width > 0 && height > 0)
 			return Qt.size(width, height)
-		const sourceItem = viewer.managedAnimated ? animation : picture
 		// Without an explicit sourceSize request Qt reports the provider's decoded
-		// pixel dimensions here. The C++ image pipeline already enforces its decode
-		// and memory limits before registering the image, so retaining that natural
-		// size gives old attachments correct fit and 1:1 behaviour without a second
-		// downsample in QML.
-		const sourceSize = sourceItem.sourceSize
-		return Qt.size(Math.max(1, Number(sourceSize.width || sourceItem.implicitWidth || 1)),
-			Math.max(1, Number(sourceSize.height || sourceItem.implicitHeight || 1)))
+		// pixel dimensions here. Retaining that natural size gives old attachments
+		// correct fit and 1:1 behaviour without a second downsample in QML.
+		return Qt.size(Math.max(1, sourceWidth), Math.max(1, sourceHeight))
 	}
 
 	function fitScale() {
@@ -166,12 +173,12 @@ ApplicationWindow {
 	}
 
 	function zoomBy(factor) {
-		zoom = Math.max(0.25, Math.min(12, zoom * factor))
+		zoom = Math.max(0.25, Math.min(maximumZoom, zoom * factor))
 		Qt.callLater(clampPan)
 	}
 
 	function setActualSize() {
-		zoom = Math.max(0.25, Math.min(12, 1 / Math.max(0.0001, fitScale())))
+		zoom = actualSizeZoom
 		Qt.callLater(clampPan)
 	}
 
@@ -499,7 +506,7 @@ ApplicationWindow {
 					ModernIconButton {
 						objectName: "attachmentViewerZoomIn"
 						iconName: "add"
-						enabled: viewer.zoom < 11.999
+						enabled: viewer.zoom < viewer.maximumZoom - 0.001
 						Accessible.name: qsTr("Zoom in")
 						onClicked: viewer.zoomBy(1.2)
 					}

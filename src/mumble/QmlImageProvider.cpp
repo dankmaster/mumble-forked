@@ -532,7 +532,8 @@ QString QmlImagePipeline::registerEncoded(const QByteArray &bytes, const QByteAr
 	QMutexLocker locker(&m_mutex);
 	if (m_registrationGenerationByKey.value(key) != registrationGeneration) return {};
 	if (const auto it = m_sources.constFind(key); it != m_sources.cend()
-		&& it->bytes == bytes && it->mimeType == mime && it->path.isEmpty() && it->image.isNull()) {
+		&& it->bytes == bytes && it->mimeType == mime && it->path.isEmpty()
+		&& it->image.isNull() && !it->fullResolution) {
 		touchSourceLocked(key);
 		return makeUrl(key, it->generation);
 	}
@@ -541,6 +542,58 @@ QString QmlImagePipeline::registerEncoded(const QByteArray &bytes, const QByteAr
 	source.mimeType    = mime;
 	source.storedBytes = bytes.size();
 	if (!insertSourceLocked(key, std::move(source))) return {};
+	return makeUrl(key, m_sources.value(key).generation);
+}
+
+QString QmlImagePipeline::registerFullResolutionEncoded(const QByteArray &bytes, const QByteArray &mimeType,
+														 const QString &stableKey, QSize *pixelSize) {
+	if (pixelSize) *pixelSize = {};
+	if (stableKey.trimmed().isEmpty() || bytes.isEmpty()
+		|| bytes.size() > m_limits.maxFullResolutionEncodedBytes
+		|| bytes.size() > m_limits.maxSourceBytes) {
+		return {};
+	}
+
+	QByteArray mime = mimeType.trimmed().toLower();
+	if (mime == QByteArrayLiteral("image/jpg")) mime = QByteArrayLiteral("image/jpeg");
+	if (!QList< QByteArray >{ "image/png", "image/jpeg", "image/webp", "image/gif" }.contains(mime)) return {};
+
+	QBuffer buffer;
+	buffer.setData(bytes);
+	if (!buffer.open(QIODevice::ReadOnly)) return {};
+	QImageReader reader(&buffer);
+	reader.setFormat(mime.mid(QByteArrayLiteral("image/").size()));
+	reader.setDecideFormatFromContent(false);
+	reader.setAutoTransform(true);
+	if (!reader.canRead()) return {};
+	const QSize sourceSize = reader.size();
+	if (!sourceSize.isValid() || sourceSize.width() <= 0 || sourceSize.height() <= 0
+		|| sourceSize.width() > m_limits.maxFullResolutionDimension
+		|| sourceSize.height() > m_limits.maxFullResolutionDimension
+		|| qint64(sourceSize.width()) * sourceSize.height() > m_limits.maxFullResolutionDecodedPixels) {
+		return {};
+	}
+
+	QString key;
+	const quint64 registrationGeneration = reserveRegistrationGeneration(stableKey, &key);
+	if (registrationGeneration == 0) return {};
+	QMutexLocker locker(&m_mutex);
+	if (m_registrationGenerationByKey.value(key) != registrationGeneration) return {};
+	if (const auto it = m_sources.constFind(key); it != m_sources.cend()
+		&& it->bytes == bytes && it->mimeType == mime && it->path.isEmpty()
+		&& it->image.isNull() && it->fullResolution) {
+		touchSourceLocked(key);
+		if (pixelSize) *pixelSize = sourceSize;
+		return makeUrl(key, it->generation);
+	}
+
+	Source source;
+	source.bytes          = bytes;
+	source.mimeType       = mime;
+	source.storedBytes    = bytes.size();
+	source.fullResolution = true;
+	if (!insertSourceLocked(key, std::move(source))) return {};
+	if (pixelSize) *pixelSize = sourceSize;
 	return makeUrl(key, m_sources.value(key).generation);
 }
 
@@ -869,7 +922,7 @@ QImage QmlImagePipeline::loadForTest(const QString &providerId, const QSize &req
 }
 
 QImage QmlImagePipeline::load(const QString &providerId, const QSize &requestedSize,
-							 const std::shared_ptr< std::atomic_bool > &cancelled) {
+								const std::shared_ptr< std::atomic_bool > &cancelled) {
 	const QUrl url(QStringLiteral("image://mumble/") + providerId);
 	const QString key = url.path().mid(1);
 	bool ok = false; const quint64 generation = QUrlQuery(url).queryItemValue(QStringLiteral("g")).toULongLong(&ok);
@@ -881,15 +934,21 @@ QImage QmlImagePipeline::load(const QString &providerId, const QSize &requestedS
 		touchSourceLocked(key);
 		if (cancelled && cancelled->load()) return {};
 	}
-	const auto boundedTargetSize = [this, &requestedSize](const QSize &sourceSize) {
+	const qint64 maximumEncodedBytes = source.fullResolution
+		? m_limits.maxFullResolutionEncodedBytes : m_limits.maxEncodedBytes;
+	const qint64 maximumDecodedPixels = source.fullResolution
+		? m_limits.maxFullResolutionDecodedPixels : m_limits.maxDecodedPixels;
+	const int maximumDimension = source.fullResolution
+		? m_limits.maxFullResolutionDimension : m_limits.maxDimension;
+	const auto boundedTargetSize = [&requestedSize, maximumDecodedPixels, maximumDimension](const QSize &sourceSize) {
 		if (!requestedSize.isValid() || !sourceSize.isValid()) return sourceSize;
 		QSize target = sourceSize;
 		target.scale(requestedSize, Qt::KeepAspectRatio);
 		// Image provider requests are render hints, not permission to allocate an
 		// arbitrarily large decoded surface. Never upscale sender-controlled data.
 		if (target.width() > sourceSize.width() || target.height() > sourceSize.height()) target = sourceSize;
-		if (target.width() > m_limits.maxDimension || target.height() > m_limits.maxDimension
-			|| qint64(target.width()) * target.height() > m_limits.maxDecodedPixels) {
+		if (target.width() > maximumDimension || target.height() > maximumDimension
+			|| qint64(target.width()) * target.height() > maximumDecodedPixels) {
 			return QSize();
 		}
 		return target;
@@ -924,14 +983,14 @@ QImage QmlImagePipeline::load(const QString &providerId, const QSize &requestedS
 	}
 	QByteArray bytes = source.bytes;
 	if (source.dataUrl) bytes = QByteArray::fromBase64(bytes, QByteArray::AbortOnBase64DecodingErrors);
-	if (!source.path.isEmpty()) { QFile file(source.path); if (!file.open(QFile::ReadOnly)) return {}; bytes = file.read(m_limits.maxEncodedBytes + 1); }
-	if (bytes.isEmpty() || bytes.size() > m_limits.maxEncodedBytes) return {};
+	if (!source.path.isEmpty()) { QFile file(source.path); if (!file.open(QFile::ReadOnly)) return {}; bytes = file.read(maximumEncodedBytes + 1); }
+	if (bytes.isEmpty() || bytes.size() > maximumEncodedBytes) return {};
 	QBuffer buffer(&bytes); buffer.open(QIODevice::ReadOnly); QImageReader reader(&buffer);
 	QByteArray format = source.mimeType.mid(QByteArrayLiteral("image/").size()); if (format == "jpg") format = "jpeg";
 	reader.setFormat(format); reader.setDecideFormatFromContent(false); reader.setAutoTransform(true);
 	const QSize sourceSize = reader.size();
-	if (!sourceSize.isValid() || sourceSize.width() > m_limits.maxDimension || sourceSize.height() > m_limits.maxDimension
-		|| qint64(sourceSize.width()) * sourceSize.height() > m_limits.maxDecodedPixels) return {};
+	if (!sourceSize.isValid() || sourceSize.width() > maximumDimension || sourceSize.height() > maximumDimension
+		|| qint64(sourceSize.width()) * sourceSize.height() > maximumDecodedPixels) return {};
 	const QSize targetSize = boundedTargetSize(sourceSize);
 	if (!targetSize.isValid()) return {};
 	const QString cacheKey = providerId + QStringLiteral("@%1x%2").arg(targetSize.width()).arg(targetSize.height());

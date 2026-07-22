@@ -18,6 +18,7 @@ private slots:
 	void rejectsEmptyKeysAndRefreshesLruRecency();
 	void rejectsStaleGenerationAndCancellation();
 	void registersDecodedImageWithoutUiThreadEncoding();
+	void preservesViewerPixelsOutsidePreviewDecodeBudget();
 	void boundsSourceStoreAndDataUrlPayloads();
 	void preservesMultiFrameGifThroughManagedAnimationSource();
 	void loadsLocalFileThroughPipeline();
@@ -113,6 +114,52 @@ void TestQmlImageProvider::registersDecodedImageWithoutUiThreadEncoding() {
 	QVERIFY(pipeline.registerImage(oversized, QStringLiteral("oversized")).isEmpty());
 	auto cancelled = std::make_shared< std::atomic_bool >(true);
 	QVERIFY(pipeline.loadForTest(providerId(second), {}, cancelled).isNull());
+}
+
+void TestQmlImageProvider::preservesViewerPixelsOutsidePreviewDecodeBudget() {
+	QmlImagePipeline::Limits limits;
+	limits.maxEncodedBytes = 1024 * 1024;
+	limits.maxDecodedPixels = 1024;
+	limits.maxDimension = 64;
+	limits.maxFullResolutionEncodedBytes = 1024 * 1024;
+	limits.maxFullResolutionDecodedPixels = 4096;
+	limits.maxFullResolutionDimension = 128;
+	limits.maxCacheBytes = 1024;
+	limits.maxSourceBytes = 2 * 1024 * 1024;
+	QmlImagePipeline pipeline(limits);
+
+	const QByteArray encoded = png(QSize(80, 40), Qt::darkGreen);
+	const QString preview = pipeline.registerEncoded(encoded, "image/png", "viewer:preview-budget");
+	QVERIFY(!preview.isEmpty());
+	QVERIFY(pipeline.loadForTest(providerId(preview)).isNull());
+
+	QSize pixelSize;
+	const QString full = pipeline.registerFullResolutionEncoded(
+		encoded, "image/png", "viewer:full-resolution", &pixelSize);
+	QVERIFY(!full.isEmpty());
+	QCOMPARE(pixelSize, QSize(80, 40));
+	const QImage decoded = pipeline.loadForTest(providerId(full));
+	QCOMPARE(decoded.size(), pixelSize);
+	QCOMPARE(decoded.pixelColor(0, 0), QColor(Qt::darkGreen));
+	QVERIFY(!pipeline.isCachedForTest(providerId(full)));
+
+	QmlImagePipeline::Limits rejectedLimits = limits;
+	rejectedLimits.maxFullResolutionDecodedPixels = 3000;
+	QmlImagePipeline rejectedPipeline(rejectedLimits);
+	QVERIFY(rejectedPipeline.registerFullResolutionEncoded(
+		encoded, "image/png", "viewer:over-full-resolution-budget").isEmpty());
+
+	// A common 12 MP camera original used to be reduced to roughly 8 MP before
+	// reaching QML. The viewer profile must retain its exact pixel dimensions.
+	QmlImagePipeline defaultPipeline;
+	const QByteArray cameraOriginal = png(QSize(4032, 3024), Qt::darkCyan);
+	QSize cameraPixelSize;
+	const QString cameraFull = defaultPipeline.registerFullResolutionEncoded(
+		cameraOriginal, "image/png", "viewer:camera-original", &cameraPixelSize);
+	QVERIFY(!cameraFull.isEmpty());
+	QCOMPARE(cameraPixelSize, QSize(4032, 3024));
+	QCOMPARE(defaultPipeline.loadForTest(providerId(cameraFull)).size(), cameraPixelSize);
+	QVERIFY(!defaultPipeline.isCachedForTest(providerId(cameraFull)));
 }
 
 void TestQmlImageProvider::boundsSourceStoreAndDataUrlPayloads() {

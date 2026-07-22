@@ -22,6 +22,9 @@ public:
 		qint64 maxEncodedBytes = 8 * 1024 * 1024;
 		qint64 maxDecodedPixels = 16 * 1024 * 1024;
 		int maxDimension = 8192;
+		qint64 maxFullResolutionEncodedBytes = 32 * 1024 * 1024;
+		qint64 maxFullResolutionDecodedPixels = 40 * 1024 * 1024;
+		int maxFullResolutionDimension = 16384;
 		qint64 maxCacheBytes = 32 * 1024 * 1024;
 		qint64 maxSourceBytes = 32 * 1024 * 1024;
 		int maxAnimatedFrames = 128;
@@ -34,6 +37,8 @@ public:
 	explicit QmlImagePipeline(Limits limits = {});
 	~QmlImagePipeline();
 	QString registerEncoded(const QByteArray &bytes, const QByteArray &mimeType, const QString &stableKey);
+	QString registerFullResolutionEncoded(const QByteArray &bytes, const QByteArray &mimeType,
+										  const QString &stableKey, QSize *pixelSize = nullptr);
 	QString registerDataUrl(const QString &dataUrl, const QString &stableKey);
 	QString registerImage(const QImage &image, const QString &stableKey);
 	QString registerAnimatedEncoded(const QByteArray &bytes, const QByteArray &mimeType, const QString &stableKey);
@@ -71,6 +76,7 @@ private:
 		QByteArray contentHash;
 		qint64 storedBytes = 0;
 		bool managedFile = false;
+		bool fullResolution = false;
 	};
 	struct CacheEntry { QImage image; qint64 bytes = 0; };
 	QImage load(const QString &providerId, const QSize &requestedSize,

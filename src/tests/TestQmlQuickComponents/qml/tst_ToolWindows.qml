@@ -492,6 +492,33 @@ TestCase {
 		tool.destroy()
 	}
 
+	function test_attachmentViewerUsesLoadedOriginalPixelsForFitAndActualSize() {
+		const tool = createTool("qrc:/qml-shell/AttachmentViewer.qml", {
+			"attachment": {
+				"url": "image://mumble/viewer-full-resolution?g=1",
+				"thumbnailUrl": "image://mumble/viewer-preview?g=1",
+				"alt": "Full-resolution fixture",
+				"assetId": "42",
+				"width": 1600,
+				"height": 900,
+				"originalState": "ready"
+			}
+		})
+		try {
+			const picture = findChild(tool.contentItem, "attachmentViewerImage")
+			verify(picture !== null)
+			tryCompare(picture, "status", Image.Ready)
+			const pixels = tool.declaredImageSize()
+			compare(pixels.width, 96)
+			compare(pixels.height, 64)
+			compare(tool.fitScale(), 1)
+			tool.setActualSize()
+			compare(tool.zoom, 1)
+		} finally {
+			tool.destroy()
+		}
+	}
+
 	function test_imageViewerRejectsRemoteSourcesAndShowsKeyboardFocus() {
 		dialogState.setSpecialState("imageViewer", {
 			"imageViewer": {
