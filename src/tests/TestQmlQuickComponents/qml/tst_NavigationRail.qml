@@ -70,7 +70,7 @@ TestCase {
 			})
 			append({
 				"stableId": "room-activity", "scopeToken": "-2:0", "title": "Activity",
-				"subtitle": "Server notices", "kind": "text", "sectionKind": "text", "selected": false,
+				"subtitle": "Server notices", "kind": "text", "sectionKind": "tool", "selected": false,
 				"depth": 0, "unreadCount": 0, "status": "",
 				"payload": { "rowKind": "room", "source": { "actions": [] } }
 			})
@@ -1089,15 +1089,15 @@ TestCase {
 		verify(navigationList !== null)
 		compare(navigationList.section.property, "")
 		const voiceSection = findChild(loader.item, "navigationSection_voice")
-		const textSection = findChild(loader.item, "navigationSection_text")
+		const toolSection = findChild(loader.item, "navigationSection_tool")
 		const directSection = findChild(loader.item, "navigationSection_direct")
 		verify(voiceSection !== null)
-		verify(textSection !== null)
+		verify(toolSection !== null)
 		verify(directSection !== null)
 		compare(voiceSection.Accessible.name, "VOICE ROOMS · 2")
-		compare(textSection.Accessible.name, "TEXT ROOMS · 1")
+		compare(toolSection.Accessible.name, "TOOLS · 1")
 		compare(directSection.Accessible.name, "DIRECT MESSAGES · 1")
-		for (const kind of [ "voice", "text", "direct" ]) {
+		for (const kind of [ "voice", "tool", "direct" ]) {
 			const visualLabel = findChild(loader.item, "navigationSectionLabel_" + kind)
 			verify(visualLabel !== null)
 			verify(visualLabel.Accessible.ignored)
@@ -1105,7 +1105,7 @@ TestCase {
 			compare(String(visualLabel.color), String(Theme.withAlpha(Theme.accent, 0.76)))
 		}
 		compare(findChild(loader.item, "navigationSectionLabel_voice").text, "VOICE ROOMS")
-		compare(findChild(loader.item, "navigationSectionLabel_text").text, "TEXT ROOMS")
+		compare(findChild(loader.item, "navigationSectionLabel_tool").text, "TOOLS")
 
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const participant = findChild(loader.item, "navigationParticipant_42")
@@ -1142,8 +1142,8 @@ TestCase {
 		const rail = loader.item
 		const navigationList = findChild(rail, "navigationRooms")
 		const voiceSection = findChild(rail, "navigationSection_voice")
-		const textSection = findChild(rail, "navigationSection_text")
-		verify(navigationList !== null && voiceSection !== null && textSection !== null)
+		const toolSection = findChild(rail, "navigationSection_tool")
+		verify(navigationList !== null && voiceSection !== null && toolSection !== null)
 
 		rail.visible = false
 		testCase.width = 420
@@ -1151,8 +1151,8 @@ TestCase {
 		rail.visible = true
 		tryVerify(function() {
 			const voiceOrigin = voiceSection.mapToItem(navigationList, 0, 0)
-			const textOrigin = textSection.mapToItem(navigationList, 0, 0)
-			return textOrigin.y >= voiceOrigin.y + voiceSection.height
+			const toolOrigin = toolSection.mapToItem(navigationList, 0, 0)
+			return toolOrigin.y >= voiceOrigin.y + voiceSection.height
 		}, 5000, "Section headings remained stacked after the rail was restored")
 		testCase.width = 340
 		testCase.height = 620

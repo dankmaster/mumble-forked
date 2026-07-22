@@ -208,6 +208,7 @@ class ActiveScopeController final : public QObject {
 	Q_PROPERTY(QString kindLabel READ kindLabel WRITE setKindLabel NOTIFY kindLabelChanged)
 	Q_PROPERTY(QString composerPlaceholder READ composerPlaceholder WRITE setComposerPlaceholder NOTIFY composerPlaceholderChanged)
 	Q_PROPERTY(QString composerHint READ composerHint WRITE setComposerHint NOTIFY composerHintChanged)
+	Q_PROPERTY(bool activity READ activity WRITE setActivity NOTIFY activityChanged)
 	Q_PROPERTY(bool canSend READ canSend WRITE setCanSend NOTIFY canSendChanged)
 	Q_PROPERTY(bool hasPendingReply READ hasPendingReply WRITE setHasPendingReply NOTIFY hasPendingReplyChanged)
 	Q_PROPERTY(QString replyActor READ replyActor WRITE setReplyActor NOTIFY replyActorChanged)
@@ -229,6 +230,7 @@ public:
 	QString kindLabel() const;
 	QString composerPlaceholder() const;
 	QString composerHint() const;
+	bool activity() const;
 	bool canSend() const;
 	bool hasPendingReply() const;
 	QString replyActor() const;
@@ -247,6 +249,7 @@ public:
 	void setKindLabel(const QString &value);
 	void setComposerPlaceholder(const QString &value);
 	void setComposerHint(const QString &value);
+	void setActivity(bool value);
 	void setCanSend(bool value);
 	void setHasPendingReply(bool value);
 	void setReplyActor(const QString &value);
@@ -268,6 +271,7 @@ signals:
 	void kindLabelChanged();
 	void composerPlaceholderChanged();
 	void composerHintChanged();
+	void activityChanged();
 	void canSendChanged();
 	void hasPendingReplyChanged();
 	void replyActorChanged();
@@ -288,6 +292,7 @@ private:
 	QString m_kindLabel;
 	QString m_composerPlaceholder;
 	QString m_composerHint;
+	bool m_activity        = false;
 	bool m_canSend = false;
 	bool m_hasPendingReply = false;
 	QString m_replyActor;

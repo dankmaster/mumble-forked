@@ -1852,6 +1852,9 @@ QString ActiveScopeController::description() const { return m_description; }
 QString ActiveScopeController::kindLabel() const { return m_kindLabel; }
 QString ActiveScopeController::composerPlaceholder() const { return m_composerPlaceholder; }
 QString ActiveScopeController::composerHint() const { return m_composerHint; }
+bool ActiveScopeController::activity() const {
+	return m_activity;
+}
 bool ActiveScopeController::canSend() const { return m_canSend; }
 bool ActiveScopeController::hasPendingReply() const { return m_hasPendingReply; }
 QString ActiveScopeController::replyActor() const { return m_replyActor; }
@@ -1880,6 +1883,9 @@ void ActiveScopeController::setComposerPlaceholder(const QString &value) {
 }
 void ActiveScopeController::setComposerHint(const QString &value) {
 	SET_SCOPE_VALUE(m_composerHint, composerHintChanged);
+}
+void ActiveScopeController::setActivity(bool value) {
+	SET_SCOPE_VALUE(m_activity, activityChanged);
 }
 void ActiveScopeController::setCanSend(bool value) { SET_SCOPE_VALUE(m_canSend, canSendChanged); }
 void ActiveScopeController::setHasPendingReply(bool value) {
@@ -1913,6 +1919,7 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setKindLabel(state.value(QStringLiteral("kindLabel")).toString());
 	setComposerPlaceholder(state.value(QStringLiteral("composerPlaceholder")).toString());
 	setComposerHint(state.value(QStringLiteral("composerHint")).toString());
+	setActivity(state.value(QStringLiteral("activity")).toBool());
 	setCanSend(state.value(QStringLiteral("canSend")).toBool());
 	setHasPendingReply(state.value(QStringLiteral("hasPendingReply")).toBool());
 	setReplyActor(state.value(QStringLiteral("replyActor")).toString());
@@ -2279,8 +2286,8 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 			 { QStringLiteral("pathLabel"), room.value(QStringLiteral("pathLabel")) },
 			 { QStringLiteral("kindLabel"), room.value(QStringLiteral("kindLabel")) },
 			 { QStringLiteral("kind"), kind },
-			 { QStringLiteral("selected"),
-			   room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))) },
+			 { QStringLiteral("sectionKind"), room.value(QStringLiteral("sectionKind"), kind) },
+			 { QStringLiteral("selected"), room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))) },
 			 { QStringLiteral("status"), joined ? QStringLiteral("joined") : QString() },
 			 { QStringLiteral("joined"), joined },
 			 { QStringLiteral("canJoin"), canJoin },
@@ -2645,7 +2652,10 @@ QVariantMap NavigationRailModel::navigationRoomRow(const QVariantMap &room, cons
 	const bool expanded = kind != QLatin1String("voice")
 		|| isRoomExpanded(row.value(QStringLiteral("scopeToken")).toString());
 	row.insert(QStringLiteral("rowKind"), QStringLiteral("room"));
-	row.insert(QStringLiteral("sectionKind"), kind);
+	const QString requestedSection = row.value(QStringLiteral("sectionKind")).toString().trimmed().toLower();
+	row.insert(QStringLiteral("sectionKind"), kind == QLatin1String("text") && requestedSection == QLatin1String("tool")
+												  ? QStringLiteral("tool")
+												  : kind);
 	row.insert(QStringLiteral("participantCount"), participantCount);
 	row.insert(QStringLiteral("talkingParticipantCount"), talkingCount);
 	row.insert(QStringLiteral("talkingParticipantLabels"), talkingLabels);
@@ -2854,7 +2864,6 @@ void NavigationRailModel::synchronizeAllRows() {
 		QVariantMap roomRow = navigationRoomRow(room, kind);
 		if (roomRow.isEmpty()) return;
 		roomRow.insert(QStringLiteral("rowKind"), QStringLiteral("room"));
-		roomRow.insert(QStringLiteral("sectionKind"), kind);
 		rows.push_back(roomRow);
 
 		if (kind != QLatin1String("voice")) return;
@@ -2885,8 +2894,20 @@ void NavigationRailModel::synchronizeAllRows() {
 	rows.reserve(m_voiceRoomStates.size() + m_textRoomStates.size() + m_directMessageStates.size());
 	for (const QVariant &entry : std::as_const(m_voiceRoomStates))
 		appendRoom(entry.toMap(), QStringLiteral("voice"));
-	for (const QVariant &entry : std::as_const(m_textRoomStates))
+	for (const QVariant &entry : std::as_const(m_textRoomStates)) {
+		if (entry.toMap().value(QStringLiteral("sectionKind")).toString().trimmed().toLower()
+			== QLatin1String("tool")) {
+			continue;
+		}
 		appendRoom(entry.toMap(), QStringLiteral("text"));
+	}
+	for (const QVariant &entry : std::as_const(m_textRoomStates)) {
+		if (entry.toMap().value(QStringLiteral("sectionKind")).toString().trimmed().toLower()
+			!= QLatin1String("tool")) {
+			continue;
+		}
+		appendRoom(entry.toMap(), QStringLiteral("text"));
+	}
 	for (const QVariant &entry : std::as_const(m_directMessageStates))
 		appendRoom(entry.toMap(), QStringLiteral("direct"));
 	synchronizeRows(rows);

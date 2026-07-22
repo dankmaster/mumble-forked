@@ -25,6 +25,7 @@ private slots:
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
 	void navigationRailFlattensRoomsAndParticipantsIncrementally();
+	void navigationRailGroupsToolTextChannelsAfterRegularTextRooms();
 	void navigationRailPresentationStateStaysStableAndIncremental();
 	void roomRowsExposeActionsOnlySource();
 	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
@@ -254,6 +255,7 @@ void TestQmlClientModels::stableRowsUpdateWithoutReset() {
 void TestQmlClientModels::activeScopeAppliesTypedState() {
 	ActiveScopeController scope;
 	QSignalSpy labelSpy(&scope, &ActiveScopeController::labelChanged);
+	QSignalSpy activitySpy(&scope, &ActiveScopeController::activityChanged);
 	QSignalSpy sendSpy(&scope, &ActiveScopeController::canSendChanged);
 	QSignalSpy replySpy(&scope, &ActiveScopeController::hasPendingReplyChanged);
 	QSignalSpy attachFilesSpy(&scope, &ActiveScopeController::canAttachFilesChanged);
@@ -269,17 +271,22 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 					   { QStringLiteral("description"), QStringLiteral("General voice room") },
 					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
 					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
-					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
+					   { QStringLiteral("activity"), true },
+					   { QStringLiteral("canSend"), true },
+					   { QStringLiteral("hasPendingReply"), true },
 					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
 					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
-					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canAttachFiles"), true },
+					   { QStringLiteral("canAttachImages"), true },
+					   { QStringLiteral("canAttachFiles"), true },
 					   { QStringLiteral("canLoadOlder"), true },
-					   { QStringLiteral("unreadCount"), 7 }, { QStringLiteral("canMarkRead"), true },
+					   { QStringLiteral("unreadCount"), 7 },
+					   { QStringLiteral("canMarkRead"), true },
 					   { QStringLiteral("loading"), true },
 					   { QStringLiteral("loadingState"), QStringLiteral("older") },
 					   { QStringLiteral("screenShare"), screenShare } });
 	QCOMPARE(scope.scopeToken(), QStringLiteral("channel:42"));
 	QCOMPARE(scope.label(), QStringLiteral("Lobby"));
+	QVERIFY(scope.activity());
 	QVERIFY(scope.canSend());
 	QVERIFY(scope.hasPendingReply());
 	QCOMPARE(scope.replyActor(), QStringLiteral("Alice"));
@@ -293,6 +300,7 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	QCOMPARE(scope.loadingState(), QStringLiteral("older"));
 	QCOMPARE(scope.screenShare(), screenShare);
 	QCOMPARE(labelSpy.count(), 1);
+	QCOMPARE(activitySpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
 	QCOMPARE(replySpy.count(), 1);
 	QCOMPARE(attachFilesSpy.count(), 1);
@@ -307,15 +315,19 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 					   { QStringLiteral("description"), QStringLiteral("General voice room") },
 					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
 					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
-					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
+					   { QStringLiteral("activity"), true },
+					   { QStringLiteral("canSend"), true },
+					   { QStringLiteral("hasPendingReply"), true },
 					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
 					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
-					   { QStringLiteral("canAttachImages"), true }, { QStringLiteral("canAttachFiles"), true },
+					   { QStringLiteral("canAttachImages"), true },
+					   { QStringLiteral("canAttachFiles"), true },
 					   { QStringLiteral("canLoadOlder"), true },
 					   { QStringLiteral("loading"), true },
 					   { QStringLiteral("loadingState"), QStringLiteral("older") },
 					   { QStringLiteral("screenShare"), screenShare } });
 	QCOMPARE(labelSpy.count(), 1);
+	QCOMPARE(activitySpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
 	QCOMPARE(replySpy.count(), 1);
 	QCOMPARE(attachFilesSpy.count(), 1);
@@ -685,6 +697,34 @@ void TestQmlClientModels::navigationRailFlattensRoomsAndParticipantsIncrementall
 	QCOMPARE(navigation.rowForStableId(QStringLiteral("user:42")), -1);
 	QCOMPARE(navigation.rowCount(), 5);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::navigationRailGroupsToolTextChannelsAfterRegularTextRooms() {
+	NavigationRailModel navigation;
+	navigation.replaceRoomStates({ QVariantMap{ { QStringLiteral("token"), QStringLiteral("channel:1") },
+												{ QStringLiteral("label"), QStringLiteral("Landing") } } },
+								 { QVariantMap{ { QStringLiteral("token"), QStringLiteral("-2:0") },
+												{ QStringLiteral("label"), QStringLiteral("Activity") },
+												{ QStringLiteral("sectionKind"), QStringLiteral("tool") } },
+								   QVariantMap{ { QStringLiteral("token"), QStringLiteral("text:7") },
+												{ QStringLiteral("label"), QStringLiteral("#Chat") } },
+								   QVariantMap{ { QStringLiteral("token"), QStringLiteral("text:9") },
+												{ QStringLiteral("label"), QStringLiteral("#TestStuff") },
+												{ QStringLiteral("sectionKind"), QStringLiteral("tool") } } });
+
+	QCOMPARE(navigation.rowCount(), 4);
+	QCOMPARE(navigation.get(0).value(QStringLiteral("sectionKind")).toString(), QStringLiteral("voice"));
+	QCOMPARE(navigation.get(1).value(QStringLiteral("title")).toString(), QStringLiteral("#Chat"));
+	QCOMPARE(navigation.get(1).value(QStringLiteral("sectionKind")).toString(), QStringLiteral("text"));
+	QCOMPARE(navigation.get(2).value(QStringLiteral("title")).toString(), QStringLiteral("Activity"));
+	QCOMPARE(navigation.get(2).value(QStringLiteral("sectionKind")).toString(), QStringLiteral("tool"));
+	QCOMPARE(navigation.get(3).value(QStringLiteral("title")).toString(), QStringLiteral("#TestStuff"));
+	QCOMPARE(navigation.get(3).value(QStringLiteral("kind")).toString(), QStringLiteral("text"));
+	QCOMPARE(navigation.get(3).value(QStringLiteral("sectionKind")).toString(), QStringLiteral("tool"));
+
+	navigation.selectScopeFromRail(QStringLiteral("text:9"), QStringLiteral("text"));
+	QVERIFY(navigation.get(3).value(QStringLiteral("selected")).toBool());
+	QVERIFY(!navigation.get(1).value(QStringLiteral("selected")).toBool());
 }
 
 void TestQmlClientModels::navigationRailPresentationStateStaysStableAndIncremental() {
