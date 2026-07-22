@@ -369,6 +369,7 @@ public:
 	};
 	QHash< unsigned int, ChatHistoryLatestPageCacheEntry > qhChatHistoryLatestPageCache;
 	quint64 uiChatHistoryLatestPageCacheAccessSerial = 0;
+	quint64 m_serverLogSequence = 0;
 
 	struct ScreenShareStream {
 		QString qsStreamID;
@@ -573,6 +574,10 @@ public:
 									   ServerUser *except = nullptr);
 	void syncScreenShareStateForUser(ServerUser *user, Channel *previousChannel = nullptr);
 	void syncWatchTogetherStateForUser(ServerUser *user);
+	bool serverLogStreamAllowedForUser(ServerUser *user);
+	void syncServerLogStateForUser(ServerUser *user, bool force = false);
+	void broadcastServerLogEntry(const QString &text, qint64 timestampMs);
+	quint64 nextServerLogSequence();
 	void removeUserFromWatchTogetherSessions(ServerUser *user, Channel *channel, const QString &reason);
 	bool stopScreenShare(const QString &streamID, unsigned int actorSession,
 						 MumbleProto::ScreenShareLifecycleState state, const QString &reason);

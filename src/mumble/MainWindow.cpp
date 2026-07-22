@@ -829,6 +829,11 @@ bool modernShellToolsAclSupported() {
 												MumbleProto::ForkFeatureToolsAcl);
 }
 
+bool modernShellServerLogStreamSupported() {
+	return Mumble::ForkFeatures::serverAllowsClientFeature(
+		Global::get().qlSupportedForkFeatures, MumbleProto::ForkFeatureServerLogStream);
+}
+
 bool modernShellToolsAllowed() {
 	return modernShellToolsAclSupported() && Global::get().pPermissions.testFlag(ChanACL::UseTools);
 }
@@ -24537,7 +24542,7 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	QString scopeDescription = target.description.trimmed();
 	if (scopeDescription.isEmpty()) {
 		if (target.serverLog) {
-			scopeDescription = tr("Server log, connection status, notices, and diagnostics.");
+			scopeDescription = tr("Live Murmur server log and recent server-log history.");
 		} else if (!connected) {
 			scopeDescription = tr("Connect to a server to load rooms and history.");
 		} else if (target.directMessage) {
@@ -24554,7 +24559,7 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	if (!connected || !target.valid) {
 		composerPlaceholder = tr("Connect to chat");
 	} else if (target.serverLog) {
-		composerPlaceholder = tr("Read-only activity");
+		composerPlaceholder = tr("Read-only server log");
 	} else if (target.directMessage && target.user) {
 		composerPlaceholder = tr("Write to %1...").arg(target.user->qsName);
 	} else if (target.scope == MumbleProto::TextChannel || target.scope == MumbleProto::Channel) {
@@ -24629,9 +24634,10 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	activeScope.insert(QStringLiteral("canAttachImages"),
 					   canSendToTarget && (supportsNativeAttachments || Global::get().bAllowHTML));
 	activeScope.insert(QStringLiteral("canAttachFiles"), canSendToTarget && supportsNativeAttachments);
-	activeScope.insert(QStringLiteral("emptyCopy"),
-					   target.readOnly ? tr("This conversation is read-only.")
-									   : tr("Messages will appear here once the selected room has activity."));
+	activeScope.insert(QStringLiteral("emptyCopy"), target.serverLog
+		? tr("No server log entries are available yet.")
+		: (target.readOnly ? tr("This conversation is read-only.")
+						   : tr("Messages will appear here once the selected room has activity.")));
 	activeScope.insert(QStringLiteral("scrollToBottom"), true);
 	activeScope.insert(QStringLiteral("autoMarkRead"), false);
 	activeScope.insert(QStringLiteral("hasPendingReply"), m_pendingPersistentChatReply.has_value());
@@ -25229,7 +25235,8 @@ QVariantMap MainWindow::buildQmlRoomState() {
 				   && static_cast< int >(target.scope) == scopeValue && target.scopeID == scopeID);
 	};
 	const QStringList toolTextChannelSelectors = modernShellToolTextChannelSelectors();
-	const bool canUseTools = modernShellToolsAllowed();
+	const bool canUseTools     = modernShellToolsAllowed();
+	const bool canUseServerLog = modernServerLogAvailable();
 	const auto appendTextRoom = [&](const int scopeValue, const unsigned int scopeID, const QString &roomLabel,
 									const QString &description, const QString &kindLabel,
 									const MumbleProto::ChatScope unreadScope = MumbleProto::Channel,
@@ -25260,9 +25267,9 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		textRooms.push_back(room);
 	};
 
-	if (canUseTools) {
+	if (canUseServerLog) {
 		appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
-					   tr("Server log, connection status, notices, and client diagnostics."), tr("Activity"),
+					   tr("Live Murmur server log and recent server-log history."), tr("Activity"),
 					   MumbleProto::Channel, false, QStringLiteral("tool"));
 	}
 
@@ -25354,11 +25361,15 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	return patch;
 }
 
-QVariantMap modernServerLogMessageState(const QString &messageKey, const QString &html, const QString &title) {
+QVariantMap modernServerLogMessageState(const quint64 sequence, const qint64 timestampMs, const QString &text) {
 	QVariantMap message;
-	message.insert(QStringLiteral("messageKey"), messageKey);
-	message.insert(QStringLiteral("actor"), title);
-	message.insert(QStringLiteral("bodyText"), multilinePlainTextFromHtml(html));
+	message.insert(QStringLiteral("messageKey"),
+				   QStringLiteral("server-log:%1").arg(static_cast< qulonglong >(sequence)));
+	message.insert(QStringLiteral("actor"), QObject::tr("Server"));
+	message.insert(QStringLiteral("bodyText"), text);
+	message.insert(QStringLiteral("createdAtMs"), timestampMs);
+	message.insert(QStringLiteral("timeLabel"), timestampMs > 0
+		? QDateTime::fromMSecsSinceEpoch(timestampMs).toString(QStringLiteral("HH:mm:ss")) : QString());
 	message.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
 	message.insert(QStringLiteral("system"), true);
 	message.insert(QStringLiteral("canReply"), false);
@@ -25367,11 +25378,15 @@ QVariantMap modernServerLogMessageState(const QString &messageKey, const QString
 	return message;
 }
 
+bool MainWindow::modernServerLogAvailable() const {
+	return m_modernServerLogAuthorized && modernShellServerLogStreamSupported();
+}
+
 void MainWindow::publishModernShellServerLogUpdate(const PersistentChatTarget &target) {
 	if (modernShellStaticModeEnabled()) {
 		return;
 	}
-	if (!target.serverLog && !target.ephemeralTextPath) {
+	if (!target.serverLog) {
 		return;
 	}
 
@@ -25385,7 +25400,7 @@ void MainWindow::publishModernShellServerLogReset(const PersistentChatTarget &ta
 	if (modernShellStaticModeEnabled()) {
 		return;
 	}
-	if (!target.serverLog && !target.ephemeralTextPath) {
+	if (!target.serverLog) {
 		return;
 	}
 
@@ -25395,44 +25410,96 @@ void MainWindow::publishModernShellServerLogReset(const PersistentChatTarget &ta
 	mumble::chatperf::recordValue("modern.server_log.reset", 1);
 }
 
-void MainWindow::appendModernServerLogEntry(const QString &html) {
-	if (html.trimmed().isEmpty()) {
+void MainWindow::clearModernServerLogState() {
+	if (!m_modernServerLogAuthorized && m_modernServerLogEntries.isEmpty()) {
 		return;
 	}
-
+	m_modernServerLogAuthorized = false;
+	m_modernServerLogEntries.clear();
 	if (++m_modernShellServerLogRevision == 0) {
 		m_modernShellServerLogRevision = 1;
 	}
+}
 
-	const QVariantMap message = modernServerLogMessageState(
-		QString::fromLatin1("server-log:%1").arg(static_cast< qulonglong >(m_modernShellServerLogRevision)),
-		html, tr("Server log"));
-	m_modernServerLogEntries.push_back(message);
-	bool trimmed = false;
-	while (m_modernServerLogMaximumEntries > 0
-		   && m_modernServerLogEntries.size() > m_modernServerLogMaximumEntries) {
+void MainWindow::applyModernServerLogState(const MumbleProto::ServerLogState &state) {
+	constexpr int ModernServerLogStateMaxEntries = 500;
+	constexpr int ModernServerLogHardMaximumEntries = 2000;
+
+	const bool activitySelected = qmlSelectionState()
+		&& qmlSelectionState()->scopeValue() == LocalServerLogScope;
+	const bool authorized = modernShellServerLogStreamSupported() && state.authorized();
+	const bool authorizationChanged = m_modernServerLogAuthorized != authorized;
+	bool resetModel = state.reset() || !authorized || authorizationChanged;
+	bool changed    = authorizationChanged;
+	QVariantList appendedMessages;
+
+	if (resetModel && !m_modernServerLogEntries.isEmpty()) {
+		m_modernServerLogEntries.clear();
+		changed = true;
+	}
+	m_modernServerLogAuthorized = authorized;
+
+	if (authorized) {
+		QHash< QString, int > rowByKey;
+		for (int row = 0; row < m_modernServerLogEntries.size(); ++row) {
+			rowByKey.insert(m_modernServerLogEntries.at(row).toMap().value(QStringLiteral("messageKey")).toString(), row);
+		}
+
+		const int entryCount = std::min(state.entries_size(), ModernServerLogStateMaxEntries);
+		for (int index = 0; index < entryCount; ++index) {
+			const MumbleProto::ServerLogEntry &entry = state.entries(index);
+			if (!entry.has_sequence() || entry.sequence() == 0 || !entry.has_text()) {
+				continue;
+			}
+			const quint64 timestampValue = entry.has_timestamp_ms() ? entry.timestamp_ms() : 0;
+			const qint64 timestampMs = timestampValue <= static_cast< quint64 >(std::numeric_limits< qint64 >::max())
+				? static_cast< qint64 >(timestampValue) : 0;
+			const QVariantMap message = modernServerLogMessageState(entry.sequence(), timestampMs, u8(entry.text()));
+			const QString messageKey  = message.value(QStringLiteral("messageKey")).toString();
+			const auto existing       = rowByKey.constFind(messageKey);
+			if (existing != rowByKey.cend()) {
+				if (m_modernServerLogEntries.at(existing.value()).toMap() != message) {
+					m_modernServerLogEntries[existing.value()] = message;
+					resetModel = true;
+					changed    = true;
+				}
+				continue;
+			}
+
+			rowByKey.insert(messageKey, m_modernServerLogEntries.size());
+			m_modernServerLogEntries.push_back(message);
+			appendedMessages.push_back(message);
+			changed = true;
+		}
+	}
+
+	const int configuredLimit = m_modernServerLogMaximumEntries > 0
+		? std::min(m_modernServerLogMaximumEntries, ModernServerLogHardMaximumEntries)
+		: ModernServerLogHardMaximumEntries;
+	while (m_modernServerLogEntries.size() > configuredLimit) {
 		m_modernServerLogEntries.removeFirst();
-		trimmed = true;
+		resetModel = true;
+		changed    = true;
 	}
 
+	if (changed && ++m_modernShellServerLogRevision == 0) {
+		m_modernShellServerLogRevision = 1;
+	}
+
+	scheduleQmlRoomStateUpdate();
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	if (!target.serverLog && !target.ephemeralTextPath) {
-		return;
+	if (target.serverLog && m_qmlShellHost) {
+		m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
+		if (resetModel) {
+			m_qmlShellHost->chatModel()->replaceMessages(m_modernServerLogEntries);
+		} else if (!appendedMessages.isEmpty()) {
+			const int appended = m_qmlShellHost->chatModel()->appendMessages(appendedMessages);
+			mumble::chatperf::recordValue("modern.server_log.append.entries", appended);
+		}
+	} else if (activitySelected && m_qmlShellHost) {
+		m_qmlShellHost->activeScopeController()->applyState(buildQmlActiveScopeState(target));
+		m_qmlShellHost->chatModel()->replaceMessages({});
 	}
-
-	if (modernShellStaticModeEnabled()) {
-		return;
-	}
-
-	if (trimmed) {
-		publishModernShellServerLogReset(target);
-		return;
-	}
-
-	if (!m_qmlShellHost) return;
-	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
-	const int appended = m_qmlShellHost->chatModel()->appendMessages(QVariantList { message });
-	mumble::chatperf::recordValue("modern.server_log.append.entries", appended);
 }
 
 void MainWindow::flushQmlRoomStateUpdates() {
@@ -26593,7 +26660,8 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		configuredToolTextChannel = channel != m_persistentTextChannels.cend()
 			&& modernShellTextChannelIsTool(modernShellToolTextChannelSelectors(), channel->name, scopeID);
 	}
-	if ((scopeValue == LocalServerLogScope || configuredToolTextChannel) && !modernShellToolsAllowed()) {
+	if ((scopeValue == LocalServerLogScope && !modernServerLogAvailable())
+		|| (configuredToolTextChannel && !modernShellToolsAllowed())) {
 		return false;
 	}
 
@@ -29667,7 +29735,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		activity.scope       = MumbleProto::Aggregate;
 		activity.scopeID     = 0;
 		activity.label       = tr("Activity");
-		activity.description = tr("Server log, connection status, notices, and client diagnostics.");
+		activity.description = tr("Live Murmur server log and recent server-log history.");
 		return activity;
 	};
 
@@ -29682,9 +29750,11 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		? static_cast< unsigned int >(selectedScopeIDValue) : 0;
 
 	if (selectedScopeValue.has_value() && *selectedScopeValue == LocalServerLogScope) {
-		if (connected && !modernShellToolsAllowed()) {
+		if (!modernServerLogAvailable()) {
 			target.label       = tr("No conversation selected");
-			target.description = tr("Ask a server administrator for the Use tools permission.");
+			target.description = connected
+				? tr("Ask a server administrator for the Use tools permission.")
+				: tr("Connect to a server to open Activity.");
 			return target;
 		}
 		return activityTarget();
@@ -29711,7 +29781,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 	}
 
 	if (!selectedScopeValue.has_value()) {
-		if (!connected) {
+		if (!connected && modernServerLogAvailable()) {
 			return activityTarget();
 		}
 		target.label = tr("No conversation selected");
@@ -29720,7 +29790,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 
 	const int scopeValue = *selectedScopeValue;
 	if (scopeValue == LocalServerLogScope) {
-		return activityTarget();
+		return modernServerLogAvailable() ? activityTarget() : target;
 	}
 	if (connected && scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
 		const auto channel = m_persistentTextChannels.constFind(selectedScopeID);
@@ -40441,6 +40511,7 @@ void MainWindow::serverConnected() {
 	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	m_reconnectSoundBlocker.reset();
 	clearQmlConnectionState();
+	clearModernServerLogState();
 
 	Global::get().uiSession                  = 0;
 	Global::get().pPermissions               = ChanACL::None;
@@ -40612,6 +40683,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 									  .arg(static_cast< int >(err))
 									  .arg(reason));
 	clearQmlConnectionState();
+	clearModernServerLogState();
 	// clear ChannelListener
 	Global::get().channelListenerManager->clear();
 	clearUserTextureRequests();

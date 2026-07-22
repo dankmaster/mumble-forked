@@ -80,7 +80,8 @@
 	PROCESS_MUMBLE_TCP_MESSAGE(ChatEmbedAssistResult, 55) \
 	PROCESS_MUMBLE_TCP_MESSAGE(FeedbackReport, 56)       \
 	PROCESS_MUMBLE_TCP_MESSAGE(FeedbackReportState, 57)  \
-	PROCESS_MUMBLE_TCP_MESSAGE(ChatHistoryWarmupRequest, 58)
+	PROCESS_MUMBLE_TCP_MESSAGE(ChatHistoryWarmupRequest, 58) \
+	PROCESS_MUMBLE_TCP_MESSAGE(ServerLogState, 59)
 
 /**
  * "X-macro" for all Mumble Protobuf UDP messages types.

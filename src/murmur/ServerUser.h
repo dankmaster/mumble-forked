@@ -146,6 +146,10 @@ public:
 	/// the token needed for the ChatSend that references it.
 	LeakyBucket m_chatAttachmentUploadBucket;
 	QElapsedTimer m_feedbackReportTimer;
+	/// True only after the server has negotiated and authorized this connection
+	/// for the server-log stream. ACL invalidation updates it before later log
+	/// records are broadcast.
+	bool bServerLogStreamActive = false;
 
 	int iLastPermissionCheck;
 	QMap< int, unsigned int > qmPermissionSent;

@@ -1079,10 +1079,11 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 
 	const QString roomState = methodBody(
 		QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
-		QStringLiteral("void MainWindow::appendModernServerLogEntry"));
+		QStringLiteral("QVariantMap modernServerLogMessageState"));
 	QVERIFY(!roomState.isEmpty());
 	QVERIFY(roomState.contains(QStringLiteral("const bool canUseTools = modernShellToolsAllowed()")));
-	QVERIFY(roomState.contains(QStringLiteral("if (canUseTools)")));
+	QVERIFY(roomState.contains(QStringLiteral("const bool canUseServerLog = modernServerLogAvailable()")));
+	QVERIFY(roomState.contains(QStringLiteral("if (canUseServerLog)")));
 	QVERIFY(roomState.contains(QStringLiteral("if (debugTool && !canUseTools)")));
 
 	const QString selection = methodBody(
@@ -1091,7 +1092,7 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 	QVERIFY(!selection.isEmpty());
 	QVERIFY(selection.contains(QStringLiteral("scopeValue == LocalServerLogScope")));
 	QVERIFY(selection.contains(QStringLiteral("configuredToolTextChannel")));
-	QVERIFY(selection.contains(QStringLiteral("!modernShellToolsAllowed()")));
+	QVERIFY(selection.contains(QStringLiteral("!modernServerLogAvailable()")));
 }
 
 void TestQmlClientModels::directMessageSummariesStayTypedAndIncremental() {
@@ -1521,18 +1522,25 @@ void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
 	const QString source = QString::fromUtf8(sourceFile.readAll());
 	const qsizetype helperStart = source.indexOf(QStringLiteral("QVariantMap modernServerLogMessageState"));
 	const qsizetype helperEnd = source.indexOf(
-		QStringLiteral("void MainWindow::publishModernShellServerLogUpdate"), helperStart);
+		QStringLiteral("bool MainWindow::modernServerLogAvailable"), helperStart);
 	QVERIFY(helperStart >= 0);
 	QVERIFY(helperEnd > helperStart);
 	const QString helperBody = source.mid(helperStart, helperEnd - helperStart);
 	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"messageKey\")")));
 	QVERIFY(!helperBody.contains(QStringLiteral("QStringLiteral(\"messageId\")")));
+	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"createdAtMs\")")));
+	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"timeLabel\")")));
+	QVERIFY(!helperBody.contains(QStringLiteral("multilinePlainTextFromHtml")));
+	QVERIFY(source.contains(QStringLiteral("void MainWindow::applyModernServerLogState")));
+	QVERIFY(!source.contains(QStringLiteral("void MainWindow::appendModernServerLogEntry")));
 
 	ChatTimelineModel model;
 	model.replaceMessages({ QVariantMap {
 		{ QStringLiteral("messageKey"), QStringLiteral("server-log:2") },
-		{ QStringLiteral("actor"), QStringLiteral("Server log") },
-		{ QStringLiteral("bodyText"), QStringLiteral("[16:08:49] Connected.") },
+		{ QStringLiteral("actor"), QStringLiteral("Server") },
+		{ QStringLiteral("bodyText"), QStringLiteral("<7:alice(42)> Authenticated") },
+		{ QStringLiteral("createdAtMs"), 1721664529123LL },
+		{ QStringLiteral("timeLabel"), QStringLiteral("16:08:49") },
 		{ QStringLiteral("deliveryState"), QStringLiteral("delivered") },
 		{ QStringLiteral("system"), true },
 		{ QStringLiteral("canReply"), false },
@@ -1541,7 +1549,9 @@ void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
 	} });
 	QCOMPARE(model.rowCount(), 1);
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("server-log:2"));
-	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("[16:08:49] Connected."));
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("<7:alice(42)> Authenticated"));
+	QCOMPARE(model.get(0).value(QStringLiteral("timestamp")).toString(), QStringLiteral("16:08:49"));
 	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap().value(QStringLiteral("system")).toBool());
 	QVERIFY(!model.hasUserHistory());
 }
