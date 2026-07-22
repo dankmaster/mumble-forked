@@ -41,6 +41,7 @@ private slots:
 	void directMessageTargetedUpdatesStayIncremental();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
+	void activityLogRowsUseLocalStableKeys();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
@@ -1510,6 +1511,39 @@ void TestQmlClientModels::messageRolesExposeStructuredState() {
 	QVERIFY(changedRoles.contains(StableListModel::SourceRole));
 	QCOMPARE(model.data(row, StableListModel::SourceRole).toMap().value(QStringLiteral("fixtureMarker")).toString(),
 			 QStringLiteral("source-only-change"));
+}
+
+void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const qsizetype helperStart = source.indexOf(QStringLiteral("QVariantMap modernServerLogMessageState"));
+	const qsizetype helperEnd = source.indexOf(
+		QStringLiteral("void MainWindow::publishModernShellServerLogUpdate"), helperStart);
+	QVERIFY(helperStart >= 0);
+	QVERIFY(helperEnd > helperStart);
+	const QString helperBody = source.mid(helperStart, helperEnd - helperStart);
+	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"messageKey\")")));
+	QVERIFY(!helperBody.contains(QStringLiteral("QStringLiteral(\"messageId\")")));
+
+	ChatTimelineModel model;
+	model.replaceMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("server-log:2") },
+		{ QStringLiteral("actor"), QStringLiteral("Server log") },
+		{ QStringLiteral("bodyText"), QStringLiteral("[16:08:49] Connected.") },
+		{ QStringLiteral("deliveryState"), QStringLiteral("delivered") },
+		{ QStringLiteral("system"), true },
+		{ QStringLiteral("canReply"), false },
+		{ QStringLiteral("canReact"), false },
+		{ QStringLiteral("canDelete"), false }
+	} });
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("server-log:2"));
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("[16:08:49] Connected."));
+	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap().value(QStringLiteral("system")).toBool());
+	QVERIFY(!model.hasUserHistory());
 }
 
 void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {

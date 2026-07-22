@@ -25354,9 +25354,9 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	return patch;
 }
 
-QVariantMap modernServerLogMessageState(const QString &messageID, const QString &html, const QString &title) {
+QVariantMap modernServerLogMessageState(const QString &messageKey, const QString &html, const QString &title) {
 	QVariantMap message;
-	message.insert(QStringLiteral("messageId"), messageID);
+	message.insert(QStringLiteral("messageKey"), messageKey);
 	message.insert(QStringLiteral("actor"), title);
 	message.insert(QStringLiteral("bodyText"), multilinePlainTextFromHtml(html));
 	message.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
