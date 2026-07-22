@@ -206,6 +206,10 @@ void TestForkFeature::serverLogStreamContract() {
 	QVERIFY(clientLogFile.open(QIODevice::ReadOnly | QIODevice::Text));
 	const QString clientLog = QString::fromUtf8(clientLogFile.readAll());
 	QVERIFY(!clientLog.contains(QStringLiteral("appendModernServerLogEntry")));
+	QVERIFY(clientLog.contains(QStringLiteral("modernEphemeralLogEntryAppended")));
+	QVERIFY(clientLog.contains(QStringLiteral("appendModernEphemeralLogEntry")));
+	QVERIFY(clientLog.contains(QStringLiteral("isModernEphemeralLogViewVisible")));
+	QVERIFY(!clientLog.contains(QStringLiteral("applyModernServerLogState")));
 }
 
 QTEST_MAIN(TestForkFeature)

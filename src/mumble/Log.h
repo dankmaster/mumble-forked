@@ -113,7 +113,7 @@ public slots:
 	void processDeferredLogs();
 
 signals:
-	void serverLogEntryAppended(QString html);
+	void modernEphemeralLogEntryAppended(QString html);
 
 	/// Signal emitted when there was a message received whose type was configured to spawn a notification
 	void notificationSpawned(QString title, QString body, QSystemTrayIcon::MessageIcon icon);

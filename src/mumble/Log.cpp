@@ -52,6 +52,8 @@ Log::Log(QObject *p) : QObject(p) {
 	qdDate   = QDate::currentDate();
 
 	QObject::connect(this, &Log::highlightSpawned, Global::get().mw, &MainWindow::highlightWindow);
+	QObject::connect(this, &Log::modernEphemeralLogEntryAppended, Global::get().mw,
+					 &MainWindow::appendModernEphemeralLogEntry);
 }
 
 // Display order in settingsscreen, allows to insert new events without breaking config-compatibility with older
@@ -426,12 +428,12 @@ void Log::log(MsgType mt, const QString &console, const QString &terse, bool own
 		modernEntryCursor.insertHtml(
 			Log::msgColor(QString::fromLatin1("[%1] ").arg(timeString.toHtmlEscaped()), Log::Time));
 		validHtml(console, &modernEntryCursor);
-		emit serverLogEntryAppended(QTextDocumentFragment(&modernEntryDocument).toHtml());
+		emit modernEphemeralLogEntryAppended(QTextDocumentFragment(&modernEntryDocument).toHtml());
 
 	}
 
 	if (!ownMessage) {
-		if (!(Global::get().mw->isActiveWindow() && Global::get().mw->isServerLogViewVisible())) {
+		if (!(Global::get().mw->isActiveWindow() && Global::get().mw->isModernEphemeralLogViewVisible())) {
 			// Message notification with window highlight
 			if (flags & Settings::LogHighlight) {
 				emit highlightSpawned();

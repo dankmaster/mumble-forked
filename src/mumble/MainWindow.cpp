@@ -24668,8 +24668,10 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 			QStringLiteral("replySnippet"),
 			persistentChatMessageTextSnippet(persistentChatMessageSourceText(*m_pendingPersistentChatReply)));
 	}
-	if (target.serverLog || target.ephemeralTextPath) {
+	if (target.serverLog) {
 		activeScope.insert(QStringLiteral("serverLogRevision"), QString::number(m_modernShellServerLogRevision));
+	} else if (target.ephemeralTextPath) {
+		activeScope.insert(QStringLiteral("serverLogRevision"), QString::number(m_modernEphemeralLogRevision));
 	}
 	if (target.scope == MumbleProto::Channel && target.channel) {
 		QVariantMap screenShare = buildModernShellVoiceRoomScreenShareState(target.channel);
@@ -25401,6 +25403,20 @@ QVariantMap modernServerLogMessageState(const quint64 sequence, const qint64 tim
 	return message;
 }
 
+QVariantMap modernEphemeralLogMessageState(const quint64 sequence, const QString &html) {
+	QVariantMap message;
+	message.insert(QStringLiteral("messageKey"),
+				   QStringLiteral("session-log:%1").arg(static_cast< qulonglong >(sequence)));
+	message.insert(QStringLiteral("actor"), QObject::tr("Session log"));
+	message.insert(QStringLiteral("bodyText"), multilinePlainTextFromHtml(html));
+	message.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
+	message.insert(QStringLiteral("system"), true);
+	message.insert(QStringLiteral("canReply"), false);
+	message.insert(QStringLiteral("canReact"), false);
+	message.insert(QStringLiteral("canDelete"), false);
+	return message;
+}
+
 bool MainWindow::modernServerLogAvailable() const {
 	return m_modernServerLogAuthorized && modernShellServerLogStreamSupported();
 }
@@ -25409,28 +25425,63 @@ void MainWindow::publishModernShellServerLogUpdate(const PersistentChatTarget &t
 	if (modernShellStaticModeEnabled()) {
 		return;
 	}
-	if (!target.serverLog) {
+	if (!target.serverLog && !target.ephemeralTextPath) {
 		return;
 	}
 
 	if (!m_qmlShellHost) return;
 	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
-	m_qmlShellHost->chatModel()->replaceMessages(m_modernServerLogEntries);
-	mumble::chatperf::recordValue("modern.server_log.update", 1);
+	m_qmlShellHost->chatModel()->replaceMessages(
+		target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries);
+	mumble::chatperf::recordValue(target.serverLog ? "modern.server_log.update" : "modern.session_log.update", 1);
 }
 
 void MainWindow::publishModernShellServerLogReset(const PersistentChatTarget &target) {
 	if (modernShellStaticModeEnabled()) {
 		return;
 	}
-	if (!target.serverLog) {
+	if (!target.serverLog && !target.ephemeralTextPath) {
 		return;
 	}
 
 	if (!m_qmlShellHost) return;
 	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
-	m_qmlShellHost->chatModel()->replaceMessages(m_modernServerLogEntries);
-	mumble::chatperf::recordValue("modern.server_log.reset", 1);
+	m_qmlShellHost->chatModel()->replaceMessages(
+		target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries);
+	mumble::chatperf::recordValue(target.serverLog ? "modern.server_log.reset" : "modern.session_log.reset", 1);
+}
+
+void MainWindow::appendModernEphemeralLogEntry(const QString &html) {
+	if (html.trimmed().isEmpty()) {
+		return;
+	}
+
+	if (++m_modernEphemeralLogRevision == 0) {
+		m_modernEphemeralLogRevision = 1;
+	}
+
+	const QVariantMap message = modernEphemeralLogMessageState(m_modernEphemeralLogRevision, html);
+	m_modernEphemeralLogEntries.push_back(message);
+	bool trimmed = false;
+	while (m_modernServerLogMaximumEntries > 0
+		   && m_modernEphemeralLogEntries.size() > m_modernServerLogMaximumEntries) {
+		m_modernEphemeralLogEntries.removeFirst();
+		trimmed = true;
+	}
+
+	const PersistentChatTarget target = currentPersistentChatTarget();
+	if (!target.ephemeralTextPath || modernShellStaticModeEnabled() || !m_qmlShellHost) {
+		return;
+	}
+
+	if (trimmed) {
+		publishModernShellServerLogReset(target);
+		return;
+	}
+
+	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
+	const int appended = m_qmlShellHost->chatModel()->appendMessages(QVariantList { message });
+	mumble::chatperf::recordValue("modern.session_log.append.entries", appended);
 }
 
 void MainWindow::clearModernServerLogState() {
@@ -29938,22 +29989,30 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 	return target;
 }
 
-bool MainWindow::isServerLogViewVisible() const {
+bool MainWindow::isModernEphemeralLogViewVisible() const {
 	return m_qmlShellHost && m_qmlShellHost->window() && m_qmlShellHost->window()->isVisible()
-		   && currentPersistentChatTarget().serverLog;
+		   && currentPersistentChatTarget().ephemeralTextPath;
 }
 
 void MainWindow::setServerLogMaximumBlockCount(int maxBlocks) {
 	m_modernServerLogMaximumEntries = qMax(0, maxBlocks);
-	bool trimmed = false;
+	bool serverLogTrimmed = false;
 	while (m_modernServerLogMaximumEntries > 0
 		   && m_modernServerLogEntries.size() > m_modernServerLogMaximumEntries) {
 		m_modernServerLogEntries.removeFirst();
-		trimmed = true;
+		serverLogTrimmed = true;
 	}
-	if (trimmed) {
+	bool ephemeralLogTrimmed = false;
+	while (m_modernServerLogMaximumEntries > 0
+		   && m_modernEphemeralLogEntries.size() > m_modernServerLogMaximumEntries) {
+		m_modernEphemeralLogEntries.removeFirst();
+		ephemeralLogTrimmed = true;
+	}
+	if (serverLogTrimmed || ephemeralLogTrimmed) {
 		const PersistentChatTarget target = currentPersistentChatTarget();
-		if (target.serverLog || target.ephemeralTextPath) publishModernShellServerLogReset(target);
+		if ((target.serverLog && serverLogTrimmed) || (target.ephemeralTextPath && ephemeralLogTrimmed)) {
+			publishModernShellServerLogReset(target);
+		}
 	}
 }
 

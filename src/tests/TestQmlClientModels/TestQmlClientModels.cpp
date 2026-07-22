@@ -42,7 +42,7 @@ private slots:
 	void directMessageTargetedUpdatesStayIncremental();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
-	void activityLogRowsUseLocalStableKeys();
+	void activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
@@ -1573,7 +1573,7 @@ void TestQmlClientModels::messageRolesExposeStructuredState() {
 			 QStringLiteral("source-only-change"));
 }
 
-void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
+void TestQmlClientModels::activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer() {
 	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
 	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
 	QFile sourceFile(sourcePath);
@@ -1581,7 +1581,7 @@ void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
 	const QString source = QString::fromUtf8(sourceFile.readAll());
 	const qsizetype helperStart = source.indexOf(QStringLiteral("QVariantMap modernServerLogMessageState"));
 	const qsizetype helperEnd = source.indexOf(
-		QStringLiteral("bool MainWindow::modernServerLogAvailable"), helperStart);
+		QStringLiteral("QVariantMap modernEphemeralLogMessageState"), helperStart);
 	QVERIFY(helperStart >= 0);
 	QVERIFY(helperEnd > helperStart);
 	const QString helperBody = source.mid(helperStart, helperEnd - helperStart);
@@ -1590,8 +1590,24 @@ void TestQmlClientModels::activityLogRowsUseLocalStableKeys() {
 	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"createdAtMs\")")));
 	QVERIFY(helperBody.contains(QStringLiteral("QStringLiteral(\"timeLabel\")")));
 	QVERIFY(!helperBody.contains(QStringLiteral("multilinePlainTextFromHtml")));
+	const qsizetype ephemeralHelperEnd = source.indexOf(
+		QStringLiteral("bool MainWindow::modernServerLogAvailable"), helperEnd);
+	QVERIFY(ephemeralHelperEnd > helperEnd);
+	const QString ephemeralHelperBody = source.mid(helperEnd, ephemeralHelperEnd - helperEnd);
+	QVERIFY(ephemeralHelperBody.contains(QStringLiteral("QStringLiteral(\"session-log:%1\")")));
+	QVERIFY(ephemeralHelperBody.contains(QStringLiteral("multilinePlainTextFromHtml")));
+	QVERIFY(ephemeralHelperBody.contains(QStringLiteral("Session log")));
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::applyModernServerLogState")));
 	QVERIFY(!source.contains(QStringLiteral("void MainWindow::appendModernServerLogEntry")));
+	QVERIFY(source.contains(QStringLiteral("void MainWindow::appendModernEphemeralLogEntry")));
+	QVERIFY(source.contains(QStringLiteral("target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries")));
+	const qsizetype visibleStart = source.indexOf(QStringLiteral("bool MainWindow::isModernEphemeralLogViewVisible"));
+	const qsizetype visibleEnd = source.indexOf(QStringLiteral("void MainWindow::setServerLogMaximumBlockCount"),
+											 visibleStart);
+	QVERIFY(visibleStart >= 0 && visibleEnd > visibleStart);
+	const QString visibleBody = source.mid(visibleStart, visibleEnd - visibleStart);
+	QVERIFY(visibleBody.contains(QStringLiteral("ephemeralTextPath")));
+	QVERIFY(!visibleBody.contains(QStringLiteral(".serverLog")));
 
 	ChatTimelineModel model;
 	model.replaceMessages({ QVariantMap {

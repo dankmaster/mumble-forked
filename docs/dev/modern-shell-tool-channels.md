@@ -28,6 +28,11 @@ When both endpoints negotiate `server_log_stream`, Murmur sends a bounded recent
 backlog followed by live entries using the exact text passed to `Server::log`.
 The client renders the text literally and keeps the surface read-only.
 
+The client keeps this authoritative stream separate from its local session-log
+buffer. That local buffer remains available only to the legacy, non-persistent
+chat fallback; client notices can therefore never be mislabeled or leaked into
+Activity, while older servers keep their existing ephemeral conversation view.
+
 Access is controlled by the root-only `Use tools` ACL permission. The server
 checks the effective root permission before sending any backlog or live entry,
 stops delivery immediately after revocation, and sends a reset so the client

@@ -192,7 +192,7 @@ public:
 	Qt::WindowFlags windowFlags() const;
 	void setWindowFlags(Qt::WindowFlags flags);
 	void setWindowTitle(const QString &title);
-	bool isServerLogViewVisible() const;
+	bool isModernEphemeralLogViewVisible() const;
 	bool shouldMirrorServerLogToNativeWidget() const;
 	void setServerLogMaximumBlockCount(int maxBlocks);
 	void queueModernStartupSetup(bool showAudioSetup, bool showCertificateSetup);
@@ -1112,6 +1112,8 @@ protected:
 	qint64 m_lastQmlStateSyncMs        = 0;
 	quint64 m_modernShellServerLogRevision = 1;
 	QVariantList m_modernServerLogEntries;
+	quint64 m_modernEphemeralLogRevision = 1;
+	QVariantList m_modernEphemeralLogEntries;
 	int m_modernServerLogMaximumEntries = 0;
 	bool m_modernServerLogAuthorized = false;
 	QJsonObject m_updateResumeState;
@@ -1370,6 +1372,7 @@ protected:
 
 
 public slots:
+	void appendModernEphemeralLogEntry(const QString &html);
 	void refreshServerActions();
 	void on_qaServerConnect_triggered(bool autoconnect = false);
 	void on_qaServerDisconnect_triggered();
