@@ -20,6 +20,7 @@ target_link_libraries(TestServerDatabase PRIVATE Qt6::Test mumble_server_object_
 target_include_directories(TestServerDatabase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_test(NAME TestServerDatabase COMMAND $<TARGET_FILE:TestServerDatabase>)
+configure_client_test_runtime(TestServerDatabase TestServerDatabase)
 
 set(input_table_data_paths)
 set(migrated_table_data_paths)

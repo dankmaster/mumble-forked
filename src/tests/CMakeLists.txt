@@ -6,9 +6,10 @@
 include(project-utils)
 
 find_pkg(Qt6 COMPONENTS Test REQUIRED)
-if(client)
-	# Shared-Qt GUI tests need the imported offscreen platform target in the
-	# parent directory so every client-test subdirectory can resolve it.
+if(client OR server)
+	# Shared-Qt GUI tests, including the server database harness, need the
+	# imported offscreen platform target in the parent directory so every test
+	# subdirectory can resolve it.
 	find_pkg(Qt6 COMPONENTS Gui REQUIRED)
 	if(NOT TARGET Qt6::QOffscreenIntegrationPlugin AND DEFINED Qt6Gui_DIR)
 		# Shared Qt does not import platform-plugin targets automatically. Import the
