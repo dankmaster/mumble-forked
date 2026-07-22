@@ -190,6 +190,7 @@ TestCase {
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
 		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(256,\s*Math\.min\(720,\s*height\)\)/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*forceLayout\(\)/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{/.test(mainSource))

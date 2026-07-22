@@ -2717,6 +2717,7 @@ ApplicationWindow {
 						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
 							if (pressed) {
+								timelineScrollHandler.cancelSmoothWheel()
 								bottomFollowTimer.stop()
 								timeline.stickToBottom = false
 								timeline.releasePrependAnchor()
@@ -2727,8 +2728,11 @@ ApplicationWindow {
 						}
 					}
 					MiddleDragScrollHandler {
+						id: timelineScrollHandler
 						targetFlickable: timeline
 						horizontalEnabled: false
+						smoothWheelEnabled: true
+						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
 						onScrollingStarted: {
 							bottomFollowTimer.stop()
 							timeline.stickToBottom = false
