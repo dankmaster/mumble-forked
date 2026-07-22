@@ -53,10 +53,12 @@ TestCase {
 		verify(/id:\s*compactMessageReactButton\s*\n\s*objectName:\s*"compactMessageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
 	}
 
-	function test_plain_text_actions_do_not_add_an_empty_footer_row() {
+	function test_message_actions_use_layout_neutral_overlay_for_text_and_rich_content() {
 		verify(/readonly property bool hasEmbeddedFooterContent:[\s\S]*readonly property bool usesCompactActionOverlay:/.test(mainSource))
-		verify(!/readonly property bool hasEmbeddedFooterContent:[^\n]*(?:\n[^\n]*){0,3}quickReactionMessageId/.test(mainSource))
-		verify(/readonly property bool usesCompactActionOverlay:\s*hasMessageActions[\s\S]*&&\s*!wideContent/.test(mainSource))
+		verify(/readonly property bool hasEmbeddedFooterContent:\s*hasReactions[\s\S]*\|\|\s*hasReplyContent/.test(mainSource))
+		verify(!/readonly property bool hasEmbeddedFooterContent:[^\n]*(?:\n[^\n]*){0,4}\bwideContent\b/.test(mainSource))
+		verify(/readonly property bool usesCompactActionOverlay:\s*hasMessageActions\s*(?:\r?\n)/.test(mainSource))
+		verify(!/readonly property bool usesCompactActionOverlay:[^\n]*(?:\n[^\n]*){0,2}!wideContent/.test(mainSource))
 		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent/.test(mainSource))
 		verify(/id:\s*messageFooter[\s\S]*Layout\.rightMargin:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*compactMessageActionTray\.width/.test(mainSource))
 		verify(/objectName:\s*"chatCompactMessageActionTray"[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay/.test(mainSource))

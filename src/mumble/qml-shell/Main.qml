@@ -3548,11 +3548,13 @@ ApplicationWindow {
 						readonly property bool hasReactions: !!reactions && reactions.length > 0
 						readonly property bool quickReactionsExpanded: canReact
 							&& root.quickReactionMessageId === stableId
-						readonly property bool hasEmbeddedFooterContent: hasReactions || wideContent
+						// Message actions are floating chrome. Keeping rich content in this
+						// footer solely for its action tray makes attachment cards grow when
+						// hover reveals the controls.
+						readonly property bool hasEmbeddedFooterContent: hasReactions
 							|| hasReplyContent || hasDeliveryStatus
 							|| (own && !systemMessage && timestamp.length > 0)
 						readonly property bool usesCompactActionOverlay: hasMessageActions
-							&& !wideContent
 						readonly property bool performancePreviewMaterialized: messagePreviewLoader.status === Loader.Ready
 							&& !!messagePreviewLoader.item
 						readonly property bool performanceAttachmentMaterialized: messageAttachmentLoader.status === Loader.Ready
