@@ -259,12 +259,15 @@ namespace {
 	}
 
 	QVariantMap visualMenuAction(const QString &id, const QString &label, const QString &tone = {},
-							 const bool checkable = false, const bool checked = false) {
-		return { { QStringLiteral("kind"), QStringLiteral("action") },
+							 const bool checkable = false, const bool checked = false,
+							 const QString &secondary = {}) {
+		QVariantMap action { { QStringLiteral("kind"), QStringLiteral("action") },
 			{ QStringLiteral("id"), id }, { QStringLiteral("label"), label },
 			{ QStringLiteral("tone"), tone }, { QStringLiteral("enabled"), true },
 			{ QStringLiteral("visible"), true }, { QStringLiteral("checkable"), checkable },
 			{ QStringLiteral("checked"), checked } };
+		if (!secondary.isEmpty()) action.insert(QStringLiteral("secondary"), secondary);
+		return action;
 	}
 
 	QVariantMap visualConnectDialog(const QString &variant) {
@@ -712,22 +715,43 @@ namespace {
 		};
 		return {
 			{ QStringLiteral("id"), QStringLiteral("acl") }, { QStringLiteral("kind"), QStringLiteral("form") },
-			{ QStringLiteral("title"), QObject::tr("Edit room") },
-			{ QStringLiteral("subtitle"), QObject::tr("Manage room details, groups, and access rules for Lobby.") },
+			{ QStringLiteral("title"), QObject::tr("Room access & settings") },
+			{ QStringLiteral("subtitle"),
+			  QObject::tr("Changes apply to Root / Lobby (room ID 1). Access rules inherit through the room tree unless overridden here.") },
 			{ QStringLiteral("sections"), QVariantList {
-				QVariantMap { { QStringLiteral("title"), QObject::tr("Access control") },
+				QVariantMap { { QStringLiteral("title"), QObject::tr("Access rules and groups") },
+					{ QStringLiteral("subtitle"), QObject::tr("These permissions belong to the target room shown above.") },
 					{ QStringLiteral("fields"), QVariantList { QVariantMap {
 						{ QStringLiteral("id"), QStringLiteral("acl.model") },
-						{ QStringLiteral("label"), QObject::tr("ACL") },
+						{ QStringLiteral("label"), QObject::tr("Rules and groups") },
 						{ QStringLiteral("type"), QStringLiteral("aclEditor") },
-						{ QStringLiteral("value"), aclModel }, { QStringLiteral("enabled"), true } } } } }
+						{ QStringLiteral("value"), aclModel }, { QStringLiteral("enabled"), true } } } } },
+				QVariantMap { { QStringLiteral("title"), QObject::tr("Room details") },
+					{ QStringLiteral("fields"), QVariantList {
+						QVariantMap { { QStringLiteral("id"), QStringLiteral("channel.name") },
+							{ QStringLiteral("label"), QObject::tr("Name") },
+							{ QStringLiteral("type"), QStringLiteral("text") },
+							{ QStringLiteral("value"), QStringLiteral("Lobby") },
+							{ QStringLiteral("enabled"), true } },
+						QVariantMap { { QStringLiteral("id"), QStringLiteral("channel.description") },
+							{ QStringLiteral("label"), QObject::tr("Topic") },
+							{ QStringLiteral("type"), QStringLiteral("textarea") },
+							{ QStringLiteral("value"), QObject::tr("Main voice lobby.") },
+							{ QStringLiteral("enabled"), true } } } } }
 			} },
 			{ QStringLiteral("actions"), QVariantList {
 				visualAction(QStringLiteral("cancel"), QObject::tr("Cancel")),
-				visualAction(QStringLiteral("saveAcl"), QObject::tr("Save room"), QStringLiteral("accent"), true) } },
+				visualAction(QStringLiteral("saveAcl"), QObject::tr("Save changes"), QStringLiteral("accent"), true) } },
 			{ QStringLiteral("primaryActionId"), QStringLiteral("saveAcl") },
 			{ QStringLiteral("initialFocusId"), QStringLiteral("aclGroupName_0") },
 			{ QStringLiteral("tone"), QStringLiteral("wide") },
+			{ QStringLiteral("highlights"), QVariantList {
+				QVariantMap { { QStringLiteral("label"), QObject::tr("Target room") },
+					{ QStringLiteral("value"), QStringLiteral("Root / Lobby") } },
+				QVariantMap { { QStringLiteral("label"), QObject::tr("Rules") },
+					{ QStringLiteral("value"), 3 } },
+				QVariantMap { { QStringLiteral("label"), QObject::tr("Groups") },
+					{ QStringLiteral("value"), 2 } } } },
 			{ QStringLiteral("preferredWidth"), 1040 }, { QStringLiteral("preferredHeight"), 780 }
 		};
 	}
@@ -3078,7 +3102,10 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 					visualMenuAction(QStringLiteral("server.disconnect"), QStringLiteral("Disconnect…"),
 						QStringLiteral("danger")),
 					QVariantMap { { QStringLiteral("kind"), QStringLiteral("separator") } },
-					visualMenuAction(QStringLiteral("server.tokens"), QStringLiteral("Access tokens…")) } }
+					visualMenuAction(QStringLiteral("server.tokens"), QStringLiteral("Access tokens…")),
+					visualMenuAction(QStringLiteral("server.acl"),
+						QStringLiteral("Root room access & settings..."), {}, false, false,
+						QStringLiteral("Root")) } }
 			},
 			QVariantMap {
 				{ QStringLiteral("id"), QStringLiteral("room") },
@@ -3136,7 +3163,8 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		const QVariantList voiceRoomActions {
 			visualMenuAction(QStringLiteral("sendMessage"), QStringLiteral("Send room message…")),
 			visualMenuAction(QStringLiteral("copyUrl"), QStringLiteral("Copy room URL")),
-			visualMenuAction(QStringLiteral("acl"), QStringLiteral("Edit room…")),
+			visualMenuAction(QStringLiteral("acl"), QStringLiteral("Room access & settings..."), {}, false,
+				false, QStringLiteral("Root / Lobby")),
 			visualMenuAction(QStringLiteral("screenShareStart"), QStringLiteral("Share your screen…"))
 		};
 		const QVariantList voiceRooms {
@@ -3149,11 +3177,12 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 						  { QStringLiteral("depth"), 0 }, { QStringLiteral("unreadCount"), 0 } }
 		};
 		const QVariantList textRoomActions {
-			QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
-						  { QStringLiteral("id"), QStringLiteral("markRead") },
-						  { QStringLiteral("label"), QStringLiteral("Mark read") },
-						  { QStringLiteral("enabled"), true }, { QStringLiteral("visible"), true },
-						  { QStringLiteral("checkable"), false }, { QStringLiteral("checked"), false } }
+			visualMenuAction(QStringLiteral("markRead"), QStringLiteral("Mark read")),
+			visualMenuAction(QStringLiteral("textRoom.edit"), QStringLiteral("Edit text room...")),
+			visualMenuAction(QStringLiteral("textRoom.acl"), QStringLiteral("Edit source room access..."), {},
+				false, false, QStringLiteral("Root / Lobby")),
+			visualMenuAction(QStringLiteral("textRoom.visibilitySource"), QStringLiteral("Go to source room"), {},
+				false, false, QStringLiteral("Root / Lobby"))
 		};
 		const QVariantList textRooms {
 			QVariantMap { { QStringLiteral("token"), QStringLiteral("3:1") },

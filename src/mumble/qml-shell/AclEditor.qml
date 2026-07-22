@@ -327,7 +327,7 @@ ColumnLayout {
 		ModernCheckBox {
 			objectName: "dialogField_" + String((root.field || {}).id || "")
 			Layout.fillWidth: root.compactLayout
-			text: qsTr("Inherit ACLs from parent room")
+			text: qsTr("Inherit access rules from parent room")
 			checked: !!root.aclModel.inheritAcls
 			onToggled: {
 				const model = root.cloneModel()
@@ -997,7 +997,7 @@ ColumnLayout {
 							currentIndex: root.selectedRule
 								? root.userOptionIndex(root.selectedRule.userId, root.selectedRule.target) : -1
 							displayText: currentIndex >= 0 ? currentText : qsTr("Choose a registered user")
-							Accessible.name: qsTr("ACL user target")
+							Accessible.name: qsTr("Access-rule user target")
 							onActivated: {
 								const option = optionAt(currentIndex)
 								const model = root.cloneModel()

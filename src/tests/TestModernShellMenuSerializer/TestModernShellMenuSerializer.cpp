@@ -221,8 +221,9 @@ void TestModernShellMenuSerializer::appendsDynamicServerActionsWithoutDroppingFi
 		ModernShellMenuSerializer::separatorItem(),
 		ModernShellMenuSerializer::actionItem(QStringLiteral("server.userList"), QStringLiteral("Registered users..."),
 			true, false),
-		ModernShellMenuSerializer::actionItem(QStringLiteral("server.acl"), QStringLiteral("Access control (ACL)..."),
-			true, false),
+		ModernShellMenuSerializer::actionItem(QStringLiteral("server.acl"),
+			QStringLiteral("Root room access & settings..."), true, false, QString(), QString(), QString(),
+			QStringLiteral("Root")),
 		ModernShellMenuSerializer::actionItem(QStringLiteral("server.settings"), QStringLiteral("Server settings..."),
 			true, false),
 		ModernShellMenuSerializer::separatorItem()
@@ -239,6 +240,10 @@ void TestModernShellMenuSerializer::appendsDynamicServerActionsWithoutDroppingFi
 		QStringList({ QStringLiteral("server.favorite"), QStringLiteral("server.userList"),
 			QStringLiteral("server.acl"), QStringLiteral("server.settings"),
 			QStringLiteral("context:server:extension-token") }));
+	const QVariantMap rootAclItem = serverItems.at(3).toMap();
+	QCOMPARE(rootAclItem.value(QStringLiteral("label")).toString(),
+		QStringLiteral("Root room access & settings..."));
+	QCOMPARE(rootAclItem.value(QStringLiteral("secondary")).toString(), QStringLiteral("Root"));
 	QVERIFY(registry.value(QStringLiteral("context:server:extension-token")).action == &dynamicAction);
 }
 

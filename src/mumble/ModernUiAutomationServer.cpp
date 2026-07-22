@@ -670,7 +670,7 @@ namespace {
 						automationDialogField(QStringLiteral("voice.maxUsers"), QObject::tr("Max voice users"),
 											  QStringLiteral("number"), 0),
 						automationSelectField(QStringLiteral("text.visibility"),
-											  QObject::tr("Text visibility source"), 0, rootOptions),
+											  QObject::tr("Text access source room"), 0, rootOptions),
 						automationDialogField(QStringLiteral("text.position"), QObject::tr("Text order"),
 											  QStringLiteral("number"), 0) }) },
 				QVariantList { cancel,
@@ -1418,10 +1418,10 @@ namespace {
 				automationSelectOption(QObject::tr("Operations"), 2)
 			};
 			return automationDialogFromSections(
-				QStringLiteral("editTextRoom:9001"), QStringLiteral("form"), QObject::tr("Edit text room"),
-				QObject::tr("Update the persistent text room without leaving Modern layout."),
+				QStringLiteral("editTextRoom:9001"), QStringLiteral("form"), QObject::tr("Text room settings"),
+				QObject::tr("#ops-briefing inherits visibility and permissions from Root."),
 				QVariantList { automationSection(
-					QObject::tr("Room"),
+					QObject::tr("Text room"),
 					QVariantList {
 						automationHiddenField(QStringLiteral("text.id"), 9001),
 						automationDialogField(QStringLiteral("text.name"), QObject::tr("Name"),
@@ -1431,12 +1431,13 @@ namespace {
 							QStringLiteral("textarea"),
 							QObject::tr("Daily handoff notes, deploy status, and moderation follow-up.")),
 						automationSelectField(QStringLiteral("text.visibility"),
-											  QObject::tr("Visibility source"), 0, visibilityOptions),
+											  QObject::tr("Access source room"), 0, visibilityOptions),
 						automationDialogField(QStringLiteral("text.position"), QObject::tr("Order"),
-											  QStringLiteral("number"), 3) }) },
+											  QStringLiteral("number"), 3) },
+					QString(), QObject::tr("Choose the voice/root room whose access rules should control this text room.")) },
 				QVariantList { cancel,
 							   automationDialogAction(QStringLiteral("editTextRoomAcl"),
-													  QObject::tr("Configure ACL"), QString(), false),
+												  QObject::tr("Open source room access..."), QString(), false),
 							   automationDialogAction(QStringLiteral("saveTextRoom"), QObject::tr("Save"),
 													  QStringLiteral("accent"), false) },
 				QStringLiteral("saveTextRoom"), QString(), QSize(680, 500));
@@ -1617,9 +1618,14 @@ namespace {
 										   automationSelectOption(QObject::tr("Nova (#7)"), 7) });
 
 			QVariantMap dialog = automationDialogFromSections(
-				QStringLiteral("acl"), QStringLiteral("form"), QObject::tr("Edit room"),
-				QObject::tr("Manage room details, inherited groups, and explicit access rules."),
+				QStringLiteral("acl"), QStringLiteral("form"), QObject::tr("Room access & settings"),
+				QObject::tr("Changes apply to Root / Lobby (room ID 1). Access rules inherit through the room tree unless overridden here."),
 				QVariantList {
+					automationSection(QObject::tr("Access rules and groups"),
+						QVariantList { automationDialogField(QStringLiteral("acl.model"),
+														   QObject::tr("Rules and groups"),
+														   QStringLiteral("aclEditor"), aclModel) },
+						QString(), QObject::tr("These permissions belong to the target room shown above.")),
 					automationSection(QObject::tr("Room details"),
 									  QVariantList {
 										  automationDialogField(QStringLiteral("channel.name"), QObject::tr("Name"),
@@ -1630,39 +1636,35 @@ namespace {
 										  automationDialogField(QStringLiteral("channel.position"),
 																QObject::tr("Order"), QStringLiteral("number"), 0),
 										  automationDialogField(QStringLiteral("channel.maxUsers"),
-																QObject::tr("Max users"), QStringLiteral("number"), 0) }),
-					automationSection(QObject::tr("Access control"),
-									  QVariantList { automationDialogField(QStringLiteral("acl.model"),
-																		   QObject::tr("ACL"),
-																		   QStringLiteral("aclEditor"), aclModel) }) },
+																QObject::tr("Max users"), QStringLiteral("number"), 0) }) },
 				QVariantList { cancel,
-							   automationDialogAction(QStringLiteral("saveAcl"), QObject::tr("Save room"),
-													  QStringLiteral("accent"), true) },
+							   automationDialogAction(QStringLiteral("saveAcl"), QObject::tr("Save changes"),
+														  QStringLiteral("accent"), true) },
 				QStringLiteral("saveAcl"), QString(), QSize(1040, 780));
 			dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 			dialog.insert(QStringLiteral("highlights"),
-						  QVariantList { automationHighlight(QObject::tr("Room"), QObject::tr("Lobby")),
+						  QVariantList { automationHighlight(QObject::tr("Target room"), QObject::tr("Root / Lobby")),
 										 automationHighlight(QObject::tr("Rules"), 3),
-										 automationHighlight(QObject::tr("Password"), QObject::tr("Set")) });
+										 automationHighlight(QObject::tr("Groups"), 2) });
 			return dialog;
 		}
 		if (variant == QLatin1String("aclLoading")) {
 			return automationDialogFromSections(
-				QStringLiteral("acl"), QStringLiteral("info"), QObject::tr("Edit room"),
-				QObject::tr("Requesting room details and ACL data for Root."),
+				QStringLiteral("acl"), QStringLiteral("info"), QObject::tr("Room access & settings"),
+				QObject::tr("Opening access settings for Root (room ID 0)."),
 				QVariantList { automationSection(
-					QObject::tr("Status"), QVariantList { automationNoteField(QObject::tr("Loading ACL...")) }) },
+					QObject::tr("Status"), QVariantList { automationNoteField(QObject::tr("Loading room access...")) }) },
 				QVariantList { close }, QStringLiteral("close"), QString(), QSize(720, 520));
 		}
 		if (variant == QLatin1String("aclError")) {
 			QVariantMap dialog = automationDialogFromSections(
-				QStringLiteral("acl"), QStringLiteral("info"), QObject::tr("Edit room"),
-				QObject::tr("Room details and ACL data could not be loaded for Root."),
+				QStringLiteral("acl"), QStringLiteral("info"), QObject::tr("Room access & settings"),
+				QObject::tr("Access settings could not be loaded for Root."),
 				QVariantList { automationSection(
 					QObject::tr("Status"),
-					QVariantList { automationNoteField(QObject::tr("The server did not return ACL data.")) }) },
+					QVariantList { automationNoteField(QObject::tr("The server did not return room access data.")) }) },
 				QVariantList { close }, QStringLiteral("close"), QStringLiteral("danger"), QSize(720, 520));
-			dialog.insert(QStringLiteral("statusMessage"), QObject::tr("Unable to load ACL data."));
+			dialog.insert(QStringLiteral("statusMessage"), QObject::tr("Unable to load room access."));
 			return dialog;
 		}
 		if (variant == QLatin1String("searchHit")) {

@@ -34,6 +34,7 @@ private slots:
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
 	void toolsRequireNegotiatedRootAclPermission();
+	void aclEntryPointsUseExplicitRoomTargets();
 	void directMessageSummariesStayTypedAndIncremental();
 	void directMessageControllerKeepsConversationDraftsSeparate();
 	void directMessageControllerRoutesRichMessageIntents();
@@ -1093,6 +1094,64 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 	QVERIFY(selection.contains(QStringLiteral("scopeValue == LocalServerLogScope")));
 	QVERIFY(selection.contains(QStringLiteral("configuredToolTextChannel")));
 	QVERIFY(selection.contains(QStringLiteral("!modernServerLogAvailable()")));
+}
+
+void TestQmlClientModels::aclEntryPointsUseExplicitRoomTargets() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString requestDialog = methodBody(
+		QStringLiteral("void MainWindow::openModernAclRequestDialog"),
+		QStringLiteral("void MainWindow::openModernAclDialog"));
+	QVERIFY(!requestDialog.isEmpty());
+	QVERIFY(requestDialog.contains(
+		QStringLiteral("navigateToPersistentChatScope(MumbleProto::Channel, channel->iId, false, true)")));
+	QVERIFY(requestDialog.contains(QStringLiteral("persistentTextAclChannelLabel(channel)")));
+	QVERIFY(!requestDialog.contains(QStringLiteral("channel = Channel::get(Mumble::ROOT_CHANNEL_ID)")));
+
+	const QString dispatcher = methodBody(
+		QStringLiteral("bool MainWindow::handleModernShellLegacyDialogAction"),
+		QStringLiteral("bool MainWindow::openModernFailedConnectionDialog"));
+	QVERIFY(!dispatcher.isEmpty());
+	QVERIFY(dispatcher.contains(QStringLiteral("if (action == QLatin1String(\"server.acl\"))")));
+	QVERIFY(dispatcher.contains(QStringLiteral("Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)")));
+	QVERIFY(dispatcher.contains(QStringLiteral("openModernAclRequestDialog(rootChannel)")));
+	QVERIFY(dispatcher.contains(QStringLiteral("if (action == QLatin1String(\"acl\"))")));
+	QVERIFY(dispatcher.contains(QStringLiteral("if (!contextChannel)")));
+	QVERIFY(dispatcher.contains(QStringLiteral("openModernAclRequestDialog(contextChannel)")));
+	QVERIFY(!dispatcher.contains(QStringLiteral(
+		"action == QLatin1String(\"server.acl\") || action == QLatin1String(\"acl\")")));
+
+	const QString textSource = methodBody(
+		QStringLiteral("void MainWindow::editPersistentTextChannelACL(const unsigned int textChannelID)"),
+		QStringLiteral("void MainWindow::setDefaultPersistentTextChannel()"));
+	QVERIFY(!textSource.isEmpty());
+	QVERIFY(textSource.contains(QStringLiteral("Channel::get(textChannelIt->aclChannelID)")));
+	QVERIFY(textSource.contains(QStringLiteral("openModernAclRequestDialog(channel)")));
+	QVERIFY(!textSource.contains(QStringLiteral("cContextChannel = channel")));
+
+	const QString scopeActions = methodBody(
+		QStringLiteral("QVariantList MainWindow::buildQmlScopeActions"),
+		QStringLiteral("QVariantList MainWindow::buildQmlParticipantActions"));
+	QVERIFY(!scopeActions.isEmpty());
+	QVERIFY(scopeActions.contains(QStringLiteral("Edit source room access...")));
+	QVERIFY(scopeActions.contains(QStringLiteral("Go to source room")));
+	QVERIFY(scopeActions.contains(QStringLiteral("accessSourceLabel")));
+
+	const QString aclPermissions = methodBody(
+		QStringLiteral("QVariantList modernAclPermissions"),
+		QStringLiteral("void modernAclCacheOnlineUsers"));
+	QVERIFY(!aclPermissions.isEmpty());
+	QVERIFY(aclPermissions.contains(QStringLiteral("for (int i = 0; i < (root ? 30 : 16); ++i)")));
+	QVERIFY(aclPermissions.contains(QStringLiteral("ChanACL::permName(permission)")));
 }
 
 void TestQmlClientModels::directMessageSummariesStayTypedAndIncremental() {

@@ -496,14 +496,14 @@ function Assert-QmlAccessibilityEvidence {
 	$requiredSurfaceNames = switch ($surface) {
 		"menu-app-server" { @(
 			"Server information…", "Search…", "Connect to a server…",
-			"Disconnect…", "Access tokens…"
+			"Disconnect…", "Access tokens…", "Root room access & settings..."
 		) }
 		# The profile surface presents grouped submenus first. Nested actions such
 		# as Disconnect are covered by component/controller tests; they are not
 		# visible semantic nodes until their top-level group is opened.
 		"menu-profile" { @("Demo User", "Presence", "Profile") }
-		"menu-room" { @("Send room message…", "Copy room URL", "Edit room…", "Share your screen…") }
-		"menu-text-room" { @("Mark read") }
+		"menu-room" { @("Send room message…", "Copy room URL", "Room access & settings...", "Share your screen…") }
+		"menu-text-room" { @("Mark read", "Edit source room access...", "Go to source room") }
 		"menu-chat-background" { @("Send room message…", "Copy room URL") }
 		"conversation-search-match" { @(
 			"Search this conversation", "Search messages in this conversation", "1 of 1",
@@ -587,8 +587,9 @@ function Assert-QmlAccessibilityEvidence {
 			"Certificate", "Current certificate", "Certificate action", "Action: Create", "Name", "Email", "Close", "Apply"
 		) }
 		"dialog-acl-populated" { @(
-			"Edit room", "Access control", "Inherit ACLs from parent room", "Room password",
-			"Groups", "scrim-team", "Added members", "Kira (#2)", "Save room"
+			"Room access & settings", "Target room", "Root / Lobby", "Access rules and groups",
+			"Rules and groups", "Inherit access rules from parent room", "Room password", "Groups",
+			"scrim-team", "Added members", "Kira (#2)", "Save changes"
 		) }
 		"dialog-stonks-populated" { @(
 			"Stonks", "Portfolio data is ready.", "Overview", "Portfolio", "Leaderboard",

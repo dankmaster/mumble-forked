@@ -605,12 +605,12 @@ Describe "Qt Quick visual manifest validation" {
 		$controller | Should Match 'sharedHost\(\)'
 		$controller | Should Match 'QStringLiteral\("direct-message-attachment"\)'
 		$controller | Should Match 'QStringLiteral\("trayOpen"\), traySurface'
-		$controller | Should Match 'visualMenuAction\(QStringLiteral\("acl"\), QStringLiteral\("Edit room…"\)\)'
+		$controller | Should Match 'visualMenuAction\(QStringLiteral\("acl"\), QStringLiteral\("Room access & settings\.\.\."\)'
 		$worker | Should Match 'Watch Together: Community release watch party'
-		$worker | Should Match 'Inherit ACLs from parent room'
+		$worker | Should Match 'Inherit access rules from parent room'
 		$worker | Should Match 'Portfolio data is ready\.'
 		$worker | Should Match 'Message attachments'
-		$worker | Should Match '"menu-room"\s*\{\s*@\("Send room message…", "Copy room URL", "Edit room…"'
+		$worker | Should Match '"menu-room"\s*\{\s*@\("Send room message…", "Copy room URL", "Room access & settings\.\.\."'
 	}
 
 	It "covers editable registered-user and ban-list states through the typed admin controllers" {

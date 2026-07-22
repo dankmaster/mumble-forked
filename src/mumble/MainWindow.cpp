@@ -14491,7 +14491,7 @@ void MainWindow::initializeBaseActions() {
 	qaUserLocalNickname = makeAction("qaUserLocalNickname", tr("Change Local Nickname"));
 	qaChannelAdd = makeAction("qaChannelAdd", tr("Add Channel"));
 	qaChannelRemove = makeAction("qaChannelRemove", tr("Remove Channel"));
-	qaChannelACL = makeAction("qaChannelACL", tr("Edit ACL"));
+	qaChannelACL = makeAction("qaChannelACL", tr("Room access & settings"));
 	qaChannelLink = makeAction("qaChannelLink", tr("Link Channel"));
 	qaChannelUnlink = makeAction("qaChannelUnlink", tr("Unlink Channel"));
 	qaChannelUnlinkAll = makeAction("qaChannelUnlinkAll", tr("Unlink All"));
@@ -16015,7 +16015,7 @@ namespace {
 			const unsigned int deny  = permissionsFromList(row.value(QStringLiteral("deny")));
 			if (!applyHere && !applySubs) {
 				if (errorMessage) {
-					*errorMessage = QObject::tr("Each ACL rule must apply here, to sub rooms, or both.");
+					*errorMessage = QObject::tr("Each access rule must apply here, to sub rooms, or both.");
 				}
 				return false;
 			}
@@ -16026,7 +16026,7 @@ namespace {
 				const std::optional< int > userID = modernUserIDFromText(target, row);
 				if (!userID || *userID < 0) {
 					if (errorMessage) {
-						*errorMessage = QObject::tr("User ACL targets must be an online username or a numeric user ID.");
+						*errorMessage = QObject::tr("User access-rule targets must be an online username or a numeric user ID.");
 					}
 					return false;
 				}
@@ -16097,6 +16097,7 @@ namespace {
 		const unsigned int channelID =
 			channel ? channel->iId : aclModel.value(QStringLiteral("channelId")).toUInt();
 		const QString channelName = channel ? channel->qsName : QObject::tr("Room %1").arg(channelID);
+		const QString channelPath = channel ? persistentTextAclChannelLabel(channel) : channelName;
 		const bool isRootChannel  = channelID == Mumble::ROOT_CHANNEL_ID;
 		const bool supportsVoiceMaxUsers =
 			Global::get().sh && Global::get().sh->protocolVersion() >= Version::fromComponents(1, 3, 0);
@@ -16126,24 +16127,25 @@ namespace {
 
 		const QString subtitle =
 			subtitleOverride.trimmed().isEmpty()
-				? QObject::tr("Edit details, access rules, and groups for %1. Room ID %2.")
-					  .arg(channelName)
+				? QObject::tr("Changes apply to %1 (room ID %2). Access rules inherit through the room tree unless overridden here.")
+					  .arg(channelPath)
 					  .arg(channelID)
 				: subtitleOverride;
 		QVariantMap dialog = modernDialogDto(
-			QStringLiteral("acl"), QStringLiteral("form"), QObject::tr("Edit room"), subtitle,
+			QStringLiteral("acl"), QStringLiteral("form"), QObject::tr("Room access & settings"), subtitle,
 			QVariantList {
-				modernDialogSection(QObject::tr("Room details"), roomFields),
-				modernDialogSection(QObject::tr("Access control"),
-									QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
-																		QObject::tr("Rules and groups"),
-																		aclModel) }) },
+				modernDialogSection(
+					QObject::tr("Access rules and groups"),
+					QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
+														QObject::tr("Rules and groups"), aclModel) },
+					QString(), QObject::tr("These permissions belong to the target room shown above.")),
+				modernDialogSection(QObject::tr("Room details"), roomFields) },
 			QVariantList { modernDialogAction(QStringLiteral("cancel"), QObject::tr("Cancel"), true, QString(), true),
-						   modernDialogAction(QStringLiteral("saveAcl"), QObject::tr("Save room"), true,
+						   modernDialogAction(QStringLiteral("saveAcl"), QObject::tr("Save changes"), true,
 											  QStringLiteral("accent")) },
 			QStringLiteral("saveAcl"), QSize(1040, 780));
 		dialog.insert(QStringLiteral("highlights"),
-					  QVariantList { modernDialogHighlight(QObject::tr("Room"), channelName),
+					  QVariantList { modernDialogHighlight(QObject::tr("Target room"), channelPath),
 									 modernDialogHighlight(QObject::tr("Rules"),
 														   aclModel.value(QStringLiteral("acls")).toList().size()),
 									 modernDialogHighlight(QObject::tr("Groups"),
@@ -18270,19 +18272,23 @@ void MainWindow::failPendingModernServerAdminOperations(const QString &error, co
 }
 
 void MainWindow::openModernAclRequestDialog(Channel *channel) {
-	if (!channel) {
-		channel = Channel::get(Mumble::ROOT_CHANNEL_ID);
-	}
 	if (!channel || !Global::get().sh) {
 		return;
 	}
 
+	// Access rules always belong to a concrete voice/root room. Move the Modern
+	// shell to that exact room before showing the editor so the background
+	// selection, participant context, dialog copy and eventual write all agree.
+	navigateToPersistentChatScope(MumbleProto::Channel, channel->iId, false, true);
 	queueChannelAclDescriptionRead(channel, true);
 
 	QVariantMap dialog = modernDialogDto(
-		QStringLiteral("acl"), QStringLiteral("info"), tr("Edit room"),
-		tr("Requesting room details and ACL data for %1.").arg(channel->qsName),
-		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading ACL...")) }) },
+		QStringLiteral("acl"), QStringLiteral("info"), tr("Room access & settings"),
+		tr("Opening access settings for %1 (room ID %2).")
+			.arg(persistentTextAclChannelLabel(channel))
+			.arg(channel->iId),
+		QVariantList { modernDialogSection(tr("Status"),
+										 QVariantList { modernNoteField(tr("Loading room access...")) }) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
 		QStringLiteral("close"), QSize(720, 520));
 	dialog.insert(QStringLiteral("loading"), true);
@@ -18577,7 +18583,7 @@ void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, 
 						  !forcedTemporary),
 		modernDialogField(QStringLiteral("voice.maxUsers"), tr("Max voice users"), QStringLiteral("number"),
 						  valueOrDefault(QStringLiteral("voice.maxUsers"), 0), supportsVoiceMaxUsers),
-		modernSelectField(QStringLiteral("text.visibility"), tr("Text visibility source"),
+		modernSelectField(QStringLiteral("text.visibility"), tr("Text access source room"),
 						  valueOrDefault(QStringLiteral("text.visibility"), Mumble::ROOT_CHANNEL_ID),
 						  textVisibilityOptions),
 		modernDialogField(QStringLiteral("text.position"), tr("Text order"), QStringLiteral("number"),
@@ -18632,14 +18638,17 @@ void MainWindow::openModernEditTextRoomDialog(const unsigned int textChannelID, 
 	const auto valueOrDefault = [&fieldValues](const QString &key, const QVariant &fallback) {
 		return fieldValues.contains(key) ? fieldValues.value(key) : fallback;
 	};
+	const unsigned int selectedAccessSourceID =
+		valueOrDefault(QStringLiteral("text.visibility"), static_cast< int >(textChannelIt->aclChannelID)).toUInt();
+	Channel *selectedAccessSource = Channel::get(selectedAccessSourceID);
+	const QString selectedAccessSourceLabel = persistentTextAclChannelLabel(selectedAccessSource);
 	QVariantList fields {
 		modernHiddenField(QStringLiteral("text.id"), static_cast< int >(textChannelID)),
 		modernDialogField(QStringLiteral("text.name"), tr("Name"), QStringLiteral("text"),
 						  valueOrDefault(QStringLiteral("text.name"), textChannelIt->name)),
 		modernTextareaField(QStringLiteral("text.description"), tr("Description"),
 							 valueOrDefault(QStringLiteral("text.description"), textChannelIt->description).toString(), 3),
-		modernSelectField(QStringLiteral("text.visibility"), tr("Visibility source"),
-						  valueOrDefault(QStringLiteral("text.visibility"), static_cast< int >(textChannelIt->aclChannelID)),
+		modernSelectField(QStringLiteral("text.visibility"), tr("Access source room"), selectedAccessSourceID,
 						  visibilityOptions),
 		modernDialogField(QStringLiteral("text.position"), tr("Order"), QStringLiteral("number"),
 						  valueOrDefault(QStringLiteral("text.position"), static_cast< int >(textChannelIt->position)))
@@ -18647,14 +18656,17 @@ void MainWindow::openModernEditTextRoomDialog(const unsigned int textChannelID, 
 
 	QVariantList actions {
 		modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
-		modernDialogAction(QStringLiteral("editTextRoomAcl"), tr("Configure ACL"), !visibilityOptions.isEmpty()),
+		modernDialogAction(QStringLiteral("editTextRoomAcl"), tr("Open source room access..."),
+						   !visibilityOptions.isEmpty()),
 		modernDialogAction(QStringLiteral("saveTextRoom"), tr("Save"), true, QStringLiteral("accent"))
 	};
 
 	QVariantMap dialog = modernDialogDto(
-		QStringLiteral("editTextRoom:%1").arg(textChannelID), QStringLiteral("form"), tr("Edit text room"),
-		tr("Update the persistent text room without leaving Modern layout."),
-		QVariantList { modernDialogSection(tr("Room"), fields) },
+		QStringLiteral("editTextRoom:%1").arg(textChannelID), QStringLiteral("form"), tr("Text room settings"),
+		tr("#%1 inherits visibility and permissions from %2.").arg(textChannelIt->name, selectedAccessSourceLabel),
+		QVariantList { modernDialogSection(
+			tr("Text room"), fields, QString(),
+			tr("Choose the voice/root room whose access rules should control this text room.")) },
 		actions, QStringLiteral("saveTextRoom"), QSize(680, 500));
 	if (!errors.isEmpty()) {
 		dialog.insert(QStringLiteral("errors"), errors);
@@ -21245,16 +21257,16 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			dialogErrors.insert(QStringLiteral("acl.model"), errorMessage);
 			openModernGenericDialog(modernAclDialogForChannel(Channel::get(aclModel.value(QStringLiteral("channelId")).toUInt()),
 															  aclModel, fieldValues, dialogErrors,
-															  tr("Review the highlighted ACL issue.")));
+													  tr("Review the highlighted access-rule issue.")));
 			return true;
 		}
 		Channel *channel = Channel::get(msg.channel_id());
 		if (!channel || !canEditChannelACL(channel)) {
 			QVariantMap dialogErrors;
 			dialogErrors.insert(QStringLiteral("acl.model"),
-								tr("You need Write permission on this room to edit details or ACLs."));
+								tr("You need Write permission on this room to edit its settings or access rules."));
 			openModernGenericDialog(modernAclDialogForChannel(channel, aclModel, fieldValues, dialogErrors,
-															  tr("Review the highlighted ACL issue.")));
+													  tr("Review the highlighted access-rule issue.")));
 			return true;
 		}
 
@@ -21344,7 +21356,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			if (!aclChannel || !canEditChannelACL(aclChannel)) {
 				QVariantMap dialogErrors;
 				dialogErrors.insert(QStringLiteral("text.visibility"),
-									tr("Choose a visibility source whose ACL you can edit."));
+									tr("Choose an access source room whose access rules you can edit."));
 				openModernEditTextRoomDialog(*textChannelID, fieldValues, dialogErrors);
 				return true;
 			}
@@ -22035,18 +22047,21 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernSearchDialog();
 		return true;
 	}
-	if (action == QLatin1String("server.acl") || action == QLatin1String("acl")) {
-		Channel *channel = contextChannel;
-		if (!channel) {
-			channel = getContextMenuChannel();
+	if (action == QLatin1String("server.acl")) {
+		Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+		if (!rootChannel) {
+			return false;
 		}
-		if (!channel) {
-			channel = selectedVoiceTreeChannel();
+		openModernAclRequestDialog(rootChannel);
+		return true;
+	}
+	if (action == QLatin1String("acl")) {
+		// Room-scoped actions must carry their room explicitly. Never let stale
+		// global selection silently turn an ACL write into a different target.
+		if (!contextChannel) {
+			return false;
 		}
-		if (!channel) {
-			channel = Channel::get(Mumble::ROOT_CHANNEL_ID);
-		}
-		openModernAclRequestDialog(channel);
+		openModernAclRequestDialog(contextChannel);
 		return true;
 	}
 	if (action == QLatin1String("self.recording") || action == QLatin1String("recording")) {
@@ -22986,16 +23001,18 @@ QVariantList MainWindow::buildModernShellAppMenus() const {
 		menus.push_back(menu);
 	};
 	const auto actionItem = [](const QString &id, const QString &actionLabel, const bool enabled,
-								   const QString &tone = QString(), const QString &hint = QString()) {
-		return ModernShellMenuSerializer::actionItem(id, actionLabel, enabled, false, tone, hint);
+								   const QString &tone = QString(), const QString &hint = QString(),
+								   const QString &secondary = QString()) {
+		return ModernShellMenuSerializer::actionItem(id, actionLabel, enabled, false, tone, hint, QString(), secondary);
 	};
 	const auto availableActionItem = [&actionItem](const QString &id, const QString &actionLabel,
 												 const bool available, const QString &tone = QString(),
-												 const QString &hint = QString()) -> QVariant {
+												 const QString &hint = QString(),
+												 const QString &secondary = QString()) -> QVariant {
 		if (!available) {
 			return {};
 		}
-		return actionItem(id, actionLabel, true, tone, hint);
+		return actionItem(id, actionLabel, true, tone, hint, secondary);
 	};
 
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh;
@@ -23024,8 +23041,9 @@ QVariantList MainWindow::buildModernShellAppMenus() const {
 										  actionEnabled(qaServerUserList)));
 	serverItems.push_back(availableActionItem(QStringLiteral("server.banList"), tr("Ban list..."),
 										  actionEnabled(qaServerBanList)));
-	serverItems.push_back(availableActionItem(QStringLiteral("server.acl"), tr("Access control (ACL)..."),
-										  canEditRootAcl));
+	serverItems.push_back(availableActionItem(
+		QStringLiteral("server.acl"), tr("Root room access & settings..."), canEditRootAcl,
+		QString(), QString(), rootChannel ? persistentTextAclChannelLabel(rootChannel) : QString()));
 	serverItems.push_back(availableActionItem(QStringLiteral("server.settings"), tr("Server settings..."),
 										  actionEnabled(qaServerSettings)));
 	const QVariantList dynamicServerItems = ModernShellMenuSerializer::serializeActions(
@@ -23312,7 +23330,8 @@ ModernShellMenuSerializer::ActionDefinition
 				definition.label = tr("Create room...");
 			} else if (action == qaChannelACL) {
 				definition.id    = QStringLiteral("acl");
-				definition.label = tr("Edit room...");
+				definition.label = tr("Room access & settings...");
+				definition.secondary = cContextChannel ? persistentTextAclChannelLabel(cContextChannel) : QString();
 			} else if (action == qaChannelRemove) {
 				definition.id    = QStringLiteral("remove");
 				definition.label = tr("Remove room...");
@@ -24890,6 +24909,8 @@ QVariantList MainWindow::buildQmlScopeActions(const QString &scopeToken, const Q
 		const PersistentTextChannel &textChannel = textChannelIt.value();
 		QVariantList actions;
 		const bool canManage = canManagePersistentTextChannels();
+		Channel *accessSource = Channel::get(textChannel.aclChannelID);
+		const QString accessSourceLabel = persistentTextAclChannelLabel(accessSource);
 		if (canManage) {
 			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.edit"),
 																tr("Edit text room..."), true, false));
@@ -24898,12 +24919,14 @@ QVariantList MainWindow::buildQmlScopeActions(const QString &scopeToken, const Q
 				textChannel.textChannelID != m_defaultPersistentTextChannelID, false));
 		}
 		if (canEditPersistentTextChannelACL(textChannel)) {
-			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.acl"),
-																tr("Configure ACL..."), true, false));
+			actions.push_back(ModernShellMenuSerializer::actionItem(
+				QStringLiteral("textRoom.acl"), tr("Edit source room access..."), true, false,
+				QString(), QString(), QString(), accessSourceLabel));
 		}
-		if (Channel::get(textChannel.aclChannelID)) {
-			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.visibilitySource"),
-																tr("Go to visibility source"), true, false));
+		if (accessSource) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(
+				QStringLiteral("textRoom.visibilitySource"), tr("Go to source room"), true, false,
+				QString(), QString(), QString(), accessSourceLabel));
 		}
 		if (canManage) {
 			if (!actions.isEmpty()) actions.push_back(ModernShellMenuSerializer::separatorItem());
@@ -29596,9 +29619,7 @@ void MainWindow::editPersistentTextChannelACL(const unsigned int textChannelID) 
 		return;
 	}
 
-	cContextChannel = channel;
-	on_qaChannelACL_triggered();
-	cContextChannel.clear();
+	openModernAclRequestDialog(channel);
 }
 
 void MainWindow::setDefaultPersistentTextChannel() {
