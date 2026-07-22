@@ -200,18 +200,36 @@ if(zeroconf)
 endif()
 
 if(ice)
-	find_pkg(Ice
-		COMPONENTS
-			Ice
-			IceSSL
-		OPTIONAL_COMPONENTS
-			IceDiscovery
-			IceLocatorDiscovery
-			IceUtil
-		REQUIRED
-	)
+	# Ice 3.8 ships a config package that imports all available targets in one
+	# pass. In particular, IceSSL is no longer a separate library because its
+	# transport is part of Ice itself. Prefer that package to avoid repeatedly
+	# importing its targets, but retain the module-based lookup for older Ice
+	# installations that still provide IceSSL as a separate component.
+	find_package(Ice CONFIG QUIET)
+	if(NOT Ice_FOUND)
+		find_pkg(Ice
+			COMPONENTS
+				Ice
+				IceSSL
+			OPTIONAL_COMPONENTS
+				IceDiscovery
+				IceLocatorDiscovery
+				IceUtil
+			REQUIRED
+		)
+	endif()
 
-	if(Ice_VERSION_MAJOR LESS 3)
+	if(NOT TARGET Ice::Ice)
+		message(FATAL_ERROR "The discovered Ice package does not provide the required Ice::Ice target.")
+	endif()
+
+	# The config package uses the singular variable while CMake's FindIce
+	# module uses the plural one consumed below.
+	if(NOT Ice_SLICE_DIRS AND Ice_SLICE_DIR)
+		set(Ice_SLICE_DIRS "${Ice_SLICE_DIR}")
+	endif()
+
+	if(Ice_VERSION VERSION_LESS 3)
 		message(FATAL_ERROR "Unsupported Ice version, at least 3.0 is required.")
 	endif()
 
@@ -277,7 +295,7 @@ if(ice)
 	target_link_libraries(mumble_server_object_lib
 		PUBLIC
 			Ice::Ice
-			Ice::IceSSL
+			$<TARGET_NAME_IF_EXISTS:Ice::IceSSL>
 			$<TARGET_NAME_IF_EXISTS:Ice::IceDiscovery>
 			$<TARGET_NAME_IF_EXISTS:Ice::IceLocatorDiscovery>
 			$<TARGET_NAME_IF_EXISTS:Ice::IceUtil>
