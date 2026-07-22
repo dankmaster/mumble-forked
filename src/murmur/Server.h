@@ -500,6 +500,8 @@ public:
 	void rememberLatestChatHistoryMessage(const ::mumble::server::db::DBChatMessage &message);
 	void invalidateChatHistoryCache(unsigned int threadID);
 	void pruneChatHistoryLatestPageCache(unsigned int preserveThreadID = 0);
+	bool isStonksTextChannelID(unsigned int textChannelID);
+	bool hasStonksAccess(ServerUser *user, ChanACL::ACLCache *cache = nullptr);
 	bool feedbackGitHubConfigured() const;
 	void sendFeedbackReportState(unsigned int session, const QString &clientReportID,
 								 MumbleProto::FeedbackReportKind kind, bool accepted,

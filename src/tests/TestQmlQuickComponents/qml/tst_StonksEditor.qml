@@ -19,6 +19,8 @@ TestCase {
 	function populatedState() {
 		return {
 			"supported": true,
+			"accessSupported": true,
+			"allowed": true,
 			"enabled": true,
 			"feature": { "tickerBannerEnabled": false, "tickerPlacement": "bottom",
 				"tickerDirection": "left", "tickerSpeed": "normal" },
@@ -170,6 +172,23 @@ TestCase {
 		verify(progress.indeterminate)
 		compare(progress.Accessible.role, Accessible.ProgressBar)
 		compare(progress.Accessible.name, "Loading Stonks data")
+	}
+
+	function test_access_denial_removes_every_interactive_editor_surface() {
+		const denied = populatedState()
+		denied.allowed = false
+		loader.item.stonks = denied
+		tryCompare(loader.item, "contentAvailable", false)
+		const unavailable = findChild(loader.item, "stonksUnavailableLabel")
+		verify(unavailable !== null)
+		tryCompare(unavailable, "visible", true)
+		verify(unavailable.text.indexOf("Use Stonks") >= 0)
+
+		const legacy = populatedState()
+		legacy.accessSupported = false
+		loader.item.stonks = legacy
+		tryCompare(loader.item, "contentAvailable", false)
+		verify(unavailable.text.indexOf("access-control contract") >= 0)
 	}
 
 	function test_portfolio_payload_preserves_quote_metadata_and_routes_save() {

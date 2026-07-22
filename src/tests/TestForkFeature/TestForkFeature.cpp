@@ -21,6 +21,7 @@ private slots:
 	void sanitizesUnknownAndFutureFeatures();
 	void exposesFallbackPolicy();
 	void toolsAclPermissionContract();
+	void stonksAclPermissionContract();
 	void legacyClientsCannotMutateToolsAcl();
 	void serverLogStreamContract();
 };
@@ -49,6 +50,7 @@ void TestForkFeature::advertisesSupportedFeaturesInVersion() {
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureInAppFeedback));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureToolsAcl));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureServerLogStream));
+	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureStonksAcl));
 }
 
 void TestForkFeature::advertisesSupportedFeaturesInServerConfig() {
@@ -99,12 +101,51 @@ void TestForkFeature::exposesFallbackPolicy() {
 	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
 				 MumbleProto::ForkFeatureServerLogStream)),
 			 QStringLiteral("server_only"));
+	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
+				 MumbleProto::ForkFeatureStonksAcl)),
+			 QStringLiteral("server_only"));
 }
 
 void TestForkFeature::toolsAclPermissionContract() {
 	QCOMPARE(static_cast< unsigned int >(ChanACL::UseTools), 0x00200000u);
 	QVERIFY(ChanACL::Permissions(ChanACL::All).testFlag(ChanACL::UseTools));
 	QCOMPARE(Mumble::ForkFeatures::minProtocolVersion(MumbleProto::ForkFeatureToolsAcl), 3u);
+}
+
+void TestForkFeature::stonksAclPermissionContract() {
+	QCOMPARE(static_cast< unsigned int >(ChanACL::UseStonks), 0x00400000u);
+	QVERIFY(ChanACL::Permissions(ChanACL::All).testFlag(ChanACL::UseStonks));
+	QCOMPARE(Mumble::ForkFeatures::minProtocolVersion(MumbleProto::ForkFeatureStonksAcl), 4u);
+
+	MumbleProto::StonksState state;
+	state.set_supported(true);
+	state.set_allowed(true);
+	std::string encoded;
+	QVERIFY(state.SerializeToString(&encoded));
+	MumbleProto::StonksState parsed;
+	QVERIFY(parsed.ParseFromString(encoded));
+	QVERIFY(parsed.allowed());
+
+	const QString serverPath = QFINDTESTDATA("../../murmur/Server.cpp");
+	QVERIFY2(!serverPath.isEmpty(), "Murmur Server.cpp test data was not found");
+	QFile serverFile(serverPath);
+	QVERIFY(serverFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString serverSource = QString::fromUtf8(serverFile.readAll());
+	QVERIFY(serverSource.contains(QStringLiteral("bool Server::hasStonksAccess")));
+	QVERIFY(serverSource.contains(QStringLiteral("ForkFeatureStonksAcl")));
+	QVERIFY(serverSource.contains(QStringLiteral("ChanACL::UseStonks")));
+	QVERIFY(serverSource.contains(QStringLiteral("scope == MumbleProto::TextChannel && isStonksTextChannelID")));
+	QVERIFY(serverSource.contains(QStringLiteral("!hasStonksAccess(user, cache)")));
+
+	const QString messagesPath = QFINDTESTDATA("../../murmur/Messages.cpp");
+	QVERIFY2(!messagesPath.isEmpty(), "Murmur Messages.cpp test data was not found");
+	QFile messagesFile(messagesPath);
+	QVERIFY(messagesFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString messagesSource = QString::fromUtf8(messagesFile.readAll());
+	QVERIFY(messagesSource.contains(QStringLiteral("state.set_allowed(server->hasStonksAccess")));
+	QVERIFY(messagesSource.contains(QStringLiteral("PERM_DENIED(uSource, rootChannel, ChanACL::UseStonks)")));
+	QVERIFY(messagesSource.contains(QStringLiteral("isStonksTextChannelID(currentTextChannel.textChannelID)")));
+	QVERIFY(messagesSource.contains(QStringLiteral("requiresStonksAccess")));
 }
 
 void TestForkFeature::legacyClientsCannotMutateToolsAcl() {
@@ -120,9 +161,12 @@ void TestForkFeature::legacyClientsCannotMutateToolsAcl() {
 
 	QVERIFY(handler.contains(QStringLiteral("ForkFeatureToolsAcl")));
 	QVERIFY(handler.contains(QStringLiteral("!toolsAclCapableClient")));
-	QVERIFY(handler.contains(QStringLiteral("grant &= ~ChanACL::UseTools")));
-	QVERIFY(handler.contains(QStringLiteral("a->pAllow &= ~ChanACL::UseTools")));
-	QVERIFY(handler.contains(QStringLiteral("PreservedToolsAclRule")));
+	QVERIFY(handler.contains(QStringLiteral("ForkFeatureStonksAcl")));
+	QVERIFY(handler.contains(QStringLiteral("!stonksAclCapableClient")));
+	QVERIFY(handler.contains(QStringLiteral("unsupportedRootFeaturePermissions")));
+	QVERIFY(handler.contains(QStringLiteral("grant &= ~unsupportedRootFeaturePermissions")));
+	QVERIFY(handler.contains(QStringLiteral("a->pAllow &= ~unsupportedRootFeaturePermissions")));
+	QVERIFY(handler.contains(QStringLiteral("PreservedRootFeatureAclRule")));
 	QVERIFY(handler.contains(QStringLiteral("rootPermissionUpdates")));
 }
 

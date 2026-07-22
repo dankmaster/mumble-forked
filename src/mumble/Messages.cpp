@@ -2076,7 +2076,10 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 		c->uiPermissions = msg.permissions();
 		if (c->iId == 0)
 			Global::get().pPermissions = static_cast< ChanACL::Permissions >(c->uiPermissions);
-		if (c->iId == 0) syncModernServerAdminPermissions();
+		if (c->iId == 0) {
+			syncModernServerAdminPermissions();
+			handleStonksPermissionUpdate();
+		}
 		if (c == current) updateMenuPermissions();
 		scheduleQmlRoomStateUpdate();
 		if (activeChatTargetMatchesPermissionChannel && activeChatTarget.channel == c

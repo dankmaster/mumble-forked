@@ -42,6 +42,7 @@
 	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>
 	<file alias="StonksEditor.qml">qml-shell/StonksEditor.qml</file>
 	<file alias="StonksHeader.qml">qml-shell/StonksHeader.qml</file>
+	<file alias="StonksRoomPanel.qml">qml-shell/StonksRoomPanel.qml</file>
 	<file alias="ScreenShareViewWindow.qml">qml-shell/ScreenShareViewWindow.qml</file>
 	<file alias="ScreenShareControls.qml">qml-shell/ScreenShareControls.qml</file>
 	<file alias="ScreenShareScopeCard.qml">qml-shell/ScreenShareScopeCard.qml</file>

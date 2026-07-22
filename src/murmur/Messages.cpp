@@ -696,9 +696,13 @@ std::chrono::system_clock::time_point currentConnectionVisibleAfter(const Server
 }
 
 std::optional< std::chrono::system_clock::time_point > liveSessionVisibleAfterForUser(
-	ServerUser *user, MumbleProto::ChatScope scope, Channel *channel,
+	Server *server, ServerUser *user, MumbleProto::ChatScope scope, unsigned int scopeID, Channel *channel,
 	const ChannelListenerManager &channelListenerManager, ChanACL::ACLCache &cache) {
 	if (!user || !channel || !clientSupportsPersistentChat(user)) {
+		return std::nullopt;
+	}
+	if (scope == MumbleProto::TextChannel && server && server->isStonksTextChannelID(scopeID)
+		&& !server->hasStonksAccess(user, &cache)) {
 		return std::nullopt;
 	}
 
@@ -725,8 +729,9 @@ std::optional< std::chrono::system_clock::time_point > liveSessionVisibleAfterFo
 }
 
 QSet< ServerUser * > recipientsWithLivePersistentChatAccess(
-	const QHash< unsigned int, ServerUser * > &connectedUsers, MumbleProto::ChatScope scope, Channel *channel,
-	ChanACL::ACLCache &cache, const QSet< ServerUser * > &channelAudience = {}) {
+	Server *server, const QHash< unsigned int, ServerUser * > &connectedUsers, MumbleProto::ChatScope scope,
+	unsigned int scopeID, Channel *channel, ChanACL::ACLCache &cache,
+	const QSet< ServerUser * > &channelAudience = {}) {
 	QSet< ServerUser * > recipients;
 
 	if (!channel) {
@@ -745,8 +750,13 @@ QSet< ServerUser * > recipientsWithLivePersistentChatAccess(
 	if (scope != MumbleProto::ServerGlobal && scope != MumbleProto::TextChannel) {
 		return recipients;
 	}
+	const bool requiresStonksAccess =
+		scope == MumbleProto::TextChannel && server && server->isStonksTextChannelID(scopeID);
 
 	for (ServerUser *currentUser : connectedUsers) {
+		if (requiresStonksAccess && !server->hasStonksAccess(currentUser, &cache)) {
+			continue;
+		}
 		if (canReceiveLivePersistentChat(currentUser, scope, channel, cache)) {
 			recipients.insert(currentUser);
 		}
@@ -2362,6 +2372,15 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	}
 
 	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
+	state.set_supported(true);
+	state.set_enabled(server->bStonksEnabled);
+	state.set_selected_period(u8(normalizedPeriod));
+	state.set_allowed(server->hasStonksAccess(user, &aclCache));
+	if (!state.allowed()) {
+		state.set_error("Use Stonks permission is required on the root channel.");
+		return state;
+	}
+
 	const std::optional< unsigned int > selfUserID = persistedUserID(user);
 	const bool registered =
 		selfUserID && server->m_dbWrapper.registeredUserExists(server->iServerNum, *selfUserID);
@@ -2369,15 +2388,12 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	Channel *rootChannel = server->qhChannels.value(Mumble::ROOT_CHANNEL_ID);
 	const bool canAdmin = rootChannel && ChanACL::hasPermission(user, rootChannel, ChanACL::Write, &aclCache);
 
-	state.set_supported(true);
-	state.set_enabled(server->bStonksEnabled);
 	state.set_registered(registered);
 	if (selfUserID) {
 		state.set_self_user_id(*selfUserID);
 	}
 	state.set_can_admin(canAdmin);
 	state.set_social_announcements_enabled(server->bStonksSocialAnnouncementsEnabled);
-	state.set_selected_period(u8(normalizedPeriod));
 	state.set_leaderboard_description("Leaderboard ranks only PnL for the selected period.");
 	if (!status.trimmed().isEmpty()) {
 		state.set_status(u8(status.trimmed()));
@@ -2830,6 +2846,10 @@ void Server::sendTextChannelSync(ServerUser *uSource) {
 		if (!permissionChannel) {
 			continue;
 		}
+		if (isStonksTextChannelID(currentTextChannel.textChannelID)
+			&& !hasStonksAccess(uSource, &acCache)) {
+			continue;
+		}
 
 		if (!canReceiveLivePersistentChat(uSource, MumbleProto::TextChannel, permissionChannel, acCache)
 			&& !resolveChatHistoryAccess(uSource, MumbleProto::TextChannel, currentTextChannel.textChannelID,
@@ -2970,15 +2990,15 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 		persistentRecipients = connectedPrivateChatParticipants(qhUsers, authorUserID.value(), scopeID);
 	} else if (scope == MumbleProto::Channel) {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
-															   storedMessage.createdAt);
+														   storedMessage.createdAt);
 		persistentRecipients.unite(recipientsWithLivePersistentChatAccess(
-			qhUsers, scope, permissionChannel, acCache, legacyFallbackRecipients));
+			this, qhUsers, scope, scopeID, permissionChannel, acCache, legacyFallbackRecipients));
 		persistentRecipients.insert(uSource);
 	} else {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   storedMessage.createdAt);
 		persistentRecipients.unite(
-			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache));
 	}
 
 	for (ServerUser *currentUser : persistentRecipients) {
@@ -3155,12 +3175,12 @@ void Server::persistAndBroadcastServerChatMessage(const QString &bodyText, Mumbl
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   storedMessage.createdAt);
 		persistentRecipients.unite(
-			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache, {}));
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache, {}));
 	} else {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   storedMessage.createdAt);
 		persistentRecipients.unite(
-			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache));
 	}
 
 	for (ServerUser *currentUser : persistentRecipients) {
@@ -3276,10 +3296,11 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 		recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache, message->createdAt);
 	if (scope == MumbleProto::Channel) {
 		recipients.unite(recipientsWithLivePersistentChatAccess(
-			qhUsers, scope, permissionChannel, acCache,
+			this, qhUsers, scope, scopeID, permissionChannel, acCache,
 			legacyChannelRecipients(qhUsers, m_channelListenerManager, permissionChannel)));
 	} else {
-		recipients.unite(recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+		recipients.unite(
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache));
 	}
 
 	for (ServerUser *currentUser : recipients) {
@@ -5618,6 +5639,14 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 	if (!permissionChannel) {
 		return;
 	}
+	if (scope == MumbleProto::TextChannel && isStonksTextChannelID(scopeID)
+		&& !hasStonksAccess(uSource, &acCache)) {
+		Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+		if (rootChannel) {
+			PERM_DENIED(uSource, rootChannel, ChanACL::UseStonks);
+		}
+		return;
+	}
 
 	if (scope != MumbleProto::Private
 		&& !ChanACL::hasPermission(uSource, permissionChannel, ChanACL::TextMessage, &acCache)) {
@@ -6007,16 +6036,16 @@ void Server::msgChatMessageDelete(ServerUser *uSource, MumbleProto::ChatMessageD
 	QSet< ServerUser * > persistentRecipients;
 	if (scope == MumbleProto::Channel) {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
-															   message->createdAt);
+														   message->createdAt);
 		persistentRecipients.unite(recipientsWithLivePersistentChatAccess(
-			qhUsers, scope, permissionChannel, acCache,
+			this, qhUsers, scope, scopeID, permissionChannel, acCache,
 			legacyChannelRecipients(qhUsers, m_channelListenerManager, permissionChannel)));
 		persistentRecipients.insert(uSource);
 	} else {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   message->createdAt);
 		persistentRecipients.unite(
-			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache));
 	}
 
 	for (ServerUser *currentUser : persistentRecipients) {
@@ -6279,7 +6308,7 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 			ChatHistoryAccess effectiveAccess = access;
 			if (!effectiveAccess.allowed) {
 				const std::optional< std::chrono::system_clock::time_point > sessionVisibleAfter =
-					liveSessionVisibleAfterForUser(uSource, messageScope, messagePermissionChannel,
+					liveSessionVisibleAfterForUser(this, uSource, messageScope, messageScopeID, messagePermissionChannel,
 												   m_channelListenerManager, acCache);
 				if (!sessionVisibleAfter) {
 					continue;
@@ -6336,7 +6365,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 	ChatHistoryAccess effectiveAccess = access;
 	if (!effectiveAccess.allowed) {
 		const std::optional< std::chrono::system_clock::time_point > sessionVisibleAfter =
-			liveSessionVisibleAfterForUser(uSource, scope, permissionChannel, m_channelListenerManager, acCache);
+			liveSessionVisibleAfterForUser(this, uSource, scope, scopeID, permissionChannel,
+									   m_channelListenerManager, acCache);
 		if (sessionVisibleAfter) {
 			effectiveAccess.allowed      = true;
 			effectiveAccess.visibleAfter = *sessionVisibleAfter;
@@ -6640,6 +6670,10 @@ void Server::msgStonksRequest(ServerUser *uSource, MumbleProto::StonksRequest &m
 		sendMessage(uSource, state);
 		return;
 	}
+	if (!hasStonksAccess(uSource, &acCache)) {
+		sendMessage(uSource, buildStonksState(this, uSource, period, acCache));
+		return;
+	}
 
 	const std::optional< unsigned int > requestedUserID =
 		msg.has_user_id() ? std::optional< unsigned int >(msg.user_id()) : std::nullopt;
@@ -6672,6 +6706,13 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 	}
 
 	Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+	if (!hasStonksAccess(uSource, &acCache)) {
+		if (rootChannel) {
+			PERM_DENIED(uSource, rootChannel, ChanACL::UseStonks);
+		}
+		sendState(QString(), tr("Use Stonks permission is required on the root channel."));
+		return;
+	}
 	const bool canAdmin  = rootChannel && ChanACL::hasPermission(uSource, rootChannel, ChanACL::Write, &acCache);
 	const MumbleProto::StonksActionKind action =
 		msg.has_action() ? msg.action() : MumbleProto::StonksActionSubmitSnapshot;
@@ -6954,7 +6995,8 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 				applyConfig("stonks_social_announcements_enabled",
 							msg.social_announcements_enabled() ? QLatin1String("true") : QLatin1String("false"));
 			}
-			if (msg.has_text_channel_id()) {
+			const bool textChannelChanged = msg.has_text_channel_id();
+			if (textChannelChanged) {
 				const unsigned int textChannelID = msg.text_channel_id();
 				if (textChannelID > 0 && !m_dbWrapper.getTextChannel(iServerNum, textChannelID)) {
 					sendState(QString(), tr("Selected Stonks text channel could not be found."));
@@ -6964,6 +7006,12 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 			}
 
 			sendState(tr("Stonks settings saved."));
+			if (textChannelChanged) {
+				// sendTextChannelSync takes qmCache itself. Release this handler's
+				// lock before rebuilding every connected user's permission-filtered list.
+				qml.unlock();
+				broadcastTextChannelSync(this, qhUsers);
+			}
 			return;
 		}
 	}
@@ -7878,16 +7926,16 @@ void Server::msgChatReactionToggle(ServerUser *uSource, MumbleProto::ChatReactio
 	QSet< ServerUser * > persistentRecipients;
 	if (scope == MumbleProto::Channel) {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
-															   message->createdAt);
+														   message->createdAt);
 		persistentRecipients.unite(recipientsWithLivePersistentChatAccess(
-			qhUsers, scope, permissionChannel, acCache,
+			this, qhUsers, scope, scopeID, permissionChannel, acCache,
 			legacyChannelRecipients(qhUsers, m_channelListenerManager, permissionChannel)));
 		persistentRecipients.insert(uSource);
 	} else {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   message->createdAt);
 		persistentRecipients.unite(
-			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+			recipientsWithLivePersistentChatAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache));
 	}
 
 	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
@@ -8383,6 +8431,15 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 		return;
 	const bool toolsAclCapableClient =
 		clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureToolsAcl);
+	const bool stonksAclCapableClient =
+		clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksAcl);
+	ChanACL::Permissions unsupportedRootFeaturePermissions = ChanACL::None;
+	if (!toolsAclCapableClient) {
+		unsupportedRootFeaturePermissions |= ChanACL::UseTools;
+	}
+	if (!stonksAclCapableClient) {
+		unsupportedRootFeaturePermissions |= ChanACL::UseStonks;
+	}
 
 	// For changing channel properties (the 'Write') ACL we allow two things:
 	// 1) As per regular ACL propagating mechanism, we check if the user has been
@@ -8435,9 +8492,9 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 						mpacl->set_group(u8(acl->qsGroup));
 					ChanACL::Permissions grant = acl->pAllow;
 					ChanACL::Permissions deny  = acl->pDeny;
-					if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
-						grant &= ~ChanACL::UseTools;
-						deny &= ~ChanACL::UseTools;
+					if (c->iId == Mumble::ROOT_CHANNEL_ID) {
+						grant &= ~unsupportedRootFeaturePermissions;
+						deny &= ~unsupportedRootFeaturePermissions;
 					}
 					mpacl->set_grant(static_cast< unsigned int >(grant));
 					mpacl->set_deny(static_cast< unsigned int >(deny));
@@ -8489,7 +8546,7 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 	} else {
 		{
 			QWriteLocker wl(&qrwlVoiceThread);
-			struct PreservedToolsAclRule {
+			struct PreservedRootFeatureAclRule {
 				bool applyHere;
 				bool applySubs;
 				int userID;
@@ -8498,16 +8555,17 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 				ChanACL::Permissions deny;
 				bool consumed = false;
 			};
-			QList< PreservedToolsAclRule > preservedToolsAclRules;
-			if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
+			QList< PreservedRootFeatureAclRule > preservedRootFeatureAclRules;
+			if (c->iId == Mumble::ROOT_CHANNEL_ID
+				&& unsupportedRootFeaturePermissions != ChanACL::None) {
 				for (const ChanACL *acl : c->qlACL) {
-					const ChanACL::Permissions allow = acl->pAllow & ChanACL::UseTools;
-					const ChanACL::Permissions deny  = acl->pDeny & ChanACL::UseTools;
+					const ChanACL::Permissions allow = acl->pAllow & unsupportedRootFeaturePermissions;
+					const ChanACL::Permissions deny  = acl->pDeny & unsupportedRootFeaturePermissions;
 					if (allow == ChanACL::None && deny == ChanACL::None) {
 						continue;
 					}
-					preservedToolsAclRules.push_back({ acl->bApplyHere, acl->bApplySubs, acl->iUserId,
-											 acl->qsGroup, allow, deny });
+					preservedRootFeatureAclRules.push_back({ acl->bApplyHere, acl->bApplySubs, acl->iUserId,
+												   acl->qsGroup, allow, deny });
 				}
 			}
 
@@ -8575,17 +8633,18 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 					a->qsGroup = u8(mpacl.group());
 				a->pDeny  = static_cast< ChanACL::Permissions >(mpacl.deny()) & ChanACL::All;
 				a->pAllow = static_cast< ChanACL::Permissions >(mpacl.grant()) & ChanACL::All;
-				if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
-					a->pAllow &= ~ChanACL::UseTools;
-					a->pDeny &= ~ChanACL::UseTools;
+				if (c->iId == Mumble::ROOT_CHANNEL_ID
+					&& unsupportedRootFeaturePermissions != ChanACL::None) {
+					a->pAllow &= ~unsupportedRootFeaturePermissions;
+					a->pDeny &= ~unsupportedRootFeaturePermissions;
 					const auto preserved = std::find_if(
-						preservedToolsAclRules.begin(), preservedToolsAclRules.end(),
-						[a](const PreservedToolsAclRule &rule) {
+						preservedRootFeatureAclRules.begin(), preservedRootFeatureAclRules.end(),
+						[a](const PreservedRootFeatureAclRule &rule) {
 							return !rule.consumed && rule.applyHere == a->bApplyHere
 								   && rule.applySubs == a->bApplySubs && rule.userID == a->iUserId
 								   && rule.group == a->qsGroup;
 						});
-					if (preserved != preservedToolsAclRules.end()) {
+					if (preserved != preservedRootFeatureAclRules.end()) {
 						a->pAllow |= preserved->allow;
 						a->pDeny |= preserved->deny;
 						preserved->consumed = true;
@@ -8593,7 +8652,7 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 				}
 			}
 
-			for (const PreservedToolsAclRule &rule : preservedToolsAclRules) {
+			for (const PreservedRootFeatureAclRule &rule : preservedRootFeatureAclRules) {
 				if (rule.consumed) {
 					continue;
 				}

@@ -127,6 +127,8 @@ ApplicationWindow {
 	readonly property var stonksTickerState: clientSession.stonks || ({})
 	readonly property bool stonksShortcutEnabled: !!clientSession.connected
 		&& stonksTickerState.supported === true
+		&& stonksTickerState.accessSupported === true
+		&& stonksTickerState.allowed === true
 		&& stonksTickerState.profileShortcutVisible !== false
 	readonly property bool stonksTickerEnabled: stonksTickerState.tickerBannerEnabled === true
 	readonly property string stonksTickerPlacement: String(stonksTickerState.tickerPlacement || "bottom")
@@ -2691,6 +2693,22 @@ ApplicationWindow {
 					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
 					session: mediaSession
 					participantModel: root.navigationParticipantModel
+				}
+
+				StonksRoomPanel {
+					id: stonksRoomPanel
+					objectName: "stonksRoomPanel"
+					Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					stonks: root.stonksTickerState
+					scopeToken: activeScope.scopeToken
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					accessibilitySuppressed: root.backgroundAccessibilitySuppressed
+					onActionRequested: (actionId, payload) => uiCommands.invokeAppAction(actionId, payload)
 				}
 
                 ListView {

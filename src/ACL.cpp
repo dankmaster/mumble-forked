@@ -216,11 +216,15 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 					if (allow & UseTools) {
 						granted |= UseTools;
 					}
+					if (allow & UseStonks) {
+						granted |= UseStonks;
+					}
 				}
 
 				// Every other regular ACL is handled here
 				if (apply) {
-					granted |= (allow & ~(Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools | Cached));
+					granted |=
+						(allow & ~(Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools | UseStonks | Cached));
 					granted &= ~deny;
 				}
 			}
@@ -235,7 +239,7 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 		granted |= Traverse | Enter | MuteDeafen | Move | MakeChannel | LinkChannel | TextMessage | MakeTempChannel
 				   | Listen | DeleteTextMessage;
 		if (chan->iId == 0)
-			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools;
+			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister | UseTools | UseStonks;
 	}
 
 	if (cache) {
@@ -328,6 +332,9 @@ QString ChanACL::whatsThis(Perm p) {
 		case UseTools:
 			return tr("This represents the permission to open server tools, including Activity and configured debug "
 					  "text rooms. This permission can only be granted on the root channel.");
+		case UseStonks:
+			return tr("This represents the permission to use Stonks, including its text room, portfolio, leaderboard, "
+					  "following, and ticker surfaces. This permission can only be granted on the root channel.");
 		default:
 			break;
 	}
@@ -389,6 +396,8 @@ QString ChanACL::permName(Perm p) {
 			return tr("Listen");
 		case UseTools:
 			return tr("Use tools");
+		case UseStonks:
+			return tr("Use Stonks");
 		default:
 			break;
 	}

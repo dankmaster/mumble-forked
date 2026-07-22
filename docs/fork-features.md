@@ -1,6 +1,6 @@
 # Fork Feature Inventory
 
-Status snapshot: 2026-07-15.
+Status snapshot: 2026-07-22.
 
 This document describes the fork-specific surface area in this repository. It
 is not an official Mumble roadmap, and several features are intentionally scoped
@@ -189,6 +189,7 @@ Current fork feature gates include:
 - richer screen-share session presence
 - virtualized chat presentation contracts
 - server-backed Stonks ledger state
+- root-scoped, group-grantable Stonks access control
 - client-assisted, server-authoritative link previews
 - in-app feedback handoff to an administrator-configured GitHub target
 
@@ -225,8 +226,25 @@ Current capabilities:
 - server database tables for scores, follows, feed preferences, pinned tickers,
   portfolio history, and saved positions
 - Modern Stonks panel for overview, portfolio ledger, leaderboard, following, and admin config
+- compact in-room leaderboard, period controls, following, popular-ticker pins,
+  refresh, and portfolio shortcuts above the normal `#stonks` chat timeline
 - client-local, opt-in rolling Stonks ticker banner for the Modern conversation header
 - optional social announcements in the configured Stonks text channel
+
+Stonks is protected by the root-only `Use Stonks` ACL permission. It can be
+allowed or denied on a server group from the Root room's access editor. Root
+`Write` implies it for administrators. A client must negotiate both
+`ForkFeatureStonksLedger` and `ForkFeatureStonksAcl`; otherwise the room,
+ticker, shortcuts, dashboard, portfolio state, and actions remain hidden.
+Normal text-room permissions still apply in addition to `Use Stonks`, so a
+member also needs the appropriate `TextMessage` and history access on the room's
+ACL source. Direct history grants do not bypass the Stonks gate.
+
+Typical group setup:
+
+1. Open the Root room's access editor.
+2. Select or create the group that should have access.
+3. Allow `Use Stonks` for that group and save the ACL.
 
 Typical commands:
 

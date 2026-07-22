@@ -33,7 +33,8 @@ ColumnLayout {
 	property string tickerDirection: "left"
 	property string tickerSpeed: "normal"
 	readonly property bool loading: stonks.loading === true
-	readonly property bool contentAvailable: stonks.supported !== false
+	readonly property bool accessAvailable: stonks.accessSupported === true && stonks.allowed === true
+	readonly property bool contentAvailable: stonks.supported !== false && accessAvailable
 		&& (stonks.enabled !== false || stonks.canAdmin === true)
 	readonly property var tabItems: {
 		const items = [
@@ -476,10 +477,15 @@ ColumnLayout {
 		radius: Theme.innerRadius
 		Label {
 			id: unavailableLabel
+			objectName: "stonksUnavailableLabel"
 			anchors.fill: parent
 			anchors.margins: 12
 			textFormat: Text.PlainText
-			text: root.stonks.error || root.stonks.status || qsTr("Stonks is unavailable on this server.")
+			text: root.stonks.accessSupported !== true
+				? qsTr("This server does not support the Stonks access-control contract.")
+				: root.stonks.allowed !== true
+					? qsTr("Your groups need the Use Stonks permission on the Root room.")
+					: root.stonks.error || root.stonks.status || qsTr("Stonks is unavailable on this server.")
 			color: Theme.textMuted
 			wrapMode: Text.Wrap
 		}

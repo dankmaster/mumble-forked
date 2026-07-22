@@ -21,6 +21,8 @@ AbstractButton {
 	readonly property string errorText: String(stonks.error || "").trim()
 	readonly property bool automationVisible: stonks.automationHeaderVisible === true
 	readonly property bool supported: stonks.supported === true
+	readonly property bool accessSupported: stonks.accessSupported === true
+	readonly property bool allowed: stonks.allowed === true
 	readonly property bool enabledForServer: stonks.enabled !== false
 	readonly property bool activeStonksScope: automationVisible || normalizedScopeLabel() === "stonks"
 		|| configuredScopeMatches()
@@ -28,7 +30,7 @@ AbstractButton {
 	readonly property int maximumTickerCount: narrowLayout || width < 300 ? 1 : width < 430 ? 2 : 3
 	readonly property var visibleTickerRows: tickerRows.slice(0, maximumTickerCount)
 	readonly property bool hasVisibleState: loading || errorText.length > 0 || tickerRows.length > 0
-	readonly property bool shouldShow: tickerBannerEnabled && supported && enabledForServer
+	readonly property bool shouldShow: tickerBannerEnabled && supported && accessSupported && allowed && enabledForServer
 		&& hasVisibleState
 	readonly property bool automationAnimationDisabled: stonks.disableTickerAnimation === true
 	readonly property bool horizontalMovement: tickerDirection === "left" || tickerDirection === "right"

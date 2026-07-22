@@ -4,9 +4,9 @@ This fork keeps product experiments behind explicit protocol features instead
 of inferring support from release strings or UI shape. Each fork feature has a
 minimum protocol revision and a fallback policy in `ForkFeature.cpp`.
 
-Status snapshot: 2026-06-05.
+Status snapshot: 2026-07-22.
 
-Current fork extension protocol revision: `3`.
+Current fork extension protocol revision: `4`.
 
 ## Current Feature Scope
 
@@ -25,6 +25,9 @@ Current fork extension protocol revision: `3`.
   high-volume chat timelines and media cards.
 - `ForkFeatureStonksLedger`: server-backed social finance portfolio state,
   follows, leaderboard state, feed preferences, and Modern Stonks presentation.
+- `ForkFeatureStonksAcl`: protocol revision 4 root-ACL contract for the
+  group-grantable `Use Stonks` permission. Clients and servers fail closed when
+  this contract is not negotiated.
 - `ForkFeatureInAppFeedback`: client feedback reports that Murmur can forward
   to an administrator-configured GitHub target.
 

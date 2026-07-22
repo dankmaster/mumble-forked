@@ -2035,6 +2035,8 @@ namespace {
 
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), true);
+		state.insert(QStringLiteral("accessSupported"), true);
+		state.insert(QStringLiteral("allowed"), true);
 		state.insert(QStringLiteral("enabled"), true);
 		state.insert(QStringLiteral("registered"), true);
 		state.insert(QStringLiteral("canAdmin"), true);

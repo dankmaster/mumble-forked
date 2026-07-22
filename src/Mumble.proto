@@ -56,6 +56,9 @@ enum ForkFeature {
 	// Server-authoritative, permission-gated Murmur log backlog and live stream
 	// used by the Modern shell Activity surface.
 	ForkFeatureServerLogStream = 8;
+	// Dedicated server-authoritative root ACL gate for every Stonks surface,
+	// including the scoped text room and ledger actions.
+	ForkFeatureStonksAcl = 9;
 }
 
 message Version {
@@ -90,7 +93,7 @@ message Version {
 	// Fine-grained chat protocol features this endpoint supports.
 	repeated ChatFeature supported_chat_features = 14 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 15 [default = 3];
+	optional uint32 fork_extension_protocol_version = 15 [default = 4];
 	// Fork-specific extension features this endpoint supports.
 	repeated ForkFeature supported_fork_features = 16 [packed = true];
 	// Persistent chat protocol revision implemented by this endpoint. This is
@@ -736,7 +739,7 @@ message ServerConfig {
 	// Fine-grained persistent chat features enabled by this server build.
 	repeated ChatFeature supported_chat_features = 18 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 19 [default = 3];
+	optional uint32 fork_extension_protocol_version = 19 [default = 4];
 	// Fork-specific extension features enabled by this server build.
 	repeated ForkFeature supported_fork_features = 20 [packed = true];
 	// Whether the server currently allows the Stonks ledger feature.
@@ -1331,6 +1334,9 @@ message StonksState {
 	repeated StonksPopularTicker personal_tickers = 22;
 	repeated StonksPinnedTicker pinned_tickers = 23;
 	optional StonksFeedPreferences feed_preferences = 24;
+	// False unless this session negotiated and currently holds the root-only
+	// Use Stonks permission. Clients must treat omission as denied.
+	optional bool allowed = 25 [default = false];
 }
 
 enum FeedbackReportKind {

@@ -31,6 +31,8 @@ TestCase {
 	function populatedState() {
 		return {
 			"supported": true,
+			"accessSupported": true,
+			"allowed": true,
 			"enabled": true,
 			"tickerBannerEnabled": true,
 			"tickerDirection": "left",
@@ -78,6 +80,20 @@ TestCase {
 
 		header.tickerBannerEnabled = true
 		tryCompare(header, "visible", true)
+	}
+
+	function test_access_contract_and_permission_are_strict_visibility_gates() {
+		const denied = populatedState()
+		denied.allowed = false
+		loader.item.stonks = denied
+		tryCompare(loader.item, "allowed", false)
+		tryCompare(loader.item, "visible", false)
+
+		const legacy = populatedState()
+		legacy.accessSupported = false
+		loader.item.stonks = legacy
+		tryCompare(loader.item, "accessSupported", false)
+		tryCompare(loader.item, "visible", false)
 	}
 
 	function test_ticker_supports_every_explicit_direction_and_speed() {

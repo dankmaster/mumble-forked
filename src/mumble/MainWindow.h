@@ -843,9 +843,11 @@ public:
 	bool restartForPreparedForkUpdate();
 	void openModernStonksDialog();
 	void openModernStonksPortfolio();
+	void openModernStonksLeaderboard();
 	void requestStonksState(const QString &period = QString(),
 							std::optional< unsigned int > userID = std::nullopt);
 	void handleStonksState(const MumbleProto::StonksState &state);
+	void handleStonksPermissionUpdate();
 	void refreshStonksTickerQuotes(bool force = false);
 	void requestStonksTickerQuote(const QString &symbol);
 	void finishStonksTickerQuote(const QString &symbol, quint64 requestToken, QVariantMap quote);

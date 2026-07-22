@@ -112,6 +112,14 @@ std::chrono::system_clock::time_point serverCurrentConnectionVisibleAfter(const 
 	return std::chrono::system_clock::now() - std::chrono::seconds(onlineSeconds + 1);
 }
 
+QString normalizedServerStonksRoomName(QString name) {
+	name = name.trimmed().toLower();
+	if (name.startsWith(QLatin1Char('#'))) {
+		name.remove(0, 1);
+	}
+	return name;
+}
+
 std::optional< std::pair< unsigned int, unsigned int > > serverPrivateChatParticipantsFromScopeKey(
 	const std::string &scopeKey) {
 	const QString key = QString::fromStdString(scopeKey);
@@ -762,6 +770,36 @@ quint64 Server::chatAssetStoredBytes() const {
 	return totalBytes;
 }
 
+bool Server::isStonksTextChannelID(const unsigned int textChannelID) {
+	if (textChannelID == 0) {
+		return false;
+	}
+	if (uiStonksTextChannelID > 0 && textChannelID == uiStonksTextChannelID) {
+		return true;
+	}
+
+	const std::optional< msdb::DBTextChannel > textChannel =
+		m_dbWrapper.getTextChannel(iServerNum, textChannelID);
+	return textChannel
+		   && normalizedServerStonksRoomName(QString::fromStdString(textChannel->name)) == QLatin1String("stonks");
+}
+
+bool Server::hasStonksAccess(ServerUser *user, ChanACL::ACLCache *cache) {
+	if (!user
+		|| !Mumble::ForkFeatures::contains(user->qlSupportedForkFeatures,
+										 MumbleProto::ForkFeatureStonksAcl)) {
+		return false;
+	}
+
+	Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+	if (!rootChannel) {
+		return false;
+	}
+
+	ChanACL::ACLCache *effectiveCache = cache ? cache : &acCache;
+	return ChanACL::hasPermission(user, rootChannel, ChanACL::UseStonks, effectiveCache);
+}
+
 Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, MumbleProto::ChatScope scope,
 															unsigned int scopeID, Channel *permissionChannel,
 															ChanACL::ACLCache *cache) {
@@ -797,6 +835,10 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 	}
 
 	if (!permissionChannel) {
+		return result;
+	}
+	if (scope == MumbleProto::TextChannel && isStonksTextChannelID(effectiveScopeID)
+		&& !hasStonksAccess(user, cache)) {
 		return result;
 	}
 
@@ -877,6 +919,15 @@ bool Server::canAccessChatMessage(ServerUser *user, const msdb::DBChatMessage &m
 								  ChanACL::ACLCache *cache) {
 	if (message.threadID != thread.threadID) {
 		return false;
+	}
+	if (thread.scope == msdb::ChatThreadScope::TextChannel) {
+		const QString scopeKey = QString::fromStdString(thread.scopeKey);
+		bool ok                = false;
+		const unsigned int textChannelID =
+			scopeKey.startsWith(QStringLiteral("text:")) ? scopeKey.mid(5).toUInt(&ok) : 0;
+		if (!ok || (isStonksTextChannelID(textChannelID) && !hasStonksAccess(user, cache))) {
+			return false;
+		}
 	}
 
 	const ChatHistoryAccess access = resolveChatHistoryAccess(user, thread, permissionChannel, cache);

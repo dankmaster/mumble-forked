@@ -838,6 +838,18 @@ bool modernShellToolsAllowed() {
 	return modernShellToolsAclSupported() && Global::get().pPermissions.testFlag(ChanACL::UseTools);
 }
 
+bool modernShellStonksAclSupported() {
+	return Mumble::ForkFeatures::serverAllowsClientFeature(
+		Global::get().qlSupportedForkFeatures, MumbleProto::ForkFeatureStonksAcl);
+}
+
+bool modernShellStonksAllowed() {
+	return Mumble::ForkFeatures::serverAllowsClientFeature(
+			   Global::get().qlSupportedForkFeatures, MumbleProto::ForkFeatureStonksLedger)
+		   && modernShellStonksAclSupported()
+		   && Global::get().pPermissions.testFlag(ChanACL::UseStonks);
+}
+
 QStringList modernShellToolTextChannelSelectors() {
 	QStringList selectors;
 	const QString configured = qEnvironmentVariable("MUMBLE_MODERN_TOOL_TEXT_CHANNELS");
@@ -15737,6 +15749,9 @@ namespace {
 			if (permission == ChanACL::UseTools && !modernShellToolsAclSupported()) {
 				continue;
 			}
+			if (permission == ChanACL::UseStonks && !modernShellStonksAclSupported()) {
+				continue;
+			}
 			QVariantMap item;
 			item.insert(QStringLiteral("id"), static_cast< int >(bit));
 			item.insert(QStringLiteral("label"), name);
@@ -16292,6 +16307,8 @@ namespace {
 	QVariantMap stonksHeaderState() {
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
+		state.insert(QStringLiteral("accessSupported"), modernShellStonksAclSupported());
+		state.insert(QStringLiteral("allowed"), modernShellStonksAllowed());
 		state.insert(QStringLiteral("enabled"), Global::get().bStonksEnabled);
 		state.insert(QStringLiteral("profileShortcutVisible"),
 					 Global::get().s.bModernShellStonksProfileShortcutVisible);
@@ -16618,6 +16635,8 @@ namespace {
 	QVariantMap stonksStateDto(const MumbleProto::StonksState &state) {
 		QVariantMap dto;
 		dto.insert(QStringLiteral("supported"), state.supported());
+		dto.insert(QStringLiteral("accessSupported"), modernShellStonksAclSupported());
+		dto.insert(QStringLiteral("allowed"), state.allowed() && modernShellStonksAllowed());
 		dto.insert(QStringLiteral("enabled"), state.enabled());
 		dto.insert(QStringLiteral("registered"), state.registered());
 		dto.insert(QStringLiteral("selfUserId"), state.has_self_user_id() ? state.self_user_id() : 0u);
@@ -17175,7 +17194,7 @@ void MainWindow::openModernSettingsDialog(const QString &pageName, const bool au
 	}
 	// Fetch the authoritative ACL-backed canAdmin state even when Stonks is
 	// currently disabled, so an authorized user can enable it from Settings.
-	if (stonksLedgerFeatureSupported()) {
+	if (modernShellStonksAllowed()) {
 		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 	}
 
@@ -17483,8 +17502,11 @@ QVariantMap MainWindow::modernSettingsStonksContext() const {
 	const QVariantMap state = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
 	QVariantMap context;
 	context.insert(QStringLiteral("connected"), Global::get().sh && Global::get().sh->isRunning());
+	context.insert(QStringLiteral("accessSupported"), modernShellStonksAclSupported());
+	context.insert(QStringLiteral("allowed"), modernShellStonksAllowed());
 	context.insert(QStringLiteral("supported"),
-				   stonksLedgerFeatureSupported() && state.value(QStringLiteral("supported"), true).toBool());
+				   stonksLedgerFeatureSupported() && modernShellStonksAllowed()
+					   && state.value(QStringLiteral("supported"), true).toBool());
 	context.insert(QStringLiteral("canAdmin"), state.value(QStringLiteral("canAdmin")).toBool());
 	context.insert(QStringLiteral("enabled"), state.value(QStringLiteral("enabled"), true).toBool());
 	context.insert(QStringLiteral("socialAnnouncementsEnabled"),
@@ -17523,7 +17545,7 @@ QVariantMap MainWindow::modernSettingsMotdContext() const {
 
 QVariantMap MainWindow::buildModernStonksDialog(const QString &initialTab) const {
 	QVariantMap state = m_stonksState;
-	const bool loadingInitialState = state.isEmpty() && stonksLedgerFeatureSupported();
+	const bool loadingInitialState = state.isEmpty() && modernShellStonksAllowed();
 	if (state.isEmpty()) {
 		state = stonksHeaderState();
 		state.insert(QStringLiteral("registered"), false);
@@ -17580,7 +17602,7 @@ void MainWindow::requestStonksState(const QString &period, std::optional< unsign
 	if (userID) {
 		m_stonksSelectedUserID = userID;
 	}
-	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+	if (!modernShellStonksAllowed() || !Global::get().sh || !Global::get().sh->isRunning()) {
 		return;
 	}
 
@@ -17600,6 +17622,14 @@ void MainWindow::openModernStonksDialog() {
 		m_stonksState.insert(QStringLiteral("canAdmin"), false);
 		m_stonksState.insert(QStringLiteral("selectedPeriod"), QStringLiteral("30d"));
 		m_stonksState.insert(QStringLiteral("error"), tr("This server has not advertised Stonks portfolio support."));
+	} else if (!modernShellStonksAclSupported()) {
+		m_stonksState = stonksHeaderState();
+		m_stonksState.insert(QStringLiteral("error"),
+							 tr("This server has not advertised the Stonks access-control contract."));
+	} else if (!modernShellStonksAllowed()) {
+		m_stonksState = stonksHeaderState();
+		m_stonksState.insert(QStringLiteral("error"),
+							 tr("You need Use Stonks permission on the Root room to open Stonks."));
 	} else {
 		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 	}
@@ -17607,7 +17637,7 @@ void MainWindow::openModernStonksDialog() {
 }
 
 void MainWindow::openModernStonksPortfolio() {
-	if (!stonksLedgerFeatureSupported()) {
+	if (!modernShellStonksAllowed()) {
 		openModernStonksDialog();
 		return;
 	}
@@ -17615,8 +17645,30 @@ void MainWindow::openModernStonksPortfolio() {
 	openModernGenericDialog(buildModernStonksDialog(QStringLiteral("portfolio")));
 }
 
+void MainWindow::openModernStonksLeaderboard() {
+	if (!modernShellStonksAllowed()) {
+		openModernStonksDialog();
+		return;
+	}
+	requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
+	openModernGenericDialog(buildModernStonksDialog(QStringLiteral("leaderboard")));
+}
+
 void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
-	m_stonksState          = stonksStateDto(state);
+	QVariantMap incomingState = stonksStateDto(state);
+	if (!incomingState.value(QStringLiteral("allowed")).toBool()) {
+		const QString selectedPeriod =
+			incomingState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
+		const QString error = incomingState.value(QStringLiteral("error")).toString().trimmed();
+		m_stonksState       = stonksHeaderState();
+		m_stonksState.insert(QStringLiteral("selectedPeriod"), selectedPeriod);
+		m_stonksState.insert(QStringLiteral("registered"), false);
+		m_stonksState.insert(QStringLiteral("canAdmin"), false);
+		m_stonksState.insert(QStringLiteral("error"),
+							 error.isEmpty() ? tr("Use Stonks permission is required on the Root room.") : error);
+	} else {
+		m_stonksState = std::move(incomingState);
+	}
 	m_stonksSelectedPeriod = m_stonksState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
 	if (m_stonksState.contains(QStringLiteral("selectedUserId"))) {
 		m_stonksSelectedUserID = m_stonksState.value(QStringLiteral("selectedUserId")).toUInt();
@@ -17640,8 +17692,58 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 	refreshStonksTickerQuotes();
 }
 
+void MainWindow::handleStonksPermissionUpdate() {
+	const bool wasAllowed = m_stonksState.value(QStringLiteral("allowed"), false).toBool();
+	const bool allowed    = modernShellStonksAllowed();
+	if (qaServerOpenStonks) {
+		qaServerOpenStonks->setEnabled(Global::get().uiSession != 0 && allowed);
+	}
+
+	if (!allowed) {
+		bool selectedStonksRoom = false;
+		if (m_persistentChatSelectedScopeValue.has_value()
+			&& *m_persistentChatSelectedScopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+			const auto textChannelIt = m_persistentTextChannels.constFind(m_persistentChatSelectedScopeID);
+			selectedStonksRoom =
+				(Global::get().uiStonksTextChannelID > 0
+				 && m_persistentChatSelectedScopeID == Global::get().uiStonksTextChannelID)
+				|| (textChannelIt != m_persistentTextChannels.cend()
+					&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks"));
+		}
+		m_stonksState = stonksHeaderState();
+		m_stonksState.insert(QStringLiteral("registered"), false);
+		m_stonksState.insert(QStringLiteral("canAdmin"), false);
+		m_stonksState.insert(QStringLiteral("selectedPeriod"), m_stonksSelectedPeriod);
+		m_stonksState.insert(QStringLiteral("error"),
+							 tr("Use Stonks permission is required on the Root room."));
+		m_stonksSelectedUserID.reset();
+		m_stonksTickerQuoteRequests.clear();
+		m_stonksTickerQuoteCache.clear();
+		if (m_stonksTickerQuoteRefreshTimer) {
+			m_stonksTickerQuoteRefreshTimer->stop();
+		}
+		if (selectedStonksRoom) {
+			if (const ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
+				navigateToPersistentChatScope(MumbleProto::Channel, self->cChannel->iId);
+			}
+		}
+	} else if (!wasAllowed) {
+		requestStonksState(m_stonksSelectedPeriod);
+	}
+
+	if (m_modernDialogController
+		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
+		openModernGenericDialog(buildModernStonksDialog());
+	} else if (m_modernDialogController
+			   && m_modernDialogController->setSettingsStonksContext(modernSettingsStonksContext())) {
+		publishModernDialogState(m_modernDialogController->state());
+	}
+	scheduleQmlRoomStateUpdate();
+}
+
 void MainWindow::refreshStonksTickerQuotes(const bool force) {
 	if (m_stonksState.isEmpty() || m_stonksState.value(QStringLiteral("disableQuoteLookup")).toBool()
+		|| !modernShellStonksAllowed() || !m_stonksState.value(QStringLiteral("allowed")).toBool()
 		|| !m_stonksState.value(QStringLiteral("supported")).toBool()
 		|| !m_stonksState.value(QStringLiteral("enabled"), true).toBool()
 		|| !Global::get().s.bModernShellTickerBannerEnabled) {
@@ -17686,6 +17788,9 @@ void MainWindow::refreshStonksTickerQuotes(const bool force) {
 }
 
 void MainWindow::requestStonksTickerQuote(const QString &symbol) {
+	if (!modernShellStonksAllowed()) {
+		return;
+	}
 	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
 	if (normalizedSymbol.isEmpty()) {
 		return;
@@ -17864,6 +17969,11 @@ void MainWindow::openModernDeveloperConsoleDialog() {
 
 bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload) {
 	const QString action = actionID.trimmed();
+	if (!modernShellStonksAllowed()) {
+		publishModernToast(QStringLiteral("error"), tr("Stonks"),
+						   tr("Your groups have not been granted the Use Stonks permission."));
+		return true;
+	}
 	if (action == QLatin1String("setTickerPresentation")
 		|| action == QLatin1String("setTickerBannerEnabled")) {
 		if (payload.contains(QStringLiteral("tickerBannerEnabled"))) {
@@ -22014,6 +22124,10 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernStonksPortfolio();
 		return true;
 	}
+	if (action == QLatin1String("server.stonksLeaderboard")) {
+		openModernStonksLeaderboard();
+		return true;
+	}
 	if (action == QLatin1String("server.information")) {
 		openModernServerInformationDialog();
 		return true;
@@ -25261,6 +25375,7 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	};
 	const QStringList toolTextChannelSelectors = modernShellToolTextChannelSelectors();
 	const bool canUseTools     = modernShellToolsAllowed();
+	const bool canUseStonks    = modernShellStonksAllowed();
 	const bool canUseServerLog = modernServerLogAvailable();
 	const auto appendTextRoom = [&](const int scopeValue, const unsigned int scopeID, const QString &roomLabel,
 									const QString &description, const QString &kindLabel,
@@ -25315,6 +25430,13 @@ QVariantMap MainWindow::buildQmlRoomState() {
 			const bool debugTool =
 				modernShellTextChannelIsTool(toolTextChannelSelectors, textChannel.name, textChannel.textChannelID);
 			if (debugTool && !canUseTools) {
+				continue;
+			}
+			const bool stonksRoom =
+				(Global::get().uiStonksTextChannelID > 0
+				 && textChannel.textChannelID == Global::get().uiStonksTextChannelID)
+				|| normalizedStonksTextRoomName(textChannel.name) == QLatin1String("stonks");
+			if (stonksRoom && !canUseStonks) {
 				continue;
 			}
 			appendTextRoom(static_cast< int >(MumbleProto::TextChannel), textChannel.textChannelID,
@@ -26774,8 +26896,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		return navigateToPersistentChatScope(MumbleProto::Channel, scopeID);
 	}
 
-	if (scopeValue == static_cast< int >(MumbleProto::TextChannel) && stonksLedgerFeatureSupported()
-		&& Global::get().bStonksEnabled) {
+	if (scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
 		const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
 		const bool isConfiguredStonksRoom =
 			Global::get().uiStonksTextChannelID > 0 && scopeID == Global::get().uiStonksTextChannelID;
@@ -26783,7 +26904,12 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 			textChannelIt != m_persistentTextChannels.cend()
 			&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks");
 		if (isConfiguredStonksRoom || isNamedStonksRoom) {
-			requestStonksState(m_stonksSelectedPeriod);
+			if (!modernShellStonksAllowed()) {
+				return false;
+			}
+			if (Global::get().bStonksEnabled) {
+				requestStonksState(m_stonksSelectedPeriod);
+			}
 		}
 	}
 
@@ -27591,7 +27717,7 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		on_qaDeveloperConsole_triggered();
 		return true;
 	} else if (actionId == QLatin1String("stonks.refreshVisible")) {
-		if (stonksLedgerFeatureSupported() && Global::get().bStonksEnabled
+		if (modernShellStonksAllowed() && Global::get().bStonksEnabled
 			&& m_persistentChatSelectedScopeValue.has_value()
 			&& *m_persistentChatSelectedScopeValue == static_cast< int >(MumbleProto::TextChannel)) {
 			const unsigned int scopeID = m_persistentChatSelectedScopeID;
@@ -28239,6 +28365,19 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		return handleModernShellDirectMessageModeChange(session, payload.value(QStringLiteral("mode")).toString());
 	}
 
+	if (normalizedActionID == QLatin1String("stonks.refresh")) {
+		return handleModernStonksDialogAction(QStringLiteral("refresh"), payload);
+	}
+	if (normalizedActionID == QLatin1String("stonks.selectPeriod")) {
+		return handleModernStonksDialogAction(QStringLiteral("selectPeriod"), payload);
+	}
+	if (normalizedActionID == QLatin1String("stonks.follow")) {
+		return handleModernStonksDialogAction(QStringLiteral("follow"), payload);
+	}
+	if (normalizedActionID == QLatin1String("stonks.unfollow")) {
+		return handleModernStonksDialogAction(QStringLiteral("unfollow"), payload);
+	}
+
 	if (normalizedActionID == QLatin1String("stonks.setTickerPin")
 		|| normalizedActionID == QLatin1String("stonks.pinTicker")
 		|| normalizedActionID == QLatin1String("stonks.unpinTicker")) {
@@ -28246,9 +28385,9 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 			publishModernToast(QStringLiteral("error"), tr("Stonks"), tr("Connect to a server before saving pins."));
 			return true;
 		}
-		if (!stonksLedgerFeatureSupported()) {
+		if (!modernShellStonksAllowed()) {
 			publishModernToast(QStringLiteral("error"), tr("Stonks"),
-							   tr("This server has not advertised Stonks portfolio support."));
+							   tr("Your groups have not been granted the Use Stonks permission."));
 			return true;
 		}
 
@@ -28292,9 +28431,9 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 							   tr("Connect to a server before saving feed preferences."));
 			return true;
 		}
-		if (!stonksLedgerFeatureSupported()) {
+		if (!modernShellStonksAllowed()) {
 			publishModernToast(QStringLiteral("error"), tr("Stonks"),
-							   tr("This server has not advertised Stonks portfolio support."));
+							   tr("Your groups have not been granted the Use Stonks permission."));
 			return true;
 		}
 
@@ -29090,7 +29229,7 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 		m_persistentTextChannels.insert(textChannel.textChannelID, textChannel);
 	}
 
-	if (stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
+	if (modernShellStonksAllowed() && Global::get().bStonksEnabled) {
 		requestStonksState(m_stonksSelectedPeriod);
 	}
 
@@ -36084,7 +36223,7 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 		return;
 	}
 	warmupPersistentChatPreviews(msg);
-	if (stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
+	if (modernShellStonksAllowed() && Global::get().bStonksEnabled) {
 		const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
 		const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;
 		if (scope == MumbleProto::TextChannel) {
@@ -37878,7 +38017,7 @@ void MainWindow::refreshServerActions() {
 		qaServerSettings->setEnabled(canManagePersistentTextChannels());
 	}
 	if (qaServerOpenStonks) {
-		qaServerOpenStonks->setEnabled(Global::get().uiSession != 0 && stonksLedgerFeatureSupported());
+		qaServerOpenStonks->setEnabled(Global::get().uiSession != 0 && modernShellStonksAllowed());
 	}
 
 	if (!qlServerActions.isEmpty()) {

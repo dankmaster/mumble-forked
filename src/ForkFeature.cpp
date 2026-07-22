@@ -25,6 +25,7 @@ namespace ForkFeatures {
 				{ MumbleProto::ForkFeatureToolsAcl, 3, FallbackPolicy::ServerOnly, "tools_acl" },
 				{ MumbleProto::ForkFeatureServerLogStream, 3, FallbackPolicy::ServerOnly,
 				  "server_log_stream" },
+				{ MumbleProto::ForkFeatureStonksAcl, 4, FallbackPolicy::ServerOnly, "stonks_acl" },
 			};
 			return table;
 		}

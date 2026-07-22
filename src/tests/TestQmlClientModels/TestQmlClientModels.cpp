@@ -34,6 +34,7 @@ private slots:
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
 	void toolsRequireNegotiatedRootAclPermission();
+	void stonksRequiresNegotiatedRootAclPermission();
 	void aclEntryPointsUseExplicitRoomTargets();
 	void directMessageSummariesStayTypedAndIncremental();
 	void directMessageControllerKeepsConversationDraftsSeparate();
@@ -1094,6 +1095,73 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 	QVERIFY(selection.contains(QStringLiteral("scopeValue == LocalServerLogScope")));
 	QVERIFY(selection.contains(QStringLiteral("configuredToolTextChannel")));
 	QVERIFY(selection.contains(QStringLiteral("!modernServerLogAvailable()")));
+}
+
+void TestQmlClientModels::stonksRequiresNegotiatedRootAclPermission() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString permissionGate = methodBody(
+		QStringLiteral("bool modernShellStonksAclSupported()"),
+		QStringLiteral("QStringList modernShellToolTextChannelSelectors()"));
+	QVERIFY(!permissionGate.isEmpty());
+	QVERIFY(permissionGate.contains(QStringLiteral("ForkFeatureStonksAcl")));
+	QVERIFY(permissionGate.contains(QStringLiteral("ForkFeatureStonksLedger")));
+	QVERIFY(permissionGate.contains(QStringLiteral("ChanACL::UseStonks")));
+
+	const QString aclPermissions = methodBody(
+		QStringLiteral("QVariantList modernAclPermissions"),
+		QStringLiteral("void modernAclCacheOnlineUsers"));
+	QVERIFY(!aclPermissions.isEmpty());
+	QVERIFY(aclPermissions.contains(QStringLiteral("permission == ChanACL::UseStonks")));
+	QVERIFY(aclPermissions.contains(QStringLiteral("!modernShellStonksAclSupported()")));
+
+	const QString headerState = methodBody(
+		QStringLiteral("QVariantMap stonksHeaderState()"),
+		QStringLiteral("QStringList stonksTickerSymbols"));
+	QVERIFY(!headerState.isEmpty());
+	QVERIFY(headerState.contains(QStringLiteral("\"accessSupported\"")));
+	QVERIFY(headerState.contains(QStringLiteral("\"allowed\"")));
+
+	const QString permissionUpdate = methodBody(
+		QStringLiteral("void MainWindow::handleStonksPermissionUpdate()"),
+		QStringLiteral("void MainWindow::refreshStonksTickerQuotes"));
+	QVERIFY(!permissionUpdate.isEmpty());
+	QVERIFY(permissionUpdate.contains(QStringLiteral("m_stonksTickerQuoteRequests.clear()")));
+	QVERIFY(permissionUpdate.contains(QStringLiteral("m_stonksTickerQuoteCache.clear()")));
+	QVERIFY(permissionUpdate.contains(QStringLiteral("navigateToPersistentChatScope(MumbleProto::Channel")));
+
+	const QString roomState = methodBody(
+		QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
+		QStringLiteral("QVariantMap modernServerLogMessageState"));
+	QVERIFY(!roomState.isEmpty());
+	QVERIFY(roomState.contains(QStringLiteral("canUseStonks")));
+	QVERIFY(roomState.contains(QStringLiteral("modernShellStonksAllowed()")));
+	QVERIFY(roomState.contains(QStringLiteral("if (stonksRoom && !canUseStonks)")));
+
+	const QString actions = methodBody(
+		QStringLiteral("bool MainWindow::handleModernShellAppActionPayload"),
+		QStringLiteral("bool MainWindow::hasPendingUpdateResumeState"));
+	QVERIFY(!actions.isEmpty());
+	QVERIFY(actions.contains(QStringLiteral("stonks.selectPeriod")));
+	QVERIFY(actions.contains(QStringLiteral("stonks.follow")));
+	QVERIFY(actions.contains(QStringLiteral("stonks.unfollow")));
+	QVERIFY(actions.contains(QStringLiteral("!modernShellStonksAllowed()")));
+
+	const QString messagesPath = QFINDTESTDATA("../../mumble/Messages.cpp");
+	QVERIFY2(!messagesPath.isEmpty(), "Messages.cpp test data was not found");
+	QFile messagesFile(messagesPath);
+	QVERIFY(messagesFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString messagesSource = QString::fromUtf8(messagesFile.readAll());
+	QVERIFY(messagesSource.contains(QStringLiteral("handleStonksPermissionUpdate()")));
 }
 
 void TestQmlClientModels::aclEntryPointsUseExplicitRoomTargets() {
