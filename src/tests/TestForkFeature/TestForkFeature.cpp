@@ -5,6 +5,9 @@
 
 #include <QtTest>
 
+#include <QtCore/QFile>
+
+#include "ACL.h"
 #include "ForkFeature.h"
 
 class TestForkFeature : public QObject {
@@ -16,6 +19,8 @@ private slots:
 	void advertisesSupportedFeaturesInServerConfig();
 	void sanitizesUnknownAndFutureFeatures();
 	void exposesFallbackPolicy();
+	void toolsAclPermissionContract();
+	void legacyClientsCannotMutateToolsAcl();
 };
 
 void TestForkFeature::protocolVersionDefaultsMatchCurrent() {
@@ -40,6 +45,7 @@ void TestForkFeature::advertisesSupportedFeaturesInVersion() {
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureStonksLedger));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureClientAssistedLinkPreviews));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureInAppFeedback));
+	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureToolsAcl));
 }
 
 void TestForkFeature::advertisesSupportedFeaturesInServerConfig() {
@@ -84,6 +90,34 @@ void TestForkFeature::exposesFallbackPolicy() {
 	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
 				 MumbleProto::ForkFeatureInAppFeedback)),
 			 QStringLiteral("server_only"));
+	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
+				 MumbleProto::ForkFeatureToolsAcl)),
+			 QStringLiteral("server_only"));
+}
+
+void TestForkFeature::toolsAclPermissionContract() {
+	QCOMPARE(static_cast< unsigned int >(ChanACL::UseTools), 0x00200000u);
+	QVERIFY(ChanACL::Permissions(ChanACL::All).testFlag(ChanACL::UseTools));
+	QCOMPARE(Mumble::ForkFeatures::minProtocolVersion(MumbleProto::ForkFeatureToolsAcl), 3u);
+}
+
+void TestForkFeature::legacyClientsCannotMutateToolsAcl() {
+	const QString sourcePath = QFINDTESTDATA("../../murmur/Messages.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "Murmur Messages.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const qsizetype start = source.indexOf(QStringLiteral("void Server::msgACL"));
+	const qsizetype end   = source.indexOf(QStringLiteral("void Server::msgQueryUsers"), start);
+	QVERIFY(start >= 0 && end > start);
+	const QString handler = source.mid(start, end - start);
+
+	QVERIFY(handler.contains(QStringLiteral("ForkFeatureToolsAcl")));
+	QVERIFY(handler.contains(QStringLiteral("!toolsAclCapableClient")));
+	QVERIFY(handler.contains(QStringLiteral("grant &= ~ChanACL::UseTools")));
+	QVERIFY(handler.contains(QStringLiteral("a->pAllow &= ~ChanACL::UseTools")));
+	QVERIFY(handler.contains(QStringLiteral("PreservedToolsAclRule")));
+	QVERIFY(handler.contains(QStringLiteral("rootPermissionUpdates")));
 }
 
 QTEST_MAIN(TestForkFeature)

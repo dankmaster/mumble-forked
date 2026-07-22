@@ -8374,6 +8374,8 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 	Channel *c = qhChannels.value(msg.channel_id());
 	if (!c)
 		return;
+	const bool toolsAclCapableClient =
+		clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureToolsAcl);
 
 	// For changing channel properties (the 'Write') ACL we allow two things:
 	// 1) As per regular ACL propagating mechanism, we check if the user has been
@@ -8424,8 +8426,14 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 						qsId.insert(static_cast< unsigned int >(acl->iUserId));
 					} else
 						mpacl->set_group(u8(acl->qsGroup));
-					mpacl->set_grant(acl->pAllow);
-					mpacl->set_deny(acl->pDeny);
+					ChanACL::Permissions grant = acl->pAllow;
+					ChanACL::Permissions deny  = acl->pDeny;
+					if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
+						grant &= ~ChanACL::UseTools;
+						deny &= ~ChanACL::UseTools;
+					}
+					mpacl->set_grant(static_cast< unsigned int >(grant));
+					mpacl->set_deny(static_cast< unsigned int >(deny));
 				}
 			}
 		}
@@ -8474,6 +8482,27 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 	} else {
 		{
 			QWriteLocker wl(&qrwlVoiceThread);
+			struct PreservedToolsAclRule {
+				bool applyHere;
+				bool applySubs;
+				int userID;
+				QString group;
+				ChanACL::Permissions allow;
+				ChanACL::Permissions deny;
+				bool consumed = false;
+			};
+			QList< PreservedToolsAclRule > preservedToolsAclRules;
+			if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
+				for (const ChanACL *acl : c->qlACL) {
+					const ChanACL::Permissions allow = acl->pAllow & ChanACL::UseTools;
+					const ChanACL::Permissions deny  = acl->pDeny & ChanACL::UseTools;
+					if (allow == ChanACL::None && deny == ChanACL::None) {
+						continue;
+					}
+					preservedToolsAclRules.push_back({ acl->bApplyHere, acl->bApplySubs, acl->iUserId,
+											 acl->qsGroup, allow, deny });
+				}
+			}
 
 			QHash< QString, QSet< int > > hOldTemp;
 
@@ -8539,6 +8568,35 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 					a->qsGroup = u8(mpacl.group());
 				a->pDeny  = static_cast< ChanACL::Permissions >(mpacl.deny()) & ChanACL::All;
 				a->pAllow = static_cast< ChanACL::Permissions >(mpacl.grant()) & ChanACL::All;
+				if (c->iId == Mumble::ROOT_CHANNEL_ID && !toolsAclCapableClient) {
+					a->pAllow &= ~ChanACL::UseTools;
+					a->pDeny &= ~ChanACL::UseTools;
+					const auto preserved = std::find_if(
+						preservedToolsAclRules.begin(), preservedToolsAclRules.end(),
+						[a](const PreservedToolsAclRule &rule) {
+							return !rule.consumed && rule.applyHere == a->bApplyHere
+								   && rule.applySubs == a->bApplySubs && rule.userID == a->iUserId
+								   && rule.group == a->qsGroup;
+						});
+					if (preserved != preservedToolsAclRules.end()) {
+						a->pAllow |= preserved->allow;
+						a->pDeny |= preserved->deny;
+						preserved->consumed = true;
+					}
+				}
+			}
+
+			for (const PreservedToolsAclRule &rule : preservedToolsAclRules) {
+				if (rule.consumed) {
+					continue;
+				}
+				ChanACL *a    = new ChanACL(c);
+				a->bApplyHere = rule.applyHere;
+				a->bApplySubs = rule.applySubs;
+				a->iUserId    = rule.userID;
+				a->qsGroup    = rule.group;
+				a->pAllow     = rule.allow;
+				a->pDeny      = rule.deny;
 			}
 
 			if (Meta::mp->bLogACLChanges) {
@@ -8585,6 +8643,32 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 		}
 
 		broadcastTextChannelSync(this, qhUsers);
+
+		if (c->iId == Mumble::ROOT_CHANNEL_ID) {
+			QList< QPair< ServerUser *, unsigned int > > rootPermissionUpdates;
+			{
+				QMutexLocker qml(&qmCache);
+				for (ServerUser *user : qhUsers) {
+					if (!user || user->sState != ServerUser::Authenticated) {
+						continue;
+					}
+					ChanACL::Permissions permissions = user->iId == 0
+						? ChanACL::Permissions(ChanACL::All)
+						: ChanACL::effectivePermissions(user, c, &acCache);
+					permissions &= ChanACL::All;
+					const unsigned int serializedPermissions = static_cast< unsigned int >(permissions);
+					user->qmPermissionSent.insert(static_cast< int >(c->iId), serializedPermissions);
+					rootPermissionUpdates.push_back(qMakePair(user, serializedPermissions));
+				}
+			}
+
+			for (const auto &update : rootPermissionUpdates) {
+				MumbleProto::PermissionQuery permissionUpdate;
+				permissionUpdate.set_channel_id(c->iId);
+				permissionUpdate.set_permissions(update.second);
+				sendMessage(update.first, permissionUpdate);
+			}
+		}
 	}
 }
 

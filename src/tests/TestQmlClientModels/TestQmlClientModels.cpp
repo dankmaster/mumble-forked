@@ -33,6 +33,7 @@ private slots:
 	void directMessageHistoryMergePublishesOnce();
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
+	void toolsRequireNegotiatedRootAclPermission();
 	void directMessageSummariesStayTypedAndIncremental();
 	void directMessageControllerKeepsConversationDraftsSeparate();
 	void directMessageControllerRoutesRichMessageIntents();
@@ -1047,6 +1048,49 @@ void TestQmlClientModels::mainWindowDatabaseBlobReadsStayAsync() {
 	QVERIFY(resolver.contains(QStringLiteral("m_modernDialogController->activeDialogID() != expectedDialogID")));
 	QVERIFY(resolver.contains(QStringLiteral("publishQmlParticipantState(user)")));
 	QVERIFY(!resolver.contains(QStringLiteral("modelReset")));
+}
+
+void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString permissionGate = methodBody(
+		QStringLiteral("bool modernShellToolsAclSupported()"),
+		QStringLiteral("QStringList modernShellToolTextChannelSelectors()"));
+	QVERIFY(!permissionGate.isEmpty());
+	QVERIFY(permissionGate.contains(QStringLiteral("ForkFeatureToolsAcl")));
+	QVERIFY(permissionGate.contains(QStringLiteral("ChanACL::UseTools")));
+
+	const QString aclPermissions = methodBody(
+		QStringLiteral("QVariantList modernAclPermissions"),
+		QStringLiteral("void modernAclCacheOnlineUsers"));
+	QVERIFY(!aclPermissions.isEmpty());
+	QVERIFY(aclPermissions.contains(QStringLiteral("permission == ChanACL::UseTools")));
+	QVERIFY(aclPermissions.contains(QStringLiteral("!modernShellToolsAclSupported()")));
+
+	const QString roomState = methodBody(
+		QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
+		QStringLiteral("void MainWindow::appendModernServerLogEntry"));
+	QVERIFY(!roomState.isEmpty());
+	QVERIFY(roomState.contains(QStringLiteral("const bool canUseTools = modernShellToolsAllowed()")));
+	QVERIFY(roomState.contains(QStringLiteral("if (canUseTools)")));
+	QVERIFY(roomState.contains(QStringLiteral("if (debugTool && !canUseTools)")));
+
+	const QString selection = methodBody(
+		QStringLiteral("bool MainWindow::handleModernShellScopeSelection"),
+		QStringLiteral("bool MainWindow::handleModernShellScopeRailSelection"));
+	QVERIFY(!selection.isEmpty());
+	QVERIFY(selection.contains(QStringLiteral("scopeValue == LocalServerLogScope")));
+	QVERIFY(selection.contains(QStringLiteral("configuredToolTextChannel")));
+	QVERIFY(selection.contains(QStringLiteral("!modernShellToolsAllowed()")));
 }
 
 void TestQmlClientModels::directMessageSummariesStayTypedAndIncremental() {

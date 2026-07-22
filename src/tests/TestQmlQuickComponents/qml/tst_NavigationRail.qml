@@ -304,6 +304,7 @@ TestCase {
 		selection.selectedVoiceChannelId = undefined
 		selection.scopeToken = ""
 		loader.item.localRoomExpansion = ({})
+		loader.item.toolsExpanded = true
 		loader.item.setNavigationFilter("")
 		loader.item.activeScopeMenuToken = ""
 		loader.item.activeParticipantMenuKey = ""
@@ -1220,6 +1221,71 @@ TestCase {
 		tryCompare(semanticParticipant, "activeFocus", true)
 		compare(participant.border.width, Theme.focusRingWidth)
 		compare(participant.border.color, Theme.focus)
+	}
+
+	function test_tools_section_collapses_without_losing_selected_tool_context() {
+		const rail = loader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		verify(navigationList !== null)
+		navigationRows.insert(5, {
+			"stableId": "room-test-stuff", "scopeToken": "text:9", "title": "#TestStuff",
+			"subtitle": "Debug text room", "kind": "text", "sectionKind": "tool",
+			"selected": false, "depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+		try {
+			navigationList.forceLayout()
+			navigationList.positionViewAtIndex(4, ListView.Contain)
+			wait(0)
+			let activity = null
+			let testStuff = null
+			let toggleMouse = null
+			let toggleIcon = null
+			tryVerify(function() {
+				activity = findChild(rail, "navigationRoom_room-activity")
+				testStuff = findChild(rail, "navigationRoom_room-test-stuff")
+				toggleMouse = findChild(rail, "navigationSectionToggleMouse_tool")
+				toggleIcon = findChild(rail, "navigationSectionToggle_tool")
+				return activity !== null && testStuff !== null
+					&& toggleMouse !== null && toggleIcon !== null
+			})
+
+			verify(toggleMouse.enabled && toggleMouse.width > 0 && toggleMouse.height > 0)
+			mouseClick(activity, activity.width - 15, activity.sectionHeaderHeight / 2, Qt.LeftButton)
+			tryCompare(rail, "toolsExpanded", false)
+			tryVerify(function() {
+				return !activity.sectionContentVisible && activity.height === activity.sectionHeaderHeight
+					&& !testStuff.sectionContentVisible && testStuff.height === 0
+			})
+			compare(activity.Accessible.role, Accessible.Button)
+			compare(activity.Accessible.name, "TOOLS")
+			verify(activity.Accessible.description.indexOf("2 tools") >= 0)
+			tryCompare(toggleIcon, "rotation", 0)
+			rail.setNavigationFilter("#teststuff")
+			tryVerify(function() { return testStuff.sectionContentVisible && testStuff.height > 0 })
+			rail.setNavigationFilter("")
+			tryVerify(function() { return !testStuff.sectionContentVisible && testStuff.height === 0 })
+
+			navigationList.currentIndex = 4
+			navigationList.forceActiveFocus(Qt.TabFocusReason)
+			keyClick(Qt.Key_Right)
+			tryCompare(rail, "toolsExpanded", true)
+			tryVerify(function() { return activity.sectionContentVisible && testStuff.sectionContentVisible })
+			tryCompare(toggleIcon, "rotation", 90)
+			keyClick(Qt.Key_Left)
+			tryCompare(rail, "toolsExpanded", false)
+
+			selection.scopeToken = "text:9"
+			tryCompare(navigationList, "currentIndex", 5)
+			tryVerify(function() { return testStuff.sectionContentVisible && testStuff.height > 0 })
+			verify(!rail.toolsExpanded)
+			compare(commands.selectScopeFromRailCount, 0)
+		} finally {
+			selection.scopeToken = ""
+			rail.toolsExpanded = true
+			navigationRows.remove(5)
+			navigationList.forceLayout()
+		}
 	}
 
 	function test_section_geometry_recovers_after_hidden_layout_change() {
