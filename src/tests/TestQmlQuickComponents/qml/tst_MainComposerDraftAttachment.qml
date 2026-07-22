@@ -103,7 +103,7 @@ TestCase {
 	}
 
 	function test_stonks_profile_shortcut_respects_the_client_preference() {
-		verify(/readonly property bool stonksShortcutEnabled:[\s\S]{0,180}profileShortcutVisible !== false/.test(mainSource))
+		verify(/readonly property bool stonksShortcutEnabled:[\s\S]{0,320}stonksTickerState\.profileShortcutVisible !== false/.test(mainSource))
 		verify(/id:\s*desktopNavigationRail[\s\S]{0,900}stonksEnabled:\s*root\.stonksShortcutEnabled/.test(mainSource))
 	}
 
