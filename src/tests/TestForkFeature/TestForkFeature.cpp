@@ -146,6 +146,14 @@ void TestForkFeature::stonksAclPermissionContract() {
 	QVERIFY(messagesSource.contains(QStringLiteral("PERM_DENIED(uSource, rootChannel, ChanACL::UseStonks)")));
 	QVERIFY(messagesSource.contains(QStringLiteral("isStonksTextChannelID(currentTextChannel.textChannelID)")));
 	QVERIFY(messagesSource.contains(QStringLiteral("requiresStonksAccess")));
+
+	const qsizetype requestStart =
+		messagesSource.indexOf(QStringLiteral("void Server::msgStonksRequest"));
+	const qsizetype actionStart =
+		messagesSource.indexOf(QStringLiteral("void Server::msgStonksAction"), requestStart);
+	QVERIFY(requestStart >= 0 && actionStart > requestStart);
+	const QString requestHandler = messagesSource.mid(requestStart, actionStart - requestStart);
+	QVERIFY(requestHandler.contains(QStringLiteral("RATELIMIT(uSource)")));
 }
 
 void TestForkFeature::legacyClientsCannotMutateToolsAcl() {

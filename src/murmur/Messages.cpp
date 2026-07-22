@@ -7090,6 +7090,10 @@ void Server::msgStonksRequest(ServerUser *uSource, MumbleProto::StonksRequest &m
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
+	// Building leaderboard history can touch many users and valuation rows. Keep
+	// repeated read requests under the same per-session throttle as mutations.
+	RATELIMIT(uSource);
+
 	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
 	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksLedger)) {
 		MumbleProto::StonksState state;
