@@ -744,6 +744,9 @@ public:
 	void cancelPersistentChatAttachmentWork(const QString &errorCode, const QString &reason);
 	void publishQmlActiveScopeState();
 	void scheduleQmlRoomStateUpdate();
+	bool modernServerLogAvailable() const;
+	void applyModernServerLogState(const MumbleProto::ServerLogState &state);
+	void clearModernServerLogState();
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
 	void publishModernShellServerLogReset(const PersistentChatTarget &target);
 	void clearModernShellMessageDtoCache(const char *reason);
@@ -1110,6 +1113,7 @@ protected:
 	quint64 m_modernShellServerLogRevision = 1;
 	QVariantList m_modernServerLogEntries;
 	int m_modernServerLogMaximumEntries = 0;
+	bool m_modernServerLogAuthorized = false;
 	QJsonObject m_updateResumeState;
 	bool m_updateResumePending                 = false;
 	bool m_updateResumeConnectAttempted        = false;
@@ -1366,7 +1370,6 @@ protected:
 
 
 public slots:
-	void appendModernServerLogEntry(const QString &html);
 	void refreshServerActions();
 	void on_qaServerConnect_triggered(bool autoconnect = false);
 	void on_qaServerDisconnect_triggered();

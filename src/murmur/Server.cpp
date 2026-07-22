@@ -85,6 +85,19 @@ namespace {
 constexpr quint64 SERVER_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC  = 5ULL * 60ULL * 1000ULL;
 constexpr quint64 LIVEKIT_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC = 5ULL * 60ULL * 1000ULL;
 constexpr quint64 SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC     = 60ULL * 1000ULL;
+constexpr int SERVER_LOG_BACKLOG_MAX_ENTRIES                     = 200;
+constexpr unsigned int SERVER_LOG_ENTRY_MAX_BYTES                = 32U * 1024U;
+constexpr unsigned int SERVER_LOG_BACKLOG_MAX_BYTES              = 512U * 1024U;
+
+QString boundedServerLogText(const QString &text) {
+	return Mumble::Feedback::truncateUtf8Bytes(
+		text, SERVER_LOG_ENTRY_MAX_BYTES, QStringLiteral("[server log entry truncated]"));
+}
+
+qint64 serverLogTimestampMs(const msdb::DBLogEntry::timestamp_type &timestamp) {
+	return std::max< qint64 >(0, static_cast< qint64 >(
+		std::chrono::duration_cast< std::chrono::milliseconds >(timestamp.time_since_epoch()).count()));
+}
 
 QString randomServerRelayCredential() {
 	return QUuid::createUuid().toString(QUuid::WithoutBraces) + QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -2618,6 +2631,7 @@ void Server::log(ServerUser *u, const QString &str) const {
 }
 
 void Server::log(const QString &msg) const {
+	const qint64 timestampMs = QDateTime::currentMSecsSinceEpoch();
 	if (meta->assumedDBState == DBState::Normal && Meta::mp->iLogDays >= 0) {
 		// New philosophy is that DB access can't be considered const, but old code requires this function
 		// to be const. Thus, we require a const_cast here.
@@ -2625,6 +2639,109 @@ void Server::log(const QString &msg) const {
 	}
 
 	qWarning("%d => %s", iServerNum, msg.toUtf8().constData());
+
+	Server *server = const_cast< Server * >(this);
+	if (QThread::currentThread() == server->QObject::thread()) {
+		server->broadcastServerLogEntry(msg, timestampMs);
+	} else {
+		QMetaObject::invokeMethod(
+			server, [server, msg, timestampMs]() { server->broadcastServerLogEntry(msg, timestampMs); },
+			Qt::QueuedConnection);
+	}
+}
+
+quint64 Server::nextServerLogSequence() {
+	if (++m_serverLogSequence == 0) {
+		m_serverLogSequence = 1;
+	}
+	return m_serverLogSequence;
+}
+
+bool Server::serverLogStreamAllowedForUser(ServerUser *user) {
+	if (!user || user->sState != ServerUser::Authenticated
+		|| !Mumble::ForkFeatures::contains(user->qlSupportedForkFeatures,
+										 MumbleProto::ForkFeatureServerLogStream)) {
+		return false;
+	}
+
+	Channel *root = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+	return root && hasPermission(user, root, ChanACL::UseTools);
+}
+
+void Server::syncServerLogStateForUser(ServerUser *user, const bool force) {
+	if (!user || user->sState != ServerUser::Authenticated) {
+		return;
+	}
+
+	const bool supportsStream = Mumble::ForkFeatures::contains(
+		user->qlSupportedForkFeatures, MumbleProto::ForkFeatureServerLogStream);
+	if (!supportsStream) {
+		user->bServerLogStreamActive = false;
+		return;
+	}
+
+	const bool authorized = serverLogStreamAllowedForUser(user);
+	if (!force && user->bServerLogStreamActive == authorized) {
+		return;
+	}
+
+	MumbleProto::ServerLogState state;
+	state.set_authorized(authorized);
+	state.set_reset(true);
+
+	if (authorized && Meta::mp->iLogDays >= 0) {
+		struct BacklogEntry {
+			qint64 timestampMs = 0;
+			QString text;
+		};
+		QList< BacklogEntry > selectedEntries;
+		unsigned int selectedBytes = 0;
+		const std::vector< msdb::DBLogEntry > newestFirst =
+			m_dbWrapper.getLogs(iServerNum, 0, SERVER_LOG_BACKLOG_MAX_ENTRIES);
+		for (const msdb::DBLogEntry &entry : newestFirst) {
+			const QString text = boundedServerLogText(QString::fromStdString(entry.message));
+			const unsigned int entryBytes = static_cast< unsigned int >(text.toUtf8().size()) + 32U;
+			if (selectedBytes + entryBytes > SERVER_LOG_BACKLOG_MAX_BYTES) {
+				break;
+			}
+			selectedBytes += entryBytes;
+			selectedEntries.push_back({ serverLogTimestampMs(entry.timestamp), text });
+		}
+
+		for (auto it = selectedEntries.crbegin(); it != selectedEntries.crend(); ++it) {
+			MumbleProto::ServerLogEntry *protoEntry = state.add_entries();
+			protoEntry->set_sequence(nextServerLogSequence());
+			protoEntry->set_timestamp_ms(static_cast< quint64 >(it->timestampMs));
+			protoEntry->set_text(it->text.toStdString());
+		}
+	}
+
+	user->bServerLogStreamActive = authorized;
+	sendMessage(user, state);
+}
+
+void Server::broadcastServerLogEntry(const QString &text, const qint64 timestampMs) {
+	const QString boundedText = boundedServerLogText(text);
+	if (boundedText.isEmpty()) {
+		return;
+	}
+
+	MumbleProto::ServerLogState state;
+	state.set_authorized(true);
+	state.set_reset(false);
+	MumbleProto::ServerLogEntry *entry = state.add_entries();
+	entry->set_sequence(nextServerLogSequence());
+	entry->set_timestamp_ms(static_cast< quint64 >(std::max< qint64 >(0, timestampMs)));
+	entry->set_text(boundedText.toStdString());
+
+	for (ServerUser *user : qhUsers) {
+		if (!user || user->sState != ServerUser::Authenticated || !user->bServerLogStreamActive
+			|| !Mumble::ForkFeatures::contains(user->qlSupportedForkFeatures,
+										 MumbleProto::ForkFeatureServerLogStream)) {
+			continue;
+		}
+		sendMessage(user, state);
+	}
 }
 
 void Server::screenShareDiagnosticLog(const QString &msg) const {
@@ -3505,6 +3622,16 @@ void Server::clearACLCache(User *p) {
 	// A change in ACLs means that the user might be able to whisper
 	// to users it didn't have permission to do before (or vice versa)
 	clearWhisperTargetCache();
+
+	// UseTools is a root-scoped permission. Reconcile the stream after the ACL
+	// cache is unlocked so revocation stops delivery before any later log line.
+	if (p) {
+		syncServerLogStateForUser(static_cast< ServerUser * >(p));
+	} else {
+		for (ServerUser *user : qhUsers) {
+			syncServerLogStateForUser(user);
+		}
+	}
 }
 
 void Server::clearWhisperTargetCache() {

@@ -4340,6 +4340,9 @@ void Server::msgAuthenticate(ServerUser *uSource, MumbleProto::Authenticate &msg
 	mpsc.set_chat_asset_max_bytes(uiChatAssetMaxBytes);
 	mpsc.set_chat_attachment_limit(uiChatAttachmentLimit);
 	sendMessage(uSource, mpsc);
+	// The client must learn the feature contract before receiving the first
+	// permission-gated backlog replacement.
+	syncServerLogStateForUser(uSource, true);
 	syncScreenShareStateForUser(uSource);
 	syncWatchTogetherStateForUser(uSource);
 
@@ -7153,6 +7156,10 @@ void Server::msgFeedbackReport(ServerUser *uSource, MumbleProto::FeedbackReport 
 }
 
 void Server::msgFeedbackReportState(ServerUser *, MumbleProto::FeedbackReportState &) {
+}
+
+void Server::msgServerLogState(ServerUser *, MumbleProto::ServerLogState &) {
+	// ServerLogState is server-to-client only.
 }
 
 void Server::msgChatAssetUploadInit(ServerUser *uSource, MumbleProto::ChatAssetUploadInit &msg) {

@@ -2756,6 +2756,10 @@ void MainWindow::msgFeedbackReportState(const MumbleProto::FeedbackReportState &
 	handleFeedbackReportState(msg);
 }
 
+void MainWindow::msgServerLogState(const MumbleProto::ServerLogState &msg) {
+	applyModernServerLogState(msg);
+}
+
 void MainWindow::msgScreenShareCreate(const MumbleProto::ScreenShareCreate &) {
 }
 

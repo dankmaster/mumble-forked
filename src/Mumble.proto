@@ -53,6 +53,9 @@ enum ForkFeature {
 	// Server-authoritative root ACL permission for Modern-shell tools such as
 	// Activity and administrator-configured debug text rooms.
 	ForkFeatureToolsAcl = 7;
+	// Server-authoritative, permission-gated Murmur log backlog and live stream
+	// used by the Modern shell Activity surface.
+	ForkFeatureServerLogStream = 8;
 }
 
 message Version {
@@ -1367,6 +1370,23 @@ message FeedbackReportState {
 	optional string error = 5;
 	optional FeedbackReportKind kind = 6 [default = FeedbackReportBug];
 	optional uint64 created_at = 7;
+}
+
+// One canonical Murmur server-log record. The text is the same plain-text
+// payload stored in Murmur's log database and exposed through the Ice log API.
+message ServerLogEntry {
+	optional uint64 sequence = 1;
+	optional uint64 timestamp_ms = 2;
+	optional string text = 3;
+}
+
+// Server-to-client replacement/backlog or incremental server-log update.
+// Clients must clear their Activity buffer whenever reset is true. An
+// unauthorized state is always a reset with no entries.
+message ServerLogState {
+	optional bool authorized = 1 [default = false];
+	optional bool reset = 2 [default = false];
+	repeated ServerLogEntry entries = 3;
 }
 
 message TextChannelInfo {

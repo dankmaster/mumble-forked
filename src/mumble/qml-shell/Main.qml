@@ -4199,7 +4199,7 @@ ApplicationWindow {
 								text: emptyConversationState.visualLoading
 									? (activeScope.loading ? qsTr("Loading conversation")
 										: qsTr("Preparing conversation"))
-									: activeScope.activity ? qsTr("No activity yet")
+									: activeScope.activity ? qsTr("No server log entries yet")
 									: !clientSession.connected ? qsTr("Connect to Mumble")
 									: activeScope.canSend ? qsTr("This conversation is quiet")
 									: qsTr("Choose a conversation")
@@ -4218,7 +4218,7 @@ ApplicationWindow {
 										? qsTr("Messages will appear here when history is ready.")
 										: qsTr("Recent messages are being laid out."))
 									: activeScope.activity
-										? qsTr("Connection events, notices, and diagnostics will appear here.")
+										? qsTr("New Murmur server-log entries will appear here live.")
 									: !clientSession.connected ? qsTr("Open the server browser to load rooms and messages.")
 									: activeScope.canSend ? qsTr("Be the first to write in %1.").arg(activeScope.label)
 									: qsTr("Select a text room, voice room, or direct message to get started.")
