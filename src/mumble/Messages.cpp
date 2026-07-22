@@ -2388,8 +2388,9 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		[bytes = std::move(bytes), mime, kind, attachmentAssetIDs, fullImageAssetIDs, previewKeys, savePaths, openFileName,
 		 assetID]() mutable {
 			PersistentChatAssetIoResult result;
-			const bool imageConsumer = !attachmentAssetIDs.isEmpty() || !fullImageAssetIDs.isEmpty()
-				|| !previewKeys.isEmpty();
+			const bool previewImageConsumer = !attachmentAssetIDs.isEmpty() || !previewKeys.isEmpty();
+			const bool fullImageConsumer = !fullImageAssetIDs.isEmpty();
+			const bool imageConsumer = previewImageConsumer || fullImageConsumer;
 			if (imageConsumer && mime.startsWith(QLatin1String("image/"))) {
 				mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
 				QBuffer buffer;
@@ -2400,32 +2401,38 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 					reader.setDecideFormatFromContent(true);
 					const QSize sourceSize = reader.size();
 					constexpr qint64 maximumPixels = 40LL * 1024LL * 1024LL;
-					if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
+					if (reader.canRead() && sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
 						&& sourceSize.width() <= 16384 && sourceSize.height() <= 16384
 						&& static_cast< qint64 >(sourceSize.width()) * sourceSize.height() <= maximumPixels) {
-						// Preserve a high-resolution viewer surface while staying inside the
-						// QML image pipeline's bounded decoded-image budget. Saved/downloaded
-						// bytes remain untouched; only the display copy is downsampled.
-						constexpr qint64 maximumDisplayPixels = 8LL * 1024LL * 1024LL;
-						if (sourceSize.width() > 8192 || sourceSize.height() > 8192
-							|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height()
-								> maximumDisplayPixels) {
-							const qreal scale = std::min({ 1.0,
-								8192.0 / sourceSize.width(), 8192.0 / sourceSize.height(),
-								std::sqrt(static_cast< qreal >(maximumDisplayPixels)
-									/ (static_cast< qreal >(sourceSize.width()) * sourceSize.height())) });
-							reader.setScaledSize(QSize(
-								std::max(1, static_cast< int >(std::floor(sourceSize.width() * scale))),
-								std::max(1, static_cast< int >(std::floor(sourceSize.height() * scale)))));
+						if (fullImageConsumer) {
+							// QByteArray is implicitly shared: retain the exact validated original
+							// without copying or decoding its full pixel surface on this worker.
+							result.fullImageBytes = bytes;
 						}
-						result.image = reader.read();
+						if (previewImageConsumer) {
+							// Chat previews remain bounded and high quality. The viewer registers
+							// the encoded original separately and decodes it asynchronously.
+							constexpr qint64 maximumDisplayPixels = 8LL * 1024LL * 1024LL;
+							if (sourceSize.width() > 8192 || sourceSize.height() > 8192
+								|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height()
+									> maximumDisplayPixels) {
+								const qreal scale = std::min({ 1.0,
+									8192.0 / sourceSize.width(), 8192.0 / sourceSize.height(),
+									std::sqrt(static_cast< qreal >(maximumDisplayPixels)
+										/ (static_cast< qreal >(sourceSize.width()) * sourceSize.height())) });
+								reader.setScaledSize(QSize(
+									std::max(1, static_cast< int >(std::floor(sourceSize.width() * scale))),
+									std::max(1, static_cast< int >(std::floor(sourceSize.height() * scale)))));
+							}
+							result.image = reader.read();
+						}
 					}
 				}
 			}
 			if (!previewKeys.isEmpty() && isPersistentChatPlayableMediaMime(mime)) {
 				result.mediaDataUrl = persistentChatPlayableMediaDataUrl(mime, bytes);
 			}
-			if (!result.image.isNull()) {
+			if (!result.image.isNull() || !result.fullImageBytes.isEmpty()) {
 				result.contentHash = QString::fromLatin1(
 					QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 			}
@@ -2493,12 +2500,13 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 					}
 				}
 			}
-			if (!fullImageAssetIDs.isEmpty() && !image.isNull() && result
+			if (!fullImageAssetIDs.isEmpty() && result && !result->fullImageBytes.isEmpty()
 				&& !result->contentHash.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
 				const QString stableKey = QStringLiteral("chat-attachment-full:%1:%2")
 					.arg(assetID)
 					.arg(result->contentHash);
-				const QString providerUrl = m_qmlShellHost->imagePipeline()->registerImage(image, stableKey);
+				const QString providerUrl = m_qmlShellHost->imagePipeline()->registerFullResolutionEncoded(
+					result->fullImageBytes, mime.toLatin1(), stableKey);
 				if (!providerUrl.isEmpty()) {
 					for (const unsigned int fullImageAssetID : fullImageAssetIDs) {
 						m_persistentChatAttachmentFullImageProviderUrls.insert(fullImageAssetID, providerUrl);

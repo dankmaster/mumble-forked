@@ -2620,39 +2620,31 @@ QImage persistentChatInlineDataImagePreviewImage(const QString &source, const Pe
 	return image;
 }
 
-QImage persistentChatInlineDataImageViewerImage(const QString &source,
+QByteArray persistentChatInlineDataImageViewerBytes(const QString &source,
 												 const PersistentChatInlineDataImageInfo &info) {
 	if (!info.valid || info.estimatedBytes > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES) {
-		return QImage();
+		return QByteArray();
 	}
 	const QByteArray bytes = persistentChatInlineDataImageBytes(source, info);
 	if (bytes.isEmpty() || bytes.size() > PERSISTENT_CHAT_INLINE_DATA_IMAGE_THUMBNAIL_MAX_BYTES) {
-		return QImage();
+		return QByteArray();
 	}
 	QBuffer buffer;
 	buffer.setData(bytes);
-	if (!buffer.open(QIODevice::ReadOnly)) return QImage();
+	if (!buffer.open(QIODevice::ReadOnly)) return QByteArray();
 
 	QImageReader reader(&buffer);
 	reader.setAutoTransform(true);
+	reader.setDecideFormatFromContent(true);
+	if (!reader.canRead()) return QByteArray();
 	const QSize sourceSize = reader.size();
 	constexpr qint64 maximumSourcePixels = 40LL * 1024LL * 1024LL;
-	constexpr qint64 maximumDisplayPixels = 8LL * 1024LL * 1024LL;
 	if (!sourceSize.isValid() || sourceSize.width() <= 0 || sourceSize.height() <= 0
 		|| sourceSize.width() > 16384 || sourceSize.height() > 16384
 		|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height() > maximumSourcePixels) {
-		return QImage();
+		return QByteArray();
 	}
-	if (sourceSize.width() > 8192 || sourceSize.height() > 8192
-		|| static_cast< qint64 >(sourceSize.width()) * sourceSize.height() > maximumDisplayPixels) {
-		const qreal scale = std::min({ 1.0,
-			8192.0 / sourceSize.width(), 8192.0 / sourceSize.height(),
-			std::sqrt(static_cast< qreal >(maximumDisplayPixels)
-				/ (static_cast< qreal >(sourceSize.width()) * sourceSize.height())) });
-		reader.setScaledSize(QSize(std::max(1, static_cast< int >(std::floor(sourceSize.width() * scale))),
-			std::max(1, static_cast< int >(std::floor(sourceSize.height() * scale)))));
-	}
-	return reader.read();
+	return bytes;
 }
 
 [[maybe_unused]] QString persistentChatInlineDataImageThumbnailSource(const QImage &image) {
@@ -36963,22 +36955,24 @@ void MainWindow::ensurePersistentChatInlineDataImageFullResolution(const QString
 
 	m_persistentChatInlineDataImageFullFailures.remove(normalizedToken);
 	m_persistentChatInlineDataImageFullRequestsInFlight.insert(normalizedToken);
-	persistentChatPreviewWorkerQueue().submit< QImage >(
+	persistentChatPreviewWorkerQueue().submit< QByteArray >(
 		this, QStringLiteral("inline:full:%1").arg(normalizedToken),
 		persistentChatPreviewWorkerSourceKey(QStringLiteral("inline-full"), normalizedToken),
 		std::max< qint64 >(1, static_cast< qint64 >(source.size()) * sizeof(QChar)),
 		PersistentChatPreviewWorkerPriority::Interactive,
-		[source, info]() { return persistentChatInlineDataImageViewerImage(source, info); },
-		[this, normalizedToken](std::optional< QImage > image) {
+		[source, info]() { return persistentChatInlineDataImageViewerBytes(source, info); },
+		[this, normalizedToken, mimeType = info.mimeType](std::optional< QByteArray > bytes) {
 			m_persistentChatInlineDataImageFullRequestsInFlight.remove(normalizedToken);
 			QString providerUrl;
-			if (image && !image->isNull() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
-				providerUrl = m_qmlShellHost->imagePipeline()->registerImage(
-					*image, QStringLiteral("chat-inline-data-full:%1").arg(normalizedToken));
+			QSize pixelSize;
+			if (bytes && !bytes->isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()) {
+				providerUrl = m_qmlShellHost->imagePipeline()->registerFullResolutionEncoded(
+					*bytes, mimeType.toLatin1(), QStringLiteral("chat-inline-data-full:%1").arg(normalizedToken),
+					&pixelSize);
 			}
-			if (!providerUrl.isEmpty()) {
+			if (!providerUrl.isEmpty() && pixelSize.isValid()) {
 				m_persistentChatInlineDataImageFullProviderUrls.insert(normalizedToken, providerUrl);
-				m_persistentChatInlineDataImageFullSizes.insert(normalizedToken, image->size());
+				m_persistentChatInlineDataImageFullSizes.insert(normalizedToken, pixelSize);
 				m_persistentChatInlineDataImageFullFailures.remove(normalizedToken);
 			} else {
 				m_persistentChatInlineDataImageFullSizes.remove(normalizedToken);

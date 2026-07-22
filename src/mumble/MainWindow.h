@@ -447,6 +447,7 @@ public:
 
 	struct PersistentChatAssetIoResult {
 		QImage image;
+		QByteArray fullImageBytes;
 		QString mediaDataUrl;
 		QString contentHash;
 		QSet< QString > savedPaths;

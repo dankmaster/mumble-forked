@@ -19,6 +19,7 @@ private slots:
 	void rejectsStaleGenerationAndCancellation();
 	void registersDecodedImageWithoutUiThreadEncoding();
 	void preservesViewerPixelsOutsidePreviewDecodeBudget();
+	void backendRegistersOriginalEncodedViewerSources();
 	void boundsSourceStoreAndDataUrlPayloads();
 	void preservesMultiFrameGifThroughManagedAnimationSource();
 	void loadsLocalFileThroughPipeline();
@@ -160,6 +161,66 @@ void TestQmlImageProvider::preservesViewerPixelsOutsidePreviewDecodeBudget() {
 	QCOMPARE(cameraPixelSize, QSize(4032, 3024));
 	QCOMPARE(defaultPipeline.loadForTest(providerId(cameraFull)).size(), cameraPixelSize);
 	QVERIFY(!defaultPipeline.isCachedForTest(providerId(cameraFull)));
+}
+
+void TestQmlImageProvider::backendRegistersOriginalEncodedViewerSources() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile mainWindowFile(mainWindowPath);
+	QVERIFY(mainWindowFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString mainWindowSource = QString::fromUtf8(mainWindowFile.readAll());
+	const auto methodBody = [](const QString &source, const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString inlineBytes = methodBody(mainWindowSource,
+		QStringLiteral("QByteArray persistentChatInlineDataImageViewerBytes"),
+		QStringLiteral("[[maybe_unused]] QString persistentChatInlineDataImageThumbnailSource"));
+	QVERIFY(!inlineBytes.isEmpty());
+	QVERIFY(inlineBytes.contains(QStringLiteral("return bytes;")));
+	QVERIFY(!inlineBytes.contains(QStringLiteral("reader.read()")));
+	QVERIFY(!inlineBytes.contains(QStringLiteral("setScaledSize")));
+
+	const QString inlineFull = methodBody(mainWindowSource,
+		QStringLiteral("void MainWindow::ensurePersistentChatInlineDataImageFullResolution"),
+		QStringLiteral("QString MainWindow::persistentChatInlineDataImageThumbnailSourceForToken"));
+	QVERIFY(!inlineFull.isEmpty());
+	QVERIFY(inlineFull.contains(QStringLiteral("submit< QByteArray >")));
+	QVERIFY(inlineFull.contains(QStringLiteral("registerFullResolutionEncoded")));
+	QVERIFY(inlineFull.contains(QStringLiteral("m_persistentChatInlineDataImageFullSizes.insert(normalizedToken, pixelSize)")));
+	QVERIFY(!inlineFull.contains(QStringLiteral("registerImage(")));
+
+	const QString messagesPath = QFINDTESTDATA("../../mumble/Messages.cpp");
+	QVERIFY2(!messagesPath.isEmpty(), "Messages.cpp test data was not found");
+	QFile messagesFile(messagesPath);
+	QVERIFY(messagesFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString messagesSource = QString::fromUtf8(messagesFile.readAll());
+	const QString assetChunk = methodBody(messagesSource,
+		QStringLiteral("void MainWindow::msgChatAssetChunk"),
+		QStringLiteral("void MainWindow::msgChatEmbedState"));
+	QVERIFY(!assetChunk.isEmpty());
+	const qsizetype exactBytes = assetChunk.indexOf(QStringLiteral("result.fullImageBytes = bytes;"));
+	const qsizetype previewDecode = assetChunk.indexOf(QStringLiteral("if (previewImageConsumer)"), exactBytes);
+	const qsizetype decodedPreview = assetChunk.indexOf(QStringLiteral("result.image = reader.read();"), previewDecode);
+	QVERIFY(exactBytes >= 0);
+	QVERIFY(previewDecode > exactBytes);
+	QVERIFY(decodedPreview > previewDecode);
+
+	const qsizetype previewRegistration = assetChunk.indexOf(QStringLiteral("chat-attachment:%1:%2"));
+	const qsizetype fullRegistration = assetChunk.indexOf(QStringLiteral("chat-attachment-full:%1:%2"));
+	QVERIFY(previewRegistration >= 0);
+	QVERIFY(fullRegistration > previewRegistration);
+	const QString previewCompletion = assetChunk.mid(previewRegistration, fullRegistration - previewRegistration);
+	QVERIFY(previewCompletion.contains(QStringLiteral("registerImage(image, stableKey)")));
+	const qsizetype fullRegistrationEnd = assetChunk.indexOf(
+		QStringLiteral("for (const unsigned int attachmentAssetID : attachmentAssetIDs)"), fullRegistration);
+	QVERIFY(fullRegistrationEnd > fullRegistration);
+	const QString fullCompletion = assetChunk.mid(fullRegistration, fullRegistrationEnd - fullRegistration);
+	QVERIFY(fullCompletion.contains(QStringLiteral("registerFullResolutionEncoded")));
+	QVERIFY(fullCompletion.contains(QStringLiteral("result->fullImageBytes")));
+	QVERIFY(!fullCompletion.contains(QStringLiteral("registerImage(")));
 }
 
 void TestQmlImageProvider::boundsSourceStoreAndDataUrlPayloads() {
