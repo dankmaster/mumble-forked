@@ -114,6 +114,12 @@ Rectangle {
 	readonly property string safeEmbedProvider: safeText(preview ? preview.embedKind : "", 64)
 	readonly property string normalizedEmbedProvider: safeEmbedProvider.toLowerCase()
 	readonly property string normalizedEmbedAspect: normalizeEmbedAspect(preview ? preview.embedAspect : "")
+	readonly property string contentBranch: safeText(preview && preview.metadata
+		? preview.metadata.contentBranch : "", 64).toLowerCase()
+	readonly property string mediaPresentation: safeText(preview && preview.metadata
+		? preview.metadata.mediaPresentation : "", 64).toLowerCase()
+	readonly property bool animatedImagePresentation: mediaPresentation === "animated-image"
+	readonly property bool providerPostPresentation: mediaPresentation === "provider-post-card"
 	// Direct media is represented by typed media fields and never by a generic
 	// sender-controlled WebEngine embed.
 	readonly property bool hasEmbedPreview: safeEmbedUrl.length > 0 && safeEmbedProvider.length > 0
@@ -133,6 +139,7 @@ Rectangle {
 	readonly property bool watchTogetherSupported: sharedPlaybackSupported
 	readonly property string openLabel: safeText(preview ? preview.openLabel : "", 128) || qsTr("Open")
 	readonly property bool inlineActionUsesPlaybackSemantics: !instagramStaticPost
+		&& !animatedImagePresentation && !providerPostPresentation
 	readonly property string inlineActionLabel: inlineActionUsesPlaybackSemantics
 		? qsTr("Play here") : qsTr("View here")
 	readonly property string inlineActionIconName: inlineActionUsesPlaybackSemantics ? "play" : "eye"
@@ -140,6 +147,7 @@ Rectangle {
 		? qsTr("Play %1 here").arg(displayTitle) : qsTr("View %1 here").arg(displayTitle)
 	readonly property string inlineActionAccessibilityDescription: inlineActionUsesPlaybackSemantics
 		? qsTr("Loads the provider player in this preview")
+		: animatedImagePresentation ? qsTr("Loads the animation in this preview")
 		: qsTr("Loads the provider post in this preview")
 	readonly property string playAccessibilityName: inlineActionAccessibilityName
 	readonly property string popoutActionLabel: inlineActionUsesPlaybackSemantics
@@ -234,7 +242,7 @@ Rectangle {
 	readonly property bool hasSecondaryOriginalOpenAction: (hasPrimaryDirectAction || hasDirectMedia)
 		&& originalProviderUrl.length > 0
 	readonly property bool hasSizeActions: inlineMediaStageVisible
-	readonly property bool hasPopoutAction: localPlaybackSupported
+	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
 	readonly property bool hasOverflowActions: hasPopoutAction || canExpand
 		|| hasSecondaryOriginalOpenAction || hasSizeActions
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
@@ -959,7 +967,8 @@ Rectangle {
         }
         if (!hasDirectMedia)
             return
-		const pairedAudioUrl = currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
+		const pairedAudioUrl = !animatedImagePresentation
+			&& currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
 			? safeDirectMediaUrl(preview.mediaAudioUrl || "", "audio") : ""
 		const pairedAudioMime = pairedAudioUrl.length > 0 ? safeText(preview.mediaAudioMime, 128) : ""
 		directMediaRequested(currentMediaUrl, String(currentMedia.mime || preview.mediaMime || ""),
@@ -976,7 +985,8 @@ Rectangle {
 	function requestCurrentDirectMediaPopout() {
 		if (!hasDirectMedia)
 			return
-		const pairedAudioUrl = currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
+		const pairedAudioUrl = !animatedImagePresentation
+			&& currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
 			? safeDirectMediaUrl(preview.mediaAudioUrl || "", "audio") : ""
 		const pairedAudioMime = pairedAudioUrl.length > 0 ? safeText(preview.mediaAudioMime, 128) : ""
 		popoutDirectMediaRequested(currentMediaUrl, String(currentMedia.mime || preview.mediaMime || ""),
@@ -1318,6 +1328,8 @@ Rectangle {
 							"session": root.mediaSessionController,
 							"aspect": root.inlineMediaAspect,
 							"presentationProvider": root.inlinePresentationProvider,
+							"presentationMode": root.mediaPresentation,
+							"animationAutoPlayEnabled": root.animationsEnabled,
 							"mediaProfileFactory": root.mediaProfileFactory,
 							"visualFixtureMode": root.visualMediaFixtureMode
 						})
@@ -1853,7 +1865,11 @@ Rectangle {
 				visible: !root.inlinePlaybackActive && root.previewState !== "error" && !root.mediaRequiresReveal
 					&& (root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
                 text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
-                    : root.currentMediaKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
+                    : root.currentMediaKind === "audio" ? qsTr("Play audio")
+					: root.animatedImagePresentation ? qsTr("View animation") : qsTr("Play video")
+				Accessible.name: root.animatedImagePresentation
+					? qsTr("View %1 animation here").arg(root.displayTitle)
+					: root.playAccessibilityName
                 onClicked: root.requestCurrentMedia()
             }
             Button {
@@ -2030,8 +2046,13 @@ Rectangle {
 					- (previewOverflowButton.visible ? previewOverflowButton.implicitWidth + Theme.space2 : 0))
 				Layout.fillWidth: root.narrowLayout
 				text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
-					: root.currentMediaKind === "audio" ? qsTr("Play audio in chat") : qsTr("Play video in chat")
+					: root.currentMediaKind === "audio" ? qsTr("Play audio in chat")
+					: root.animatedImagePresentation ? qsTr("View animation in chat") : qsTr("Play video in chat")
 				dense: true
+				Accessible.name: root.animatedImagePresentation
+					? qsTr("View %1 animation in chat").arg(root.displayTitle)
+					: root.playAccessibilityName
+				Accessible.description: root.inlineActionAccessibilityDescription
 				onClicked: root.requestCurrentMediaWithFocus()
             }
 			Item {
