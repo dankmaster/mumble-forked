@@ -64,8 +64,11 @@ TestCase {
 		wait(20)
 		for (let index = 0; index < timeline.count; ++index) {
 			const item = timeline.itemAtIndex(index)
-			if (item)
+			if (item) {
 				item.accessibilitySuppressed = false
+				item.logEntry = false
+				item.logAlternating = false
+			}
 		}
 	}
 
@@ -254,6 +257,33 @@ TestCase {
 		compare(outgoing.messageWidth, 190)
 		incoming.preferredIncomingWidth = 520
 		outgoing.preferredOwnWidth = 260
+	}
+
+	function test_log_entry_uses_a_dense_full_lane_row_without_chat_card_chrome() {
+		const entry = timeline.itemAtIndex(0)
+		verify(entry !== null)
+		const surface = findChild(entry, "chatMessageSurface")
+		const divider = findChild(entry, "activityLogRowDivider")
+		verify(surface !== null && divider !== null)
+
+		entry.logEntry = true
+		entry.logAlternating = true
+		compare(entry.messageWidth, entry.laneWidth)
+		compare(entry.surfaceX, 0)
+		compare(entry.topGap, 0)
+		compare(entry.horizontalPadding, Theme.space3)
+		compare(entry.verticalPadding, Theme.space2)
+		compare(entry.surfaceBorderWidth, 0)
+		compare(surface.radius, 0)
+		verify(surface.color.a > 0)
+		compare(divider.parent, surface)
+		compare(divider.height, 1)
+		compare(divider.color, Theme.divider)
+
+		entry.logAlternating = false
+		compare(surface.color.a, 0)
+		entry.logEntry = false
+		compare(entry.topGap, Theme.space3)
 	}
 
 	function test_narrow_lane_is_bounded_and_outgoing_message_is_adaptive() {

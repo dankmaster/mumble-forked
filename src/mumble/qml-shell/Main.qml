@@ -100,6 +100,8 @@ ApplicationWindow {
 		: compactNavigation ? Theme.space5 : 28
 	readonly property int timelineVerticalMargin: narrowShell ? Theme.space3 : Theme.space5
 	readonly property int conversationLaneMaximumWidth: Theme.chatLaneMaximumWidth
+	readonly property int activityLogTimeColumnWidth: Theme.densityMetric(58, 68, 76)
+	readonly property int activityLogGutterWidth: Theme.densityMetric(12, 14, 16)
 	// Drawer.visible can stay true while the popup item is resident. Position is
 	// the reliable modal-state signal: zero is fully closed, one fully open.
 	readonly property bool navigationModalActive: navigationDrawer.position > 0.001
@@ -2726,6 +2728,86 @@ ApplicationWindow {
 					onActionRequested: (actionId, payload) => uiCommands.invokeAppAction(actionId, payload)
 				}
 
+				Item {
+					id: activityLogColumnHeader
+					objectName: "activityLogColumnHeader"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? Theme.densityMetric(30, 34, 40) : 0
+					visible: activeScope.activity
+					Accessible.role: Accessible.Grouping
+					Accessible.name: qsTr("Activity log columns: time and event")
+					Accessible.ignored: root.backgroundAccessibilitySuppressed
+
+					Rectangle {
+						id: activityLogColumnSurface
+						objectName: "activityLogColumnSurface"
+						anchors.horizontalCenter: parent.horizontalCenter
+						anchors.verticalCenter: parent.verticalCenter
+						width: Math.max(1, Math.min(root.conversationLaneMaximumWidth,
+							parent.width - root.timelineHorizontalMargin * 2 - Theme.space4))
+						height: parent.height
+						radius: Math.min(Theme.innerRadius, 8)
+						color: Theme.withAlpha(Theme.surfaceRaised, 0.76)
+						border.color: Theme.quietBorder
+						border.width: 1
+						Accessible.ignored: true
+
+						RowLayout {
+							anchors.fill: parent
+							anchors.leftMargin: Theme.space3
+							anchors.rightMargin: Theme.space3
+							spacing: Theme.space2
+
+							Label {
+								Layout.preferredWidth: root.activityLogTimeColumnWidth
+								textFormat: Text.PlainText
+								text: qsTr("TIME")
+								color: Theme.textFaint
+								font.pixelSize: Theme.fontCaption
+								font.weight: Font.DemiBold
+								font.letterSpacing: 0.7
+								horizontalAlignment: Text.AlignRight
+								Accessible.ignored: true
+							}
+							Item {
+								Layout.preferredWidth: root.activityLogGutterWidth
+								Layout.fillHeight: true
+								Accessible.ignored: true
+							}
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: qsTr("EVENT")
+								color: Theme.textFaint
+								font.pixelSize: Theme.fontCaption
+								font.weight: Font.DemiBold
+								font.letterSpacing: 0.7
+								Accessible.ignored: true
+							}
+							RowLayout {
+								spacing: Theme.space1
+								Accessible.ignored: true
+								Rectangle {
+									Layout.preferredWidth: 6
+									Layout.preferredHeight: 6
+									radius: 3
+									color: clientSession.connected ? Theme.success : Theme.textMuted
+									Accessible.ignored: true
+								}
+								Label {
+									textFormat: Text.PlainText
+									text: clientSession.connected ? qsTr("LIVE") : qsTr("OFFLINE")
+									color: clientSession.connected ? Theme.success : Theme.textMuted
+									font.pixelSize: Theme.fontCaption
+									font.weight: Font.DemiBold
+									font.letterSpacing: 0.6
+									Accessible.ignored: true
+								}
+							}
+						}
+					}
+				}
+
                 ListView {
                     id: timeline
 					objectName: "chatTimeline"
@@ -2735,7 +2817,8 @@ ApplicationWindow {
                     clip: true
 					interactive: !scopePresentationPending
 					Accessible.role: Accessible.List
-					Accessible.name: qsTr("Conversation messages")
+					Accessible.name: activeScope.activity ? qsTr("Activity log")
+						: qsTr("Conversation messages")
 					// QQuickListView's scrolling contentItem reports its untransformed
 					// content bounds to Windows UIA. With tall rich cards that wrapper can
 					// appear hundreds of pixels away from its visible children. Remove only
@@ -2751,7 +2834,7 @@ ApplicationWindow {
 					spacing: 0
 					leftMargin: root.timelineHorizontalMargin
 					rightMargin: root.timelineHorizontalMargin
-					topMargin: root.timelineVerticalMargin
+					topMargin: activeScope.activity ? Theme.space1 : root.timelineVerticalMargin
 					reuseItems: !scopeReuseResetActive
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
@@ -3420,12 +3503,14 @@ ApplicationWindow {
 					footerPositioning: ListView.InlineFooter
 					footer: Item {
 						width: timeline.width
-						height: root.timelineVerticalMargin
+						height: activeScope.activity ? Theme.space3 : root.timelineVerticalMargin
 					}
 			delegate: ChatMessageFrame {
 						id: messageDelegate
 						opacity: timeline.scopePresentationPending ? 0 : 1
 						readonly property bool performanceTimelineDelegate: true
+						logEntry: activeScope.activity
+						logAlternating: logEntry && index % 2 === 1
 				required property int index
 				// Ordinary rows enter UIA only when fully contained so cached actor/header
 				// nodes cannot leak across the clip. A legitimate rich card may be taller
@@ -3560,11 +3645,12 @@ ApplicationWindow {
 						required property bool canDelete
 						searchCurrent: root.conversationSearchOpen
 							&& stableId === String(chatModel.currentMatchStableId || "")
-						systemMessage: !!source.system
+						systemMessage: logEntry || !!source.system
 							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
 						startsGroup: root.messageStartsGroup(index, source, title)
 						dateSeparatorLabel: root.messageDateSeparator(index, source)
-						bodyImplicitHeight: messageRow.implicitHeight
+						bodyImplicitHeight: logEntry
+							? activityLogRow.implicitHeight : messageRow.implicitHeight
 						// Flickable margins do not constrain a vertical ListView delegate's
 						// horizontal scene rect. Reserve the shell-safe trailing inset here as
 						// well, otherwise compact metadata extends beneath productSurface's
@@ -3623,12 +3709,81 @@ ApplicationWindow {
 							|| deliveryState === "failed" || deliveryState === "cancelled"
 						width: laneAvailableWidth
 						TapHandler {
+							enabled: !messageDelegate.logEntry
 							acceptedButtons: Qt.RightButton
 							onTapped: messageDelegate.openMessageActions()
+						}
+						RowLayout {
+							id: activityLogRow
+							anchors.fill: parent
+							visible: messageDelegate.logEntry
+							spacing: Theme.space2
+
+							Label {
+								objectName: "activityLogTimestamp"
+								Layout.preferredWidth: root.activityLogTimeColumnWidth
+								Layout.alignment: Qt.AlignTop
+								Layout.topMargin: 1
+								textFormat: Text.PlainText
+								text: timestamp
+								color: Theme.textMuted
+								font.family: Qt.platform.os === "windows" ? "Consolas" : "monospace"
+								font.pixelSize: Theme.fontCaption
+								font.weight: Font.Medium
+								horizontalAlignment: Text.AlignRight
+								Accessible.name: qsTr("Time %1").arg(text)
+								Accessible.ignored: root.backgroundAccessibilitySuppressed
+									|| !messageDelegate.itemContainedInViewport(activityLogTimestamp)
+							}
+							Item {
+								id: activityLogGutter
+								objectName: "activityLogGutter"
+								Layout.preferredWidth: root.activityLogGutterWidth
+								Layout.fillHeight: true
+								Accessible.ignored: true
+
+								Rectangle {
+									anchors.horizontalCenter: parent.horizontalCenter
+									anchors.top: parent.top
+									anchors.bottom: parent.bottom
+									width: 1
+									color: Theme.divider
+									Accessible.ignored: true
+								}
+								Rectangle {
+									objectName: "activityLogMarker"
+									anchors.horizontalCenter: parent.horizontalCenter
+									anchors.top: parent.top
+									anchors.topMargin: 5
+									width: 7
+									height: 7
+									radius: width / 2
+									color: Theme.accent
+									border.color: Theme.withAlpha(Theme.textStrong, 0.18)
+									border.width: 1
+									Accessible.ignored: true
+								}
+							}
+							RichMessageBody {
+								id: activityLogBody
+								objectName: "activityLogEvent"
+								Layout.fillWidth: true
+								Layout.alignment: Qt.AlignTop
+								accessibilitySuppressed: root.backgroundAccessibilitySuppressed
+									|| !messageDelegate.itemContainedInViewport(activityLogBody)
+								segments: messageDelegate.bodySegments || []
+								resourceActive: !messageDelegate.accessibilityPooled
+								animationsEnabled: !root.visualFixtureOverrideActive
+								hoverEffectsEnabled: !root.visualFixtureOverrideActive
+								textColor: Theme.textMain
+								pixelSize: Theme.fontBody
+								onLinkRequested: link => Qt.openUrlExternally(link)
+							}
 						}
                         RowLayout {
 							id: messageRow
 							anchors.fill: parent
+							visible: !messageDelegate.logEntry
 							spacing: Theme.space2
                             Rectangle {
 								Layout.preferredWidth: messageDelegate.own || messageDelegate.systemMessage ? 0 : Theme.avatarMedium

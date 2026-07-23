@@ -183,6 +183,11 @@ TestCase {
 		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*if\s*\(activeScope\.activity\)[\s\S]*return\s+true/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No server log entries yet"\)[\s\S]*qsTr\("New Murmur server-log entries will appear here live\."\)/.test(mainSource))
 		verify(/id:\s*composerSurface[\s\S]*visible:\s*!activeScope\.activity[\s\S]*Layout\.preferredHeight:\s*visible\s*\?/.test(mainSource))
+		verify(/id:\s*activityLogColumnHeader[\s\S]{0,2400}visible:\s*activeScope\.activity[\s\S]{0,1200}qsTr\("TIME"\)[\s\S]{0,800}qsTr\("EVENT"\)[\s\S]{0,1200}qsTr\("LIVE"\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]{0,500}Accessible\.name:\s*activeScope\.activity\s*\?\s*qsTr\("Activity log"\)/.test(mainSource))
+		verify(/delegate:\s*ChatMessageFrame\s*\{[\s\S]{0,400}logEntry:\s*activeScope\.activity[\s\S]{0,160}logAlternating:\s*logEntry\s*&&\s*index\s*%\s*2\s*===\s*1/.test(mainSource))
+		verify(/id:\s*activityLogRow[\s\S]{0,300}visible:\s*messageDelegate\.logEntry[\s\S]{0,1000}objectName:\s*"activityLogTimestamp"[\s\S]{0,1400}objectName:\s*"activityLogGutter"[\s\S]{0,1600}objectName:\s*"activityLogEvent"/.test(mainSource))
+		verify(/id:\s*messageRow[\s\S]{0,180}visible:\s*!messageDelegate\.logEntry/.test(mainSource))
 	}
 
 	function test_composer_keeps_its_destination_visible_while_typing() {
