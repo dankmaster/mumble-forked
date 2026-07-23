@@ -47,107 +47,336 @@ if ($MemoryAbortBytes -lt 256MB) { throw "MemoryAbortBytes must be at least 256 
 $cases = @(
 	[pscustomobject]@{
 		id = "youtube"
+		sourceProvider = "youtube"
+		sourceUrl = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+		sourceItemId = "M7lc1UVf-VE"
+		playbackItemId = "M7lc1UVf-VE"
+		contentBranch = "video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "youtube"
-		url = "https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?rel=0&modestbranding=1&playsinline=1&autoplay=1&controls=1&enablejsapi=1&origin=https%3A%2F%2Fwww.mumble.info&widget_referrer=https%3A%2F%2Fwww.mumble.info%2F"
+		playbackUrl = "https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?rel=0&modestbranding=1&playsinline=1&autoplay=1&controls=1&enablejsapi=1&origin=https%3A%2F%2Fwww.mumble.info&widget_referrer=https%3A%2F%2Fwww.mumble.info%2F"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "vimeo"
+		sourceProvider = "vimeo"
+		sourceUrl = "https://vimeo.com/1195621748"
+		sourceItemId = "1195621748"
+		playbackItemId = "1195621748"
+		contentBranch = "video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "vimeo"
-		url = "https://player.vimeo.com/video/1195621748?title=0&byline=0&portrait=0&autoplay=1"
+		playbackUrl = "https://player.vimeo.com/video/1195621748?title=0&byline=0&portrait=0&autoplay=1"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "twitch"
+		sourceProvider = "twitch"
+		sourceUrl = "https://clips.twitch.tv/IncredulousAbstemiousFennelImGlitch"
+		sourceItemId = "IncredulousAbstemiousFennelImGlitch"
+		playbackItemId = "IncredulousAbstemiousFennelImGlitch"
+		contentBranch = "clip-video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "twitch"
-		url = "https://clips.twitch.tv/embed?clip=IncredulousAbstemiousFennelImGlitch&parent=www.mumble.info&autoplay=true&muted=true"
+		playbackUrl = "https://clips.twitch.tv/embed?clip=IncredulousAbstemiousFennelImGlitch&parent=www.mumble.info&autoplay=true&muted=true"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "streamable"
+		sourceProvider = "streamable"
+		sourceUrl = "https://streamable.com/ba9f2"
+		sourceItemId = "ba9f2"
+		playbackItemId = "ba9f2"
+		contentBranch = "video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "streamable"
-		url = "https://streamable.com/e/ba9f2?autoplay=1"
+		playbackUrl = "https://streamable.com/e/ba9f2?autoplay=1"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "dailymotion"
+		sourceProvider = "dailymotion"
+		sourceUrl = "https://www.dailymotion.com/video/x84sh87"
+		sourceItemId = "x84sh87"
+		playbackItemId = "x84sh87"
+		contentBranch = "video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "dailymotion"
-		url = "https://geo.dailymotion.com/player.html?video=x84sh87&autoplay=1&mute=1"
+		playbackUrl = "https://geo.dailymotion.com/player.html?video=x84sh87&autoplay=1&mute=1"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "soundcloud"
+		sourceProvider = "soundcloud"
+		sourceUrl = "https://soundcloud.com/forss/flickermood"
+		sourceItemId = "forss/flickermood"
+		playbackItemId = "forss/flickermood"
+		contentBranch = "audio-track"
+		expectedPresentation = "provider-audio-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "soundcloud"
-		url = "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood&auto_play=true&hide_related=false&show_comments=false&show_user=true&show_reposts=false&visual=false"
+		playbackUrl = "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood&auto_play=true&hide_related=false&show_comments=false&show_user=true&show_reposts=false&visual=false"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "spotify"
+		sourceProvider = "spotify"
+		sourceUrl = "https://open.spotify.com/album/2dFcS2u5YoUj4WmUkZ1oW6"
+		sourceItemId = "album/2dFcS2u5YoUj4WmUkZ1oW6"
+		playbackItemId = "album/2dFcS2u5YoUj4WmUkZ1oW6"
+		contentBranch = "audio-album"
+		expectedPresentation = "provider-audio-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "spotify"
-		url = "https://open.spotify.com/embed/album/2dFcS2u5YoUj4WmUkZ1oW6?utm_source=generator"
+		playbackUrl = "https://open.spotify.com/embed/album/2dFcS2u5YoUj4WmUkZ1oW6?utm_source=generator"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "tiktok"
+		sourceProvider = "tiktok"
+		sourceUrl = "https://www.tiktok.com/@imee_2001/video/7611978857305984274"
+		sourceItemId = "7611978857305984274"
+		playbackItemId = "7611978857305984274"
+		contentBranch = "video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "tiktok"
-		url = "https://www.tiktok.com/player/v1/7611978857305984274?autoplay=1&rel=0&music_info=0&description=0"
+		playbackUrl = "https://www.tiktok.com/player/v1/7611978857305984274?autoplay=1&rel=0&music_info=0&description=0"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "instagram"
+		sourceProvider = "instagram"
+		sourceUrl = "https://www.instagram.com/reel/DYWnW2RMbWr/"
+		sourceItemId = "reel/DYWnW2RMbWr"
+		playbackItemId = "reel/DYWnW2RMbWr"
+		contentBranch = "reel-video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "instagram"
-		url = "https://www.instagram.com/reel/DYWnW2RMbWr/embed/"
+		playbackUrl = "https://www.instagram.com/reel/DYWnW2RMbWr/embed/"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "facebook"
+		sourceProvider = "facebook"
+		sourceUrl = "https://www.facebook.com/reel/1327313299204519"
+		sourceItemId = "reel/1327313299204519"
+		playbackItemId = "reel/1327313299204519"
+		contentBranch = "reel-video"
+		expectedPresentation = "provider-video-player"
+		verificationSurface = "provider-webengine"
+		coverageState = "real-playback"
 		provider = "facebook"
-		url = "https://www.facebook.com/plugins/video.php?href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1327313299204519&show_text=false&width=560"
+		playbackUrl = "https://www.facebook.com/plugins/video.php?href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1327313299204519&show_text=false&width=560"
 		mediaMime = ""
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "reddit-direct"
+		sourceProvider = "reddit"
+		sourceUrl = "https://www.reddit.com/r/interestingasfuck/comments/1tobuah/a_snow_leopards_reaction_after_seeing_a_tiger/"
+		sourceItemId = "1tobuah"
+		playbackItemId = "2mhpjnavbi3h1"
+		contentBranch = "video-with-separate-audio"
+		expectedPresentation = "native-video-player"
+		verificationSurface = "native-media"
+		coverageState = "real-playback"
 		provider = "direct"
-		url = "https://v.redd.it/2mhpjnavbi3h1/CMAF_360.mp4"
+		playbackUrl = "https://v.redd.it/2mhpjnavbi3h1/CMAF_360.mp4"
 		mediaMime = "video/mp4"
 		audioUrl = "https://v.redd.it/2mhpjnavbi3h1/CMAF_AUDIO_128.mp4"
 		audioMime = "audio/mp4"
 	}
 	[pscustomobject]@{
 		id = "x-direct"
+		sourceProvider = "x"
+		sourceUrl = "https://x.com/historyinmemes/status/2058971862265151767"
+		sourceItemId = "2058971862265151767"
+		playbackItemId = "2056919877567291392"
+		contentBranch = "video"
+		expectedPresentation = "native-video-player"
+		verificationSurface = "native-media"
+		coverageState = "real-playback"
 		provider = "direct"
-		url = "https://video.twimg.com/amplify_video/2056919877567291392/vid/avc1/680x784/24c6nHGlHaoG23fa.mp4"
+		playbackUrl = "https://video.twimg.com/amplify_video/2056919877567291392/vid/avc1/680x784/24c6nHGlHaoG23fa.mp4"
 		mediaMime = "video/mp4"
 		audioUrl = ""
 		audioMime = ""
 	}
 	[pscustomobject]@{
 		id = "4chan-direct"
+		sourceProvider = "4chan"
+		sourceUrl = "https://i.4cdn.org/wsg/1779181872711838.webm"
+		sourceItemId = "1779181872711838"
+		playbackItemId = "1779181872711838"
+		contentBranch = "video"
+		expectedPresentation = "native-video-player"
+		verificationSurface = "native-media"
+		coverageState = "real-playback"
 		provider = "direct"
-		url = "https://i.4cdn.org/wsg/1779181872711838.webm"
+		playbackUrl = "https://i.4cdn.org/wsg/1779181872711838.webm"
 		mediaMime = "video/webm"
 		audioUrl = ""
 		audioMime = ""
+	}
+)
+
+$formatCoverage = @(
+	foreach ($mediaCase in $cases) {
+		[pscustomobject]@{
+			id = $mediaCase.id
+			source_provider = $mediaCase.sourceProvider
+			source_url = $mediaCase.sourceUrl
+			playback_url = $mediaCase.playbackUrl
+			source_item_id = $mediaCase.sourceItemId
+			playback_item_id = $mediaCase.playbackItemId
+			content_branch = $mediaCase.contentBranch
+			expected_presentation = $mediaCase.expectedPresentation
+			verification_surface = $mediaCase.verificationSurface
+			coverage_state = $mediaCase.coverageState
+		}
+	}
+	[pscustomobject]@{
+		id = "instagram-static"
+		source_provider = "instagram"
+		source_url = "https://www.instagram.com/p/DYzqx_9txNX/"
+		playback_url = "https://www.instagram.com/p/DYzqx_9txNX/embed/"
+		source_item_id = "p/DYzqx_9txNX"
+		playback_item_id = "p/DYzqx_9txNX"
+		content_branch = "still-post"
+		expected_presentation = "provider-post-viewer"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "real-cache-observation"
+	}
+	[pscustomobject]@{
+		id = "reddit-still"
+		source_provider = "reddit"
+		source_url = "https://www.reddit.com/r/pics/comments/haucpf/ive_found_a_few_funny_memories_during_lockdown/"
+		playback_url = "https://i.redd.it/f58v4g8mwh551.jpg"
+		source_item_id = "haucpf"
+		playback_item_id = "f58v4g8mwh551"
+		content_branch = "still-image"
+		expected_presentation = "image-card"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "reddit-gif"
+		source_provider = "reddit"
+		source_url = "https://www.reddit.com/r/animegifs/comments/g91mkj/slap_me_with_the_money_kon/"
+		playback_url = "https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback"
+		source_item_id = "g91mkj"
+		playback_item_id = "p91cxpzry9v41"
+		content_branch = "animated-gif-video-backed"
+		expected_presentation = "animated-image"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "x-still"
+		source_provider = "x"
+		source_url = "https://x.com/tekbog/status/2058911571225813258"
+		playback_url = "https://pbs.twimg.com/media/HJK48cubUAEIN2b.png"
+		source_item_id = "2058911571225813258"
+		playback_item_id = "HJK48cubUAEIN2b"
+		content_branch = "still-image"
+		expected_presentation = "image-card"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "real-cache-observation"
+	}
+	[pscustomobject]@{
+		id = "x-animated-gif"
+		source_provider = "x"
+		source_url = "https://x.com/FloodSocial/status/870042717589340160"
+		playback_url = ""
+		source_item_id = "870042717589340160"
+		playback_item_id = ""
+		content_branch = "animated-gif-video-backed"
+		expected_presentation = "animated-image"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "giphy-gif"
+		source_provider = "giphy"
+		source_url = "https://giphy.com/gifs/bbqfilms-ghostbusters-ecto-cooler-see-the-slime-xT4uQCfBOBGralHfOM"
+		playback_url = "https://media.giphy.com/media/xT4uQCfBOBGralHfOM/giphy.gif"
+		source_item_id = "xT4uQCfBOBGralHfOM"
+		playback_item_id = "xT4uQCfBOBGralHfOM"
+		content_branch = "animated-gif"
+		expected_presentation = "animated-image"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "tenor-gif"
+		source_provider = "tenor"
+		source_url = "https://tenor.com/view/what-is-this-gif-2935825949418015718"
+		playback_url = ""
+		source_item_id = "2935825949418015718"
+		playback_item_id = ""
+		content_branch = "animated-gif"
+		expected_presentation = "animated-image"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "imgur-gifv"
+		source_provider = "imgur"
+		source_url = "https://imgur.com/owLfF25"
+		playback_url = "https://i.imgur.com/owLfF25.gifv"
+		source_item_id = "owLfF25"
+		playback_item_id = "owLfF25"
+		content_branch = "animated-gif-video-backed"
+		expected_presentation = "animated-image"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
+	}
+	[pscustomobject]@{
+		id = "tiktok-photo"
+		source_provider = "tiktok"
+		source_url = "https://www.tiktok.com/@contextify0/photo/7626953410033585428"
+		playback_url = "https://www.tiktok.com/player/v1/7626953410033585428?autoplay=1&rel=0&music_info=0&description=0"
+		source_item_id = "7626953410033585428"
+		playback_item_id = "7626953410033585428"
+		content_branch = "photo-carousel"
+		expected_presentation = "provider-post-viewer"
+		verification_surface = "persistent-chat-card"
+		coverage_state = "runtime-pending"
 	}
 )
 
@@ -513,7 +742,7 @@ function Invoke-RealMediaPass {
 		Invoke-Automation -Port $port -Token $token -Request @{
 			command = "openQmlMediaSession"
 			presentation = "detached"
-			url = $MediaCase.url
+			url = $MediaCase.playbackUrl
 			provider = $MediaCase.provider
 			mediaMime = $MediaCase.mediaMime
 			audioUrl = $MediaCase.audioUrl
@@ -628,7 +857,15 @@ function Invoke-RealMediaPass {
 			id = $MediaCase.id
 			pass = $Pass
 			provider = $MediaCase.provider
-			url = $MediaCase.url
+			source_provider = $MediaCase.sourceProvider
+			source_url = $MediaCase.sourceUrl
+			playback_url = $MediaCase.playbackUrl
+			source_item_id = $MediaCase.sourceItemId
+			playback_item_id = $MediaCase.playbackItemId
+			content_branch = $MediaCase.contentBranch
+			expected_presentation = $MediaCase.expectedPresentation
+			verification_surface = $MediaCase.verificationSurface
+			coverage_state = $MediaCase.coverageState
 			audio_url = $MediaCase.audioUrl
 			startup_ms = $startupMilliseconds
 			terminal_ms = $terminalMilliseconds
@@ -725,6 +962,7 @@ $report = [pscustomobject]@{
 	memory_abort_bytes = $MemoryAbortBytes
 	network_results_are_environment_dependent = $true
 	contract_passed = $contractPassed
+	format_coverage = @($formatCoverage)
 	comparisons = @($comparisons)
 	cases = @($allResults)
 }
