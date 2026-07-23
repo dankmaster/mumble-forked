@@ -53,6 +53,10 @@ configure_client_test_runtime(TestShakaLicense TestShakaLicense)
 
 add_test(NAME TestQmlMediaProfileFactory COMMAND $<TARGET_FILE:TestQmlMediaProfileFactory>)
 configure_client_test_runtime(TestQmlMediaProfileFactory TestQmlMediaProfileFactory)
+set_property(TEST TestQmlMediaProfileFactory APPEND PROPERTY ENVIRONMENT
+	"QSG_RENDER_LOOP=basic"
+	"QT_QUICK_BACKEND=software"
+)
 
 if(WIN32 AND TARGET Qt6::qtwebenginequickplugin)
 	# The test executes from the build tree rather than a windeployqt stage. Point
