@@ -403,7 +403,9 @@ struct Settings {
 	QString qsImagePath = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
 
 	bool bUpdateCheck      = true;
-	bool bPluginCheck      = true;
+	// Plugins are opt-in. Keep automatic startup checks off unless the user
+	// explicitly enables them; manual checks remain available in plugin settings.
+	bool bPluginCheck      = false;
 	bool bPluginAutoUpdate = false;
 	QString qsForkUpdateSnoozedSignature = {};
 	qint64 iForkUpdateSnoozedUntilMs     = 0;

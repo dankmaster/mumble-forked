@@ -4570,7 +4570,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																				  QObject::tr("Check for client updates"),
 																				  m_draft.bUpdateCheck),
 																		boolField(QStringLiteral("network.pluginCheck"),
-																				  QObject::tr("Check for plugin updates"),
+																				  QObject::tr("Check for plugin updates at startup"),
 																				  m_draft.bPluginCheck),
 																		boolField(QStringLiteral("network.pluginAutoUpdate"),
 																				  QObject::tr("Update plugins automatically"),
