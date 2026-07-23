@@ -24,6 +24,8 @@ Rectangle {
 	property string visualFixtureMode: ""
 	readonly property bool animationPresentation:
 		String(presentationMode || "").trim().toLowerCase() === "animated-image"
+	readonly property bool providerPostPresentation:
+		String(presentationMode || "").trim().toLowerCase() === "provider-post-card"
 	readonly property var providerPresentation: ProviderPresentation.resolve(
 		String(presentationProvider || "").trim()
 			|| (session ? session.provider : ""))
@@ -56,20 +58,23 @@ Rectangle {
 	readonly property bool documentReady: visualFixtureRendererReady
 		|| (nativeDirectMedia && nativePlayerLoader.item
 			&& nativePlayerLoader.item.documentReady)
+		|| (providerPostPresentation && providerDocumentPresented)
 		|| (!nativeDirectMedia && _documentReadyGeneration === _mediaGeneration
 			&& _mediaGeneration > 0 && _rendererHealthy)
 	readonly property bool surfaceVerified: documentReady
 	readonly property bool transportVerified: visualFixtureRendererReady
 		|| (nativeDirectMedia && documentReady)
 		|| (_transportVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0)
-	readonly property bool playbackVerified: documentReady
+	readonly property bool playbackVerified: !providerPostPresentation && documentReady
 		&& ((session && String(session.state || "") === "playing")
 			|| (_playbackVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0))
 	readonly property string surfaceVerificationState: visualFixtureRendererReady ? "verified"
+		: providerPostPresentation && providerDocumentPresented ? "verified"
 		: nativeDirectMedia ? (documentReady ? "verified" : rendererHealthy ? "pending" : "idle")
 		: String(session ? session.error || "" : "").length > 0
 			&& _surfaceVerificationState === "idle" ? "failed" : _surfaceVerificationState
 	readonly property string surfaceVerificationEvidence: visualFixtureRendererReady ? "fixture"
+		: providerPostPresentation && providerDocumentPresented ? "provider-document"
 		: nativeDirectMedia && documentReady ? "native-media" : _surfaceVerificationEvidence
 	readonly property string surfaceVerificationDetail: _surfaceVerificationDetail
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
@@ -167,7 +172,9 @@ Rectangle {
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
-	Accessible.name: animationPresentation
+	Accessible.name: providerPostPresentation
+		? qsTr("%1 embedded post").arg(providerLabel)
+		: animationPresentation
 		? qsTr("%1 inline animated image").arg(providerLabel)
 		: qsTr("%1 inline media player").arg(providerLabel)
 	Accessible.description: providerVerificationRequired ? surfaceVerificationDetail : ""
@@ -1116,6 +1123,7 @@ Rectangle {
 	Timer {
 		interval: 1500
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
+			&& !inlinePlayer.providerPostPresentation
 			&& inlinePlayer.documentReady && inlinePlayer.rendererHealthy
 			&& inlinePlayer.session && inlinePlayer.session.error.length === 0
 		repeat: true

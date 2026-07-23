@@ -1078,10 +1078,12 @@ TestCase {
 				"metadata": { "instagramMediaKind": fixture.metadataKind }
 			}
 			card.previewIdentity = "message:instagram-semantics:" + index
+			wait(0)
 			compare(card.instagramEmbedMediaKind, fixture.normalizedKind)
 			compare(card.normalizedEmbedAspect, fixture.aspect)
 			compare(card.localPlaybackSupported, fixture.localPlayback)
 			compare(card.inlineMediaStageVisible, fixture.stageVisible)
+			compare(card.providerPostPresentation, fixture.normalizedKind === "post")
 			verify(!card.sharedPlaybackSupported)
 			verify(!card.watchTogetherSupported)
 			compare(inlineButton.visible, fixture.stageVisible)
@@ -1094,8 +1096,9 @@ TestCase {
 
 			if (overflowButton.visible)
 				overflowButton.clicked()
-			compare(popoutButton.visible, fixture.localPlayback)
-			if (fixture.localPlayback) {
+			const popoutExpected = fixture.localPlayback && fixture.normalizedKind !== "post"
+			compare(popoutButton.visible, popoutExpected)
+			if (popoutExpected) {
 				compare(popoutButton.text, fixture.popoutLabel)
 				compare(popoutButton.Accessible.description, fixture.popoutDescription)
 			}

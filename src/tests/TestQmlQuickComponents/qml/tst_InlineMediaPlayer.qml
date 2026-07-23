@@ -454,6 +454,39 @@ TestCase {
 		session.loadProgress = 0
 	}
 
+	function test_provider_post_uses_loaded_document_without_playback_probe() {
+		const player = playerLoader.item
+		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
+		const failureSurface = findChild(player, "inlineMediaFailureOverlay")
+		session.active = true
+		session.state = "loading"
+		session.loadProgress = 0
+		player.presentationMode = "provider-post-card"
+		player.beginMediaDocumentLoad("about:blank#provider-post")
+		wait(0)
+
+		verify(player.providerPostPresentation)
+		verify(!player.documentReady)
+		verify(loadingSurface !== null && loadingSurface.visible)
+
+		session.loadProgress = 99
+		wait(0)
+		verify(player.providerDocumentPresented)
+		verify(player.documentReady)
+		verify(player.surfaceVerified)
+		verify(!player.transportVerified)
+		verify(!player.playbackVerified)
+		compare(player.surfaceVerificationState, "verified")
+		compare(player.surfaceVerificationEvidence, "provider-document")
+		compare(player.rendererState, "active")
+		verify(!loadingSurface.visible)
+		verify(failureSurface !== null && !failureSurface.visible)
+
+		player.presentationMode = ""
+		session.active = false
+		session.loadProgress = 0
+	}
+
 	function test_verified_document_completion_is_generation_bound() {
 		const player = playerLoader.item
 		session.active = true

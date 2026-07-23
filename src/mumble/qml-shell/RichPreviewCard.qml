@@ -119,7 +119,6 @@ Rectangle {
 	readonly property string mediaPresentation: safeText(preview && preview.metadata
 		? preview.metadata.mediaPresentation : "", 64).toLowerCase()
 	readonly property bool animatedImagePresentation: mediaPresentation === "animated-image"
-	readonly property bool providerPostPresentation: mediaPresentation === "provider-post-card"
 	// Direct media is represented by typed media fields and never by a generic
 	// sender-controlled WebEngine embed.
 	readonly property bool hasEmbedPreview: safeEmbedUrl.length > 0 && safeEmbedProvider.length > 0
@@ -127,6 +126,8 @@ Rectangle {
 	readonly property string instagramEmbedMediaKind: normalizedInstagramEmbedMediaKind()
 	readonly property bool instagramStaticPost: normalizedEmbedProvider === "instagram"
 		&& instagramEmbedMediaKind === "post"
+	readonly property bool providerPostPresentation: mediaPresentation === "provider-post-card"
+		|| instagramStaticPost
 	// Local rendering and synchronized room playback are separate capabilities.
 	// A provider can be viewed or played in this card without implementing the
 	// deterministic state contract required by Watch Together.
@@ -242,6 +243,7 @@ Rectangle {
 		&& originalProviderUrl.length > 0
 	readonly property bool hasSizeActions: inlineMediaStageVisible
 	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
+		&& !providerPostPresentation
 	readonly property bool hasOverflowActions: hasPopoutAction || canExpand
 		|| hasSecondaryOriginalOpenAction || hasSizeActions
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
@@ -1281,7 +1283,8 @@ Rectangle {
 							"session": root.mediaSessionController,
 							"aspect": root.inlineMediaAspect,
 							"presentationProvider": root.inlinePresentationProvider,
-							"presentationMode": root.mediaPresentation,
+							"presentationMode": root.providerPostPresentation
+								? "provider-post-card" : root.mediaPresentation,
 							"animationAutoPlayEnabled": root.animationsEnabled,
 							"mediaProfileFactory": root.mediaProfileFactory,
 							"visualFixtureMode": root.visualMediaFixtureMode
