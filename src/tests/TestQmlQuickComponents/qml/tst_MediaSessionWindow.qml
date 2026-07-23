@@ -282,6 +282,29 @@ TestCase {
 		session.active = false
 	}
 
+	function test_loaded_provider_document_is_not_covered_while_transport_probe_settles() {
+		const window = windowLoader.item
+		const loadingSurface = findChild(window.contentItem, "mediaSessionLoadingSurface")
+		session.active = true
+		session.state = "loading"
+		session.loadProgress = 98
+		window.beginMediaDocumentLoad("about:blank#provider-document")
+		wait(0)
+
+		verify(!window.documentReady)
+		verify(!window.providerDocumentPresented)
+		verify(loadingSurface !== null && loadingSurface.visible)
+
+		session.loadProgress = 99
+		wait(0)
+		verify(!window.documentReady)
+		verify(window.providerDocumentPresented)
+		verify(!loadingSurface.visible)
+
+		session.active = false
+		session.loadProgress = 0
+	}
+
 	function test_runtime_error_surface_remains_actionable_across_retry() {
 		const window = windowLoader.item
 		session.url = "https://www.youtube.com/embed/runtime-retry"

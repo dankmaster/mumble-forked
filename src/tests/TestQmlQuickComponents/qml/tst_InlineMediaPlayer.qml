@@ -431,6 +431,29 @@ TestCase {
 		session.active = false
 	}
 
+	function test_loaded_provider_document_is_not_covered_while_transport_probe_settles() {
+		const player = playerLoader.item
+		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
+		session.active = true
+		session.state = "loading"
+		session.loadProgress = 98
+		player.beginMediaDocumentLoad("about:blank#provider-document")
+		wait(0)
+
+		verify(!player.documentReady)
+		verify(!player.providerDocumentPresented)
+		verify(loadingSurface !== null && loadingSurface.visible)
+
+		session.loadProgress = 99
+		wait(0)
+		verify(!player.documentReady)
+		verify(player.providerDocumentPresented)
+		verify(!loadingSurface.visible)
+
+		session.active = false
+		session.loadProgress = 0
+	}
+
 	function test_verified_document_completion_is_generation_bound() {
 		const player = playerLoader.item
 		session.active = true

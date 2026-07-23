@@ -55,6 +55,11 @@ ApplicationWindow {
 		&& !nativeDirectMedia && mediaRuntimeReady
 	readonly property bool webSurfaceActive: playerLoader.active
 	readonly property bool nativeSurfaceActive: nativePlayerLoader.active
+	// A loaded provider document must stay directly visible while the deeper
+	// media/transport probe settles. Do not cover real provider controls,
+	// consent, or verification UI with Mumble-owned loading chrome.
+	readonly property bool providerDocumentPresented: !nativeDirectMedia
+		&& rendererHealthy && mediaSession.loadProgress >= 99
 	readonly property string rendererBackend: visualFixtureRendererReady ? "fixture"
 		: nativeSurfaceActive ? "native" : webSurfaceActive ? "webengine" : "none"
 	readonly property bool secondaryAudioActive: nativeSurfaceActive && nativePlayerLoader.item
@@ -1485,6 +1490,7 @@ ApplicationWindow {
 		anchors.fill: playerLoader
 		visible: mediaWindow.rendererState === "loading"
 			&& !mediaWindow.providerVerificationRequired
+			&& !mediaWindow.providerDocumentPresented
 		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage

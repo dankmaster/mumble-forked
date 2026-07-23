@@ -87,6 +87,12 @@ Rectangle {
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 	readonly property bool webSurfaceActive: playerLoader.active
 	readonly property bool nativeSurfaceActive: nativePlayerLoader.active
+	// Once WebEngine has finished loading the provider document, let that real
+	// surface own the presentation while transport verification continues.
+	// Keeping Mumble's loading chrome above an already visible provider page
+	// obscures consent, sign-in, image, and player controls.
+	readonly property bool providerDocumentPresented: !nativeDirectMedia
+		&& rendererHealthy && !!session && session.loadProgress >= 99
 	readonly property string rendererBackend: visualFixtureRendererReady ? "fixture"
 		: nativeSurfaceActive ? "native" : webSurfaceActive ? "webengine" : "none"
 	readonly property bool secondaryAudioActive: nativeSurfaceActive && nativePlayerLoader.item
@@ -1280,6 +1286,7 @@ Rectangle {
 		anchors.fill: playerLoader
 		visible: inlinePlayer.ready && !inlinePlayer.documentReady
 			&& !inlinePlayer.providerVerificationRequired && session.error.length === 0
+			&& !inlinePlayer.providerDocumentPresented
 		color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
