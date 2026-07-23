@@ -176,7 +176,7 @@ if [[ "$expected_version" -ge 23 ]]; then
 fi
 
 if [[ "$expected_version" -ge 24 ]]; then
-	legacy_superuser_credentials="$(run_sql "SELECT COUNT(*) FROM server_logs WHERE message LIKE 'Initialized ''SuperUser'' password on server % to ''%'';")"
+	legacy_superuser_credentials="$(run_sql "SELECT COUNT(*) FROM server_logs WHERE message LIKE 'Initialized ''SuperUser'' password on server % to ''%''';")"
 	if [[ "$legacy_superuser_credentials" != "0" ]]; then
 		echo "Legacy plaintext SuperUser credentials remain in server_logs: $legacy_superuser_credentials" >&2
 		exit 1
