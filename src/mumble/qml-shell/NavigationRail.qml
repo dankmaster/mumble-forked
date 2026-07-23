@@ -660,8 +660,9 @@ Rectangle {
 				continue
 			const targetHeight = candidate.roomRowHeight === undefined
 				? candidate.height : candidate.roomRowHeight
-			const targetTop = candidate.sectionHeaderHeight === undefined
-				? 0 : candidate.sectionHeaderHeight
+			const targetTop = candidate.sectionContentTopOffset === undefined
+				? (candidate.sectionHeaderHeight === undefined ? 0 : candidate.sectionHeaderHeight)
+				: candidate.sectionContentTopOffset
 			const local = candidate.mapFromItem(null, scenePoint.x, scenePoint.y)
 			if (local.x < 0 || local.y < targetTop || local.x > candidate.width
 				|| local.y > targetTop + targetHeight)
@@ -1359,6 +1360,9 @@ Rectangle {
 					: sectionKind === "direct" ? qsTr("DIRECT MESSAGES")
 					: sectionKind === "tool" ? qsTr("TOOLS") : qsTr("TEXT ROOMS")
 				readonly property int sectionHeaderHeight: startsVisibleSection ? 34 : 0
+				readonly property int sectionContentGap: startsVisibleSection && sectionContentVisible
+					? Theme.space1 : 0
+				readonly property int sectionContentTopOffset: sectionHeaderHeight + sectionContentGap
 				// Keep a heading whole when selection reveal leaves only its upper padding
 				// outside the viewport. The header may cover that same amount of row
 				// padding, but never leaves clipped title glyphs at the top edge.
@@ -1406,22 +1410,12 @@ Rectangle {
 					? "navigationParticipantSemantic_" + participantDelegate.participantObjectKey
 					: "navigationRoom_" + stableId
 				width: rooms.width - 20
-				height: navigationVisible ? sectionHeaderHeight + (sectionContentVisible
+				height: navigationVisible ? sectionContentTopOffset + (sectionContentVisible
 					? (isParticipant ? Theme.participantRowHeight : roomRowHeight) : 0) : 0
 				visible: navigationVisible
 				enabled: navigationVisible
-                radius: 8
-				color: isParticipant ? "transparent"
-					: roomDropArea.containsDrag ? Theme.selected
-					: (!navigationRail.visualFixtureMode && roomMouse.pressed) ? Theme.accentSubtle
-					: selected ? Theme.selected
-					: joined ? Theme.withAlpha(Theme.success, 0.045)
-					: (!navigationRail.visualFixtureMode && roomMouse.containsMouse)
-						? Theme.surfaceHover : "transparent"
-				border.width: isParticipant ? 0 : rowFocusVisible ? Theme.focusRingWidth
-					: roomDropArea.containsDrag ? 2 : 0
-				border.color: rowFocusVisible ? Theme.focus
-					: roomDropArea.containsDrag ? Theme.accent : "transparent"
+				color: "transparent"
+				border.width: 0
 				opacity: roomMouse.drag.active ? 0.72 : 1.0
 				activeFocusOnTab: false
 				onActiveFocusChanged: if (activeFocus) makeCurrent()
@@ -1516,10 +1510,33 @@ Rectangle {
 					}
 				}
 				Rectangle {
+					id: roomSurface
+					objectName: "navigationRoomSurface_" + stableId
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionContentTopOffset
+					height: roomDelegate.roomRowHeight
+					visible: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
+					radius: 8
+					color: roomDropArea.containsDrag ? Theme.selected
+						: (!navigationRail.visualFixtureMode && roomMouse.pressed) ? Theme.accentSubtle
+						: selected ? Theme.selected
+						: joined ? Theme.withAlpha(Theme.success, 0.045)
+						: (!navigationRail.visualFixtureMode && roomMouse.containsMouse)
+							? Theme.surfaceHover : "transparent"
+					border.width: roomDelegate.rowFocusVisible ? Theme.focusRingWidth
+						: roomDropArea.containsDrag ? 2 : 0
+					border.color: roomDelegate.rowFocusVisible ? Theme.focus
+						: roomDropArea.containsDrag ? Theme.accent : "transparent"
+					z: 1
+					Accessible.ignored: true
+				}
+				Rectangle {
 					objectName: "navigationRoomSelectionAccent_" + stableId
 					anchors.left: parent.left
 					anchors.top: parent.top
-					anchors.topMargin: roomDelegate.sectionHeaderHeight + 5
+					anchors.topMargin: roomDelegate.sectionContentTopOffset + 5
 					width: 2
 					height: Math.max(16, roomDelegate.roomRowHeight - 10)
 					radius: 1
@@ -1535,7 +1552,7 @@ Rectangle {
 					anchors.left: parent.left
 					anchors.right: parent.right
 					anchors.top: parent.top
-					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					anchors.topMargin: roomDelegate.sectionContentTopOffset
 					height: roomDelegate.roomRowHeight
 					visible: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
 					anchors.leftMargin: 8 + Math.min(depth, 5) * 11
@@ -1828,7 +1845,7 @@ Rectangle {
 					anchors.left: parent.left
 					anchors.right: parent.right
 					anchors.top: parent.top
-					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					anchors.topMargin: roomDelegate.sectionContentTopOffset
 					height: roomDelegate.roomRowHeight
 					enabled: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
 						&& kind === "voice"
@@ -1863,7 +1880,7 @@ Rectangle {
 					anchors.left: parent.left
 					anchors.right: parent.right
 					anchors.top: parent.top
-					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					anchors.topMargin: roomDelegate.sectionContentTopOffset
 					height: roomDelegate.roomRowHeight
 					enabled: roomDelegate.sectionContentVisible && !roomDelegate.isParticipant
 					z: 2
@@ -1995,7 +2012,7 @@ Rectangle {
 				anchors.left: parent.left
 				anchors.right: parent.right
 				anchors.top: parent.top
-				anchors.topMargin: roomDelegate.sectionHeaderHeight
+				anchors.topMargin: roomDelegate.sectionContentTopOffset
 				visible: roomDelegate.isParticipant
 				function activateSelection() {
 					if (isListener || participantSession.length === 0)

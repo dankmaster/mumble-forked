@@ -412,17 +412,18 @@ TestCase {
 
 	function test_visual_fixture_ignores_workstation_hover_without_disabling_product_hover() {
 		const room = findChild(loader.item, "navigationRoom_room-games")
+		const roomSurface = findChild(loader.item, "navigationRoomSurface_room-games")
 		const participantActions = findChild(loader.item, "navigationParticipantActions_42")
-		verify(room !== null && participantActions !== null)
-		const expectedIdleColor = String(room.color)
+		verify(room !== null && roomSurface !== null && participantActions !== null)
+		const expectedIdleColor = String(roomSurface.color)
 		try {
 			loader.item.visualFixtureMode = true
 			mouseMove(room, room.width / 2, room.height / 2)
 			wait(Theme.motionFast + 20)
-			compare(String(room.color), expectedIdleColor)
+			compare(String(roomSurface.color), expectedIdleColor)
 			compare(room.revealActions, false)
 			mousePress(room, room.width / 2, room.height / 2, Qt.LeftButton)
-			compare(String(room.color), expectedIdleColor)
+			compare(String(roomSurface.color), expectedIdleColor)
 			mouseRelease(room, room.width / 2, room.height / 2, Qt.LeftButton)
 			compare(participantActions.hoverEnabled, false)
 			mouseMove(participantActions, participantActions.width / 2,
@@ -435,7 +436,7 @@ TestCase {
 			tryCompare(participantActions, "hovered", true)
 			mouseMove(room, room.width / 2, room.height / 2)
 			tryCompare(room, "revealActions", true)
-			tryCompare(room, "color", Theme.surfaceHover)
+			tryCompare(roomSurface, "color", Theme.surfaceHover)
 		} finally {
 			loader.item.visualFixtureMode = false
 			mouseMove(loader.item, loader.item.width - 2, 2)
@@ -1048,11 +1049,12 @@ TestCase {
 	function test_participants_are_flat_rows_under_multiple_voice_rooms() {
 		const navigationList = findChild(loader.item, "navigationRooms")
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const roomSurface = findChild(loader.item, "navigationRoomSurface_room-lobby")
 		const games = findChild(loader.item, "navigationRoom_room-games")
 		const alice = findChild(loader.item, "navigationParticipant_42")
 		const listener = findChild(loader.item, "navigationParticipant_listener:2:42")
 		const details = findChild(loader.item, "navigationRoomDetails_room-lobby")
-		verify(navigationList !== null && room !== null && games !== null)
+		verify(navigationList !== null && room !== null && roomSurface !== null && games !== null)
 		verify(alice !== null && listener !== null && details !== null)
 		compare(navigationList.count, 6)
 		verify(alice.mapToItem(navigationList.contentItem, 0, 0).y
@@ -1067,19 +1069,21 @@ TestCase {
 		compare(alice.mapToItem(navigationList, 0, 0).x,
 			listener.mapToItem(navigationList, 0, 0).x)
 		compare(details.text, "You are here · You are sharing in this room")
-		verify(String(room.color) !== String(Theme.selected))
-		verify(String(room.border.color) !== String(Theme.accent))
+		verify(String(roomSurface.color) !== String(Theme.selected))
+		verify(String(roomSurface.border.color) !== String(Theme.accent))
 	}
 
 	function test_only_open_conversation_uses_selected_purple() {
 		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const activitySurface = findChild(loader.item, "navigationRoomSurface_room-activity")
 		const accent = findChild(loader.item, "navigationRoomSelectionAccent_room-activity")
 		const gamesDetails = findChild(loader.item, "navigationRoomDetails_room-games")
-		verify(activity !== null && accent !== null && gamesDetails !== null)
+		verify(activity !== null && activitySurface !== null
+			&& accent !== null && gamesDetails !== null)
 		verify(!gamesDetails.visible)
 		navigationRows.setProperty(4, "selected", true)
-		tryCompare(activity, "color", Theme.selected)
-		compare(activity.border.width, 0)
+		tryCompare(activitySurface, "color", Theme.selected)
+		compare(activitySurface.border.width, 0)
 		verify(accent.visible)
 		compare(accent.color, Theme.accent)
 		navigationRows.setProperty(4, "selected", false)
@@ -1108,6 +1112,7 @@ TestCase {
 
 	function test_room_and_participant_press_override_selection_with_theme_token() {
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const roomSurface = findChild(loader.item, "navigationRoomSurface_room-lobby")
 		const roomMouse = findChild(loader.item, "navigationRoomMouse_room-lobby")
 		var participant = null
 		tryVerify(function() {
@@ -1115,12 +1120,13 @@ TestCase {
 			return participant !== null
 		})
 		const participantMouse = findChild(loader.item, "navigationParticipantMouse_42")
-		verify(room !== null && roomMouse !== null && participantMouse !== null)
+		verify(room !== null && roomSurface !== null
+			&& roomMouse !== null && participantMouse !== null)
 
 		navigationRows.setProperty(0, "selected", true)
-		tryCompare(room, "color", Theme.selected)
+		tryCompare(roomSurface, "color", Theme.selected)
 		mousePress(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
-		tryCompare(room, "color", Theme.accentSubtle)
+		tryCompare(roomSurface, "color", Theme.accentSubtle)
 		mouseRelease(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
 		navigationRows.setProperty(0, "selected", false)
 
@@ -1207,9 +1213,31 @@ TestCase {
 		compare(findChild(loader.item, "navigationSectionLabel_tool").text, "TOOLS")
 
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const roomSurface = findChild(loader.item, "navigationRoomSurface_room-lobby")
+		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const activitySurface = findChild(loader.item, "navigationRoomSurface_room-activity")
+		const direct = findChild(loader.item, "navigationRoom_room-direct")
+		const directSurface = findChild(loader.item, "navigationRoomSurface_room-direct")
 		const participant = findChild(loader.item, "navigationParticipant_42")
 		const semanticParticipant = findChild(loader.item, "navigationParticipantSemantic_42")
-		verify(room !== null && participant !== null && semanticParticipant !== null)
+		verify(room !== null && roomSurface !== null
+			&& activity !== null && activitySurface !== null
+			&& direct !== null && directSurface !== null
+			&& participant !== null && semanticParticipant !== null)
+		for (const sectionGeometry of [
+			{ "section": voiceSection, "room": room, "surface": roomSurface },
+			{ "section": toolSection, "room": activity, "surface": activitySurface },
+			{ "section": directSection, "room": direct, "surface": directSurface }
+		]) {
+			const headerBottom = sectionGeometry.section.mapToItem(
+				sectionGeometry.room, 0, sectionGeometry.section.height).y
+			const surfaceTop = sectionGeometry.surface.mapToItem(
+				sectionGeometry.room, 0, 0).y
+			compare(sectionGeometry.room.sectionContentGap, Theme.space1)
+			compare(sectionGeometry.room.sectionContentTopOffset,
+				sectionGeometry.room.sectionHeaderHeight + Theme.space1)
+			compare(surfaceTop - headerBottom, Theme.space1)
+		}
 		const roomTitle = findChild(loader.item, "navigationRoomTitle_room-lobby")
 		const roomDetails = findChild(loader.item, "navigationRoomDetails_room-lobby")
 		const participantTitle = findChild(loader.item, "navigationParticipantTitle_42")
@@ -1229,8 +1257,8 @@ TestCase {
 		verify(semanticParticipant.Accessible.description.indexOf("Local volume -6 dB") >= 0)
 		room.forceActiveFocus()
 		tryCompare(room, "activeFocus", true)
-		compare(room.border.width, Theme.focusRingWidth)
-		compare(room.border.color, Theme.focus)
+		compare(roomSurface.border.width, Theme.focusRingWidth)
+		compare(roomSurface.border.color, Theme.focus)
 		semanticParticipant.forceActiveFocus()
 		tryCompare(semanticParticipant, "activeFocus", true)
 		compare(participant.border.width, Theme.focusRingWidth)
@@ -1386,11 +1414,17 @@ TestCase {
 		navigationList.positionViewAtBeginning()
 		navigationList.forceLayout()
 		wait(0)
-		navigationList.contentY = 8
-		tryVerify(function() { return Math.abs(navigationList.contentY - 8) <= 0.5 })
 		const section = findChild(rail, "navigationSection_text")
 		const firstRoom = navigationList.itemAtIndex(0)
-		verify(section !== null && firstRoom !== null)
+		const firstRoomSurface = findChild(rail, "navigationRoomSurface_header-scroll-0")
+		verify(section !== null && firstRoom !== null && firstRoomSurface !== null)
+		compare(firstRoom.sectionContentGap, Theme.space1)
+		compare(firstRoomSurface.mapToItem(firstRoom, 0, 0).y,
+			firstRoom.sectionHeaderHeight + Theme.space1)
+		compare(firstRoomSurface.mapToItem(firstRoom, 0, 0).y
+			- section.mapToItem(firstRoom, 0, section.height).y, Theme.space1)
+		navigationList.contentY = 8
+		tryVerify(function() { return Math.abs(navigationList.contentY - 8) <= 0.5 })
 		const origin = section.mapToItem(navigationList, 0, 0)
 		verify(Math.abs(origin.y) <= 0.5,
 			"A slightly scrolled heading must be pinned to the viewport instead of clipping")
@@ -1457,7 +1491,7 @@ TestCase {
 		verify(room !== null)
 		commands.selectedScope = "channel:2"
 		mouseClick(room, room.width / 2,
-			room.sectionHeaderHeight + room.roomRowHeight / 2, Qt.RightButton)
+			room.sectionContentTopOffset + room.roomRowHeight / 2, Qt.RightButton)
 		compare(scopeMenuSpy.count, 1)
 		compare(scopeMenuSpy.signalArguments[0][0], "channel:1")
 		compare(commands.selectedScope, "channel:2")
@@ -1825,7 +1859,7 @@ TestCase {
 			return participantItem !== null
 		})
 		mouseClick(roomItem, roomItem.width / 2,
-			roomItem.sectionHeaderHeight + roomItem.roomRowHeight / 2, Qt.LeftButton)
+			roomItem.sectionContentTopOffset + roomItem.roomRowHeight / 2, Qt.LeftButton)
 		compare(commands.selectedScope, "channel:1")
 		compare(commands.selectedRailKind, "voice")
 		compare(commands.selectScopeFromRailCount, 1)
@@ -1848,7 +1882,7 @@ TestCase {
 		const startX = participant.width / 2
 		const startY = participant.height / 2
 		const target = participant.mapFromItem(room, room.width / 2,
-			room.sectionHeaderHeight + room.roomRowHeight / 2)
+			room.sectionContentTopOffset + room.roomRowHeight / 2)
 		mouseDrag(participant, startX, startY, target.x - startX, target.y - startY,
 			Qt.LeftButton, Qt.NoModifier, 20)
 		tryCompare(commands, "movedParticipant", "42")
@@ -1889,9 +1923,9 @@ TestCase {
 		const mouse = findChild(source, "navigationRoomMouse_room-lobby")
 		verify(mouse !== null)
 		const startX = source.width / 2
-		const startY = source.sectionHeaderHeight + source.roomRowHeight / 2
+		const startY = source.sectionContentTopOffset + source.roomRowHeight / 2
 		const target = source.mapFromItem(targetRoom, targetRoom.width / 2,
-			targetRoom.sectionHeaderHeight + targetRoom.roomRowHeight / 2)
+			targetRoom.sectionContentTopOffset + targetRoom.roomRowHeight / 2)
 
 		mousePress(source, startX, startY, Qt.LeftButton)
 		compare(mouse.dragSourceScopeToken, "channel:1")
