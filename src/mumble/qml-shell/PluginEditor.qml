@@ -22,7 +22,8 @@ ColumnLayout {
 	readonly property bool compactLayout: width < 620
 	readonly property bool loading: !!(field && field.loading)
 	readonly property string errorText: field && field.error ? String(field.error) : ""
-	readonly property var operation: field && field.operation ? field.operation : ({})
+	property var modelOperation: ({})
+	readonly property var operation: field && field.operation ? field.operation : modelOperation
 	readonly property string operationId: String(operation.id || "").trim()
 	readonly property string operationStatus: String(operation.status || "").toLowerCase()
 	readonly property bool operationVisible: operationStatus.length > 0
@@ -56,6 +57,36 @@ ColumnLayout {
 	property bool cancelFocusHandoffEligible: false
 	property bool cancelFocusHandoffPending: false
 	property int cancelFocusHandoffGeneration: 0
+	function isPluginOperation(candidate) {
+		const id = String(candidate && candidate.id || "")
+		const kind = String(candidate && candidate.kind || "")
+		return id.indexOf("plugin-") === 0 || kind.indexOf("plugin-") === 0
+	}
+	function refreshModelOperation() {
+		const controller = root.asyncOperationController
+		if (!controller || typeof controller.count === "undefined" || !controller.get) {
+			root.modelOperation = ({})
+			return
+		}
+		let selected = ({})
+		for (let index = Number(controller.count) - 1; index >= 0; --index) {
+			const candidate = controller.get(index)
+			if (!root.isPluginOperation(candidate))
+				continue
+			const status = String(candidate.status || "").toLowerCase()
+			if ([ "running", "cancelling", "failed", "partial" ].indexOf(status) < 0)
+				continue
+			for (const key in candidate)
+				selected[key] = candidate[key]
+			if ((status === "failed" || status === "partial")
+					&& controller.itemResultPage) {
+				selected.itemResults = controller.itemResultPage(
+					String(candidate.id || ""), 0, 64, true)
+			}
+			break
+		}
+		root.modelOperation = selected
+	}
 	function ownsItem(item) {
 		let candidate = item
 		while (candidate) {
@@ -138,6 +169,16 @@ ColumnLayout {
 		if (root.asyncOperationController && root.operationId.length > 0
 				&& root.asyncOperationController.cancel)
 			root.asyncOperationController.cancel(root.operationId)
+	}
+	onAsyncOperationControllerChanged: refreshModelOperation()
+	Component.onCompleted: refreshModelOperation()
+
+	Connections {
+		target: root.asyncOperationController
+		ignoreUnknownSignals: true
+		function onCountChanged() { root.refreshModelOperation() }
+		function onDataChanged() { root.refreshModelOperation() }
+		function onModelReset() { root.refreshModelOperation() }
 	}
 	function normalizedOperationResults(source) {
 		if (!source)

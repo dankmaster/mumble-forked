@@ -22,7 +22,17 @@ TestCase {
 		id: operationController
 		property string cancelledId: ""
 		property int cancelCalls: 0
+		property var rows: []
+		readonly property int count: rows.length
+		signal dataChanged()
+		signal modelReset()
 		function cancel(operationId) { cancelledId = operationId; cancelCalls += 1 }
+		function get(index) { return index >= 0 && index < rows.length ? rows[index] : ({}) }
+		function itemResultPage(operationId, offset, limit, unsuccessfulOnly) {
+			const operation = rows.find(candidate => String(candidate.id || "") === operationId)
+			const results = operation && operation.itemResults ? operation.itemResults : []
+			return results.filter(result => !unsuccessfulOnly || !result.success).slice(offset, offset + limit)
+		}
 	}
 
 	Shell.PluginEditor {
@@ -78,6 +88,8 @@ TestCase {
 		editor.animationsEnabled = true
 		operationController.cancelledId = ""
 		operationController.cancelCalls = 0
+		operationController.rows = []
+		operationController.modelReset()
 		populatedField = {
 			"label": "Installed plugins",
 			"rows": pluginRows()
@@ -341,6 +353,48 @@ TestCase {
 		compare(progress.visible, operationCard.visible)
 		compare(progress.animated, false)
 		compare(progress.value, 0.64)
+	}
+
+	function test_live_model_shows_only_active_or_failed_plugin_work() {
+		populatedField = { "label": "Installed plugins", "rows": pluginRows() }
+		operationController.rows = [
+			{
+				"id": "plugin-update-check:success",
+				"kind": "plugin-update-check",
+				"status": "succeeded",
+				"title": "Checking plugin updates",
+				"subtitle": "1 item completed"
+			},
+			{
+				"id": "chat-attachment-save:1",
+				"kind": "",
+				"status": "failed",
+				"title": "Saving attachment"
+			}
+		]
+		operationController.dataChanged()
+		compare(editor.operationVisible, false)
+
+		operationController.rows = operationController.rows.concat([ {
+			"id": "plugin-load:broken",
+			"kind": "plugin-load",
+			"status": "failed",
+			"title": "Loading plugin",
+			"subtitle": "1 item failed",
+			"failedItems": 1,
+			"itemResults": [ {
+				"itemId": "broken",
+				"success": false,
+				"errorCode": "load-failed",
+				"message": "The plugin could not be loaded"
+			} ]
+		} ])
+		operationController.dataChanged()
+		compare(editor.operationVisible, true)
+		compare(editor.operationId, "plugin-load:broken")
+		compare(editor.operationStatus, "failed")
+		compare(editor.operationResultCount, 1)
+		compare(findChild(editor, "pluginOperationCard").visible, editor.visible)
 	}
 
 	function test_outer_scroll_viewport_withdraws_fully_clipped_plugin_subtrees() {

@@ -93,6 +93,7 @@ private slots:
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void asyncOperationsExposeStructuredPluginResults();
+	void asyncOperationOverlayExcludesPluginWork();
 	void asyncOperationItemResultsAreLosslessAndPaginated();
 	void mediaSessionLocalPlaybackControlsRemainTyped();
 	void mediaSessionSwitchesBetweenInlineAndDetachedPresentation();
@@ -4197,6 +4198,37 @@ void TestQmlClientModels::asyncOperationsExposeStructuredPluginResults() {
 	QVERIFY(!operations.appendItemResult(QStringLiteral("plugin-update:batch"), QStringLiteral("44"), 44,
 		true, false, QString(), QStringLiteral("Late result")));
 	QVERIFY(!operations.finishStructuredOperation(QStringLiteral("missing"), QStringLiteral("failed"), 0, 1, 0));
+}
+
+void TestQmlClientModels::asyncOperationOverlayExcludesPluginWork() {
+	AsyncOperationModel operations;
+	AsyncOperationOverlayProxyModel overlay;
+	overlay.setSourceModel(&operations);
+
+	operations.startStructuredOperation(QStringLiteral("plugin-update-check:startup"),
+		QStringLiteral("plugin-update-check"), QStringLiteral("Checking plugin updates"),
+		QStringLiteral("Contacting the plugin update service"), 1, false);
+	QCOMPARE(operations.rowCount(), 1);
+	QCOMPARE(overlay.rowCount(), 0);
+
+	operations.startOperation(QStringLiteral("chat-attachment-save:1"), QStringLiteral("Saving attachment"),
+		QStringLiteral("Writing the selected file"), false);
+	QCOMPARE(operations.rowCount(), 2);
+	QCOMPARE(overlay.rowCount(), 1);
+
+	QVERIFY(operations.finishStructuredOperation(QStringLiteral("plugin-update-check:startup"),
+		QStringLiteral("succeeded"), 1, 0, 0));
+	QCOMPARE(operations.rowCount(), 1);
+	QCOMPARE(overlay.rowCount(), 1);
+
+	operations.startStructuredOperation(QStringLiteral("plugin-load:broken"),
+		QStringLiteral("plugin-load"), QStringLiteral("Loading plugin"),
+		QStringLiteral("Starting Broken Plugin"), 1, false);
+	QVERIFY(operations.finishStructuredOperation(QStringLiteral("plugin-load:broken"),
+		QStringLiteral("failed"), 0, 1, 0));
+	QCOMPARE(operations.rowCount(), 2);
+	QCOMPARE(overlay.rowCount(), 1);
+	QCOMPARE(operations.get(1).value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
 }
 
 void TestQmlClientModels::asyncOperationItemResultsAreLosslessAndPaginated() {

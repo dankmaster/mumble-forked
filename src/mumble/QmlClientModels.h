@@ -10,6 +10,7 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
+#include <QtCore/QSortFilterProxyModel>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 #include <QtCore/QUrl>
@@ -785,6 +786,16 @@ private:
 	};
 
 	QHash< QString, ItemResultStore > m_itemResultsByOperation;
+};
+
+class AsyncOperationOverlayProxyModel final : public QSortFilterProxyModel {
+	Q_OBJECT
+
+public:
+	explicit AsyncOperationOverlayProxyModel(QObject *parent = nullptr);
+
+protected:
+	bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 };
 
 class ActionModel final : public StableListModel {

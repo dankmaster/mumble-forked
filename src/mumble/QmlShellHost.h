@@ -14,6 +14,7 @@
 #include <memory>
 
 class AsyncOperationModel;
+class AsyncOperationOverlayProxyModel;
 class ActionModel;
 class ActiveScopeController;
 class ChatTimelineModel;
@@ -125,6 +126,7 @@ private:
 	std::unique_ptr< ChatTimelineModel > m_chatModel;
 	std::unique_ptr< ToastController > m_toastController;
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
+	std::unique_ptr< AsyncOperationOverlayProxyModel > m_operationOverlayModel;
 	std::unique_ptr< ActionModel > m_actionModel;
 	std::unique_ptr< DialogStateController > m_dialogController;
 	std::unique_ptr< DirectMessageController > m_directMessageController;

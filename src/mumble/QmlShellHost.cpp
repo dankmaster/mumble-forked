@@ -49,6 +49,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
 	  m_toastController(std::make_unique< ToastController >(this)),
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
+	  m_operationOverlayModel(std::make_unique< AsyncOperationOverlayProxyModel >(this)),
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_directMessageController(std::make_unique< DirectMessageController >(this)),
@@ -66,6 +67,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_pttWindowStateController(std::make_unique< QmlWindowStateController >(this)),
 	  m_auxiliaryWindowStateStore(std::make_unique< QmlWindowStateStore >(
 		  Global::get().s.qbaModernAuxiliaryWindowGeometries, this)) {
+	m_operationOverlayModel->setSourceModel(m_operationModel.get());
 	m_recorderController->setRuntime(m_recorderRuntime.get());
 	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
 #ifdef USE_MANUAL_PLUGIN
@@ -155,6 +157,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());
 	context->setContextProperty(QStringLiteral("toastState"), m_toastController.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
+	context->setContextProperty(QStringLiteral("operationOverlayModel"), m_operationOverlayModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
 	context->setContextProperty(QStringLiteral("directMessages"), m_directMessageController.get());

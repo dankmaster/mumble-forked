@@ -55,6 +55,11 @@ namespace {
 	constexpr qsizetype MaxReactionEmojiCharacters = 64;
 	constexpr qsizetype MaxReactionActorNameCharacters = 256;
 
+	bool isPluginOperation(const QVariantMap &operation) {
+		return operation.value(QStringLiteral("kind")).toString().startsWith(QLatin1String("plugin-"))
+			|| operation.value(QStringLiteral("id")).toString().startsWith(QLatin1String("plugin-"));
+	}
+
 	struct NativePlaybackPreparationResult {
 		qulonglong generation = 0;
 		QUrl mediaUrl;
@@ -4251,6 +4256,9 @@ void AsyncOperationModel::finishOperation(const QString &operationId, const bool
 															 : QStringLiteral("failed"));
 	row.insert(QStringLiteral("subtitle"), message);
 	upsertRow(row);
+	if (isPluginOperation(row) && (success || errorCode.trimmed() == QLatin1String("cancelled"))) {
+		dismiss(operationId);
+	}
 }
 
 bool AsyncOperationModel::finishStructuredOperation(const QString &operationId, const QString &status,
@@ -4292,6 +4300,10 @@ bool AsyncOperationModel::finishStructuredOperation(const QString &operationId, 
 	}
 	row.insert(QStringLiteral("subtitle"), summary);
 	upsertRow(row);
+	if (isPluginOperation(row)
+		&& (terminalStatus == QLatin1String("succeeded") || terminalStatus == QLatin1String("cancelled"))) {
+		dismiss(operationId);
+	}
 	return true;
 }
 
@@ -4346,6 +4358,19 @@ void AsyncOperationModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
 	m_itemResultsByOperation.clear();
 	StableListModel::clear();
+}
+
+AsyncOperationOverlayProxyModel::AsyncOperationOverlayProxyModel(QObject *parent)
+	: QSortFilterProxyModel(parent) {
+	setDynamicSortFilter(true);
+}
+
+bool AsyncOperationOverlayProxyModel::filterAcceptsRow(const int sourceRow,
+													   const QModelIndex &sourceParent) const {
+	if (!sourceModel()) return false;
+	const QModelIndex sourceIndex = sourceModel()->index(sourceRow, 0, sourceParent);
+	if (!sourceIndex.isValid()) return false;
+	return !isPluginOperation(sourceModel()->data(sourceIndex, StableListModel::PayloadRole).toMap());
 }
 
 UiCommandController::UiCommandController(QObject *parent) : QObject(parent) {

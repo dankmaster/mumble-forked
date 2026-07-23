@@ -2282,7 +2282,7 @@ ApplicationWindow {
 			id: operationList
 			objectName: "asyncOperationList"
 			anchors.fill: parent
-			model: operationModel
+			model: operationOverlayModel
 			spacing: Theme.space2
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
