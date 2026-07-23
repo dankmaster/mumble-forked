@@ -30,6 +30,12 @@ Item {
 	// message between captures, so allow fixture hosts to suppress hover-only
 	// chrome without changing normal product interaction.
 	property bool hoverEffectsEnabled: true
+	// Activity reuses the stable chat timeline model and virtualization, but its
+	// rows are a chronological log rather than authored conversation bubbles.
+	// Keep that distinction in the frame geometry so the Activity presentation
+	// can span the complete lane without inheriting chat-card chrome.
+	property bool logEntry: false
+	property bool logAlternating: false
 	readonly property bool accessibilityFrameIgnored: true
 	readonly property bool accessibilitySubtreeActive: !accessibilityPooled && accessibilityViewportVisible
 	readonly property bool hovered: hoverEffectsEnabled && messageHover.hovered
@@ -55,6 +61,8 @@ Item {
 	readonly property real laneWidth: Math.max(1, Math.min(root.laneMaximumWidth,
 		root.laneAvailableWidth > 0 ? root.laneAvailableWidth : root.laneMaximumWidth))
 	readonly property real messageWidth: {
+		if (root.logEntry)
+			return root.laneWidth
 		if (root.systemMessage)
 			return Math.min(root.laneWidth, root.systemMaximumWidth)
 		if (root.own) {
@@ -69,6 +77,8 @@ Item {
 	}
 	readonly property real messageX: {
 		const laneStart = Math.max(0, (root.laneAvailableWidth - root.laneWidth) / 2)
+		if (root.logEntry)
+			return laneStart
 		if (root.own)
 			return laneStart + root.laneWidth - root.messageWidth
 		if (root.systemMessage)
@@ -78,18 +88,23 @@ Item {
 
 	property real groupGap: Theme.space3
 	property real continuationGap: Theme.chatMetadataSpacing
-	readonly property real topGap: root.startsGroup ? root.groupGap : root.continuationGap
+	readonly property real topGap: root.logEntry ? 0
+		: root.startsGroup ? root.groupGap : root.continuationGap
 	readonly property bool hasDateSeparator: root.dateSeparatorLabel.length > 0
 	readonly property real dateSeparatorHeight: root.hasDateSeparator
 		? Theme.space5 + Theme.fontCaption : 0
-	property real horizontalPadding: root.systemMessage || root.own
+	property real horizontalPadding: root.logEntry ? Theme.space3
+		: root.systemMessage || root.own
 		? Theme.chatBubbleHorizontalPadding : 0
-	property real verticalPadding: root.systemMessage || root.own
+	property real verticalPadding: root.logEntry ? Theme.space2
+		: root.systemMessage || root.own
 		? Theme.chatBubbleVerticalPadding : 0
 	property real compactMinimumHeight: root.own ? 32 : 28
 	property real groupMinimumHeight: root.own ? 40 : Theme.avatarMedium
+	property real logMinimumHeight: Theme.densityMetric(30, 34, 40)
 	readonly property real surfaceHeight: Math.max(
-		root.startsGroup ? root.groupMinimumHeight : root.compactMinimumHeight,
+		root.logEntry ? root.logMinimumHeight
+			: root.startsGroup ? root.groupMinimumHeight : root.compactMinimumHeight,
 		Math.ceil(root.bodyImplicitHeight) + root.verticalPadding * 2)
 	readonly property color bubbleColor: root.systemMessage ? Theme.surfaceRaised
 		: root.own ? Theme.chatOwnSurface : Theme.chatIncomingSurface
@@ -99,10 +114,15 @@ Item {
 	// The incoming avatar sits outside its bubble in Main.qml, so this technical
 	// frame stays transparent for incoming rows while exposing the semantic
 	// bubble roles to its content. Own/system rows can paint the complete frame.
-	readonly property color surfaceColor: root.own || root.systemMessage ? root.bubbleColor : "transparent"
-	readonly property color surfaceBorderColor: root.own || root.systemMessage
+	readonly property color surfaceColor: root.logEntry
+		? (root.hovered ? Theme.withAlpha(Theme.surfaceHover, 0.78)
+			: root.logAlternating ? Theme.withAlpha(Theme.surfaceRaised, 0.52) : "transparent")
+		: root.own || root.systemMessage ? root.bubbleColor : "transparent"
+	readonly property color surfaceBorderColor: root.logEntry ? "transparent"
+		: root.own || root.systemMessage
 		? root.bubbleBorderColor : "transparent"
-	readonly property int surfaceBorderWidth: root.own || root.systemMessage ? root.bubbleBorderWidth : 0
+	readonly property int surfaceBorderWidth: root.logEntry ? 0
+		: root.own || root.systemMessage ? root.bubbleBorderWidth : 0
 	readonly property alias dateSeparatorItem: dateSeparator
 	readonly property alias surfaceX: messageSurface.x
 	readonly property alias surfaceWidth: messageSurface.width
@@ -214,7 +234,7 @@ Item {
 		y: root.dateSeparatorHeight + root.topGap
 		width: root.messageWidth
 		height: root.surfaceHeight
-		radius: root.systemMessage || root.own ? Theme.innerRadius : 0
+		radius: root.logEntry ? 0 : root.systemMessage || root.own ? Theme.innerRadius : 0
 		color: root.surfaceColor
 		border.color: root.surfaceBorderColor
 		border.width: root.surfaceBorderWidth
@@ -238,6 +258,17 @@ Item {
 			// Semantic descendants are promoted and remain governed by the barrier.
 			Accessible.ignored: true
 		}
+
+		Rectangle {
+			objectName: "activityLogRowDivider"
+			visible: root.logEntry
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.bottom: parent.bottom
+			height: 1
+			color: Theme.divider
+			Accessible.ignored: true
+		}
 	}
 
 	Rectangle {
@@ -248,7 +279,7 @@ Item {
 		width: messageSurface.width + 6
 		height: messageSurface.height + 6
 		visible: root.searchCurrent && !root.accessibilityPooled
-		radius: Math.max(Theme.innerRadius, messageSurface.radius + 3)
+		radius: root.logEntry ? 4 : Math.max(Theme.innerRadius, messageSurface.radius + 3)
 		color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.07)
 		border.color: Theme.accent
 		border.width: Theme.focusRingWidth
