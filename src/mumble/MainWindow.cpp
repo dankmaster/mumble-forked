@@ -35538,13 +35538,17 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				return;
 			}
 
-			// Modern SPA pages often advertise a very large Content-Length even though the useful
-			// preview metadata is available near the start of <head>. Parse the prefix we did receive
-			// instead of failing the entire preview outright.
+			// Modern SPA pages often advertise a very large Content-Length. Generic links only need
+			// the bounded <head>, while known rich providers may keep their real product/listing data
+			// later in the already size-limited response document.
 			const qint64 maxPageBytes = previewMaxPageBytesForUrl(previewPageUrl);
 			const QByteArray htmlBytes =
 				data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
 			const QVariantMap baseMetadata = it->metadata;
+			const PersistentChatPreviewHtmlScope htmlScope =
+				richPreviewProviderForUrl(previewUrl)
+					? PersistentChatPreviewHtmlScope::BoundedDocument
+					: PersistentChatPreviewHtmlScope::HeadOnly;
 			parsePersistentChatPreviewHtmlAsync(
 				this, persistentChatPreviewWorkerGroup(previewKey),
 				persistentChatPreviewWorkerSourceKey(QStringLiteral("html:page"),
@@ -35592,6 +35596,14 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->description      = parsed.description;
 			for (auto metadataIt = parsed.metadata.cbegin(); metadataIt != parsed.metadata.cend(); ++metadataIt) {
 				it->metadata.insert(metadataIt.key(), metadataIt.value());
+			}
+			if (richPreviewProviderForUrl(previewUrl)) {
+				if (richPreviewClientHydrationComplete(previewUrl, it->metadata)) {
+					it->metadata.insert(
+						QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+				} else {
+					it->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+				}
 			}
 			if (parsed.instagramMetadata) {
 				applyInstagramPreviewMetadata(*it, previewUrl, *parsed.instagramMetadata);
@@ -35727,7 +35739,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				renderIfVisible();
 			});
 			renderIfVisible();
-		});
+		}, htmlScope);
 		});
 }
 

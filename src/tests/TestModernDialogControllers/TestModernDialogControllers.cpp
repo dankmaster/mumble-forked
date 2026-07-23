@@ -3662,6 +3662,14 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 		"scope == PersistentChatPreviewHtmlScope::BoundedDocument")));
 	QVERIFY(source.contains(QStringLiteral(
 		"}, PersistentChatPreviewHtmlScope::BoundedDocument);")));
+	QVERIFY(source.contains(QStringLiteral(
+		"const PersistentChatPreviewHtmlScope htmlScope =")));
+	QVERIFY(source.contains(QStringLiteral(
+		"richPreviewProviderForUrl(previewUrl)")));
+	QVERIFY(source.contains(QStringLiteral(
+		": PersistentChatPreviewHtmlScope::HeadOnly;")));
+	QVERIFY(source.contains(QStringLiteral(
+		"}, htmlScope);")));
 	QVERIFY(source.contains(QStringLiteral("instagramPosterUrl")));
 	QVERIFY(source.contains(QStringLiteral("requestPersistentChatPreviewPosterImage(")));
 	QVERIFY(source.contains(QStringLiteral(
