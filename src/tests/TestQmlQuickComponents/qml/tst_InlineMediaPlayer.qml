@@ -618,6 +618,9 @@ TestCase {
 		const surface = findChild(player, "inlineMediaWebSurface")
 		const controls = findChild(player, "mediaTransportActions")
 		verify(canvas !== null && surface !== null && controls !== null)
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
 
 		for (const width of [ 460, 580, 720 ]) {
 			testCase.width = width
@@ -637,6 +640,8 @@ TestCase {
 		verify(canvas.height >= 190)
 		verify(surface.width >= canvas.width * 0.99)
 		verify(player.height >= canvas.height + 40)
+		session.active = false
+		player.visualFixtureMode = ""
 	}
 
 	function test_provider_controlled_embed_uses_clear_top_close_without_empty_footer() {
@@ -653,7 +658,6 @@ TestCase {
 		verify(canvas !== null && controls !== null && closeButton !== null)
 		verify(!player.nativeControlsVisible)
 		verify(!controls.parent.parent.visible)
-		compare(controls.parent.parent.height, 0)
 		verify(closeButton.visible)
 		compare(closeButton.text, "Close")
 		verify(Math.abs(player.implicitHeight - player.mediaViewportHeight) < 1)
@@ -826,8 +830,13 @@ TestCase {
 		const player = playerLoader.item
 		const playButton = findChild(player, "mediaPlayButton")
 		verify(playButton !== null)
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
 		verify(player.focusInitialControl())
 		compare(playButton.activeFocus, true)
+		session.active = false
+		player.visualFixtureMode = ""
 	}
 
 	function test_failure_moves_focus_to_retry_and_retry_is_the_initial_control() {

@@ -774,6 +774,8 @@ try {
 				$cycleRecords = [Collections.Generic.List[object]]::new()
 				$treeAfterActivation = $null
 				$treeAfterClose = $null
+				$performanceAfterRenderer = $null
+				$performanceAfterClose = $null
 				try {
 					if ($performanceSupported) {
 						Invoke-QmlAutomationCommand -Port $runPort -Token $runToken -Request @{
@@ -808,6 +810,12 @@ try {
 						$allTraceRecords.Add($record)
 					}
 					$treeAfterActivation = Get-ProcessTreeSnapshot -RootProcessId $process.Id
+					if ($performanceSupported) {
+						$phaseResponse = Invoke-QmlAutomationCommand -Port $runPort -Token $runToken `
+							-Request @{ command = "qmlPerformanceSnapshot" }
+						$performanceAfterRenderer = Get-ObjectPropertyValue `
+							-Object $phaseResponse -Name "performance"
+					}
 				} catch {
 					$activationError = $_.Exception.Message
 				} finally {
@@ -824,6 +832,14 @@ try {
 						$allTraceRecords.Add($record)
 					}
 					$treeAfterClose = Get-ProcessTreeSnapshot -RootProcessId $process.Id
+					if ($performanceSupported) {
+						try {
+							$phaseResponse = Invoke-QmlAutomationCommand -Port $runPort -Token $runToken `
+								-Request @{ command = "qmlPerformanceSnapshot" }
+							$performanceAfterClose = Get-ObjectPropertyValue `
+								-Object $phaseResponse -Name "performance"
+						} catch { }
+					}
 				}
 
 				$cycleLatched = @(Get-LatchedWebEngineProcessStarts -RootProcessId $process.Id `
@@ -857,10 +873,12 @@ try {
 					renderer_process_observed = $rendererProcessObserved
 					latched_qtwebengine_process_start_count = $cycleLatched.Count
 					process_tree_after_activation = $treeAfterActivation
+					performance_after_renderer = $performanceAfterRenderer
 					close_latency_ms = if ($null -ne $close) { $close.close_latency_ms } else { $null }
 					close_state = if ($null -ne $close) { $close.state } else { $null }
 					close_error = $closeError
 					process_tree_after_close = $treeAfterClose
+					performance_after_close = $performanceAfterClose
 					qtwebengine_process_persisted_after_close = $treeAfterClose.qtwebengine_process_count -gt 0
 					passed = $null -ne $surfaceActivation -and $null -ne $rendererReady -and
 						[bool]$rendererReady.surface_verified -and [bool]$rendererReady.transport_verified -and

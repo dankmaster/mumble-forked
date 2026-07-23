@@ -95,6 +95,7 @@ QtObject {
 		"twitter.com": "x",
 		"youtube.com": "youtube",
 		"youtube-nocookie.com": "youtube",
+		"youtubenocookie.com": "youtube",
 		"youtu.be": "youtube",
 		"spotify.com": "spotify",
 		"spotify.link": "spotify",

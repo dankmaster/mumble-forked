@@ -870,7 +870,9 @@ Rectangle {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		anchors.bottom: inlineControls.top
+		anchors.bottom: parent.bottom
+		anchors.bottomMargin: inlinePlayer.nativeControlsVisible
+			? inlineControls.implicitHeight : 0
 		color: Theme.mediaCanvas
 		border.color: inlinePlayer.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1457,7 +1459,6 @@ Rectangle {
 		anchors.right: parent.right
 		anchors.bottom: parent.bottom
 		visible: inlinePlayer.nativeControlsVisible
-		height: visible ? implicitHeight : 0
 		session: inlinePlayer.session
 		embedded: true
 		fullscreenAvailable: false

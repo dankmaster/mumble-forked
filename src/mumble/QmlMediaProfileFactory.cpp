@@ -31,6 +31,8 @@ const QByteArray MediaClientReferer("https://www.mumble.info/");
 const QUrl AdaptiveMediaDocument(QStringLiteral("qrc:/media-player/AdaptiveMediaPlayer.html"));
 const QUrl AdaptiveMediaBootstrap(QStringLiteral("qrc:/media-player/AdaptiveMediaPlayer.js"));
 const QUrl AdaptiveMediaRuntime(QStringLiteral("qrc:/media-player/shaka-player.compiled.js"));
+constexpr int VideoMemoryCacheBytes = 32 * 1024 * 1024;
+constexpr int AudioMemoryCacheBytes = 8 * 1024 * 1024;
 
 const QHash< QString, QSet< QString > > &providerResourceDomains() {
 	static const QHash< QString, QSet< QString > > domains {
@@ -323,8 +325,11 @@ QQuickWebEngineProfile *QmlMediaProfileFactory::createProfile(const bool audio) 
 	if (mumble::chatperf::enabled()) profileTimer.start();
 	auto *profile = new QQuickWebEngineProfile(this);
 	profile->setOffTheRecord(true);
-	profile->setHttpCacheType(QQuickWebEngineProfile::NoCache);
-	profile->setHttpCacheMaximumSize(0);
+	// Keep warm navigation and short provider reloads fast without retaining
+	// media across sessions. The active session owns this bounded memory-only
+	// cache; releaseProfiles() destroys it as soon as playback closes.
+	profile->setHttpCacheType(QQuickWebEngineProfile::MemoryHttpCache);
+	profile->setHttpCacheMaximumSize(audio ? AudioMemoryCacheBytes : VideoMemoryCacheBytes);
 	profile->setPersistentCookiesPolicy(QQuickWebEngineProfile::NoPersistentCookies);
 	profile->setPersistentPermissionsPolicy(QQuickWebEngineProfile::PersistentPermissionsPolicy::AskEveryTime);
 	profile->setSpellCheckEnabled(false);

@@ -161,6 +161,8 @@ Describe 'Qt Quick inline-media lifecycle verifier' {
 		$scriptText | Should Match 'qmlPerformanceEnd'
 		$scriptText | Should Match 'qmlPerformanceSnapshot'
 		$scriptText | Should Match 'uiStallCount'
+		$scriptText | Should Match 'performance_after_renderer'
+		$scriptText | Should Match 'performance_after_close'
 		$scriptText | Should Match 'zero_ui_stalls_when_performance_snapshot_supported'
 		$scriptText | Should Match 'uiStallCount -eq 0'
 	}

@@ -286,6 +286,17 @@ void TestQmlMediaProfileFactory::explicitMediaActivationLoadsDelayedProfileAndVi
 	QVERIFY(profile);
 	QCOMPARE(profiles.videoProfile(), profile);
 	QCOMPARE(QString::fromLatin1(profile->metaObject()->className()), QStringLiteral("QQuickWebEngineProfile"));
+	// Use the QObject contract here so this delayed-runtime test does not gain a
+	// static QQuickWebEngineProfile meta-object import before explicit activation.
+	QVERIFY(profile->property("offTheRecord").toBool());
+	QCOMPARE(profile->property("httpCacheType").toInt(), 0); // MemoryHttpCache
+	QCOMPARE(profile->property("httpCacheMaximumSize").toInt(), 32 * 1024 * 1024);
+	QCOMPARE(profile->property("persistentCookiesPolicy").toInt(), 0); // NoPersistentCookies
+	QObject *audioProfile = profiles.audioProfile();
+	QVERIFY(audioProfile);
+	QCOMPARE(audioProfile->property("httpCacheType").toInt(), 0); // MemoryHttpCache
+	QCOMPARE(audioProfile->property("httpCacheMaximumSize").toInt(), 8 * 1024 * 1024);
+	QCOMPARE(audioProfile->property("persistentCookiesPolicy").toInt(), 0); // NoPersistentCookies
 	QVERIFY(moduleLoaded(webEngineQuick));
 	QVERIFY(moduleLoaded(webEngineCore));
 
@@ -313,6 +324,15 @@ WebEngineView {
 	QVERIFY(moduleLoaded(webEngineQuick));
 	QVERIFY(moduleLoaded(webEngineCore));
 	QVERIFY(moduleLoaded(webChannelQuick));
+
+	QPointer< QObject > releasedProfile(profile);
+	QPointer< QObject > releasedAudioProfile(audioProfile);
+	view.reset();
+	session.closePlayer();
+	QTRY_VERIFY_WITH_TIMEOUT(releasedProfile.isNull(), 2000);
+	QTRY_VERIFY_WITH_TIMEOUT(releasedAudioProfile.isNull(), 2000);
+	QVERIFY(!profiles.videoProfile());
+	QVERIFY(!profiles.audioProfile());
 #endif
 }
 
