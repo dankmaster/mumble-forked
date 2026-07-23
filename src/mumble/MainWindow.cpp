@@ -3790,6 +3790,8 @@ struct PersistentChatPreviewOEmbedTarget {
 struct PersistentChatPreviewPlayableMediaMeta {
 	QString url;
 	QString mime;
+	QString contentBranch;
+	QString mediaPresentation;
 };
 
 struct SpotifyPreviewTarget {
@@ -3853,7 +3855,12 @@ std::optional< QString > dailymotionVideoIdFromUrl(const QUrl &url) {
 	return s_videoIdPattern.match(videoId).hasMatch() ? std::optional< QString >(videoId) : std::nullopt;
 }
 
-std::optional< QString > tiktokPostIdFromUrl(const QUrl &url) {
+struct TikTokPostTarget {
+	QString id;
+	QString kind;
+};
+
+std::optional< TikTokPostTarget > tiktokPostTargetFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (!hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
 		return std::nullopt;
@@ -3867,14 +3874,14 @@ std::optional< QString > tiktokPostIdFromUrl(const QUrl &url) {
 		if ((segment == QLatin1String("video") || segment == QLatin1String("photo")) && i + 1 < segments.size()) {
 			const QString postId = segments.at(i + 1);
 			if (s_postIdPattern.match(postId).hasMatch()) {
-				return postId;
+				return TikTokPostTarget { postId, segment };
 			}
 		}
 		if (segment == QLatin1String("player") && i + 2 < segments.size()
 			&& segments.at(i + 1).compare(QLatin1String("v1"), Qt::CaseInsensitive) == 0) {
 			const QString postId = segments.at(i + 2);
 			if (s_postIdPattern.match(postId).hasMatch()) {
-				return postId;
+				return TikTokPostTarget { postId, QStringLiteral("video") };
 			}
 		}
 	}
@@ -3882,13 +3889,18 @@ std::optional< QString > tiktokPostIdFromUrl(const QUrl &url) {
 	return std::nullopt;
 }
 
+bool isTikTokPhotoPostUrl(const QUrl &url) {
+	const std::optional< TikTokPostTarget > target = tiktokPostTargetFromUrl(url);
+	return target && target->kind == QLatin1String("photo");
+}
+
 std::optional< PersistentChatPreviewEmbedTarget > tiktokEmbedTargetFromUrl(const QUrl &url) {
-	const std::optional< QString > postId = tiktokPostIdFromUrl(url);
-	if (!postId) {
+	const std::optional< TikTokPostTarget > target = tiktokPostTargetFromUrl(url);
+	if (!target || target->kind == QLatin1String("photo")) {
 		return std::nullopt;
 	}
 
-	QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*postId));
+	QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(target->id));
 	QUrlQuery query;
 	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("1"));
 	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
@@ -4618,6 +4630,9 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 	};
 
 	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		if (isTikTokPhotoPostUrl(url)) {
+			return std::nullopt;
+		}
 		setUrlEndpoint(QStringLiteral("https://www.tiktok.com/oembed"));
 		providerKey   = QStringLiteral("tiktok");
 		siteLabel     = QObject::tr("TikTok");
@@ -9502,8 +9517,14 @@ std::optional< PersistentChatPreviewPlayableMediaMeta >
 			const int bitrate = variant.value(QStringLiteral("bitrate")).toInt(1);
 			if (bitrate > bestVideoScore) {
 				PersistentChatPreviewPlayableMediaMeta media;
-				media.url  = url;
-				media.mime = QStringLiteral("video/mp4");
+				media.url               = url;
+				media.mime              = QStringLiteral("video/mp4");
+				media.contentBranch     = type == QLatin1String("animated_gif")
+											 ? QStringLiteral("animated-gif-video-backed")
+											 : QStringLiteral("video");
+				media.mediaPresentation = type == QLatin1String("animated_gif")
+											 ? QStringLiteral("animated-image")
+											 : QStringLiteral("video-player");
 				bestVideo  = media;
 				bestVideoScore = bitrate;
 			}
@@ -10262,7 +10283,8 @@ std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUr
 	}
 	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("TikTok"), QObject::tr("Open on TikTok"),
-												  QObject::tr("TikTok video") };
+												  isTikTokPhotoPostUrl(url) ? QObject::tr("TikTok photo post")
+																			 : QObject::tr("TikTok video") };
 	}
 	if (host == QLatin1String("vimeo.com") || host == QLatin1String("player.vimeo.com")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Vimeo"), QObject::tr("Open on Vimeo"),
@@ -10942,7 +10964,53 @@ QString previewImageMetaTag(const QHash< QString, QString > &metaTags) {
 }
 
 std::optional< PersistentChatPreviewPlayableMediaMeta >
-	previewPlayableMediaMetaTag(const QHash< QString, QString > &metaTags) {
+	previewPlayableMediaMetaTag(const QHash< QString, QString > &metaTags, const QUrl &pageUrl) {
+	const auto mediaFromMetaTags =
+		[&metaTags](const QString &urlKey, const QString &mimeKey, const QString &contentBranch,
+					const QString &mediaPresentation) -> std::optional< PersistentChatPreviewPlayableMediaMeta > {
+		const QString url = metaTags.value(urlKey).trimmed();
+		if (url.isEmpty()) {
+			return std::nullopt;
+		}
+		return PersistentChatPreviewPlayableMediaMeta {
+			url,
+			metaTags.value(mimeKey).trimmed(),
+			contentBranch,
+			mediaPresentation
+		};
+	};
+
+	const QString host = normalizedPreviewHost(pageUrl.host());
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))) {
+		if (const auto stream = mediaFromMetaTags(
+				QStringLiteral("twitter:player:stream"), QStringLiteral("twitter:player:stream:content_type"),
+				QStringLiteral("animated-gif-video-backed"), QStringLiteral("animated-image"));
+			stream) {
+			return stream;
+		}
+		if (metaTags.value(QStringLiteral("og:image:type")).trimmed().compare(
+				QLatin1String("image/gif"), Qt::CaseInsensitive) == 0) {
+			if (const auto image = mediaFromMetaTags(
+					QStringLiteral("og:image"), QStringLiteral("og:image:type"),
+					QStringLiteral("animated-gif"), QStringLiteral("animated-image"));
+				image) {
+				return image;
+			}
+		}
+	}
+
+	if (hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))) {
+		const QUrl twitterPlayer(metaTags.value(QStringLiteral("twitter:player")).trimmed());
+		if (twitterPlayer.path().endsWith(QLatin1String(".gifv"), Qt::CaseInsensitive)) {
+			if (const auto stream = mediaFromMetaTags(
+					QStringLiteral("twitter:player:stream"), QStringLiteral("twitter:player:stream:content_type"),
+					QStringLiteral("animated-gif-video-backed"), QStringLiteral("animated-image"));
+				stream) {
+				return stream;
+			}
+		}
+	}
+
 	const QList< QPair< QString, QString > > preferredKeys = {
 		{ QStringLiteral("og:video:secure_url"), QStringLiteral("og:video:type") },
 		{ QStringLiteral("og:video:url"), QStringLiteral("og:video:type") },
@@ -10956,10 +11024,12 @@ std::optional< PersistentChatPreviewPlayableMediaMeta >
 			continue;
 		}
 
-		PersistentChatPreviewPlayableMediaMeta media;
-		media.url  = url;
-		media.mime = metaTags.value(keys.second).trimmed();
-		return media;
+		return PersistentChatPreviewPlayableMediaMeta {
+			url,
+			metaTags.value(keys.second).trimmed(),
+			QString(),
+			QString()
+		};
 	}
 
 	return std::nullopt;
@@ -31276,7 +31346,10 @@ void MainWindow::cancelChatEmbedAssistForState(const MumbleProto::ChatEmbedState
 }
 
 bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
-														const QString &suggestedMime) {
+														const QString &suggestedMime,
+														const QString &contentBranch,
+														const QString &mediaPresentation) {
+	const bool gifvSource = mediaUrl.path().endsWith(QLatin1String(".gifv"), Qt::CaseInsensitive);
 	QUrl normalizedMediaUrl = normalizedRemotePlayableMediaUrl(mediaUrl);
 	if (!isTrustedRemotePlayableMediaUrl(normalizedMediaUrl, suggestedMime)) {
 		return false;
@@ -31298,12 +31371,44 @@ bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &p
 	preview.thumbnailFinished = true;
 	preview.failed            = false;
 
+	QString resolvedContentBranch = contentBranch.trimmed().toLower();
+	QString resolvedPresentation  = mediaPresentation.trimmed().toLower();
+	if (gifvSource || mime == QLatin1String("image/gif")) {
+		if (resolvedContentBranch.isEmpty()) {
+			resolvedContentBranch =
+				gifvSource ? QStringLiteral("animated-gif-video-backed") : QStringLiteral("animated-gif");
+		}
+		if (resolvedPresentation.isEmpty()) {
+			resolvedPresentation = QStringLiteral("animated-image");
+		}
+	} else if (mime.startsWith(QLatin1String("video/"))) {
+		if (resolvedContentBranch.isEmpty()) {
+			resolvedContentBranch = QStringLiteral("video");
+		}
+		if (resolvedPresentation.isEmpty()) {
+			resolvedPresentation = QStringLiteral("video-player");
+		}
+	} else if (mime.startsWith(QLatin1String("image/"))) {
+		if (resolvedContentBranch.isEmpty()) {
+			resolvedContentBranch = QStringLiteral("image");
+		}
+		if (resolvedPresentation.isEmpty()) {
+			resolvedPresentation = QStringLiteral("image-card");
+		}
+	}
+	if (!resolvedContentBranch.isEmpty()) {
+		preview.metadata.insert(QStringLiteral("contentBranch"), resolvedContentBranch);
+	}
+	if (!resolvedPresentation.isEmpty()) {
+		preview.metadata.insert(QStringLiteral("mediaPresentation"), resolvedPresentation);
+	}
+
 	if (preview.title.trimmed().isEmpty()) {
 		const QString fileName = QFileInfo(normalizedMediaUrl.path()).fileName();
 		preview.title         = fileName.isEmpty() ? tr("Video preview") : fileName;
 	}
 	if (previewDescriptionIsPlaceholder(preview.description)) {
-		if (mime == QLatin1String("image/gif")) {
+		if (resolvedPresentation == QLatin1String("animated-image")) {
 			preview.description = tr("Animated image preview");
 		} else if (mime.startsWith(QLatin1String("image/"))) {
 			preview.description = tr("Image preview");
@@ -33178,7 +33283,9 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 
 				const std::optional< PersistentChatPreviewPlayableMediaMeta > media =
 					xPostSyndicationPlayableMedia(object);
-				if (media && applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(media->url), media->mime)) {
+				if (media && applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(media->url), media->mime,
+																   media->contentBranch,
+																   media->mediaPresentation)) {
 					previewIt->siteSnapshotRequested = false;
 					previewIt->siteSnapshotFinished  = true;
 				}
@@ -33989,8 +34096,15 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 				const QUrl remoteMediaUrl    = QUrl(fallbackUrl);
 				const QUrl dashManifestUrl   = redditDashManifestUrl(video);
 				const QUrl previewImageUrl   = QUrl(redditPreviewImageUrl(post));
+				const bool animatedImage     = video.value(QStringLiteral("is_gif")).toBool(false);
 				applied                      = applyPersistentChatRemotePlayableMedia(*previewIt, remoteMediaUrl,
-																				   QStringLiteral("video/mp4"));
+																				   QStringLiteral("video/mp4"),
+																				   animatedImage
+																					   ? QStringLiteral("animated-gif-video-backed")
+																					   : QStringLiteral("video"),
+																				   animatedImage
+																					   ? QStringLiteral("animated-image")
+																					   : QStringLiteral("video-player"));
 				const QString title          = post.value(QStringLiteral("title")).toString().trimmed();
 				const QString subreddit      = post.value(QStringLiteral("subreddit_name_prefixed")).toString().trimmed();
 				const QString postPermalink  = post.value(QStringLiteral("permalink")).toString().trimmed();
@@ -34004,9 +34118,10 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 				if (applied && (previewIt->description.isEmpty()
 								|| previewIt->description == tr("Fetching page metadata")
 								|| previewIt->description == tr("Preview unavailable"))) {
-					previewIt->description = tr("Video preview");
+					previewIt->description =
+						animatedImage ? tr("Animated image preview") : tr("Video preview");
 				}
-				if (applied && dashManifestUrl.isValid()) {
+				if (applied && !animatedImage && dashManifestUrl.isValid()) {
 					requestPersistentChatRedditVideoAudioPreview(previewKey, dashManifestUrl);
 				}
 				if (applied && previewIt->thumbnailImage.isNull() && previewImageUrl.isValid()
@@ -34304,6 +34419,12 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 		preview.metadata = previewMetadataWithSwedishData(preview.metadata, previewUrl, preview.title,
 														  preview.description);
+		if (isTikTokPhotoPostUrl(previewUrl)) {
+			preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("tiktok"));
+			preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("tiktok"));
+			preview.metadata.insert(QStringLiteral("contentBranch"), QStringLiteral("photo-carousel"));
+			preview.metadata.insert(QStringLiteral("mediaPresentation"), QStringLiteral("provider-post-card"));
+		}
 		const QString vehicleTitle = preview.metadata.value(QStringLiteral("vehicleTitle")).toString().trimmed();
 		const QString vehicleDescription =
 			preview.metadata.value(QStringLiteral("vehicleDescription")).toString().trimmed();
@@ -35071,6 +35192,22 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		return;
 	}
 
+	if (!isImagePreview && isTikTokPhotoPostUrl(previewUrl)) {
+		preview.title       = provider ? provider->fallbackTitle : tr("TikTok photo post");
+		preview.description = tr("Photo post");
+		preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("tiktok"));
+		preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("tiktok"));
+		preview.metadata.insert(QStringLiteral("contentBranch"), QStringLiteral("photo-carousel"));
+		preview.metadata.insert(QStringLiteral("mediaPresentation"), QStringLiteral("provider-post-card"));
+		preview.metadataFinished  = true;
+		preview.thumbnailFinished = true;
+		preview.failed            = false;
+		m_persistentChatPreviews.insert(previewKey, preview);
+		storePersistentChatPreviewDiskCache(previewKey);
+		renderIfVisible();
+		return;
+	}
+
 	if (!isImagePreview && applyYahooFinanceQuotePreviewFallback(preview, previewUrl)) {
 		m_persistentChatPreviews.insert(previewKey, preview);
 		requestPersistentChatFinancePreview(previewKey, previewUrl);
@@ -35316,7 +35453,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 						QLatin1String("og:site_name"),
 						provider ? provider->siteLabel : previewDisplayHost(previewUrl));
 					parsed.imageUrlString  = previewImageMetaTag(parsed.metaTags);
-					parsed.playableMediaMeta = previewPlayableMediaMetaTag(parsed.metaTags);
+					parsed.playableMediaMeta = previewPlayableMediaMetaTag(parsed.metaTags, previewUrl);
 					if (parsed.title.isEmpty()) {
 						parsed.title = provider ? provider->fallbackTitle : previewDisplayHost(previewUrl);
 					}
@@ -35390,7 +35527,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			applyPersistentChatListingMediaItems(*it);
 			if (parsed.playableMediaMeta) {
 				const QUrl mediaUrl = previewPageUrl.resolved(QUrl(parsed.playableMediaMeta->url));
-				applyPersistentChatRemotePlayableMedia(*it, mediaUrl, parsed.playableMediaMeta->mime);
+				applyPersistentChatRemotePlayableMedia(*it, mediaUrl, parsed.playableMediaMeta->mime,
+													   parsed.playableMediaMeta->contentBranch,
+													   parsed.playableMediaMeta->mediaPresentation);
 			}
 
 			QString selectedImageUrlString = parsed.imageUrlString.trimmed();

@@ -3,6 +3,9 @@ $verifyScript = Join-Path $repoRoot 'scripts\windows\verify-qml-real-media-playb
 $mainWindow = Join-Path $repoRoot 'src\mumble\MainWindow.cpp'
 $profileFactory = Join-Path $repoRoot 'src\mumble\QmlMediaProfileFactory.cpp'
 $playbackProbe = Join-Path $repoRoot 'src\mumble\qml-shell\MediaPlaybackProbe.js'
+$richPreviewCard = Join-Path $repoRoot 'src\mumble\qml-shell\RichPreviewCard.qml'
+$inlineMediaPlayer = Join-Path $repoRoot 'src\mumble\qml-shell\InlineMediaPlayer.qml'
+$nativeDirectMediaPlayer = Join-Path $repoRoot 'src\mumble\qml-shell\NativeDirectMediaPlayer.qml'
 
 Describe 'Qt Quick real-media playback verifier' {
 	BeforeAll {
@@ -10,6 +13,9 @@ Describe 'Qt Quick real-media playback verifier' {
 		$mainWindowText = Get-Content -Raw -LiteralPath $mainWindow
 		$profileFactoryText = Get-Content -Raw -LiteralPath $profileFactory
 		$playbackProbeText = Get-Content -Raw -LiteralPath $playbackProbe
+		$richPreviewCardText = Get-Content -Raw -LiteralPath $richPreviewCard
+		$inlineMediaPlayerText = Get-Content -Raw -LiteralPath $inlineMediaPlayer
+		$nativeDirectMediaPlayerText = Get-Content -Raw -LiteralPath $nativeDirectMediaPlayer
 		$tokens = $null
 		$parseErrors = $null
 		$scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -24,7 +30,9 @@ Describe 'Qt Quick real-media playback verifier' {
 		foreach ($id in @(
 			'youtube', 'vimeo', 'twitch', 'streamable', 'dailymotion',
 			'soundcloud', 'spotify', 'tiktok',
-			'instagram', 'facebook', 'reddit-direct', 'x-direct', '4chan-direct'
+			'instagram', 'facebook', 'reddit-direct', 'x-direct',
+			'x-animated-gif', 'reddit-gif', 'tenor-gif', 'imgur-gifv',
+			'4chan-direct'
 		)) {
 			$scriptText | Should Match ('id = "' + [regex]::Escape($id) + '"')
 		}
@@ -47,6 +55,10 @@ Describe 'Qt Quick real-media playback verifier' {
 		$scriptText | Should Match 'geo\.dailymotion\.com/player\.html\?video=x84sh87'
 		$scriptText | Should Match 'v\.redd\.it/.+CMAF_360\.mp4'
 		$scriptText | Should Match 'video\.twimg\.com/.+\.mp4'
+		$scriptText | Should Match 'video\.twimg\.com/tweet_video/DBMDLy_U0AAqUWP\.mp4'
+		$scriptText | Should Match 'v\.redd\.it/p91cxpzry9v41/DASH_1080\?source=fallback'
+		$scriptText | Should Match 'media\.tenor\.com/KL4mJXVvS-YAAAPo/what-is-this\.mp4'
+		$scriptText | Should Match 'i\.imgur\.com/owLfF25\.mp4'
 		$scriptText | Should Match 'i\.4cdn\.org/.+\.webm'
 		$scriptText | Should Not Match 'data:audio/wav;base64'
 	}
@@ -69,17 +81,19 @@ Describe 'Qt Quick real-media playback verifier' {
 		$scriptText | Should Match 'coverage_state = "runtime-pending"'
 		$scriptText | Should Match 'content_branch = "still-image"'
 		$scriptText | Should Match 'content_branch = "animated-gif"'
-		$scriptText | Should Match 'content_branch = "animated-gif-video-backed"'
+		$scriptText | Should Match 'contentBranch = "animated-gif-video-backed"'
 		$scriptText | Should Match 'content_branch = "photo-carousel"'
 		$scriptText | Should Match 'expected_presentation = "image-card"'
 		$scriptText | Should Match 'expected_presentation = "animated-image"'
 		$scriptText | Should Match 'expected_presentation = "provider-post-viewer"'
+		$scriptText | Should Match 'expected_presentation = "provider-post-card"'
 		$scriptText | Should Match 'https://www\.reddit\.com/r/animegifs/comments/g91mkj/'
 		$scriptText | Should Match 'https://x\.com/FloodSocial/status/870042717589340160'
 		$scriptText | Should Match 'https://giphy\.com/gifs/.+-xT4uQCfBOBGralHfOM'
 		$scriptText | Should Match 'https://tenor\.com/view/what-is-this-gif-2935825949418015718'
 		$scriptText | Should Match 'https://imgur\.com/owLfF25'
 		$scriptText | Should Match 'https://www\.tiktok\.com/@contextify0/photo/7626953410033585428'
+		$scriptText | Should Match '(?s)id = "tiktok-photo".+?playback_url = "".+?playback_item_id = ""'
 		$scriptText | Should Not Match 'sourceUrl = "https://(?:www\.)?(?:youtube|vimeo|reddit|tiktok|instagram|facebook)\.com/?"'
 	}
 
@@ -89,6 +103,35 @@ Describe 'Qt Quick real-media playback verifier' {
 		$mainWindowText | Should Not Match 'https://media\.giphy\.com/media/%1/giphy\.mp4'
 		$scriptText | Should Match 'playback_url = "https://media\.giphy\.com/media/xT4uQCfBOBGralHfOM/giphy\.gif"'
 		$scriptText | Should Match 'expected_presentation = "animated-image"'
+	}
+
+	It 'keeps animated transport MIME honest while applying a separate presentation contract' {
+		$mainWindowText | Should Match 'type == QLatin1String\("animated_gif"\)'
+		$mainWindowText | Should Match 'value\(QStringLiteral\("is_gif"\)\)\.toBool\(false\)'
+		$mainWindowText | Should Match '\.endsWith\(QLatin1String\("\.gifv"\)'
+		$mainWindowText | Should Match 'QStringLiteral\("twitter:player:stream"\)'
+		$mainWindowText | Should Match 'QStringLiteral\("video/mp4"\)'
+		$mainWindowText | Should Match 'QStringLiteral\("animated-gif-video-backed"\)'
+		$mainWindowText | Should Match 'QStringLiteral\("animated-image"\)'
+		$mainWindowText | Should Match 'QStringLiteral\("provider-post-card"\)'
+		$mainWindowText | Should Match 'isTikTokPhotoPostUrl\(previewUrl\)'
+
+		$richPreviewCardText | Should Match 'mediaPresentation'
+		$richPreviewCardText | Should Match 'animatedImagePresentation'
+		$richPreviewCardText | Should Match 'providerPostPresentation'
+		$richPreviewCardText | Should Match 'hasPopoutAction: localPlaybackSupported && !animatedImagePresentation'
+		$richPreviewCardText | Should Match 'const pairedAudioUrl = !animatedImagePresentation'
+
+		$inlineMediaPlayerText | Should Match 'presentationMode'
+		$inlineMediaPlayerText | Should Match 'inlineMediaAnimationToggleButton'
+		$inlineMediaPlayerText | Should Match 'Pause animation'
+		$inlineMediaPlayerText | Should Match 'Resume animation'
+		$inlineMediaPlayerText | Should Match '&& !animationPresentation'
+
+		$nativeDirectMediaPlayerText | Should Match 'root\.animationPresentation \? MediaPlayer\.Infinite : 1'
+		$nativeDirectMediaPlayerText | Should Match 'primaryAudio\.muted = animationPresentation'
+		$nativeDirectMediaPlayerText | Should Match 'property string secondaryAudioUrl: animationPresentation'
+		$nativeDirectMediaPlayerText | Should Match 'if \(animationPresentation \|\| !_enabled'
 	}
 
 	It 'runs cold and warm passes in fresh client processes with one isolated provider-state root' {
@@ -143,6 +186,8 @@ Describe 'Qt Quick real-media playback verifier' {
 	It 'captures the stable final surface and gates teardown separately from provider availability' {
 		$scriptText | Should Match 'command = "captureQml"'
 		$scriptText | Should Match 'window = "media-session"'
+		$scriptText | Should Match 'playback_capture = \$playbackCapturePath'
+		$scriptText | Should Match '\$playbackObserved -and -not \$playbackCaptureAttempted'
 		$scriptText | Should Match 'Wait-MediaClosed'
 		$scriptText | Should Match 'surface_released'
 		$scriptText | Should Match 'media_inactive'

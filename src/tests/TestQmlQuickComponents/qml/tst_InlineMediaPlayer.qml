@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import QtMultimedia
 import Mumble.Theme 1.0
 import Mumble.ProviderPresentation 1.0
 
@@ -37,6 +38,7 @@ TestCase {
 		property int volume: 100
 		property bool muted: false
 		property int retryCalls: 0
+		property int playCalls: 0
 		property int pauseCalls: 0
 		property int closeCalls: 0
 		property int errorReports: 0
@@ -50,8 +52,14 @@ TestCase {
 		signal mutedRequested(bool value)
 		signal retryRequested()
 
-		function play() {}
-		function pause() { pauseCalls += 1 }
+		function play() {
+			playCalls += 1
+			state = "playing"
+		}
+		function pause() {
+			pauseCalls += 1
+			state = "paused"
+		}
 		function seek(value) {}
 		function setVolume(value) {}
 		function toggleMuted() {}
@@ -97,6 +105,8 @@ TestCase {
 		playerLoader.item.invalidateMediaDocument()
 		playerLoader.item.aspect = "wide"
 		playerLoader.item.presentationProvider = ""
+		playerLoader.item.presentationMode = ""
+		playerLoader.item.animationAutoPlayEnabled = true
 		playerLoader.item.mediaProfileFactory = null
 		playerLoader.item.providerVerificationStabilityMs = 0
 		playerLoader.item.providerVerificationProbeCount = 1
@@ -121,6 +131,7 @@ TestCase {
 		session.playbackAudioWarning = undefined
 		session.playbackSourcePreparing = false
 		session.retryCalls = 0
+		session.playCalls = 0
 		session.pauseCalls = 0
 		session.closeCalls = 0
 		session.errorReports = 0
@@ -162,6 +173,61 @@ TestCase {
 		session.active = false
 		wait(0)
 		verify(!player.nativeSurfaceActive)
+	}
+
+	function test_video_backed_animation_is_silent_looping_and_exposes_only_pause_resume() {
+		const player = playerLoader.item
+		player.presentationProvider = "reddit"
+		player.presentationMode = "animated-image"
+		player.animationAutoPlayEnabled = false
+		player.visualFixtureMode = "active"
+		session.provider = "direct"
+		session.mediaMime = "video/mp4"
+		session.url = "https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback"
+		session.audioUrl = "https://v.redd.it/p91cxpzry9v41/DASH_AUDIO_128.mp4"
+		session.state = "playing"
+		session.active = true
+		wait(0)
+
+		const animationToggle = findChild(player, "inlineMediaAnimationToggleButton")
+		const popoutButton = findChild(player, "inlineMediaPopoutButton")
+		const controls = findChild(player, "mediaTransportActions")
+		verify(animationToggle !== null && popoutButton !== null && controls !== null)
+		verify(player.animationPresentation)
+		verify(!player.nativeControlsVisible)
+		verify(!controls.parent.parent.visible)
+		verify(animationToggle.visible)
+		verify(!popoutButton.visible)
+		compare(animationToggle.text, "Pause animation")
+		compare(player.Accessible.name, "Reddit inline animated image")
+
+		animationToggle.clicked()
+		compare(session.pauseCalls, 1)
+		compare(session.state, "paused")
+		compare(animationToggle.text, "Resume animation")
+		animationToggle.clicked()
+		compare(session.playCalls, 1)
+		compare(session.state, "playing")
+
+		player.visualFixtureMode = ""
+		session.mediaMime = "audio/wav"
+		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.playbackUrl = undefined
+		session.playbackAudioUrl = undefined
+		wait(0)
+
+		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
+		verify(nativeLoader !== null)
+		tryVerify(function() { return nativeLoader.item !== null })
+		const nativePlayer = nativeLoader.item
+		verify(nativePlayer.animationPresentation)
+		compare(nativePlayer.animationAutoPlayEnabled, false)
+		compare(nativePlayer.secondaryAudioUrl, "")
+		verify(nativePlayer.primaryAudioMuted)
+		tryVerify(function() { return nativePlayer.primaryPlayer !== null })
+		compare(nativePlayer.primaryPlayer.loops, MediaPlayer.Infinite)
+
+		session.active = false
 	}
 
 	function test_native_direct_media_waits_for_prepared_playback_source() {

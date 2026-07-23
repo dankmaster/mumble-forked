@@ -238,6 +238,70 @@ $cases = @(
 		audioMime = ""
 	}
 	[pscustomobject]@{
+		id = "x-animated-gif"
+		sourceProvider = "x"
+		sourceUrl = "https://x.com/FloodSocial/status/870042717589340160"
+		sourceItemId = "870042717589340160"
+		playbackItemId = "DBMDLy_U0AAqUWP"
+		contentBranch = "animated-gif-video-backed"
+		expectedPresentation = "animated-image"
+		verificationSurface = "native-media-transport"
+		coverageState = "real-transport-playback"
+		provider = "direct"
+		playbackUrl = "https://video.twimg.com/tweet_video/DBMDLy_U0AAqUWP.mp4"
+		mediaMime = "video/mp4"
+		audioUrl = ""
+		audioMime = ""
+	}
+	[pscustomobject]@{
+		id = "reddit-gif"
+		sourceProvider = "reddit"
+		sourceUrl = "https://www.reddit.com/r/animegifs/comments/g91mkj/slap_me_with_the_money_kon/"
+		sourceItemId = "g91mkj"
+		playbackItemId = "p91cxpzry9v41"
+		contentBranch = "animated-gif-video-backed"
+		expectedPresentation = "animated-image"
+		verificationSurface = "native-media-transport"
+		coverageState = "real-transport-playback"
+		provider = "direct"
+		playbackUrl = "https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback"
+		mediaMime = "video/mp4"
+		audioUrl = ""
+		audioMime = ""
+	}
+	[pscustomobject]@{
+		id = "tenor-gif"
+		sourceProvider = "tenor"
+		sourceUrl = "https://tenor.com/view/what-is-this-gif-2935825949418015718"
+		sourceItemId = "2935825949418015718"
+		playbackItemId = "KL4mJXVvS-YAAAPo"
+		contentBranch = "animated-gif-video-backed"
+		expectedPresentation = "animated-image"
+		verificationSurface = "native-media-transport"
+		coverageState = "real-transport-playback"
+		provider = "direct"
+		playbackUrl = "https://media.tenor.com/KL4mJXVvS-YAAAPo/what-is-this.mp4"
+		mediaMime = "video/mp4"
+		audioUrl = ""
+		audioMime = ""
+	}
+	[pscustomobject]@{
+		id = "imgur-gifv"
+		sourceProvider = "imgur"
+		sourceUrl = "https://imgur.com/owLfF25"
+		sourceItemId = "owLfF25"
+		playbackItemId = "owLfF25"
+		contentBranch = "animated-gif-video-backed"
+		expectedPresentation = "animated-image"
+		verificationSurface = "native-media-transport"
+		coverageState = "real-transport-playback"
+		provider = "direct"
+		playbackUrl = "https://i.imgur.com/owLfF25.mp4"
+		mediaMime = "video/mp4"
+		audioUrl = ""
+		audioMime = ""
+	}
+	[pscustomobject]@{
 		id = "4chan-direct"
 		sourceProvider = "4chan"
 		sourceUrl = "https://i.4cdn.org/wsg/1779181872711838.webm"
@@ -295,18 +359,6 @@ $formatCoverage = @(
 		coverage_state = "runtime-pending"
 	}
 	[pscustomobject]@{
-		id = "reddit-gif"
-		source_provider = "reddit"
-		source_url = "https://www.reddit.com/r/animegifs/comments/g91mkj/slap_me_with_the_money_kon/"
-		playback_url = "https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback"
-		source_item_id = "g91mkj"
-		playback_item_id = "p91cxpzry9v41"
-		content_branch = "animated-gif-video-backed"
-		expected_presentation = "animated-image"
-		verification_surface = "persistent-chat-card"
-		coverage_state = "runtime-pending"
-	}
-	[pscustomobject]@{
 		id = "x-still"
 		source_provider = "x"
 		source_url = "https://x.com/tekbog/status/2058911571225813258"
@@ -317,18 +369,6 @@ $formatCoverage = @(
 		expected_presentation = "image-card"
 		verification_surface = "persistent-chat-card"
 		coverage_state = "real-cache-observation"
-	}
-	[pscustomobject]@{
-		id = "x-animated-gif"
-		source_provider = "x"
-		source_url = "https://x.com/FloodSocial/status/870042717589340160"
-		playback_url = ""
-		source_item_id = "870042717589340160"
-		playback_item_id = ""
-		content_branch = "animated-gif-video-backed"
-		expected_presentation = "animated-image"
-		verification_surface = "persistent-chat-card"
-		coverage_state = "runtime-pending"
 	}
 	[pscustomobject]@{
 		id = "giphy-gif"
@@ -343,38 +383,14 @@ $formatCoverage = @(
 		coverage_state = "runtime-pending"
 	}
 	[pscustomobject]@{
-		id = "tenor-gif"
-		source_provider = "tenor"
-		source_url = "https://tenor.com/view/what-is-this-gif-2935825949418015718"
-		playback_url = ""
-		source_item_id = "2935825949418015718"
-		playback_item_id = ""
-		content_branch = "animated-gif"
-		expected_presentation = "animated-image"
-		verification_surface = "persistent-chat-card"
-		coverage_state = "runtime-pending"
-	}
-	[pscustomobject]@{
-		id = "imgur-gifv"
-		source_provider = "imgur"
-		source_url = "https://imgur.com/owLfF25"
-		playback_url = "https://i.imgur.com/owLfF25.gifv"
-		source_item_id = "owLfF25"
-		playback_item_id = "owLfF25"
-		content_branch = "animated-gif-video-backed"
-		expected_presentation = "animated-image"
-		verification_surface = "persistent-chat-card"
-		coverage_state = "runtime-pending"
-	}
-	[pscustomobject]@{
 		id = "tiktok-photo"
 		source_provider = "tiktok"
 		source_url = "https://www.tiktok.com/@contextify0/photo/7626953410033585428"
-		playback_url = "https://www.tiktok.com/player/v1/7626953410033585428?autoplay=1&rel=0&music_info=0&description=0"
+		playback_url = ""
 		source_item_id = "7626953410033585428"
-		playback_item_id = "7626953410033585428"
+		playback_item_id = ""
 		content_branch = "photo-carousel"
-		expected_presentation = "provider-post-viewer"
+		expected_presentation = "provider-post-card"
 		verification_surface = "persistent-chat-card"
 		coverage_state = "runtime-pending"
 	}
@@ -758,6 +774,8 @@ function Invoke-RealMediaPass {
 		$initialPosition = $null
 		$maximumPosition = 0.0
 		$playbackObserved = $false
+		$playbackCaptureAttempted = $false
+		$playbackCapturePath = ""
 		$finalState = $null
 		while ($true) {
 			$phase = if ($null -eq $observationDeadline) { "media-load" } else { "playback" }
@@ -796,6 +814,21 @@ function Invoke-RealMediaPass {
 					-and $maximumPosition - $initialPosition -ge 0.5
 				$playbackObserved = $playbackObserved -or [bool]$media.playbackVerified `
 					-or $positionAdvanced
+				if ($playbackObserved -and -not $playbackCaptureAttempted) {
+					$playbackCaptureAttempted = $true
+					$playingCaptureCandidate =
+						Join-Path $outputRoot "$($MediaCase.id)-$Pass-playing.png"
+					try {
+						Invoke-Automation -Port $port -Token $token -Request @{
+							command = "captureQml"
+							window = "media-session"
+							path = $playingCaptureCandidate
+						} | Out-Null
+						$playbackCapturePath = $playingCaptureCandidate
+					} catch {
+						$playbackCapturePath = ""
+					}
+				}
 				if ([DateTime]::UtcNow -ge $observationDeadline) {
 					$finalState = $media
 					break
@@ -896,6 +929,7 @@ function Invoke-RealMediaPass {
 			post_close_working_set_bytes = $postCloseSample.working_set_bytes
 			provider_state_before = $stateBefore
 			provider_state_after = $stateAfter
+			playback_capture = $playbackCapturePath
 			capture = $capturePath
 			resources = Get-SampleSummary -Samples @($samples)
 			samples = @($samples)

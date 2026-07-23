@@ -18,8 +18,12 @@ Rectangle {
 	// The playback transport can be "direct" while the card still represents a
 	// provider such as Reddit. Keep presentation identity separate from transport.
 	property string presentationProvider: ""
+	property string presentationMode: ""
+	property bool animationAutoPlayEnabled: true
 	property string aspect: "wide"
 	property string visualFixtureMode: ""
+	readonly property bool animationPresentation:
+		String(presentationMode || "").trim().toLowerCase() === "animated-image"
 	readonly property var providerPresentation: ProviderPresentation.resolve(
 		String(presentationProvider || "").trim()
 			|| (session ? session.provider : ""))
@@ -150,13 +154,16 @@ Rectangle {
 	// misleading 0:00 / 0:00 bar that previously appeared under broken embeds.
 	readonly property bool nativeControlsVisible: !!session
 		&& Boolean(session.playbackControllable) && transportVerified
+		&& !animationPresentation
 	implicitHeight: mediaViewportHeight
 		+ (nativeControlsVisible ? inlineControls.implicitHeight : 0)
 		+ (providerVerificationRequired ? verificationStrip.height : 0)
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
-	Accessible.name: qsTr("%1 inline media player").arg(providerLabel)
+	Accessible.name: animationPresentation
+		? qsTr("%1 inline animated image").arg(providerLabel)
+		: qsTr("%1 inline media player").arg(providerLabel)
 
 	function fallbackProviderMark(label) {
 		const words = String(label || "").trim().split(/\s+/).filter(function(word) {
@@ -651,7 +658,7 @@ Rectangle {
 	function applyDesiredPlaybackState(expectedGeneration) {
 		if (nativeDirectMedia && nativePlayerLoader.item) {
 			nativePlayerLoader.item.applySessionState()
-			if (Number(session.position || 0) > 0.05)
+			if (!animationPresentation && Number(session.position || 0) > 0.05)
 				nativePlayerLoader.item.seek(session.position)
 			return
 		}
@@ -685,6 +692,10 @@ Rectangle {
 		if (failureOverlay.visible && retryButton.visible && retryButton.enabled) {
 			retryButton.forceActiveFocus()
 			return retryButton.activeFocus
+		}
+		if (animationToggleButton.visible && animationToggleButton.enabled) {
+			animationToggleButton.forceActiveFocus()
+			return animationToggleButton.activeFocus
 		}
 		if (providerCloseButton.visible && providerCloseButton.enabled) {
 			providerCloseButton.forceActiveFocus()
@@ -781,6 +792,8 @@ Rectangle {
 		function onPlayRequested() { inlinePlayer.requestPlaybackState("playing") }
 		function onPauseRequested() { inlinePlayer.requestPlaybackState("paused") }
 		function onSeekRequested(seconds) {
+			if (inlinePlayer.animationPresentation)
+				return
 			if (inlinePlayer.nativeDirectMedia && nativePlayerLoader.item)
 				nativePlayerLoader.item.seek(seconds)
 			else inlinePlayer.runPlayerScript(inlinePlayer.playerScript("seek", seconds))
@@ -839,7 +852,9 @@ Rectangle {
 			border.color: Theme.withAlpha(inlinePlayer.providerOnAccent, 0.24)
 			border.width: 1
 			Accessible.role: Accessible.StaticText
-			Accessible.name: qsTr("%1 media player").arg(inlinePlayer.providerLabel)
+			Accessible.name: inlinePlayer.animationPresentation
+				? qsTr("%1 animated image").arg(inlinePlayer.providerLabel)
+				: qsTr("%1 media player").arg(inlinePlayer.providerLabel)
 			Row {
 				id: inlineProviderRow
 				anchors.centerIn: parent
@@ -898,7 +913,29 @@ Rectangle {
 			anchors.verticalCenter: parent.verticalCenter
 			spacing: Theme.space2
 			ModernIconButton {
+				id: animationToggleButton
+				objectName: "inlineMediaAnimationToggleButton"
+				visible: inlinePlayer.animationPresentation
+					&& inlinePlayer.ready && inlinePlayer.documentReady
+				enabled: inlinePlayer.providerInputEnabled
+				overlay: true
+				dense: true
+				text: session && String(session.state || "") === "playing"
+					? qsTr("Pause animation") : qsTr("Resume animation")
+				iconName: session && String(session.state || "") === "playing" ? "pause" : "play"
+				Accessible.description: qsTr("Pause or resume this silent looping animation")
+				onClicked: {
+					if (!inlinePlayer.session)
+						return
+					if (String(inlinePlayer.session.state || "") === "playing")
+						inlinePlayer.session.pause()
+					else
+						inlinePlayer.session.play()
+				}
+			}
+			ModernIconButton {
 				objectName: "inlineMediaPopoutButton"
+				visible: !inlinePlayer.animationPresentation
 				overlay: true
 				dense: true
 				text: qsTr("Pop out")
@@ -1018,6 +1055,8 @@ Rectangle {
 		sourceComponent: NativeDirectMediaPlayer {
 			session: inlinePlayer.session
 			playbackInputEnabled: inlinePlayer.providerInputEnabled
+			presentationMode: inlinePlayer.presentationMode
+			animationAutoPlayEnabled: inlinePlayer.animationAutoPlayEnabled
 		}
 	}
 

@@ -1266,6 +1266,100 @@ TestCase {
 		findChild(card, "previewOverflowMenu").close()
 	}
 
+	function test_video_backed_animation_keeps_mp4_transport_but_uses_view_semantics() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Slap me with the money",
+			"url": "https://www.reddit.com/r/animegifs/comments/g91mkj/slap_me_with_the_money_kon/",
+			"openLabel": "Open on Reddit",
+			"mediaUrl": "https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback",
+			"mediaMime": "video/mp4",
+			"mediaAudioUrl": "https://v.redd.it/p91cxpzry9v41/DASH_AUDIO_128.mp4",
+			"mediaAudioMime": "audio/mp4",
+			"metadata": {
+				"previewProvider": "reddit",
+				"contentBranch": "animated-gif-video-backed",
+				"mediaPresentation": "animated-image"
+			}
+		}
+		card.previewIdentity = "message:reddit-gif"
+		card.mediaSessionId = "message:reddit-gif"
+		wait(0)
+
+		const inlineButton = findChild(card, "previewPlayButton")
+		const popoutButton = findChild(card, "previewPopoutButton")
+		verify(inlineButton !== null && popoutButton !== null)
+		compare(card.contentBranch, "animated-gif-video-backed")
+		compare(card.mediaPresentation, "animated-image")
+		verify(card.animatedImagePresentation)
+		verify(card.hasDirectMedia)
+		verify(card.localPlaybackSupported)
+		verify(!card.inlineActionUsesPlaybackSemantics)
+		compare(card.inlineActionLabel, "View here")
+		compare(card.inlineActionIconName, "eye")
+		verify(!card.sharedPlaybackSupported)
+		verify(!card.hasPopoutAction)
+		verify(!popoutButton.visible)
+		tryCompare(inlineButton, "visible", true)
+		compare(inlineButton.text, "View here")
+
+		inlineButton.clicked()
+		compare(directMediaSpy.count, 1)
+		compare(directMediaSpy.signalArguments[0][0],
+			"https://v.redd.it/p91cxpzry9v41/DASH_1080?source=fallback")
+		compare(directMediaSpy.signalArguments[0][1], "video/mp4")
+		compare(directMediaSpy.signalArguments[0][2], "")
+		compare(directMediaSpy.signalArguments[0][3], "")
+		compare(watchTogetherSpy.count, 0)
+		compare(popoutDirectMediaSpy.count, 0)
+	}
+
+	function test_tiktok_photo_is_a_provider_post_card_without_player_claims() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "TikTok photo post",
+			"description": "Photo post",
+			"url": "https://www.tiktok.com/@contextify0/photo/7626953410033585428",
+			"openLabel": "Open on TikTok",
+			"metadata": {
+				"provider": "tiktok",
+				"previewProvider": "tiktok",
+				"contentBranch": "photo-carousel",
+				"mediaPresentation": "provider-post-card"
+			}
+		}
+		card.previewIdentity = "message:tiktok-photo"
+		wait(0)
+
+		const openButton = findChild(card, "previewOpenButton")
+		const inlineButton = findChild(card, "previewPlayButton")
+		const popoutButton = findChild(card, "previewPopoutButton")
+		verify(openButton !== null && inlineButton !== null && popoutButton !== null)
+		compare(card.contentBranch, "photo-carousel")
+		compare(card.mediaPresentation, "provider-post-card")
+		verify(card.providerPostPresentation)
+		verify(!card.hasEmbedPreview)
+		verify(!card.hasDirectMedia)
+		verify(!card.localPlaybackSupported)
+		verify(!card.inlineMediaStageVisible)
+		verify(!card.inlineActionUsesPlaybackSemantics)
+		verify(!card.hasPopoutAction)
+		verify(!card.sharedPlaybackSupported)
+		verify(!inlineButton.visible)
+		verify(!popoutButton.visible)
+		tryCompare(openButton, "visible", true)
+		compare(openButton.text, "Open on TikTok")
+
+		openButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0],
+			"https://www.tiktok.com/@contextify0/photo/7626953410033585428")
+		compare(directMediaSpy.count, 0)
+		compare(inlinePlaySpy.count, 0)
+	}
+
 	function test_embed_fallback_deduplicates_host_title_and_prefers_provider_name() {
 		const card = previewLoader.item
 		card.preview = {

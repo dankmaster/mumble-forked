@@ -592,7 +592,9 @@ public:
 	bool requestPersistentChatPreviewPosterImage(const QString &previewKey, const QUrl &posterUrl,
 												 const QString &suggestedMime = QString(), int redirectCount = 0);
 	bool applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
-												const QString &suggestedMime = QString());
+												const QString &suggestedMime = QString(),
+												const QString &contentBranch = QString(),
+												const QString &mediaPresentation = QString());
 	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
 											 const QString &suggestedMime = QString());
 	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
