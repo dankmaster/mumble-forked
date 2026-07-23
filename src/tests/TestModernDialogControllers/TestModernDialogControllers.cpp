@@ -3647,7 +3647,7 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
-	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 13")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
 	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
 	QVERIFY(source.contains(QStringLiteral("data-old-hires")));
 	QVERIFY(source.contains(QStringLiteral("data-a-dynamic-image")));
@@ -3676,6 +3676,12 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 		"providerMetadata.insert(QStringLiteral(\"previewProvider\"), target->providerKey)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
+	QVERIFY(source.contains(QStringLiteral("redditPostOEmbedUrl(url)")));
+	QVERIFY(source.contains(QStringLiteral("redditPostEmbedUrl(previewUrl)")));
+	QVERIFY(source.contains(QStringLiteral("redditVideoIdFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral("redditPosterUrlFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"https://www.youtube-nocookie.com/embed/%1")));
 	QVERIFY(source.contains(QStringLiteral(

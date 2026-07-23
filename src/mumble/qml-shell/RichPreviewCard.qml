@@ -259,6 +259,9 @@ Rectangle {
 		&& (providerDetails.presentation === "socialPost"
 			|| ["instagram", "tiktok", "facebook", "spotify", "soundcloud"].indexOf(
 				providerDetails.providerToken) >= 0)
+	readonly property bool providerOwnsDetails: inlineProviderOwnsDetails
+		|| (hasEmbedPreview
+			&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0)
 	readonly property bool fullBleedMediaStage: (hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed
 	readonly property string genericProviderMark: buildGenericProviderMark()
 	readonly property bool genericHeaderShowsIdentityMark: previewState === "ready"
@@ -1932,7 +1935,7 @@ Rectangle {
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
 			height: visible ? implicitHeight : 0
-			visible: !root.inlineProviderOwnsDetails
+			visible: !root.providerOwnsDetails
 			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
 			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""

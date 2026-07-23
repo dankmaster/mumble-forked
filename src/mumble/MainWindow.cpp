@@ -3787,6 +3787,9 @@ struct PersistentChatPreviewOEmbedTarget {
 	bool socialPost = false;
 };
 
+std::optional< QString > redditPostIdFromUrl(const QUrl &url);
+QUrl redditPostOEmbedUrl(const QUrl &postUrl);
+
 struct PersistentChatPreviewPlayableMediaMeta {
 	QString url;
 	QString mime;
@@ -4670,6 +4673,13 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		siteLabel     = QObject::tr("SoundCloud");
 		fallbackTitle = QObject::tr("SoundCloud track");
 		openLabel     = QObject::tr("Open on SoundCloud");
+	} else if (redditPostIdFromUrl(url)) {
+		endpoint      = redditPostOEmbedUrl(url);
+		providerKey   = QStringLiteral("reddit");
+		siteLabel     = QObject::tr("Reddit");
+		fallbackTitle = QObject::tr("Reddit post");
+		openLabel     = QObject::tr("Open on Reddit");
+		socialPost    = true;
 	} else if (host == QLatin1String("streamable.com")) {
 		setUrlEndpoint(QStringLiteral("https://api.streamable.com/oembed.json"));
 		providerKey   = QStringLiteral("streamable");
@@ -4730,7 +4740,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 13;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 9;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
@@ -9657,6 +9667,68 @@ std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
 	}
 
 	return videoId;
+}
+
+std::optional< QString > redditPostIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("reddit.com") && host != QLatin1String("old.reddit.com")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	for (int index = 0; index + 1 < segments.size(); ++index) {
+		if (segments.at(index).compare(QLatin1String("comments"), Qt::CaseInsensitive) != 0) {
+			continue;
+		}
+		const QString postId = segments.at(index + 1);
+		if (isValidRedditVideoId(postId)) {
+			return postId;
+		}
+		break;
+	}
+
+	return std::nullopt;
+}
+
+QUrl redditPostOEmbedUrl(const QUrl &postUrl) {
+	QUrl endpoint(QStringLiteral("https://www.reddit.com/oembed"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("url"), postUrl.toString(QUrl::FullyEncoded));
+	endpoint.setQuery(query);
+	return endpoint;
+}
+
+QUrl redditPostEmbedUrl(const QUrl &postUrl) {
+	QUrl embedUrl;
+	embedUrl.setScheme(QStringLiteral("https"));
+	embedUrl.setHost(QStringLiteral("embed.reddit.com"));
+	embedUrl.setPath(postUrl.path());
+	return embedUrl;
+}
+
+QString redditVideoIdFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_redditMediaUrlPattern(
+		QLatin1String(R"(https://v\.redd\.it/([A-Za-z0-9_-]{5,64}))"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_redditMediaUrlPattern.match(html);
+	const QString videoId               = match.hasMatch() ? match.captured(1) : QString();
+	return isValidRedditVideoId(videoId) ? videoId : QString();
+}
+
+QUrl redditPosterUrlFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_redditPosterPattern(
+		QLatin1String(R"(\bposter\s*=\s*["'](https://[^"']+)["'])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_redditPosterPattern.match(html);
+	if (!match.hasMatch()) {
+		return {};
+	}
+	const QString decoded = QTextDocumentFragment::fromHtml(match.captured(1)).toPlainText().trimmed();
+	const QUrl posterUrl(decoded);
+	return posterUrl.isValid() && posterUrl.scheme().toLower() == QLatin1String("https")
+			   && isSafePreviewTarget(posterUrl)
+		? posterUrl
+		: QUrl();
 }
 
 QUrl redditVideoMetadataUrl(const QString &videoId) {
@@ -30936,6 +31008,11 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 							!= RICH_PREVIEW_METADATA_VERSION
 						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
 							   != RICH_PREVIEW_METADATA_VERSION))
+				|| (redditPostIdFromUrl(cachedUrl)
+					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+							!= RICH_PREVIEW_METADATA_VERSION
+						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+							   != RICH_PREVIEW_METADATA_VERSION))
 				|| (isInstagramPreviewUrl(cachedUrl)
 					&& (cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
 							!= INSTAGRAM_PREVIEW_METADATA_VERSION
@@ -33544,7 +33621,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	}
 
 	const bool hasEmbedTarget = previewEmbedTargetForUrl(previewUrl).has_value();
-	if (hasEmbedTarget) {
+	const bool isRedditPost = target->providerKey == QLatin1String("reddit");
+	if (hasEmbedTarget || isRedditPost) {
 		it->siteSnapshotRequested = false;
 		it->siteSnapshotFinished  = true;
 		it->thumbnailFinished     = true;
@@ -33553,6 +33631,14 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	providerMetadata.insert(QStringLiteral("provider"), target->providerKey);
 	providerMetadata.insert(QStringLiteral("previewProvider"), target->providerKey);
 	providerMetadata.insert(QStringLiteral("providerName"), target->siteLabel);
+	if (isRedditPost) {
+		providerMetadata.insert(QStringLiteral("previewKind"), QStringLiteral("socialPost"));
+		providerMetadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+		providerMetadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+		if (const std::optional< QString > postId = redditPostIdFromUrl(previewUrl)) {
+			providerMetadata.insert(QStringLiteral("redditPostId"), *postId);
+		}
+	}
 	it->metadata = providerMetadata;
 
 	QNetworkRequest request(target->url);
@@ -33560,7 +33646,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target, hasEmbedTarget]() {
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, previewUrl, target, hasEmbedTarget, isRedditPost]() {
 		const QByteArray data     = reply->readAll();
 		const bool success        = reply->error() == QNetworkReply::NoError;
 		const QString failureText = previewFailureText(reply);
@@ -33584,14 +33671,31 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				const QString author     = object.value(QStringLiteral("author_name")).toString().trimmed();
 				const QString provider   = object.value(QStringLiteral("provider_name")).toString().trimmed();
 				const QString html       = object.value(QStringLiteral("html")).toString();
-				const QString postText   = target->socialPost ? xPostTextFromOEmbedHtml(html) : QString();
+				const QString postText =
+					target->socialPost && !isRedditPost ? xPostTextFromOEmbedHtml(html) : QString();
 
 				previewIt->title = !postText.isEmpty()
 									   ? postText
 									   : (title.isEmpty() ? target->fallbackTitle : trimmedPreviewText(title, 280));
 				if (!author.isEmpty()) {
-					previewIt->subtitle =
-						target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
+					if (isRedditPost) {
+						static const QRegularExpression s_redditSubredditPattern(
+							QLatin1String(R"(href=["']https://www\.reddit\.com/r/([^/"']+)/?["'])"),
+							QRegularExpression::CaseInsensitiveOption);
+						const QRegularExpressionMatch subredditMatch =
+							s_redditSubredditPattern.match(html);
+						const QString subreddit = subredditMatch.hasMatch()
+													  ? subredditMatch.captured(1).trimmed()
+													  : QString();
+						const QString redditAuthor = author.startsWith(QLatin1String("u/"))
+														 ? author : QStringLiteral("u/%1").arg(author);
+						previewIt->subtitle = subreddit.isEmpty()
+												  ? redditAuthor
+												  : QStringLiteral("%1 · r/%2").arg(redditAuthor, subreddit);
+					} else {
+						previewIt->subtitle =
+							target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
+					}
 					previewIt->description = target->socialPost ? target->siteLabel : QString();
 				} else {
 					previewIt->subtitle = provider.isEmpty() ? target->siteLabel : provider;
@@ -33667,7 +33771,7 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		}
 		if (!success && previewDescriptionIsPlaceholder(previewIt->description)) {
 			previewIt->description = hasEmbedTarget ? QString() : failureText;
-			if (!hasEmbedTarget && previewIt->mediaDataUrl.isEmpty()) {
+			if (!hasEmbedTarget && !isRedditPost && previewIt->mediaDataUrl.isEmpty()) {
 				previewIt->failed = true;
 			}
 		}
@@ -33675,7 +33779,91 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 			previewIt->thumbnailFinished = true;
 		}
 		publishPersistentChatPreviewUpdate(previewKey);
+		if (isRedditPost) {
+			requestPersistentChatRedditPostPreview(previewKey, previewUrl);
+		}
 	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRedditPostPreview(const QString &previewKey, const QUrl &previewUrl) {
+	const std::optional< QString > postId = redditPostIdFromUrl(previewUrl);
+	const QUrl embedUrl                   = redditPostEmbedUrl(previewUrl);
+	if (previewKey.isEmpty() || !postId || !Global::get().nam || !isSafePreviewTarget(embedUrl)
+		|| embedUrl.scheme().toLower() != QLatin1String("https")) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| it->mediaKind == QLatin1String("video")) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+	QVariantMap metadata     = it->metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("providerName"), tr("Reddit"));
+	metadata.insert(QStringLiteral("previewKind"), QStringLiteral("socialPost"));
+	metadata.insert(QStringLiteral("redditPostId"), *postId);
+	metadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+	metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+	it->metadata = metadata;
+
+	QNetworkRequest request(embedUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, embedUrl]() {
+				const QByteArray data     = reply->readAll();
+				const bool success        = reply->error() == QNetworkReply::NoError;
+				const QString failureText = previewFailureText(reply);
+				reply->deleteLater();
+
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) {
+					return;
+				}
+
+				previewIt->remoteMediaRequested = false;
+				const QString html = success ? QString::fromUtf8(data) : QString();
+				const QString videoId = redditVideoIdFromEmbedHtml(html);
+				const QUrl posterUrl = redditPosterUrlFromEmbedHtml(html);
+				QVariantMap resolvedMetadata = previewIt->metadata;
+				if (success && !html.isEmpty()) {
+					resolvedMetadata.insert(QStringLiteral("richPreviewClientHydrationVersion"),
+											RICH_PREVIEW_METADATA_VERSION);
+				} else {
+					resolvedMetadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+				}
+				if (posterUrl.isValid()) {
+					requestPersistentChatPreviewPosterImage(previewKey, posterUrl);
+				}
+
+				if (!videoId.isEmpty()) {
+					resolvedMetadata.insert(QStringLiteral("redditVideoId"), videoId);
+					resolvedMetadata.insert(QStringLiteral("redditEmbedUrl"),
+											embedUrl.toString(QUrl::FullyEncoded));
+				}
+				previewIt->metadata = resolvedMetadata;
+				if (!videoId.isEmpty()) {
+					if (requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)) {
+						publishPersistentChatPreviewUpdate(previewKey);
+						return;
+					}
+				}
+
+				previewIt->remoteMediaFinished = true;
+				previewIt->metadataFinished    = true;
+				previewIt->failed              = false;
+				publishPersistentChatPreviewUpdate(previewKey);
+			});
 
 	return true;
 }

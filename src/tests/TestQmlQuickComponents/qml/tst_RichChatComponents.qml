@@ -844,16 +844,23 @@ TestCase {
 		inlineSession.provider = "spotify"
 		inlineSession.playbackControllable = false
 		inlineSession.detached = false
-		inlineSession.active = true
 
 		const panel = findChild(card, "previewEmbedMediaPanel")
 		const details = findChild(card, "providerDetails")
 		const closeButton = findChild(card, "previewInlineCloseButton")
 		const originalButton = findChild(card, "previewEmbedOriginalButton")
 		verify(panel !== null && details !== null && closeButton !== null && originalButton !== null)
+		tryCompare(card, "providerOwnsDetails", true)
+		compare(details.visible, false)
+		const collapsedHeight = card.implicitHeight
+
+		inlineSession.active = true
 		tryCompare(card, "inlinePlaybackActive", true)
 		compare(card.inlineProviderOwnsDetails, true)
 		compare(details.visible, false)
+		tryVerify(function() {
+			return Math.abs(card.implicitHeight - collapsedHeight) <= 1
+		})
 		tryCompare(closeButton, "visible", true)
 		tryCompare(originalButton, "visible", true)
 		const panelOrigin = panel.mapToItem(card, 0, 0)
