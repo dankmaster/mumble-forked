@@ -136,7 +136,26 @@ TestCase {
 		tryCompare(loader.item, "maximumPopularRows", 2)
 		verify(loader.item.contentItem.width <= loader.item.width)
 		verify(loader.item.implicitHeight > 0)
+		verify(loader.item.implicitHeight < 300)
 		compare(loader.item.Accessible.role, Accessible.Pane)
 		compare(loader.item.Accessible.name, "Stonks room dashboard")
+	}
+
+	function test_wide_panel_uses_a_single_compact_toolbar() {
+		loader.width = 760
+		loader.item.narrowLayout = false
+		wait(0)
+
+		const periods = findChild(loader.item, "stonksRoomPeriods")
+		const refresh = findChild(loader.item, "stonksRoomRefresh")
+		const portfolio = findChild(loader.item, "stonksRoomPortfolio")
+		verify(periods !== null && refresh !== null && portfolio !== null)
+		const periodsPosition = periods.mapToItem(loader.item, 0, 0)
+		const refreshPosition = refresh.mapToItem(loader.item, 0, 0)
+		const portfolioPosition = portfolio.mapToItem(loader.item, 0, 0)
+		verify(Math.abs(periodsPosition.y - refreshPosition.y) < refresh.height)
+		verify(Math.abs(refreshPosition.y - portfolioPosition.y) < portfolio.height)
+		verify(loader.item.implicitHeight < 190)
+		compare(refresh.Accessible.name, "Refresh")
 	}
 }

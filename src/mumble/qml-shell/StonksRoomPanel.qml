@@ -90,7 +90,7 @@ Control {
 	leftPadding: Theme.space3
 	rightPadding: Theme.space3
 	topPadding: Theme.space2
-	bottomPadding: Theme.space3
+	bottomPadding: Theme.space2
 	Accessible.role: Accessible.Pane
 	Accessible.name: qsTr("Stonks room dashboard")
 	Accessible.description: qsTr("Portfolio leaderboard and popular tickers above the room chat")
@@ -107,67 +107,54 @@ Control {
 		id: panelLayout
 		spacing: Theme.space2
 
-		RowLayout {
+		GridLayout {
+			id: panelToolbar
 			Layout.fillWidth: true
-			spacing: Theme.space2
+			columns: root.narrowLayout || root.width < 760 ? 1 : 2
+			columnSpacing: Theme.space2
+			rowSpacing: Theme.space1
 
-			ModernIcon {
-				name: "activity"
-				size: 17
-				color: Theme.accent
-			}
-			ColumnLayout {
+			ModernSegmentedControl {
+				id: periodControl
+				objectName: "stonksRoomPeriods"
 				Layout.fillWidth: true
-				spacing: 0
-				Label {
-					textFormat: Text.PlainText
-					text: qsTr("Stonks live")
-					color: Theme.textStrong
-					font.pixelSize: Theme.fontLabel
-					font.weight: Font.DemiBold
-				}
-				Label {
-					Layout.fillWidth: true
-					visible: !root.narrowLayout && root.width >= 500
-					textFormat: Text.PlainText
-					text: qsTr("Compete, follow portfolios, and chat with the room.")
-					color: Theme.textMuted
-					font.pixelSize: Theme.fontCaption
-					elide: Text.ElideRight
+				Layout.preferredWidth: 420
+				Layout.maximumWidth: 420
+				Layout.alignment: Qt.AlignVCenter
+				model: root.periodOptions()
+				currentValue: String(root.stonks.selectedPeriod || "30d").toLowerCase()
+				accessibleName: qsTr("Leaderboard period")
+				optionObjectNamePrefix: "stonksRoomPeriod"
+				onActivated: function(index, value) {
+					root.actionRequested("stonks.selectPeriod", { "period": String(value) })
 				}
 			}
-			ModernButton {
-				objectName: "stonksRoomRefresh"
-				dense: true
-				text: qsTr("Refresh")
-				Accessible.description: qsTr("Refresh the Stonks room dashboard")
-				onClicked: root.actionRequested("stonks.refresh", {})
-			}
-			ModernButton {
-				objectName: "stonksRoomPortfolio"
-				dense: true
-				text: qsTr("Portfolio")
-				onClicked: root.actionRequested("server.stonksPortfolio", {})
-			}
-			ModernButton {
-				objectName: "stonksRoomLeaderboard"
-				dense: true
-				text: root.narrowLayout ? qsTr("Rankings") : qsTr("Full leaderboard")
-				onClicked: root.actionRequested("server.stonksLeaderboard", {})
-			}
-		}
 
-		ModernSegmentedControl {
-			id: periodControl
-			objectName: "stonksRoomPeriods"
-			Layout.fillWidth: true
-			Layout.maximumWidth: 420
-			model: root.periodOptions()
-			currentValue: String(root.stonks.selectedPeriod || "30d").toLowerCase()
-			accessibleName: qsTr("Leaderboard period")
-			optionObjectNamePrefix: "stonksRoomPeriod"
-			onActivated: function(index, value) {
-				root.actionRequested("stonks.selectPeriod", { "period": String(value) })
+			RowLayout {
+				Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+				spacing: Theme.space1
+
+				ModernIconButton {
+					objectName: "stonksRoomRefresh"
+					dense: true
+					iconName: "refresh"
+					text: qsTr("Refresh")
+					toolTipText: qsTr("Refresh Stonks")
+					Accessible.description: qsTr("Refresh the Stonks room dashboard")
+					onClicked: root.actionRequested("stonks.refresh", {})
+				}
+				ModernButton {
+					objectName: "stonksRoomPortfolio"
+					dense: true
+					text: qsTr("Portfolio")
+					onClicked: root.actionRequested("server.stonksPortfolio", {})
+				}
+				ModernButton {
+					objectName: "stonksRoomLeaderboard"
+					dense: true
+					text: root.narrowLayout ? qsTr("Rankings") : qsTr("Full leaderboard")
+					onClicked: root.actionRequested("server.stonksLeaderboard", {})
+				}
 			}
 		}
 
@@ -179,7 +166,7 @@ Control {
 
 			Rectangle {
 				Layout.fillWidth: true
-				Layout.preferredHeight: leaderboardLayout.implicitHeight + Theme.space2 * 2
+				Layout.preferredHeight: leaderboardLayout.implicitHeight + Theme.space1 * 2
 				color: Theme.strip
 				border.color: Theme.divider
 				radius: Theme.innerRadius
@@ -187,7 +174,10 @@ Control {
 				ColumnLayout {
 					id: leaderboardLayout
 					anchors.fill: parent
-					anchors.margins: Theme.space2
+					anchors.leftMargin: Theme.space2
+					anchors.rightMargin: Theme.space2
+					anchors.topMargin: Theme.space1
+					anchors.bottomMargin: Theme.space1
 					spacing: Theme.space1
 
 					Label {
@@ -206,7 +196,7 @@ Control {
 							required property int index
 							required property var modelData
 							Layout.fillWidth: true
-							Layout.preferredHeight: 32
+							Layout.preferredHeight: 28
 							color: modelData.followed === true ? Theme.surfaceHover : "transparent"
 							radius: 6
 							Accessible.role: Accessible.ListItem
@@ -270,7 +260,7 @@ Control {
 
 			Rectangle {
 				Layout.fillWidth: true
-				Layout.preferredHeight: popularLayout.implicitHeight + Theme.space2 * 2
+				Layout.preferredHeight: popularLayout.implicitHeight + Theme.space1 * 2
 				color: Theme.strip
 				border.color: Theme.divider
 				radius: Theme.innerRadius
@@ -278,7 +268,10 @@ Control {
 				ColumnLayout {
 					id: popularLayout
 					anchors.fill: parent
-					anchors.margins: Theme.space2
+					anchors.leftMargin: Theme.space2
+					anchors.rightMargin: Theme.space2
+					anchors.topMargin: Theme.space1
+					anchors.bottomMargin: Theme.space1
 					spacing: Theme.space1
 
 					Label {
