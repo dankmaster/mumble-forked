@@ -4179,8 +4179,8 @@ std::optional< PersistentChatPreviewPlayableMediaMeta > giphyPlayableMediaFromUr
 		return std::nullopt;
 	}
 	return PersistentChatPreviewPlayableMediaMeta {
-		QStringLiteral("https://media.giphy.com/media/%1/giphy.mp4").arg(*id),
-		QStringLiteral("video/mp4")
+		QStringLiteral("https://media.giphy.com/media/%1/giphy.gif").arg(*id),
+		QStringLiteral("image/gif")
 	};
 }
 
