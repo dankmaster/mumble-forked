@@ -3656,6 +3656,12 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationComplete")));
 	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationVersion")));
 	QVERIFY(source.contains(QStringLiteral("QNetworkRequest::AlwaysNetwork")));
+	QVERIFY(source.contains(QStringLiteral(
+		"constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024")));
+	QVERIFY(source.contains(QStringLiteral(
+		"scope == PersistentChatPreviewHtmlScope::BoundedDocument")));
+	QVERIFY(source.contains(QStringLiteral(
+		"}, PersistentChatPreviewHtmlScope::BoundedDocument);")));
 	QVERIFY(source.contains(QStringLiteral("instagramPosterUrl")));
 	QVERIFY(source.contains(QStringLiteral("requestPersistentChatPreviewPosterImage(")));
 	QVERIFY(source.contains(QStringLiteral(

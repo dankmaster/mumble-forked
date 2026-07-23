@@ -5558,7 +5558,12 @@ void insertPreviewMetadataValue(QVariantMap &metadata, const QString &key, const
 }
 
 QString decodedPreviewText(const QString &text);
-QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType);
+enum class PersistentChatPreviewHtmlScope {
+	HeadOnly,
+	BoundedDocument,
+};
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType,
+						   PersistentChatPreviewHtmlScope scope);
 QString extractHtmlTitle(const QString &html);
 QString trimmedPreviewText(QString text, int maxLength);
 bool previewDescriptionIsPlaceholder(const QString &description);
@@ -11812,6 +11817,7 @@ QString decodedPreviewText(const QString &text) {
 }
 
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_HEAD_MAX_BYTES = 512 * 1024;
+constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_TAG_MAX_CHARS  = 16 * 1024;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_KEY_MAX_CHARS  = 128;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_VALUE_MAX_CHARS = 8 * 1024;
@@ -11849,8 +11855,12 @@ QString previewHtmlCharsetFromBytes(const QByteArray &bytes) {
 	return (!match.captured(1).isEmpty() ? match.captured(1) : match.captured(2)).trimmed().toLower();
 }
 
-QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType) {
-	const QByteArray boundedBytes     = persistentChatPreviewHtmlHeadPrefix(bytes);
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType,
+						   PersistentChatPreviewHtmlScope scope) {
+	const QByteArray boundedBytes =
+		scope == PersistentChatPreviewHtmlScope::BoundedDocument
+			? bytes.left(PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES)
+			: persistentChatPreviewHtmlHeadPrefix(bytes);
 	const QString contentTypeCharset = previewHtmlCharsetFromContentType(contentType);
 	const QString charset = !contentTypeCharset.isEmpty() ? contentTypeCharset : previewHtmlCharsetFromBytes(boundedBytes);
 	if (charset == QLatin1String("iso-8859-1") || charset == QLatin1String("latin1")
@@ -12305,10 +12315,10 @@ struct PersistentChatPreviewHtmlParseResult {
 	std::optional< InstagramPreviewMetadata > instagramMetadata;
 };
 
-PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(const QByteArray &bytes,
-														 const QString &contentType) {
+PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(
+	const QByteArray &bytes, const QString &contentType, PersistentChatPreviewHtmlScope scope) {
 	PersistentChatPreviewHtmlParseResult result;
-	result.html     = decodedPreviewHtml(bytes, contentType);
+	result.html     = decodedPreviewHtml(bytes, contentType, scope);
 	result.metaTags = extractMetaTags(result.html);
 	result.title    = extractHtmlTitle(result.html);
 	return result;
@@ -12317,12 +12327,14 @@ PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(const QByteA
 void parsePersistentChatPreviewHtmlAsync(
 	QObject *context, const QString &group, const QString &key, QByteArray bytes, QString contentType,
 	std::function< void(PersistentChatPreviewHtmlParseResult &) > transform,
-	std::function< void(PersistentChatPreviewHtmlParseResult) > completion) {
+	std::function< void(PersistentChatPreviewHtmlParseResult) > completion,
+	PersistentChatPreviewHtmlScope scope = PersistentChatPreviewHtmlScope::HeadOnly) {
 	const qint64 estimatedBytes = bytes.size();
 	persistentChatPreviewWorkerQueue().submit< PersistentChatPreviewHtmlParseResult >(
 		context, group, key, estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
-		[bytes = std::move(bytes), contentType = std::move(contentType), transform = std::move(transform)]() {
-			PersistentChatPreviewHtmlParseResult result = parsePersistentChatPreviewHtml(bytes, contentType);
+		[bytes = std::move(bytes), contentType = std::move(contentType), transform = std::move(transform), scope]() {
+			PersistentChatPreviewHtmlParseResult result =
+				parsePersistentChatPreviewHtml(bytes, contentType, scope);
 			if (transform) {
 				transform(result);
 			}
@@ -32811,7 +32823,7 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 		}
 
 		publishPersistentChatPreviewUpdate(previewKey);
-	});
+	}, PersistentChatPreviewHtmlScope::BoundedDocument);
 	});
 
 	return true;
