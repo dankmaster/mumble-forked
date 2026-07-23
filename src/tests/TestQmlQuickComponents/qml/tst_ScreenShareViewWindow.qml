@@ -78,8 +78,11 @@ TestCase {
 		verify(viewer.title.indexOf("Alex") >= 0)
 		verify(viewer.title.indexOf("Lobby") >= 0)
 		const header = findChild(viewer.contentItem, "screenShareViewerHeader")
+		compare(metadata.text, "Alex · Lobby")
 		verify(header.Accessible.description.indexOf("Alex") >= 0)
 		verify(header.Accessible.description.indexOf("Lobby") >= 0)
+		verify(findChild(viewer.contentItem, "screenShareStateBadge") === null,
+			"live state is conveyed semantically instead of with a redundant badge")
 		viewer.destroy()
 	}
 
@@ -130,10 +133,12 @@ TestCase {
 		compare(mute.iconName, shareBackend.audioMuted ? "volume-off" : "volume")
 		compare(fullscreen.iconName, "fullscreen")
 		compare(close.iconName, "close")
+		verify(!pause.overlay && !mute.overlay && !fullscreen.overlay && !close.overlay,
+			"toolbar actions use normal theme contrast instead of media-overlay colors")
 		return close
 	}
 
-	function test_wide_media_chrome_keeps_metadata_and_actions_on_one_compact_row() {
+	function test_normal_media_chrome_is_one_lightweight_row() {
 		const viewer = createViewer(1120, 720)
 		verify(!viewer.narrowHeader)
 		verify(!viewer.controlsWrapped)
@@ -146,13 +151,16 @@ TestCase {
 		verifyActionRow(viewer, header)
 		const metadataOrigin = metadata.mapToItem(header, 0, 0)
 		const actionsOrigin = actions.mapToItem(header, 0, 0)
-		verify(Math.abs(metadataOrigin.y - actionsOrigin.y) <= Theme.space2,
+		verify(Math.abs((metadataOrigin.y + metadata.height / 2)
+				- (actionsOrigin.y + actions.height / 2)) <= 0.5,
 			"wide metadata and actions share one compact header row")
 		verify(metadataOrigin.x + metadata.width <= actionsOrigin.x + 0.5,
 			"metadata does not collide with right-aligned actions")
 		verify(actionsOrigin.x + actions.width <= header.width - Theme.space3 + 0.5,
 			"actions remain right aligned inside the header padding")
-		verify(header.height < 64, "the 1120 px media chrome remains compact")
+		verify(header.height < 58, "the normal media chrome remains a single compact row")
+		verify(findChild(viewer.contentItem, "screenShareLiveBadge") === null,
+			"the video frame has no persistent LIVE logo")
 		const canvas = findChild(viewer.contentItem, "screenShareCanvas")
 		const canvasOrigin = canvas.mapToItem(viewer.contentItem, 0, 0)
 		const headerOrigin = header.mapToItem(viewer.contentItem, 0, 0)
@@ -162,10 +170,10 @@ TestCase {
 		viewer.destroy()
 	}
 
-	function test_narrow_media_chrome_moves_the_complete_action_group_to_a_clean_second_row() {
+	function test_minimum_width_keeps_the_lightweight_controls_on_one_row() {
 		const viewer = createViewer(640, 400)
-		verify(viewer.narrowHeader)
-		verify(viewer.controlsWrapped)
+		verify(!viewer.narrowHeader)
+		verify(!viewer.controlsWrapped)
 		const header = findChild(viewer.contentItem, "screenShareViewerHeader")
 		const metadata = findChild(viewer.contentItem, "screenShareViewerMetadata")
 		const actions = findChild(viewer.contentItem, "screenShareViewerHeaderActions")
@@ -174,11 +182,59 @@ TestCase {
 		verifyActionRow(viewer, header)
 		const metadataOrigin = metadata.mapToItem(header, 0, 0)
 		const actionsOrigin = actions.mapToItem(header, 0, 0)
-		verify(actionsOrigin.y >= metadataOrigin.y + metadata.height + Theme.space2 - 0.5,
-			"the complete action group follows metadata at narrow width")
-		verify(actionsOrigin.x >= Theme.space3 - 0.5)
+		verify(Math.abs((metadataOrigin.y + metadata.height / 2)
+				- (actionsOrigin.y + actions.height / 2)) <= 0.5,
+			"minimum-width metadata and actions remain in the same compact row")
+		verify(metadataOrigin.x >= Theme.space3 - 0.5)
+		verify(metadataOrigin.x + metadata.width <= actionsOrigin.x + 0.5)
 		verify(actionsOrigin.x + actions.width <= header.width - Theme.space3 + 0.5)
-		verify(canvas.height > 180, "responsive header does not collapse the video surface")
+		verify(header.height < 58, "minimum-width media chrome remains compact")
+		verify(canvas.height > 300, "the lightweight row preserves the video surface")
+		viewer.destroy()
+	}
+
+	function test_fullscreen_is_video_only_without_persistent_chrome() {
+		shareBackend.nativeFrameActive = true
+		shareBackend.hasCurrentFrame = true
+		const viewer = createViewer(1120, 720)
+		const header = findChild(viewer.contentItem, "screenShareViewerHeader")
+		const canvas = findChild(viewer.contentItem, "screenShareCanvas")
+		const audioStatus = findChild(viewer.contentItem, "screenShareAudioControlStatus")
+		verify(header !== null && canvas !== null && audioStatus !== null)
+
+		viewer.setFullscreen(true)
+		tryCompare(viewer, "fullscreen", true)
+		tryCompare(header, "visible", false)
+		verify(!audioStatus.visible)
+		tryVerify(function() {
+			const canvasOrigin = canvas.mapToItem(viewer.contentItem, 0, 0)
+			return Math.abs(canvasOrigin.x) <= 0.5 && Math.abs(canvasOrigin.y) <= 0.5
+				&& Math.abs(canvas.width - viewer.contentItem.width) <= 0.5
+				&& Math.abs(canvas.height - viewer.contentItem.height) <= 0.5
+		}, 5000, "fullscreen layout settles to the complete content area")
+		verify(findChild(viewer.contentItem, "screenShareLiveBadge") === null)
+
+		viewer.setFullscreen(false)
+		tryCompare(viewer, "fullscreen", false)
+		tryCompare(header, "visible", true)
+		compare(findChild(viewer.contentItem, "screenShareFullscreenButton").iconName, "fullscreen")
+		viewer.destroy()
+	}
+
+	function test_audio_controls_disappear_when_the_share_has_no_audio_track() {
+		shareBackend.audioAvailable = false
+		const viewer = createViewer(640, 400)
+		const header = findChild(viewer.contentItem, "screenShareViewerHeader")
+		const mute = findChild(viewer.contentItem, "screenShareMuteButton")
+		const volume = findChild(viewer.contentItem, "screenShareVolumeSlider")
+		const pause = findChild(viewer.contentItem, "screenSharePauseButton")
+		const fullscreen = findChild(viewer.contentItem, "screenShareFullscreenButton")
+		const close = findChild(viewer.contentItem, "screenShareCloseButton")
+		verify(!mute.visible)
+		verify(!volume.visible)
+		verifyInside(pause, header, "pause")
+		verifyInside(fullscreen, header, "full screen")
+		verifyInside(close, header, "close")
 		viewer.destroy()
 	}
 

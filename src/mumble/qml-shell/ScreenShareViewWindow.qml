@@ -11,8 +11,9 @@ ApplicationWindow {
 	property bool hostClosing: false
 	property bool closeRequestPending: false
 	property bool hasShownLiveFrame: false
-	readonly property bool narrowHeader: width < 760
-	readonly property bool controlsWrapped: narrowHeader
+	readonly property bool fullscreen: visibility === Window.FullScreen
+	readonly property bool narrowHeader: width < 560
+	readonly property bool controlsWrapped: false
 	readonly property string surfaceId: "screenShare.viewer"
 	readonly property string sharerLabel: String(backend.ownerLabel || "").trim()
 	readonly property string roomLabel: String(backend.roomLabel || "").trim()
@@ -23,6 +24,15 @@ ApplicationWindow {
 		if (roomLabel.length > 0)
 			parts.push(qsTr("in %1").arg(roomLabel))
 		return parts.length > 0 ? parts.join(" · ") : String(backend.detail || qsTr("Live viewer"))
+	}
+	readonly property string compactIdentityLabel: {
+		const parts = []
+		if (sharerLabel.length > 0)
+			parts.push(sharerLabel)
+		if (roomLabel.length > 0)
+			parts.push(roomLabel)
+		return parts.length > 0
+			? parts.join(" · ") : String(backend.title || qsTr("Live screen share"))
 	}
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 	readonly property string operationStatus: String(backend.operationStatus || "idle")
@@ -52,9 +62,6 @@ ApplicationWindow {
 	readonly property string headerStateLabel: operationFailed ? qsTr("Viewer unavailable")
 		: operationBusy ? (hasShownLiveFrame ? qsTr("Reconnecting") : qsTr("Connecting"))
 		: backend.paused ? qsTr("Paused locally") : qsTr("Live")
-	readonly property color headerStateTone: operationFailed ? Theme.danger
-		: operationBusy ? Theme.warning
-		: backend.paused ? Theme.textMuted : Theme.success
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -141,8 +148,10 @@ ApplicationWindow {
 	function setFullscreen(enabled) {
 		if (enabled)
 			root.showFullScreen()
-		else
+		else {
 			root.showNormal()
+			Qt.callLater(focusInitialControl)
+		}
 	}
 	function closeFromHost() {
 		hostClosing = true
@@ -197,13 +206,12 @@ ApplicationWindow {
 			Layout.row: 1
 			Layout.column: 0
 			Layout.fillWidth: true
-			Layout.preferredHeight: {
-				const metadataHeight = headerMetadata ? headerMetadata.implicitHeight : 0
-				const actionsHeight = headerActions ? headerActions.implicitHeight : 0
-				return Boolean(root && root.narrowHeader)
-					? metadataHeight + actionsHeight + Theme.space2 + Theme.space2 * 2
-					: Math.max(metadataHeight, actionsHeight) + Theme.space2 * 2
-			}
+			Layout.preferredHeight: visible
+				? Math.max(headerMetadata.implicitHeight, headerActions.implicitHeight) + Theme.space2 * 2
+				: 0
+			Layout.minimumHeight: 0
+			Layout.maximumHeight: visible ? Number.POSITIVE_INFINITY : 0
+			visible: !root.fullscreen
 			radius: 0
 			color: Theme.withAlpha(Theme.chatSurface, 0.98)
 			border.width: 0
@@ -232,180 +240,111 @@ ApplicationWindow {
 				}
 
 				RowLayout {
-					id: headerMetadata
-					objectName: "screenShareViewerMetadata"
-					anchors.left: parent.left
-					anchors.right: !parent ? undefined
-						: (root && root.narrowHeader) ? parent.right
-						: headerActions ? headerActions.left : parent.right
-					anchors.rightMargin: root && root.narrowHeader ? 0 : Theme.space4
-					anchors.top: parent.top
-					height: implicitHeight
-					spacing: Theme.space2
-					Accessible.ignored: true
+					anchors.fill: parent
+					spacing: Theme.space3
 
-					Rectangle {
-						Layout.preferredWidth: 30
-						Layout.preferredHeight: 30
-						Layout.alignment: Qt.AlignVCenter
-						radius: height / 2
-						color: Theme.withAlpha(Theme.accent, 0.12)
-						border.width: 0
-						ModernIcon {
-							anchors.centerIn: parent
-							name: "screen-share"
-							size: 18
-							color: Theme.accent
-						}
-					}
-
-					ColumnLayout {
+					Label {
+						id: headerMetadata
+						objectName: "screenShareViewerMetadata"
 						Layout.fillWidth: true
 						Layout.minimumWidth: 0
-						spacing: 2
-						Label {
-							Layout.fillWidth: true
-							textFormat: Text.PlainText
-							text: String(backend.title || qsTr("Live screen share"))
-							color: Theme.textStrong
-							font.weight: Font.DemiBold
-							font.pixelSize: Theme.fontLabel
-							elide: Text.ElideRight
-							Accessible.ignored: true
-						}
-						Label {
-							Layout.fillWidth: true
-							textFormat: Text.PlainText
-							text: root.identityDetail
-							color: Theme.textMuted
-							font.pixelSize: Theme.fontCaption
-							elide: Text.ElideRight
-							Accessible.ignored: true
-						}
-					}
-
-					Rectangle {
-						id: headerStateBadge
-						objectName: "screenShareStateBadge"
 						Layout.alignment: Qt.AlignVCenter
-						Layout.preferredWidth: headerStateBadgeLabel.implicitWidth + Theme.space3
-						Layout.preferredHeight: 24
-						radius: height / 2
-						color: Theme.withAlpha(root.headerStateTone, 0.14)
-						border.color: Theme.withAlpha(root.headerStateTone, 0.34)
-						Accessible.role: Accessible.StaticText
-						Accessible.name: root.headerStateLabel
-						Label {
-							id: headerStateBadgeLabel
-							anchors.centerIn: parent
-							textFormat: Text.PlainText
-							text: root.headerStateLabel
-							color: root.headerStateTone
-							font.pixelSize: Theme.fontCaption
-							font.weight: Font.DemiBold
-							Accessible.ignored: true
-						}
+						textFormat: Text.PlainText
+						text: root.compactIdentityLabel
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						elide: Text.ElideRight
+						Accessible.ignored: true
 					}
-				}
 
-				Item {
-					id: headerActions
-					objectName: "screenShareViewerHeaderActions"
-					anchors.left: root && root.narrowHeader && parent ? parent.left : undefined
-					anchors.right: parent ? parent.right : undefined
-					anchors.top: !parent ? undefined
-						: (root && root.narrowHeader) && headerMetadata ? headerMetadata.bottom : parent.top
-					anchors.topMargin: root && root.narrowHeader ? Theme.space2 : 0
-					anchors.verticalCenter: root && root.narrowHeader || !parent
-						? undefined : parent.verticalCenter
-					width: !parent ? 0
-						: root && root.narrowHeader ? parent.width
-						: headerActionRow ? headerActionRow.implicitWidth : 0
-					height: headerActionRow ? headerActionRow.implicitHeight : 0
-					implicitWidth: headerActionRow ? headerActionRow.implicitWidth : 0
-					implicitHeight: headerActionRow ? headerActionRow.implicitHeight : 0
+					Item {
+						id: headerActions
+						objectName: "screenShareViewerHeaderActions"
+						Layout.alignment: Qt.AlignVCenter
+						Layout.preferredWidth: headerActionRow.implicitWidth
+						Layout.preferredHeight: headerActionRow.implicitHeight
+						implicitWidth: headerActionRow.implicitWidth
+						implicitHeight: headerActionRow.implicitHeight
 
-					RowLayout {
-						id: headerActionRow
-						anchors.right: parent.right
-						anchors.verticalCenter: parent.verticalCenter
-						spacing: Theme.space1
+						RowLayout {
+							id: headerActionRow
+							anchors.fill: parent
+							spacing: Theme.space1
 
-						ModernIconButton {
-							id: screenSharePauseButton
-							objectName: "screenSharePauseButton"
-							visible: !root.operationBusy && !root.operationFailed
-							enabled: root.transportControlsEnabled
-							dense: true
-							text: root.backend && root.backend.paused ? qsTr("Resume") : qsTr("Pause")
-							iconName: root.backend && root.backend.paused ? "play" : "pause"
-							overlay: true
-							selected: Boolean(root.backend && root.backend.paused)
-							tone: root.backend && root.backend.paused ? "accent" : "neutral"
-							Accessible.description: root.backend && root.backend.paused
-								? qsTr("Resume immediately without reconnecting the receiver")
-								: qsTr("Pause this stream locally without closing the viewer")
-							onClicked: if (root.backend) root.backend.setPaused(!root.backend.paused)
-						}
+							ModernIconButton {
+								id: screenSharePauseButton
+								objectName: "screenSharePauseButton"
+								visible: !root.operationBusy && !root.operationFailed
+								enabled: root.transportControlsEnabled
+								dense: true
+								text: root.backend && root.backend.paused ? qsTr("Resume") : qsTr("Pause")
+								iconName: root.backend && root.backend.paused ? "play" : "pause"
+								selected: Boolean(root.backend && root.backend.paused)
+								tone: root.backend && root.backend.paused ? "accent" : "neutral"
+								Accessible.description: root.backend && root.backend.paused
+									? qsTr("Resume immediately without reconnecting the receiver")
+									: qsTr("Pause this stream locally without closing the viewer")
+								onClicked: if (root.backend) root.backend.setPaused(!root.backend.paused)
+							}
 
-						ModernIconButton {
-							id: screenShareMuteButton
-							objectName: "screenShareMuteButton"
-							visible: !root.operationBusy && !root.operationFailed
-							enabled: backend.audioAvailable && root.transportControlsEnabled
-							dense: true
-							text: backend.audioMuted ? qsTr("Unmute") : qsTr("Mute")
-							iconName: backend.audioMuted ? "volume-off" : "volume"
-							overlay: true
-							selected: backend.audioMuted
-							Accessible.description: backend.audioAvailable
-								? (root.audioControlNeedsAttention && root.audioControlError.length > 0
-									? root.audioControlError : qsTr("Change local audio playback for this share"))
-								: qsTr("This share has no audio track")
-							onClicked: backend.setAudioMuted(!backend.audioMuted)
-						}
+							ModernIconButton {
+								id: screenShareMuteButton
+								objectName: "screenShareMuteButton"
+								visible: backend.audioAvailable
+									&& !root.operationBusy && !root.operationFailed
+								enabled: root.transportControlsEnabled
+								dense: true
+								text: backend.audioMuted ? qsTr("Unmute") : qsTr("Mute")
+								iconName: backend.audioMuted ? "volume-off" : "volume"
+								selected: backend.audioMuted
+								Accessible.description: root.audioControlNeedsAttention
+									&& root.audioControlError.length > 0
+									? root.audioControlError
+									: qsTr("Change local audio playback for this share")
+								onClicked: backend.setAudioMuted(!backend.audioMuted)
+							}
 
-						ModernSlider {
-							id: screenShareVolumeSlider
-							objectName: "screenShareVolumeSlider"
-							Layout.preferredWidth: root && root.narrowHeader ? 96 : 112
-							visible: !root.operationBusy && !root.operationFailed
-							from: 0
-							to: 100
-							value: backend.audioVolume
-							enabled: backend.audioAvailable && root.transportControlsEnabled
-							onMoved: backend.setAudioVolume(value)
-							Accessible.name: qsTr("Stream volume")
-							Accessible.description: qsTr("%1 percent").arg(Math.round(value))
-						}
+							ModernSlider {
+								id: screenShareVolumeSlider
+								objectName: "screenShareVolumeSlider"
+								Layout.preferredWidth: 104
+								visible: backend.audioAvailable
+									&& !root.operationBusy && !root.operationFailed
+								from: 0
+								to: 100
+								value: backend.audioVolume
+								enabled: root.transportControlsEnabled
+								onMoved: backend.setAudioVolume(value)
+								Accessible.name: qsTr("Stream volume")
+								Accessible.description: qsTr("%1 percent").arg(Math.round(value))
+							}
 
-						ModernIconButton {
-							id: screenShareFullscreenButton
-							objectName: "screenShareFullscreenButton"
-							visible: !root.operationBusy && !root.operationFailed
-							text: root.visibility === Window.FullScreen
-								? qsTr("Exit full screen") : qsTr("Enter full screen")
-							iconName: root.visibility === Window.FullScreen ? "fullscreen-exit" : "fullscreen"
-							overlay: true
-							dense: true
-							selected: root.visibility === Window.FullScreen
-							Accessible.name: root.visibility === Window.FullScreen
-								? qsTr("Exit full screen") : qsTr("Enter full screen")
-							onClicked: root.setFullscreen(root.visibility !== Window.FullScreen)
-						}
+							ModernIconButton {
+								id: screenShareFullscreenButton
+								objectName: "screenShareFullscreenButton"
+								visible: !root.operationBusy && !root.operationFailed
+								text: root.fullscreen
+									? qsTr("Exit full screen") : qsTr("Enter full screen")
+								iconName: root.fullscreen ? "fullscreen-exit" : "fullscreen"
+								dense: true
+								selected: root.fullscreen
+								Accessible.name: root.fullscreen
+									? qsTr("Exit full screen") : qsTr("Enter full screen")
+								onClicked: root.setFullscreen(!root.fullscreen)
+							}
 
-						ModernIconButton {
-							id: screenShareCloseButton
-							objectName: "screenShareCloseButton"
-							visible: !root.operationFailed
-							dense: true
-							text: qsTr("Close viewer")
-							iconName: "close"
-							overlay: true
-							selected: activeFocus
-							tone: "danger"
-							Accessible.description: qsTr("Stop receiving this screen share")
-							onClicked: backend.requestStop()
+							ModernIconButton {
+								id: screenShareCloseButton
+								objectName: "screenShareCloseButton"
+								visible: !root.operationFailed
+								dense: true
+								text: qsTr("Close viewer")
+								iconName: "close"
+								selected: activeFocus
+								tone: "danger"
+								Accessible.description: qsTr("Stop receiving this screen share")
+								onClicked: backend.requestStop()
+							}
 						}
 					}
 				}
@@ -442,40 +381,6 @@ ApplicationWindow {
 				anchors.margins: 1
 				window: backend.videoWindow
 				visible: root.displayState === "active" && !root.nativeSurfaceReady && window !== null
-			}
-
-			Rectangle {
-				objectName: "screenShareLiveBadge"
-				anchors.left: parent.left
-				anchors.top: parent.top
-				anchors.margins: Theme.space3
-				width: liveBadgeRow.implicitWidth + Theme.space3
-				height: 26
-				radius: height / 2
-				visible: root.displayState === "active"
-				color: Theme.withAlpha(Theme.mediaCanvas, 0.78)
-				border.color: Theme.withAlpha(Theme.success, 0.55)
-				z: 3
-				Row {
-					id: liveBadgeRow
-					anchors.centerIn: parent
-					spacing: Theme.space1
-					Rectangle {
-						anchors.verticalCenter: parent.verticalCenter
-						width: 7
-						height: 7
-						radius: width / 2
-						color: Theme.success
-					}
-					Label {
-						objectName: "screenShareLiveBadgeLabel"
-						textFormat: Text.PlainText
-						text: qsTr("LIVE")
-						color: Theme.mediaOverlayTextStrong
-						font.pixelSize: Theme.fontCaption
-						font.weight: Font.DemiBold
-					}
-				}
 			}
 
 			Rectangle {
@@ -521,15 +426,14 @@ ApplicationWindow {
 						Layout.alignment: Qt.AlignHCenter
 						Layout.preferredWidth: 52
 						Layout.preferredHeight: 52
-						visible: !screenShareBusy.visible
+						visible: root.displayState === "error"
 						radius: Theme.innerRadius
-						color: root.displayState === "error"
-							? Theme.withAlpha(Theme.danger, 0.15) : Theme.accentSubtle
+						color: Theme.withAlpha(Theme.danger, 0.15)
 						ModernIcon {
 							anchors.centerIn: parent
-							name: root.displayState === "error" ? "warning" : "screen-share"
+							name: "warning"
 							size: 24
-							color: root.displayState === "error" ? Theme.danger : Theme.accent
+							color: Theme.danger
 						}
 					}
 					Label {
@@ -591,7 +495,8 @@ ApplicationWindow {
 			}
 		}
 
-		RowLayout {
+		Label {
+			objectName: "screenShareAudioControlStatus"
 			Layout.row: 2
 			Layout.column: 0
 			Layout.fillWidth: true
@@ -599,38 +504,19 @@ ApplicationWindow {
 			Layout.rightMargin: Theme.space3
 			Layout.topMargin: Theme.space1
 			Layout.bottomMargin: Theme.space1
-			visible: root.playbackSurfaceReady && !root.operationBusy && !root.operationFailed
-			spacing: Theme.space2
-			Label {
-				Layout.fillWidth: true
-				textFormat: Text.PlainText
-				text: backend.status
-				color: Theme.textMuted
-				font.pixelSize: Theme.fontCaption
-				elide: Text.ElideRight
-			}
-			Label {
-				objectName: "screenShareAudioControlStatus"
-				Layout.maximumWidth: Math.max(180, root.width * 0.34)
-				visible: root.audioControlNeedsAttention && root.audioControlError.length > 0
-				textFormat: Text.PlainText
-				text: root.audioControlError
-				color: root.audioControlStatus === "error" ? Theme.danger : Theme.warning
-				font.pixelSize: Theme.fontCaption
-				elide: Text.ElideRight
-				Accessible.role: root.audioControlStatus === "error"
-					? Accessible.AlertMessage : Accessible.StaticText
-				Accessible.name: root.audioControlStatus === "error"
-					? qsTr("Viewer audio control failed") : qsTr("Connecting viewer audio controls")
-				Accessible.description: text
-			}
-			Label {
-				textFormat: Text.PlainText
-				text: root.nativeSurfaceReady ? qsTr("In-app video") : qsTr("System video")
-				color: Theme.textFaint
-				font.pixelSize: Theme.fontCaption
-				visible: root.playbackSurfaceReady
-			}
+			visible: !root.fullscreen && root.playbackSurfaceReady
+				&& !root.operationBusy && !root.operationFailed
+				&& root.audioControlNeedsAttention && root.audioControlError.length > 0
+			textFormat: Text.PlainText
+			text: root.audioControlError
+			color: root.audioControlStatus === "error" ? Theme.danger : Theme.warning
+			font.pixelSize: Theme.fontCaption
+			elide: Text.ElideRight
+			Accessible.role: root.audioControlStatus === "error"
+				? Accessible.AlertMessage : Accessible.StaticText
+			Accessible.name: root.audioControlStatus === "error"
+				? qsTr("Viewer audio control failed") : qsTr("Connecting viewer audio controls")
+			Accessible.description: text
 		}
     }
 }
