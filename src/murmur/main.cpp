@@ -16,7 +16,9 @@
 #include <QSslSocket>
 
 #include <cassert>
+#include <array>
 #include <csignal>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 
@@ -199,6 +201,7 @@ struct CLIOptions {
 	std::optional< std::string > dbDumpPath;
 	std::optional< std::string > dbImportPath;
 	std::tuple< std::string, std::optional< unsigned int > > supwSrv;
+	std::optional< unsigned int > readSupwSrv;
 	std::optional< unsigned int > disableSuSrv;
 	bool dbMigrate     = false;
 	bool verboseLogging = false;
@@ -214,7 +217,6 @@ struct CLIOptions {
 
 #ifdef Q_OS_UNIX
 	bool limits = false;
-	std::optional< unsigned int > readSupwSrv;
 #endif
 
 	static constexpr const char *const CLI_ABOUT_SECTION          = "About";
@@ -235,18 +237,20 @@ CLIOptions parseCLI(int argc, char **argv) {
 		->check(CLI::ExistingFile)
 		->group(CLIOptions::CLI_CONFIGURATION_SECTION);
 
-	app.add_option("--set-su-pw", options.supwSrv, "Set password for 'SuperUser' account on server srv.")
+	app.add_option("--set-su-pw", options.supwSrv,
+				   "Set password for 'SuperUser' account on server srv. "
+				   "The password is visible in process arguments; prefer --read-su-pw.")
 		->option_text("<pw> [srv]")
 		->type_size(1, 2)
 		->group(CLIOptions::CLI_ADMINISTRATION_SECTION);
 
-#ifdef Q_OS_UNIX
 	app.add_option("--read-su-pw", options.readSupwSrv, "Reads password for server srv from standard input.")
 		->option_text("[srv]")
 		->default_str("0")
 		->expected(0, 1)
 		->group(CLIOptions::CLI_ADMINISTRATION_SECTION);
 
+#ifdef Q_OS_UNIX
 	app.add_flag("--limits", options.limits,
 				 "Tests and shows how many file descriptors and threads can be created. "
 				 "The purpose of this option is to test how many clients Mumble server can handle. "
@@ -422,9 +426,7 @@ int main(int argc, char **argv) {
 		bool wipeSsl       = cli_options.wipeSsl;
 		bool wipeLogs      = cli_options.wipeLogs;
 		unsigned int sunum = 0;
-#ifdef Q_OS_UNIX
 		bool readPw = false;
-#endif
 		bool logGroups = cli_options.logGroups;
 		bool logACL    = cli_options.logAcls;
 
@@ -438,26 +440,27 @@ int main(int argc, char **argv) {
 
 		if (!std::get< 0 >(cli_options.supwSrv).empty()) {
 			supw  = QString::fromStdString(std::get< 0 >(cli_options.supwSrv));
+			OPENSSL_cleanse(std::get< 0 >(cli_options.supwSrv).data(),
+							std::get< 0 >(cli_options.supwSrv).size());
+			std::get< 0 >(cli_options.supwSrv).clear();
 			sunum = std::get< 1 >(cli_options.supwSrv).value_or< unsigned int >(0);
-#ifdef Q_OS_UNIX
 		} else if (cli_options.readSupwSrv) {
-			// Note that it is essential to set detach = false here. If this is ever to be changed, the code part
-			// handling the readPw = true part has to be moved up so that it is executed before fork is called on Unix
-			// systems.
-
+			// On Unix this must be read before any fork. On every platform,
+			// disabling detach also makes stdin-based automation deterministic.
 			detach = false;
 			readPw = true;
 			sunum  = *cli_options.readSupwSrv;
 		}
 
+#ifdef Q_OS_UNIX
 		if (cli_options.limits) {
 			detach = false;
 			Meta::mp->read(inifile);
 			unixhandler.setuid();
 			unixhandler.finalcap();
 			LimitTest::testLimits(a);
-#endif
 		}
+#endif
 
 		if (QSslSocket::supportsSsl()) {
 			qInfo("SSL: OpenSSL version is '%s'", SSLeay_version(SSLEAY_VERSION));
@@ -613,33 +616,44 @@ int main(int argc, char **argv) {
 		meta = new Meta(Meta::getConnectionParameter());
 		meta->initPBKDF2IterationCount();
 
-#ifdef Q_OS_UNIX
-		// It doesn't matter that this code comes after the forking because detach is
-		// set to false when readPw is set to true.
 		if (readPw) {
-			char password[256];
-			char *p;
+			std::array< char, 256 > password {};
 
 			printf("Password: ");
 			fflush(nullptr);
-			if (fgets(password, 255, stdin) != password)
-				qFatal("No password provided");
-			p = strchr(password, '\r');
-			if (p)
+			if (fgets(password.data(), static_cast< int >(password.size() - 1), stdin) != password.data()) {
+				qCritical("No SuperUser password provided on standard input");
+				return 1;
+			}
+			char *p = strchr(password.data(), '\r');
+			if (p) {
 				*p = 0;
-			p = strchr(password, '\n');
-			if (p)
+			}
+			p = strchr(password.data(), '\n');
+			if (p) {
 				*p = 0;
+			}
 
-			supw = QLatin1String(password);
+			supw = QString::fromUtf8(password.data());
+			OPENSSL_cleanse(password.data(), password.size());
 		}
-#endif
 
 		if (!supw.isNull()) {
 			if (supw.isEmpty()) {
-				qFatal("Superuser password can not be empty");
+				qCritical("SuperUser password can not be empty");
+				return 1;
 			}
-			meta->dbWrapper.setSuperUserPassword(sunum, supw.toStdString());
+			std::string password = supw.toStdString();
+			try {
+				meta->dbWrapper.setSuperUserPassword(sunum, password);
+			} catch (...) {
+				OPENSSL_cleanse(password.data(), password.size());
+				OPENSSL_cleanse(supw.data(), static_cast< std::size_t >(supw.size()) * sizeof(QChar));
+				throw;
+			}
+			OPENSSL_cleanse(password.data(), password.size());
+			OPENSSL_cleanse(supw.data(), static_cast< std::size_t >(supw.size()) * sizeof(QChar));
+			supw.clear();
 			qInfo("Superuser password set on server %u", sunum);
 			return 0;
 		}

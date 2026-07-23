@@ -63,6 +63,7 @@
 #include "Screen.h"
 #include "ScreenShare.h"
 #include "ScreenShareManager.h"
+#include "ServerLogRedaction.h"
 #include "ServerHandler.h"
 #include "ServerConnectionUtils.h"
 #include "ServerResolver.h"
@@ -25582,11 +25583,12 @@ QVariantMap MainWindow::buildQmlRoomState() {
 }
 
 QVariantMap modernServerLogMessageState(const quint64 sequence, const qint64 timestampMs, const QString &text) {
+	const QString safeText = Mumble::ServerLog::redactSensitiveText(text);
 	QVariantMap message;
 	message.insert(QStringLiteral("messageKey"),
 				   QStringLiteral("server-log:%1").arg(static_cast< qulonglong >(sequence)));
 	message.insert(QStringLiteral("actor"), QObject::tr("Server"));
-	message.insert(QStringLiteral("bodyText"), text);
+	message.insert(QStringLiteral("bodyText"), safeText);
 	message.insert(QStringLiteral("createdAtMs"), timestampMs);
 	message.insert(QStringLiteral("timeLabel"), timestampMs > 0
 		? QDateTime::fromMSecsSinceEpoch(timestampMs).toString(QStringLiteral("HH:mm:ss")) : QString());
@@ -25603,7 +25605,8 @@ QVariantMap modernEphemeralLogMessageState(const quint64 sequence, const QString
 	message.insert(QStringLiteral("messageKey"),
 				   QStringLiteral("session-log:%1").arg(static_cast< qulonglong >(sequence)));
 	message.insert(QStringLiteral("actor"), QObject::tr("Session log"));
-	message.insert(QStringLiteral("bodyText"), multilinePlainTextFromHtml(html));
+	message.insert(QStringLiteral("bodyText"),
+				   Mumble::ServerLog::redactSensitiveText(multilinePlainTextFromHtml(html)));
 	message.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
 	message.insert(QStringLiteral("system"), true);
 	message.insert(QStringLiteral("canReply"), false);

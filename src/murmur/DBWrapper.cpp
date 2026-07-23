@@ -14,6 +14,7 @@
 #include "MumbleConstants.h"
 #include "PBKDF2.h"
 #include "PasswordGenerator.h"
+#include "ServerLogRedaction.h"
 #include "Server.h"
 #include "ServerUserInfo.h"
 #include "VolumeAdjustment.h"
@@ -96,6 +97,8 @@
 
 #include <QDateTime>
 #include <QString>
+
+#include <openssl/crypto.h>
 
 namespace mdb  = ::mumble::db;
 namespace msdb = ::mumble::server::db;
@@ -205,11 +208,27 @@ unsigned int DBWrapper::addServer() {
 
 	// Generate a new, default password for the SuperUser
 	constexpr const int pwSize = 32;
-	std::string pw             = PasswordGenerator::generatePassword(pwSize).toStdString();
-	setSuperUserPassword(serverID, pw);
+	QString generatedPassword = PasswordGenerator::generatePassword(pwSize);
+	std::string pw             = generatedPassword.toStdString();
+	try {
+		setSuperUserPassword(serverID, pw);
+	} catch (...) {
+		OPENSSL_cleanse(pw.data(), pw.size());
+		OPENSSL_cleanse(generatedPassword.data(),
+						static_cast< std::size_t >(generatedPassword.size()) * sizeof(QChar));
+		throw;
+	}
 
-	// Write the default password into the DB, in case it needs to be fetched at a later point
-	logMessage(serverID, "Initialized 'SuperUser' password on server " + std::to_string(serverID) + " to '" + pw + "'");
+	// The generated password deliberately remains undisclosed. Persisting it in
+	// the server log made it visible to log readers and the modern Activity
+	// stream. Operators must set an explicit password through the stdin-based
+	// administration command before their first SuperUser login.
+	OPENSSL_cleanse(pw.data(), pw.size());
+	pw.clear();
+	OPENSSL_cleanse(generatedPassword.data(),
+					static_cast< std::size_t >(generatedPassword.size()) * sizeof(QChar));
+	generatedPassword.clear();
+	logMessage(serverID, Mumble::ServerLog::superUserBootstrapNotice(serverID).toStdString());
 
 	// Add server-wide admin group
 	::msdb::DBGroup adminGroup;
@@ -989,7 +1008,8 @@ void DBWrapper::logMessage(unsigned int serverID, const std::string &msg) {
 
 	assertValidID(serverID);
 
-	::msdb::DBLogEntry entry(msg);
+	::msdb::DBLogEntry entry(
+		Mumble::ServerLog::redactSensitiveText(QString::fromStdString(msg)).toStdString());
 
 	m_serverDB.getLogTable().logMessage(serverID, entry);
 
@@ -1001,8 +1021,13 @@ std::vector<::msdb::DBLogEntry > DBWrapper::getLogs(unsigned int serverID, unsig
 
 	assertValidID(serverID);
 
-	return m_serverDB.getLogTable().getLogs(
+	std::vector< ::msdb::DBLogEntry > entries = m_serverDB.getLogTable().getLogs(
 		serverID, static_cast< unsigned int >(amount >= 0 ? amount : std::numeric_limits< int >::max()), startOffset);
+	for (::msdb::DBLogEntry &entry : entries) {
+		entry.message =
+			Mumble::ServerLog::redactSensitiveText(QString::fromStdString(entry.message)).toStdString();
+	}
+	return entries;
 
 	WRAPPER_END
 }

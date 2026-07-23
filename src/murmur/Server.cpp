@@ -25,6 +25,7 @@
 #include "ProtoUtils.h"
 #include "QtUtils.h"
 #include "ScreenShare.h"
+#include "ServerLogRedaction.h"
 #include "ServerUser.h"
 #include "User.h"
 #include "Version.h"
@@ -91,7 +92,8 @@ constexpr unsigned int SERVER_LOG_BACKLOG_MAX_BYTES              = 512U * 1024U;
 
 QString boundedServerLogText(const QString &text) {
 	return Mumble::Feedback::truncateUtf8Bytes(
-		text, SERVER_LOG_ENTRY_MAX_BYTES, QStringLiteral("[server log entry truncated]"));
+		Mumble::ServerLog::redactSensitiveText(text), SERVER_LOG_ENTRY_MAX_BYTES,
+		QStringLiteral("[server log entry truncated]"));
 }
 
 qint64 serverLogTimestampMs(const msdb::DBLogEntry::timestamp_type &timestamp) {
@@ -2744,20 +2746,23 @@ void Server::log(ServerUser *u, const QString &str) const {
 
 void Server::log(const QString &msg) const {
 	const qint64 timestampMs = QDateTime::currentMSecsSinceEpoch();
+	const QString safeMessage = Mumble::ServerLog::redactSensitiveText(msg);
 	if (meta->assumedDBState == DBState::Normal && Meta::mp->iLogDays >= 0) {
 		// New philosophy is that DB access can't be considered const, but old code requires this function
 		// to be const. Thus, we require a const_cast here.
-		const_cast< DBWrapper & >(m_dbWrapper).logMessage(iServerNum, msg.toStdString());
+		const_cast< DBWrapper & >(m_dbWrapper).logMessage(iServerNum, safeMessage.toStdString());
 	}
 
-	qWarning("%d => %s", iServerNum, msg.toUtf8().constData());
+	qWarning("%d => %s", iServerNum, safeMessage.toUtf8().constData());
 
 	Server *server = const_cast< Server * >(this);
 	if (QThread::currentThread() == server->thread()) {
-		server->broadcastServerLogEntry(msg, timestampMs);
+		server->broadcastServerLogEntry(safeMessage, timestampMs);
 	} else {
 		QMetaObject::invokeMethod(
-			server, [server, msg, timestampMs]() { server->broadcastServerLogEntry(msg, timestampMs); },
+			server, [server, safeMessage, timestampMs]() {
+				server->broadcastServerLogEntry(safeMessage, timestampMs);
+			},
 			Qt::QueuedConnection);
 	}
 }

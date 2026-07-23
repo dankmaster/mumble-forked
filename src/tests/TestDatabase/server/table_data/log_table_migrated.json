@@ -13,5 +13,20 @@
 				1671293390
 			]
 		]
+	},
+	"v23": {
+		"table_name": "server_logs",
+		"column_names": [
+			"server_id",
+			"message",
+			"message_date"
+		],
+		"rows": [
+			[
+				0,
+				"Removed a legacy SuperUser bootstrap credential from server log history. Set an explicit password with --read-su-pw before login.",
+				1671293390
+			]
+		]
 	}
 }

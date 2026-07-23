@@ -38,5 +38,45 @@
 				1671293390
 			]
 		]
+	},
+	"v23": {
+		"table_name": "server_logs",
+		"column_names": [
+			"server_id",
+			"message",
+			"message_date"
+		],
+		"column_types": [
+			"INTEGER",
+			"TEXT",
+			"BIGINT"
+		],
+		"rows": [
+			[
+				0,
+				"Initialized 'SuperUser' password on server 0 to 'legacy-secret-that-must-be-removed'",
+				1671293390
+			]
+		]
+	},
+	"v24": {
+		"table_name": "server_logs",
+		"column_names": [
+			"server_id",
+			"message",
+			"message_date"
+		],
+		"column_types": [
+			"INTEGER",
+			"TEXT",
+			"BIGINT"
+		],
+		"rows": [
+			[
+				0,
+				"Removed a legacy SuperUser bootstrap credential from server log history. Set an explicit password with --read-su-pw before login.",
+				1671293390
+			]
+		]
 	}
 }

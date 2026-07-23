@@ -177,6 +177,20 @@ namespace server {
 					// Use default implementation to handle migration without change of format
 					mdb::Table::migrate(fromSchemaVersion, toSchemaVersion);
 				}
+
+				if (fromSchemaVersion < 24) {
+					// Older servers persisted the generated SuperUser bootstrap
+					// password verbatim. Remove that credential from storage while
+					// preserving a useful, non-secret audit entry.
+					const std::string legacyPattern =
+						"Initialized 'SuperUser' password on server % to '%'";
+					const std::string redactedMessage =
+						"Removed a legacy SuperUser bootstrap credential from server log history. "
+						"Set an explicit password with --read-su-pw before login.";
+					m_sql << "UPDATE \"" << getName() << "\" SET \"" << column::message
+						  << "\" = :redactedMessage WHERE \"" << column::message << "\" LIKE :legacyPattern",
+						soci::use(redactedMessage), soci::use(legacyPattern);
+				}
 			} catch (const soci::soci_error &) {
 				std::throw_with_nested(::mdb::MigrationException(
 					std::string("Failed at migrating table \"") + NAME + "\" from schema version "

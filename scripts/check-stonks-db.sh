@@ -6,11 +6,11 @@ usage() {
 Usage: scripts/check-stonks-db.sh [--expect-version VERSION] <mumble-server.sqlite>
 
 Verifies, read-only, that a Murmur SQLite database has the Stonks schema migration applied.
-Defaults to expecting schema version 23.
+Defaults to expecting schema version 24.
 USAGE
 }
 
-expected_version="23"
+expected_version="24"
 db_path=""
 
 while [[ $# -gt 0 ]]; do
@@ -173,4 +173,13 @@ if [[ "$expected_version" -ge 23 ]]; then
 	echo "OK: stonks_valuations rows=$valuation_count range=$valuation_range"
 	echo "OK: stonks_valuations identity keys are unique"
 	echo "OK: stonks_valuations snapshot references are valid"
+fi
+
+if [[ "$expected_version" -ge 24 ]]; then
+	legacy_superuser_credentials="$(run_sql "SELECT COUNT(*) FROM server_logs WHERE message LIKE 'Initialized ''SuperUser'' password on server % to ''%'';")"
+	if [[ "$legacy_superuser_credentials" != "0" ]]; then
+		echo "Legacy plaintext SuperUser credentials remain in server_logs: $legacy_superuser_credentials" >&2
+		exit 1
+	fi
+	echo "OK: legacy plaintext SuperUser log credentials removed"
 fi
