@@ -4,12 +4,17 @@ import QtQuick.Layouts
 import QtWebEngine
 import Mumble.Theme 1.0
 import Mumble.ProviderPresentation 1.0
+import "MediaPlaybackProbe.js" as MediaPlaybackProbe
 
 ApplicationWindow {
     id: mediaWindow
 	property string visualFixtureMode: ""
 	property var mediaProfileFactory: typeof mediaProfiles !== "undefined" ? mediaProfiles : null
-	readonly property var providerPresentation: ProviderPresentation.resolve(mediaSession.provider)
+	// Detached direct media keeps the transport provider "direct", but its URL
+	// can still carry a known origin identity (for example v.redd.it or Imgur).
+	// Resolve that host locally so pop-outs do not regress to a generic Media badge.
+	readonly property string presentationProvider: presentationProviderHint()
+	readonly property var providerPresentation: ProviderPresentation.resolve(presentationProvider)
 	readonly property string providerLabel: providerPresentation.label
 		|| String(mediaSession.provider || "").trim() || qsTr("Media")
 	readonly property string providerMark: providerPresentation.mark
@@ -83,6 +88,20 @@ ApplicationWindow {
 			&& nativePlayerLoader.item.documentReady)
 		|| (!nativeDirectMedia && _documentReadyGeneration === _mediaGeneration
 			&& _mediaGeneration > 0 && _rendererHealthy)
+	readonly property bool surfaceVerified: documentReady
+	readonly property bool transportVerified: visualFixtureRendererReady
+		|| (nativeDirectMedia && documentReady)
+		|| (_transportVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0)
+	readonly property bool playbackVerified: documentReady
+		&& (mediaSession.state === "playing"
+			|| (_playbackVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0))
+	readonly property string surfaceVerificationState: visualFixtureRendererReady ? "verified"
+		: nativeDirectMedia ? (documentReady ? "verified" : rendererHealthy ? "pending" : "idle")
+		: mediaSession.error.length > 0 && _surfaceVerificationState === "idle"
+			? "failed" : _surfaceVerificationState
+	readonly property string surfaceVerificationEvidence: visualFixtureRendererReady ? "fixture"
+		: nativeDirectMedia && documentReady ? "native-media" : _surfaceVerificationEvidence
+	readonly property string surfaceVerificationDetail: _surfaceVerificationDetail
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
 		&& _mediaGeneration > 0 && _statePollToken >= 0
 	readonly property int statePollToken: _statePollToken
@@ -103,6 +122,12 @@ ApplicationWindow {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
+	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int _transportVerifiedGeneration: -1
+	property int _playbackVerifiedGeneration: -1
+	property string _surfaceVerificationState: "idle"
+	property string _surfaceVerificationEvidence: ""
+	property string _surfaceVerificationDetail: ""
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -225,6 +250,11 @@ ApplicationWindow {
 		_documentReadyProbeStartedAt = 0
 		documentReadyProbeAttempts = 0
 		documentReadyProbeState = "idle"
+		_transportVerifiedGeneration = -1
+		_playbackVerifiedGeneration = -1
+		_surfaceVerificationState = rendererIsHealthy ? "pending" : "idle"
+		_surfaceVerificationEvidence = ""
+		_surfaceVerificationDetail = ""
 		resetStatePoll()
 		resetAudioStatePoll()
 		_missingStatePolls = 0
@@ -272,14 +302,22 @@ ApplicationWindow {
 		if (generation !== _mediaGeneration || !_rendererHealthy)
 			return false
 		_documentReadyGeneration = generation
+		_transportVerifiedGeneration = generation
+		_surfaceVerificationState = "verified"
 		_missingStatePolls = 0
 		return true
 	}
 
-	function completeMediaDocumentLoad(generation) {
+	function completeMediaDocumentLoad(generation, evaluation) {
 		if (!markMediaDocumentReady(generation))
 			return false
 		_documentReadyProbeGeneration = -1
+		const result = evaluation && typeof evaluation === "object" ? evaluation : ({})
+		_surfaceVerificationEvidence = String(result.evidence || "manual")
+		_surfaceVerificationDetail = ""
+		if (result.playbackVerified === true)
+			_playbackVerifiedGeneration = generation
+		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (playerLoader.item && playerLoader.item.loadGeneration === generation)
 			playerLoader.item.documentReady = true
 		mediaSession.reportLoadProgress(100)
@@ -287,53 +325,75 @@ ApplicationWindow {
 		return true
 	}
 
-	function probeMediaDocumentReady(generation) {
-		if (generation !== _mediaGeneration || documentReady
+	function verificationFailureMessage(evaluation) {
+		const kind = String(evaluation ? evaluation.kind || "" : "")
+		if (kind === "verification" || kind === "sign-in")
+			return qsTr("This provider requires verification or sign-in. Open it externally to continue.")
+		if (kind === "unavailable")
+			return qsTr("This provider says the media is unavailable here. Open the original page instead.")
+		if (kind === "adaptive-renderer-failed")
+			return String(evaluation.detail || "")
+				|| qsTr("The stream could not be prepared for playback.")
+		if (kind === "adaptive-renderer-timeout")
+			return qsTr("The stream could not be prepared for playback.")
+		return qsTr("The provider player did not expose a usable media surface. Open it externally instead.")
+	}
+
+	function applyMediaSurfaceProbeResult(generation, value, background) {
+		if (generation !== _mediaGeneration)
+			return false
+		const evaluation = MediaPlaybackProbe.classify(value,
+			mediaSession.provider, adaptiveManifest,
+			background ? 0 : documentReadyProbeAttempts,
+			background ? 2147483647 : documentReadyProbeMaxAttempts)
+		_surfaceVerificationEvidence = String(evaluation.evidence || "")
+		documentReadyProbeState = String(evaluation.state || "pending")
+			+ (_surfaceVerificationEvidence.length > 0
+				? ":" + _surfaceVerificationEvidence : "")
+		if (evaluation.state === "verified") {
+			_transportVerifiedGeneration = generation
+			if (evaluation.playbackVerified === true)
+				_playbackVerifiedGeneration = generation
+			if (background) {
+				_surfaceVerificationState = "verified"
+				return true
+			}
+			return completeMediaDocumentLoad(generation, evaluation)
+		}
+		if (evaluation.state === "pending")
+			return false
+		const failureState = evaluation.state === "blocked" ? "blocked" : "failed"
+		const detail = verificationFailureMessage(evaluation)
+		if (!failMediaDocument(generation, failureState, detail,
+				String(evaluation.evidence || "")))
+			return false
+		if (typeof mediaSession.reportTypedError === "function")
+			mediaSession.reportTypedError(String(evaluation.kind || "provider-surface-failed"), detail)
+		else
+			mediaSession.reportError(detail)
+		return true
+	}
+
+	function probeMediaDocumentReady(generation, background) {
+		if (generation !== _mediaGeneration || (!background && documentReady)
 				|| _documentReadyProbeGeneration === generation || !playerLoader.item)
 			return false
 		const webPlayer = playerLoader.item
 		_documentReadyProbeGeneration = generation
 		_documentReadyProbeStartedAt = Date.now()
-		documentReadyProbeAttempts += 1
+		if (!background)
+			documentReadyProbeAttempts += 1
 		documentReadyProbeState = "submitted"
 		try {
 			webPlayer.runJavaScript(
-				"(function(){const state=String(document.readyState||'');"
-				+ "const media=document.querySelector('audio,video');"
-				+ "const adaptiveExpected=" + (adaptiveManifest ? "true" : "false") + ";"
-				+ "const adaptive=adaptiveExpected?(window.__mumbleAdaptiveState||null):null;"
-				+ "const error=adaptive?String(adaptive.error||''):'';"
-				+ "const ready=!!media&&(!adaptiveExpected||(adaptive&&adaptive.ready===true));"
-				+ "return state+'|'+(ready?'media':'none')+'|'+error;})()",
+				MediaPlaybackProbe.probeScript(mediaSession.provider,
+					adaptiveManifest),
 				function(value) {
 					if (mediaWindow._documentReadyProbeGeneration !== generation)
 						return
 					mediaWindow._documentReadyProbeGeneration = -1
 					mediaWindow._documentReadyProbeStartedAt = 0
-					const result = String(value || "")
-					mediaWindow.documentReadyProbeState = "callback:" + result
-					const parts = result.split("|")
-					const documentIsReady = parts[0] === "interactive" || parts[0] === "complete"
-					const mediaIsPresent = parts.length > 1 && parts[1] === "media"
-					const adaptiveError = parts.length > 2 ? parts.slice(2).join("|").trim() : ""
-					if (generation === mediaWindow.mediaGeneration && mediaWindow.adaptiveManifest
-							&& adaptiveError.length > 0) {
-						if (mediaWindow.failMediaDocument(generation))
-							mediaSession.reportTypedError("adaptive-renderer-failed", adaptiveError)
-						return
-					}
-					if (generation === mediaWindow.mediaGeneration && mediaWindow.adaptiveManifest
-							&& !mediaIsPresent && mediaWindow.documentReadyProbeAttempts >= 400) {
-						if (mediaWindow.failMediaDocument(generation))
-							mediaSession.reportTypedError("adaptive-renderer-timeout",
-								qsTr("The stream could not be prepared for playback."))
-						return
-					}
-					if (generation !== mediaWindow.mediaGeneration || mediaWindow.documentReady
-							|| !documentIsReady
-							|| (String(mediaSession.provider || "") === "direct" && !mediaIsPresent))
-						return
-					mediaWindow.completeMediaDocumentLoad(generation)
+					mediaWindow.applyMediaSurfaceProbeResult(generation, value, !!background)
 				})
 			return true
 		} catch (error) {
@@ -345,8 +405,14 @@ ApplicationWindow {
 		}
 	}
 
-	function failMediaDocument(generation) {
-		return invalidateMediaDocument(generation)
+	function failMediaDocument(generation, verificationState, detail, evidence) {
+		if (!invalidateMediaDocument(generation))
+			return false
+		_surfaceVerificationState = String(verificationState || "failed")
+		_surfaceVerificationDetail = String(detail || "")
+		_surfaceVerificationEvidence = String(evidence || "")
+		documentReadyProbeState = _surfaceVerificationState
+		return true
 	}
 
 	function handleWindowClosing(close) {
@@ -986,7 +1052,9 @@ ApplicationWindow {
 				if (loadGeneration !== mediaWindow.mediaGeneration
 						|| !mediaWindow.rendererHealthy || !mediaSession.active)
 					return
-				mediaSession.reportLoadProgress(loadProgress)
+				// Reserve 100 for the shared media-surface probe. A completed HTML
+				// request can still be a provider challenge or error document.
+				mediaSession.reportLoadProgress(Math.min(99, loadProgress))
 				if (loadProgress === 100)
 					Qt.callLater(function() { mediaWindow.probeMediaDocumentReady(loadGeneration) })
 			}
@@ -1013,8 +1081,12 @@ ApplicationWindow {
 					documentReady = false
 					if (mediaWindow.failMediaDocument(generation))
 						mediaSession.reportError(request.errorString)
-				} else if (request.status === WebEngineView.LoadSucceededStatus)
-					mediaWindow.completeMediaDocumentLoad(generation)
+				} else if (request.status === WebEngineView.LoadSucceededStatus) {
+					mediaSession.reportLoadProgress(99)
+					Qt.callLater(function() {
+						mediaWindow.probeMediaDocumentReady(generation)
+					})
+				}
             }
             onRenderProcessTerminated: function(status, exitCode) {
 				const generation = loadGeneration
@@ -1085,7 +1157,7 @@ ApplicationWindow {
 		interval: 50
 		running: mediaSession.active && !mediaWindow.nativeDirectMedia
 			&& mediaWindow.rendererHealthy
-			&& !mediaWindow.documentReady && mediaSession.loadProgress >= 100
+			&& !mediaWindow.documentReady && mediaSession.loadProgress >= 99
 		repeat: true
 		onTriggered: {
 			if (mediaWindow._documentReadyProbeGeneration === mediaWindow.mediaGeneration
@@ -1096,6 +1168,28 @@ ApplicationWindow {
 			}
 			mediaWindow.probeMediaDocumentReady(mediaWindow.mediaGeneration)
 		}
+	}
+
+	function presentationProviderHint() {
+		const transportProvider = String(mediaSession.provider || "").trim().toLowerCase()
+		if (transportProvider !== "direct")
+			return transportProvider
+		const match = String(mediaSession.url || "").match(
+			/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]+@)?([^:/?#]+)/i)
+		if (!match)
+			return transportProvider
+		const identity = ProviderPresentation.resolve(String(match[1] || ""))
+		return identity.known ? identity.token : transportProvider
+	}
+
+	Timer {
+		interval: 1500
+		running: mediaSession.active && !mediaWindow.nativeDirectMedia
+			&& mediaWindow.documentReady && mediaWindow.rendererHealthy
+			&& mediaSession.error.length === 0
+		repeat: true
+		onTriggered: mediaWindow.probeMediaDocumentReady(
+			mediaWindow.mediaGeneration, true)
 	}
 
 	Rectangle {

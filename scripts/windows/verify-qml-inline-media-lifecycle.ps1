@@ -34,7 +34,7 @@ if ($PollIntervalMilliseconds -lt 1 -or $PollIntervalMilliseconds -gt 100) {
 $executablePath = (Resolve-Path -LiteralPath $Executable).Path
 $sourceConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $outputFilePath = [IO.Path]::GetFullPath($OutputPath)
-$contractId = "windows-qml-inline-native-media-lifecycle-v2"
+$contractId = "windows-qml-inline-native-media-lifecycle-v3"
 $schemaVersion = 1
 $firstActivationTargetMilliseconds = 50.0
 $tinyLocalWav = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
@@ -610,16 +610,26 @@ function Wait-InlineRendererReady {
 		$response = Invoke-QmlAutomationCommand -Port $Port -Token $Token -Request @{ command = "qmlReadinessState" }
 		$media = Get-ObjectPropertyValue -Object $response -Name "media"
 		$backendState = [string](Get-ObjectPropertyValue -Object $media -Name "state" -Default "")
+		$verificationState = [string](Get-ObjectPropertyValue -Object $media -Name "surfaceVerificationState" -Default "")
+		$verificationEvidence = [string](Get-ObjectPropertyValue -Object $media -Name "surfaceVerificationEvidence" -Default "")
 		if ($null -ne $media -and
 			[bool](Get-ObjectPropertyValue -Object $media -Name "active" -Default $false) -and
 			[string](Get-ObjectPropertyValue -Object $media -Name "presentation" -Default "") -eq "inline" -and
 			[bool](Get-ObjectPropertyValue -Object $media -Name "rendererPresent" -Default $false) -and
 			[bool](Get-ObjectPropertyValue -Object $media -Name "rendererActive" -Default $false) -and
 			[bool](Get-ObjectPropertyValue -Object $media -Name "rendererReady" -Default $false) -and
+			[bool](Get-ObjectPropertyValue -Object $media -Name "surfaceVerified" -Default $false) -and
+			[bool](Get-ObjectPropertyValue -Object $media -Name "transportVerified" -Default $false) -and
+			$verificationState -eq "verified" -and
+			-not [string]::IsNullOrWhiteSpace($verificationEvidence) -and
 			$backendState -in @("paused", "playing")) {
 			return [pscustomobject]@{
 				renderer_ready_latency_ms = [double]$Stopwatch.Elapsed.TotalMilliseconds
 				playback_ready_latency_ms = [double]$Stopwatch.Elapsed.TotalMilliseconds
+				surface_verified = $true
+				transport_verified = $true
+				surface_verification_state = $verificationState
+				surface_verification_evidence = $verificationEvidence
 				state = $media
 			}
 		}
@@ -835,6 +845,14 @@ try {
 					renderer_ready_state = if ($null -ne $rendererReady) { $rendererReady.state } else { $null }
 					renderer_ready_error = $rendererReadyError
 					renderer_backend = $rendererBackend
+					surface_verified = $null -ne $rendererReady -and [bool]$rendererReady.surface_verified
+					transport_verified = $null -ne $rendererReady -and [bool]$rendererReady.transport_verified
+					surface_verification_state = if ($null -ne $rendererReady) {
+						[string]$rendererReady.surface_verification_state
+					} else { "" }
+					surface_verification_evidence = if ($null -ne $rendererReady) {
+						[string]$rendererReady.surface_verification_evidence
+					} else { "" }
 					native_backend_observed = $nativeBackendObserved
 					renderer_process_observed = $rendererProcessObserved
 					latched_qtwebengine_process_start_count = $cycleLatched.Count
@@ -845,6 +863,7 @@ try {
 					process_tree_after_close = $treeAfterClose
 					qtwebengine_process_persisted_after_close = $treeAfterClose.qtwebengine_process_count -gt 0
 					passed = $null -ne $surfaceActivation -and $null -ne $rendererReady -and
+						[bool]$rendererReady.surface_verified -and [bool]$rendererReady.transport_verified -and
 						$nativeBackendObserved -and -not $rendererProcessObserved -and $null -ne $close
 				})
 				Start-Sleep -Milliseconds 100
@@ -888,6 +907,12 @@ try {
 				@($cycleValues | Where-Object { $null -eq $_.renderer_ready_latency_ms }).Count -eq 0
 			all_cycles_playback_ready = $cycleValues.Count -eq $CyclesPerRun -and
 				@($cycleValues | Where-Object { $null -eq $_.playback_ready_latency_ms }).Count -eq 0
+			all_cycles_surface_and_transport_verified = $cycleValues.Count -eq $CyclesPerRun -and
+				@($cycleValues | Where-Object {
+					-not $_.surface_verified -or -not $_.transport_verified -or
+					$_.surface_verification_state -ne "verified" -or
+					[string]::IsNullOrWhiteSpace($_.surface_verification_evidence)
+				}).Count -eq 0
 			all_cycles_used_native_renderer = $cycleValues.Count -eq $CyclesPerRun -and
 				@($cycleValues | Where-Object { -not $_.native_backend_observed }).Count -eq 0
 			all_cycles_avoided_qtwebengine_process = $cycleValues.Count -eq $CyclesPerRun -and
@@ -899,6 +924,7 @@ try {
 		$runPassed = [bool]$runGates.zero_qtwebengine_before_activation -and
 			[bool]$runGates.all_cycles_surface_activated -and [bool]$runGates.all_cycles_renderer_ready -and
 			[bool]$runGates.all_cycles_playback_ready -and
+			[bool]$runGates.all_cycles_surface_and_transport_verified -and
 			[bool]$runGates.all_cycles_used_native_renderer -and
 			[bool]$runGates.all_cycles_avoided_qtwebengine_process -and
 			[bool]$runGates.all_cycles_closed_session_and_surface -and
@@ -958,6 +984,10 @@ $gates = [ordered]@{
 		@($runValues | Where-Object { -not $_.gates.all_cycles_renderer_ready }).Count -eq 0
 	all_inline_cycles_playback_ready = $runValues.Count -eq 5 -and
 		@($runValues | Where-Object { -not $_.gates.all_cycles_playback_ready }).Count -eq 0
+	all_inline_cycles_surface_and_transport_verified = $runValues.Count -eq 5 -and
+		@($runValues | Where-Object {
+			-not $_.gates.all_cycles_surface_and_transport_verified
+		}).Count -eq 0
 	all_inline_cycles_used_native_renderer = $runValues.Count -eq 5 -and
 		@($runValues | Where-Object { -not $_.gates.all_cycles_used_native_renderer }).Count -eq 0
 	all_inline_cycles_avoided_qtwebengine_process = $runValues.Count -eq 5 -and

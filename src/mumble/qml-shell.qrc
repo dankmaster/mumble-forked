@@ -57,8 +57,9 @@
 	<file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
 	<file alias="AclMemberEditor.qml">qml-shell/AclMemberEditor.qml</file>
 	<file alias="ServerAdminEditor.qml">qml-shell/ServerAdminEditor.qml</file>
-    <file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
+	<file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
 	<file alias="InlineMediaPlayer.qml">qml-shell/InlineMediaPlayer.qml</file>
+	<file alias="MediaPlaybackProbe.js">qml-shell/MediaPlaybackProbe.js</file>
 	<file alias="NativeDirectMediaPlayer.qml">qml-shell/NativeDirectMediaPlayer.qml</file>
 	<file alias="MediaSessionControls.qml">qml-shell/MediaSessionControls.qml</file>
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>

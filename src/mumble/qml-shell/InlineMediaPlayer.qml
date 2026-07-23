@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import QtWebEngine
 import Mumble.Theme 1.0
 import Mumble.ProviderPresentation 1.0
+import "MediaPlaybackProbe.js" as MediaPlaybackProbe
 
 Rectangle {
 	id: inlinePlayer
@@ -14,10 +15,14 @@ Rectangle {
 	// Keep isolated WebEngine profiles explicit. If a host forgets to provide
 	// them, no provider surface is created with WebEngine's shared default.
 	property var mediaProfileFactory: null
+	// The playback transport can be "direct" while the card still represents a
+	// provider such as Reddit. Keep presentation identity separate from transport.
+	property string presentationProvider: ""
 	property string aspect: "wide"
 	property string visualFixtureMode: ""
 	readonly property var providerPresentation: ProviderPresentation.resolve(
-		session ? session.provider : "")
+		String(presentationProvider || "").trim()
+			|| (session ? session.provider : ""))
 	readonly property string providerLabel: providerPresentation.label
 		|| String(session ? session.provider || "" : "").trim() || qsTr("Media")
 	readonly property string providerMark: providerPresentation.mark
@@ -49,6 +54,20 @@ Rectangle {
 			&& nativePlayerLoader.item.documentReady)
 		|| (!nativeDirectMedia && _documentReadyGeneration === _mediaGeneration
 			&& _mediaGeneration > 0 && _rendererHealthy)
+	readonly property bool surfaceVerified: documentReady
+	readonly property bool transportVerified: visualFixtureRendererReady
+		|| (nativeDirectMedia && documentReady)
+		|| (_transportVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0)
+	readonly property bool playbackVerified: documentReady
+		&& ((session && String(session.state || "") === "playing")
+			|| (_playbackVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0))
+	readonly property string surfaceVerificationState: visualFixtureRendererReady ? "verified"
+		: nativeDirectMedia ? (documentReady ? "verified" : rendererHealthy ? "pending" : "idle")
+		: String(session ? session.error || "" : "").length > 0
+			&& _surfaceVerificationState === "idle" ? "failed" : _surfaceVerificationState
+	readonly property string surfaceVerificationEvidence: visualFixtureRendererReady ? "fixture"
+		: nativeDirectMedia && documentReady ? "native-media" : _surfaceVerificationEvidence
+	readonly property string surfaceVerificationDetail: _surfaceVerificationDetail
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
 		&& _mediaGeneration > 0 && _statePollToken >= 0
 	readonly property int statePollToken: _statePollToken
@@ -96,6 +115,12 @@ Rectangle {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
+	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int _transportVerifiedGeneration: -1
+	property int _playbackVerifiedGeneration: -1
+	property string _surfaceVerificationState: "idle"
+	property string _surfaceVerificationEvidence: ""
+	property string _surfaceVerificationDetail: ""
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -111,7 +136,13 @@ Rectangle {
 	property int _audioStatePollToken: -1
 	property int _nextAudioStatePollToken: 0
 	property int _audioMissingStatePolls: 0
-	implicitHeight: mediaViewportHeight + inlineControls.implicitHeight
+	// Controls only become meaningful once the provider transport is proven.
+	// Keeping them hidden while a challenge/error document loads avoids the
+	// misleading 0:00 / 0:00 bar that previously appeared under broken embeds.
+	readonly property bool nativeControlsVisible: !!session
+		&& Boolean(session.playbackControllable) && transportVerified
+	implicitHeight: mediaViewportHeight
+		+ (nativeControlsVisible ? inlineControls.implicitHeight : 0)
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
@@ -177,6 +208,11 @@ Rectangle {
 		_documentReadyProbeStartedAt = 0
 		documentReadyProbeAttempts = 0
 		documentReadyProbeState = "idle"
+		_transportVerifiedGeneration = -1
+		_playbackVerifiedGeneration = -1
+		_surfaceVerificationState = rendererIsHealthy ? "pending" : "idle"
+		_surfaceVerificationEvidence = ""
+		_surfaceVerificationDetail = ""
 		resetStatePoll()
 		_missingStatePolls = 0
 		_rendererHealthy = !!rendererIsHealthy
@@ -200,72 +236,99 @@ Rectangle {
 		if (generation !== _mediaGeneration || !_rendererHealthy)
 			return false
 		_documentReadyGeneration = generation
+		_transportVerifiedGeneration = generation
+		_surfaceVerificationState = "verified"
 		_missingStatePolls = 0
 		return true
 	}
 
-	function completeMediaDocumentLoad(generation) {
+	function completeMediaDocumentLoad(generation, evaluation) {
 		if (!markMediaDocumentReady(generation))
 			return false
 		_documentReadyProbeGeneration = -1
+		const result = evaluation && typeof evaluation === "object" ? evaluation : ({})
+		_surfaceVerificationEvidence = String(result.evidence || "manual")
+		_surfaceVerificationDetail = ""
+		if (result.playbackVerified === true)
+			_playbackVerifiedGeneration = generation
+		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (session)
 			session.reportLoadProgress(100)
 		Qt.callLater(function() { inlinePlayer.applyDesiredPlaybackState(generation) })
 		return true
 	}
 
-	function probeMediaDocumentReady(generation) {
-		if (generation !== _mediaGeneration || documentReady
+	function verificationFailureMessage(evaluation) {
+		const kind = String(evaluation ? evaluation.kind || "" : "")
+		if (kind === "verification" || kind === "sign-in")
+			return qsTr("This provider requires verification or sign-in. Open it externally to continue.")
+		if (kind === "unavailable")
+			return qsTr("This provider says the media is unavailable here. Open the original page instead.")
+		if (kind === "adaptive-renderer-failed")
+			return String(evaluation.detail || "")
+				|| qsTr("The stream could not be prepared for playback.")
+		if (kind === "adaptive-renderer-timeout")
+			return qsTr("The stream could not be prepared for playback.")
+		return qsTr("The provider player did not expose a usable media surface. Open it externally instead.")
+	}
+
+	function applyMediaSurfaceProbeResult(generation, value, background) {
+		if (generation !== _mediaGeneration)
+			return false
+		const evaluation = MediaPlaybackProbe.classify(value,
+			session ? session.provider : "", adaptiveManifest,
+			background ? 0 : documentReadyProbeAttempts,
+			background ? 2147483647 : documentReadyProbeMaxAttempts)
+		_surfaceVerificationEvidence = String(evaluation.evidence || "")
+		documentReadyProbeState = String(evaluation.state || "pending")
+			+ (_surfaceVerificationEvidence.length > 0
+				? ":" + _surfaceVerificationEvidence : "")
+		if (evaluation.state === "verified") {
+			_transportVerifiedGeneration = generation
+			if (evaluation.playbackVerified === true)
+				_playbackVerifiedGeneration = generation
+			if (background) {
+				_surfaceVerificationState = "verified"
+				return true
+			}
+			return completeMediaDocumentLoad(generation, evaluation)
+		}
+		if (evaluation.state === "pending")
+			return false
+		const failureState = evaluation.state === "blocked" ? "blocked" : "failed"
+		const detail = verificationFailureMessage(evaluation)
+		if (!failMediaDocument(generation, failureState, detail,
+				String(evaluation.evidence || "")))
+			return false
+		if (session) {
+			if (typeof session.reportTypedError === "function")
+				session.reportTypedError(String(evaluation.kind || "provider-surface-failed"), detail)
+			else
+				session.reportError(detail)
+		}
+		return true
+	}
+
+	function probeMediaDocumentReady(generation, background) {
+		if (generation !== _mediaGeneration || (!background && documentReady)
 				|| _documentReadyProbeGeneration === generation || !playerLoader.item)
 			return false
 		const webPlayer = playerLoader.item
 		_documentReadyProbeGeneration = generation
 		_documentReadyProbeStartedAt = Date.now()
-		documentReadyProbeAttempts += 1
+		if (!background)
+			documentReadyProbeAttempts += 1
 		documentReadyProbeState = "submitted"
 		try {
 			webPlayer.runJavaScript(
-				"(function(){const state=String(document.readyState||'');"
-				+ "const media=document.querySelector('audio,video');"
-				+ "const adaptiveExpected=" + (adaptiveManifest ? "true" : "false") + ";"
-				+ "const adaptive=adaptiveExpected?(window.__mumbleAdaptiveState||null):null;"
-				+ "const error=adaptive?String(adaptive.error||''):'';"
-				+ "const ready=!!media&&(!adaptiveExpected||(adaptive&&adaptive.ready===true));"
-				+ "return state+'|'+(ready?'media':'none')+'|'+error;})()",
+				MediaPlaybackProbe.probeScript(session ? session.provider : "",
+					adaptiveManifest),
 				function(value) {
 					if (inlinePlayer._documentReadyProbeGeneration !== generation)
 						return
 					inlinePlayer._documentReadyProbeGeneration = -1
 					inlinePlayer._documentReadyProbeStartedAt = 0
-					const result = String(value || "")
-					inlinePlayer.documentReadyProbeState = "callback:" + result
-					const parts = result.split("|")
-					const documentIsReady = parts[0] === "interactive" || parts[0] === "complete"
-					const mediaIsPresent = parts.length > 1 && parts[1] === "media"
-					const adaptiveError = parts.length > 2 ? parts.slice(2).join("|").trim() : ""
-					if (generation === inlinePlayer.mediaGeneration && inlinePlayer.adaptiveManifest
-							&& adaptiveError.length > 0) {
-						if (inlinePlayer.failMediaDocument(generation) && inlinePlayer.session) {
-							if (typeof inlinePlayer.session.reportTypedError === "function")
-								inlinePlayer.session.reportTypedError("adaptive-renderer-failed", adaptiveError)
-							else
-								inlinePlayer.session.reportError(adaptiveError)
-						}
-						return
-					}
-					if (generation === inlinePlayer.mediaGeneration && inlinePlayer.adaptiveManifest
-							&& !mediaIsPresent && inlinePlayer.documentReadyProbeAttempts >= 400) {
-						if (inlinePlayer.failMediaDocument(generation) && inlinePlayer.session)
-							inlinePlayer.session.reportTypedError("adaptive-renderer-timeout",
-								qsTr("The stream could not be prepared for playback."))
-						return
-					}
-					if (generation !== inlinePlayer.mediaGeneration || inlinePlayer.documentReady
-							|| !documentIsReady
-							|| (String(inlinePlayer.session ? inlinePlayer.session.provider || "" : "") === "direct"
-								&& !mediaIsPresent))
-						return
-					inlinePlayer.completeMediaDocumentLoad(generation)
+					inlinePlayer.applyMediaSurfaceProbeResult(generation, value, !!background)
 				})
 			return true
 		} catch (error) {
@@ -277,8 +340,14 @@ Rectangle {
 		}
 	}
 
-	function failMediaDocument(generation) {
-		return invalidateMediaDocument(generation)
+	function failMediaDocument(generation, verificationState, detail, evidence) {
+		if (!invalidateMediaDocument(generation))
+			return false
+		_surfaceVerificationState = String(verificationState || "failed")
+		_surfaceVerificationDetail = String(detail || "")
+		_surfaceVerificationEvidence = String(evidence || "")
+		documentReadyProbeState = _surfaceVerificationState
+		return true
 	}
 
 	function beginAudioDocumentLoad() {
@@ -555,6 +624,10 @@ Rectangle {
 			retryButton.forceActiveFocus()
 			return retryButton.activeFocus
 		}
+		if (providerCloseButton.visible && providerCloseButton.enabled) {
+			providerCloseButton.forceActiveFocus()
+			return providerCloseButton.activeFocus
+		}
 		return inlineControls.focusInitialControl()
 	}
 
@@ -633,7 +706,8 @@ Rectangle {
 		function onStateChanged() {
 			if (inlinePlayer.session && (inlinePlayer.session.state === "error"
 					|| String(inlinePlayer.session.error || "").length > 0)) {
-				inlinePlayer.invalidateMediaDocument()
+				if (inlinePlayer.rendererHealthy || inlinePlayer.documentReady)
+					inlinePlayer.invalidateMediaDocument()
 				inlinePlayer.invalidateAudioDocument()
 				Qt.callLater(inlinePlayer.focusFailureControl)
 			}
@@ -778,6 +852,15 @@ Rectangle {
 				iconName: "external"
 				onClicked: Qt.openUrlExternally(inlinePlayer.externalMediaUrl())
 			}
+			ModernButton {
+				id: providerCloseButton
+				objectName: "inlineMediaProviderCloseButton"
+				visible: !inlinePlayer.nativeControlsVisible
+				dense: true
+				text: qsTr("Close")
+				Accessible.description: qsTr("Close the provider player and return to the preview")
+				onClicked: inlineControls.requestClose()
+			}
 		}
 	}
 
@@ -901,7 +984,9 @@ Rectangle {
 				if (loadGeneration !== inlinePlayer.mediaGeneration
 						|| !inlinePlayer.rendererHealthy || !inlinePlayer.session)
 					return
-				inlinePlayer.session.reportLoadProgress(loadProgress)
+				// 100 means a verified provider surface, not merely that WebEngine
+				// finished receiving an HTML document.
+				inlinePlayer.session.reportLoadProgress(Math.min(99, loadProgress))
 				if (loadProgress === 100) {
 					const generation = loadGeneration
 					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
@@ -919,7 +1004,7 @@ Rectangle {
 					if (inlinePlayer.failMediaDocument(generation))
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
-					inlinePlayer.session.reportLoadProgress(100)
+					inlinePlayer.session.reportLoadProgress(99)
 					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
 				}
 			}
@@ -986,7 +1071,7 @@ Rectangle {
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
 			&& inlinePlayer.rendererHealthy
 			&& !inlinePlayer.documentReady && inlinePlayer.session
-			&& inlinePlayer.session.loadProgress >= 100
+			&& inlinePlayer.session.loadProgress >= 99
 		repeat: true
 		onTriggered: {
 			if (inlinePlayer._documentReadyProbeGeneration === inlinePlayer.mediaGeneration
@@ -997,6 +1082,16 @@ Rectangle {
 			}
 			inlinePlayer.probeMediaDocumentReady(inlinePlayer.mediaGeneration)
 		}
+	}
+
+	Timer {
+		interval: 1500
+		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
+			&& inlinePlayer.documentReady && inlinePlayer.rendererHealthy
+			&& inlinePlayer.session && inlinePlayer.session.error.length === 0
+		repeat: true
+		onTriggered: inlinePlayer.probeMediaDocumentReady(
+			inlinePlayer.mediaGeneration, true)
 	}
 
 	Rectangle {
@@ -1361,6 +1456,8 @@ Rectangle {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.bottom: parent.bottom
+		visible: inlinePlayer.nativeControlsVisible
+		height: visible ? implicitHeight : 0
 		session: inlinePlayer.session
 		embedded: true
 		fullscreenAvailable: false

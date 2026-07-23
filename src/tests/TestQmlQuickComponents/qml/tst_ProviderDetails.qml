@@ -62,6 +62,42 @@ TestCase {
 		compare(ProviderPresentation.resolve("Humble Store").token, "humble")
 		compare(ProviderPresentation.resolve("itch.io").token, "itch")
 		compare(ProviderPresentation.resolve("Xbox Store").token, "xbox")
+
+		const hostAliases = [
+			{ host: "www.youtube.com", provider: "youtube" },
+			{ host: "www.youtube-nocookie.com", provider: "youtube" },
+			{ host: "open.spotify.com", provider: "spotify" },
+			{ host: "vm.tiktok.com", provider: "tiktok" },
+			{ host: "www.instagram.com", provider: "instagram" },
+			{ host: "clips.twitch.tv", provider: "twitch" },
+			{ host: "player.vimeo.com", provider: "vimeo" },
+			{ host: "w.soundcloud.com", provider: "soundcloud" },
+			{ host: "media.giphy.com", provider: "giphy" },
+			{ host: "www.reddit.com", provider: "reddit" },
+			{ host: "preview.redditmedia.com", provider: "reddit" },
+			{ host: "github.com", provider: "github" },
+			{ host: "i.4cdn.org", provider: "4chan" },
+			{ host: "finance.yahoo.com", provider: "yahoofinance" },
+			{ host: "www.blocket.se", provider: "blocket" },
+			{ host: "www.flashback.org", provider: "flashback" },
+			{ host: "www.gp.se", provider: "gp" },
+			{ host: "www.dn.se", provider: "dn" },
+			{ host: "www.amazon.se", provider: "amazon" },
+			{ host: "www.amazon.de", provider: "amazon" },
+			{ host: "maps.app.goo.gl", provider: "googlemaps" },
+			{ host: "store.steampowered.com", provider: "steam" },
+			{ host: "www.kinguin.net", provider: "kinguin" },
+			{ host: "www.kinguin.com", provider: "kinguin" },
+			{ host: "store.epicgames.com", provider: "epic" },
+			{ host: "store.ubi.com", provider: "ubisoft" },
+			{ host: "www.greenmangaming.com", provider: "greenmangaming" }
+		]
+		for (const fixture of hostAliases) {
+			const presentation = ProviderPresentation.resolve(fixture.host)
+			compare(presentation.token, fixture.provider, fixture.host)
+			verify(presentation.known, fixture.host + " should resolve to a known provider")
+		}
+		verify(!ProviderPresentation.resolve("notyoutube.com").known)
 	}
 
 	function setFixture(metadata, kind, expanded, provider, title, subtitle, description) {

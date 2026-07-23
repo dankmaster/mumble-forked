@@ -107,6 +107,7 @@ TestCase {
 		session.provider = "youtube"
 		session.mediaMime = ""
 		session.detached = true
+		session.playbackControllable = true
 		session.playbackControlAllowed = true
 		session.sharedAvailable = false
 		session.sharedJoined = false
@@ -458,6 +459,67 @@ TestCase {
 		verify(window.completeMediaDocumentLoad(secondGeneration))
 		verify(window.documentReady)
 		compare(session.loadReports, 2)
+		session.active = false
+	}
+
+	function test_detached_surface_uses_the_same_provider_verification_contract() {
+		const window = windowLoader.item
+		session.url = ""
+		session.active = true
+		session.provider = "youtube"
+		let generation = window.beginMediaDocumentLoad("about:blank#challenge")
+		verify(window.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Sign in to confirm you are not a bot"
+		}, false))
+		compare(window.surfaceVerificationState, "blocked")
+		verify(!window.surfaceVerified)
+		verify(!window.transportVerified)
+		compare(session.errorReports, 1)
+
+		session.provider = "soundcloud"
+		generation = window.beginMediaDocumentLoad("about:blank#soundcloud")
+		verify(window.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": true,
+			"providerUi": true,
+			"playbackEvidence": false
+		}, false))
+		verify(window.surfaceVerified)
+		verify(window.transportVerified)
+		verify(!window.playbackVerified)
+		compare(window.surfaceVerificationState, "verified")
+
+		verify(window.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": true,
+			"providerUi": true,
+			"mediaPresent": true,
+			"mediaReady": true,
+			"playbackEvidence": true
+		}, true))
+		verify(window.playbackVerified)
+		verify(window.surfaceVerificationEvidence.indexOf("playback") >= 0)
+		session.active = false
+	}
+
+	function test_detached_direct_media_keeps_known_origin_identity() {
+		const window = windowLoader.item
+		session.provider = "direct"
+		session.url = "https://v.redd.it/abc/DASH_720.mp4"
+		session.mediaMime = "video/mp4"
+		session.active = true
+		window.visualFixtureMode = "active"
+		wait(0)
+
+		compare(window.presentationProvider, "reddit")
+		compare(window.providerLabel, "Reddit")
+		compare(window.providerMark, "R")
+		compare(findChild(window.contentItem, "mediaSessionProviderLabel").text, "Reddit")
+
+		window.visualFixtureMode = ""
 		session.active = false
 	}
 

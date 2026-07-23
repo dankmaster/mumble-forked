@@ -142,7 +142,18 @@ TestCase {
 		property string state: "idle"
 		property string error: ""
 		property string errorCode: ""
+		property bool playbackControllable: true
+		property bool playbackControlAllowed: true
+		property bool sharedAvailable: false
+		property bool sharedJoined: false
 		property bool sharedHost: false
+		property int sharedParticipantCount: 0
+		property string mediaMime: ""
+		property real position: 0
+		property real duration: 0
+		property int loadProgress: 0
+		property int volume: 100
+		property bool muted: false
 		property int detachCalls: 0
 		property int pauseCalls: 0
 		property int retryCalls: 0
@@ -251,6 +262,10 @@ TestCase {
 		inlineSession.state = "idle"
 		inlineSession.error = ""
 		inlineSession.errorCode = ""
+		inlineSession.playbackControllable = true
+		inlineSession.playbackControlAllowed = true
+		inlineSession.sharedAvailable = false
+		inlineSession.sharedJoined = false
 		inlineSession.sharedHost = false
 		inlineSession.detachCalls = 0
 		inlineSession.pauseCalls = 0
@@ -825,14 +840,23 @@ TestCase {
 			  "accessibleDescription": "Loads the provider post in this preview",
 			  "popoutLabel": "Open in separate viewer",
 			  "popoutDescription": "Open the provider post in a separate window",
-			  "localPlayback": false },
+			  "localPlayback": false, "stageVisible": false },
+			// Instagram historically used /p/ for video posts. Typed metadata must
+			// be able to recover the playable media kind from that generic path.
+			{ "path": "p/legacy-video", "metadataKind": "reel", "normalizedKind": "reel",
+			  "aspect": "short", "label": "Play here", "icon": "play",
+			  "accessibleName": "Play Instagram item here",
+			  "accessibleDescription": "Loads the provider player in this preview",
+			  "popoutLabel": "Open in separate player",
+			  "popoutDescription": "Open the provider player in a separate window",
+			  "localPlayback": true, "stageVisible": true },
 			{ "path": "reel/moving-reel", "metadataKind": "reel", "normalizedKind": "reel",
 			  "aspect": "short", "label": "Play here", "icon": "play",
 			  "accessibleName": "Play Instagram item here",
 			  "accessibleDescription": "Loads the provider player in this preview",
 			  "popoutLabel": "Open in separate player",
 			  "popoutDescription": "Open the provider player in a separate window",
-			  "localPlayback": true },
+			  "localPlayback": true, "stageVisible": true },
 			// The canonical path wins over stale cached metadata. Older cache entries
 			// classified /tv/ as a post even though it is a video embed.
 			{ "path": "tv/legacy-video", "metadataKind": "post", "normalizedKind": "tv",
@@ -841,8 +865,9 @@ TestCase {
 			  "accessibleDescription": "Loads the provider player in this preview",
 			  "popoutLabel": "Open in separate player",
 			  "popoutDescription": "Open the provider player in a separate window",
-			  "localPlayback": true }
+			  "localPlayback": true, "stageVisible": true }
 		]
+		let inlineRequests = 0
 		for (let index = 0; index < fixtures.length; ++index) {
 			const fixture = fixtures[index]
 			const embedUrl = "https://www.instagram.com/" + fixture.path + "/embed/"
@@ -856,24 +881,37 @@ TestCase {
 			compare(card.instagramEmbedMediaKind, fixture.normalizedKind)
 			compare(card.normalizedEmbedAspect, fixture.aspect)
 			compare(card.localPlaybackSupported, fixture.localPlayback)
+			compare(card.inlineMediaStageVisible, fixture.stageVisible)
 			verify(!card.sharedPlaybackSupported)
 			verify(!card.watchTogetherSupported)
-			compare(inlineButton.text, fixture.label)
-			compare(inlineIcon.name, fixture.icon)
-			compare(inlineButton.Accessible.name, fixture.accessibleName)
-			compare(inlineButton.Accessible.description, fixture.accessibleDescription)
+			compare(inlineButton.visible, fixture.stageVisible)
+			if (fixture.stageVisible) {
+				compare(inlineButton.text, fixture.label)
+				compare(inlineIcon.name, fixture.icon)
+				compare(inlineButton.Accessible.name, fixture.accessibleName)
+				compare(inlineButton.Accessible.description, fixture.accessibleDescription)
+			}
 
-			overflowButton.clicked()
-			tryCompare(popoutButton, "visible", true)
-			compare(popoutButton.text, fixture.popoutLabel)
-			compare(popoutButton.Accessible.description, fixture.popoutDescription)
+			if (overflowButton.visible)
+				overflowButton.clicked()
+			compare(popoutButton.visible, fixture.localPlayback)
+			if (fixture.localPlayback) {
+				compare(popoutButton.text, fixture.popoutLabel)
+				compare(popoutButton.Accessible.description, fixture.popoutDescription)
+			}
 			compare(watchButton.visible, false)
 			overflowMenu.close()
 
-			inlineButton.clicked()
-			compare(inlinePlaySpy.count, index + 1)
-			compare(inlinePlaySpy.signalArguments[index][0], embedUrl)
-			compare(inlinePlaySpy.signalArguments[index][1], "instagram")
+			if (fixture.localPlayback) {
+				inlineButton.clicked()
+				inlineRequests += 1
+				compare(inlinePlaySpy.count, inlineRequests)
+				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][0], embedUrl)
+				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][1], "instagram")
+			} else {
+				compare(inlinePlaySpy.count, inlineRequests)
+				verify(findChild(card, "previewOpenButton").visible)
+			}
 		}
 	}
 
@@ -1239,6 +1277,101 @@ TestCase {
 		compare(card.displayTitle, "YouTube video")
 		compare(card.metadataLine, "www.youtube.com")
 		compare(card.providerLabel, "YouTube")
+	}
+
+	function test_active_social_provider_owns_details_without_duplicate_native_post() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "A provider-owned post",
+			"subtitle": "@creator",
+			"description": "The native summary should return after playback closes.",
+			"url": "https://www.instagram.com/reel/123/",
+			"embedUrl": "https://www.instagram.com/reel/123/embed/",
+			"embedKind": "instagram",
+			"metadata": {
+				"previewProvider": "instagram",
+				"instagramMediaKind": "reel",
+				"instagramAuthor": "@creator"
+			}
+		}
+		card.previewIdentity = "message:social-provider-owner"
+		card.mediaSessionId = "message:social-provider-owner"
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "instagram"
+		inlineSession.playbackControllable = false
+		inlineSession.detached = false
+		inlineSession.active = true
+		wait(0)
+
+		const details = findChild(card, "providerDetails")
+		verify(details !== null)
+		compare(details.providerToken, "instagram")
+		compare(details.presentation, "identity")
+		verify(card.inlineProviderOwnsDetails)
+		verify(!details.visible)
+		compare(details.height, 0)
+		compare(card.inlineControlsEstimate, 0)
+
+		inlineSession.active = false
+		inlineSession.detached = true
+		wait(0)
+		verify(!card.inlineProviderOwnsDetails)
+		verify(details.visible)
+	}
+
+	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Reddit video",
+			"url": "https://www.reddit.com/r/cats/comments/123/video",
+			"mediaUrl": "https://v.redd.it/123/DASH_720.mp4",
+			"mediaMime": "video/mp4",
+			"metadata": {
+				"previewProvider": "reddit",
+				"providerName": "Reddit"
+			}
+		}
+		card.previewIdentity = "message:reddit-direct-identity"
+		card.mediaSessionId = "message:reddit-direct-identity"
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "direct"
+		inlineSession.detached = false
+		inlineSession.active = true
+		wait(0)
+
+		verify(card.directInlinePlaybackActive)
+		compare(card.inlinePresentationProvider, "reddit")
+	}
+
+	function test_generic_link_uses_host_identity_mark_and_deduplicates_placeholder_copy() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "example.com", "subtitle": "example.com",
+			"description": "example.com", "host": "news.example.com",
+			"url": "https://news.example.com/release"
+		}
+		card.previewIdentity = "message:generic-provider-mark"
+		wait(0)
+
+		const compactVisual = findChild(card, "previewCompactVisual")
+		const providerMark = findChild(card, "previewGenericProviderMark")
+		const description = findChild(card, "previewDescription")
+		verify(compactVisual !== null && providerMark !== null && description !== null)
+		compare(card.displayTitle, "example.com")
+		compare(card.metadataLine, "news.example.com")
+		compare(card.providerLabel, "news.example.com")
+		compare(card.genericProviderMark, "EX")
+		compare(card.displayDescription, "")
+		compare(card.hasExpandedDescription, false)
+		tryCompare(compactVisual, "visible", true)
+		tryCompare(providerMark, "visible", true)
+		compare(providerMark.presentation, "mark")
+		compare(providerMark.badgeText, "EX")
+		compare(description.visible, false)
 	}
 
 	function test_provider_embed_aspect_fallbacks_preserve_production_shapes() {

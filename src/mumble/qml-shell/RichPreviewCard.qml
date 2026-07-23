@@ -94,6 +94,8 @@ Rectangle {
 	readonly property string metadataLine: rawMetadataLine.length > 0
 		&& !equivalentPreviewText(rawMetadataLine, displayTitle) ? rawMetadataLine
 		: previewHost.length > 0 && !equivalentPreviewText(previewHost, displayTitle) ? previewHost : ""
+	readonly property string displayDescription: descriptionRepeatsVisibleSummary(sanitizedDescription)
+		? "" : sanitizedDescription
 	readonly property string inferredGenericSocialProviderToken: inferGenericSocialProviderToken()
 	readonly property string providerLabel: displayProviderLabel(firstSafeText(preview ? [
 		preview.metadata ? preview.metadata.gameStoreName : "",
@@ -184,7 +186,10 @@ Rectangle {
 		: normalizedEmbedAspect === "audio"
 			? Math.min(352, Math.max(220, embedMediaWidth * 0.61))
 		: embedMediaWidth * 9 / 16
-	readonly property real inlineControlsEstimate: Theme.controlHeight + Theme.space2 * 2
+	readonly property bool inlineNativeControlsExpected: inlinePlaybackActive
+		&& !!mediaSessionController && Boolean(mediaSessionController.playbackControllable)
+	readonly property real inlineControlsEstimate: inlineNativeControlsExpected
+		? Theme.controlHeight + Theme.space2 * 2 : 0
 	readonly property string inlineMediaAspect: hasEmbedPreview ? normalizedEmbedAspect
 		: currentMediaKind === "audio" ? "compact-audio" : "wide"
 	readonly property real directInlineMediaHeight: currentMediaKind === "audio"
@@ -213,7 +218,7 @@ Rectangle {
 	readonly property bool mediaRequiresReveal: (hasRevealableMedia || hasEmbedPreview) && !sensitiveMediaRevealed
 		&& (contentWarning.length > 0 || thumbnailBlur)
 	readonly property bool hasExpandedDescription: previewState === "ready"
-		&& sanitizedDescription.length > 0
+		&& displayDescription.length > 0
 		&& !providerDetails.ownsDescription
 	readonly property bool canExpand: !!preview && preview.previewSize !== "large"
 		&& (providerDetails.canExpand || hasExpandedDescription || hasRevealableMedia
@@ -224,12 +229,12 @@ Rectangle {
 	readonly property string originalProviderUrl: safeExternalUrl(preview ? preview.url : "")
 	readonly property bool hasPrimaryOpenAction: !inlineMediaStageVisible && !hasPrimaryDirectAction
 		&& originalProviderUrl.length > 0
-	readonly property bool hasFooterOriginalOpenAction: hasEmbedPreview
+	readonly property bool hasFooterOriginalOpenAction: inlineMediaStageVisible && hasEmbedPreview
 		&& originalProviderUrl.length > 0
 	readonly property bool hasSecondaryOriginalOpenAction: (hasPrimaryDirectAction || hasDirectMedia)
 		&& originalProviderUrl.length > 0
-	readonly property bool hasSizeActions: hasEmbedPreview || hasDirectMedia
-	readonly property bool hasPopoutAction: hasEmbedPreview || hasDirectMedia
+	readonly property bool hasSizeActions: inlineMediaStageVisible
+	readonly property bool hasPopoutAction: localPlaybackSupported
 	readonly property bool hasOverflowActions: hasPopoutAction || canExpand
 		|| hasSecondaryOriginalOpenAction || hasSizeActions
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
@@ -237,8 +242,21 @@ Rectangle {
 		&& String(mediaSessionController.sessionId || "") === mediaSessionId
 	readonly property bool directInlinePlaybackActive: inlinePlaybackActive && !hasEmbedPreview
 		&& hasDirectMedia && String(mediaSessionController ? mediaSessionController.provider || "" : "") === "direct"
-	readonly property bool inlineMediaStageVisible: hasEmbedPreview || hasDirectMedia
+	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported)
+		|| hasDirectMedia
+	readonly property string inlinePresentationProvider: hasEmbedPreview
+		? normalizedEmbedProvider
+		: String(providerDetails.providerToken || providerLabel || "").trim()
+	readonly property bool inlineProviderOwnsDetails: inlinePlaybackActive
+		&& hasEmbedPreview
+		&& (providerDetails.presentation === "socialPost"
+			|| ["instagram", "tiktok", "facebook"].indexOf(
+				providerDetails.providerToken) >= 0)
 	readonly property bool fullBleedMediaStage: (hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed
+	readonly property string genericProviderMark: buildGenericProviderMark()
+	readonly property bool genericHeaderShowsIdentityMark: previewState === "ready"
+		&& !inlineMediaStageVisible && imageSource.length === 0 && !hasExternalImage
+		&& !hasDirectMedia && !hasExternalMedia && genericProviderMark.length > 0
 	// The centered short/square player keeps the ordinary card inset, while
 	// wide providers intentionally meet the top edge. Keep these values in one
 	// place so the delegate's implicit height always includes the same insets
@@ -265,10 +283,13 @@ Rectangle {
 
 	implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
 	radius: Theme.innerRadius
-	color: effectiveHovered ? Theme.previewCardHover : Theme.previewCardBackground
+	color: effectiveHovered
+		? Theme.mixColors(Theme.previewCardHover, providerDetails.providerAccent, 0.055)
+		: Theme.mixColors(Theme.previewCardBackground, providerDetails.providerAccent, 0.03)
 	border.color: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
 		: root.mediaRequiresReveal ? root.withAlpha(Theme.warning, 0.65)
-		: effectiveHovered ? root.withAlpha(providerDetails.providerAccent, 0.38) : Theme.previewCardBorder
+		: effectiveHovered ? root.withAlpha(providerDetails.providerAccent, 0.46)
+		: root.withAlpha(providerDetails.providerAccent, 0.24)
 	border.width: 1
 	Behavior on color { ColorAnimation { duration: root.animationDuration } }
 	Behavior on border.color { ColorAnimation { duration: root.animationDuration } }
@@ -335,7 +356,7 @@ Rectangle {
 				qsTr("Reveal the media to view it")]
 				.filter(function(value) { return value.length > 0 }).join(". ")
 		}
-		return sanitizedDescription
+		return displayDescription
 	}
 
 	function resetForReuse() {
@@ -371,19 +392,24 @@ Rectangle {
 	function normalizedInstagramEmbedMediaKind() {
 		if (normalizedEmbedProvider !== "instagram")
 			return ""
+		const metadataKind = safeText(preview && preview.metadata
+			? preview.metadata.instagramMediaKind : "", 32).toLowerCase()
+		const normalizedMetadataKind = metadataKind === "p" ? "post"
+			: metadataKind === "reels" ? "reel" : metadataKind
 		const urlMatch = safeEmbedUrl.match(
 			/^https:\/\/(?:www\.)?(?:instagram\.com|instagr\.am)\/(p|reel|reels|tv)\//i)
 		if (urlMatch) {
 			const pathKind = String(urlMatch[1] || "").toLowerCase()
-			return pathKind === "p" ? "post" : pathKind === "reels" ? "reel" : pathKind
-		}
-		const metadataKind = safeText(preview && preview.metadata
-			? preview.metadata.instagramMediaKind : "", 32).toLowerCase()
-		if (metadataKind === "p")
+			if (pathKind === "reel" || pathKind === "reels" || pathKind === "tv")
+				return pathKind === "reels" ? "reel" : pathKind
+			// Historic Instagram videos and reels often use /p/. Prefer typed
+			// metadata when it proves this is playable media; otherwise keep a
+			// static post native instead of loading the whole provider document.
+			if (normalizedMetadataKind === "reel" || normalizedMetadataKind === "tv")
+				return normalizedMetadataKind
 			return "post"
-		if (metadataKind === "reels")
-			return "reel"
-		return metadataKind
+		}
+		return normalizedMetadataKind
 	}
 
 	function isSupportedYouTubeSharedPlaybackUrl(value) {
@@ -474,6 +500,51 @@ Rectangle {
 		return first.length > 0 && first === second
 	}
 
+	function descriptionRepeatsVisibleSummary(value) {
+		const description = safeText(value, 4096)
+		if (description.length === 0)
+			return false
+		for (const summary of [displayTitle, metadataLine, providerLabel, previewHost]) {
+			if (equivalentPreviewText(description, summary))
+				return true
+		}
+		return false
+	}
+
+	function buildGenericProviderMark() {
+		const catalogMark = safeText(providerDetails.providerMark, 12)
+		if (catalogMark.length > 0)
+			return catalogMark
+
+		const identity = firstSafeText([previewHost, providerLabel], 256)
+			.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "")
+			.replace(/:\d+$/, "").replace(/[/?#].*$/, "")
+		if (identity.length === 0)
+			return ""
+
+		if (identity.indexOf(".") < 0 && /\s/.test(identity)) {
+			const words = identity.split(/\s+/).filter(function(word) { return word.length > 0 })
+			return words.slice(0, 2).map(function(word) {
+				return word.charAt(0)
+			}).join("").toUpperCase()
+		}
+
+		const genericLabels = ["app", "blog", "docs", "help", "m", "mobile",
+			"news", "open", "social", "store", "support", "www"]
+		const labels = identity.split(".").filter(function(label) { return label.length > 0 })
+		let label = labels.length > 0 ? labels[0] : identity
+		for (let index = 0; index < labels.length; ++index) {
+			if (genericLabels.indexOf(labels[index]) < 0) {
+				label = labels[index]
+				break
+			}
+		}
+		const compactLabel = label.replace(/[^a-z0-9]/g, "")
+		if (compactLabel.length === 0)
+			return ""
+		return (compactLabel.length <= 4 ? compactLabel : compactLabel.slice(0, 2)).toUpperCase()
+	}
+
 	function fallbackEmbedTitle(provider) {
 		switch (safeText(provider, 64).toLowerCase()) {
 		case "youtube": return qsTr("YouTube video")
@@ -483,6 +554,10 @@ Rectangle {
 		case "streamable": return qsTr("Streamable video")
 		case "spotify": return qsTr("Spotify audio")
 		case "soundcloud": return qsTr("SoundCloud audio")
+		case "tiktok": return qsTr("TikTok video")
+		case "instagram": return instagramStaticPost
+			? qsTr("Instagram post") : qsTr("Instagram video")
+		case "facebook": return qsTr("Facebook video")
 		default:
 			const label = displayProviderLabel(provider)
 			return label.length > 0 ? qsTr("%1 media").arg(label) : qsTr("Embedded media")
@@ -490,6 +565,8 @@ Rectangle {
 	}
 
 	function requestInlinePlayback() {
+		if (!localPlaybackSupported)
+			return
 		if (!hasEmbedPreview && hasDirectMedia) {
 			requestCurrentMedia()
 			return
@@ -1240,6 +1317,7 @@ Rectangle {
 						setSource(root.inlinePlayerComponentUrl, {
 							"session": root.mediaSessionController,
 							"aspect": root.inlineMediaAspect,
+							"presentationProvider": root.inlinePresentationProvider,
 							"mediaProfileFactory": root.mediaProfileFactory,
 							"visualFixtureMode": root.visualMediaFixtureMode
 						})
@@ -1418,7 +1496,8 @@ Rectangle {
 				Layout.preferredHeight: root.genericHeaderVisualHeight
 				visible: !root.inlineMediaStageVisible && (root.imageSource.length > 0
 					|| root.previewState !== "ready" || root.hasExternalImage
-					|| root.hasDirectMedia || root.hasExternalMedia)
+					|| root.hasDirectMedia || root.hasExternalMedia
+					|| root.genericHeaderShowsIdentityMark)
 				radius: Theme.innerRadius
 				color: Theme.embedSurface
                 clip: true
@@ -1461,6 +1540,17 @@ Rectangle {
                     color: Theme.textStrong
 					size: Theme.avatarSmall
                 }
+				ProviderIdentityBadge {
+					objectName: "previewGenericProviderMark"
+					anchors.centerIn: parent
+					visible: root.genericHeaderShowsIdentityMark
+					providerToken: providerDetails.providerToken
+					badgeText: root.genericProviderMark
+					presentation: "mark"
+					markExtent: root.compact ? 40 : 44
+					accent: providerDetails.providerAccent
+					foreground: providerDetails.providerForeground
+				}
                 Button {
 					id: compactMediaAction
 					objectName: "previewCompactMediaButton"
@@ -1617,7 +1707,7 @@ Rectangle {
                     Layout.fillWidth: true
 					visible: root.previewState === "ready"
 						&& root.hasExpandedDescription
-					text: root.sanitizedDescription
+					text: root.displayDescription
                     color: Theme.textMain
 					font.pixelSize: Theme.fontCaption
 					lineHeight: 1.25
@@ -1873,6 +1963,8 @@ Rectangle {
 		ProviderDetails {
 			id: providerDetails
 			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? implicitHeight : 0
+			visible: !root.inlineProviderOwnsDetails
 			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
 			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""

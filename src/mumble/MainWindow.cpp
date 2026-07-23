@@ -3276,7 +3276,9 @@ int youtubeStartSecondsFromUrl(const QUrl &url) {
 }
 
 QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
-	QUrl url(QString::fromLatin1("https://www.youtube.com/embed/%1").arg(target.videoId));
+	// The privacy-enhanced player avoids carrying ordinary youtube.com cookies
+	// into the isolated embed profile and reduces avoidable sign-in challenges.
+	QUrl url(QString::fromLatin1("https://www.youtube-nocookie.com/embed/%1").arg(target.videoId));
 	QUrlQuery query;
 	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("modestbranding"), QStringLiteral("1"));
@@ -3777,6 +3779,7 @@ struct PersistentChatPreviewEmbedTarget {
 
 struct PersistentChatPreviewOEmbedTarget {
 	QUrl url;
+	QString providerKey;
 	QString siteLabel;
 	QString fallbackTitle;
 	QString openLabel;
@@ -4073,7 +4076,7 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 	if (const std::optional< TwitchPreviewTarget > twitchTarget = twitchPreviewTargetFromUrl(url); twitchTarget) {
 		const QUrl embedUrl = twitchEmbedUrl(*twitchTarget);
 		if (embedUrl.isValid()) {
-			return PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), embedUrl, QStringLiteral("twitch") };
+			return PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), embedUrl, QStringLiteral("wide") };
 		}
 	}
 
@@ -4600,6 +4603,7 @@ std::vector< MainWindow::PersistentChatPreviewMediaItem >
 std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	QUrl endpoint;
+	QString providerKey;
 	QString siteLabel;
 	QString fallbackTitle;
 	QString openLabel;
@@ -4614,11 +4618,13 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 
 	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
 		setUrlEndpoint(QStringLiteral("https://www.tiktok.com/oembed"));
+		providerKey   = QStringLiteral("tiktok");
 		siteLabel     = QObject::tr("TikTok");
 		fallbackTitle = QObject::tr("TikTok video");
 		openLabel     = QObject::tr("Open on TikTok");
 	} else if (host == QLatin1String("vimeo.com") || host == QLatin1String("player.vimeo.com")) {
 		setUrlEndpoint(QStringLiteral("https://vimeo.com/api/oembed.json"));
+		providerKey   = QStringLiteral("vimeo");
 		siteLabel     = QObject::tr("Vimeo");
 		fallbackTitle = QObject::tr("Vimeo video");
 		openLabel     = QObject::tr("Open on Vimeo");
@@ -4628,11 +4634,13 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
 		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
 		endpoint.setQuery(query);
+		providerKey   = QStringLiteral("dailymotion");
 		siteLabel     = QObject::tr("Dailymotion");
 		fallbackTitle = QObject::tr("Dailymotion video");
 		openLabel     = QObject::tr("Open on Dailymotion");
 	} else if (host == QLatin1String("open.spotify.com") || host == QLatin1String("spotify.link")) {
 		setUrlEndpoint(QStringLiteral("https://open.spotify.com/oembed"));
+		providerKey   = QStringLiteral("spotify");
 		siteLabel     = QObject::tr("Spotify");
 		fallbackTitle = QObject::tr("Spotify link");
 		openLabel     = QObject::tr("Open on Spotify");
@@ -4642,21 +4650,25 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
 		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
 		endpoint.setQuery(query);
+		providerKey   = QStringLiteral("soundcloud");
 		siteLabel     = QObject::tr("SoundCloud");
 		fallbackTitle = QObject::tr("SoundCloud track");
 		openLabel     = QObject::tr("Open on SoundCloud");
 	} else if (host == QLatin1String("streamable.com")) {
 		setUrlEndpoint(QStringLiteral("https://api.streamable.com/oembed.json"));
+		providerKey   = QStringLiteral("streamable");
 		siteLabel     = QObject::tr("Streamable");
 		fallbackTitle = QObject::tr("Streamable video");
 		openLabel     = QObject::tr("Open on Streamable");
 	} else if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
 		setUrlEndpoint(QStringLiteral("https://giphy.com/services/oembed"));
+		providerKey   = QStringLiteral("giphy");
 		siteLabel     = QObject::tr("GIPHY");
 		fallbackTitle = QObject::tr("GIPHY GIF");
 		openLabel     = QObject::tr("Open on GIPHY");
 	} else if (isBlueskyPostUrl(url)) {
 		setUrlEndpoint(QStringLiteral("https://embed.bsky.app/oembed"));
+		providerKey   = QStringLiteral("bluesky");
 		siteLabel     = QObject::tr("Bluesky");
 		fallbackTitle = QObject::tr("Bluesky post");
 		openLabel     = QObject::tr("Open on Bluesky");
@@ -4666,6 +4678,7 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		QUrlQuery query;
 		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
 		endpoint.setQuery(query);
+		providerKey   = QStringLiteral("mastodon");
 		siteLabel     = QObject::tr("Mastodon");
 		fallbackTitle = QObject::tr("Mastodon post");
 		openLabel     = QObject::tr("Open post");
@@ -4674,7 +4687,9 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		return std::nullopt;
 	}
 
-	return PersistentChatPreviewOEmbedTarget { endpoint, siteLabel, fallbackTitle, openLabel, socialPost };
+	return PersistentChatPreviewOEmbedTarget {
+		endpoint, providerKey, siteLabel, fallbackTitle, openLabel, socialPost
+	};
 }
 
 struct PersistentChatPreviewProviderInfo {
@@ -4699,7 +4714,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 10;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 11;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 8;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
@@ -24094,14 +24109,24 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 	}
 	previewState.insert(QStringLiteral("kind"), previewKind);
 	previewState.insert(QStringLiteral("url"), preview.canonicalUrl);
-	previewState.insert(QStringLiteral("title"), preview.title);
-	previewState.insert(QStringLiteral("subtitle"), preview.subtitle);
-	previewState.insert(QStringLiteral("description"), preview.description);
+	const QUrl canonicalPreviewUrl(preview.canonicalUrl);
+	const QString displayHost = previewDisplayHost(canonicalPreviewUrl);
+	if (!displayHost.isEmpty()) {
+		previewState.insert(QStringLiteral("host"), displayHost);
+	}
+	previewState.insert(QStringLiteral("title"), trimmedPreviewText(preview.title, 512));
+	previewState.insert(QStringLiteral("subtitle"), trimmedPreviewText(preview.subtitle, 512));
+	const QString sanitizedDescription = trimmedPreviewText(preview.description, 4096);
+	const QString displayDescription =
+		!preview.failed && preview.metadataFinished && previewDescriptionIsPlaceholder(sanitizedDescription)
+			? QString()
+			: sanitizedDescription;
+	previewState.insert(QStringLiteral("description"), displayDescription);
 	if (preview.failed) {
 		// Failed/blocked previews historically stored their user-facing failure
 		// reason in description. Keep normal copy and error semantics distinct in
 		// the typed QML DTO without changing the persisted preview format.
-		previewState.insert(QStringLiteral("errorDescription"), preview.description);
+		previewState.insert(QStringLiteral("errorDescription"), sanitizedDescription);
 	}
 	previewState.insert(QStringLiteral("openLabel"), preview.openLabel);
 	previewState.insert(QStringLiteral("loading"), !preview.metadataFinished || !preview.thumbnailFinished);
@@ -24109,31 +24134,71 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 	if (!preview.thumbnailProviderUrl.isEmpty()) {
 		previewState.insert(QStringLiteral("thumbnailUrl"), preview.thumbnailProviderUrl);
 	}
-	if (!preview.metadata.isEmpty()) {
-		QVariantMap metadataState = preview.metadata;
-		// Provider metadata remains the cache/source-of-truth shape. Only managed
-		// image-provider URLs may cross into QML; never expose a remote avatar or
-		// store-art URL while its bounded, pinned download is still pending.
-		for (const QString &metadataKey : {
-				 QStringLiteral("forumPostAuthorAvatarUrl"),
-				 QStringLiteral("forumFirstPostAuthorAvatarUrl"),
-				 QStringLiteral("xAvatarUrl"),
-				 QStringLiteral("instagramAvatarUrl"),
-				 QStringLiteral("githubOwnerAvatarUrl"),
-				 QStringLiteral("steamHeaderImage"),
-				 QStringLiteral("steamCapsuleImage") }) {
-			const QString source = preview.metadata.value(metadataKey).toString().trimmed();
-			const auto managedIt = preview.metadataImages.constFind(metadataKey);
-			if (managedIt != preview.metadataImages.cend() && managedIt->source == source
-				&& !managedIt->providerUrl.isEmpty()) {
-				metadataState.insert(metadataKey, managedIt->providerUrl);
-			} else {
-				metadataState.remove(metadataKey);
-			}
+	QVariantMap metadataState = preview.metadata;
+	QString providerKey =
+		metadataState.value(QStringLiteral("provider")).toString().trimmed().toLower();
+	if (providerKey.isEmpty()) {
+		providerKey =
+			metadataState.value(QStringLiteral("previewProvider")).toString().trimmed().toLower();
+	}
+	if (providerKey.isEmpty()) {
+		if (const std::optional< PersistentChatPreviewEmbedTarget > embedTargetCandidate =
+				previewEmbedTargetForUrl(canonicalPreviewUrl);
+			embedTargetCandidate) {
+			providerKey = embedTargetCandidate->kind;
+		} else if (const std::optional< PersistentChatPreviewOEmbedTarget > oEmbedTarget =
+					   previewOEmbedTargetForUrl(canonicalPreviewUrl);
+				   oEmbedTarget) {
+			providerKey = oEmbedTarget->providerKey;
+		} else if (const std::optional< RichPreviewProviderInfo > provider =
+					   richPreviewProviderForUrl(canonicalPreviewUrl);
+				   provider) {
+			providerKey = provider->key;
+		} else if (const std::optional< GameStorePreviewInfo > store =
+					   gameStorePreviewInfoForUrl(canonicalPreviewUrl);
+				   store) {
+			providerKey = store->key;
 		}
-		if (!metadataState.isEmpty()) {
-			previewState.insert(QStringLiteral("metadata"), metadataState);
+	}
+	const std::optional< PersistentChatPreviewProviderInfo > providerInfo =
+		previewProviderInfo(canonicalPreviewUrl);
+	if (!providerKey.isEmpty()) {
+		if (metadataState.value(QStringLiteral("provider")).toString().trimmed().isEmpty()) {
+			metadataState.insert(QStringLiteral("provider"), providerKey);
 		}
+		if (metadataState.value(QStringLiteral("previewProvider")).toString().trimmed().isEmpty()) {
+			metadataState.insert(QStringLiteral("previewProvider"), providerKey);
+		}
+	}
+	// A few legacy/direct previews (for example i.4cdn.org) have a known
+	// provider label but no typed metadata key. Preserve that correct identity
+	// for the QML card without inventing a localized string as a provider token.
+	if (metadataState.value(QStringLiteral("providerName")).toString().trimmed().isEmpty()
+		&& providerInfo) {
+		metadataState.insert(QStringLiteral("providerName"), providerInfo->siteLabel);
+	}
+	// Provider metadata remains the cache/source-of-truth shape. Only managed
+	// image-provider URLs may cross into QML; never expose a remote avatar or
+	// store-art URL while its bounded, pinned download is still pending.
+	for (const QString &metadataKey : {
+			 QStringLiteral("forumPostAuthorAvatarUrl"),
+			 QStringLiteral("forumFirstPostAuthorAvatarUrl"),
+			 QStringLiteral("xAvatarUrl"),
+			 QStringLiteral("instagramAvatarUrl"),
+			 QStringLiteral("githubOwnerAvatarUrl"),
+			 QStringLiteral("steamHeaderImage"),
+			 QStringLiteral("steamCapsuleImage") }) {
+		const QString source = preview.metadata.value(metadataKey).toString().trimmed();
+		const auto managedIt = preview.metadataImages.constFind(metadataKey);
+		if (managedIt != preview.metadataImages.cend() && managedIt->source == source
+			&& !managedIt->providerUrl.isEmpty()) {
+			metadataState.insert(metadataKey, managedIt->providerUrl);
+		} else {
+			metadataState.remove(metadataKey);
+		}
+	}
+	if (!metadataState.isEmpty()) {
+		previewState.insert(QStringLiteral("metadata"), metadataState);
 	}
 	if (!preview.mediaDataUrl.isEmpty()) {
 		previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
@@ -24228,7 +24293,7 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 		const QUrl suggestedEmbed(suggestedEmbedUrl);
 		if (suggestedEmbed.isValid()) {
 			embedTarget =
-				PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), suggestedEmbed, QStringLiteral("twitch") };
+				PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), suggestedEmbed, QStringLiteral("wide") };
 		} else {
 			embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
 		}
@@ -33267,6 +33332,11 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		it->siteSnapshotFinished  = true;
 		it->thumbnailFinished     = true;
 	}
+	QVariantMap providerMetadata = it->metadata;
+	providerMetadata.insert(QStringLiteral("provider"), target->providerKey);
+	providerMetadata.insert(QStringLiteral("previewProvider"), target->providerKey);
+	providerMetadata.insert(QStringLiteral("providerName"), target->siteLabel);
+	it->metadata = providerMetadata;
 
 	QNetworkRequest request(target->url);
 	preparePreviewRequest(request);
@@ -33374,6 +33444,9 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		}
 		if (previewIt->subtitle.trimmed().isEmpty()) {
 			previewIt->subtitle = target->siteLabel;
+		}
+		if (success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)) {
+			previewIt->description.clear();
 		}
 		if (!success && previewDescriptionIsPlaceholder(previewIt->description)) {
 			previewIt->description = hasEmbedTarget ? QString() : failureText;

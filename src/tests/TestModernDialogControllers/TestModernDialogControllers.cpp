@@ -3035,7 +3035,10 @@ void TestModernDialogControllers::mediaAutomationReadinessStateIsTyped() {
 			 QStringLiteral("sharedOperationError"),
 			 QStringLiteral("rendererPresent"), QStringLiteral("rendererState"),
 			 QStringLiteral("rendererReady"), QStringLiteral("windowPresent"),
-			 QStringLiteral("windowReady"), QStringLiteral("windowComponentFailed") }) {
+			 QStringLiteral("windowReady"), QStringLiteral("windowComponentFailed"),
+			 QStringLiteral("surfaceVerified"), QStringLiteral("transportVerified"),
+			 QStringLiteral("playbackVerified"), QStringLiteral("surfaceVerificationState"),
+			 QStringLiteral("surfaceVerificationEvidence"), QStringLiteral("surfaceVerificationDetail") }) {
 		QVERIFY2(helperBody.contains(QStringLiteral("\"%1\"").arg(field)),
 			qPrintable(QStringLiteral("Missing typed media automation field: %1").arg(field)));
 	}
@@ -3562,6 +3565,38 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(dtoEnd > dtoStart);
 	const QString dto = source.mid(dtoStart, dtoEnd - dtoStart);
 	QVERIFY(dto.contains(QStringLiteral("QVariantMap metadataState = preview.metadata")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"const QUrl canonicalPreviewUrl(preview.canonicalUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"const QString displayHost = previewDisplayHost(canonicalPreviewUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewState.insert(QStringLiteral(\"host\"), displayHost)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"trimmedPreviewText(preview.title, 512)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"trimmedPreviewText(preview.subtitle, 512)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"const QString sanitizedDescription = trimmedPreviewText(preview.description, 4096)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewDescriptionIsPlaceholder(sanitizedDescription)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewState.insert(QStringLiteral(\"errorDescription\"), sanitizedDescription)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewEmbedTargetForUrl(canonicalPreviewUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewOEmbedTargetForUrl(canonicalPreviewUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"richPreviewProviderForUrl(canonicalPreviewUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"gameStorePreviewInfoForUrl(canonicalPreviewUrl)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"metadataState.insert(QStringLiteral(\"provider\"), providerKey)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"metadataState.insert(QStringLiteral(\"previewProvider\"), providerKey)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"const std::optional< PersistentChatPreviewProviderInfo > providerInfo")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"metadataState.insert(QStringLiteral(\"providerName\"), providerInfo->siteLabel)")));
 	QVERIFY(dto.contains(QStringLiteral("metadataState.remove(metadataKey)")));
 	QVERIFY(dto.contains(QStringLiteral("metadataState.insert(metadataKey, managedIt->providerUrl)")));
 	for (const QString &field : {
@@ -3599,6 +3634,15 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 11")));
+	QVERIFY(source.contains(QStringLiteral(
+		"providerMetadata.insert(QStringLiteral(\"previewProvider\"), target->providerKey)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"https://www.youtube-nocookie.com/embed/%1")));
+	QVERIFY(source.contains(QStringLiteral(
+		"PersistentChatPreviewEmbedTarget { QStringLiteral(\"twitch\"), embedUrl, QStringLiteral(\"wide\") }")));
 }
 
 void TestModernDialogControllers::serverIdentityImagePickerIsManagedAndAsynchronous() {
