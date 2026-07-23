@@ -98,6 +98,7 @@ TestCase {
 		controlsLoader.item.externalAvailable = false
 		controlsLoader.item.embedded = false
 		controlsLoader.item.fullscreen = false
+		controlsLoader.item.transportAvailable = true
 		findChild(controlsLoader.item, "mediaExternalButton").text = "Open externally"
 		findChild(controlsLoader.item, "mediaCloseButton").text = "End session"
 	}
@@ -362,7 +363,9 @@ TestCase {
 		controls.externalAvailable = true
 
 		tryCompare(controls, "providerControlled", true)
-		compare(stateLabel.text, "Provider controls")
+		compare(stateLabel.text, "")
+		verify(!stateLabel.visible)
+		verify(!findChild(controls, "mediaSeekSlider").parent.visible)
 		verify(!seekSlider.visible)
 		verify(!playButton.visible)
 		verify(!muteButton.visible)
@@ -374,5 +377,35 @@ TestCase {
 		compare(externalButton.activeFocus, true)
 		externalButton.clicked()
 		compare(externalSpy.count, 1)
+	}
+
+	function test_verification_state_hides_fake_transport_but_keeps_real_window_actions() {
+		const controls = controlsLoader.item
+		const seekSlider = findChild(controls, "mediaSeekSlider")
+		const playButton = findChild(controls, "mediaPlayButton")
+		const stateLabel = findChild(controls, "mediaStateLabel")
+		const externalButton = findChild(controls, "mediaExternalButton")
+		const fullscreenButton = findChild(controls, "mediaFullscreenButton")
+		const closeButton = findChild(controls, "mediaCloseButton")
+
+		session.sharedAvailable = false
+		session.sharedJoined = false
+		session.sharedHost = false
+		session.state = "loading"
+		session.position = 0
+		session.duration = 0
+		controls.externalAvailable = true
+		controls.transportAvailable = false
+
+		verify(!controls.transportControlsVisible)
+		verify(!seekSlider.parent.visible)
+		verify(!seekSlider.visible)
+		verify(!playButton.visible)
+		verify(!stateLabel.visible)
+		verify(externalButton.visible)
+		verify(fullscreenButton.visible)
+		verify(closeButton.visible)
+		verify(controls.focusInitialControl())
+		compare(externalButton.activeFocus, true)
 	}
 }

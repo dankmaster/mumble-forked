@@ -9,6 +9,7 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QEventLoop>
 #include <QtCore/QScopedPointer>
+#include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -75,6 +76,14 @@ void TestQmlMediaProfileFactory::providerResourcesAreDenyByDefault() {
 	QVERIFY(!QmlMediaProfileFactory::isResourceRequestAllowed(
 		QStringLiteral("tiktok"), tiktokPlayer, {},
 		QUrl(QStringLiteral("https://tiktokcdn-eu.com.evil.test/player.js")), tiktokPlayer));
+
+	const QUrl vimeoPlayer(QStringLiteral("https://player.vimeo.com/video/1195621748"));
+	QVERIFY(QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("vimeo"), vimeoPlayer, {},
+		QUrl(QStringLiteral("https://challenges.cloudflare.com/turnstile/v0/api.js")), vimeoPlayer));
+	QVERIFY(!QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("youtube"), player, {},
+		QUrl(QStringLiteral("https://challenges.cloudflare.com/turnstile/v0/api.js")), player));
 }
 
 void TestQmlMediaProfileFactory::directMediaAllowsOnlyExactSources() {
@@ -191,6 +200,27 @@ void TestQmlMediaProfileFactory::activeSessionNavigationAcceptsSafeRedirectsAndN
 	QVERIFY(!providerProfiles.isNavigationRequestAllowed(
 		QUrl(QStringLiteral("https://www.youtube.com:444/embed/provider-source")),
 		providerSession.url()));
+	QVERIFY(!providerProfiles.isNavigationRequestAllowed(
+		QUrl(QStringLiteral("https://accounts.google.com/v3/signin/identifier")),
+		providerSession.url()));
+	QVERIFY(providerProfiles.isVerificationNavigationAllowed(
+		QUrl(QStringLiteral("https://accounts.google.com/v3/signin/identifier")),
+		providerSession.url()));
+	QVERIFY(!providerProfiles.isVerificationNavigationAllowed(
+		QUrl(QStringLiteral("https://accounts.google.com.evil.example/signin")),
+		providerSession.url()));
+
+	MediaSessionBackend twitchSession;
+	QVERIFY(twitchSession.open(QUrl(QStringLiteral(
+		"https://clips.twitch.tv/embed?clip=example&parent=www.mumble.info")),
+		QStringLiteral("twitch"), QStringLiteral("provider-twitch")));
+	QmlMediaProfileFactory twitchProfiles(&twitchSession);
+	QVERIFY(twitchProfiles.isVerificationNavigationAllowed(
+		QUrl(QStringLiteral("https://passport.twitch.tv/login")),
+		twitchSession.url()));
+	QVERIFY(!twitchProfiles.isVerificationNavigationAllowed(
+		QUrl(QStringLiteral("https://twitch.tv.evil.example/login")),
+		twitchSession.url()));
 
 	MediaSessionBackend directSession;
 	const QUrl primary(QStringLiteral("https://media.example.com/clips/../video.mp4#source"));
@@ -251,6 +281,9 @@ void TestQmlMediaProfileFactory::explicitMediaActivationLoadsDelayedProfileAndVi
 #ifndef MUMBLE_TEST_DELAYED_WEBENGINE
 	QSKIP("This toolchain/build does not support the Windows shared delay-load contract.");
 #else
+	QTemporaryDir providerStateRoot;
+	QVERIFY(providerStateRoot.isValid());
+	qputenv("MUMBLE_MEDIA_PROFILE_ROOT", providerStateRoot.path().toUtf8());
 	auto moduleLoaded = [](const char *moduleName) { return GetModuleHandleA(moduleName) != nullptr; };
 	const char *webEngineQuick = MUMBLE_TEST_WEBENGINE_QUICK_DLL;
 	const char *webEngineCore = MUMBLE_TEST_WEBENGINE_CORE_DLL;
@@ -281,11 +314,27 @@ void TestQmlMediaProfileFactory::explicitMediaActivationLoadsDelayedProfileAndVi
 	QCOMPARE(profilesChangedSpy.count(), 1);
 	QVERIFY(moduleLoaded(webEngineQuick));
 	QVERIFY(moduleLoaded(webEngineCore));
+	QVERIFY(profiles.providerStatePersistent());
 
 	QObject *profile = profiles.videoProfile();
 	QVERIFY(profile);
 	QCOMPARE(profiles.videoProfile(), profile);
 	QCOMPARE(QString::fromLatin1(profile->metaObject()->className()), QStringLiteral("QQuickWebEngineProfile"));
+	// Use the QObject contract here so this delayed-runtime test does not gain a
+	// static QQuickWebEngineProfile meta-object import before explicit activation.
+	QVERIFY(!profile->property("offTheRecord").toBool());
+	QCOMPARE(profile->property("storageName").toString(), QStringLiteral("mumble-media-youtube"));
+	QVERIFY(QDir::cleanPath(profile->property("persistentStoragePath").toString())
+		.startsWith(QDir::cleanPath(providerStateRoot.path())));
+	QCOMPARE(profile->property("httpCacheType").toInt(), 0); // MemoryHttpCache
+	QCOMPARE(profile->property("httpCacheMaximumSize").toInt(), 32 * 1024 * 1024);
+	QCOMPARE(profile->property("persistentCookiesPolicy").toInt(), 1); // AllowPersistentCookies
+	QObject *audioProfile = profiles.audioProfile();
+	QVERIFY(audioProfile);
+	QVERIFY(audioProfile->property("offTheRecord").toBool());
+	QCOMPARE(audioProfile->property("httpCacheType").toInt(), 0); // MemoryHttpCache
+	QCOMPARE(audioProfile->property("httpCacheMaximumSize").toInt(), 8 * 1024 * 1024);
+	QCOMPARE(audioProfile->property("persistentCookiesPolicy").toInt(), 0); // NoPersistentCookies
 	QVERIFY(moduleLoaded(webEngineQuick));
 	QVERIFY(moduleLoaded(webEngineCore));
 
@@ -313,6 +362,16 @@ WebEngineView {
 	QVERIFY(moduleLoaded(webEngineQuick));
 	QVERIFY(moduleLoaded(webEngineCore));
 	QVERIFY(moduleLoaded(webChannelQuick));
+
+	QPointer< QObject > releasedProfile(profile);
+	QPointer< QObject > releasedAudioProfile(audioProfile);
+	view.reset();
+	session.closePlayer();
+	QTRY_VERIFY_WITH_TIMEOUT(releasedProfile.isNull(), 2000);
+	QTRY_VERIFY_WITH_TIMEOUT(releasedAudioProfile.isNull(), 2000);
+	QVERIFY(!profiles.videoProfile());
+	QVERIFY(!profiles.audioProfile());
+	qunsetenv("MUMBLE_MEDIA_PROFILE_ROOT");
 #endif
 }
 

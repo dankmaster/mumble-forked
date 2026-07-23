@@ -4438,6 +4438,18 @@ namespace {
 			rendererPresent ? surface->property("documentReadyProbeAttempts").toInt() : 0);
 		state.insert(QStringLiteral("rendererProbeState"),
 			rendererPresent ? surface->property("documentReadyProbeState").toString() : QString());
+		state.insert(QStringLiteral("surfaceVerified"),
+			rendererPresent && surface->property("surfaceVerified").toBool());
+		state.insert(QStringLiteral("transportVerified"),
+			rendererPresent && surface->property("transportVerified").toBool());
+		state.insert(QStringLiteral("playbackVerified"),
+			rendererPresent && surface->property("playbackVerified").toBool());
+		state.insert(QStringLiteral("surfaceVerificationState"),
+			rendererPresent ? surface->property("surfaceVerificationState").toString() : QString());
+		state.insert(QStringLiteral("surfaceVerificationEvidence"),
+			rendererPresent ? surface->property("surfaceVerificationEvidence").toString() : QString());
+		state.insert(QStringLiteral("surfaceVerificationDetail"),
+			rendererPresent ? surface->property("surfaceVerificationDetail").toString() : QString());
 		state.insert(QStringLiteral("rendererSurfaceId"),
 			rendererPresent ? surface->property("surfaceId").toString() : QString());
 		state.insert(QStringLiteral("windowRequired"), active);

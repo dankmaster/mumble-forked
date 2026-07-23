@@ -11,6 +11,7 @@ Rectangle {
 	property bool fullscreenAvailable: true
 	property bool externalAvailable: false
 	property bool embedded: false
+	property bool transportAvailable: true
 	property Item focusBeforeClosePrompt: null
 	property bool confirmedClosePending: false
 	readonly property bool sharedPlayback: Boolean(session.sharedAvailable && session.sharedJoined)
@@ -18,11 +19,12 @@ Rectangle {
 		? Boolean(session.playbackControlAllowed)
 		: Boolean(session.playbackControllable && (!session.sharedAvailable || session.sharedHost))
 	readonly property bool providerControlled: !Boolean(session.playbackControllable)
+	readonly property bool transportControlsVisible: transportAvailable && !providerControlled
 	readonly property bool compactControls: embedded || width < 720
 	readonly property bool embeddedNarrow: embedded && width < 420
 	readonly property bool controlsWrapped: transportActions.childrenRect.height > Theme.controlHeight
 	readonly property bool externalActionAvailable: externalAvailable
-		&& (session.state === "error" || providerControlled)
+		&& (session.state === "error" || providerControlled || !transportAvailable)
 	readonly property bool confirmationVisible: closeDialog.opened
 	readonly property bool compactVolumeVisible: compactControls
 	readonly property bool volumePopupVisible: volumePopup.opened
@@ -68,7 +70,7 @@ Rectangle {
 				? qsTr("Loading · %1%").arg(session.loadProgress)
 				: qsTr("Loading")
 		if (session.state === "error") return qsTr("Playback unavailable")
-		if (root.providerControlled) return qsTr("Provider controls")
+		if (root.providerControlled || !root.transportAvailable) return ""
 		if (session.sharedHost) return qsTr("Hosting for %1").arg(session.sharedParticipantCount)
 		if (session.sharedJoined) return qsTr("Synchronized with host")
 		return session.state === "playing" ? qsTr("Playing") : qsTr("Paused")
@@ -182,7 +184,7 @@ Rectangle {
 			id: seekRow
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
-			visible: !root.embedded
+			visible: !root.embedded && root.transportControlsVisible
 			spacing: Theme.space2
 
 			ModernSlider {
@@ -193,7 +195,7 @@ Rectangle {
 				to: Math.max(1, Number(session.duration || 0))
 				value: Number(session.position || 0)
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
-				visible: !root.providerControlled
+				visible: root.transportControlsVisible
 				onMoved: session.seek(value)
 				Accessible.name: qsTr("Playback position")
 				Accessible.description: qsTr("%1 of %2").arg(root.formatTime(value)).arg(root.formatTime(session.duration))
@@ -206,7 +208,7 @@ Rectangle {
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				horizontalAlignment: Text.AlignRight
-				visible: !root.providerControlled
+				visible: root.transportControlsVisible
 			}
 		}
 
@@ -224,7 +226,7 @@ Rectangle {
 				text: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
 				iconName: session.state === "playing" ? "pause" : "play"
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
-				visible: !root.providerControlled
+				visible: root.transportControlsVisible
 				Accessible.name: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
 				Accessible.description: session.sharedJoined
 					? qsTr("Control synchronized playback for everyone in the session") : ""
@@ -234,7 +236,7 @@ Rectangle {
 			Label {
 				id: embeddedTimeLabel
 				objectName: "mediaEmbeddedTimeLabel"
-				visible: root.embedded && !root.providerControlled && !root.embeddedNarrow
+				visible: root.embedded && root.transportControlsVisible && !root.embeddedNarrow
 				width: session.duration >= 3600 ? 108 : 82
 				height: Theme.controlHeight
 				textFormat: Text.PlainText
@@ -248,7 +250,7 @@ Rectangle {
 			ModernSlider {
 				id: embeddedSeekSlider
 				objectName: "mediaEmbeddedSeekSlider"
-				visible: root.embedded && !root.providerControlled
+				visible: root.embedded && root.transportControlsVisible
 				// Give seeking the space left by the visible transport cluster. This
 				// keeps the card player on one row without relying on translated label
 				// widths or a brittle per-breakpoint estimate.
@@ -275,7 +277,7 @@ Rectangle {
 				font.weight: session.sharedHost ? Font.DemiBold : Font.Normal
 				elide: Text.ElideRight
 				verticalAlignment: Text.AlignVCenter
-				visible: !root.embedded || root.providerControlled
+				visible: !root.embedded && root.transportControlsVisible
 			}
 
 			ModernButton {
@@ -297,7 +299,7 @@ Rectangle {
 				text: session.muted ? qsTr("Unmute media") : qsTr("Mute media")
 				iconName: session.muted || session.volume === 0 ? "volume-off" : "volume"
 				selected: !!session.muted
-				visible: !root.providerControlled
+				visible: root.transportControlsVisible
 				Accessible.name: session.muted ? qsTr("Unmute media") : qsTr("Mute media")
 				onClicked: session.toggleMuted()
 			}
@@ -306,7 +308,7 @@ Rectangle {
 				id: volumeSlider
 				objectName: "mediaVolumeSlider"
 				width: 104
-				visible: !root.compactControls && !root.providerControlled
+				visible: !root.compactControls && root.transportControlsVisible
 				from: 0
 				to: 100
 				stepSize: 1
@@ -319,7 +321,7 @@ Rectangle {
 			ModernButton {
 				id: compactVolumeButton
 				objectName: "mediaCompactVolumeButton"
-				visible: root.compactControls && !root.providerControlled
+				visible: root.compactControls && root.transportControlsVisible
 				dense: true
 				highlighted: volumePopup.opened
 				text: qsTr("%1%").arg(Math.round(session.volume))

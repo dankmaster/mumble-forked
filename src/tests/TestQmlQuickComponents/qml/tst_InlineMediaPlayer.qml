@@ -38,6 +38,7 @@ TestCase {
 		property bool muted: false
 		property int retryCalls: 0
 		property int pauseCalls: 0
+		property int closeCalls: 0
 		property int errorReports: 0
 		property int loadReports: 0
 		property int lastLoadProgress: -1
@@ -69,14 +70,16 @@ TestCase {
 		function reportPlaybackState(position, duration, paused) {}
 		function isNavigationAllowed(url) { return true }
 		function detach() {}
-		function closePlayer() {}
+		function closePlayer() { closeCalls += 1 }
 	}
 
 	QtObject {
 		id: mediaRuntime
 		property var videoProfile: null
 		property string videoDocumentUrl: ""
+		property bool providerStatePersistent: true
 		function isNavigationRequestAllowed(requestUrl, firstPartyUrl) { return true }
+		function isVerificationNavigationAllowed(requestUrl, firstPartyUrl) { return true }
 	}
 
 	Loader {
@@ -93,12 +96,16 @@ TestCase {
 		testCase.height = 700
 		playerLoader.item.invalidateMediaDocument()
 		playerLoader.item.aspect = "wide"
+		playerLoader.item.presentationProvider = ""
 		playerLoader.item.mediaProfileFactory = null
+		playerLoader.item.providerVerificationStabilityMs = 0
+		playerLoader.item.providerVerificationProbeCount = 1
 		mediaRuntime.videoDocumentUrl = ""
 		playerLoader.item.statePollTimeoutMs = 3000
 		session.active = false
 		playerLoader.item.visualFixtureMode = ""
 		session.detached = false
+		session.playbackControllable = true
 		session.playbackControlAllowed = true
 		session.sharedAvailable = false
 		session.sharedJoined = false
@@ -115,6 +122,7 @@ TestCase {
 		session.playbackSourcePreparing = false
 		session.retryCalls = 0
 		session.pauseCalls = 0
+		session.closeCalls = 0
 		session.errorReports = 0
 		session.loadReports = 0
 		session.lastLoadProgress = -1
@@ -381,6 +389,151 @@ TestCase {
 		session.active = false
 	}
 
+	function test_provider_surface_probe_rejects_challenges_and_verifies_every_allowlisted_transport() {
+		const player = playerLoader.item
+		session.active = true
+		session.provider = "youtube"
+		let generation = player.beginMediaDocumentLoad("about:blank#challenge")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Logga in för att bekräfta att du inte är en bot"
+		}, false))
+		verify(!player.documentReady)
+		compare(player.surfaceVerificationState, "blocked")
+		verify(player.surfaceVerificationDetail.indexOf("Complete verification") >= 0)
+		verify(player.surfaceVerificationDetail.indexOf("reload the media") >= 0)
+		compare(session.errorReports, 0)
+		verify(player.providerVerificationRequired)
+		verify(!player.transportVerified)
+		verify(!player.nativeControlsVisible)
+		const verificationStrip = findChild(player, "inlineMediaVerificationStrip")
+		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
+		verify(verificationStrip !== null && verificationStrip.visible)
+		verify(loadingSurface !== null && !loadingSurface.visible)
+
+		generation = player.beginMediaDocumentLoad("about:blank#consent")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": true,
+			"mediaPresent": true,
+			"blockedKind": "consent",
+			"detail": "Allow all cookies"
+		}, false))
+		compare(player.surfaceVerificationState, "blocked")
+		verify(player.surfaceVerificationDetail.indexOf("cookie preferences") >= 0)
+		verify(!player.playbackVerified)
+
+		const providers = [ "youtube", "twitch", "streamable", "vimeo",
+			"dailymotion", "spotify", "facebook", "tiktok", "instagram",
+			"soundcloud" ]
+		for (let index = 0; index < providers.length; ++index) {
+			session.provider = providers[index]
+			generation = player.beginMediaDocumentLoad("about:blank#" + providers[index])
+			player.documentReadyProbeAttempts = 1
+			verify(player.applyMediaSurfaceProbeResult(generation, {
+				"readyState": "complete",
+				"transport": true,
+				"providerUi": true,
+				"mediaPresent": providers[index] === "youtube",
+				"mediaReady": providers[index] === "youtube",
+				"playbackEvidence": false
+			}, false))
+			verify(player.documentReady)
+			verify(player.surfaceVerified)
+			verify(player.transportVerified)
+			compare(player.surfaceVerificationState, "verified")
+			verify(player.surfaceVerificationEvidence.indexOf("transport") >= 0)
+		}
+		session.active = false
+	}
+
+	function test_provider_verification_requires_stability_and_revokes_late_false_positive() {
+		const player = playerLoader.item
+		player.providerVerificationStabilityMs = 1200
+		player.providerVerificationProbeCount = 3
+		session.active = true
+		session.provider = "youtube"
+		const generation = player.beginMediaDocumentLoad("about:blank#late-challenge")
+		const verifiedProbe = {
+			"readyState": "complete",
+			"transport": true,
+			"providerUi": true,
+			"mediaPresent": true,
+			"mediaReady": true,
+			"playbackEvidence": true
+		}
+
+		verify(!player.applyMediaSurfaceProbeResult(generation, verifiedProbe, false))
+		verify(!player.documentReady)
+		compare(player.surfaceVerificationState, "pending")
+		player._verifiedProbeCount = 2
+		player._verifiedProbeStartedAt = Date.now() - 1300
+		verify(player.applyMediaSurfaceProbeResult(generation, verifiedProbe, false))
+		verify(player.documentReady)
+		verify(player.playbackVerified)
+
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Logga in för att bekräfta att du inte är en bot"
+		}, true))
+		verify(!player.documentReady)
+		verify(!player.transportVerified)
+		verify(!player.playbackVerified)
+		verify(player.providerVerificationRequired)
+		compare(session.errorReports, 0)
+		compare(session.error, "")
+		verify(findChild(player, "inlineMediaVerificationStrip").visible)
+		session.active = false
+	}
+
+	function test_provider_verification_navigation_survives_auth_redirects_until_reload() {
+		const player = playerLoader.item
+		session.active = true
+		const generation = player.beginMediaDocumentLoad("about:blank#challenge-navigation")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Sign in to confirm you are not a bot"
+		}, false))
+		verify(player.providerVerificationRequired)
+
+		player.verificationNavigationActive = true
+		player.beginMediaDocumentLoad("https://accounts.google.com/v3/signin/identifier")
+		verify(player.verificationNavigationActive)
+		verify(player.navigationRequestAllowed(
+			"https://accounts.google.com/v3/signin/identifier",
+			player.rendererDocumentUrl,
+			player.verificationNavigationActive))
+
+		session.retry()
+		compare(player.verificationNavigationActive, false)
+		session.active = false
+	}
+
+	function test_background_probe_persists_real_playback_evidence() {
+		const player = playerLoader.item
+		session.active = true
+		session.provider = "vimeo"
+		const generation = player.beginMediaDocumentLoad("about:blank#vimeo")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete", "transport": true, "providerUi": true,
+			"playbackEvidence": false
+		}, false))
+		verify(!player.playbackVerified)
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete", "transport": true, "providerUi": true,
+			"mediaPresent": true, "mediaReady": true, "playbackEvidence": true
+		}, true))
+		verify(player.playbackVerified)
+		verify(player.surfaceVerificationEvidence.indexOf("playback") >= 0)
+		session.active = false
+	}
+
 	function test_late_poll_callback_cannot_mutate_new_document_generation() {
 		const player = playerLoader.item
 		const firstGeneration = player.beginMediaDocumentLoad("https://www.youtube.com/embed/first")
@@ -555,6 +708,9 @@ TestCase {
 		const surface = findChild(player, "inlineMediaWebSurface")
 		const controls = findChild(player, "mediaTransportActions")
 		verify(canvas !== null && surface !== null && controls !== null)
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
 
 		for (const width of [ 460, 580, 720 ]) {
 			testCase.width = width
@@ -574,6 +730,52 @@ TestCase {
 		verify(canvas.height >= 190)
 		verify(surface.width >= canvas.width * 0.99)
 		verify(player.height >= canvas.height + 40)
+		session.active = false
+		player.visualFixtureMode = ""
+	}
+
+	function test_provider_controlled_embed_uses_clear_top_close_without_empty_footer() {
+		const player = playerLoader.item
+		session.provider = "vimeo"
+		session.playbackControllable = false
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
+
+		const canvas = findChild(player, "inlineMediaCanvas")
+		const controls = findChild(player, "mediaTransportActions")
+		const closeButton = findChild(player, "inlineMediaProviderCloseButton")
+		verify(canvas !== null && controls !== null && closeButton !== null)
+		verify(!player.nativeControlsVisible)
+		verify(!controls.parent.parent.visible)
+		verify(closeButton.visible)
+		compare(closeButton.text, "Close")
+		verify(Math.abs(player.implicitHeight - player.mediaViewportHeight) < 1)
+		testCase.height = Math.ceil(player.implicitHeight)
+		wait(0)
+		verify(Math.abs(canvas.height - player.mediaViewportHeight) < 1)
+		verify(player.focusInitialControl())
+		compare(closeButton.activeFocus, true)
+		closeButton.clicked()
+		compare(session.closeCalls, 1)
+
+		session.playbackControllable = true
+		session.active = false
+	}
+
+	function test_direct_transport_can_keep_the_originating_provider_identity() {
+		const player = playerLoader.item
+		session.provider = "direct"
+		player.presentationProvider = "reddit"
+		player.visualFixtureMode = "active"
+		session.active = true
+		wait(0)
+
+		compare(player.providerLabel, "Reddit")
+		compare(player.providerMark, "R")
+		compare(player.Accessible.name, "Reddit inline media player")
+		compare(findChild(player, "inlineMediaProviderLabel").text, "Reddit")
+		session.active = false
 	}
 
 	function test_audio_surfaces_stay_low_and_controls_keep_full_width() {
@@ -718,8 +920,13 @@ TestCase {
 		const player = playerLoader.item
 		const playButton = findChild(player, "mediaPlayButton")
 		verify(playButton !== null)
+		session.active = true
+		player.visualFixtureMode = "active"
+		wait(0)
 		verify(player.focusInitialControl())
 		compare(playButton.activeFocus, true)
+		session.active = false
+		player.visualFixtureMode = ""
 	}
 
 	function test_failure_moves_focus_to_retry_and_retry_is_the_initial_control() {

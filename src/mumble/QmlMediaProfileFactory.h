@@ -22,6 +22,7 @@ class QmlMediaProfileFactory final : public QObject {
 	Q_PROPERTY(QObject *videoProfile READ videoProfile NOTIFY profilesChanged)
 	Q_PROPERTY(QObject *audioProfile READ audioProfile NOTIFY profilesChanged)
 	Q_PROPERTY(QUrl videoDocumentUrl READ videoDocumentUrl NOTIFY documentUrlChanged)
+	Q_PROPERTY(bool providerStatePersistent READ providerStatePersistent NOTIFY documentUrlChanged)
 	Q_PROPERTY(bool runtimeReady READ runtimeReady NOTIFY runtimeStateChanged)
 	Q_PROPERTY(bool runtimePreparing READ runtimePreparing NOTIFY runtimeStateChanged)
 	Q_PROPERTY(QString runtimeError READ runtimeError NOTIFY runtimeStateChanged)
@@ -33,10 +34,13 @@ public:
 	QObject *videoProfile();
 	QObject *audioProfile();
 	QUrl videoDocumentUrl() const;
+	bool providerStatePersistent() const;
 	bool runtimeReady() const;
 	bool runtimePreparing() const;
 	QString runtimeError() const;
 	Q_INVOKABLE bool isNavigationRequestAllowed(const QUrl &requestUrl, const QUrl &firstPartyUrl) const;
+	Q_INVOKABLE bool isVerificationNavigationAllowed(const QUrl &requestUrl,
+													 const QUrl &firstPartyUrl) const;
 	Q_INVOKABLE void retryRuntime();
 
 	static bool isResourceRequestAllowed(const QString &provider, const QUrl &primaryUrl,
