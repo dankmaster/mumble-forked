@@ -3647,12 +3647,17 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
-	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 12")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 13")));
 	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
 	QVERIFY(source.contains(QStringLiteral("data-old-hires")));
 	QVERIFY(source.contains(QStringLiteral("data-a-dynamic-image")));
 	QVERIFY(source.contains(QStringLiteral(
 		"amazonProductImageItemsFromHtml(url, html)")));
+	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationComplete")));
+	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationVersion")));
+	QVERIFY(source.contains(QStringLiteral("QNetworkRequest::AlwaysNetwork")));
+	QVERIFY(source.contains(QStringLiteral("instagramPosterUrl")));
+	QVERIFY(source.contains(QStringLiteral("requestPersistentChatPreviewPosterImage(")));
 	QVERIFY(source.contains(QStringLiteral(
 		"providerMetadata.insert(QStringLiteral(\"previewProvider\"), target->providerKey)")));
 	QVERIFY(source.contains(QStringLiteral(

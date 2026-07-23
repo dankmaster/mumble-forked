@@ -4730,8 +4730,8 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 12;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 8;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 13;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 9;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
@@ -9057,6 +9057,31 @@ QVariantMap previewMetadataWithSwedishData(QVariantMap metadata, const QUrl &url
 	return metadata;
 }
 
+bool richPreviewClientHydrationComplete(const QUrl &url, const QVariantMap &metadata) {
+	if (isAmazonPreviewUrl(url)) {
+		return !metadata.value(QStringLiteral("productTitle")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("productImages")).toList().isEmpty();
+	}
+	if (isBlocketPreviewUrl(url)
+		&& metadata.value(QStringLiteral("previewProvider")).toString() == QLatin1String("blocket")) {
+		return !metadata.value(QStringLiteral("listingTitle")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("listingPrice")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("listingImages")).toList().isEmpty();
+	}
+	return true;
+}
+
+QUrl richPreviewClientPageUrl(const QUrl &url) {
+	QUrl pageUrl = flashbackPreviewPageUrl(url);
+	if (const std::optional< QString > productId = amazonProductIdFromUrl(url); productId) {
+		pageUrl.setScheme(QStringLiteral("https"));
+		pageUrl.setPath(QStringLiteral("/dp/%1").arg(*productId));
+		pageUrl.setQuery(QString());
+		pageUrl.setFragment(QString());
+	}
+	return pageUrl;
+}
+
 bool isBlueskyPostUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host != QLatin1String("bsky.app")) {
@@ -12122,6 +12147,7 @@ struct InstagramPreviewMetadata {
 	QString caption;
 	QString createdAt;
 	QString mediaKind;
+	QString posterUrl;
 	QString avatarUrl;
 	QString ownerUserId;
 	std::optional< qlonglong > likeCount;
@@ -12134,6 +12160,11 @@ InstagramPreviewMetadata instagramPreviewMetadataFromMetaTags(const QUrl &url,
 	InstagramPreviewMetadata metadata;
 	metadata.mediaKind = instagramPreviewMediaKind(url);
 	metadata.ownerUserId = metaTags.value(QLatin1String("instapp:owner_user_id")).trimmed();
+	const QUrl posterUrl(previewImageMetaTag(metaTags));
+	if (posterUrl.isValid() && posterUrl.scheme().toLower() == QLatin1String("https")
+		&& isSafePreviewTarget(posterUrl)) {
+		metadata.posterUrl = posterUrl.toString(QUrl::FullyEncoded);
+	}
 
 	const QString twitterTitle = metaTags.value(QLatin1String("twitter:title")).trimmed();
 	static const QRegularExpression s_twitterTitlePattern(
@@ -12224,6 +12255,7 @@ void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, c
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramHandle"), instagram.handle);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCaption"), instagram.caption);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCreatedAt"), instagram.createdAt);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramPosterUrl"), instagram.posterUrl);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramAvatarUrl"), instagram.avatarUrl);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramOwnerUserId"), instagram.ownerUserId);
 	if (instagram.likeCount) {
@@ -30779,7 +30811,8 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	}
 	const QString expectedPreviewSource = it->canonicalUrl;
 	if (it->metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
-		== INSTAGRAM_PREVIEW_METADATA_VERSION) {
+			== INSTAGRAM_PREVIEW_METADATA_VERSION
+		&& !it->thumbnailImage.isNull()) {
 		return false;
 	}
 	if (m_pendingPersistentChatInstagramMetadataRequests.contains(previewKey)) {
@@ -30794,6 +30827,8 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	}
 	QNetworkRequest pageRequest(requestUrl);
 	prepareInstagramPreviewMetadataRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
 	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
 	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(requestUrl), false);
 	connect(pageReply, &QNetworkReply::finished, this,
@@ -30825,6 +30860,10 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 					}
 					if (parsed.instagramMetadata) {
 						applyInstagramPreviewMetadata(*previewIt, requestUrl, *parsed.instagramMetadata);
+						if (!parsed.instagramMetadata->posterUrl.isEmpty()) {
+							requestPersistentChatPreviewPosterImage(
+								previewKey, QUrl(parsed.instagramMetadata->posterUrl), QStringLiteral("image/jpeg"));
+						}
 					}
 					previewIt->metadataFinished = true;
 					ensurePersistentChatPreviewSiteSnapshot(previewKey);
@@ -30881,11 +30920,14 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 			const QUrl cachedUrl(cached.canonicalUrl);
 			const bool invalid = isGameStorePreviewUrl(cachedUrl)
 				|| (richPreviewProviderForUrl(cachedUrl)
-					&& cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
-						   != RICH_PREVIEW_METADATA_VERSION)
+					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+							!= RICH_PREVIEW_METADATA_VERSION
+						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+							   != RICH_PREVIEW_METADATA_VERSION))
 				|| (isInstagramPreviewUrl(cachedUrl)
-					&& cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
-						   != INSTAGRAM_PREVIEW_METADATA_VERSION)
+					&& (cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
+							!= INSTAGRAM_PREVIEW_METADATA_VERSION
+						|| cached.thumbnailImage.isNull()))
 				|| (isTwitchHost(cachedUrl.host())
 					&& cached.metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
 						   != TWITCH_PREVIEW_METADATA_VERSION)
@@ -32491,6 +32533,12 @@ bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &pre
 		for (auto metadataIt = webhallenMetadata.cbegin(); metadataIt != webhallenMetadata.cend(); ++metadataIt) {
 			previewIt->metadata.insert(metadataIt.key(), metadataIt.value());
 		}
+		if (richPreviewClientHydrationComplete(previewUrl, previewIt->metadata)) {
+			previewIt->metadata.insert(
+				QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+		} else {
+			previewIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+		}
 		applyPersistentChatListingMediaItems(*previewIt);
 
 		const QString productTitle = previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
@@ -32537,8 +32585,10 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
-		|| it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
-			   == RICH_PREVIEW_METADATA_VERSION) {
+		|| (it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+				== RICH_PREVIEW_METADATA_VERSION
+			&& it->metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+				   == RICH_PREVIEW_METADATA_VERSION)) {
 		return false;
 	}
 
@@ -32546,9 +32596,11 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 	it->remoteMediaFinished  = false;
 	const QString expectedPreviewSource = it->canonicalUrl;
 
-	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
+	const QUrl previewPageUrl = richPreviewClientPageUrl(previewUrl);
 	QNetworkRequest pageRequest(previewPageUrl);
 	preparePreviewRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
 	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
 	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(previewPageUrl), false);
 	connect(pageReply, &QNetworkReply::finished, this,
@@ -32632,6 +32684,12 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 
 		for (auto it = parsed.metadata.cbegin(); it != parsed.metadata.cend(); ++it) {
 			previewIt->metadata.insert(it.key(), it.value());
+		}
+		if (richPreviewClientHydrationComplete(previewUrl, previewIt->metadata)) {
+			previewIt->metadata.insert(
+				QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+		} else {
+			previewIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
 		}
 		const QString threadPostUrl =
 			previewIt->metadata.value(QStringLiteral("forumThreadPostUrl")).toString().trimmed();
@@ -34358,6 +34416,7 @@ bool MainWindow::refreshRestoredPersistentChatPreview(const QString &previewKey)
 				&& !s_richProductSessionRefreshes.contains(previewKey)) {
 				s_richProductSessionRefreshes.insert(previewKey);
 				restoredIt->metadata.remove(QStringLiteral("richPreviewMetadataVersion"));
+				restoredIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
 				restoredIt->remoteMediaFinished = false;
 				requestPersistentChatRichProviderPreview(previewKey, restoredPreviewUrl);
 			}
