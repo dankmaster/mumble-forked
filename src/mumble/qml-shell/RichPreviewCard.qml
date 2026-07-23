@@ -130,8 +130,7 @@ Rectangle {
 	// Local rendering and synchronized room playback are separate capabilities.
 	// A provider can be viewed or played in this card without implementing the
 	// deterministic state contract required by Watch Together.
-	readonly property bool localPlaybackSupported: hasDirectMedia
-		|| (hasEmbedPreview && !instagramStaticPost)
+	readonly property bool localPlaybackSupported: hasDirectMedia || hasEmbedPreview
 	readonly property bool sharedPlaybackSupported: hasEmbedPreview
 		&& normalizedEmbedProvider === "youtube" && isSupportedYouTubeSharedPlaybackUrl(safeEmbedUrl)
 	// Compatibility alias for callers and automation that already consume this
@@ -258,7 +257,7 @@ Rectangle {
 	readonly property bool inlineProviderOwnsDetails: inlinePlaybackActive
 		&& hasEmbedPreview
 		&& (providerDetails.presentation === "socialPost"
-			|| ["instagram", "tiktok", "facebook"].indexOf(
+			|| ["instagram", "tiktok", "facebook", "spotify", "soundcloud"].indexOf(
 				providerDetails.providerToken) >= 0)
 	readonly property bool fullBleedMediaStage: (hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed
 	readonly property string genericProviderMark: buildGenericProviderMark()
@@ -339,6 +338,56 @@ Rectangle {
 	ButtonGroup {
 		id: previewSizeGroup
 		exclusive: true
+	}
+
+	Timer {
+		id: inlineFocusRestoreTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		property int attempt: 0
+		onTriggered: root.restoreInlinePlaybackTriggerFocus(generation, attempt)
+	}
+
+	Timer {
+		id: inlineFocusHandoffTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.handOffInlinePlaybackFocus()
+	}
+
+	Timer {
+		id: inlineFailureFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (root.inlinePlayerComponentFailed && inlineComponentRetryButton.visible)
+				inlineComponentRetryButton.forceActiveFocus()
+		}
+	}
+
+	Timer {
+		id: inlineComponentRetryTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (inlineMediaLoader.active)
+				inlineMediaLoader.updateSource()
+		}
+	}
+
+	Timer {
+		id: inlineRuntimeRetryFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.focusInlineRuntimeRetryNow()
+	}
+
+	Timer {
+		id: currentMediaRequestTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.requestCurrentMedia()
 	}
 
 	Rectangle {
@@ -613,10 +662,7 @@ Rectangle {
 			mediaSessionController.reportTypedError("renderer-component-unavailable", message)
 		else if (typeof mediaSessionController.reportError === "function")
 			mediaSessionController.reportError(message)
-		Qt.callLater(function() {
-			if (inlinePlayerComponentFailed && inlineComponentRetryButton.visible)
-				inlineComponentRetryButton.forceActiveFocus()
-		})
+		inlineFailureFocusTimer.restart()
 	}
 
 	function retryInlinePlayerComponent() {
@@ -625,10 +671,7 @@ Rectangle {
 		if (typeof mediaSessionController.retry === "function")
 			mediaSessionController.retry()
 		inlineMediaLoader.source = ""
-		Qt.callLater(function() {
-			if (inlineMediaLoader.active)
-				inlineMediaLoader.updateSource()
-		})
+		inlineComponentRetryTimer.restart()
 	}
 
 	function retryInlineMediaRuntime() {
@@ -654,19 +697,21 @@ Rectangle {
 		if (!mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
 				|| !inlineFocusRequestMatchesCurrentSession())
 			return
-		Qt.callLater(function() {
-			if (!root.mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
-					|| !inlineRuntimeRetryButton.visible
-					|| !root.inlineFocusRequestMatchesCurrentSession())
-				return
-			const activeItem = root.Window ? root.Window.activeFocusItem : null
-			// Runtime preparation is asynchronous. Do not pull focus back from a
-			// different product surface when the user has moved on in the meantime.
-			if (activeItem && !root.itemIsWithin(activeItem, root))
-				return
-			inlineRuntimeRetryButton.forceActiveFocus(Qt.OtherFocusReason)
-			root.retainInlinePlaybackFocusForRestore(true)
-		})
+		inlineRuntimeRetryFocusTimer.restart()
+	}
+
+	function focusInlineRuntimeRetryNow() {
+		if (!mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
+				|| !inlineRuntimeRetryButton.visible
+				|| !inlineFocusRequestMatchesCurrentSession())
+			return
+		const activeItem = root.Window ? root.Window.activeFocusItem : null
+		// Runtime preparation is asynchronous. Do not pull focus back from a
+		// different product surface when the user has moved on in the meantime.
+		if (activeItem && !itemIsWithin(activeItem, root))
+			return
+		inlineRuntimeRetryButton.forceActiveFocus(Qt.OtherFocusReason)
+		retainInlinePlaybackFocusForRestore(true)
 	}
 
 	function inlineFocusRequestMatchesCurrentSession() {
@@ -679,10 +724,18 @@ Rectangle {
 	}
 
 	function handOffInlinePlaybackFocus() {
-		if (!inlineFocusRequestMatchesCurrentSession() || !inlineMediaLoader.item
-				|| !inlineMediaLoader.item.focusInitialControl)
+		if (!inlineFocusRequestMatchesCurrentSession())
 			return false
-		return inlineMediaLoader.item.focusInitialControl()
+		if (inlineMediaLoader.item && inlineMediaLoader.item.focusInitialControl
+				&& inlineMediaLoader.item.focusInitialControl())
+			return true
+		const target = previewInlineAnimationToggleButton.visible
+			? previewInlineAnimationToggleButton : previewInlineCloseButton
+		if (!target.visible || !target.enabled)
+			return false
+		target.forceActiveFocus(Qt.OtherFocusReason)
+		retainInlinePlaybackFocusForRestore(target.activeFocus)
+		return target.activeFocus
 	}
 
 	function captureInlinePlaybackFocusForRestore() {
@@ -720,16 +773,16 @@ Rectangle {
 			clearInlinePlaybackFocusRequest()
 			return
 		}
-		Qt.callLater(function() {
-			root.restoreInlinePlaybackTriggerFocus(generation, attempt + 1)
-		})
+		inlineFocusRestoreTimer.generation = generation
+		inlineFocusRestoreTimer.attempt = attempt + 1
+		inlineFocusRestoreTimer.restart()
 	}
 
 	function scheduleInlinePlaybackFocusRestore() {
 		const generation = ++inlineFocusRestoreGeneration
-		Qt.callLater(function() {
-			root.restoreInlinePlaybackTriggerFocus(generation, 0)
-		})
+		inlineFocusRestoreTimer.generation = generation
+		inlineFocusRestoreTimer.attempt = 0
+		inlineFocusRestoreTimer.restart()
 	}
 
 	function clearInlinePlaybackFocusRequest() {
@@ -784,7 +837,16 @@ Rectangle {
 		if (!visible)
 			preserveInlinePlaybackWhenHidden()
 	}
-	Component.onDestruction: preserveInlinePlaybackWhenHidden()
+	Component.onDestruction: {
+		inlineFocusRestoreGeneration += 1
+		inlineFocusRestoreTimer.stop()
+		inlineFocusHandoffTimer.stop()
+		inlineFailureFocusTimer.stop()
+		inlineComponentRetryTimer.stop()
+		inlineRuntimeRetryFocusTimer.stop()
+		currentMediaRequestTimer.stop()
+		preserveInlinePlaybackWhenHidden()
+	}
 
 	function safeDirectMediaUrl(value, kind) {
 		const url = String(value === undefined || value === null ? "" : value).trim()
@@ -1070,32 +1132,6 @@ Rectangle {
 				color: root.withAlpha(Theme.embedOverlayBase, embedPoster.status === Image.Ready ? 0.30 : 0.18)
 			}
 
-			Rectangle {
-				objectName: "previewTwitchPosterScrim"
-				anchors.fill: parent
-				visible: providerDetails.variant === "twitch" && !root.inlinePlaybackActive
-				color: "transparent"
-				gradient: Gradient {
-					orientation: Gradient.Vertical
-					GradientStop {
-						objectName: "previewTwitchPosterScrimTop"
-						position: 0.42
-						color: root.withAlpha(Theme.mediaCanvas, 0)
-					}
-					GradientStop {
-						objectName: "previewTwitchPosterScrimMiddle"
-						position: 0.72
-						color: root.withAlpha(Theme.mediaCanvas, 0.84)
-					}
-					GradientStop {
-						objectName: "previewTwitchPosterScrimBottom"
-						position: 1.0
-						color: root.withAlpha(Theme.mediaCanvas, 0.96)
-					}
-				}
-				Accessible.ignored: true
-			}
-
 			Button {
 				id: embedPosterAction
 				objectName: "previewEmbedPosterAction"
@@ -1121,92 +1157,6 @@ Rectangle {
 						root.sensitiveMediaRevealed = true
 					else
 						root.requestInlinePlaybackWithFocus()
-				}
-			}
-
-			ProviderIdentityBadge {
-				objectName: "previewEmbedProviderBadge"
-				anchors.left: parent.left
-				anchors.top: parent.top
-				anchors.margins: Theme.space2
-				z: 2
-				visible: root.providerLabel.length > 0 && !root.inlinePlaybackActive
-					&& !(providerDetails.genericSocialPostPresentation && providerDetails.ownsHeader)
-				width: Math.min(parent.width - Theme.space4, implicitWidth)
-				height: implicitHeight
-				providerToken: providerDetails.providerToken
-				badgeText: root.providerLabel
-				presentation: "overlay"
-				accent: providerDetails.providerAccent
-				foreground: Theme.contrastText(providerDetails.providerAccent)
-			}
-
-			Rectangle {
-				objectName: "previewEmbedProviderState"
-				anchors.right: parent.right
-				anchors.top: parent.top
-				anchors.margins: Theme.space2
-				z: 2
-				visible: providerDetails.providerStateLabel.length > 0 && !root.inlinePlaybackActive
-				width: Math.min(parent.width / 2, embedProviderStateLabel.implicitWidth + Theme.space2 * 2)
-				height: Theme.space5
-				radius: height / 2
-				color: root.withAlpha(providerDetails.providerStateColor, 0.92)
-
-				Label {
-					id: embedProviderStateLabel
-					anchors.fill: parent
-					anchors.leftMargin: Theme.space2
-					anchors.rightMargin: Theme.space2
-					text: providerDetails.providerStateLabel
-					textFormat: Text.PlainText
-					color: Theme.contrastText(providerDetails.providerStateColor)
-					font.pixelSize: Theme.fontCaption
-					font.bold: true
-					elide: Text.ElideRight
-					horizontalAlignment: Text.AlignHCenter
-					verticalAlignment: Text.AlignVCenter
-					Accessible.ignored: true
-				}
-			}
-
-			ColumnLayout {
-				objectName: "previewTwitchPosterCopy"
-				anchors.left: parent.left
-				anchors.right: parent.right
-				anchors.bottom: parent.bottom
-				anchors.margins: Theme.space3
-				anchors.rightMargin: Math.max(Theme.space3, parent.width * 0.25)
-				z: 2
-				visible: providerDetails.variant === "twitch" && !root.inlinePlaybackActive
-				spacing: Theme.space1
-				Accessible.ignored: true
-				Label {
-					objectName: "previewTwitchPosterTitle"
-					Layout.fillWidth: true
-					text: root.displayTitle.length > 0 ? root.displayTitle : qsTr("Twitch")
-					textFormat: Text.PlainText
-					color: Theme.mediaOverlayTextStrong
-					font.pixelSize: Theme.fontTitle
-					font.bold: true
-					elide: Text.ElideRight
-					Accessible.ignored: true
-				}
-				Label {
-					objectName: "previewTwitchPosterNote"
-					Layout.fillWidth: true
-					visible: text.length > 0
-					text: root.safeText(root.preview && root.preview.metadata
-						? (root.preview.metadata.twitchDisclaimer
-							|| root.preview.metadata.twitchPlaybackNote || "") : "", 512)
-					textFormat: Text.PlainText
-					color: Theme.mediaOverlayTextMuted
-					font.pixelSize: Theme.fontCaption
-					font.bold: true
-					wrapMode: Text.Wrap
-					maximumLineCount: 2
-					elide: Text.ElideRight
-					Accessible.ignored: true
 				}
 			}
 
@@ -1343,7 +1293,7 @@ Rectangle {
 					updateSource()
 				}
 				onLoaded: if (root.restoreInlinePlaybackFocus)
-					Qt.callLater(function() { root.handOffInlinePlaybackFocus() })
+					inlineFocusHandoffTimer.restart()
 				onStatusChanged: if (status === Loader.Error && active)
 					root.reportInlinePlayerComponentFailure()
 				Component.onCompleted: updateSource()
@@ -1764,7 +1714,8 @@ Rectangle {
 		Item {
 			id: expandedMediaSlot
 			Layout.fillWidth: true
-			Layout.preferredHeight: !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
+			Layout.preferredHeight: !providerDetails.ownsMediaGallery
+				&& !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
 									|| root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
 			visible: Layout.preferredHeight > 0
@@ -1980,6 +1931,7 @@ Rectangle {
 			id: providerDetails
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
+			height: visible ? implicitHeight : 0
 			visible: !root.inlineProviderOwnsDetails
 			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
@@ -1995,7 +1947,7 @@ Rectangle {
 			onSteamMediaSelectionRequested: (index) => root.selectedMediaIndex = index
 			onSteamMediaOpenRequested: (index) => {
 				root.selectedMediaIndex = index
-				Qt.callLater(function() { root.requestCurrentMedia() })
+				currentMediaRequestTimer.restart()
 			}
 		}
 
@@ -2020,6 +1972,51 @@ Rectangle {
 				Accessible.name: root.openLabel + ": " + root.displayTitle
 				Accessible.description: qsTr("Open the original provider page for more details")
 				onClicked: root.externalOpenRequested(root.originalProviderUrl)
+			}
+
+			ModernIconButton {
+				id: previewInlineAnimationToggleButton
+				objectName: "previewInlineAnimationToggleButton"
+				visible: root.inlinePlaybackActive && root.animatedImagePresentation
+				enabled: !!root.mediaSessionController
+				dense: true
+				iconName: root.mediaSessionController
+					&& String(root.mediaSessionController.state || "") === "playing"
+					? "pause" : "play"
+				text: root.mediaSessionController
+					&& String(root.mediaSessionController.state || "") === "playing"
+					? qsTr("Pause animation") : qsTr("Resume animation")
+				Accessible.description: qsTr("Pause or resume this silent looping animation")
+				onClicked: {
+					if (!root.mediaSessionController)
+						return
+					if (String(root.mediaSessionController.state || "") === "playing")
+						root.mediaSessionController.pause()
+					else
+						root.mediaSessionController.play()
+				}
+				onActiveFocusChanged: root.retainInlinePlaybackFocusForRestore(activeFocus)
+			}
+
+			ModernButton {
+				id: previewInlineCloseButton
+				objectName: "previewInlineCloseButton"
+				visible: root.inlinePlaybackActive
+				dense: true
+				text: qsTr("Close player")
+				Accessible.description: qsTr("Close inline media and return to the preview")
+				onClicked: {
+					root.retainInlinePlaybackFocusForRestore(activeFocus)
+					if (root.mediaSessionController
+							&& typeof root.mediaSessionController.closePlayer === "function")
+						root.mediaSessionController.closePlayer()
+					else if (root.mediaSessionController
+							&& typeof root.mediaSessionController.close === "function")
+						root.mediaSessionController.close()
+					if (!root.inlinePlaybackActive && root.restoreInlinePlaybackFocus)
+						root.scheduleInlinePlaybackFocusRestore()
+				}
+				onActiveFocusChanged: root.retainInlinePlaybackFocusForRestore(activeFocus)
 			}
 
             ModernButton {

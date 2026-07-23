@@ -150,6 +150,32 @@ ApplicationWindow {
 	property string _documentUrl: ""
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 
+	Timer {
+		id: initialControlsFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: controls.focusInitialControl()
+	}
+
+	Timer {
+		id: desiredPlaybackStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === mediaWindow.mediaGeneration)
+				mediaWindow.applyDesiredPlaybackState(generation)
+		}
+	}
+
+	Timer {
+		id: mediaDocumentProbeTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: mediaWindow.probeMediaDocumentReady(generation)
+	}
+
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
 	palette.inactive.base: Theme.surfaceRaised
@@ -220,11 +246,14 @@ ApplicationWindow {
 				minimumWidth, minimumHeight)
 		if (!restored)
 			applyInitialWindowSize()
-		Qt.callLater(controls.focusInitialControl)
+		initialControlsFocusTimer.restart()
 	}
 	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked)
-		Qt.callLater(controls.focusInitialControl)
+		initialControlsFocusTimer.restart()
 	Component.onDestruction: {
+		initialControlsFocusTimer.stop()
+		desiredPlaybackStateTimer.stop()
+		mediaDocumentProbeTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()
@@ -356,7 +385,8 @@ ApplicationWindow {
 		if (playerLoader.item && playerLoader.item.loadGeneration === generation)
 			playerLoader.item.documentReady = true
 		mediaSession.reportLoadProgress(100)
-		Qt.callLater(function() { mediaWindow.applyDesiredPlaybackState(generation) })
+		desiredPlaybackStateTimer.generation = generation
+		desiredPlaybackStateTimer.restart()
 		return true
 	}
 
@@ -1000,7 +1030,7 @@ ApplicationWindow {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		anchors.bottom: verificationStrip.visible ? verificationStrip.top : controls.top
+		anchors.bottom: secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.top : controls.top
 		color: Theme.mediaCanvas
 		border.color: mediaWindow.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1008,6 +1038,8 @@ ApplicationWindow {
 		clip: true
 		Accessible.role: Accessible.Pane
 		Accessible.name: qsTr("%1 detached media player").arg(mediaWindow.providerLabel)
+		Accessible.description: mediaWindow.providerVerificationRequired
+			? mediaWindow.surfaceVerificationDetail : ""
 	}
 
 	Rectangle {
@@ -1120,8 +1152,10 @@ ApplicationWindow {
 				// Reserve 100 for the shared media-surface probe. A completed HTML
 				// request can still be a provider challenge or error document.
 				mediaSession.reportLoadProgress(Math.min(99, loadProgress))
-				if (loadProgress === 100)
-					Qt.callLater(function() { mediaWindow.probeMediaDocumentReady(loadGeneration) })
+				if (loadProgress === 100) {
+					mediaDocumentProbeTimer.generation = loadGeneration
+					mediaDocumentProbeTimer.restart()
+				}
 			}
             onLoadingChanged: function(request) {
 				const callbackGeneration = loadGeneration > 0 ? loadGeneration : mediaWindow.mediaGeneration
@@ -1148,9 +1182,8 @@ ApplicationWindow {
 						mediaSession.reportError(request.errorString)
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					mediaSession.reportLoadProgress(99)
-					Qt.callLater(function() {
-						mediaWindow.probeMediaDocumentReady(generation)
-					})
+					mediaDocumentProbeTimer.generation = generation
+					mediaDocumentProbeTimer.restart()
 				}
             }
             onRenderProcessTerminated: function(status, exitCode) {
@@ -1292,28 +1325,6 @@ ApplicationWindow {
 			propagateComposedEvents: false
 			onWheel: function(wheel) { wheel.accepted = true }
 		}
-
-		Rectangle {
-			anchors.horizontalCenter: parent.horizontalCenter
-			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space3
-			width: Math.min(parent.width - Theme.space4 * 2, guestPlaybackLabel.implicitWidth + Theme.space4)
-			height: guestPlaybackLabel.implicitHeight + Theme.space2
-			radius: height / 2
-			color: Theme.withAlpha(Theme.embedOverlayBase, 0.88)
-			border.color: mediaWindow.providerAccentBorder
-			Label {
-				id: guestPlaybackLabel
-				anchors.centerIn: parent
-				width: Math.min(implicitWidth, parent.width - Theme.space3)
-				text: qsTr("Host controls playback · local audio controls remain available")
-				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				elide: Text.ElideRight
-			}
-		}
 	}
 
 	Timer {
@@ -1386,7 +1397,8 @@ ApplicationWindow {
 						request.errorString || qsTr("The separate audio track could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					documentReady = true
-					Qt.callLater(function() { mediaWindow.applyDesiredPlaybackState(generation) })
+					desiredPlaybackStateTimer.generation = generation
+					desiredPlaybackStateTimer.restart()
 				}
             }
             onRenderProcessTerminated: function(status, exitCode) {
@@ -1431,80 +1443,15 @@ ApplicationWindow {
     }
 
 	Rectangle {
-		id: mediaProviderBadge
-		objectName: "mediaSessionProviderBadge"
-		parent: playerCanvas
-		anchors.left: parent.left
-		anchors.top: parent.top
-		anchors.margins: Theme.space3
-		width: providerBadgeRow.implicitWidth + Theme.space3
-		height: 28
-		radius: height / 2
-		visible: mediaWindow.rendererState === "active"
-		color: mediaWindow.providerAccent
-		border.color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.24)
-		z: 3
-		Accessible.role: Accessible.StaticText
-		Accessible.name: mediaWindow.detachedProviderAccessibleName()
-		Row {
-			id: providerBadgeRow
-			anchors.centerIn: parent
-			spacing: Theme.space1
-			Label {
-				objectName: "mediaSessionProviderMark"
-				anchors.verticalCenter: parent.verticalCenter
-				text: mediaWindow.providerMark
-				textFormat: Text.PlainText
-				color: mediaWindow.providerOnAccent
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.Bold
-				Accessible.ignored: true
-			}
-			Rectangle {
-				anchors.verticalCenter: parent.verticalCenter
-				width: 1
-				height: 14
-				visible: mediaProviderLabel.visible
-				color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.34)
-			}
-			Label {
-				id: mediaProviderLabel
-				objectName: "mediaSessionProviderLabel"
-				visible: !mediaWindow.compactProviderChrome
-				textFormat: Text.PlainText
-				text: mediaWindow.providerLabel
-				color: mediaWindow.providerOnAccent
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "mediaSessionSurfaceStateLabel"
-				textFormat: Text.PlainText
-				text: mediaSession.sharedAvailable && mediaSession.sharedJoined
-					? (mediaSession.sharedHost ? qsTr("· HOSTING") : qsTr("· SYNCED"))
-					: qsTr("· DETACHED")
-				color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.82)
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				Accessible.ignored: true
-			}
-		}
-	}
-
-	Rectangle {
+		id: secondaryAudioWarningPanel
 		objectName: "mediaSessionSecondaryAudioWarning"
-		parent: playerCanvas
-		anchors.left: playerLoader.left
-		anchors.right: playerLoader.right
-		anchors.bottom: playerLoader.bottom
-		anchors.margins: Theme.space3
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: controls.top
 		height: secondaryAudioWarningRow.implicitHeight + Theme.space2
 		visible: mediaWindow.secondaryAudioDegraded && mediaSession.active
-		radius: Theme.innerRadius
-		color: Theme.withAlpha(Theme.embedOverlayBase, 0.94)
+		color: Theme.embedSurface
 		border.color: Theme.withAlpha(Theme.warning, 0.62)
-		z: 7
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Video continues without the separate audio track")
 		Accessible.description: mediaWindow.secondaryAudioWarning
@@ -1524,7 +1471,7 @@ ApplicationWindow {
 				Layout.fillWidth: true
 				text: qsTr("Video remains available. %1").arg(mediaWindow.secondaryAudioWarning)
 				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
+				color: Theme.textMain
 				font.pixelSize: Theme.fontCaption
 				wrapMode: Text.Wrap
 			}
@@ -1773,56 +1720,6 @@ ApplicationWindow {
             }
         }
     }
-
-	Rectangle {
-		id: verificationStrip
-		objectName: "mediaSessionVerificationStrip"
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.bottom: controls.top
-		visible: mediaWindow.providerVerificationRequired
-		height: visible
-			? Math.max(Theme.controlHeight + Theme.space2,
-				verificationRow.implicitHeight + Theme.space2) : 0
-		color: Theme.embedSurface
-		border.color: mediaWindow.providerAccentBorder
-		z: 8
-		Accessible.role: Accessible.AlertMessage
-		Accessible.name: qsTr("%1 verification required").arg(mediaWindow.providerLabel)
-		Accessible.description: mediaWindow.surfaceVerificationDetail
-
-		RowLayout {
-			id: verificationRow
-			anchors.fill: parent
-			anchors.leftMargin: Theme.space3
-			anchors.rightMargin: Theme.space2
-			anchors.topMargin: Theme.space1
-			anchors.bottomMargin: Theme.space1
-			spacing: Theme.space2
-
-			ModernIcon {
-				name: "warning"
-				size: 18
-				color: Theme.warning
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "mediaSessionVerificationText"
-				Layout.fillWidth: true
-				text: mediaWindow.surfaceVerificationDetail
-				textFormat: Text.PlainText
-				color: Theme.textMain
-				font.pixelSize: Theme.fontCaption
-				wrapMode: Text.Wrap
-			}
-			ModernButton {
-				objectName: "mediaSessionVerificationReloadButton"
-				text: qsTr("Reload player")
-				Accessible.description: qsTr("Reload after completing provider verification")
-				onClicked: mediaWindow.retryMediaRenderer()
-			}
-		}
-	}
 
     MediaSessionControls {
         id: controls

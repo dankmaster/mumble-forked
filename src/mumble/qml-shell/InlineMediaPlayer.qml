@@ -157,13 +157,58 @@ Rectangle {
 		&& !animationPresentation
 	implicitHeight: mediaViewportHeight
 		+ (nativeControlsVisible ? inlineControls.implicitHeight : 0)
-		+ (providerVerificationRequired ? verificationStrip.height : 0)
+		+ (secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.height : 0)
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
 	Accessible.name: animationPresentation
 		? qsTr("%1 inline animated image").arg(providerLabel)
 		: qsTr("%1 inline media player").arg(providerLabel)
+	Accessible.description: providerVerificationRequired ? surfaceVerificationDetail : ""
+
+	Timer {
+		id: deferredPlaybackStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === inlinePlayer.mediaGeneration)
+				inlinePlayer.applyDesiredPlaybackState(generation)
+		}
+	}
+
+	Timer {
+		id: deferredMediaProbeTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: inlinePlayer.probeMediaDocumentReady(generation)
+	}
+
+	Timer {
+		id: deferredReloadTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (playerLoader.item)
+				playerLoader.item.reload()
+			if (audioPlayerLoader.item)
+				audioPlayerLoader.item.reload()
+		}
+	}
+
+	Timer {
+		id: deferredFocusTimer
+		interval: 0
+		repeat: false
+		property bool failureOnly: false
+		onTriggered: {
+			if (failureOnly)
+				inlinePlayer.focusFailureControl()
+			else
+				inlinePlayer.focusInitialControl()
+		}
+	}
 
 	function fallbackProviderMark(label) {
 		const words = String(label || "").trim().split(/\s+/).filter(function(word) {
@@ -299,7 +344,8 @@ Rectangle {
 		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (session)
 			session.reportLoadProgress(100)
-		Qt.callLater(function() { inlinePlayer.applyDesiredPlaybackState(generation) })
+		deferredPlaybackStateTimer.generation = generation
+		deferredPlaybackStateTimer.restart()
 		return true
 	}
 
@@ -693,14 +739,6 @@ Rectangle {
 			retryButton.forceActiveFocus()
 			return retryButton.activeFocus
 		}
-		if (animationToggleButton.visible && animationToggleButton.enabled) {
-			animationToggleButton.forceActiveFocus()
-			return animationToggleButton.activeFocus
-		}
-		if (providerCloseButton.visible && providerCloseButton.enabled) {
-			providerCloseButton.forceActiveFocus()
-			return providerCloseButton.activeFocus
-		}
 		return inlineControls.focusInitialControl()
 	}
 
@@ -765,9 +803,15 @@ Rectangle {
 		invalidateMediaDocument()
 		invalidateAudioDocument()
 	}
-	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked)
-		Qt.callLater(focusInitialControl)
+	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked) {
+		deferredFocusTimer.failureOnly = false
+		deferredFocusTimer.restart()
+	}
 	Component.onDestruction: {
+		deferredPlaybackStateTimer.stop()
+		deferredMediaProbeTimer.stop()
+		deferredReloadTimer.stop()
+		deferredFocusTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()
@@ -782,7 +826,8 @@ Rectangle {
 				if (inlinePlayer.rendererHealthy || inlinePlayer.documentReady)
 					inlinePlayer.invalidateMediaDocument()
 				inlinePlayer.invalidateAudioDocument()
-				Qt.callLater(inlinePlayer.focusFailureControl)
+				deferredFocusTimer.failureOnly = true
+				deferredFocusTimer.restart()
 			}
 		}
 		function onSourceChanged() {
@@ -816,151 +861,7 @@ Rectangle {
 			inlinePlayer.verificationNavigationActive = false
 			inlinePlayer.invalidateMediaDocument()
 			inlinePlayer.invalidateAudioDocument()
-			Qt.callLater(function() {
-				if (playerLoader.item)
-					playerLoader.item.reload()
-				if (audioPlayerLoader.item)
-					audioPlayerLoader.item.reload()
-			})
-		}
-	}
-
-	Rectangle {
-		id: inlineToolbar
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.top: parent.top
-		height: Theme.controlHeight + Theme.space2
-		z: 6
-		color: "transparent"
-		border.width: 0
-		gradient: Gradient {
-			GradientStop { position: 0.0; color: Theme.withAlpha(Theme.embedOverlayBase, 0.82) }
-			GradientStop { position: 1.0; color: "transparent" }
-		}
-
-		Rectangle {
-			id: inlineProviderBadge
-			objectName: "inlineMediaProviderBadge"
-			anchors.left: parent.left
-			anchors.leftMargin: Theme.space3
-			anchors.verticalCenter: parent.verticalCenter
-			width: inlineProviderRow.implicitWidth + Theme.space2
-			height: 24
-			radius: height / 2
-			color: inlinePlayer.providerAccent
-			border.color: Theme.withAlpha(inlinePlayer.providerOnAccent, 0.24)
-			border.width: 1
-			Accessible.role: Accessible.StaticText
-			Accessible.name: inlinePlayer.animationPresentation
-				? qsTr("%1 animated image").arg(inlinePlayer.providerLabel)
-				: qsTr("%1 media player").arg(inlinePlayer.providerLabel)
-			Row {
-				id: inlineProviderRow
-				anchors.centerIn: parent
-				spacing: Theme.space1
-				Label {
-					objectName: "inlineMediaProviderMark"
-					anchors.verticalCenter: parent.verticalCenter
-					textFormat: Text.PlainText
-					text: inlinePlayer.providerMark
-					color: inlinePlayer.providerOnAccent
-					font.pixelSize: Theme.fontCaption
-					font.weight: Font.Bold
-					Accessible.ignored: true
-				}
-				Rectangle {
-					anchors.verticalCenter: parent.verticalCenter
-					width: 1
-					height: 12
-					visible: inlineProviderLabel.visible
-					color: Theme.withAlpha(inlinePlayer.providerOnAccent, 0.34)
-				}
-				Label {
-					id: inlineProviderLabel
-					objectName: "inlineMediaProviderLabel"
-					visible: !inlinePlayer.compactProviderChrome
-					textFormat: Text.PlainText
-					text: inlinePlayer.providerLabel
-					color: inlinePlayer.providerOnAccent
-					font.pixelSize: Theme.fontCaption
-					font.weight: Font.DemiBold
-					Accessible.ignored: true
-				}
-			}
-		}
-
-		Label {
-			objectName: "inlineMediaStatusLabel"
-			visible: false
-			anchors.left: inlineProviderBadge.right
-			anchors.right: toolbarActions.left
-			anchors.leftMargin: Theme.space2
-			anchors.rightMargin: Theme.space2
-			anchors.verticalCenter: parent.verticalCenter
-			textFormat: Text.PlainText
-			text: session && session.sharedAvailable && session.sharedJoined
-				? qsTr("Watching together in chat") : qsTr("Playing in chat")
-			color: Theme.mediaOverlayTextStrong
-			font.pixelSize: Theme.fontLabel
-			font.bold: true
-			elide: Text.ElideRight
-		}
-		Row {
-			id: toolbarActions
-			anchors.right: parent.right
-			anchors.rightMargin: Theme.space2
-			anchors.verticalCenter: parent.verticalCenter
-			spacing: Theme.space2
-			ModernIconButton {
-				id: animationToggleButton
-				objectName: "inlineMediaAnimationToggleButton"
-				visible: inlinePlayer.animationPresentation
-					&& inlinePlayer.ready && inlinePlayer.documentReady
-				enabled: inlinePlayer.providerInputEnabled
-				overlay: true
-				dense: true
-				text: session && String(session.state || "") === "playing"
-					? qsTr("Pause animation") : qsTr("Resume animation")
-				iconName: session && String(session.state || "") === "playing" ? "pause" : "play"
-				Accessible.description: qsTr("Pause or resume this silent looping animation")
-				onClicked: {
-					if (!inlinePlayer.session)
-						return
-					if (String(inlinePlayer.session.state || "") === "playing")
-						inlinePlayer.session.pause()
-					else
-						inlinePlayer.session.play()
-				}
-			}
-			ModernIconButton {
-				objectName: "inlineMediaPopoutButton"
-				visible: !inlinePlayer.animationPresentation
-				overlay: true
-				dense: true
-				text: qsTr("Pop out")
-				iconName: "external"
-				Accessible.description: qsTr("Move playback to a separate movable window")
-				onClicked: if (inlinePlayer.session) inlinePlayer.session.detach()
-			}
-			ModernIconButton {
-				objectName: "inlineMediaExternalButton"
-				overlay: true
-				dense: true
-				visible: false
-				text: qsTr("Browser")
-				iconName: "external"
-				onClicked: Qt.openUrlExternally(inlinePlayer.externalMediaUrl())
-			}
-			ModernButton {
-				id: providerCloseButton
-				objectName: "inlineMediaProviderCloseButton"
-				visible: !inlinePlayer.nativeControlsVisible
-				dense: true
-				text: qsTr("Close")
-				Accessible.description: qsTr("Close the provider player and return to the preview")
-				onClicked: inlineControls.requestClose()
-			}
+			deferredReloadTimer.restart()
 		}
 	}
 
@@ -973,7 +874,7 @@ Rectangle {
 		anchors.bottom: parent.bottom
 		anchors.bottomMargin: (inlinePlayer.nativeControlsVisible
 			? inlineControls.implicitHeight : 0)
-			+ (inlinePlayer.providerVerificationRequired ? verificationStrip.height : 0)
+			+ (secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.height : 0)
 		color: Theme.mediaCanvas
 		border.color: inlinePlayer.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1094,7 +995,8 @@ Rectangle {
 				inlinePlayer.session.reportLoadProgress(Math.min(99, loadProgress))
 				if (loadProgress === 100) {
 					const generation = loadGeneration
-					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
+					deferredMediaProbeTimer.generation = generation
+					deferredMediaProbeTimer.restart()
 				}
 			}
 			onLoadingChanged: function(request) {
@@ -1110,7 +1012,8 @@ Rectangle {
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					inlinePlayer.session.reportLoadProgress(99)
-					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
+					deferredMediaProbeTimer.generation = generation
+					deferredMediaProbeTimer.restart()
 				}
 			}
 			onRenderProcessTerminated: {
@@ -1235,28 +1138,6 @@ Rectangle {
 			propagateComposedEvents: false
 			onWheel: function(wheel) { wheel.accepted = true }
 		}
-
-		Rectangle {
-			anchors.horizontalCenter: parent.horizontalCenter
-			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space3
-			width: Math.min(parent.width - Theme.space4 * 2, guestPlaybackLabel.implicitWidth + Theme.space4)
-			height: guestPlaybackLabel.implicitHeight + Theme.space2
-			radius: height / 2
-			color: Theme.withAlpha(Theme.embedOverlayBase, 0.88)
-			border.color: inlinePlayer.providerAccentBorder
-			Label {
-				id: guestPlaybackLabel
-				anchors.centerIn: parent
-				width: Math.min(implicitWidth, parent.width - Theme.space3)
-				text: qsTr("Host controls playback · local audio controls remain available")
-				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				elide: Text.ElideRight
-			}
-		}
 	}
 
 	Timer {
@@ -1317,9 +1198,8 @@ Rectangle {
 					if (!inlinePlayer.markAudioDocumentReady(generation))
 						return
 					audioPlayerLoader.documentReady = true
-					Qt.callLater(function() {
-						inlinePlayer.applyDesiredPlaybackState(inlinePlayer.mediaGeneration)
-					})
+					deferredPlaybackStateTimer.generation = inlinePlayer.mediaGeneration
+					deferredPlaybackStateTimer.restart()
 				}
 			}
 			onRenderProcessTerminated: {
@@ -1358,18 +1238,15 @@ Rectangle {
 	}
 
 	Rectangle {
+		id: secondaryAudioWarningPanel
 		objectName: "inlineMediaSecondaryAudioWarning"
-		parent: playerCanvas
-		anchors.left: playerLoader.left
-		anchors.right: playerLoader.right
-		anchors.bottom: playerLoader.bottom
-		anchors.margins: Theme.space3
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: inlineControls.top
 		height: secondaryAudioWarningRow.implicitHeight + Theme.space2
 		visible: inlinePlayer.secondaryAudioDegraded && inlinePlayer.ready
-		radius: Theme.innerRadius
-		color: Theme.withAlpha(Theme.embedOverlayBase, 0.94)
+		color: Theme.embedSurface
 		border.color: Theme.withAlpha(Theme.warning, 0.62)
-		z: 7
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Video continues without the separate audio track")
 		Accessible.description: inlinePlayer.secondaryAudioWarning
@@ -1389,59 +1266,9 @@ Rectangle {
 				Layout.fillWidth: true
 				text: qsTr("Video remains available. %1").arg(inlinePlayer.secondaryAudioWarning)
 				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				wrapMode: Text.Wrap
-			}
-		}
-	}
-
-	Rectangle {
-		id: verificationStrip
-		objectName: "inlineMediaVerificationStrip"
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.bottom: parent.bottom
-		visible: inlinePlayer.providerVerificationRequired
-		height: visible
-			? Math.max(Theme.controlHeight + Theme.space2,
-				verificationRow.implicitHeight + Theme.space2) : 0
-		color: Theme.embedSurface
-		border.color: inlinePlayer.providerAccentBorder
-		z: 8
-		Accessible.role: Accessible.AlertMessage
-		Accessible.name: qsTr("%1 verification required").arg(inlinePlayer.providerLabel)
-		Accessible.description: inlinePlayer.surfaceVerificationDetail
-
-		RowLayout {
-			id: verificationRow
-			anchors.fill: parent
-			anchors.leftMargin: Theme.space3
-			anchors.rightMargin: Theme.space2
-			anchors.topMargin: Theme.space1
-			anchors.bottomMargin: Theme.space1
-			spacing: Theme.space2
-
-			ModernIcon {
-				name: "warning"
-				size: 18
-				color: Theme.warning
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "inlineMediaVerificationText"
-				Layout.fillWidth: true
-				text: inlinePlayer.surfaceVerificationDetail
-				textFormat: Text.PlainText
 				color: Theme.textMain
 				font.pixelSize: Theme.fontCaption
 				wrapMode: Text.Wrap
-			}
-			ModernButton {
-				objectName: "inlineMediaVerificationReloadButton"
-				text: qsTr("Reload player")
-				Accessible.description: qsTr("Reload after completing provider verification")
-				onClicked: if (session) session.retry()
 			}
 		}
 	}
@@ -1540,7 +1367,10 @@ Rectangle {
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("%1 playback failed").arg(inlinePlayer.providerLabel)
 		Accessible.description: session ? session.error : ""
-		onVisibleChanged: if (visible) Qt.callLater(inlinePlayer.focusFailureControl)
+		onVisibleChanged: if (visible) {
+			deferredFocusTimer.failureOnly = true
+			deferredFocusTimer.restart()
+		}
 		ColumnLayout {
 			anchors.centerIn: parent
 			width: Math.min(parent.width - Theme.space5 * 2, 480)

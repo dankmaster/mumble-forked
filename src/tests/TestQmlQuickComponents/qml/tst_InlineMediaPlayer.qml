@@ -192,22 +192,12 @@ TestCase {
 		const animationToggle = findChild(player, "inlineMediaAnimationToggleButton")
 		const popoutButton = findChild(player, "inlineMediaPopoutButton")
 		const controls = findChild(player, "mediaTransportActions")
-		verify(animationToggle !== null && popoutButton !== null && controls !== null)
+		verify(animationToggle === null && popoutButton === null && controls !== null)
 		verify(player.animationPresentation)
 		verify(!player.nativeControlsVisible)
 		verify(!controls.parent.parent.visible)
-		verify(animationToggle.visible)
-		verify(!popoutButton.visible)
-		compare(animationToggle.text, "Pause animation")
 		compare(player.Accessible.name, "Reddit inline animated image")
-
-		animationToggle.clicked()
-		compare(session.pauseCalls, 1)
-		compare(session.state, "paused")
-		compare(animationToggle.text, "Resume animation")
-		animationToggle.clicked()
-		compare(session.playCalls, 1)
-		compare(session.state, "playing")
+		compare(player.Accessible.description, "")
 
 		player.visualFixtureMode = ""
 		session.mediaMime = "audio/wav"
@@ -396,9 +386,14 @@ TestCase {
 		compare(session.errorReports, 0)
 		compare(session.error, "")
 		const warning = findChild(player, "inlineMediaSecondaryAudioWarning")
+		const canvas = findChild(player, "inlineMediaCanvas")
 		const failure = findChild(player, "inlineMediaFailureOverlay")
-		verify(warning !== null && warning.visible)
+		verify(warning !== null && warning.visible && canvas !== null)
 		compare(warning.Accessible.name, "Video continues without the separate audio track")
+		const warningOrigin = warning.mapToItem(player, 0, 0)
+		const canvasOrigin = canvas.mapToItem(player, 0, 0)
+		verify(warningOrigin.y >= canvasOrigin.y + canvas.height - 0.5,
+			"degraded-audio status must remain below, not over, the media canvas")
 		verify(failure !== null && !failure.visible)
 
 		const replacementGeneration = player.beginMediaDocumentLoad("about:blank#retry")
@@ -474,9 +469,9 @@ TestCase {
 		verify(player.providerVerificationRequired)
 		verify(!player.transportVerified)
 		verify(!player.nativeControlsVisible)
-		const verificationStrip = findChild(player, "inlineMediaVerificationStrip")
 		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
-		verify(verificationStrip !== null && verificationStrip.visible)
+		verify(findChild(player, "inlineMediaVerificationStrip") === null)
+		verify(player.Accessible.description.indexOf("Complete verification") >= 0)
 		verify(loadingSurface !== null && !loadingSurface.visible)
 
 		generation = player.beginMediaDocumentLoad("about:blank#consent")
@@ -552,7 +547,8 @@ TestCase {
 		verify(player.providerVerificationRequired)
 		compare(session.errorReports, 0)
 		compare(session.error, "")
-		verify(findChild(player, "inlineMediaVerificationStrip").visible)
+		verify(findChild(player, "inlineMediaVerificationStrip") === null)
+		verify(player.Accessible.description.indexOf("Complete verification") >= 0)
 		session.active = false
 	}
 
@@ -800,7 +796,7 @@ TestCase {
 		player.visualFixtureMode = ""
 	}
 
-	function test_provider_controlled_embed_uses_clear_top_close_without_empty_footer() {
+	function test_provider_controlled_embed_keeps_the_media_viewport_free_of_mumble_chrome() {
 		const player = playerLoader.item
 		session.provider = "vimeo"
 		session.playbackControllable = false
@@ -811,19 +807,14 @@ TestCase {
 		const canvas = findChild(player, "inlineMediaCanvas")
 		const controls = findChild(player, "mediaTransportActions")
 		const closeButton = findChild(player, "inlineMediaProviderCloseButton")
-		verify(canvas !== null && controls !== null && closeButton !== null)
+		verify(canvas !== null && controls !== null && closeButton === null)
 		verify(!player.nativeControlsVisible)
 		verify(!controls.parent.parent.visible)
-		verify(closeButton.visible)
-		compare(closeButton.text, "Close")
 		verify(Math.abs(player.implicitHeight - player.mediaViewportHeight) < 1)
 		testCase.height = Math.ceil(player.implicitHeight)
 		wait(0)
 		verify(Math.abs(canvas.height - player.mediaViewportHeight) < 1)
-		verify(player.focusInitialControl())
-		compare(closeButton.activeFocus, true)
-		closeButton.clicked()
-		compare(session.closeCalls, 1)
+		verify(!player.focusInitialControl())
 
 		session.playbackControllable = true
 		session.active = false
@@ -840,7 +831,7 @@ TestCase {
 		compare(player.providerLabel, "Reddit")
 		compare(player.providerMark, "R")
 		compare(player.Accessible.name, "Reddit inline media player")
-		compare(findChild(player, "inlineMediaProviderLabel").text, "Reddit")
+		verify(findChild(player, "inlineMediaProviderLabel") === null)
 		session.active = false
 	}
 
@@ -863,7 +854,7 @@ TestCase {
 		compare(surface.y, Math.round((canvas.height - surface.height) / 2))
 	}
 
-	function test_accessibility_exposes_one_named_player_and_toolbar_actions() {
+	function test_accessibility_exposes_one_named_player_without_overlay_toolbar_actions() {
 		const player = playerLoader.item
 		compare(player.Accessible.role, Accessible.Pane)
 		compare(player.Accessible.name, "YouTube inline media player")
@@ -872,19 +863,14 @@ TestCase {
 		verify(!player.webSurfaceActive)
 		compare(player.rendererState, "empty")
 
-		const popoutButton = findChild(player, "inlineMediaPopoutButton")
-		const externalButton = findChild(player, "inlineMediaExternalButton")
-		verify(popoutButton !== null && externalButton !== null)
-		compare(popoutButton.Accessible.role, Accessible.Button)
-		compare(popoutButton.Accessible.name, "Pop out")
-		compare(externalButton.Accessible.role, Accessible.Button)
-		compare(externalButton.Accessible.name, "Browser")
+		verify(findChild(player, "inlineMediaPopoutButton") === null)
+		verify(findChild(player, "inlineMediaExternalButton") === null)
+		verify(findChild(player, "inlineMediaProviderBadge") === null)
 	}
 
 	function test_dark_media_surfaces_use_overlay_contrast_tokens() {
 		const player = playerLoader.item
 		const strongLabels = [
-			findChild(player, "inlineMediaStatusLabel"),
 			findChild(player, "inlineMediaFixtureHeading"),
 			findChild(player, "inlineMediaLoadingHeading"),
 			findChild(player, "inlineMediaFailureHeading")
@@ -904,13 +890,9 @@ TestCase {
 		}
 
 		const progressTrack = findChild(player, "inlineMediaLoadingProgressTrack")
-		const popoutButton = findChild(player, "inlineMediaPopoutButton")
-		const externalButton = findChild(player, "inlineMediaExternalButton")
-		verify(progressTrack !== null && popoutButton !== null && externalButton !== null)
+		verify(progressTrack !== null)
 		compare(String(progressTrack.color),
 			String(Theme.withAlpha(Theme.mediaOverlayTextStrong, 0.20)))
-		compare(popoutButton.overlay, true)
-		compare(externalButton.overlay, true)
 	}
 
 	function test_provider_presentation_styles_active_loading_error_and_compact_states() {
@@ -927,22 +909,13 @@ TestCase {
 		compare(String(player.providerOnAccent), String(Theme.contrastText(player.providerAccent)))
 		compare(player.Accessible.name, "YouTube inline media player")
 
-		const badge = findChild(player, "inlineMediaProviderBadge")
-		const badgeMark = findChild(player, "inlineMediaProviderMark")
-		const badgeLabel = findChild(player, "inlineMediaProviderLabel")
-		verify(badge !== null && badgeMark !== null && badgeLabel !== null)
-		compare(String(badge.color), String(player.providerAccent))
-		compare(badge.Accessible.name, "YouTube media player")
-		compare(badgeMark.text, "YT")
-		compare(badgeLabel.text, "YouTube")
-		compare(String(badgeMark.color), String(player.providerOnAccent))
-		compare(String(badgeLabel.color), String(player.providerOnAccent))
+		verify(findChild(player, "inlineMediaProviderBadge") === null)
+		verify(findChild(player, "inlineMediaProviderMark") === null)
+		verify(findChild(player, "inlineMediaProviderLabel") === null)
 
 		testCase.width = 420
 		wait(0)
 		verify(player.compactProviderChrome)
-		verify(!badgeLabel.visible)
-		verify(badgeMark.visible)
 
 		player.visualFixtureMode = "loading"
 		wait(0)

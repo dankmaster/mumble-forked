@@ -68,6 +68,60 @@ Item {
 	property int secondaryLoadTimeoutMs: 8000
 	clip: true
 
+	Timer {
+		id: applySessionStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === root._generation)
+				root.applySessionState()
+		}
+	}
+
+	Timer {
+		id: mainAttemptTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (root._componentReady && root._enabled && generation === root._generation
+					&& root.sourceUrl.length > 0)
+				root._mainAttemptActive = true
+		}
+	}
+
+	Timer {
+		id: secondaryAttemptTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (root._componentReady && root._enabled
+					&& generation === root._secondaryGeneration
+					&& root.secondaryAudioUrl.length > 0)
+				root._secondaryAttemptActive = true
+		}
+	}
+
+	Timer {
+		id: retryTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			root._enabled = true
+			root.restartMainAttempt()
+			root.restartSecondaryAttempt()
+		}
+	}
+
+	Timer {
+		id: preparedSecondaryWarningTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.applyPreparedSecondaryAudioWarning()
+	}
+
 	function boundedVolume() {
 		return Math.max(0, Math.min(100, Number(session ? session.volume : 100)))
 	}
@@ -141,11 +195,10 @@ Item {
 		_mainReady = true
 		_mainFailed = false
 		reportLoadProgress(progress === undefined ? 100 : progress)
-		if (!wasReady)
-			Qt.callLater(function() {
-				if (root._generation === expectedGeneration)
-					root.applySessionState()
-			})
+		if (!wasReady) {
+			applySessionStateTimer.generation = expectedGeneration
+			applySessionStateTimer.restart()
+		}
 		return true
 	}
 
@@ -216,11 +269,8 @@ Item {
 		resetLifecycle()
 		const generation = _generation
 		_mainAttemptActive = false
-		Qt.callLater(function() {
-			if (root._componentReady && root._enabled && root._generation === generation
-					&& root.sourceUrl.length > 0)
-				root._mainAttemptActive = true
-		})
+		mainAttemptTimer.generation = generation
+		mainAttemptTimer.restart()
 		return generation
 	}
 
@@ -238,12 +288,8 @@ Item {
 		resetSecondaryLifecycle()
 		const generation = _secondaryGeneration
 		_secondaryAttemptActive = false
-		Qt.callLater(function() {
-			if (root._componentReady && root._enabled
-					&& root._secondaryGeneration === generation
-					&& root.secondaryAudioUrl.length > 0)
-				root._secondaryAttemptActive = true
-		})
+		secondaryAttemptTimer.generation = generation
+		secondaryAttemptTimer.restart()
 		return generation
 	}
 
@@ -340,11 +386,7 @@ Item {
 		_mainAttemptActive = false
 		_secondaryAttemptActive = false
 		secondaryLoadWatchdog.stop()
-		Qt.callLater(function() {
-			root._enabled = true
-			root.restartMainAttempt()
-			root.restartSecondaryAttempt()
-		})
+		retryTimer.restart()
 		return true
 	}
 
@@ -370,7 +412,7 @@ Item {
 	onSecondaryAudioUrlChanged: {
 		if (_componentReady) {
 			restartSecondaryAttempt()
-			Qt.callLater(applyPreparedSecondaryAudioWarning)
+			preparedSecondaryWarningTimer.restart()
 		}
 	}
 	onAnimationPresentationChanged: {
@@ -389,14 +431,21 @@ Item {
 			_animationInitialPausePending = false
 		}
 	}
-	onPreparedSecondaryAudioWarningChanged: Qt.callLater(applyPreparedSecondaryAudioWarning)
+	onPreparedSecondaryAudioWarningChanged: preparedSecondaryWarningTimer.restart()
 	Component.onCompleted: {
 		_componentReady = true
 		restartMainAttempt()
 		restartSecondaryAttempt()
-		Qt.callLater(applyPreparedSecondaryAudioWarning)
+		preparedSecondaryWarningTimer.restart()
 	}
-	Component.onDestruction: shutdown()
+	Component.onDestruction: {
+		applySessionStateTimer.stop()
+		mainAttemptTimer.stop()
+		secondaryAttemptTimer.stop()
+		retryTimer.stop()
+		preparedSecondaryWarningTimer.stop()
+		shutdown()
+	}
 
 	AudioOutput {
 		id: primaryAudio

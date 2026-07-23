@@ -4730,7 +4730,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 11;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 12;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 8;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
@@ -8412,6 +8412,39 @@ QString amazonProductImageFromHtml(const QString &html) {
 	return image;
 }
 
+QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString &html) {
+	QVariantList images;
+	QSet< QString > seenImages;
+
+	static const QRegularExpression s_oldHiresPattern(
+		QLatin1String("\\bdata-old-hires\\s*=\\s*(['\"])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	QRegularExpressionMatchIterator oldHiresMatches = s_oldHiresPattern.globalMatch(html);
+	while (oldHiresMatches.hasNext() && images.size() < 16) {
+		appendPreviewImageItem(images, seenImages, baseUrl, oldHiresMatches.next().captured(2));
+	}
+
+	static const QRegularExpression s_dynamicImagesAttributePattern(
+		QLatin1String("\\bdata-a-dynamic-image\\s*=\\s*(['\"])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	static const QRegularExpression s_dynamicImageUrlPattern(
+		QLatin1String("https?://[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp)(?:\\?[^\"'<>\\\\\\s]*)?"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator dynamicAttributes = s_dynamicImagesAttributePattern.globalMatch(html);
+	while (dynamicAttributes.hasNext() && images.size() < 16) {
+		const QString dynamicImages = decodedPreviewText(dynamicAttributes.next().captured(2));
+		QRegularExpressionMatchIterator imageUrls = s_dynamicImageUrlPattern.globalMatch(dynamicImages);
+		while (imageUrls.hasNext() && images.size() < 16) {
+			appendPreviewImageItem(images, seenImages, baseUrl, imageUrls.next().captured(0));
+		}
+	}
+
+	if (images.isEmpty()) {
+		appendPreviewImageItem(images, seenImages, baseUrl, amazonProductImageFromHtml(html));
+	}
+	return images;
+}
+
 QString gameStoreMetaPriceText(const QHash< QString, QString > &metaTags) {
 	const QString amount = previewMetaValue(metaTags,
 											QStringList { QStringLiteral("product:price:amount"),
@@ -8763,6 +8796,10 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), productImage);
 		QVariantList productImages;
 		QSet< QString > seenProductImages;
+		if (amazonProduct) {
+			appendPreviewImageItems(productImages, seenProductImages, url,
+									amazonProductImageItemsFromHtml(url, html));
+		}
 		appendPreviewImageItems(productImages, seenProductImages, url, productData.images);
 		if (!productImage.isEmpty()) {
 			appendPreviewImageItem(productImages, seenProductImages, url, productImage);

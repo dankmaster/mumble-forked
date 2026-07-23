@@ -243,9 +243,14 @@ TestCase {
 		compare(session.errorReports, 0)
 		compare(session.error, "")
 		const warning = findChild(window.contentItem, "mediaSessionSecondaryAudioWarning")
+		const canvas = findChild(window.contentItem, "mediaSessionCanvas")
 		const failure = findChild(window.contentItem, "mediaSessionFailureSurface")
-		verify(warning !== null && warning.visible)
+		verify(warning !== null && warning.visible && canvas !== null)
 		compare(warning.Accessible.name, "Video continues without the separate audio track")
+		const warningOrigin = warning.mapToItem(window.contentItem, 0, 0)
+		const canvasOrigin = canvas.mapToItem(window.contentItem, 0, 0)
+		verify(warningOrigin.y >= canvasOrigin.y + canvas.height - 0.5,
+			"degraded-audio status must remain below, not over, the media canvas")
 		verify(failure !== null && !failure.visible)
 
 		const replacementGeneration = window.beginMediaDocumentLoad("about:blank#retry")
@@ -486,7 +491,12 @@ TestCase {
 		verify(window.providerVerificationRequired)
 		verify(window.surfaceVerificationDetail.indexOf("kept for later playback") >= 0)
 		compare(session.errorReports, 0)
-		verify(findChild(window.contentItem, "mediaSessionVerificationStrip").visible)
+		verify(findChild(window.contentItem, "mediaSessionVerificationStrip") === null)
+		const canvas = findChild(window.contentItem, "mediaSessionCanvas")
+		const controls = findChild(window.contentItem, "mediaSessionWindowControls")
+		verify(canvas !== null && controls !== null)
+		verify(canvas.Accessible.description.indexOf("kept for later playback") >= 0)
+		compare(controls.transportAvailable, false)
 
 		generation = window.beginMediaDocumentLoad("about:blank#consent")
 		verify(window.applyMediaSurfaceProbeResult(generation, {
@@ -565,7 +575,8 @@ TestCase {
 		compare(window.presentationProvider, "reddit")
 		compare(window.providerLabel, "Reddit")
 		compare(window.providerMark, "R")
-		compare(findChild(window.contentItem, "mediaSessionProviderLabel").text, "Reddit")
+		verify(findChild(window.contentItem, "mediaSessionProviderLabel") === null)
+		compare(window.title, "Reddit player")
 
 		window.visualFixtureMode = ""
 		session.active = false
@@ -651,35 +662,23 @@ TestCase {
 		verify(canvas !== null)
 		compare(canvas.Accessible.name, "YouTube detached media player")
 
-		const badge = findChild(window.contentItem, "mediaSessionProviderBadge")
-		const badgeMark = findChild(window.contentItem, "mediaSessionProviderMark")
-		const badgeLabel = findChild(window.contentItem, "mediaSessionProviderLabel")
-		const stateLabel = findChild(window.contentItem, "mediaSessionSurfaceStateLabel")
-		verify(badge !== null && badge.visible)
-		compare(String(badge.color), String(window.providerAccent))
-		compare(badge.Accessible.name, "YouTube media player, detached window")
-		compare(badgeMark.text, "YT")
-		compare(badgeLabel.text, "YouTube")
-		compare(stateLabel.text, "· DETACHED")
-		compare(String(badgeMark.color), String(window.providerOnAccent))
-		compare(String(badgeLabel.color), String(window.providerOnAccent))
+		verify(findChild(window.contentItem, "mediaSessionProviderBadge") === null)
+		verify(findChild(window.contentItem, "mediaSessionProviderMark") === null)
+		verify(findChild(window.contentItem, "mediaSessionProviderLabel") === null)
+		verify(findChild(window.contentItem, "mediaSessionSurfaceStateLabel") === null)
 
 		session.sharedAvailable = true
 		session.sharedJoined = true
 		session.sharedHost = false
 		wait(0)
-		compare(stateLabel.text, "· SYNCED")
-		compare(badge.Accessible.name, "YouTube media player, synchronized with host")
+		compare(canvas.Accessible.name, "YouTube detached media player")
 		session.sharedHost = true
 		wait(0)
-		compare(stateLabel.text, "· HOSTING")
-		compare(badge.Accessible.name, "YouTube media player, hosting watch together")
+		compare(canvas.Accessible.name, "YouTube detached media player")
 
 		window.width = 680
 		wait(0)
 		verify(window.compactProviderChrome)
-		verify(!badgeLabel.visible)
-		verify(badgeMark.visible)
 
 		session.sharedAvailable = false
 		session.sharedJoined = false

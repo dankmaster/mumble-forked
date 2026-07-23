@@ -3720,6 +3720,7 @@ ApplicationWindow {
 							spacing: Theme.space2
 
 							Label {
+								id: activityLogTimestamp
 								objectName: "activityLogTimestamp"
 								Layout.preferredWidth: root.activityLogTimeColumnWidth
 								Layout.alignment: Qt.AlignTop

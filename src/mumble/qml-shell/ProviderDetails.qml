@@ -39,6 +39,8 @@ FocusScope {
 	readonly property bool steamPresentation: variant === "game" && providerToken === "steam"
 	readonly property bool googlePresentation: variant === "googleSearch"
 	readonly property bool flashbackPresentation: variant === "forum" && providerToken === "flashback"
+	readonly property bool articlePresentation: variant === "article"
+	readonly property bool commercePresentation: commerceLayout && !steamPresentation
 	readonly property bool xPresentation: variant === "x"
 	readonly property bool instagramPresentation: variant === "instagram"
 	readonly property bool githubPresentation: variant === "github"
@@ -49,13 +51,27 @@ FocusScope {
 		&& ["bluesky", "mastodon", "reddit"].indexOf(providerToken) >= 0
 		&& !socialBespokePresentation
 	readonly property bool bespokeSemanticOwner: steamPresentation || googlePresentation
-		|| flashbackPresentation || socialBespokePresentation
+		|| flashbackPresentation || articlePresentation || commercePresentation
+		|| socialBespokePresentation
 	readonly property bool dedicatedSemanticOwner: bespokeSemanticOwner
 		|| genericSocialPostPresentation
 	readonly property bool ownsHeader: dedicatedSemanticOwner || identityOwnsGenericHeader()
+	readonly property bool ownsMediaGallery: steamPresentation || articlePresentation
+		|| commercePresentation
 	readonly property string flashbackAuthorAvatarSource: safeManagedImageSource(firstValue([
 		"forumPostAuthorAvatarUrl"
 	]))
+	readonly property string managedPreviewImageSource: safeManagedImageSource(previewImageSource)
+	readonly property string articleTitle: safeText(firstValue(["articleTitle"]), 512)
+		|| safeText(previewTitle, 512)
+	readonly property string articleSummary: safeText(firstValue(["articleDescription"]), 2048)
+		|| safeText(previewDescription, 2048)
+	readonly property string articleAuthor: safeText(firstValue(["articleAuthor"]), 256)
+	readonly property string articleMetaLine: [
+		safeText(firstValue(["articlePublisher"]), 128) || providerDisplayName,
+		safeText(firstValue(["articleSection"]), 128),
+		humanReadableDate(firstValue(["articlePublishedAt", "articleUpdatedAt"]))
+	].filter(function(value) { return value.length > 0 }).join(" · ")
 	readonly property string xAvatarSource: safeManagedImageSource(firstValue(["xAvatarUrl"]))
 	readonly property string instagramAvatarSource: safeManagedImageSource(firstValue([
 		"instagramAvatarUrl"
@@ -133,7 +149,8 @@ FocusScope {
 			|| releaseInfo.hasSummary || (metadata
 				&& (metadata.githubArchived === true || metadata.githubFork === true))
 		: twitchPresentation ? allStats.length > 2 || bodyText.length > 0 : false
-	readonly property bool ownsDescription: genericSocialPostPresentation || bodyText.length > 0
+	readonly property bool ownsDescription: articlePresentation || commercePresentation
+		|| genericSocialPostPresentation || bodyText.length > 0
 		|| structuredDescriptionCoversPreview()
 	readonly property string steamReviewSummary: safeText(firstValue([
 		"steamReviewSummary", "gameStoreRating"
@@ -216,6 +233,16 @@ FocusScope {
 		if (value === undefined || value === null || typeof value === "object")
 			return ""
 		return String(value).trim().slice(0, maximum || 512)
+	}
+
+	function humanReadableDate(value) {
+		const text = safeText(value, 128)
+		if (text.length === 0)
+			return ""
+		const timestamp = Date.parse(text)
+		if (!isFinite(timestamp))
+			return text
+		return new Date(timestamp).toLocaleDateString(Qt.locale(), Locale.ShortFormat)
 	}
 
 	function safeManagedImageSource(value) {
@@ -1466,6 +1493,413 @@ FocusScope {
 		}
 
 		Rectangle {
+			id: articleCard
+			objectName: "providerArticleCard"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? articleLayout.implicitHeight + Theme.space3 * 2 : 0
+			visible: root.articlePresentation
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: root.providerAccentBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.heading
+			Accessible.description: root.joinAccessibleSentences([
+				root.articleTitle,
+				root.articleMetaLine, root.articleSummary,
+				root.articleAuthor.length > 0 ? qsTr("By %1").arg(root.articleAuthor) : ""
+			])
+
+			ColumnLayout {
+				id: articleLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space2
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space3
+
+					Rectangle {
+						objectName: "providerArticleHero"
+						Layout.preferredWidth: visible ? (root.compactLayout ? 108 : 164) : 0
+						Layout.preferredHeight: visible ? (root.compactLayout ? 78 : 108) : 0
+						Layout.alignment: Qt.AlignTop
+						visible: root.managedPreviewImageSource.length > 0
+						radius: Theme.innerRadius
+						color: Theme.embedSurface
+						clip: true
+
+						Image {
+							objectName: "providerArticleHeroImage"
+							anchors.fill: parent
+							source: root.managedPreviewImageSource
+							asynchronous: true
+							cache: false
+							sourceSize.width: 640
+							sourceSize.height: 400
+							fillMode: Image.PreserveAspectCrop
+							Accessible.ignored: true
+						}
+						Button {
+							anchors.fill: parent
+							visible: root.steamMediaItems.length > 0
+							background: Item {}
+							contentItem: Item {}
+							Accessible.name: qsTr("Open article image")
+							Accessible.description: root.articleTitle
+							onClicked: root.steamMediaOpenRequested(root.boundedSteamMediaIndex)
+						}
+					}
+
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						Layout.alignment: Qt.AlignTop
+						spacing: Theme.space1
+
+						RowLayout {
+							Layout.fillWidth: true
+							spacing: Theme.space2
+							ProviderIdentityBadge {
+								Layout.preferredWidth: 30
+								Layout.preferredHeight: 30
+								providerToken: root.providerToken
+								badgeText: root.identityInitials(root.providerDisplayName, "N")
+								presentation: "mark"
+								markExtent: 30
+								accent: root.providerAccent
+								foreground: root.providerForeground
+							}
+							Label {
+								objectName: "providerArticleMeta"
+								Layout.fillWidth: true
+								text: root.articleMetaLine
+								textFormat: Text.PlainText
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								wrapMode: Text.Wrap
+								maximumLineCount: 2
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+						Label {
+							objectName: "providerArticleTitle"
+							Layout.fillWidth: true
+							text: root.articleTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							lineHeight: 1.18
+							wrapMode: Text.Wrap
+							maximumLineCount: root.expanded ? 4 : 2
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerArticleTldr"
+					Layout.fillWidth: true
+					visible: root.articleSummary.length > 0
+					text: root.articleSummary
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					lineHeight: 1.3
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 7 : 3
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Label {
+					objectName: "providerArticleByline"
+					Layout.fillWidth: true
+					visible: root.articleAuthor.length > 0
+					text: qsTr("By %1").arg(root.articleAuthor)
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					Accessible.ignored: true
+				}
+
+				RowLayout {
+					objectName: "providerArticleGalleryControls"
+					Layout.fillWidth: true
+					visible: root.steamMediaItems.length > 1
+					spacing: Theme.space1
+					ModernIconButton {
+						enabled: root.boundedSteamMediaIndex > 0
+						dense: true
+						iconName: "chevron-left"
+						text: qsTr("Previous image")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex - 1)
+					}
+						Label {
+							Layout.fillWidth: true
+							text: qsTr("%1 of %2").arg(root.boundedSteamMediaIndex + 1)
+								.arg(root.steamMediaItems.length)
+						textFormat: Text.PlainText
+						color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							horizontalAlignment: Text.AlignHCenter
+							Accessible.ignored: true
+						}
+					ModernIconButton {
+						enabled: root.boundedSteamMediaIndex + 1 < root.steamMediaItems.length
+						dense: true
+						iconName: "chevron-right"
+						text: qsTr("Next image")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex + 1)
+					}
+				}
+			}
+		}
+
+		Rectangle {
+			id: commerceCard
+			objectName: "providerCommerceCard"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? commerceCardLayout.implicitHeight + Theme.space3 * 2 : 0
+			visible: root.commercePresentation
+			radius: Theme.innerRadius
+			color: root.withAlpha(root.providerAccent, 0.055)
+			border.color: root.providerAccentBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.heading
+			Accessible.description: root.accessibleSummary()
+
+			ColumnLayout {
+				id: commerceCardLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space2
+
+				Rectangle {
+					objectName: "providerCommerceHero"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? (root.compactLayout ? 150 : 220) : 0
+					visible: root.managedPreviewImageSource.length > 0
+					radius: Theme.innerRadius
+					color: Theme.embedSurface
+					clip: true
+
+					Image {
+						objectName: "providerCommerceHeroImage"
+						anchors.fill: parent
+						source: root.managedPreviewImageSource
+						asynchronous: true
+						cache: false
+						sourceSize.width: 1000
+						sourceSize.height: 700
+						fillMode: root.variant === "product"
+							? Image.PreserveAspectFit : Image.PreserveAspectCrop
+						Accessible.ignored: true
+					}
+					Button {
+						anchors.fill: parent
+						visible: root.steamMediaItems.length > 0
+						background: Item {}
+						contentItem: Item {}
+						Accessible.name: qsTr("Open listing image")
+						Accessible.description: root.previewTitle
+						onClicked: root.steamMediaOpenRequested(root.boundedSteamMediaIndex)
+					}
+				}
+
+				RowLayout {
+					objectName: "providerCommerceGalleryControls"
+					Layout.fillWidth: true
+					visible: root.steamMediaItems.length > 1
+					spacing: Theme.space1
+					ModernIconButton {
+						enabled: root.boundedSteamMediaIndex > 0
+						dense: true
+						iconName: "chevron-left"
+						text: qsTr("Previous image")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex - 1)
+					}
+					Label {
+						Layout.fillWidth: true
+						text: qsTr("%1 of %2").arg(root.boundedSteamMediaIndex + 1)
+							.arg(root.steamMediaItems.length)
+						textFormat: Text.PlainText
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						horizontalAlignment: Text.AlignHCenter
+						Accessible.ignored: true
+					}
+					ModernIconButton {
+						enabled: root.boundedSteamMediaIndex + 1 < root.steamMediaItems.length
+						dense: true
+						iconName: "chevron-right"
+						text: qsTr("Next image")
+						onClicked: root.steamMediaSelectionRequested(root.boundedSteamMediaIndex + 1)
+					}
+				}
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					ProviderIdentityBadge {
+						Layout.preferredWidth: 32
+						Layout.preferredHeight: 32
+						providerToken: root.providerToken
+						badgeText: root.identityInitials(root.providerDisplayName, "P")
+						presentation: "mark"
+						markExtent: 32
+						accent: root.providerAccent
+						foreground: root.providerForeground
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							Layout.fillWidth: true
+							text: root.providerDisplayName
+							textFormat: Text.PlainText
+							color: root.providerForeground
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerCommerceStatusLine"
+							Layout.fillWidth: true
+							visible: root.commerceStatus.length > 0
+							text: root.commerceStatus
+							textFormat: Text.PlainText
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					Label {
+						objectName: "providerCommercePrice"
+						visible: root.primaryValue.length > 0
+						text: root.primaryValue
+						textFormat: Text.PlainText
+						color: root.providerForeground
+						font.pixelSize: Theme.fontHeading
+						font.bold: true
+						Accessible.ignored: true
+					}
+				}
+
+				Label {
+					objectName: "providerCommerceTitle"
+					Layout.fillWidth: true
+					text: root.previewTitle
+					textFormat: Text.PlainText
+					color: Theme.textStrong
+					font.pixelSize: Theme.fontTitle
+					font.bold: true
+					lineHeight: 1.18
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 4 : 2
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Label {
+					objectName: "providerCommerceDescription"
+					Layout.fillWidth: true
+					visible: root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					lineHeight: 1.25
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 6 : 3
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				Flow {
+					objectName: "providerCommerceFacts"
+					Layout.fillWidth: true
+					Layout.preferredHeight: implicitHeight
+					spacing: Theme.space1
+					Repeater {
+						model: root.visibleStats
+						delegate: Rectangle {
+							id: commerceFact
+							required property var modelData
+							required property int index
+							objectName: "providerCommerceFact_" + index
+							width: Math.min(commerceCardLayout.width,
+								commerceFactLabel.implicitWidth + Theme.space2 * 2)
+							height: 26
+							radius: height / 2
+							color: Theme.panel
+							border.color: Theme.surfaceBorder
+							Label {
+								id: commerceFactLabel
+								objectName: "providerCommerceFactLabel_" + commerceFact.index
+								anchors.fill: parent
+								anchors.leftMargin: Theme.space2
+								anchors.rightMargin: Theme.space2
+								text: modelData.label + ": " + modelData.value
+								textFormat: Text.PlainText
+								color: Theme.textMain
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								verticalAlignment: Text.AlignVCenter
+								Accessible.ignored: true
+							}
+						}
+					}
+				}
+
+				Flow {
+					objectName: "providerCommerceHighlights"
+					Layout.fillWidth: true
+					Layout.preferredHeight: implicitHeight
+					visible: root.visibleChips.length > 0
+					spacing: Theme.space1
+					Repeater {
+						model: root.visibleChips
+						delegate: Rectangle {
+							id: commerceHighlight
+							required property var modelData
+							required property int index
+							objectName: "providerCommerceHighlight_" + index
+							width: Math.min(commerceCardLayout.width,
+								commerceHighlightLabel.implicitWidth + Theme.space2 * 2)
+							height: 26
+							radius: height / 2
+							color: root.providerAccentSubtle
+							border.color: root.providerAccentBorder
+							Label {
+								id: commerceHighlightLabel
+								objectName: "providerCommerceHighlightLabel_" + commerceHighlight.index
+								anchors.fill: parent
+								anchors.leftMargin: Theme.space2
+								anchors.rightMargin: Theme.space2
+								text: modelData.text
+								textFormat: Text.PlainText
+								color: root.providerForeground
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								elide: Text.ElideRight
+								verticalAlignment: Text.AlignVCenter
+								Accessible.ignored: true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		Rectangle {
 			id: steamCard
 			objectName: "providerSteamCard"
 			Layout.fillWidth: true
@@ -2152,11 +2586,11 @@ FocusScope {
 			id: flashbackCard
 			objectName: "providerFlashbackThread"
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight : 0
+			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.flashbackPresentation
 			radius: Theme.innerRadius
-			color: Theme.embedSurface
-			border.color: Theme.embedBorder
+			color: root.withAlpha(root.providerAccent, 0.055)
+			border.color: root.providerAccentBorder
 			clip: true
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
@@ -2164,43 +2598,50 @@ FocusScope {
 
 			ColumnLayout {
 				id: flashbackLayout
-				anchors.left: parent.left
-				anchors.right: parent.right
-				spacing: 0
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space2
 
 				Rectangle {
 					objectName: "providerFlashbackMasthead"
 					Layout.fillWidth: true
-					Layout.preferredHeight: 52
-					color: Theme.embedRevealSurface
+					Layout.preferredHeight: 34
+					color: "transparent"
 					RowLayout {
 						anchors.fill: parent
-						anchors.leftMargin: Theme.space3
-						anchors.rightMargin: Theme.space3
-						spacing: Theme.space3
+						spacing: Theme.space2
 						Label {
 							objectName: "providerFlashbackLogo"
 							text: "FLASHBACK"
 							textFormat: Text.PlainText
-							color: Theme.textStrong
-							font.pixelSize: Theme.fontHeading
+							color: root.providerForeground
+							font.pixelSize: Theme.fontTitle
 							font.bold: true
-							font.letterSpacing: -0.6
+							font.letterSpacing: -0.35
 							Accessible.ignored: true
 						}
 						Rectangle {
 							Layout.preferredWidth: 1
-							Layout.preferredHeight: 24
-							color: Theme.quietBorder
+							Layout.preferredHeight: 18
+							color: root.providerAccentBorder
 						}
 						Label {
 							Layout.fillWidth: true
-							text: qsTr("Forum · Aktuellt · Populärt")
+							text: root.joinedValue(["forumCategory", "forumName"], " · ")
+								|| qsTr("Flashback forum")
 							textFormat: Text.PlainText
 							color: Theme.secondaryText
 							font.pixelSize: Theme.fontCaption
-							font.bold: true
 							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerFlashbackLinkContext"
+							text: root.hasValue("postId") ? qsTr("Linked post") : qsTr("Thread")
+							textFormat: Text.PlainText
+							color: root.providerForeground
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
 							Accessible.ignored: true
 						}
 					}
@@ -2208,7 +2649,6 @@ FocusScope {
 
 				ColumnLayout {
 					Layout.fillWidth: true
-					Layout.margins: Theme.space3
 					spacing: Theme.space2
 					Label {
 						objectName: "providerFlashbackTitle"
@@ -2303,8 +2743,8 @@ FocusScope {
 						Layout.preferredHeight: visible ? flashbackQuoteLayout.implicitHeight + Theme.space2 * 2 : 0
 						visible: root.hasAny(["forumQuoteAuthor", "forumQuoteExcerpt", "forumQuotePostNumber"])
 						radius: Theme.space1
-						color: Theme.embedRevealSurface
-						border.color: Theme.embedBorder
+						color: Theme.panel
+						border.color: Theme.surfaceBorder
 						Rectangle {
 							anchors.left: parent.left
 							anchors.top: parent.top
@@ -2368,13 +2808,13 @@ FocusScope {
 				Rectangle {
 					objectName: "providerFlashbackFooter"
 					Layout.fillWidth: true
-					Layout.preferredHeight: 38
-					color: Theme.embedRevealSurface
-					border.color: Theme.embedBorder
+					Layout.preferredHeight: visible ? 26 : 0
+					visible: root.hasAny(["forumPage", "forumPageCount", "forumPostCount",
+						"forumPostNumber", "forumPostTime"])
+					color: "transparent"
+					border.color: "transparent"
 					RowLayout {
 						anchors.fill: parent
-						anchors.leftMargin: Theme.space3
-						anchors.rightMargin: Theme.space3
 						spacing: Theme.space2
 						Label {
 							objectName: "providerFlashbackMeta"
@@ -2391,12 +2831,11 @@ FocusScope {
 							Accessible.ignored: true
 						}
 						Label {
-							objectName: "providerFlashbackLinkContext"
-							text: root.hasValue("postId") ? qsTr("Linked post") : qsTr("Thread")
+							objectName: "providerFlashbackPostMeta"
+							text: root.joinedValue(["forumPostNumber", "forumPostTime"], " · ")
 							textFormat: Text.PlainText
-							color: root.providerForeground
+							color: Theme.secondaryText
 							font.pixelSize: Theme.fontCaption
-							font.bold: true
 							Accessible.ignored: true
 						}
 					}
@@ -3140,7 +3579,8 @@ FocusScope {
 			Layout.preferredHeight: visible ? implicitHeight : 0
 			visible: !root.steamPresentation && !root.googlePresentation
 				&& !root.genericSocialPostPresentation
-				&& !root.flashbackPresentation && (root.financeLayout || root.commerceLayout
+				&& !root.flashbackPresentation && !root.articlePresentation
+				&& !root.commercePresentation && (root.financeLayout || root.commerceLayout
 				|| (root.identityTitle.length === 0 && root.identitySubtitle.length === 0
 					&& root.bodyText.length === 0))
 				&& (root.heading.length > 0 || root.primaryValue.length > 0
@@ -3276,6 +3716,7 @@ FocusScope {
 			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: !root.financeLayout && !root.commerceLayout
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.articlePresentation
 				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 				&& (root.identityTitle.length > 0
 				|| root.identitySubtitle.length > 0 || root.bodyText.length > 0)
@@ -3508,6 +3949,7 @@ FocusScope {
 			Layout.preferredHeight: statsFlow.visible ? statsFlow.implicitHeight : 0
 			visible: root.visibleStats.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.articlePresentation && !root.commercePresentation
 				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 			columns: root.statColumnCount(width)
 			columnSpacing: Theme.space2
@@ -3598,6 +4040,7 @@ FocusScope {
 			Layout.preferredHeight: chipFlow.visible ? chipFlow.implicitHeight : 0
 			visible: root.visibleChips.length > 0 && !root.steamPresentation
 				&& !root.googlePresentation && !root.flashbackPresentation
+				&& !root.articlePresentation && !root.commercePresentation
 				&& !root.socialBespokePresentation && !root.genericSocialPostPresentation
 			spacing: Theme.space1
 

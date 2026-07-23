@@ -967,6 +967,9 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'providerPresentation') | Should Be $true
 		($worker -match 'cardX.*timelineX') | Should Be $true
 		($worker -match 'steam.*providerSteamHeroImage') | Should Be $true
+		($worker -match 'product.*vehicle.*property.*marketplace[\s\S]*providerCommerceHeroImage') |
+			Should Be $true
+		($worker -match 'article.*providerArticleHeroImage') | Should Be $true
 		($worker -match 'previewState.*expectedPreviewState') | Should Be $true
 		($worker -match 'compact.*expectedCompact') | Should Be $true
 		($worker -match 'returned a truncated accessibility tree') | Should Be $true

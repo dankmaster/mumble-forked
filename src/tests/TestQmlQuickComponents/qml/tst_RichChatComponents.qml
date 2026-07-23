@@ -155,6 +155,7 @@ TestCase {
 		property int volume: 100
 		property bool muted: false
 		property int detachCalls: 0
+		property int playCalls: 0
 		property int pauseCalls: 0
 		property int retryCalls: 0
 		property int closeCalls: 0
@@ -166,6 +167,10 @@ TestCase {
 		function pause() {
 			pauseCalls += 1
 			state = "paused"
+		}
+		function play() {
+			playCalls += 1
+			state = "playing"
 		}
 		function retry() {
 			retryCalls += 1
@@ -268,6 +273,7 @@ TestCase {
 		inlineSession.sharedJoined = false
 		inlineSession.sharedHost = false
 		inlineSession.detachCalls = 0
+		inlineSession.playCalls = 0
 		inlineSession.pauseCalls = 0
 		inlineSession.retryCalls = 0
 		inlineSession.closeCalls = 0
@@ -672,7 +678,7 @@ TestCase {
 		compare(attachmentLoader.item.implicitHeight, attachmentHeight)
 	}
 
-	function test_expanded_product_keeps_inset_content_inside_card() {
+	function test_product_uses_one_inset_gallery_card_without_duplicate_media() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready",
@@ -699,19 +705,206 @@ TestCase {
 		const header = findChild(card, "previewGenericHeader")
 		const details = findChild(card, "providerDetails")
 		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
+		const commerceCard = findChild(card, "providerCommerceCard")
+		const commerceHero = findChild(card, "providerCommerceHero")
+		const commerceTitle = findChild(card, "providerCommerceTitle")
 		verify(content !== null && header !== null && details !== null && expandedPanel !== null)
+		verify(commerceCard !== null && commerceHero !== null && commerceTitle !== null)
 		tryVerify(function() { return card.expanded && card.implicitHeight > 180 })
 		previewLoader.height = Math.ceil(card.implicitHeight)
 		wait(0)
-		tryCompare(header, "width", content.width)
+		compare(header.visible, false)
+		tryCompare(commerceCard, "visible", true)
 		tryCompare(details, "width", content.width)
-		const headerOrigin = header.mapToItem(content, 0, 0)
-		verify(headerOrigin.x >= -0.5)
-		verify(headerOrigin.x + header.width <= content.width + 0.5,
-			"generic header width " + header.width + " escaped inset content width " + content.width)
-		const panelOrigin = expandedPanel.mapToItem(card, 0, 0)
-		verify(Math.abs(panelOrigin.x) <= 1)
-		verify(Math.abs(expandedPanel.width - card.width) <= 1)
+		const commerceOrigin = commerceCard.mapToItem(content, 0, 0)
+		verify(commerceOrigin.x >= -0.5)
+		verify(commerceOrigin.x + commerceCard.width <= content.width + 0.5)
+		compare(commerceTitle.text, "Logitech G Pro X Superlight 2")
+		tryCompare(commerceHero, "visible", true)
+		compare(expandedPanel.visible, false)
+	}
+
+	function test_article_uses_compact_image_tldr_and_human_date_without_detail_tiles() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "article",
+			"title": "Government halves the price of monthly transit passes",
+			"description": "Public transit monthly passes will cost half as much for six months.",
+			"url": "https://news.example.com/transit",
+			"mediaItems": [{
+				"kind": "image",
+				"mime": "image/jpeg",
+				"url": "image://mumble/article-hero?g=1"
+			}],
+			"metadata": {
+				"previewKind": "article",
+				"previewProvider": "goteborgsposten",
+				"articlePublisher": "Göteborgs-Posten",
+				"articleSection": "Politics",
+				"articleAuthor": "Karin Jansson",
+				"articlePublishedAt": "2026-05-25T18:17:01.000Z",
+				"articleTitle": "Government halves the price of monthly transit passes",
+				"articleDescription": "Public transit monthly passes will cost half as much for six months."
+			}
+		}
+		card.previewIdentity = "message:article-tldr"
+
+		const header = findChild(card, "previewGenericHeader")
+		const article = findChild(card, "providerArticleCard")
+		const hero = findChild(card, "providerArticleHero")
+		const title = findChild(card, "providerArticleTitle")
+		const tldr = findChild(card, "providerArticleTldr")
+		const meta = findChild(card, "providerArticleMeta")
+		const stats = findChild(card, "providerDetailsStats")
+		verify(header !== null && article !== null && hero !== null && title !== null
+			&& tldr !== null && meta !== null && stats !== null)
+		compare(header.visible, false)
+		tryCompare(article, "visible", true)
+		tryCompare(hero, "visible", true)
+		compare(title.text, "Government halves the price of monthly transit passes")
+		compare(tldr.text, "Public transit monthly passes will cost half as much for six months.")
+		verify(meta.text.indexOf("Göteborgs-Posten") >= 0)
+		verify(meta.text.indexOf("Politics") >= 0)
+		verify(meta.text.indexOf("T18:17:01") < 0)
+		compare(stats.visible, false)
+		compare(findChild(card, "previewDescription").visible, false)
+	}
+
+	function test_marketplace_gallery_uses_all_images_and_keeps_navigation_outside_the_photo() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "marketplaceListing",
+			"title": "MSI RTX 4070 Ti SUPER 16G",
+			"description": "Sparingly used and works perfectly.",
+			"url": "https://www.blocket.se/recommerce/forsale/item/17926061",
+			"mediaItems": [
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-one?g=1" },
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-two?g=1" },
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-three?g=1" }
+			],
+			"metadata": {
+				"previewKind": "marketplaceListing",
+				"previewProvider": "blocket",
+				"marketplaceProvider": "Blocket",
+				"listingPrice": "8 500 kr",
+				"listingLocation": "Stockholm",
+				"listingCondition": "Used",
+				"listingId": "17926061",
+				"listingDescription": "Sparingly used and works perfectly."
+			}
+		}
+		card.previewIdentity = "message:blocket-gallery"
+
+		const gallery = findChild(card, "providerCommerceCard")
+		const hero = findChild(card, "providerCommerceHero")
+		const heroImage = findChild(card, "providerCommerceHeroImage")
+		const controls = findChild(card, "providerCommerceGalleryControls")
+		const price = findChild(card, "providerCommercePrice")
+		verify(gallery !== null && hero !== null && heroImage !== null
+			&& controls !== null && price !== null)
+		tryCompare(gallery, "visible", true)
+		tryCompare(hero, "visible", true)
+		tryCompare(controls, "visible", true)
+		compare(price.text, "8 500 kr")
+		compare(card.selectedMediaIndex, 0)
+		card.selectedMediaIndex = 1
+		wait(0)
+		compare(heroImage.source.toString(), "image://mumble/blocket-two?g=1")
+		const controlsOrigin = controls.mapToItem(card, 0, 0)
+		const heroOrigin = hero.mapToItem(card, 0, 0)
+		verify(controlsOrigin.y >= heroOrigin.y + hero.height - 1)
+	}
+
+	function test_active_provider_player_has_only_external_actions_below_media_and_no_duplicate_spotify_details() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Bobo & Gileus",
+			"url": "https://open.spotify.com/album/example",
+			"embedUrl": "https://open.spotify.com/embed/album/example",
+			"embedKind": "spotify",
+			"embedAspect": "compact-audio",
+			"metadata": {
+				"previewKind": "audio",
+				"previewProvider": "spotify",
+				"audioProvider": "Spotify",
+				"audioProgram": "Bobo & Gileus"
+			}
+		}
+		card.previewIdentity = "message:spotify-clean-surface"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "spotify"
+		inlineSession.playbackControllable = false
+		inlineSession.detached = false
+		inlineSession.active = true
+
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const details = findChild(card, "providerDetails")
+		const closeButton = findChild(card, "previewInlineCloseButton")
+		const originalButton = findChild(card, "previewEmbedOriginalButton")
+		verify(panel !== null && details !== null && closeButton !== null && originalButton !== null)
+		tryCompare(card, "inlinePlaybackActive", true)
+		compare(card.inlineProviderOwnsDetails, true)
+		compare(details.visible, false)
+		tryCompare(closeButton, "visible", true)
+		tryCompare(originalButton, "visible", true)
+		const panelOrigin = panel.mapToItem(card, 0, 0)
+		const closeOrigin = closeButton.mapToItem(card, 0, 0)
+		verify(closeOrigin.y >= panelOrigin.y + panel.height - 1)
+		verify(findChild(card, "previewEmbedProviderBadge") === null)
+		verify(findChild(card, "previewEmbedProviderState") === null)
+		closeButton.clicked()
+		compare(inlineSession.closeCalls, 1)
+		tryCompare(card, "inlinePlaybackActive", false)
+	}
+
+	function test_video_backed_animation_pause_action_lives_below_the_media() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Animated reaction",
+			"url": "https://x.com/example/status/1",
+			"mediaUrl": "https://video.twimg.com/tweet_video/example.mp4",
+			"mediaMime": "video/mp4",
+			"metadata": {
+				"previewProvider": "x",
+				"contentBranch": "animated-gif-video-backed",
+				"mediaPresentation": "animated-image"
+			}
+		}
+		card.previewIdentity = "message:animated-footer"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "direct"
+		inlineSession.state = "playing"
+		inlineSession.detached = false
+		inlineSession.active = true
+
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const toggle = findChild(card, "previewInlineAnimationToggleButton")
+		verify(panel !== null && toggle !== null)
+		tryCompare(toggle, "visible", true)
+		compare(toggle.text, "Pause animation")
+		const panelOrigin = panel.mapToItem(card, 0, 0)
+		const toggleOrigin = toggle.mapToItem(card, 0, 0)
+		verify(toggleOrigin.y >= panelOrigin.y + panel.height - 1)
+		toggle.clicked()
+		compare(inlineSession.pauseCalls, 1)
+		compare(inlineSession.state, "paused")
+		compare(toggle.text, "Resume animation")
+		toggle.clicked()
+		compare(inlineSession.playCalls, 1)
+		compare(inlineSession.state, "playing")
 	}
 
     function test_direct_media_gallery_is_bounded_and_typed() {
@@ -840,7 +1033,7 @@ TestCase {
 			  "accessibleDescription": "Loads the provider post in this preview",
 			  "popoutLabel": "Open in separate viewer",
 			  "popoutDescription": "Open the provider post in a separate window",
-			  "localPlayback": false, "stageVisible": false },
+			  "localPlayback": true, "stageVisible": true },
 			// Instagram historically used /p/ for video posts. Typed metadata must
 			// be able to recover the playable media kind from that generic path.
 			{ "path": "p/legacy-video", "metadataKind": "reel", "normalizedKind": "reel",
@@ -908,9 +1101,6 @@ TestCase {
 				compare(inlinePlaySpy.count, inlineRequests)
 				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][0], embedUrl)
 				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][1], "instagram")
-			} else {
-				compare(inlinePlaySpy.count, inlineRequests)
-				verify(findChild(card, "previewOpenButton").visible)
 			}
 		}
 	}
@@ -1494,7 +1684,7 @@ TestCase {
 		}
 	}
 
-	function test_provider_embed_badges_keep_brand_and_twitch_state_visible_before_playback() {
+	function test_provider_identity_and_state_never_cover_the_media_surface() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready", "title": "Mumble Dev",
@@ -1508,45 +1698,15 @@ TestCase {
 		const providerBadge = findChild(card, "previewEmbedProviderBadge")
 		const stateBadge = findChild(card, "previewEmbedProviderState")
 		const posterScrim = findChild(card, "previewTwitchPosterScrim")
-		const scrimTop = findChild(card, "previewTwitchPosterScrimTop")
-		const scrimMiddle = findChild(card, "previewTwitchPosterScrimMiddle")
-		const scrimBottom = findChild(card, "previewTwitchPosterScrimBottom")
 		const details = findChild(card, "providerDetails")
-		verify(providerBadge !== null && stateBadge !== null && details !== null)
-		verify(posterScrim !== null && scrimTop !== null && scrimMiddle !== null
-			&& scrimBottom !== null)
-		tryCompare(providerBadge, "visible", true)
-		compare(providerBadge.presentation, "overlay")
-		tryCompare(stateBadge, "visible", true)
-		tryCompare(posterScrim, "visible", true)
+		verify(providerBadge === null && stateBadge === null && posterScrim === null)
+		verify(findChild(card, "previewTwitchPosterCopy") === null)
+		verify(details !== null)
 		compare(details.providerToken, "twitch")
 		compare(details.providerStateLabel, "Live")
 		compare(card.normalizedEmbedAspect, "twitch")
 		verify(card.embedMediaWidth <= 520)
 		verify(Math.abs(card.embedMediaWidth / card.embedMediaHeight - 4 / 3) < 0.01)
-		const posterCopy = findChild(card, "previewTwitchPosterCopy")
-		const posterTitle = findChild(card, "previewTwitchPosterTitle")
-		const posterNote = findChild(card, "previewTwitchPosterNote")
-		compare(posterCopy.visible, true)
-		compare(posterTitle.text, "Mumble Dev")
-		compare(posterNote.text,
-			"Twitch may require playback confirmation.")
-		compare(String(posterTitle.color), String(Theme.mediaOverlayTextStrong))
-		compare(String(posterNote.color), String(Theme.mediaOverlayTextMuted))
-		compare(posterCopy.Accessible.ignored, true)
-		compare(posterTitle.Accessible.ignored, true)
-		compare(posterNote.Accessible.ignored, true)
-		verify(scrimTop.color.a < 0.01)
-		verify(scrimMiddle.color.a >= 0.83)
-		verify(scrimBottom.color.a >= 0.95)
-		verify(Math.abs(providerBadge.color.r - details.providerAccent.r) < 0.01)
-		verify(Math.abs(providerBadge.color.g - details.providerAccent.g) < 0.01)
-		verify(Math.abs(providerBadge.color.b - details.providerAccent.b) < 0.01)
-		verify(Math.abs(providerBadge.color.a - 0.92) < 0.01)
-		verify(Math.abs(stateBadge.color.r - details.providerStateColor.r) < 0.01)
-		verify(Math.abs(stateBadge.color.g - details.providerStateColor.g) < 0.01)
-		verify(Math.abs(stateBadge.color.b - details.providerStateColor.b) < 0.01)
-		verify(Math.abs(stateBadge.color.a - 0.92) < 0.01)
 		compare(findChild(card, "previewProviderChip").visible, false)
 	}
 
