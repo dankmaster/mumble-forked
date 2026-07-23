@@ -91,6 +91,10 @@ Rectangle {
 		&& Boolean(session.sharedAvailable) && Boolean(session.sharedJoined)
 		&& !Boolean(session.sharedHost)
 	readonly property bool providerInputEnabled: !sharedGuestPlaybackLocked
+	readonly property bool providerVerificationRequired: _surfaceVerificationState === "blocked"
+	readonly property bool providerStatePersistent: !!mediaProfileFactory
+		&& Boolean(mediaProfileFactory.providerStatePersistent)
+	property bool verificationNavigationActive: false
 	property string _webSecondaryAudioWarning: ""
 	readonly property string secondaryAudioWarning: nativeSurfaceActive && nativePlayerLoader.item
 		? String(nativePlayerLoader.item.secondaryAudioWarning || "")
@@ -121,6 +125,11 @@ Rectangle {
 	property string _surfaceVerificationState: "idle"
 	property string _surfaceVerificationEvidence: ""
 	property string _surfaceVerificationDetail: ""
+	property int _verifiedProbeGeneration: -1
+	property int _verifiedProbeCount: 0
+	property double _verifiedProbeStartedAt: 0
+	property int providerVerificationStabilityMs: 1200
+	property int providerVerificationProbeCount: 3
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -143,6 +152,7 @@ Rectangle {
 		&& Boolean(session.playbackControllable) && transportVerified
 	implicitHeight: mediaViewportHeight
 		+ (nativeControlsVisible ? inlineControls.implicitHeight : 0)
+		+ (providerVerificationRequired ? verificationStrip.height : 0)
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
@@ -177,7 +187,7 @@ Rectangle {
 				? "const target=Math.max(0,Math.min(100," + numericValue + "));if(isYt&&typeof yt.setVolume==='function'){yt.setVolume(target);return true;}if(media){media.volume=target/100;return true;}return false;"
 				: command === "mute"
 				? "const muted=" + (numericValue > 0 ? "true" : "false") + ";if(isYt){if(muted&&typeof yt.mute==='function')yt.mute();else if(!muted&&typeof yt.unMute==='function')yt.unMute();return true;}if(media){media.muted=muted;return true;}return false;"
-				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1&&state!==3,error:playbackError};}"
+				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1,error:playbackError};}"
 				  + "if(media)return {position:Number(media.currentTime||0),duration:isFinite(media.duration)?Number(media.duration):0,paused:!!media.paused,error:playbackError};return null;")
 			+ "})()"
 	}
@@ -191,7 +201,10 @@ Rectangle {
 		return String(session ? session.url || "" : "")
 	}
 
-	function navigationRequestAllowed(requestUrl, firstPartyUrl) {
+	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
+		if (verificationMode && mediaProfileFactory
+				&& typeof mediaProfileFactory.isVerificationNavigationAllowed === "function")
+			return mediaProfileFactory.isVerificationNavigationAllowed(requestUrl, firstPartyUrl)
 		if (mediaProfileFactory
 				&& typeof mediaProfileFactory.isNavigationRequestAllowed === "function")
 			return mediaProfileFactory.isNavigationRequestAllowed(requestUrl, firstPartyUrl)
@@ -200,6 +213,8 @@ Rectangle {
 	}
 
 	function resetMediaLifecycle(documentUrl, rendererIsHealthy) {
+		if (!rendererIsHealthy || String(documentUrl || "").length === 0)
+			verificationNavigationActive = false
 		_webSecondaryAudioWarning = ""
 		_mediaGeneration += 1
 		_documentUrl = String(documentUrl || "")
@@ -213,11 +228,31 @@ Rectangle {
 		_surfaceVerificationState = rendererIsHealthy ? "pending" : "idle"
 		_surfaceVerificationEvidence = ""
 		_surfaceVerificationDetail = ""
+		resetVerifiedProbeStability()
 		resetStatePoll()
 		_missingStatePolls = 0
 		_rendererHealthy = !!rendererIsHealthy
 		_transportRetryCount = 0
 		return _mediaGeneration
+	}
+
+	function resetVerifiedProbeStability() {
+		_verifiedProbeGeneration = -1
+		_verifiedProbeCount = 0
+		_verifiedProbeStartedAt = 0
+	}
+
+	function stableProviderVerificationReached(generation) {
+		const now = Date.now()
+		if (_verifiedProbeGeneration !== generation) {
+			_verifiedProbeGeneration = generation
+			_verifiedProbeCount = 1
+			_verifiedProbeStartedAt = now
+		} else {
+			_verifiedProbeCount += 1
+		}
+		return _verifiedProbeCount >= Math.max(1, providerVerificationProbeCount)
+			&& now - _verifiedProbeStartedAt >= Math.max(0, providerVerificationStabilityMs)
 	}
 
 	function beginMediaDocumentLoad(documentUrl) {
@@ -251,6 +286,9 @@ Rectangle {
 		_surfaceVerificationDetail = ""
 		if (result.playbackVerified === true)
 			_playbackVerifiedGeneration = generation
+		if (verificationNavigationActive
+				&& navigationRequestAllowed(_documentUrl, rendererDocumentUrl, false))
+			verificationNavigationActive = false
 		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (session)
 			session.reportLoadProgress(100)
@@ -261,7 +299,13 @@ Rectangle {
 	function verificationFailureMessage(evaluation) {
 		const kind = String(evaluation ? evaluation.kind || "" : "")
 		if (kind === "verification" || kind === "sign-in")
-			return qsTr("This provider requires verification or sign-in. Open it externally to continue.")
+			return providerStatePersistent
+				? qsTr("Complete verification in the player. This provider's sign-in state is kept for later playback.")
+				: qsTr("Complete verification in the player, then reload the media.")
+		if (kind === "consent")
+			return providerStatePersistent
+				? qsTr("Choose cookie preferences in the player. This choice is kept for later playback.")
+				: qsTr("Choose cookie preferences in the player, then reload the media.")
 		if (kind === "unavailable")
 			return qsTr("This provider says the media is unavailable here. Open the original page instead.")
 		if (kind === "adaptive-renderer-failed")
@@ -284,6 +328,12 @@ Rectangle {
 			+ (_surfaceVerificationEvidence.length > 0
 				? ":" + _surfaceVerificationEvidence : "")
 		if (evaluation.state === "verified") {
+			if (!background && !documentReady
+					&& !stableProviderVerificationReached(generation)) {
+				_surfaceVerificationState = "pending"
+				documentReadyProbeState = "stabilizing:" + _surfaceVerificationEvidence
+				return false
+			}
 			_transportVerifiedGeneration = generation
 			if (evaluation.playbackVerified === true)
 				_playbackVerifiedGeneration = generation
@@ -293,10 +343,22 @@ Rectangle {
 			}
 			return completeMediaDocumentLoad(generation, evaluation)
 		}
+		resetVerifiedProbeStability()
 		if (evaluation.state === "pending")
 			return false
-		const failureState = evaluation.state === "blocked" ? "blocked" : "failed"
 		const detail = verificationFailureMessage(evaluation)
+		if (evaluation.state === "blocked") {
+			_documentReadyGeneration = -1
+			_transportVerifiedGeneration = -1
+			_playbackVerifiedGeneration = -1
+			_surfaceVerificationState = "blocked"
+			_surfaceVerificationDetail = detail
+			if (playerLoader.item)
+				playerLoader.item.documentReady = false
+			documentReadyProbeState = "blocked:" + String(evaluation.kind || "verification")
+			return true
+		}
+		const failureState = evaluation.state === "blocked" ? "blocked" : "failed"
 		if (!failMediaDocument(generation, failureState, detail,
 				String(evaluation.evidence || "")))
 			return false
@@ -738,6 +800,7 @@ Rectangle {
 				nativePlayerLoader.item.retry()
 				return
 			}
+			inlinePlayer.verificationNavigationActive = false
 			inlinePlayer.invalidateMediaDocument()
 			inlinePlayer.invalidateAudioDocument()
 			Qt.callLater(function() {
@@ -871,8 +934,9 @@ Rectangle {
 		anchors.right: parent.right
 		anchors.top: parent.top
 		anchors.bottom: parent.bottom
-		anchors.bottomMargin: inlinePlayer.nativeControlsVisible
-			? inlineControls.implicitHeight : 0
+		anchors.bottomMargin: (inlinePlayer.nativeControlsVisible
+			? inlineControls.implicitHeight : 0)
+			+ (inlinePlayer.providerVerificationRequired ? verificationStrip.height : 0)
 		color: Theme.mediaCanvas
 		border.color: inlinePlayer.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1017,7 +1081,14 @@ Rectangle {
 				if (inlinePlayer.failMediaDocument(generation) && inlinePlayer.session)
 					inlinePlayer.session.reportError(qsTr("The inline player stopped unexpectedly."))
 			}
-			onNewWindowRequested: function(request) {}
+			onNewWindowRequested: function(request) {
+				if (inlinePlayer.providerVerificationRequired
+						&& inlinePlayer.navigationRequestAllowed(
+							request.requestedUrl, inlinePlayer.rendererDocumentUrl, true)) {
+					inlinePlayer.verificationNavigationActive = true
+					request.openIn(webPlayer)
+				}
+			}
 			onFileDialogRequested: function(request) {
 				request.accepted = true
 				request.dialogReject()
@@ -1034,8 +1105,16 @@ Rectangle {
 			onCertificateError: function(error) { error.rejectCertificate() }
 			onContextMenuRequested: function(request) { request.accepted = true }
 			onNavigationRequested: function(request) {
-				if (!inlinePlayer.navigationRequestAllowed(request.url, inlinePlayer.rendererDocumentUrl))
+				const verificationMode = inlinePlayer.providerVerificationRequired
+					|| inlinePlayer.verificationNavigationActive
+				if (!inlinePlayer.navigationRequestAllowed(request.url,
+						inlinePlayer.rendererDocumentUrl,
+						verificationMode)) {
 					request.action = WebEngineNavigationRequest.IgnoreRequest
+					return
+				}
+				if (verificationMode)
+					inlinePlayer.verificationNavigationActive = true
 			}
 			Connections {
 				target: webPlayer.profile
@@ -1069,7 +1148,7 @@ Rectangle {
 	}
 
 	Timer {
-		interval: 50
+		interval: inlinePlayer.providerVerificationRequired ? 500 : 75
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
 			&& inlinePlayer.rendererHealthy
 			&& !inlinePlayer.documentReady && inlinePlayer.session
@@ -1279,11 +1358,62 @@ Rectangle {
 	}
 
 	Rectangle {
+		id: verificationStrip
+		objectName: "inlineMediaVerificationStrip"
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: parent.bottom
+		visible: inlinePlayer.providerVerificationRequired
+		height: visible
+			? Math.max(Theme.controlHeight + Theme.space2,
+				verificationRow.implicitHeight + Theme.space2) : 0
+		color: Theme.embedSurface
+		border.color: inlinePlayer.providerAccentBorder
+		z: 8
+		Accessible.role: Accessible.AlertMessage
+		Accessible.name: qsTr("%1 verification required").arg(inlinePlayer.providerLabel)
+		Accessible.description: inlinePlayer.surfaceVerificationDetail
+
+		RowLayout {
+			id: verificationRow
+			anchors.fill: parent
+			anchors.leftMargin: Theme.space3
+			anchors.rightMargin: Theme.space2
+			anchors.topMargin: Theme.space1
+			anchors.bottomMargin: Theme.space1
+			spacing: Theme.space2
+
+			ModernIcon {
+				name: "warning"
+				size: 18
+				color: Theme.warning
+				Accessible.ignored: true
+			}
+			Label {
+				objectName: "inlineMediaVerificationText"
+				Layout.fillWidth: true
+				text: inlinePlayer.surfaceVerificationDetail
+				textFormat: Text.PlainText
+				color: Theme.textMain
+				font.pixelSize: Theme.fontCaption
+				wrapMode: Text.Wrap
+			}
+			ModernButton {
+				objectName: "inlineMediaVerificationReloadButton"
+				text: qsTr("Reload player")
+				Accessible.description: qsTr("Reload after completing provider verification")
+				onClicked: if (session) session.retry()
+			}
+		}
+	}
+
+	Rectangle {
 		id: loadingOverlay
 		objectName: "inlineMediaLoadingSurface"
 		parent: playerCanvas
 		anchors.fill: playerLoader
-		visible: inlinePlayer.ready && !inlinePlayer.documentReady && session.error.length === 0
+		visible: inlinePlayer.ready && !inlinePlayer.documentReady
+			&& !inlinePlayer.providerVerificationRequired && session.error.length === 0
 		color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage

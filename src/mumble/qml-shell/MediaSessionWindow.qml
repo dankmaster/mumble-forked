@@ -62,6 +62,10 @@ ApplicationWindow {
 	readonly property bool sharedGuestPlaybackLocked: mediaSession.sharedAvailable
 		&& mediaSession.sharedJoined && !mediaSession.sharedHost
 	readonly property bool providerInputEnabled: !sharedGuestPlaybackLocked
+	readonly property bool providerVerificationRequired: _surfaceVerificationState === "blocked"
+	readonly property bool providerStatePersistent: !!mediaProfileFactory
+		&& Boolean(mediaProfileFactory.providerStatePersistent)
+	property bool verificationNavigationActive: false
 	property string _webSecondaryAudioWarning: ""
 	readonly property string secondaryAudioWarning: nativeSurfaceActive && nativePlayerLoader.item
 		? String(nativePlayerLoader.item.secondaryAudioWarning || "")
@@ -128,6 +132,11 @@ ApplicationWindow {
 	property string _surfaceVerificationState: "idle"
 	property string _surfaceVerificationEvidence: ""
 	property string _surfaceVerificationDetail: ""
+	property int _verifiedProbeGeneration: -1
+	property int _verifiedProbeCount: 0
+	property double _verifiedProbeStartedAt: 0
+	property int providerVerificationStabilityMs: 1200
+	property int providerVerificationProbeCount: 3
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -200,7 +209,7 @@ ApplicationWindow {
     width: 1040
     height: 700
     minimumWidth: 640
-    minimumHeight: 420
+    minimumHeight: mediaAspect === "compact-audio" ? 260 : 420
 	    title: mediaSession.sharedAvailable && mediaSession.sharedTitle.length > 0
 	           ? qsTr("%1 · %2").arg(providerLabel).arg(mediaSession.sharedTitle)
 	           : qsTr("%1 player").arg(providerLabel)
@@ -242,6 +251,8 @@ ApplicationWindow {
 	}
 
 	function resetMediaLifecycle(documentUrl, rendererIsHealthy) {
+		if (!rendererIsHealthy || String(documentUrl || "").length === 0)
+			verificationNavigationActive = false
 		_webSecondaryAudioWarning = ""
 		_mediaGeneration += 1
 		_documentUrl = String(documentUrl || "")
@@ -255,6 +266,7 @@ ApplicationWindow {
 		_surfaceVerificationState = rendererIsHealthy ? "pending" : "idle"
 		_surfaceVerificationEvidence = ""
 		_surfaceVerificationDetail = ""
+		resetVerifiedProbeStability()
 		resetStatePoll()
 		resetAudioStatePoll()
 		_missingStatePolls = 0
@@ -263,6 +275,25 @@ ApplicationWindow {
 		desiredPlaybackState = ""
 		transportRetryCount = 0
 		return _mediaGeneration
+	}
+
+	function resetVerifiedProbeStability() {
+		_verifiedProbeGeneration = -1
+		_verifiedProbeCount = 0
+		_verifiedProbeStartedAt = 0
+	}
+
+	function stableProviderVerificationReached(generation) {
+		const now = Date.now()
+		if (_verifiedProbeGeneration !== generation) {
+			_verifiedProbeGeneration = generation
+			_verifiedProbeCount = 1
+			_verifiedProbeStartedAt = now
+		} else {
+			_verifiedProbeCount += 1
+		}
+		return _verifiedProbeCount >= Math.max(1, providerVerificationProbeCount)
+			&& now - _verifiedProbeStartedAt >= Math.max(0, providerVerificationStabilityMs)
 	}
 
 	function beginMediaDocumentLoad(documentUrl) {
@@ -275,6 +306,7 @@ ApplicationWindow {
 		_documentUrl = String(documentUrl || "")
 		_documentReadyGeneration = -1
 		_documentReadyProbeGeneration = -1
+		resetVerifiedProbeStability()
 		resetStatePoll()
 		resetAudioStatePoll()
 		_missingStatePolls = 0
@@ -317,6 +349,9 @@ ApplicationWindow {
 		_surfaceVerificationDetail = ""
 		if (result.playbackVerified === true)
 			_playbackVerifiedGeneration = generation
+		if (verificationNavigationActive
+				&& navigationRequestAllowed(_documentUrl, rendererDocumentUrl, false))
+			verificationNavigationActive = false
 		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (playerLoader.item && playerLoader.item.loadGeneration === generation)
 			playerLoader.item.documentReady = true
@@ -328,7 +363,13 @@ ApplicationWindow {
 	function verificationFailureMessage(evaluation) {
 		const kind = String(evaluation ? evaluation.kind || "" : "")
 		if (kind === "verification" || kind === "sign-in")
-			return qsTr("This provider requires verification or sign-in. Open it externally to continue.")
+			return providerStatePersistent
+				? qsTr("Complete verification in the player. This provider's sign-in state is kept for later playback.")
+				: qsTr("Complete verification in the player, then reload the media.")
+		if (kind === "consent")
+			return providerStatePersistent
+				? qsTr("Choose cookie preferences in the player. This choice is kept for later playback.")
+				: qsTr("Choose cookie preferences in the player, then reload the media.")
 		if (kind === "unavailable")
 			return qsTr("This provider says the media is unavailable here. Open the original page instead.")
 		if (kind === "adaptive-renderer-failed")
@@ -351,6 +392,12 @@ ApplicationWindow {
 			+ (_surfaceVerificationEvidence.length > 0
 				? ":" + _surfaceVerificationEvidence : "")
 		if (evaluation.state === "verified") {
+			if (!background && !documentReady
+					&& !stableProviderVerificationReached(generation)) {
+				_surfaceVerificationState = "pending"
+				documentReadyProbeState = "stabilizing:" + _surfaceVerificationEvidence
+				return false
+			}
 			_transportVerifiedGeneration = generation
 			if (evaluation.playbackVerified === true)
 				_playbackVerifiedGeneration = generation
@@ -360,10 +407,22 @@ ApplicationWindow {
 			}
 			return completeMediaDocumentLoad(generation, evaluation)
 		}
+		resetVerifiedProbeStability()
 		if (evaluation.state === "pending")
 			return false
-		const failureState = evaluation.state === "blocked" ? "blocked" : "failed"
 		const detail = verificationFailureMessage(evaluation)
+		if (evaluation.state === "blocked") {
+			_documentReadyGeneration = -1
+			_transportVerifiedGeneration = -1
+			_playbackVerifiedGeneration = -1
+			_surfaceVerificationState = "blocked"
+			_surfaceVerificationDetail = detail
+			if (playerLoader.item)
+				playerLoader.item.documentReady = false
+			documentReadyProbeState = "blocked:" + String(evaluation.kind || "verification")
+			return true
+		}
+		const failureState = "failed"
 		if (!failMediaDocument(generation, failureState, detail,
 				String(evaluation.evidence || "")))
 			return false
@@ -508,7 +567,10 @@ ApplicationWindow {
 		return String(mediaSession.url || "")
 	}
 
-	function navigationRequestAllowed(requestUrl, firstPartyUrl) {
+	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
+		if (verificationMode && mediaProfileFactory
+				&& typeof mediaProfileFactory.isVerificationNavigationAllowed === "function")
+			return mediaProfileFactory.isVerificationNavigationAllowed(requestUrl, firstPartyUrl)
 		if (mediaProfileFactory
 				&& typeof mediaProfileFactory.isNavigationRequestAllowed === "function")
 			return mediaProfileFactory.isNavigationRequestAllowed(requestUrl, firstPartyUrl)
@@ -532,13 +594,15 @@ ApplicationWindow {
 		if (acceptedGeneration !== callbackGeneration
 				|| requestValue !== String(acceptedUrl || ""))
 			return false
-		return navigationRequestAllowed(requestUrl, expectedUrl)
+		return navigationRequestAllowed(requestUrl, expectedUrl,
+			verificationNavigationActive)
 	}
 
 	function retryMediaRenderer() {
 		if (mediaRuntimeError.length > 0 && mediaProfileFactory
 				&& typeof mediaProfileFactory.retryRuntime === "function")
 			mediaProfileFactory.retryRuntime()
+		verificationNavigationActive = false
 		mediaSession.retry()
 	}
 
@@ -608,7 +672,7 @@ ApplicationWindow {
 				? "const target=Math.max(0,Math.min(100," + numericValue + "));if(isYt&&typeof yt.setVolume==='function'){yt.setVolume(target);return true;}if(media){media.volume=target/100;return true;}return false;"
 				: command === "mute"
 				? "const muted=" + (numericValue > 0 ? "true" : "false") + ";if(isYt){if(muted&&typeof yt.mute==='function')yt.mute();else if(!muted&&typeof yt.unMute==='function')yt.unMute();return true;}if(media){media.muted=muted;return true;}return false;"
-				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1&&state!==3,error:playbackError};}"
+				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1,error:playbackError};}"
 				  + "if(media)return {position:Number(media.currentTime||0),duration:isFinite(media.duration)?Number(media.duration):0,paused:!!media.paused,error:playbackError};return null;")
 			+ "})()"
 	}
@@ -662,16 +726,16 @@ ApplicationWindow {
 	function applyInitialWindowSize() {
 		if (mediaAspect === "short") {
 			width = 640
-			height = 820
+			height = 864
 		} else if (mediaAspect === "square") {
 			width = 760
 			height = 760
 		} else if (mediaAspect === "audio") {
 			width = 820
-			height = 520
+			height = 420
 		} else if (mediaAspect === "compact-audio") {
 			width = 820
-			height = 420
+			height = 260
 		} else {
 			width = 1040
 			height = 700
@@ -850,6 +914,7 @@ ApplicationWindow {
 			nativePlayerLoader.item.retry()
 			return
 		}
+		verificationNavigationActive = false
 		const generation = beginMediaDocumentLoad(rendererDocumentUrl)
 		if (playerLoader.item) {
 			playerLoader.item.loadGeneration = generation
@@ -935,7 +1000,7 @@ ApplicationWindow {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		anchors.bottom: controls.top
+		anchors.bottom: verificationStrip.visible ? verificationStrip.top : controls.top
 		color: Theme.mediaCanvas
 		border.color: mediaWindow.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1096,8 +1161,16 @@ ApplicationWindow {
 				if (mediaWindow.failMediaDocument(generation))
 					mediaSession.reportError(qsTr("The media player stopped unexpectedly."))
             }
-            // A new-window request fails closed unless openIn() is called.
-            onNewWindowRequested: function(request) {}
+            // Normal provider pop-ups fail closed. A provider verification flow
+			// may reuse this same isolated view for a narrowly allowlisted auth URL.
+            onNewWindowRequested: function(request) {
+				if (mediaWindow.providerVerificationRequired
+						&& mediaWindow.navigationRequestAllowed(
+							request.requestedUrl, mediaWindow.rendererDocumentUrl, true)) {
+					mediaWindow.verificationNavigationActive = true
+					request.openIn(player)
+				}
+			}
             onFileDialogRequested: function(request) {
                 request.accepted = true
                 request.dialogReject()
@@ -1114,10 +1187,16 @@ ApplicationWindow {
             onCertificateError: function(error) { error.rejectCertificate() }
             onContextMenuRequested: function(request) { request.accepted = true }
             onNavigationRequested: function(request) {
-				if (!mediaWindow.navigationRequestAllowed(request.url, mediaWindow.rendererDocumentUrl)) {
+				const verificationMode = mediaWindow.providerVerificationRequired
+					|| mediaWindow.verificationNavigationActive
+				if (!mediaWindow.navigationRequestAllowed(request.url,
+						mediaWindow.rendererDocumentUrl,
+						verificationMode)) {
                     request.action = WebEngineNavigationRequest.IgnoreRequest
 					return
 				}
+				if (verificationMode)
+					mediaWindow.verificationNavigationActive = true
 				acceptedNavigationGeneration = loadGeneration > 0
 					? loadGeneration : mediaWindow.mediaGeneration
 				acceptedNavigationUrl = String(request.url || "")
@@ -1154,7 +1233,7 @@ ApplicationWindow {
 	}
 
 	Timer {
-		interval: 50
+		interval: mediaWindow.providerVerificationRequired ? 500 : 75
 		running: mediaSession.active && !mediaWindow.nativeDirectMedia
 			&& mediaWindow.rendererHealthy
 			&& !mediaWindow.documentReady && mediaSession.loadProgress >= 99
@@ -1458,6 +1537,7 @@ ApplicationWindow {
 		parent: playerCanvas
 		anchors.fill: playerLoader
 		visible: mediaWindow.rendererState === "loading"
+			&& !mediaWindow.providerVerificationRequired
 		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
@@ -1694,6 +1774,56 @@ ApplicationWindow {
         }
     }
 
+	Rectangle {
+		id: verificationStrip
+		objectName: "mediaSessionVerificationStrip"
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: controls.top
+		visible: mediaWindow.providerVerificationRequired
+		height: visible
+			? Math.max(Theme.controlHeight + Theme.space2,
+				verificationRow.implicitHeight + Theme.space2) : 0
+		color: Theme.embedSurface
+		border.color: mediaWindow.providerAccentBorder
+		z: 8
+		Accessible.role: Accessible.AlertMessage
+		Accessible.name: qsTr("%1 verification required").arg(mediaWindow.providerLabel)
+		Accessible.description: mediaWindow.surfaceVerificationDetail
+
+		RowLayout {
+			id: verificationRow
+			anchors.fill: parent
+			anchors.leftMargin: Theme.space3
+			anchors.rightMargin: Theme.space2
+			anchors.topMargin: Theme.space1
+			anchors.bottomMargin: Theme.space1
+			spacing: Theme.space2
+
+			ModernIcon {
+				name: "warning"
+				size: 18
+				color: Theme.warning
+				Accessible.ignored: true
+			}
+			Label {
+				objectName: "mediaSessionVerificationText"
+				Layout.fillWidth: true
+				text: mediaWindow.surfaceVerificationDetail
+				textFormat: Text.PlainText
+				color: Theme.textMain
+				font.pixelSize: Theme.fontCaption
+				wrapMode: Text.Wrap
+			}
+			ModernButton {
+				objectName: "mediaSessionVerificationReloadButton"
+				text: qsTr("Reload player")
+				Accessible.description: qsTr("Reload after completing provider verification")
+				onClicked: mediaWindow.retryMediaRenderer()
+			}
+		}
+	}
+
     MediaSessionControls {
         id: controls
 		objectName: "mediaSessionWindowControls"
@@ -1705,6 +1835,7 @@ ApplicationWindow {
 		session: mediaSession
 		fullscreen: mediaWindow.visibility === Window.FullScreen
 		externalAvailable: mediaWindow.externalMediaUrl().length > 0
+		transportAvailable: !mediaWindow.providerVerificationRequired
 		onFullscreenRequested: enabled => mediaWindow.setFullscreen(enabled)
 		onExternalRequested: Qt.openUrlExternally(mediaWindow.externalMediaUrl())
 		onExitConfirmed: disposition => mediaWindow.applyExitDisposition(disposition)

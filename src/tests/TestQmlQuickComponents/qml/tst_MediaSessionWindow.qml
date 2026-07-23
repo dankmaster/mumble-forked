@@ -19,9 +19,13 @@ TestCase {
 		property var videoProfile: null
 		property var audioProfile: null
 		property string videoDocumentUrl: ""
+		property bool providerStatePersistent: true
 		property bool navigationAllowed: true
 		property int retryCalls: 0
 		function isNavigationRequestAllowed(requestUrl, firstPartyUrl) {
+			return navigationAllowed
+		}
+		function isVerificationNavigationAllowed(requestUrl, firstPartyUrl) {
 			return navigationAllowed
 		}
 		function retryRuntime() {
@@ -127,6 +131,8 @@ TestCase {
 		session.closePlayerCalls = 0
 		windowLoader.item.visualFixtureMode = ""
 		windowLoader.item.statePollTimeoutMs = 3000
+		windowLoader.item.providerVerificationStabilityMs = 0
+		windowLoader.item.providerVerificationProbeCount = 1
 		windowLoader.item.mediaProfileFactory = mediaRuntime
 		mediaRuntime.runtimeReady = false
 		mediaRuntime.runtimePreparing = false
@@ -477,7 +483,22 @@ TestCase {
 		compare(window.surfaceVerificationState, "blocked")
 		verify(!window.surfaceVerified)
 		verify(!window.transportVerified)
-		compare(session.errorReports, 1)
+		verify(window.providerVerificationRequired)
+		verify(window.surfaceVerificationDetail.indexOf("kept for later playback") >= 0)
+		compare(session.errorReports, 0)
+		verify(findChild(window.contentItem, "mediaSessionVerificationStrip").visible)
+
+		generation = window.beginMediaDocumentLoad("about:blank#consent")
+		verify(window.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": true,
+			"mediaPresent": true,
+			"blockedKind": "consent",
+			"detail": "Allow all cookies"
+		}, false))
+		compare(window.surfaceVerificationState, "blocked")
+		verify(window.surfaceVerificationDetail.indexOf("kept for later playback") >= 0)
+		verify(!window.playbackVerified)
 
 		session.provider = "soundcloud"
 		generation = window.beginMediaDocumentLoad("about:blank#soundcloud")
@@ -502,6 +523,33 @@ TestCase {
 		}, true))
 		verify(window.playbackVerified)
 		verify(window.surfaceVerificationEvidence.indexOf("playback") >= 0)
+		session.active = false
+	}
+
+	function test_detached_verification_navigation_survives_auth_redirects_until_reload() {
+		const window = windowLoader.item
+		session.url = ""
+		session.active = true
+		session.provider = "youtube"
+		const generation = window.beginMediaDocumentLoad("about:blank#challenge-navigation")
+		verify(window.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Sign in to confirm you are not a bot"
+		}, false))
+		verify(window.providerVerificationRequired)
+
+		window.verificationNavigationActive = true
+		window.beginMediaDocumentLoad("https://accounts.google.com/v3/signin/identifier")
+		verify(window.verificationNavigationActive)
+		verify(window.navigationRequestAllowed(
+			"https://accounts.google.com/v3/signin/identifier",
+			window.rendererDocumentUrl,
+			window.verificationNavigationActive))
+
+		window.retryMediaRenderer()
+		compare(window.verificationNavigationActive, false)
 		session.active = false
 	}
 
@@ -741,7 +789,22 @@ TestCase {
 		wait(0)
 		window.applyInitialWindowSize()
 		compare(window.width, 640)
-		compare(window.height, 820)
+		compare(window.height, 864)
+
+		session.provider = "spotify"
+		session.url = "https://open.spotify.com/embed/playlist/example"
+		wait(0)
+		window.applyInitialWindowSize()
+		compare(window.width, 820)
+		compare(window.height, 420)
+
+		session.provider = "soundcloud"
+		session.url = "https://w.soundcloud.com/player/?url=test"
+		wait(0)
+		window.applyInitialWindowSize()
+		compare(window.width, 820)
+		compare(window.height, 260)
+		compare(window.minimumHeight, 260)
 
 		window.width = 713
 		window.height = 677

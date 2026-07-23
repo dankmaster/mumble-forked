@@ -77,7 +77,9 @@ TestCase {
 		id: mediaRuntime
 		property var videoProfile: null
 		property string videoDocumentUrl: ""
+		property bool providerStatePersistent: true
 		function isNavigationRequestAllowed(requestUrl, firstPartyUrl) { return true }
+		function isVerificationNavigationAllowed(requestUrl, firstPartyUrl) { return true }
 	}
 
 	Loader {
@@ -96,6 +98,8 @@ TestCase {
 		playerLoader.item.aspect = "wide"
 		playerLoader.item.presentationProvider = ""
 		playerLoader.item.mediaProfileFactory = null
+		playerLoader.item.providerVerificationStabilityMs = 0
+		playerLoader.item.providerVerificationProbeCount = 1
 		mediaRuntime.videoDocumentUrl = ""
 		playerLoader.item.statePollTimeoutMs = 3000
 		session.active = false
@@ -398,8 +402,28 @@ TestCase {
 		}, false))
 		verify(!player.documentReady)
 		compare(player.surfaceVerificationState, "blocked")
-		verify(player.surfaceVerificationDetail.indexOf("verification or sign-in") >= 0)
-		compare(session.errorReports, 1)
+		verify(player.surfaceVerificationDetail.indexOf("Complete verification") >= 0)
+		verify(player.surfaceVerificationDetail.indexOf("reload the media") >= 0)
+		compare(session.errorReports, 0)
+		verify(player.providerVerificationRequired)
+		verify(!player.transportVerified)
+		verify(!player.nativeControlsVisible)
+		const verificationStrip = findChild(player, "inlineMediaVerificationStrip")
+		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
+		verify(verificationStrip !== null && verificationStrip.visible)
+		verify(loadingSurface !== null && !loadingSurface.visible)
+
+		generation = player.beginMediaDocumentLoad("about:blank#consent")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": true,
+			"mediaPresent": true,
+			"blockedKind": "consent",
+			"detail": "Allow all cookies"
+		}, false))
+		compare(player.surfaceVerificationState, "blocked")
+		verify(player.surfaceVerificationDetail.indexOf("cookie preferences") >= 0)
+		verify(!player.playbackVerified)
 
 		const providers = [ "youtube", "twitch", "streamable", "vimeo",
 			"dailymotion", "spotify", "facebook", "tiktok", "instagram",
@@ -422,6 +446,72 @@ TestCase {
 			compare(player.surfaceVerificationState, "verified")
 			verify(player.surfaceVerificationEvidence.indexOf("transport") >= 0)
 		}
+		session.active = false
+	}
+
+	function test_provider_verification_requires_stability_and_revokes_late_false_positive() {
+		const player = playerLoader.item
+		player.providerVerificationStabilityMs = 1200
+		player.providerVerificationProbeCount = 3
+		session.active = true
+		session.provider = "youtube"
+		const generation = player.beginMediaDocumentLoad("about:blank#late-challenge")
+		const verifiedProbe = {
+			"readyState": "complete",
+			"transport": true,
+			"providerUi": true,
+			"mediaPresent": true,
+			"mediaReady": true,
+			"playbackEvidence": true
+		}
+
+		verify(!player.applyMediaSurfaceProbeResult(generation, verifiedProbe, false))
+		verify(!player.documentReady)
+		compare(player.surfaceVerificationState, "pending")
+		player._verifiedProbeCount = 2
+		player._verifiedProbeStartedAt = Date.now() - 1300
+		verify(player.applyMediaSurfaceProbeResult(generation, verifiedProbe, false))
+		verify(player.documentReady)
+		verify(player.playbackVerified)
+
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Logga in för att bekräfta att du inte är en bot"
+		}, true))
+		verify(!player.documentReady)
+		verify(!player.transportVerified)
+		verify(!player.playbackVerified)
+		verify(player.providerVerificationRequired)
+		compare(session.errorReports, 0)
+		compare(session.error, "")
+		verify(findChild(player, "inlineMediaVerificationStrip").visible)
+		session.active = false
+	}
+
+	function test_provider_verification_navigation_survives_auth_redirects_until_reload() {
+		const player = playerLoader.item
+		session.active = true
+		const generation = player.beginMediaDocumentLoad("about:blank#challenge-navigation")
+		verify(player.applyMediaSurfaceProbeResult(generation, {
+			"readyState": "complete",
+			"transport": false,
+			"blockedKind": "verification",
+			"detail": "Sign in to confirm you are not a bot"
+		}, false))
+		verify(player.providerVerificationRequired)
+
+		player.verificationNavigationActive = true
+		player.beginMediaDocumentLoad("https://accounts.google.com/v3/signin/identifier")
+		verify(player.verificationNavigationActive)
+		verify(player.navigationRequestAllowed(
+			"https://accounts.google.com/v3/signin/identifier",
+			player.rendererDocumentUrl,
+			player.verificationNavigationActive))
+
+		session.retry()
+		compare(player.verificationNavigationActive, false)
 		session.active = false
 	}
 

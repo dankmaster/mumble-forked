@@ -15,6 +15,7 @@
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QSet>
+#include <QtCore/QStandardPaths>
 #include <QtNetwork/QHostAddress>
 #include <QtWebEngineCore/QWebEngineUrlRequestInfo>
 #include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
@@ -46,7 +47,8 @@ const QHash< QString, QSet< QString > > &providerResourceDomains() {
 		{ QStringLiteral("streamable"), { QStringLiteral("streamable.com") } },
 		{ QStringLiteral("vimeo"),
 		  { QStringLiteral("vimeo.com"), QStringLiteral("vimeocdn.com"),
-			QStringLiteral("vod-progressive.akamaized.net") } },
+			QStringLiteral("vod-progressive.akamaized.net"),
+			QStringLiteral("challenges.cloudflare.com") } },
 		{ QStringLiteral("dailymotion"),
 		  { QStringLiteral("dailymotion.com"), QStringLiteral("dmcdn.net") } },
 		{ QStringLiteral("spotify"),
@@ -61,9 +63,37 @@ const QHash< QString, QSet< QString > > &providerResourceDomains() {
 			QStringLiteral("tiktokv.eu"), QStringLiteral("byteoversea.com") } },
 		{ QStringLiteral("instagram"),
 		  { QStringLiteral("instagram.com"), QStringLiteral("cdninstagram.com"),
-			QStringLiteral("facebook.net"), QStringLiteral("fbcdn.net"), QStringLiteral("fbsbx.com") } },
+			QStringLiteral("facebook.com"), QStringLiteral("facebook.net"),
+			QStringLiteral("fbcdn.net"), QStringLiteral("fbsbx.com") } },
 		{ QStringLiteral("soundcloud"),
 		  { QStringLiteral("soundcloud.com"), QStringLiteral("sndcdn.com") } }
+	};
+	return domains;
+}
+
+const QSet< QString > &persistentProviderStateProviders() {
+	static const QSet< QString > providers {
+		QStringLiteral("youtube"), QStringLiteral("twitch"), QStringLiteral("streamable"),
+		QStringLiteral("vimeo"), QStringLiteral("dailymotion"), QStringLiteral("spotify"),
+		QStringLiteral("facebook"), QStringLiteral("tiktok"), QStringLiteral("instagram"),
+		QStringLiteral("soundcloud")
+	};
+	return providers;
+}
+
+const QHash< QString, QSet< QString > > &providerVerificationNavigationDomains() {
+	static const QHash< QString, QSet< QString > > domains {
+		{ QStringLiteral("youtube"),
+		  { QStringLiteral("accounts.google.com"), QStringLiteral("accounts.youtube.com"),
+			QStringLiteral("consent.youtube.com") } },
+		{ QStringLiteral("twitch"), { QStringLiteral("twitch.tv") } },
+		{ QStringLiteral("vimeo"),
+		  { QStringLiteral("vimeo.com"), QStringLiteral("challenges.cloudflare.com") } },
+		{ QStringLiteral("spotify"), { QStringLiteral("accounts.spotify.com") } },
+		{ QStringLiteral("soundcloud"), { QStringLiteral("secure.soundcloud.com") } },
+		{ QStringLiteral("facebook"), { QStringLiteral("accountscenter.facebook.com") } },
+		{ QStringLiteral("instagram"), { QStringLiteral("accountscenter.instagram.com"),
+										QStringLiteral("accountscenter.facebook.com") } }
 	};
 	return domains;
 }
@@ -80,6 +110,25 @@ bool providerAllowsHost(const QString &provider, const QString &host) {
 		if (hostMatchesDomain(normalizedHost, domain)) return true;
 	}
 	return false;
+}
+
+bool providerAllowsVerificationNavigation(const QString &provider, const QString &host) {
+	const auto domains = providerVerificationNavigationDomains().constFind(provider.trimmed().toLower());
+	if (domains == providerVerificationNavigationDomains().cend()) return false;
+	const QString normalizedHost = host.trimmed().toLower();
+	for (const QString &domain : *domains) {
+		if (hostMatchesDomain(normalizedHost, domain)) return true;
+	}
+	return false;
+}
+
+QString providerStateRoot() {
+	const QString overrideRoot = qEnvironmentVariable("MUMBLE_MEDIA_PROFILE_ROOT").trimmed();
+	if (!overrideRoot.isEmpty()) return QDir::cleanPath(overrideRoot);
+	const QString applicationData =
+		QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+	return applicationData.isEmpty()
+		? QString() : QDir(applicationData).filePath(QStringLiteral("media-provider-state"));
 }
 
 QUrl requestIdentity(const QUrl &url) {
@@ -323,14 +372,28 @@ QQuickWebEngineProfile *QmlMediaProfileFactory::createProfile(const bool audio) 
 	if (!m_session || !m_session->active()) return nullptr;
 	QElapsedTimer profileTimer;
 	if (mumble::chatperf::enabled()) profileTimer.start();
-	auto *profile = new QQuickWebEngineProfile(this);
-	profile->setOffTheRecord(true);
+	const QString provider = m_session->provider().trimmed().toLower();
+	const QString stateRoot = providerStateRoot();
+	const bool persistentProviderState = !audio && persistentProviderStateProviders().contains(provider)
+		&& !stateRoot.isEmpty() && QDir().mkpath(QDir(stateRoot).filePath(provider));
+	auto *profile = persistentProviderState
+		? new QQuickWebEngineProfile(QStringLiteral("mumble-media-%1").arg(provider), this)
+		: new QQuickWebEngineProfile(this);
+	profile->setOffTheRecord(!persistentProviderState);
+	if (persistentProviderState) {
+		// Provider verification and consent state is deliberately isolated by
+		// provider. HTTP media remains memory-only below, so videos and artwork
+		// do not accumulate in the persistent profile directory.
+		profile->setPersistentStoragePath(QDir(stateRoot).filePath(provider));
+	}
 	// Keep warm navigation and short provider reloads fast without retaining
 	// media across sessions. The active session owns this bounded memory-only
 	// cache; releaseProfiles() destroys it as soon as playback closes.
 	profile->setHttpCacheType(QQuickWebEngineProfile::MemoryHttpCache);
 	profile->setHttpCacheMaximumSize(audio ? AudioMemoryCacheBytes : VideoMemoryCacheBytes);
-	profile->setPersistentCookiesPolicy(QQuickWebEngineProfile::NoPersistentCookies);
+	profile->setPersistentCookiesPolicy(persistentProviderState
+		? QQuickWebEngineProfile::AllowPersistentCookies
+		: QQuickWebEngineProfile::NoPersistentCookies);
 	profile->setPersistentPermissionsPolicy(QQuickWebEngineProfile::PersistentPermissionsPolicy::AskEveryTime);
 	profile->setSpellCheckEnabled(false);
 	profile->setPushServiceEnabled(false);
@@ -346,7 +409,8 @@ QQuickWebEngineProfile *QmlMediaProfileFactory::createProfile(const bool audio) 
 	updatePolicies();
 	if (mumble::chatperf::enabled()) {
 		mumble::chatperf::recordNote("qml.media.profile.create",
-			QStringLiteral("audio=%1 duration_ms=%2").arg(audio).arg(profileTimer.elapsed()));
+			QStringLiteral("audio=%1 provider_state=%2 duration_ms=%3")
+				.arg(audio).arg(persistentProviderState).arg(profileTimer.elapsed()));
 	}
 	return profile;
 }
@@ -382,6 +446,12 @@ QUrl QmlMediaProfileFactory::videoDocumentUrl() const {
 	return m_session->url();
 }
 
+bool QmlMediaProfileFactory::providerStatePersistent() const {
+	return m_session && m_session->active()
+		&& persistentProviderStateProviders().contains(m_session->provider().trimmed().toLower())
+		&& !providerStateRoot().isEmpty();
+}
+
 bool QmlMediaProfileFactory::isNavigationRequestAllowed(const QUrl &requestUrl,
 												 const QUrl &firstPartyUrl) const {
 	if (!m_session || !m_session->active()) return false;
@@ -395,6 +465,16 @@ bool QmlMediaProfileFactory::isNavigationRequestAllowed(const QUrl &requestUrl,
 	}
 	if (!m_session->isNavigationAllowed(requestUrl)) return false;
 	return isResourceRequestAllowed(m_session->provider(), m_session->url(), m_session->audioUrl(),
+		requestUrl, firstPartyUrl, m_session->mediaMime());
+}
+
+bool QmlMediaProfileFactory::isVerificationNavigationAllowed(const QUrl &requestUrl,
+													 const QUrl &firstPartyUrl) const {
+	if (isNavigationRequestAllowed(requestUrl, firstPartyUrl)) return true;
+	if (!m_session || !m_session->active() || !isSafePublicHttpsUrl(requestUrl)) return false;
+	const QString provider = m_session->provider().trimmed().toLower();
+	if (!providerAllowsVerificationNavigation(provider, requestUrl.host())) return false;
+	return isResourceRequestAllowed(provider, m_session->url(), m_session->audioUrl(),
 		requestUrl, firstPartyUrl, m_session->mediaMime());
 }
 
