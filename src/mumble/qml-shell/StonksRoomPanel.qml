@@ -39,8 +39,9 @@ Control {
 		if (configuredId <= 0)
 			return false
 		const normalizedToken = String(scopeToken || "").trim().toLowerCase()
+		// Production tokens use "<ChatScope enum>:<id>"; TextChannel is 3.
 		return normalizedToken === "text:" + configuredId
-			|| normalizedToken.endsWith(":" + configuredId)
+			|| normalizedToken === "3:" + configuredId
 	}
 
 	function periodOptions() {

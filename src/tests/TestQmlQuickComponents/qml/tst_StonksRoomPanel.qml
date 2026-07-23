@@ -94,6 +94,22 @@ TestCase {
 		tryCompare(loader.item, "visible", true)
 	}
 
+	function test_scope_type_is_required_when_channel_ids_collide() {
+		const permitted = populatedState()
+		permitted.automationHeaderVisible = false
+		loader.item.stonks = permitted
+		loader.item.scopeLabel = "Landing"
+		loader.item.scopeToken = "0:7"
+		tryCompare(loader.item, "visible", false)
+		compare(loader.item.implicitHeight, 0)
+
+		loader.item.scopeToken = "3:7"
+		tryCompare(loader.item, "visible", true)
+
+		loader.item.scopeToken = "text:7"
+		tryCompare(loader.item, "visible", true)
+	}
+
 	function test_period_follow_and_navigation_actions_are_structured() {
 		const period = findChild(loader.item, "stonksRoomPeriod_7d")
 		verify(period !== null)
