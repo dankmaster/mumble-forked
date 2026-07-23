@@ -410,6 +410,8 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 
 void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft() {
 	Settings settings;
+	QVERIFY(!settings.bPluginCheck);
+	QVERIFY(!PluginSetting().enabled);
 	settings.modernLayoutPolicy       = Settings::ModernLayoutFollowLegacy;
 	settings.wlWindowLayout           = Settings::LayoutClassic;
 	settings.bReconnect               = false;
@@ -515,6 +517,17 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 		pageController.open(settings, page);
 		return pageController.state().value(QStringLiteral("sections")).toList();
 	};
+	const QVariantMap pluginCheckField =
+		findSettingsFieldById(settingsPageSections(QStringLiteral("network")),
+			QStringLiteral("network.pluginCheck"));
+	QCOMPARE(pluginCheckField.value(QStringLiteral("value")).toBool(), false);
+	QCOMPARE(pluginCheckField.value(QStringLiteral("label")).toString(),
+		QStringLiteral("Check for plugin updates at startup"));
+
+	ModernSettingsController pluginUpdateController;
+	pluginUpdateController.open(settings, QStringLiteral("network"));
+	pluginUpdateController.updateField(QStringLiteral("network.pluginCheck"), true);
+	QCOMPARE(pluginUpdateController.draft().bPluginCheck, true);
 
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 	Settings wasapiSettings          = settings;
