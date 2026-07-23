@@ -362,6 +362,20 @@ Rectangle {
 		return true
 	}
 
+	function completeProviderPostDocumentLoad(generation) {
+		if (generation !== _mediaGeneration || !_rendererHealthy)
+			return false
+		_documentReadyGeneration = generation
+		_documentReadyProbeGeneration = -1
+		_surfaceVerificationState = "verified"
+		_surfaceVerificationEvidence = "provider-document"
+		_surfaceVerificationDetail = ""
+		documentReadyProbeState = "verified:provider-document"
+		if (session)
+			session.reportLoadProgress(100)
+		return true
+	}
+
 	function verificationFailureMessage(evaluation) {
 		const kind = String(evaluation ? evaluation.kind || "" : "")
 		if (kind === "verification" || kind === "sign-in")
@@ -1025,8 +1039,12 @@ Rectangle {
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					inlinePlayer.session.reportLoadProgress(99)
-					deferredMediaProbeTimer.generation = generation
-					deferredMediaProbeTimer.restart()
+					if (inlinePlayer.providerPostPresentation) {
+						inlinePlayer.completeProviderPostDocumentLoad(generation)
+					} else {
+						deferredMediaProbeTimer.generation = generation
+						deferredMediaProbeTimer.restart()
+					}
 				}
 			}
 			onRenderProcessTerminated: {
