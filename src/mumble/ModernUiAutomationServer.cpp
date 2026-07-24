@@ -6008,6 +6008,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("windowExposed"), host->window()->isExposed());
 		response.insert(QStringLiteral("windowVisibility"), static_cast< int >(host->window()->visibility()));
 		response.insert(QStringLiteral("connected"), host->sessionController()->connected());
+#ifdef Q_OS_WIN
+		response.insert(QStringLiteral("d3dVBlankThreadDisabled"),
+			qEnvironmentVariableIntValue("QT_D3D_NO_VBLANK_THREAD") != 0);
+#endif
 		response.insert(QStringLiteral("activeScopeToken"), host->activeScopeController()->scopeToken());
 		response.insert(QStringLiteral("roomCount"), host->roomModel()->rowCount());
 		response.insert(QStringLiteral("participantCount"), host->participantModel()->rowCount());
