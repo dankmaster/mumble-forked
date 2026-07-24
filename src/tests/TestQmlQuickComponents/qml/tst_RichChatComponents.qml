@@ -1540,6 +1540,26 @@ TestCase {
 		verify(card.imageRefreshQueued)
 		verify(card.embedPosterFallbackActive)
 		compare(card.effectiveEmbedPosterSource, "")
+		verify(card.embedPosterUnavailable)
+		verify(!card.inlineMediaStageVisible)
+		verify(findChild(card, "previewOpenButton").visible)
+
+		// A backend hydration response may legitimately keep the same generation
+		// when the managed source is still registered. Give that settled source
+		// one bounded new QML request instead of permanently retaining local
+		// fallback state.
+		card.preview = {
+			"state": "ready", "title": "Real Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=10"
+		}
+		tryVerify(function() { return !card.embedPosterFallbackActive })
+		compare(card.embedPosterHydrationRetryCount, 1)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10")
+		verify(card.inlineMediaStageVisible)
 
 		card.preview = {
 			"state": "ready", "title": "Refreshed Instagram poster",

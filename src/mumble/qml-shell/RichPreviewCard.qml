@@ -42,6 +42,8 @@ Rectangle {
 	property int embedPosterRecoveryIntervalMs: 2500
 	property int embedPosterRetryLimit: 2
 	property bool embedPosterFallbackActive: false
+	property int embedPosterHydrationRetryCount: 0
+	property int embedPosterHydrationRetryLimit: 1
 	property bool sensitiveMediaRevealed: false
 	property bool restoreInlinePlaybackFocus: false
 	property bool inlineFocusEligibleForRestore: false
@@ -275,7 +277,10 @@ Rectangle {
 		&& providerPostPresentation && !inlineAdapterReady
 	readonly property bool directInlinePlaybackActive: inlinePlaybackActive && !hasEmbedPreview
 		&& hasDirectMedia && String(mediaSessionController ? mediaSessionController.provider || "" : "") === "direct"
-	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported)
+	readonly property bool embedPosterUnavailable: hasEmbedPreview && embedPosterFallbackActive
+		&& !inlinePlaybackActive
+	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported
+		&& !embedPosterUnavailable)
 		|| hasDirectMedia
 	readonly property string inlinePresentationProvider: hasEmbedPreview
 		? normalizedEmbedProvider
@@ -337,13 +342,25 @@ Rectangle {
 
 	onMediaRuntimeErrorChanged: focusInlineRuntimeRetry()
     onPreviewIdentityChanged: resetForReuse()
-	onEmbedPosterSourceChanged: resetEmbedPosterRecovery()
+	onEmbedPosterSourceChanged: {
+		embedPosterHydrationRetryCount = 0
+		resetEmbedPosterRecovery()
+	}
     onPreviewChanged: {
 		// Required-property assignment can notify before the dependent mediaItems
 		// binding has completed its first evaluation in a newly reused delegate.
 		const itemCount = mediaItems && mediaItems.length !== undefined ? mediaItems.length : 0
 		selectedMediaIndex = Math.max(0, Math.min(selectedMediaIndex, Math.max(0, itemCount - 1)))
+		const retryHydratedPoster = embedPosterFallbackActive && renderActive
+			&& embedPosterHydrationRetryCount < embedPosterHydrationRetryLimit
         imageRefreshQueued = false
+		if (retryHydratedPoster) {
+			embedPosterHydrationRetryCount += 1
+			Qt.callLater(function() {
+				if (root.embedPosterFallbackActive && root.renderActive)
+					root.resetEmbedPosterRecovery()
+			})
+		}
     }
 	onContentWarningChanged: sensitiveMediaRevealed = false
 	onThumbnailBlurChanged: sensitiveMediaRevealed = false
@@ -460,6 +477,7 @@ Rectangle {
 		sizePresetOverride = ""
         selectedMediaIndex = 0
         imageRefreshQueued = false
+		embedPosterHydrationRetryCount = 0
 		resetEmbedPosterRecovery()
 		sensitiveMediaRevealed = false
 		restoreInlinePlaybackFocus = false
@@ -493,7 +511,7 @@ Rectangle {
 
 	function recoverStalledEmbedPoster(statusOverride) {
 		const status = statusOverride === undefined ? embedPoster.status : statusOverride
-		if (status !== Image.Loading || !renderActive
+		if ((status !== Image.Loading && status !== Image.Error) || !renderActive
 				|| embedPosterSource.length === 0 || mediaRequiresReveal)
 			return false
 		if (embedPosterRetryAttempt < embedPosterRetryLimit) {
@@ -898,8 +916,13 @@ Rectangle {
 		if (!renderActive) {
 			embedPosterRecoveryTimer.stop()
 			preserveInlinePlaybackWhenHidden()
-		} else if (embedPoster.status === Image.Loading) {
-			embedPosterRecoveryTimer.restart()
+		} else {
+			if (embedPosterFallbackActive) {
+				embedPosterHydrationRetryCount = 0
+				resetEmbedPosterRecovery()
+			} else if (embedPoster.status === Image.Loading) {
+				embedPosterRecoveryTimer.restart()
+			}
 		}
 	}
 	onInlinePlaybackActiveChanged: {
@@ -1211,7 +1234,7 @@ Rectangle {
 					if (status === Image.Ready)
 						root.embedPosterRetryAttempt = 0
 					else if (status === Image.Error && root.embedPosterSource.length > 0)
-						root.requestImageRefresh()
+						root.recoverStalledEmbedPoster(status)
 				}
 			}
 

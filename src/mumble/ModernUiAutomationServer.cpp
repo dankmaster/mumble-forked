@@ -4814,6 +4814,15 @@ namespace {
 		state.insert(QStringLiteral("timestamp"), modelRow.value(QStringLiteral("timestamp")));
 		state.insert(QStringLiteral("previewState"), previewState);
 		state.insert(QStringLiteral("preview"), preview);
+		const QString thumbnailSource = preview.value(QStringLiteral("thumbnailUrl")).toString();
+		const std::shared_ptr< QmlImagePipeline > imagePipeline = host->imagePipeline();
+		state.insert(QStringLiteral("thumbnailSourceRegistered"),
+			!thumbnailSource.isEmpty() && imagePipeline && imagePipeline->containsSource(thumbnailSource));
+		if (imagePipeline) {
+			state.insert(QStringLiteral("imagePipelineSourceBytes"), imagePipeline->sourceBytes());
+			state.insert(QStringLiteral("imagePipelineCachedBytes"), imagePipeline->cachedBytes());
+			state.insert(QStringLiteral("imagePipelineSourceCount"), imagePipeline->sourceCountForTest());
+		}
 		state.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), stableId));
 		return state;
 	}
