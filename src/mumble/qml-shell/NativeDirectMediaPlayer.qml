@@ -34,6 +34,19 @@ Item {
 	readonly property bool rendererHealthy: !_mainFailed
 	readonly property string rendererState: sourceUrl.length === 0 ? (sourcePreparing ? "loading" : "empty")
 		: _mainFailed ? "error" : _mainReady ? "active" : "loading"
+	readonly property string playbackPhase: resolvePlaybackPhase(
+		sourceUrl.length > 0,
+		sourcePreparing,
+		_mainFailed,
+		_mainReady,
+		primaryPlayer ? primaryPlayer.playbackState : MediaPlayer.StoppedState,
+		primaryPlayer ? primaryPlayer.mediaStatus === MediaPlayer.EndOfMedia : false)
+	readonly property string playbackStatusText: playbackPhaseLabel(playbackPhase)
+	readonly property string playbackStatusDetail: secondaryAudioDegraded
+		? qsTr("%1 Separate audio is unavailable.").arg(playbackStatusText)
+		: playbackInputEnabled
+			? playbackStatusText
+			: qsTr("%1 Playback is controlled by the session host.").arg(playbackStatusText)
 	readonly property bool secondaryAudioActive: secondaryAudioUrl.length > 0
 		&& !_secondaryFailed
 	readonly property bool secondaryAudioDegraded: secondaryAudioWarning.length > 0
@@ -124,6 +137,42 @@ Item {
 
 	function boundedVolume() {
 		return Math.max(0, Math.min(100, Number(session ? session.volume : 100)))
+	}
+
+	function resolvePlaybackPhase(sourceAvailable, preparing, failed, ready,
+			playbackState, atEnd) {
+		if (failed)
+			return "error"
+		if (!sourceAvailable)
+			return preparing ? "loading" : "empty"
+		if (!ready)
+			return "loading"
+		if (atEnd)
+			return "ended"
+		if (playbackState === MediaPlayer.PlayingState)
+			return "playing"
+		if (playbackState === MediaPlayer.PausedState)
+			return "paused"
+		return "ready"
+	}
+
+	function playbackPhaseLabel(phase) {
+		switch (String(phase || "")) {
+		case "loading":
+			return qsTr("Loading media")
+		case "ready":
+			return qsTr("Ready to play")
+		case "playing":
+			return qsTr("Playing")
+		case "paused":
+			return qsTr("Paused")
+		case "ended":
+			return qsTr("Playback finished")
+		case "error":
+			return qsTr("Media unavailable")
+		default:
+			return qsTr("No media selected")
+		}
 	}
 
 	function sessionMuted() {
@@ -556,11 +605,10 @@ Item {
 		Accessible.role: Accessible.Pane
 		Accessible.name: root.animationPresentation
 			? qsTr("Silent looping animated image") : qsTr("Direct media playback")
-		Accessible.description: root.playbackInputEnabled
-			? (root.animationPresentation
-				? qsTr("Use the animation control to pause or resume")
-				: qsTr("Native media playback surface"))
-			: qsTr("Playback is controlled by the session host")
+		Accessible.description: root.animationPresentation
+			? qsTr("%1 Use the animation control to pause or resume.").arg(
+				root.playbackStatusText)
+			: root.playbackStatusDetail
 	}
 
 	Rectangle {
@@ -604,7 +652,7 @@ Item {
 			}
 			Label {
 				Layout.fillWidth: true
-				text: qsTr("Playing with the native media engine")
+				text: root.playbackStatusText
 				textFormat: Text.PlainText
 				color: Theme.mediaOverlayTextMuted
 				font.pixelSize: Theme.fontLabel
