@@ -14588,9 +14588,6 @@ void MainWindow::applyShellLayout() {
 						});
 			}
 			MediaSessionBackend *mediaSession = m_qmlShellHost->mediaSession();
-			connect(mediaSession, &MediaSessionBackend::playbackRejected, this, [this](const QString &message) {
-				publishModernToast(QStringLiteral("warning"), tr("Media playback"), message);
-			});
 			const auto sendWatchTogether = [this, mediaSession](MumbleProto::WatchTogetherEvent event,
 													 const QString &sessionID, const QUrl &sourceURL,
 													 const QString &provider, const QString &title,

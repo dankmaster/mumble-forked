@@ -154,6 +154,7 @@ Rectangle {
 	property double _verifiedProbeStartedAt: 0
 	property int providerVerificationStabilityMs: 1200
 	property int providerVerificationProbeCount: 3
+	property int providerPostLoadTimeoutMs: 12000
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -233,6 +234,15 @@ Rectangle {
 		}
 	}
 
+	Timer {
+		id: providerPostLoadTimeoutTimer
+		interval: Math.max(1000, inlinePlayer.providerPostLoadTimeoutMs)
+		repeat: false
+		running: inlinePlayer.ready && inlinePlayer.providerPostPresentation
+			&& !inlinePlayer.documentReady
+		onTriggered: inlinePlayer.recoverProviderPostLoadTimeout()
+	}
+
 	function fallbackProviderMark(label) {
 		const words = String(label || "").trim().split(/\s+/).filter(function(word) {
 			return word.length > 0
@@ -243,6 +253,23 @@ Rectangle {
 			return words[0].substring(0, Math.min(4, words[0].length)).toUpperCase()
 		return words.slice(0, 2).map(function(word) { return word.charAt(0) })
 			.join("").toUpperCase()
+	}
+
+	function recoverProviderPostLoadTimeout() {
+		if (!providerPostPresentation || documentReady || !ready || !session)
+			return false
+		// Keep the real native poster and metadata card as the fallback. A
+		// provider document that never finishes must not leave an infinite busy
+		// overlay or emit a global notification over unrelated media.
+		if (typeof session.closePlayer === "function") {
+			session.closePlayer()
+			return true
+		}
+		if (typeof session.close === "function") {
+			session.close()
+			return true
+		}
+		return false
 	}
 
 	function playerScript(command, value) {
@@ -882,6 +909,7 @@ Rectangle {
 		deferredMediaProbeTimer.stop()
 		deferredReloadTimer.stop()
 		deferredFocusTimer.stop()
+		providerPostLoadTimeoutTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()

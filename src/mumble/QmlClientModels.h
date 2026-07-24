@@ -911,6 +911,7 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(qulonglong playbackSourceGeneration READ playbackSourceGeneration NOTIFY playbackSourceChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY sourceChanged)
 	Q_PROPERTY(bool detached READ detached NOTIFY sourceChanged)
+	Q_PROPERTY(bool detachedPlaybackSupported READ detachedPlaybackSupported CONSTANT)
 	Q_PROPERTY(bool playbackControllable READ playbackControllable NOTIFY sourceChanged)
 	Q_PROPERTY(bool playbackControlAllowed READ playbackControlAllowed NOTIFY stateChanged)
 	Q_PROPERTY(QString mediaMime READ mediaMime NOTIFY sourceChanged)
@@ -951,6 +952,7 @@ public:
 	qulonglong playbackSourceGeneration() const;
 	QString provider() const;
 	bool detached() const;
+	bool detachedPlaybackSupported() const;
 	bool playbackControllable() const;
 	bool playbackControlAllowed() const;
 	QString mediaMime() const;

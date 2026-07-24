@@ -28,6 +28,10 @@ Rectangle {
 	property string savedSizePreset: ""
     property int selectedMediaIndex: 0
     property bool imageRefreshQueued: false
+	property int embedPosterRetryAttempt: 0
+	property int embedPosterRetryNonce: 0
+	property int embedPosterRecoveryIntervalMs: 2500
+	property int embedPosterRetryLimit: 2
 	property bool sensitiveMediaRevealed: false
 	property bool restoreInlinePlaybackFocus: false
 	property bool inlineFocusEligibleForRestore: false
@@ -178,6 +182,8 @@ Rectangle {
 	readonly property string embedPosterSource: hasEmbedPreview
 		? safeRenderImageSource(preview ? (preview.thumbnailUrl || preview.posterUrl || "") : "")
 		: imageSource
+	readonly property string effectiveEmbedPosterSource:
+		posterSourceWithRetry(embedPosterSource, embedPosterRetryNonce)
 	readonly property bool fullBleedEmbed: hasEmbedPreview
 		&& normalizedEmbedAspect !== "short" && normalizedEmbedAspect !== "square"
 	readonly property real embedMediaWidth: normalizedEmbedAspect === "short"
@@ -245,6 +251,8 @@ Rectangle {
 	readonly property bool hasSizeActions: inlineMediaStageVisible
 	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
 		&& !providerPostPresentation
+		&& (!mediaSessionController
+			|| mediaSessionController.detachedPlaybackSupported !== false)
 	readonly property bool hasOverflowActions: hasPopoutAction || canExpand
 		|| hasSecondaryOriginalOpenAction || hasSizeActions
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
@@ -319,6 +327,7 @@ Rectangle {
 
 	onMediaRuntimeErrorChanged: focusInlineRuntimeRetry()
     onPreviewIdentityChanged: resetForReuse()
+	onEmbedPosterSourceChanged: resetEmbedPosterRecovery()
     onPreviewChanged: {
 		// Required-property assignment can notify before the dependent mediaItems
 		// binding has completed its first evaluation in a newly reused delegate.
@@ -360,6 +369,13 @@ Rectangle {
 		property int generation: -1
 		property int attempt: 0
 		onTriggered: root.restoreInlinePlaybackTriggerFocus(generation, attempt)
+	}
+
+	Timer {
+		id: embedPosterRecoveryTimer
+		interval: root.embedPosterRecoveryIntervalMs
+		repeat: false
+		onTriggered: root.recoverStalledEmbedPoster()
 	}
 
 	Timer {
@@ -434,6 +450,7 @@ Rectangle {
 		sizePresetOverride = ""
         selectedMediaIndex = 0
         imageRefreshQueued = false
+		resetEmbedPosterRecovery()
 		sensitiveMediaRevealed = false
 		restoreInlinePlaybackFocus = false
 		inlineFocusEligibleForRestore = false
@@ -448,6 +465,34 @@ Rectangle {
         imageRefreshQueued = true
         imageRefreshRequested()
     }
+
+	function resetEmbedPosterRecovery() {
+		embedPosterRecoveryTimer.stop()
+		embedPosterRetryAttempt = 0
+		embedPosterRetryNonce = 0
+	}
+
+	function posterSourceWithRetry(source, nonce) {
+		const normalized = String(source || "")
+		if (normalized.length === 0 || Number(nonce || 0) <= 0)
+			return normalized
+		return normalized + (normalized.indexOf("?") >= 0 ? "&" : "?")
+			+ "qmlRetry=" + Number(nonce)
+	}
+
+	function recoverStalledEmbedPoster(statusOverride) {
+		const status = statusOverride === undefined ? embedPoster.status : statusOverride
+		if (status !== Image.Loading || !renderActive
+				|| embedPosterSource.length === 0 || mediaRequiresReveal)
+			return false
+		if (embedPosterRetryAttempt < embedPosterRetryLimit) {
+			embedPosterRetryAttempt += 1
+			embedPosterRetryNonce += 1
+			return true
+		}
+		requestImageRefresh()
+		return false
+	}
 
     function safeExternalUrl(value) {
 		const url = String(value === undefined || value === null ? "" : value).trim().slice(0, 2048)
@@ -822,6 +867,7 @@ Rectangle {
 		// moving it to the existing detached surface; guests and local-only media
 		// may safely suppress their card-local renderer without affecting peers.
 		if (mediaSessionController.sharedHost
+				&& mediaSessionController.detachedPlaybackSupported !== false
 				&& typeof mediaSessionController.detach === "function") {
 			mediaSessionController.detach()
 			return true
@@ -834,8 +880,12 @@ Rectangle {
 	}
 
 	onRenderActiveChanged: {
-		if (!renderActive)
+		if (!renderActive) {
+			embedPosterRecoveryTimer.stop()
 			preserveInlinePlaybackWhenHidden()
+		} else if (embedPoster.status === Image.Loading) {
+			embedPosterRecoveryTimer.restart()
+		}
 	}
 	onInlinePlaybackActiveChanged: {
 		if (inlinePlaybackActive) {
@@ -858,6 +908,7 @@ Rectangle {
 		inlineComponentRetryTimer.stop()
 		inlineRuntimeRetryFocusTimer.stop()
 		currentMediaRequestTimer.stop()
+		embedPosterRecoveryTimer.stop()
 		preserveInlinePlaybackWhenHidden()
 	}
 
@@ -1058,7 +1109,7 @@ Rectangle {
 	}
 
 	function requestCurrentDirectMediaPopout() {
-		if (!hasDirectMedia)
+		if (!hasDirectMedia || !hasPopoutAction)
 			return
 		const pairedAudioUrl = !animatedImagePresentation
 			&& currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
@@ -1126,7 +1177,7 @@ Rectangle {
 				anchors.fill: parent
 				source: root.renderActive && (!root.inlinePlaybackActive || root.inlineAdapterPending)
 					&& !root.mediaRequiresReveal
-					? root.embedPosterSource : ""
+					? root.effectiveEmbedPosterSource : ""
 				asynchronous: true
 				cache: false
 				sourceSize: Qt.size(Math.min(1280, root.inlineMediaStageWidth * Screen.devicePixelRatio),
@@ -1137,8 +1188,16 @@ Rectangle {
 				fillMode: Image.PreserveAspectCrop
 				visible: status === Image.Ready
 					&& (!root.inlinePlaybackActive || root.inlineAdapterPending)
-				onStatusChanged: if (status === Image.Error && root.embedPosterSource.length > 0)
-					root.requestImageRefresh()
+				onStatusChanged: {
+					if (status === Image.Loading && root.renderActive)
+						embedPosterRecoveryTimer.restart()
+					else
+						embedPosterRecoveryTimer.stop()
+					if (status === Image.Ready)
+						root.embedPosterRetryAttempt = 0
+					else if (status === Image.Error && root.embedPosterSource.length > 0)
+						root.requestImageRefresh()
+				}
 			}
 
 			Rectangle {

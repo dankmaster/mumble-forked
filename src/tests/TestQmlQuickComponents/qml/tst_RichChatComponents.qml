@@ -95,11 +95,17 @@ TestCase {
         signalName: "externalOpenRequested"
     }
 
-    SignalSpy {
-        id: imageOpenSpy
-        target: previewLoader.item
-        signalName: "imageOpenRequested"
-    }
+	SignalSpy {
+		id: imageOpenSpy
+		target: previewLoader.item
+		signalName: "imageOpenRequested"
+	}
+
+	SignalSpy {
+		id: imageRefreshSpy
+		target: previewLoader.item
+		signalName: "imageRefreshRequested"
+	}
 
 	SignalSpy {
 		id: inlinePlaySpy
@@ -135,6 +141,7 @@ TestCase {
 		id: inlineSession
 		property bool active: false
 		property bool detached: true
+		property bool detachedPlaybackSupported: true
 		property string sessionId: ""
 		property string provider: "youtube"
 		property string url: "https://www.youtube.com/embed/test"
@@ -219,6 +226,7 @@ TestCase {
         directMediaSpy.clear()
         externalOpenSpy.clear()
         imageOpenSpy.clear()
+		imageRefreshSpy.clear()
 		inlinePlaySpy.clear()
 		popoutPlaySpy.clear()
 		popoutDirectMediaSpy.clear()
@@ -260,6 +268,7 @@ TestCase {
 			previewOverflowMenu.close()
 		inlineSession.active = false
 		inlineSession.detached = true
+		inlineSession.detachedPlaybackSupported = true
 		inlineSession.sessionId = ""
 		inlineSession.url = "https://www.youtube.com/embed/test"
 		inlineSession.audioUrl = ""
@@ -1480,6 +1489,55 @@ TestCase {
 		compare(popoutDirectMediaSpy.count, 1)
 		compare(popoutPlaySpy.count, 0)
 		findChild(card, "previewOverflowMenu").close()
+	}
+
+	function test_platform_capability_hides_and_blocks_detached_media() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Inline-only clip",
+			"url": "https://provider.example/watch/inline-only",
+			"mediaUrl": "data:video/mp4;base64,AAAA", "mediaMime": "video/mp4"
+		}
+		card.previewIdentity = "message:inline-only"
+		card.mediaSessionId = "message:inline-only"
+		card.mediaSessionController = inlineSession
+		inlineSession.detachedPlaybackSupported = false
+		wait(0)
+
+		const popoutButton = findChild(card, "previewPopoutButton")
+		verify(popoutButton !== null)
+		verify(card.localPlaybackSupported)
+		verify(!card.hasPopoutAction)
+		verify(!popoutButton.visible)
+		card.requestCurrentDirectMediaPopout()
+		compare(popoutDirectMediaSpy.count, 0)
+	}
+
+	function test_stalled_real_poster_retries_before_requesting_hydration() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Real Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=10"
+		}
+		card.previewIdentity = "message:instagram-real-poster"
+		wait(0)
+
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10")
+		verify(card.recoverStalledEmbedPoster(Image.Loading))
+		compare(card.embedPosterRetryAttempt, 1)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10&qmlRetry=1")
+		verify(card.recoverStalledEmbedPoster(Image.Loading))
+		compare(card.embedPosterRetryAttempt, 2)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10&qmlRetry=2")
+		verify(!card.recoverStalledEmbedPoster(Image.Loading))
+		compare(imageRefreshSpy.count, 1)
+		verify(card.imageRefreshQueued)
 	}
 
 	function test_video_backed_animation_keeps_mp4_transport_but_uses_view_semantics() {

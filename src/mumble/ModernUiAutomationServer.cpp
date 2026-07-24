@@ -6337,7 +6337,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 				? "requestInlinePlaybackWithFocus" : "requestCurrentMediaWithFocus";
 			handled = QMetaObject::invokeMethod(card, method, Qt::DirectConnection);
 		} else if (action == QLatin1String("popout") || action == QLatin1String("open-popout")) {
-			if (card->property("hasEmbedPreview").toBool()) {
+			if (!card->property("hasPopoutAction").toBool()) {
+				handled = false;
+			} else if (card->property("hasEmbedPreview").toBool()) {
 				const QString url = card->property("safeEmbedUrl").toString();
 				const QString provider = card->property("safeEmbedProvider").toString();
 				handled = !url.isEmpty() && !provider.isEmpty()

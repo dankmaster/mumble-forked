@@ -77,7 +77,11 @@ TestCase {
 		function reportPlaybackState(position, duration, paused) {}
 		function isNavigationAllowed(url) { return true }
 		function detach() {}
-		function closePlayer() { closeCalls += 1 }
+		function closePlayer() {
+			closeCalls += 1
+			active = false
+			detached = true
+		}
 	}
 
 	QtObject {
@@ -390,6 +394,25 @@ TestCase {
 		player.presentationMode = ""
 		session.active = false
 		session.loadProgress = 0
+	}
+
+	function test_provider_post_timeout_returns_to_native_card_without_error_toast() {
+		const player = playerLoader.item
+		session.active = true
+		session.detached = false
+		session.state = "loading"
+		session.loadProgress = 0
+		player.presentationMode = "provider-post-card"
+		player.beginMediaDocumentLoad("about:blank#provider-post-timeout")
+		wait(0)
+
+		verify(player.providerPostPresentation)
+		verify(!player.documentReady)
+		verify(player.ready)
+		verify(player.recoverProviderPostLoadTimeout())
+		compare(session.closeCalls, 1)
+		verify(!session.active)
+		compare(session.errorReports, 0)
 	}
 
 	function test_verified_document_completion_is_generation_bound() {

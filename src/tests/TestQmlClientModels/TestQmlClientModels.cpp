@@ -4554,6 +4554,24 @@ void TestQmlClientModels::mediaSessionSwitchesBetweenInlineAndDetachedPresentati
 	QCOMPARE(sourceSpy.count(), 1);
 	media.reportPlaybackState(23.5, 90.0, false);
 
+#ifdef Q_OS_WIN
+	QVERIFY(!media.detachedPlaybackSupported());
+	media.detach();
+	QVERIFY(!media.detached());
+	QVERIFY(media.active());
+	QCOMPARE(media.position(), 23.5);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
+	QCOMPARE(sourceSpy.count(), 1);
+	media.closePlayer();
+	QVERIFY(!media.active());
+	QVERIFY(media.detached());
+
+	// Requests for a separate player degrade to the proven inline presentation
+	// rather than exposing a second D3D11-backed QQuickWindow.
+	QVERIFY(media.open(url, QStringLiteral("youtube"), QStringLiteral("message:43")));
+	QVERIFY(!media.detached());
+#else
+	QVERIFY(media.detachedPlaybackSupported());
 	media.detach();
 	QVERIFY(media.detached());
 	QVERIFY(media.active());
@@ -4572,6 +4590,7 @@ void TestQmlClientModels::mediaSessionSwitchesBetweenInlineAndDetachedPresentati
 
 	QVERIFY(media.open(url, QStringLiteral("youtube"), QStringLiteral("message:43")));
 	QVERIFY(media.detached());
+#endif
 }
 
 void TestQmlClientModels::mediaSessionAutomationLifecycleStaysInlineAndAllowlisted() {
