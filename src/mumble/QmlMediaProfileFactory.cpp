@@ -12,6 +12,8 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QHash>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QSet>
@@ -145,18 +147,36 @@ bool isAdaptivePlayerResourceUrl(const QUrl &url) {
 		|| candidate == AdaptiveMediaRuntime;
 }
 
-QUrl adaptivePlayerDocumentUrl(const QUrl &manifestUrl) {
-	QUrl documentUrl = AdaptiveMediaDocument;
-	documentUrl.setFragment(QString::fromLatin1(
-		manifestUrl.toEncoded(QUrl::FullyEncoded).toBase64(QByteArray::Base64UrlEncoding
-			| QByteArray::OmitTrailingEquals)));
-	return documentUrl;
+QString normalizedMediaMime(QString mime) {
+	return mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
 }
 
 bool isAdaptiveManifestMime(const QString &mime) {
-	const QString normalized = mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
+	const QString normalized = normalizedMediaMime(mime);
 	return normalized == QLatin1String("application/vnd.apple.mpegurl")
 		|| normalized == QLatin1String("application/dash+xml");
+}
+
+bool isDirectMediaDocumentMime(const QString &mime) {
+	const QString normalized = normalizedMediaMime(mime);
+	return normalized.startsWith(QLatin1String("video/"))
+		|| normalized.startsWith(QLatin1String("audio/"))
+		|| isAdaptiveManifestMime(normalized);
+}
+
+QUrl isolatedMediaPlayerDocumentUrl(const QUrl &sourceUrl, const QString &mediaMime) {
+	const QUrl normalizedSourceUrl =
+		sourceUrl.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
+	const QJsonObject payload {
+		{ QStringLiteral("sourceUrl"), normalizedSourceUrl.toString(QUrl::FullyEncoded) },
+		{ QStringLiteral("mediaMime"), normalizedMediaMime(mediaMime) },
+		{ QStringLiteral("adaptive"), isAdaptiveManifestMime(mediaMime) }
+	};
+	QUrl documentUrl = AdaptiveMediaDocument;
+	documentUrl.setFragment(QString::fromLatin1(
+		QJsonDocument(payload).toJson(QJsonDocument::Compact).toBase64(QByteArray::Base64UrlEncoding
+			| QByteArray::OmitTrailingEquals)));
+	return documentUrl;
 }
 
 bool isSameHttpsOrigin(const QUrl &left, const QUrl &right) {
@@ -233,6 +253,10 @@ bool isSafePublicHttpsUrl(const QUrl &url) {
 	return url.isValid() && url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0
 		&& !url.host().isEmpty() && url.userInfo().isEmpty()
 		&& (url.port(-1) == -1 || url.port(-1) == 443) && !isLocalNetworkHost(url.host());
+}
+
+bool usesIsolatedDirectMediaDocument(const QUrl &sourceUrl, const QString &mediaMime) {
+	return isSafePublicHttpsUrl(sourceUrl) && isDirectMediaDocumentMime(mediaMime);
 }
 }
 
@@ -323,8 +347,9 @@ bool QmlMediaProfileFactory::isResourceRequestAllowed(const QString &provider, c
 	const QString scheme = requestUrl.scheme().toLower();
 	if (scheme == QLatin1String("about")) return requestUrl == QUrl(QStringLiteral("about:blank"));
 	if (scheme == QLatin1String("qrc")) {
-		return normalizedProvider == QLatin1String("direct") && isAdaptiveManifestMime(mediaMime)
-			&& isSafePublicHttpsUrl(primaryUrl) && isAdaptivePlayerResourceUrl(requestUrl)
+		return normalizedProvider == QLatin1String("direct")
+			&& usesIsolatedDirectMediaDocument(primaryUrl, mediaMime)
+			&& isAdaptivePlayerResourceUrl(requestUrl)
 			&& (firstPartyUrl.isEmpty() || firstPartyUrl == QUrl(QStringLiteral("about:blank"))
 				|| isAdaptivePlayerDocumentUrl(firstPartyUrl));
 	}
@@ -440,10 +465,19 @@ QString QmlMediaProfileFactory::runtimeError() const { return m_runtimeError; }
 QUrl QmlMediaProfileFactory::videoDocumentUrl() const {
 	if (!m_session || !m_session->active()) return {};
 	if (m_session->provider() == QLatin1String("direct")
-		&& isAdaptiveManifestMime(m_session->mediaMime())) {
-		return adaptivePlayerDocumentUrl(m_session->url());
+		&& usesIsolatedDirectMediaDocument(m_session->url(), m_session->mediaMime())) {
+		return isolatedMediaPlayerDocumentUrl(m_session->url(), m_session->mediaMime());
 	}
 	return m_session->url();
+}
+
+QUrl QmlMediaProfileFactory::audioDocumentUrl() const {
+	if (!m_session || !m_session->active() || m_session->audioUrl().isEmpty()) return {};
+	if (m_session->provider() == QLatin1String("direct")
+		&& usesIsolatedDirectMediaDocument(m_session->audioUrl(), m_session->audioMime())) {
+		return isolatedMediaPlayerDocumentUrl(m_session->audioUrl(), m_session->audioMime());
+	}
+	return m_session->audioUrl();
 }
 
 bool QmlMediaProfileFactory::providerStatePersistent() const {
@@ -455,12 +489,29 @@ bool QmlMediaProfileFactory::providerStatePersistent() const {
 bool QmlMediaProfileFactory::isNavigationRequestAllowed(const QUrl &requestUrl,
 												 const QUrl &firstPartyUrl) const {
 	if (!m_session || !m_session->active()) return false;
-	if (m_session->provider() == QLatin1String("direct")
-		&& isAdaptiveManifestMime(m_session->mediaMime())) {
-		const QUrl documentUrl = videoDocumentUrl();
-		if (requestUrl.adjusted(QUrl::NormalizePathSegments)
-			!= documentUrl.adjusted(QUrl::NormalizePathSegments)) return false;
-		return isResourceRequestAllowed(m_session->provider(), m_session->url(),
+	if (m_session->provider() == QLatin1String("direct")) {
+		const QUrl normalizedRequest = requestUrl.adjusted(QUrl::NormalizePathSegments);
+		const QUrl videoDocument = videoDocumentUrl();
+		const QUrl audioDocument = audioDocumentUrl();
+		const bool isVideoDocument = !videoDocument.isEmpty()
+			&& normalizedRequest == videoDocument.adjusted(QUrl::NormalizePathSegments);
+		const bool isAudioDocument = !audioDocument.isEmpty()
+			&& normalizedRequest == audioDocument.adjusted(QUrl::NormalizePathSegments);
+		if ((usesIsolatedDirectMediaDocument(m_session->url(), m_session->mediaMime())
+				|| usesIsolatedDirectMediaDocument(m_session->audioUrl(), m_session->audioMime()))
+			&& !isVideoDocument && !isAudioDocument) {
+			return false;
+		}
+		if (!isVideoDocument && !isAudioDocument) {
+			return m_session->isNavigationAllowed(requestUrl)
+				&& isResourceRequestAllowed(m_session->provider(), m_session->url(),
+					m_session->audioUrl(), requestUrl, firstPartyUrl, m_session->mediaMime());
+		}
+		if (isAudioDocument) {
+			return isResourceRequestAllowed(QStringLiteral("direct"), m_session->audioUrl(), {},
+				requestUrl, firstPartyUrl, m_session->audioMime());
+		}
+		return isResourceRequestAllowed(QStringLiteral("direct"), m_session->url(),
 			m_session->audioUrl(), requestUrl, firstPartyUrl, m_session->mediaMime());
 	}
 	if (!m_session->isNavigationAllowed(requestUrl)) return false;

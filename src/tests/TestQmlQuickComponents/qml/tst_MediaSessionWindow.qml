@@ -19,6 +19,7 @@ TestCase {
 		property var videoProfile: null
 		property var audioProfile: null
 		property string videoDocumentUrl: ""
+		property string audioDocumentUrl: ""
 		property bool providerStatePersistent: true
 		property bool navigationAllowed: true
 		property int retryCalls: 0
@@ -138,6 +139,7 @@ TestCase {
 		mediaRuntime.runtimePreparing = false
 		mediaRuntime.runtimeError = ""
 		mediaRuntime.videoDocumentUrl = ""
+		mediaRuntime.audioDocumentUrl = ""
 		mediaRuntime.navigationAllowed = true
 		mediaRuntime.retryCalls = 0
 		windowLoader.item.invalidateMediaDocumentIfNeeded()
@@ -176,23 +178,32 @@ TestCase {
 		compare(window.externalMediaUrl(), session.url)
 	}
 
-	function test_non_adaptive_direct_media_uses_native_surface_without_webengine_runtime() {
+	function test_non_adaptive_direct_media_uses_isolated_webengine_runtime() {
 		const window = windowLoader.item
+		window.visualFixtureMode = "active"
+		mediaRuntime.runtimeReady = true
 		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.mediaMime = "video/mp4"
+		session.url = "https://video.twimg.com/amplify_video/example/vid/avc1/source.mp4"
+		session.audioUrl = "https://v.redd.it/example/DASH_AUDIO_128.mp4"
+		mediaRuntime.videoDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#direct"
+		mediaRuntime.audioDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#audio"
 		session.active = true
 		wait(0)
 
-		verify(window.nativeDirectMedia)
-		verify(window.nativeSurfaceActive)
+		verify(window.directMediaDocument)
+		verify(window.isolatedMediaDocument)
+		verify(window.isolatedAudioDocument)
+		compare(window.audioRendererDocumentUrl, mediaRuntime.audioDocumentUrl)
+		verify(!window.nativeDirectMedia)
+		verify(!window.nativeSurfaceActive)
 		verify(!window.webSurfaceActive)
-		compare(window.rendererBackend, "native")
-		verify(findChild(window.contentItem, "mediaSessionNativeSurface") !== null)
+		compare(window.rendererBackend, "fixture")
+		verify(findChild(window.contentItem, "mediaSessionWebSurface") !== null)
 
 		session.active = false
 		wait(0)
-		verify(!window.nativeSurfaceActive)
+		verify(!window.webSurfaceActive)
 	}
 
 	function test_watch_together_guest_blocks_provider_input_but_keeps_local_audio_controls() {

@@ -48,11 +48,20 @@ Rectangle {
 		return String(session ? session.provider || "" : "").toLowerCase() === "direct"
 			&& (mime === "application/vnd.apple.mpegurl" || mime === "application/dash+xml")
 	}
-	readonly property bool nativeDirectMedia: normalizedVisualFixtureMode.length === 0
-		&& ready && String(session ? session.provider || "" : "").toLowerCase() === "direct"
-		&& !adaptiveManifest && String(session ? session.url || "" : "").trim().length > 0
+	readonly property bool directMediaDocument: ready
+		&& String(session ? session.provider || "" : "").toLowerCase() === "direct"
+		&& String(session ? session.url || "" : "").trim().length > 0
 		&& String(session ? session.error || "" : "").length === 0
+	// Direct transport is intentionally hosted by the isolated WebEngine
+	// document. Creating QtMultimedia players inside virtualized chat delegates
+	// can deadlock Windows Media Foundation while a delegate is destroyed.
+	readonly property bool nativeDirectMedia: false
 	readonly property string rendererDocumentUrl: playbackDocumentUrl()
+	readonly property string audioRendererDocumentUrl: audioPlaybackDocumentUrl()
+	readonly property bool isolatedMediaDocument: directMediaDocument
+		&& /^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(rendererDocumentUrl)
+	readonly property bool isolatedAudioDocument:
+		/^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(audioRendererDocumentUrl)
 	readonly property string normalizedAspect: normalizeAspect(aspect)
 	readonly property int mediaGeneration: _mediaGeneration
 	readonly property bool documentReady: visualFixtureRendererReady
@@ -134,7 +143,7 @@ Rectangle {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
-	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int documentReadyProbeMaxAttempts: isolatedMediaDocument ? 400 : 160
 	property int _transportVerifiedGeneration: -1
 	property int _playbackVerifiedGeneration: -1
 	property string _surfaceVerificationState: "idle"
@@ -160,6 +169,7 @@ Rectangle {
 	property int _audioStatePollToken: -1
 	property int _nextAudioStatePollToken: 0
 	property int _audioMissingStatePolls: 0
+	property bool _animationInitialPausePending: false
 	// Controls only become meaningful once the provider transport is proven.
 	// Keeping them hidden while a challenge/error document loads avoids the
 	// misleading 0:00 / 0:00 bar that previously appeared under broken embeds.
@@ -237,11 +247,13 @@ Rectangle {
 
 	function playerScript(command, value) {
 		const provider = JSON.stringify(String(session ? session.provider : ""))
+		const animated = animationPresentation ? "true" : "false"
 		const numericValue = Number(value || 0)
-		return "(function(){const provider=" + provider + ";"
+		return "(function(){const provider=" + provider + ";const animated=" + animated + ";"
 			+ "const yt=document.getElementById('movie_player')||document.querySelector('.html5-video-player');"
 			+ "const isYt=provider==='youtube'&&yt&&typeof yt.getPlayerState==='function';"
 			+ "const media=document.querySelector('video,audio');"
+			+ "if(media&&animated){media.loop=true;media.muted=true;media.volume=0;}"
 			+ (command === "play"
 				? "window.__mumbleMediaPlayError='';if(isYt&&typeof yt.playVideo==='function'){yt.playVideo();return true;}if(media){const result=media.play();if(result&&typeof result.catch==='function')result.catch(function(error){window.__mumbleMediaPlayError=String(error&&error.message||error||'Playback was blocked');});return true;}return false;"
 				: command === "pause"
@@ -264,6 +276,15 @@ Rectangle {
 				return documentUrl
 		}
 		return String(session ? session.url || "" : "")
+	}
+
+	function audioPlaybackDocumentUrl() {
+		if (mediaProfileFactory && typeof mediaProfileFactory.audioDocumentUrl !== "undefined") {
+			const documentUrl = String(mediaProfileFactory.audioDocumentUrl || "")
+			if (documentUrl.length > 0)
+				return documentUrl
+		}
+		return String(session ? session.audioUrl || "" : "")
 	}
 
 	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
@@ -298,6 +319,7 @@ Rectangle {
 		_missingStatePolls = 0
 		_rendererHealthy = !!rendererIsHealthy
 		_transportRetryCount = 0
+		_animationInitialPausePending = animationPresentation && !animationAutoPlayEnabled
 		return _mediaGeneration
 	}
 
@@ -400,7 +422,7 @@ Rectangle {
 		if (generation !== _mediaGeneration)
 			return false
 		const evaluation = MediaPlaybackProbe.classify(value,
-			session ? session.provider : "", adaptiveManifest,
+			session ? session.provider : "", isolatedMediaDocument,
 			background ? 0 : documentReadyProbeAttempts,
 			background ? 2147483647 : documentReadyProbeMaxAttempts)
 		_surfaceVerificationEvidence = String(evaluation.evidence || "")
@@ -464,7 +486,7 @@ Rectangle {
 		try {
 			webPlayer.runJavaScript(
 				MediaPlaybackProbe.probeScript(session ? session.provider : "",
-					adaptiveManifest),
+					isolatedMediaDocument),
 				function(value) {
 					if (inlinePlayer._documentReadyProbeGeneration !== generation)
 						return
@@ -743,7 +765,10 @@ Rectangle {
 		runPlayerScript(playerScript("mute", session.muted ? 1 : 0), generation)
 		if (Number(session.position || 0) > 0.05)
 			runPlayerScript(playerScript("seek", session.position), generation)
-		requestPlaybackState(session.state === "playing" ? "playing" : "paused", generation)
+		const requestedState = _animationInitialPausePending
+			? "paused" : session.state === "playing" ? "playing" : "paused"
+		_animationInitialPausePending = false
+		requestPlaybackState(requestedState, generation)
 	}
 
 	function requestPlaybackState(state, expectedGeneration) {
@@ -767,6 +792,24 @@ Rectangle {
 			return retryButton.activeFocus
 		}
 		return inlineControls.focusInitialControl()
+	}
+
+	onAnimationAutoPlayEnabledChanged: {
+		if (animationPresentation && !animationAutoPlayEnabled) {
+			_animationInitialPausePending = true
+			if (documentReady) {
+				deferredPlaybackStateTimer.generation = mediaGeneration
+				deferredPlaybackStateTimer.restart()
+			}
+		}
+	}
+
+	onPresentationModeChanged: {
+		_animationInitialPausePending = animationPresentation && !animationAutoPlayEnabled
+		if (documentReady) {
+			deferredPlaybackStateTimer.generation = mediaGeneration
+			deferredPlaybackStateTimer.restart()
+		}
 	}
 
 	function focusFailureControl() {
@@ -1011,7 +1054,7 @@ Rectangle {
 			activeFocusOnTab: inlinePlayer.providerInputEnabled
 			Accessible.ignored: !inlinePlayer.providerInputEnabled
 			settings.playbackRequiresUserGesture: false
-			settings.localContentCanAccessRemoteUrls: inlinePlayer.adaptiveManifest
+			settings.localContentCanAccessRemoteUrls: inlinePlayer.isolatedMediaDocument
 			Accessible.name: qsTr("Embedded media provider playback")
 			onLoadProgressChanged: {
 				if (loadGeneration !== inlinePlayer.mediaGeneration
@@ -1211,8 +1254,9 @@ Rectangle {
 			id: audioPlayer
 			profile: inlinePlayer.mediaProfileFactory
 				? inlinePlayer.mediaProfileFactory.audioProfile : null
-			url: inlinePlayer.session ? inlinePlayer.session.audioUrl : ""
+			url: inlinePlayer.audioRendererDocumentUrl
 			settings.playbackRequiresUserGesture: false
+			settings.localContentCanAccessRemoteUrls: inlinePlayer.isolatedAudioDocument
 			onLoadingChanged: function(request) {
 				if (request.status === WebEngineView.LoadStartedStatus) {
 					audioPlayerLoader.loadGeneration = inlinePlayer.beginAudioDocumentLoad()

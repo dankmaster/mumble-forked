@@ -45,10 +45,19 @@ ApplicationWindow {
 		return String(mediaSession.provider || "").toLowerCase() === "direct"
 			&& (mime === "application/vnd.apple.mpegurl" || mime === "application/dash+xml")
 	}
-	readonly property bool nativeDirectMedia: providerSurfaceRequested
+	readonly property bool directMediaDocument: mediaSession.active && hasMediaSource
+		&& mediaSession.error.length === 0
 		&& String(mediaSession.provider || "").toLowerCase() === "direct"
-		&& !adaptiveManifest
+	// Keep direct playback out of QtMultimedia. The local WebEngine document
+	// owns raw audio/video and adaptive manifests so closing or recycling the
+	// QML surface cannot deadlock Windows Media Foundation teardown.
+	readonly property bool nativeDirectMedia: false
 	readonly property string rendererDocumentUrl: playbackDocumentUrl()
+	readonly property string audioRendererDocumentUrl: audioPlaybackDocumentUrl()
+	readonly property bool isolatedMediaDocument: directMediaDocument
+		&& /^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(rendererDocumentUrl)
+	readonly property bool isolatedAudioDocument:
+		/^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(audioRendererDocumentUrl)
 	readonly property bool providerSurfaceRequested: normalizedVisualFixtureMode.length === 0
 		&& mediaSession.active && hasMediaSource && mediaSession.error.length === 0
 	readonly property bool providerSurfaceAllowed: providerSurfaceRequested
@@ -131,7 +140,7 @@ ApplicationWindow {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
-	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int documentReadyProbeMaxAttempts: isolatedMediaDocument ? 400 : 160
 	property int _transportVerifiedGeneration: -1
 	property int _playbackVerifiedGeneration: -1
 	property string _surfaceVerificationState: "idle"
@@ -419,7 +428,7 @@ ApplicationWindow {
 		if (generation !== _mediaGeneration)
 			return false
 		const evaluation = MediaPlaybackProbe.classify(value,
-			mediaSession.provider, adaptiveManifest,
+			mediaSession.provider, isolatedMediaDocument,
 			background ? 0 : documentReadyProbeAttempts,
 			background ? 2147483647 : documentReadyProbeMaxAttempts)
 		_surfaceVerificationEvidence = String(evaluation.evidence || "")
@@ -481,7 +490,7 @@ ApplicationWindow {
 		try {
 			webPlayer.runJavaScript(
 				MediaPlaybackProbe.probeScript(mediaSession.provider,
-					adaptiveManifest),
+					isolatedMediaDocument),
 				function(value) {
 					if (mediaWindow._documentReadyProbeGeneration !== generation)
 						return
@@ -600,6 +609,15 @@ ApplicationWindow {
 				return documentUrl
 		}
 		return String(mediaSession.url || "")
+	}
+
+	function audioPlaybackDocumentUrl() {
+		if (mediaProfileFactory && typeof mediaProfileFactory.audioDocumentUrl !== "undefined") {
+			const documentUrl = String(mediaProfileFactory.audioDocumentUrl || "")
+			if (documentUrl.length > 0)
+				return documentUrl
+		}
+		return String(mediaSession.audioUrl || "")
 	}
 
 	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
@@ -939,7 +957,7 @@ ApplicationWindow {
 			audioPlayerLoader.item.documentReady = false
 			audioPlayerLoader.item.loadGeneration = generation
 			audioPlayerLoader.item.acceptedNavigationGeneration = generation
-			audioPlayerLoader.item.acceptedNavigationUrl = String(mediaSession.audioUrl || "")
+			audioPlayerLoader.item.acceptedNavigationUrl = audioRendererDocumentUrl
 			audioPlayerLoader.item.reload()
 		}
 	}
@@ -962,7 +980,7 @@ ApplicationWindow {
 			audioPlayerLoader.item.documentReady = false
 			audioPlayerLoader.item.loadGeneration = generation
 			audioPlayerLoader.item.acceptedNavigationGeneration = generation
-			audioPlayerLoader.item.acceptedNavigationUrl = String(mediaSession.audioUrl || "")
+			audioPlayerLoader.item.acceptedNavigationUrl = audioRendererDocumentUrl
 			audioPlayerLoader.item.reload()
 		}
 	}
@@ -1149,7 +1167,7 @@ ApplicationWindow {
 			activeFocusOnTab: mediaWindow.providerInputEnabled
 			Accessible.ignored: !mediaWindow.providerInputEnabled
 			settings.playbackRequiresUserGesture: false
-			settings.localContentCanAccessRemoteUrls: mediaWindow.adaptiveManifest
+			settings.localContentCanAccessRemoteUrls: mediaWindow.isolatedMediaDocument
 			onLoadProgressChanged: {
 				if (loadGeneration !== mediaWindow.mediaGeneration
 						|| !mediaWindow.rendererHealthy || !mediaSession.active)
@@ -1377,11 +1395,12 @@ ApplicationWindow {
 			Accessible.ignored: true
 			profile: mediaWindow.mediaProfileFactory
 				? mediaWindow.mediaProfileFactory.audioProfile : null
-            url: mediaSession.audioUrl
+            url: mediaWindow.audioRendererDocumentUrl
             settings.playbackRequiresUserGesture: false
+			settings.localContentCanAccessRemoteUrls: mediaWindow.isolatedAudioDocument
             onLoadingChanged: function(request) {
 				const callbackGeneration = loadGeneration > 0 ? loadGeneration : mediaWindow.mediaGeneration
-				if (!mediaWindow.requestUrlMatches(request.url, mediaSession.audioUrl,
+				if (!mediaWindow.requestUrlMatches(request.url, mediaWindow.audioRendererDocumentUrl,
 						acceptedNavigationUrl, acceptedNavigationGeneration, callbackGeneration))
 					return
 				if (request.status === WebEngineView.LoadStartedStatus) {
@@ -1431,7 +1450,8 @@ ApplicationWindow {
             onCertificateError: function(error) { error.rejectCertificate() }
             onContextMenuRequested: function(request) { request.accepted = true }
             onNavigationRequested: function(request) {
-				if (!mediaWindow.navigationRequestAllowed(request.url, mediaSession.audioUrl)) {
+				if (!mediaWindow.navigationRequestAllowed(
+						request.url, mediaWindow.audioRendererDocumentUrl)) {
                     request.action = WebEngineNavigationRequest.IgnoreRequest
 					return
 				}

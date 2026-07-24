@@ -22,6 +22,7 @@ class QmlMediaProfileFactory final : public QObject {
 	Q_PROPERTY(QObject *videoProfile READ videoProfile NOTIFY profilesChanged)
 	Q_PROPERTY(QObject *audioProfile READ audioProfile NOTIFY profilesChanged)
 	Q_PROPERTY(QUrl videoDocumentUrl READ videoDocumentUrl NOTIFY documentUrlChanged)
+	Q_PROPERTY(QUrl audioDocumentUrl READ audioDocumentUrl NOTIFY documentUrlChanged)
 	Q_PROPERTY(bool providerStatePersistent READ providerStatePersistent NOTIFY documentUrlChanged)
 	Q_PROPERTY(bool runtimeReady READ runtimeReady NOTIFY runtimeStateChanged)
 	Q_PROPERTY(bool runtimePreparing READ runtimePreparing NOTIFY runtimeStateChanged)
@@ -34,6 +35,7 @@ public:
 	QObject *videoProfile();
 	QObject *audioProfile();
 	QUrl videoDocumentUrl() const;
+	QUrl audioDocumentUrl() const;
 	bool providerStatePersistent() const;
 	bool runtimeReady() const;
 	bool runtimePreparing() const;

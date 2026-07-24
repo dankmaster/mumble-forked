@@ -1,6 +1,5 @@
 import QtQuick
 import QtTest
-import QtMultimedia
 import Mumble.Theme 1.0
 import Mumble.ProviderPresentation 1.0
 
@@ -85,6 +84,7 @@ TestCase {
 		id: mediaRuntime
 		property var videoProfile: null
 		property string videoDocumentUrl: ""
+		property string audioDocumentUrl: ""
 		property bool providerStatePersistent: true
 		function isNavigationRequestAllowed(requestUrl, firstPartyUrl) { return true }
 		function isVerificationNavigationAllowed(requestUrl, firstPartyUrl) { return true }
@@ -111,6 +111,7 @@ TestCase {
 		playerLoader.item.providerVerificationStabilityMs = 0
 		playerLoader.item.providerVerificationProbeCount = 1
 		mediaRuntime.videoDocumentUrl = ""
+		mediaRuntime.audioDocumentUrl = ""
 		playerLoader.item.statePollTimeoutMs = 3000
 		session.active = false
 		playerLoader.item.visualFixtureMode = ""
@@ -156,23 +157,32 @@ TestCase {
 		compare(player.externalMediaUrl(), session.url)
 	}
 
-	function test_non_adaptive_direct_media_uses_native_surface_without_webengine() {
+	function test_non_adaptive_direct_media_uses_isolated_webengine_document() {
 		const player = playerLoader.item
+		player.visualFixtureMode = "active"
+		player.mediaProfileFactory = mediaRuntime
 		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.mediaMime = "video/mp4"
+		session.url = "https://video.twimg.com/amplify_video/example/vid/avc1/source.mp4"
+		session.audioUrl = "https://v.redd.it/example/DASH_AUDIO_128.mp4"
+		mediaRuntime.videoDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#direct"
+		mediaRuntime.audioDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#audio"
 		session.active = true
 		wait(0)
 
-		verify(player.nativeDirectMedia)
-		verify(player.nativeSurfaceActive)
+		verify(player.directMediaDocument)
+		verify(player.isolatedMediaDocument)
+		verify(player.isolatedAudioDocument)
+		compare(player.audioRendererDocumentUrl, mediaRuntime.audioDocumentUrl)
+		verify(!player.nativeDirectMedia)
+		verify(!player.nativeSurfaceActive)
 		verify(!player.webSurfaceActive)
-		compare(player.rendererBackend, "native")
-		verify(findChild(player, "inlineMediaNativeSurface") !== null)
+		compare(player.rendererBackend, "fixture")
+		verify(findChild(player, "inlineMediaWebSurface") !== null)
 
 		session.active = false
 		wait(0)
-		verify(!player.nativeSurfaceActive)
+		verify(!player.webSurfaceActive)
 	}
 
 	function test_video_backed_animation_is_silent_looping_and_exposes_only_pause_resume() {
@@ -198,140 +208,33 @@ TestCase {
 		verify(!controls.parent.parent.visible)
 		compare(player.Accessible.name, "Reddit inline animated image")
 		compare(player.Accessible.description, "")
-
-		player.visualFixtureMode = ""
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
-		session.playbackUrl = undefined
-		session.playbackAudioUrl = undefined
-		wait(0)
-
-		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
-		verify(nativeLoader !== null)
-		tryVerify(function() { return nativeLoader.item !== null })
-		const nativePlayer = nativeLoader.item
-		verify(nativePlayer.animationPresentation)
-		compare(nativePlayer.animationAutoPlayEnabled, false)
-		compare(nativePlayer.secondaryAudioUrl, "")
-		verify(nativePlayer.primaryAudioMuted)
-		tryVerify(function() { return nativePlayer.primaryPlayer !== null })
-		compare(nativePlayer.primaryPlayer.loops, MediaPlayer.Infinite)
+		const script = player.playerScript("play", 0)
+		verify(script.indexOf("const animated=true") >= 0)
+		verify(script.indexOf("media.loop=true") >= 0)
+		verify(script.indexOf("media.muted=true") >= 0)
+		verify(player._animationInitialPausePending)
 
 		session.active = false
 	}
 
-	function test_native_direct_media_waits_for_prepared_playback_source() {
+	function test_direct_webengine_document_ignores_native_prepared_source() {
 		const player = playerLoader.item
-		const originalSource = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		const originalSource = "https://cdn.example.com/media/source.mp4"
 		const preparedSource = "file:///C:/private-cache/native-a.wav"
-		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = originalSource
-		session.playbackUrl = ""
-		session.playbackSourcePreparing = true
-		session.active = true
-		wait(0)
-
-		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
-		verify(nativeLoader !== null)
-		tryVerify(function() { return nativeLoader.item !== null })
-		const nativePlayer = nativeLoader.item
-		compare(nativePlayer.sourceUrl, "")
-		compare(nativePlayer.rendererState, "loading")
-		verify(nativePlayer.primaryPlayer === null)
-
-		const preparingGeneration = nativePlayer.mediaGeneration
-		session.playbackUrl = preparedSource
-		session.playbackSourcePreparing = false
-		tryCompare(nativePlayer, "sourceUrl", preparedSource)
-		tryVerify(function() { return nativePlayer.mediaGeneration > preparingGeneration })
-		tryVerify(function() { return nativePlayer.primaryPlayer !== null })
-		compare(session.url, originalSource)
-
-		session.active = false
-	}
-
-	function test_native_direct_media_ignores_late_callbacks_from_replaced_source() {
-		const player = playerLoader.item
-		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
-		session.active = true
-		wait(0)
-
-		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
-		verify(nativeLoader !== null)
-		tryVerify(function() { return nativeLoader.item !== null })
-		const nativePlayer = nativeLoader.item
-		const replacedGeneration = nativePlayer.mediaGeneration
-		session.errorReports = 0
-		nativePlayer.sourceUrl = session.url + "#replacement"
-
-		verify(nativePlayer.mediaGeneration > replacedGeneration)
-		verify(!nativePlayer.reportMainError("late source A error", replacedGeneration))
-		verify(!nativePlayer.acceptMainReady(replacedGeneration, 100))
-		verify(nativePlayer.rendererHealthy)
-		compare(session.errorReports, 0)
-
-		session.active = false
-	}
-
-	function test_secondary_audio_hang_degrades_and_restores_primary_audio() {
-		const player = playerLoader.item
-		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
-		session.active = true
-		wait(0)
-
-		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
-		verify(nativeLoader !== null)
-		tryVerify(function() { return nativeLoader.item !== null })
-		const nativePlayer = nativeLoader.item
-		nativePlayer.secondaryAudioUrl = "data:audio/mp4;base64,AAAA"
-		nativePlayer.setMuted(false)
-		verify(!nativePlayer.primaryAudioMuted)
-		const readyGeneration = nativePlayer.secondaryAudioGeneration
-		verify(nativePlayer.acceptSecondaryReady(readyGeneration))
-		verify(nativePlayer.primaryAudioMuted)
-
-		verify(nativePlayer.beginSecondaryPending(readyGeneration))
-		const audioGeneration = readyGeneration
-		verify(!nativePlayer.primaryAudioMuted)
-
-		verify(nativePlayer.expireSecondaryAudioLoad(audioGeneration))
-		verify(nativePlayer.secondaryAudioDegraded)
-		compare(nativePlayer.secondaryAudioState, "degraded")
-		verify(nativePlayer.secondaryAudioWarning.indexOf("timed out") >= 0)
-		verify(!nativePlayer.primaryAudioMuted)
-		verify(!nativePlayer.acceptSecondaryReady(audioGeneration))
-
-		session.active = false
-	}
-
-	function test_secondary_audio_preparation_failure_keeps_primary_playback_available() {
-		const player = playerLoader.item
+		player.visualFixtureMode = "active"
+		player.mediaProfileFactory = mediaRuntime
 		session.provider = "direct"
 		session.mediaMime = "video/mp4"
-		session.url = "data:video/mp4;base64,AAAA"
-		session.audioUrl = "data:audio/mp4;base64,INVALID"
-		session.playbackUrl = "file:///C:/private-cache/native-video.mp4"
-		session.playbackAudioUrl = ""
-		session.playbackAudioWarning = "The separate audio track could not be prepared."
-		session.muted = false
+		session.url = originalSource
+		session.playbackUrl = preparedSource
+		session.playbackSourcePreparing = false
+		mediaRuntime.videoDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#source"
 		session.active = true
 		wait(0)
 
-		const nativeLoader = findChild(player, "inlineMediaNativeSurface")
-		verify(nativeLoader !== null)
-		tryVerify(function() { return nativeLoader.item !== null })
-		const nativePlayer = nativeLoader.item
-		tryVerify(function() { return nativePlayer.secondaryAudioDegraded })
-		compare(nativePlayer.secondaryAudioState, "degraded")
-		compare(nativePlayer.secondaryAudioWarning,
-			"The separate audio track could not be prepared.")
-		verify(!nativePlayer.primaryAudioMuted)
-		verify(nativePlayer.secondaryPlayer === null)
+		compare(player.rendererDocumentUrl, mediaRuntime.videoDocumentUrl)
+		compare(player.externalMediaUrl(), originalSource)
+		compare(session.url, originalSource)
 
 		session.active = false
 	}
