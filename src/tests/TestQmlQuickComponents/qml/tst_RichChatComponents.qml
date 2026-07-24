@@ -846,10 +846,14 @@ TestCase {
 		inlineSession.detached = false
 
 		const panel = findChild(card, "previewEmbedMediaPanel")
+		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
+		const content = findChild(card, "previewContent")
+		const actionFlow = findChild(card, "previewActionFlow")
 		const details = findChild(card, "providerDetails")
 		const closeButton = findChild(card, "previewInlineCloseButton")
 		const originalButton = findChild(card, "previewEmbedOriginalButton")
-		verify(panel !== null && details !== null && closeButton !== null && originalButton !== null)
+		verify(panel !== null && mediaSlot !== null && content !== null && actionFlow !== null
+			&& details !== null && closeButton !== null && originalButton !== null)
 		tryCompare(card, "providerOwnsDetails", true)
 		compare(details.visible, false)
 		const collapsedHeight = card.implicitHeight
@@ -863,9 +867,21 @@ TestCase {
 		})
 		tryCompare(closeButton, "visible", true)
 		tryCompare(originalButton, "visible", true)
+		tryVerify(function() {
+			const settledPanelOrigin = panel.mapToItem(card, 0, 0)
+			const settledCloseOrigin = closeButton.mapToItem(card, 0, 0)
+			return mediaSlot.height >= panel.height - 1
+				&& settledCloseOrigin.y >= settledPanelOrigin.y + panel.height - 1
+		}, 5000, "Provider actions did not settle below the media viewport")
 		const panelOrigin = panel.mapToItem(card, 0, 0)
 		const closeOrigin = closeButton.mapToItem(card, 0, 0)
-		verify(closeOrigin.y >= panelOrigin.y + panel.height - 1)
+		verify(closeOrigin.y >= panelOrigin.y + panel.height - 1,
+			"closeOrigin.y=" + closeOrigin.y + ", panelOrigin.y=" + panelOrigin.y
+				+ ", panel.height=" + panel.height + ", mediaSlot.height=" + mediaSlot.height
+				+ ", actionFlow.y=" + actionFlow.y + ", actionFlow.height=" + actionFlow.height
+				+ ", actionFlow.implicitHeight=" + actionFlow.implicitHeight
+				+ ", content.height=" + content.height + ", content.implicitHeight=" + content.implicitHeight
+				+ ", card.height=" + card.height + ", card.implicitHeight=" + card.implicitHeight)
 		verify(findChild(card, "previewEmbedProviderBadge") === null)
 		verify(findChild(card, "previewEmbedProviderState") === null)
 		closeButton.clicked()
