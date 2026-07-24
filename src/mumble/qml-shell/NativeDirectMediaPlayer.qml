@@ -56,7 +56,12 @@ Item {
 	property string secondaryAudioWarning: ""
 	readonly property int mediaGeneration: _generation
 	readonly property int secondaryAudioGeneration: _secondaryGeneration
-	readonly property bool primaryAudioMuted: primaryAudio.muted
+	readonly property var primaryAudio: primaryPlayer && primaryPlayer.audioOutput
+		? primaryPlayer.audioOutput : null
+	readonly property var secondaryAudio: secondaryPlayer && secondaryPlayer.audioOutput
+		? secondaryPlayer.audioOutput : null
+	readonly property bool primaryAudioMuted: primaryAudio
+		? primaryAudio.muted : animationPresentation || sessionMuted()
 	readonly property bool secondaryLoadWatchdogActive: secondaryLoadWatchdog.running
 	readonly property var primaryPlayer: primaryPlayerLoader.item
 	readonly property var secondaryPlayer: secondaryPlayerLoader.item
@@ -398,8 +403,10 @@ Item {
 
 	function setVolume(volume) {
 		const normalized = Math.max(0, Math.min(100, Number(volume || 0))) / 100
-		primaryAudio.volume = normalized
-		secondaryAudio.volume = normalized
+		if (primaryAudio)
+			primaryAudio.volume = normalized
+		if (secondaryAudio)
+			secondaryAudio.volume = normalized
 		return true
 	}
 
@@ -408,8 +415,10 @@ Item {
 		// Keep the primary track audible while the optional separate track loads.
 		// Switch atomically only after that track is actually ready; timeout/error
 		// therefore degrades without an audible multi-second gap.
-		primaryAudio.muted = animationPresentation || value || _secondaryReady
-		secondaryAudio.muted = animationPresentation || value
+		if (primaryAudio)
+			primaryAudio.muted = animationPresentation || value || _secondaryReady
+		if (secondaryAudio)
+			secondaryAudio.muted = animationPresentation || value
 		return true
 	}
 
@@ -496,25 +505,17 @@ Item {
 		shutdown()
 	}
 
-	AudioOutput {
-		id: primaryAudio
-		volume: root.boundedVolume() / 100
-		muted: root.animationPresentation || root.sessionMuted()
-	}
-
-	AudioOutput {
-		id: secondaryAudio
-		volume: root.boundedVolume() / 100
-		muted: root.animationPresentation || root.sessionMuted()
-	}
-
 	Loader {
 		id: primaryPlayerLoader
 		active: root._enabled && root._mainAttemptActive && root.sourceUrl.length > 0
 		sourceComponent: MediaPlayer {
 			property int generation: -1
 			property string attemptSource: ""
-			audioOutput: primaryAudio
+			audioOutput: AudioOutput {
+				objectName: "nativeDirectPrimaryAudioOutput"
+				volume: root.boundedVolume() / 100
+				muted: root.animationPresentation || root.sessionMuted()
+			}
 			videoOutput: videoOutput
 			loops: root.animationPresentation ? MediaPlayer.Infinite : 1
 			Component.onCompleted: {
@@ -569,7 +570,11 @@ Item {
 		sourceComponent: MediaPlayer {
 			property int generation: -1
 			property string attemptSource: ""
-			audioOutput: secondaryAudio
+			audioOutput: AudioOutput {
+				objectName: "nativeDirectSecondaryAudioOutput"
+				volume: root.boundedVolume() / 100
+				muted: root.animationPresentation || root.sessionMuted()
+			}
 			Component.onCompleted: {
 				generation = root._secondaryGeneration
 				attemptSource = root.secondaryAudioUrl

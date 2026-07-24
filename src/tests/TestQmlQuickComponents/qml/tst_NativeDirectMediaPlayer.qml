@@ -64,6 +64,23 @@ TestCase {
 			MediaPlayer.PlayingState, false), "error")
 	}
 
+	function test_audio_output_initialization_waits_for_the_deferred_player_attempt() {
+		const player = playerLoader.item
+		compare(player.primaryPlayer, null)
+		verify(findChild(player, "nativeDirectPrimaryAudioOutput") === null)
+		verify(findChild(player, "nativeDirectSecondaryAudioOutput") === null)
+
+		session.playbackUrl =
+			"data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+
+		tryVerify(function() { return player.primaryPlayer !== null })
+		verify(findChild(player, "nativeDirectPrimaryAudioOutput") !== null)
+		verify(findChild(player, "nativeDirectSecondaryAudioOutput") === null)
+
+		session.playbackUrl = ""
+		tryVerify(function() { return player.primaryPlayer === null })
+	}
+
 	function test_status_copy_and_accessibility_share_the_same_state() {
 		const player = playerLoader.item
 		const videoOutput = findChild(player, "nativeDirectMediaVideoOutput")
