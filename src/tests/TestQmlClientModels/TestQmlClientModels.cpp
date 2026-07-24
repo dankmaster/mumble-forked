@@ -33,6 +33,7 @@ private slots:
 	void directMessageHistoryMergePublishesOnce();
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
+	void persistentChatVideoPosterDetachesFrameBeforePreviewWorker();
 	void toolsRequireNegotiatedRootAclPermission();
 	void stonksRequiresNegotiatedRootAclPermission();
 	void aclEntryPointsUseExplicitRoomTargets();
@@ -1053,6 +1054,38 @@ void TestQmlClientModels::mainWindowDatabaseBlobReadsStayAsync() {
 	QVERIFY(resolver.contains(QStringLiteral("m_modernDialogController->activeDialogID() != expectedDialogID")));
 	QVERIFY(resolver.contains(QStringLiteral("publishQmlParticipantState(user)")));
 	QVERIFY(!resolver.contains(QStringLiteral("modelReset")));
+}
+
+void TestQmlClientModels::persistentChatVideoPosterDetachesFrameBeforePreviewWorker() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+
+	const qsizetype methodStart =
+		source.indexOf(QStringLiteral("void MainWindow::startNextPersistentChatVideoPoster()"));
+	const qsizetype methodEnd =
+		source.indexOf(QStringLiteral("void MainWindow::finishPersistentChatVideoPoster("), methodStart);
+	QVERIFY(methodStart >= 0);
+	QVERIFY(methodEnd > methodStart);
+	const QString method = source.mid(methodStart, methodEnd - methodStart);
+
+	const qsizetype detach =
+		method.indexOf(QStringLiteral("const QImage detachedFrame = frame.toImage();"));
+	const qsizetype submit =
+		method.indexOf(QStringLiteral("persistentChatPreviewWorkerQueue().submit< QImage >"));
+	const qsizetype detachedCapture =
+		method.indexOf(QStringLiteral("[detachedFrame]()"));
+	QVERIFY2(detach >= 0,
+		"The hardware-backed QVideoFrame must be materialized on its owning GUI thread");
+	QVERIFY(submit > detach);
+	QVERIFY(detachedCapture > submit);
+	QVERIFY(method.contains(QStringLiteral("if (detachedFrame.isNull())")));
+	QVERIFY(method.contains(QStringLiteral("persistentChatThumbnailImage(detachedFrame)")));
+	QVERIFY2(!method.contains(QStringLiteral("[frame]()")),
+		"A QVideoFrame captured by a preview worker can create a short-lived Qt Multimedia QRhi");
+	QCOMPARE(method.count(QStringLiteral("frame.toImage()")), 1);
 }
 
 void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {

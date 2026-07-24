@@ -31955,13 +31955,21 @@ void MainWindow::startNextPersistentChatVideoPoster() {
 				|| m_activePersistentChatVideoPosterSource != source) {
 				return;
 			}
-			// Mapping a hardware-backed frame and smooth-scaling a large source can
-			// be expensive. Detach the decoder immediately and perform that CPU work
-			// on the bounded preview worker instead of the UI thread.
+			// Detach the decoder immediately. Mapping a hardware-backed QVideoFrame on
+			// a short-lived preview worker creates a Qt Multimedia thread-local QRhi.
+			// Its D3D11/NVIDIA teardown can then hold the Windows loader queue while
+			// WebEngine is delay-loaded, leaving real media stuck on "Preparing".
+			// Materialize the frame on the owning GUI thread and offload only the
+			// potentially expensive CPU scaling of the detached QImage.
 			disconnect(m_persistentChatVideoPosterSink, nullptr, this, nullptr);
 			disconnect(m_persistentChatVideoPosterPlayer, nullptr, this, nullptr);
 			m_persistentChatVideoPosterPlayer->pause();
-			const QSize frameSize = frame.size();
+			const QImage detachedFrame = frame.toImage();
+			if (detachedFrame.isNull()) {
+				finishPersistentChatVideoPoster(previewKey, source);
+				return;
+			}
+			const QSize frameSize = detachedFrame.size();
 			const qint64 estimatedBytes = frameSize.isValid()
 				? static_cast< qint64 >(frameSize.width()) * frameSize.height() * 4
 				: 0;
@@ -31969,7 +31977,7 @@ void MainWindow::startNextPersistentChatVideoPoster() {
 				this, persistentChatPreviewWorkerGroup(previewKey),
 				persistentChatPreviewWorkerSourceKey(QStringLiteral("video-poster"), source),
 				estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
-				[frame]() mutable { return persistentChatThumbnailImage(frame.toImage()); },
+				[detachedFrame]() { return persistentChatThumbnailImage(detachedFrame); },
 				[this, previewKey, source](std::optional< QImage > image) {
 					finishPersistentChatVideoPoster(previewKey, source,
 						image ? std::move(*image) : QImage());
