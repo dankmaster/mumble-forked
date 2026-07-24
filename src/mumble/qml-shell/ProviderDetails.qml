@@ -45,10 +45,11 @@ FocusScope {
 	readonly property bool instagramPresentation: variant === "instagram"
 	readonly property bool githubPresentation: variant === "github"
 	readonly property bool twitchPresentation: variant === "twitch"
-	readonly property bool socialBespokePresentation: xPresentation || instagramPresentation
+	readonly property bool socialBespokePresentation: instagramPresentation
 		|| githubPresentation || twitchPresentation
-	readonly property bool genericSocialPostPresentation: family === "social"
-		&& ["bluesky", "mastodon", "reddit"].indexOf(providerToken) >= 0
+	readonly property bool genericSocialPostPresentation: (variant === "x"
+		|| (family === "social"
+			&& ["bluesky", "mastodon", "reddit"].indexOf(providerToken) >= 0))
 		&& !socialBespokePresentation
 	readonly property bool bespokeSemanticOwner: steamPresentation || googlePresentation
 		|| flashbackPresentation || articlePresentation || commercePresentation

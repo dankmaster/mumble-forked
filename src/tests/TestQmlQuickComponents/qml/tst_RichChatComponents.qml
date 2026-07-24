@@ -1573,7 +1573,7 @@ TestCase {
 		compare(card.providerLabel, "YouTube")
 	}
 
-	function test_active_social_provider_owns_details_without_duplicate_native_post() {
+	function test_active_social_provider_keeps_mumble_details_and_stable_geometry() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready",
@@ -1603,16 +1603,97 @@ TestCase {
 		verify(details !== null)
 		compare(details.providerToken, "instagram")
 		compare(details.presentation, "identity")
-		verify(card.inlineProviderOwnsDetails)
-		verify(!details.visible)
-		compare(details.height, 0)
+		verify(!card.inlineProviderOwnsDetails)
+		verify(details.visible)
+		verify(details.height > 0)
 		compare(card.inlineControlsEstimate, 0)
+		const activeCardHeight = card.implicitHeight
+		const activeDetailsHeight = details.height
 
 		inlineSession.active = false
 		inlineSession.detached = true
 		wait(0)
 		verify(!card.inlineProviderOwnsDetails)
 		verify(details.visible)
+		compare(details.height, activeDetailsHeight)
+		compare(card.implicitHeight, activeCardHeight)
+	}
+
+	function test_provider_post_keeps_native_transition_until_adapter_is_ready() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Stable Instagram transition",
+			"url": "https://www.instagram.com/reel/stable/",
+			"embedUrl": "https://www.instagram.com/reel/stable/embed/",
+			"embedKind": "instagram",
+			"embedAspect": "short",
+			"thumbnailUrl": "image://mumble/preview/stable",
+			"metadata": {
+				"provider": "instagram",
+				"instagramMediaKind": "reel",
+				"mediaPresentation": "provider-post-card"
+			}
+		}
+		card.previewIdentity = "message:instagram-stable-transition"
+		card.mediaSessionId = "message:instagram-stable-transition"
+		card.mediaSessionController = inlineSession
+		card.visualMediaFixtureMode = "loading"
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "instagram"
+		inlineSession.detached = false
+		inlineSession.active = true
+		wait(0)
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const details = findChild(card, "providerDetails")
+		verify(loader !== null && details !== null)
+		verify(card.inlineAdapterPending)
+		tryCompare(loader, "opacity", 0)
+		verify(details.visible)
+		const loadingHeight = card.implicitHeight
+
+		loader.item.visualFixtureMode = "active"
+		tryVerify(function() { return card.inlineAdapterReady })
+		tryCompare(loader, "opacity", 1)
+		compare(card.implicitHeight, loadingHeight)
+		verify(details.visible)
+	}
+
+	function test_x_uses_the_common_mumble_social_post_card() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Shared card state keeps scrolling stable.",
+			"subtitle": "Ada",
+			"description": "@ada",
+			"url": "https://x.com/ada/status/123",
+			"metadata": {
+				"provider": "x",
+				"xDisplayName": "Ada",
+				"xHandle": "@ada",
+				"xVerified": true
+			}
+		}
+		card.previewIdentity = "message:x-common-social-card"
+		wait(0)
+
+		const details = findChild(card, "providerDetails")
+		const socialPost = findChild(card, "providerSocialPost")
+		const xCard = findChild(card, "providerXCard")
+		const genericHeader = findChild(card, "previewGenericHeader")
+		verify(details !== null && socialPost !== null && genericHeader !== null)
+		compare(details.providerToken, "x")
+		compare(details.xPresentation, true)
+		compare(details.socialBespokePresentation, false)
+		compare(details.genericSocialPostPresentation, true)
+		compare(details.presentation, "socialPost")
+		verify(socialPost.visible)
+		verify(xCard === null || !xCard.visible)
+		compare(genericHeader.visible, false)
+		compare(findChild(card, "providerSocialAuthor").text, "Ada")
+		compare(findChild(card, "providerSocialPostText").text,
+			"Shared card state keeps scrolling stable.")
 	}
 
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {

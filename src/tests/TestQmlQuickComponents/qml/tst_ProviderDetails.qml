@@ -119,7 +119,7 @@ TestCase {
 			&& item.Accessible.role === Accessible.Grouping ? 1 : 0
 		const cardNames = ["providerSteamCard", "providerGoogleSearch", "providerFlashbackThread",
 			"providerArticleCard", "providerCommerceCard",
-			"providerXPost", "providerInstagramPost", "providerGitHubRepository",
+			"providerSocialPost", "providerXPost", "providerInstagramPost", "providerGitHubRepository",
 			"providerTwitchStream"]
 		for (let index = 0; index < cardNames.length; ++index) {
 			const card = findChild(item, cardNames[index])
@@ -223,7 +223,8 @@ TestCase {
 		compare(item.variant, data.variant)
 		const expectedPresentation = data.family === "finance" ? "market"
 			: data.family === "commerce" ? "commerce"
-			: ["audio", "x", "instagram", "github", "twitch"].indexOf(data.variant) >= 0
+			: data.variant === "x" ? "socialPost"
+			: ["audio", "instagram", "github", "twitch"].indexOf(data.variant) >= 0
 				? "identity" : "details"
 		compare(item.presentation, expectedPresentation)
 		verify(item.hasDetails)
@@ -294,12 +295,9 @@ TestCase {
 			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
 			"xRepostCount": 12000, "xLikeCount": 362000
 		}, "x", true, "", "Post", "X", "Frame pacing is a feature.")
-		compare(item.presentation, "identity")
-		compare(item.identityTitle, "Mumble Design")
-		verify(item.identitySubtitle.indexOf("@mumbledesign") >= 0)
-		verify(findChild(item, "providerXPost").visible)
-		verify(findChild(item, "providerXVerified").visible)
-		compare(findChild(item, "providerXPostText").text, "Frame pacing is a feature.")
+		compare(item.presentation, "socialPost")
+		verify(findChild(item, "providerSocialPost").visible)
+		compare(findChild(item, "providerSocialPostText").text, "Post")
 		compare(findChild(item, "providerIdentity").visible, false)
 		compare(findChild(item, "providerDetailsStats").visible, false)
 
@@ -571,7 +569,7 @@ TestCase {
 		verify(card.Accessible.description.indexOf("..") < 0)
 
 		const socialFixtures = [
-			{ "kind": "x", "name": "providerXPost", "metadata": {
+			{ "kind": "x", "name": "providerSocialPost", "metadata": {
 				"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
 				"xLikeCount": 42 }, "description": "Frame pacing." },
 			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
@@ -639,9 +637,11 @@ TestCase {
 		compare(loader.item, null)
 		compare(instantiatedSocialCardCount(item), 0)
 
+		item = setFixture({ "previewKind": "x", "xHandle": "@mumble" }, "x", false)
+		tryCompare(loader, "active", false)
+		verify(findChild(item, "providerSocialPost").visible)
+
 		const fixtures = [
-			{ "kind": "x", "name": "providerXPost", "metadata": {
-				"previewKind": "x", "xHandle": "@mumble" } },
 			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
 				"provider": "instagram", "instagramHandle": "@mumble" } },
 			{ "kind": "github", "name": "providerGitHubRepository", "metadata": {
@@ -1075,28 +1075,13 @@ TestCase {
 	function test_social_provider_cards_have_distinct_compact_and_expanded_hierarchy() {
 		detailsLoader.width = 680
 		let item = setFixture({
-			"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
-			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
-			"xRepostCount": 12000, "xQuoteCount": 420, "xLikeCount": 362000,
-			"xViewCount": 8100000, "xBookmarkCount": 9000
-		}, "x", false, "", "", "", "Frame pacing is a product feature.")
-		let card = findChild(item, "providerXPost")
-		verify(card.visible)
-		compare(findChild(item, "providerXDisplayName").text, "Mumble Design")
-		verify(findChild(item, "providerXByline").text.indexOf("Mumble Design") < 0)
-		verify(findChild(item, "providerXMetric_2") !== null)
-		compare(findChild(item, "providerXMetric_3"), null)
-		item.expanded = true
-		tryVerify(function() { return findChild(item, "providerXMetric_5") !== null })
-
-		item = setFixture({
 			"provider": "instagram", "instagramDisplayName": "Mumble Quick",
 			"instagramHandle": "@mumblequick", "instagramCreatedAt": "18:30",
 			"instagramCaption": "A native caption with stable delegate reuse.",
 			"instagramMediaKind": "reel", "instagramLikeCount": 18420,
 			"instagramCommentCount": 318
 		}, "instagram", false)
-		card = findChild(item, "providerInstagramPost")
+		let card = findChild(item, "providerInstagramPost")
 		verify(card.visible)
 		compare(findChild(item, "providerInstagramDisplayName").text, "Mumble Quick")
 		verify(findChild(item, "providerInstagramByline").text.indexOf("Mumble Quick") < 0)
@@ -1233,33 +1218,13 @@ TestCase {
 	}
 
 	function test_social_provider_avatars_use_managed_sources_and_initial_fallbacks() {
-		const xManaged = "image://mumble/x-avatar?g=21"
-		let item = setFixture({
-			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
-			"xHandle": "@mumbledesign", "xAvatarUrl": xManaged
-		}, "x", false)
-		let avatar = findChild(item, "providerXAvatar")
-		verify(avatar !== null)
-		compare(item.xAvatarSource, xManaged)
-		compare(avatar.source.toString(), xManaged)
-		compare(avatar.asynchronous, true)
-		compare(avatar.cache, false)
-		compare(findChild(item, "providerXAvatarFallback").text, "MD")
-		item.metadata = {
-			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
-			"xHandle": "@mumbledesign", "xAvatarUrl": "https://cdn.example.test/x.png"
-		}
-		wait(0)
-		compare(item.xAvatarSource, "")
-		compare(avatar.source.toString(), "")
-
 		const instagramManaged = "image://mumble/instagram-avatar?g=22"
-		item = setFixture({
+		let item = setFixture({
 			"provider": "instagram", "previewKind": "instagram",
 			"instagramDisplayName": "Mumble Quick", "instagramHandle": "@mumblequick",
 			"instagramAvatarUrl": instagramManaged
 		}, "instagram", false)
-		avatar = findChild(item, "providerInstagramAvatar")
+		let avatar = findChild(item, "providerInstagramAvatar")
 		verify(avatar !== null)
 		compare(item.instagramAvatarSource, instagramManaged)
 		compare(avatar.source.toString(), instagramManaged)
@@ -1475,8 +1440,6 @@ TestCase {
 			{ "kind": "vehicleListing", "provider": "blocket", "metadata": {
 				"previewProvider": "blocket", "previewKind": "vehicleListing",
 				"vehiclePrice": "245 000 kr" } },
-			{ "kind": "x", "provider": "", "metadata": {
-				"previewKind": "x", "xHandle": "@mumble" } },
 			{ "kind": "instagram", "provider": "instagram", "metadata": {
 				"provider": "instagram", "instagramHandle": "@mumble" } },
 			{ "kind": "github", "provider": "github", "metadata": {

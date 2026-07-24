@@ -208,8 +208,9 @@ Rectangle {
 		: currentMediaKind === "audio" ? actionAvailableWidth : width
 	readonly property real embedPanelHeight: !inlineMediaStageVisible ? 0
 		: inlinePlaybackActive
-			? Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
-				inlineMediaLoader.item ? inlineMediaLoader.item.implicitHeight : 0)
+			? providerPostPresentation ? inlineMediaViewportHeight
+				: Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
+					inlineMediaLoader.item ? inlineMediaLoader.item.implicitHeight : 0)
 			: inlineMediaViewportHeight
 	readonly property bool currentMediaManagedAnimated: currentMediaKind === "image"
 		&& !!currentMedia.managedAnimated && /^file:\/\//i.test(imageSource)
@@ -249,6 +250,11 @@ Rectangle {
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
 		&& mediaSessionController.active && !mediaSessionController.detached
 		&& String(mediaSessionController.sessionId || "") === mediaSessionId
+	readonly property bool inlineAdapterReady: inlinePlaybackActive
+		&& inlineMediaLoader.status === Loader.Ready && !!inlineMediaLoader.item
+		&& inlineMediaLoader.item.documentReady === true
+	readonly property bool inlineAdapterPending: inlinePlaybackActive
+		&& providerPostPresentation && !inlineAdapterReady
 	readonly property bool directInlinePlaybackActive: inlinePlaybackActive && !hasEmbedPreview
 		&& hasDirectMedia && String(mediaSessionController ? mediaSessionController.provider || "" : "") === "direct"
 	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported)
@@ -256,11 +262,13 @@ Rectangle {
 	readonly property string inlinePresentationProvider: hasEmbedPreview
 		? normalizedEmbedProvider
 		: String(providerDetails.providerToken || providerLabel || "").trim()
+	// Provider players are adapters inside the Mumble-owned card. Keep the
+	// native identity/details surface mounted while an adapter activates so
+	// transient player state cannot collapse the delegate, move the scroll
+	// anchor, or make the card alternate between two ownership models.
 	readonly property bool inlineProviderOwnsDetails: inlinePlaybackActive
 		&& hasEmbedPreview
-		&& (providerDetails.presentation === "socialPost"
-			|| ["instagram", "tiktok", "facebook", "spotify", "soundcloud"].indexOf(
-				providerDetails.providerToken) >= 0)
+		&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0
 	readonly property bool providerOwnsDetails: inlineProviderOwnsDetails
 		|| (hasEmbedPreview
 			&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0)
@@ -1116,7 +1124,8 @@ Rectangle {
 				id: embedPoster
 				objectName: "previewEmbedPoster"
 				anchors.fill: parent
-				source: root.renderActive && !root.inlinePlaybackActive && !root.mediaRequiresReveal
+				source: root.renderActive && (!root.inlinePlaybackActive || root.inlineAdapterPending)
+					&& !root.mediaRequiresReveal
 					? root.embedPosterSource : ""
 				asynchronous: true
 				cache: false
@@ -1126,14 +1135,15 @@ Rectangle {
 				// the provider action, including audio embeds. PreserveAspectFit left
 				// square album art floating in a wide empty strip for Spotify.
 				fillMode: Image.PreserveAspectCrop
-				visible: status === Image.Ready && !root.inlinePlaybackActive
+				visible: status === Image.Ready
+					&& (!root.inlinePlaybackActive || root.inlineAdapterPending)
 				onStatusChanged: if (status === Image.Error && root.embedPosterSource.length > 0)
 					root.requestImageRefresh()
 			}
 
 			Rectangle {
 				anchors.fill: parent
-				visible: !root.inlinePlaybackActive
+				visible: !root.inlinePlaybackActive || root.inlineAdapterPending
 				color: root.withAlpha(Theme.embedOverlayBase, embedPoster.status === Image.Ready ? 0.30 : 0.18)
 			}
 
@@ -1179,8 +1189,10 @@ Rectangle {
 			ModernBusyIndicator {
 				objectName: "previewEmbedBusyIndicator"
 				anchors.centerIn: parent
-				running: !root.inlinePlaybackActive && !root.mediaRequiresReveal
-					&& (root.previewState === "loading" || embedPoster.status === Image.Loading)
+				running: !root.mediaRequiresReveal
+					&& ((!root.inlinePlaybackActive
+							&& (root.previewState === "loading" || embedPoster.status === Image.Loading))
+						|| root.inlineAdapterPending)
 				visible: running
 				animated: root.animationsEnabled
 				Accessible.name: qsTr("Loading provider preview")
@@ -1276,7 +1288,13 @@ Rectangle {
 				anchors.fill: parent
 				active: root.inlinePlaybackActive && root.renderActive && !root.mediaRequiresReveal
 					&& root.mediaRuntimeReady
+				opacity: root.providerPostPresentation && !root.inlineAdapterReady ? 0 : 1
+				enabled: opacity > 0
+				Accessible.ignored: opacity <= 0
 				asynchronous: true
+				Behavior on opacity {
+					NumberAnimation { duration: root.animationDuration }
+				}
 				function updateSource() {
 					if (active) {
 						setSource(root.inlinePlayerComponentUrl, {
