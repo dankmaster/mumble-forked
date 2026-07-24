@@ -1538,6 +1538,20 @@ TestCase {
 		verify(!card.recoverStalledEmbedPoster(Image.Loading))
 		compare(imageRefreshSpy.count, 1)
 		verify(card.imageRefreshQueued)
+		verify(card.embedPosterFallbackActive)
+		compare(card.effectiveEmbedPosterSource, "")
+
+		card.preview = {
+			"state": "ready", "title": "Refreshed Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=11"
+		}
+		wait(0)
+		verify(!card.embedPosterFallbackActive)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=11")
 	}
 
 	function test_video_backed_animation_keeps_mp4_transport_but_uses_view_semantics() {

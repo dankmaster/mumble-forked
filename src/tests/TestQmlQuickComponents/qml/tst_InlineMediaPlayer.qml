@@ -114,6 +114,7 @@ TestCase {
 		playerLoader.item.mediaProfileFactory = null
 		playerLoader.item.providerVerificationStabilityMs = 0
 		playerLoader.item.providerVerificationProbeCount = 1
+		playerLoader.item.providerDocumentLoadTimeoutMs = 12000
 		mediaRuntime.videoDocumentUrl = ""
 		mediaRuntime.audioDocumentUrl = ""
 		playerLoader.item.statePollTimeoutMs = 3000
@@ -396,21 +397,52 @@ TestCase {
 		session.loadProgress = 0
 	}
 
-	function test_provider_post_timeout_returns_to_native_card_without_error_toast() {
+	function test_provider_document_timeout_returns_to_native_card_without_error_toast_data() {
+		return [
+			{ tag: "provider post", presentationMode: "provider-post-card" },
+			{ tag: "provider player", presentationMode: "" }
+		]
+	}
+
+	function test_provider_document_timeout_returns_to_native_card_without_error_toast(data) {
 		const player = playerLoader.item
 		session.active = true
 		session.detached = false
 		session.state = "loading"
 		session.loadProgress = 0
-		player.presentationMode = "provider-post-card"
-		player.beginMediaDocumentLoad("about:blank#provider-post-timeout")
+		player.presentationMode = data.presentationMode
+		player.beginMediaDocumentLoad("about:blank#provider-document-timeout")
 		wait(0)
 
-		verify(player.providerPostPresentation)
+		compare(player.providerPostPresentation,
+			data.presentationMode === "provider-post-card")
+		verify(!player.providerDocumentPresented)
 		verify(!player.documentReady)
 		verify(player.ready)
-		verify(player.recoverProviderPostLoadTimeout())
+		verify(player.recoverProviderDocumentLoadTimeout())
 		compare(session.closeCalls, 1)
+		verify(!session.active)
+		compare(session.errorReports, 0)
+	}
+
+	function test_provider_document_timeout_timer_closes_stalled_player() {
+		const player = playerLoader.item
+		player.providerDocumentLoadTimeoutMs = 1000
+		session.active = true
+		session.detached = false
+		session.state = "loading"
+		// Qt WebEngine can expose a usable surface at 99% while never emitting
+		// the final load event. Video still needs a verified document or an
+		// explicit provider-owned verification surface before the watchdog stops.
+		session.loadProgress = 99
+		player.presentationMode = ""
+		player.beginMediaDocumentLoad("about:blank#provider-document-timer")
+
+		tryVerify(function() {
+			return player.providerDocumentLoadTimeoutRunning
+				&& player.providerDocumentLoadElapsedMs > 0
+		}, 750)
+		tryCompare(session, "closeCalls", 1, 2500)
 		verify(!session.active)
 		compare(session.errorReports, 0)
 	}

@@ -18,6 +18,15 @@ Rectangle {
 	property string mediaSessionId: ""
 	property string visualMediaFixtureMode: ""
 	property url inlinePlayerComponentUrl: Qt.resolvedUrl("InlineMediaPlayer.qml")
+	readonly property bool inlineProviderLoadTimeoutRunning:
+		inlineMediaLoader.item
+			? Boolean(inlineMediaLoader.item.providerDocumentLoadTimeoutRunning) : false
+	readonly property double inlineProviderLoadElapsedMs:
+		inlineMediaLoader.item
+			? Number(inlineMediaLoader.item.providerDocumentLoadElapsedMs || 0) : 0
+	readonly property int inlineProviderLoadTimeoutMs:
+		inlineMediaLoader.item
+			? Number(inlineMediaLoader.item.providerDocumentLoadTimeoutMs || 0) : 0
 	property bool renderActive: true
 	property bool animationsEnabled: true
 	property bool hoverEffectsEnabled: true
@@ -32,6 +41,7 @@ Rectangle {
 	property int embedPosterRetryNonce: 0
 	property int embedPosterRecoveryIntervalMs: 2500
 	property int embedPosterRetryLimit: 2
+	property bool embedPosterFallbackActive: false
 	property bool sensitiveMediaRevealed: false
 	property bool restoreInlinePlaybackFocus: false
 	property bool inlineFocusEligibleForRestore: false
@@ -182,8 +192,8 @@ Rectangle {
 	readonly property string embedPosterSource: hasEmbedPreview
 		? safeRenderImageSource(preview ? (preview.thumbnailUrl || preview.posterUrl || "") : "")
 		: imageSource
-	readonly property string effectiveEmbedPosterSource:
-		posterSourceWithRetry(embedPosterSource, embedPosterRetryNonce)
+	readonly property string effectiveEmbedPosterSource: embedPosterFallbackActive
+		? "" : posterSourceWithRetry(embedPosterSource, embedPosterRetryNonce)
 	readonly property bool fullBleedEmbed: hasEmbedPreview
 		&& normalizedEmbedAspect !== "short" && normalizedEmbedAspect !== "square"
 	readonly property real embedMediaWidth: normalizedEmbedAspect === "short"
@@ -470,6 +480,7 @@ Rectangle {
 		embedPosterRecoveryTimer.stop()
 		embedPosterRetryAttempt = 0
 		embedPosterRetryNonce = 0
+		embedPosterFallbackActive = false
 	}
 
 	function posterSourceWithRetry(source, nonce) {
@@ -490,6 +501,10 @@ Rectangle {
 			embedPosterRetryNonce += 1
 			return true
 		}
+		// The provider metadata remains real and actionable even when its image
+		// transport stalls. Stop presenting an endless busy state and fall back
+		// to the provider action surface until hydration supplies a new source.
+		embedPosterFallbackActive = true
 		requestImageRefresh()
 		return false
 	}

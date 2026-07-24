@@ -154,7 +154,13 @@ Rectangle {
 	property double _verifiedProbeStartedAt: 0
 	property int providerVerificationStabilityMs: 1200
 	property int providerVerificationProbeCount: 3
-	property int providerPostLoadTimeoutMs: 12000
+	property int providerDocumentLoadTimeoutMs: 12000
+	property double _providerDocumentLoadStartedAt: 0
+	property double _providerDocumentLoadElapsedMs: 0
+	readonly property bool providerDocumentLoadTimeoutRunning:
+		providerDocumentLoadTimeoutTimer.running
+	readonly property double providerDocumentLoadElapsedMs:
+		_providerDocumentLoadElapsedMs
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -235,12 +241,25 @@ Rectangle {
 	}
 
 	Timer {
-		id: providerPostLoadTimeoutTimer
-		interval: Math.max(1000, inlinePlayer.providerPostLoadTimeoutMs)
-		repeat: false
-		running: inlinePlayer.ready && inlinePlayer.providerPostPresentation
+		id: providerDocumentLoadTimeoutTimer
+		interval: 250
+		repeat: true
+		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
 			&& !inlinePlayer.documentReady
-		onTriggered: inlinePlayer.recoverProviderPostLoadTimeout()
+			&& inlinePlayer.surfaceVerificationState !== "blocked"
+			&& (!inlinePlayer.providerPostPresentation
+				|| !inlinePlayer.providerDocumentPresented)
+		onTriggered: {
+			if (inlinePlayer._providerDocumentLoadStartedAt <= 0) {
+				inlinePlayer.armProviderDocumentLoadTimeout()
+				return
+			}
+			inlinePlayer._providerDocumentLoadElapsedMs = Math.max(0,
+				Date.now() - inlinePlayer._providerDocumentLoadStartedAt)
+			if (inlinePlayer._providerDocumentLoadElapsedMs
+					>= Math.max(1000, inlinePlayer.providerDocumentLoadTimeoutMs))
+				inlinePlayer.recoverProviderDocumentLoadTimeout()
+		}
 	}
 
 	function fallbackProviderMark(label) {
@@ -255,21 +274,24 @@ Rectangle {
 			.join("").toUpperCase()
 	}
 
-	function recoverProviderPostLoadTimeout() {
-		if (!providerPostPresentation || documentReady || !ready || !session)
+	function armProviderDocumentLoadTimeout() {
+		_providerDocumentLoadStartedAt = Date.now()
+		_providerDocumentLoadElapsedMs = 0
+	}
+
+	function recoverProviderDocumentLoadTimeout() {
+		if (nativeDirectMedia || documentReady
+				|| surfaceVerificationState === "blocked"
+				|| (providerPostPresentation && providerDocumentPresented)
+				|| !ready || !session)
 			return false
 		// Keep the real native poster and metadata card as the fallback. A
 		// provider document that never finishes must not leave an infinite busy
 		// overlay or emit a global notification over unrelated media.
-		if (typeof session.closePlayer === "function") {
-			session.closePlayer()
-			return true
-		}
-		if (typeof session.close === "function") {
-			session.close()
-			return true
-		}
-		return false
+		_providerDocumentLoadStartedAt = 0
+		_providerDocumentLoadElapsedMs = 0
+		session.closePlayer()
+		return true
 	}
 
 	function playerScript(command, value) {
@@ -893,12 +915,19 @@ Rectangle {
 	}
 
 	onSessionChanged: {
+		armProviderDocumentLoadTimeout()
 		invalidateMediaDocument()
 		invalidateAudioDocument()
 	}
-	onReadyChanged: if (!ready) {
-		invalidateMediaDocument()
-		invalidateAudioDocument()
+	onReadyChanged: {
+		if (ready) {
+			armProviderDocumentLoadTimeout()
+		} else {
+			_providerDocumentLoadStartedAt = 0
+			_providerDocumentLoadElapsedMs = 0
+			invalidateMediaDocument()
+			invalidateAudioDocument()
+		}
 	}
 	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked) {
 		deferredFocusTimer.failureOnly = false
@@ -909,7 +938,7 @@ Rectangle {
 		deferredMediaProbeTimer.stop()
 		deferredReloadTimer.stop()
 		deferredFocusTimer.stop()
-		providerPostLoadTimeoutTimer.stop()
+		providerDocumentLoadTimeoutTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()

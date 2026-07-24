@@ -4650,9 +4650,17 @@ namespace {
 		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
 		state.insert(QStringLiteral("renderActive"), card->property("renderActive").toBool());
 		state.insert(QStringLiteral("inlinePlaybackActive"), card->property("inlinePlaybackActive").toBool());
+		state.insert(QStringLiteral("inlineProviderLoadTimeoutRunning"),
+			card->property("inlineProviderLoadTimeoutRunning").toBool());
+		state.insert(QStringLiteral("inlineProviderLoadElapsedMs"),
+			card->property("inlineProviderLoadElapsedMs").toDouble());
+		state.insert(QStringLiteral("inlineProviderLoadTimeoutMs"),
+			card->property("inlineProviderLoadTimeoutMs").toInt());
 		state.insert(QStringLiteral("localPlaybackSupported"), card->property("localPlaybackSupported").toBool());
 		state.insert(QStringLiteral("mediaSessionId"), card->property("mediaSessionId").toString());
 		state.insert(QStringLiteral("embedPosterSource"), card->property("embedPosterSource").toString());
+		state.insert(QStringLiteral("embedPosterFallbackActive"),
+			card->property("embedPosterFallbackActive").toBool());
 		state.insert(QStringLiteral("playAccessibilityName"),
 			card->property("playAccessibilityName").toString());
 		QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
