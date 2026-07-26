@@ -72,17 +72,21 @@ jobs:
             '.\scripts\windows\tests\WindowsInstallerUpgradeContract.Tests.ps1'
           )
           $pester = Get-Module -ListAvailable Pester |
+            Where-Object Version -eq ([Version]'3.4.0') |
             Sort-Object Version -Descending |
             Select-Object -First 1
           if ($null -eq $pester) {
-            throw 'Pester is required for the Qt Quick and community release gate script tests.'
+            Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser `
+              -Repository PSGallery -Force -SkipPublisherCheck
+            $pester = Get-Module -ListAvailable Pester |
+              Where-Object Version -eq ([Version]'3.4.0') |
+              Select-Object -First 1
+          }
+          if ($null -eq $pester) {
+            throw 'Pester 3.4.0 is required for the Qt Quick and community release gate script tests.'
           }
           Import-Module $pester.Path -Force
-          if ($pester.Version.Major -ge 5) {
-            $result = Invoke-Pester -Path $testFiles -PassThru
-          } else {
-            $result = Invoke-Pester -Script $testFiles -PassThru
-          }
+          $result = Invoke-Pester -Script $testFiles -PassThru
           if ($result.FailedCount -ne 0) {
             throw "$($result.FailedCount) Qt Quick/community release gate script test(s) failed."
           }

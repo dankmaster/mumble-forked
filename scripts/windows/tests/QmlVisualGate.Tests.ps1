@@ -1780,7 +1780,7 @@ Describe "Qt Quick connected fixture contract" {
 	It "renders system message timestamps only in the semantic header" {
 		$qml = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
-		($qml -match '\|\| \(messageDelegate\.own && !messageDelegate\.systemMessage') | Should Be $true
+		($qml -match 'hasEmbeddedFooterContent:[\s\S]{0,180}\|\| \(own && !systemMessage && timestamp\.length > 0\)') | Should Be $true
 		($qml -match '\(messageDelegate\.own\s*\r?\n\s*&& !messageDelegate\.systemMessage\)') | Should Be $true
 		($worker -match 'outgoingTimestampNodes') | Should Be $true
 		($worker -match 'expected exactly one semantic owner') | Should Be $true
@@ -2056,6 +2056,7 @@ Describe "Qt Quick community parity contract" {
 		$script:communityManual = Get-Content -Raw "$script:communityRepoRoot\src\mumble\qml-shell\ManualPluginWindow.qml"
 		$script:communityToolTest = Get-Content -Raw "$script:communityRepoRoot\src\tests\TestQmlQuickComponents\qml\tst_ToolWindows.qml"
 		$script:communityPreview = Get-Content -Raw "$script:communityRepoRoot\src\mumble\qml-shell\RichPreviewCard.qml"
+		$script:communityProviderDetails = Get-Content -Raw "$script:communityRepoRoot\src\mumble\qml-shell\ProviderDetails.qml"
 		$script:communityPreviewTest = Get-Content -Raw "$script:communityRepoRoot\src\tests\TestQmlQuickComponents\qml\tst_RichChatComponents.qml"
 		$script:communityToast = Get-Content -Raw "$script:communityRepoRoot\src\mumble\qml-shell\ToastPill.qml"
 		$script:communityToastModel = Get-Content -Raw "$script:communityRepoRoot\src\mumble\QmlClientModels.cpp"
@@ -2209,7 +2210,7 @@ Describe "Qt Quick community parity contract" {
 
 	It "renders notifications as one centered coalescing product pill" {
 		$script:communityMainWindow | Should Match 'toastController\(\)->publish\(kind, title, message, actionID, actionLabel, timeoutMs\)'
-		$script:communityMain | Should Match 'ToastPill\s*\{[\s\S]*anchors\.horizontalCenter: parent\.horizontalCenter[\s\S]*anchors\.bottom: parent\.bottom[\s\S]*anchors\.bottomMargin: composerSurface\.height \+ 22'
+		$script:communityMain | Should Match 'ToastPill\s*\{[\s\S]*anchors\.horizontalCenter: parent\.horizontalCenter[\s\S]*anchors\.bottom: parent\.bottom[\s\S]*anchors\.bottomMargin: composerSurface\.height \+ bottomStonksTicker\.height \+ 22'
 		$script:communityToast | Should Match 'objectName: "modernToastPill"'
 		$script:communityToast | Should Match 'radius: height / 2'
 		$script:communityToast | Should Match 'controller\.repeatCount > 1'
@@ -2250,7 +2251,8 @@ Describe "Qt Quick community parity contract" {
 
 		$script:communityMain | Should Match 'readonly property bool modalUiActive:[\s\S]{0,160}mediaSessionWindowUnavailable'
 		$script:communityMain | Should Match 'id:\s*mediaWindowComponentFailurePopup[\s\S]*?modal:\s*true[\s\S]*?focus:\s*true'
-		$script:communityMain | Should Match 'active:\s*root\.modalUiActive'
+		$script:communityMain | Should Match 'readonly property bool backgroundAccessibilitySuppressed:[\s\S]{0,160}mediaSessionWindowUnavailable'
+		$script:communityMain | Should Match 'active:\s*root\.backgroundAccessibilitySuppressed'
 
 		$script:communityConnectQml | Should Match 'id:\s*nestedModalAccessibilityBarrier'
 		$script:communityConnectQml | Should Match 'targets:\s*\[\s*dialogHeader,\s*dialogStatusBanner,\s*dialogBodyLayout,\s*dialogFooter\s*\]'
@@ -2275,10 +2277,12 @@ Describe "Qt Quick community parity contract" {
 	}
 
 	It "keeps Steam posters and HLS-DASH trailers on the lazy native media route" {
-		$script:communityPreview | Should Match 'objectName: "previewSteamMediaRail"'
-		$script:communityPreview | Should Match 'objectName: "previewSteamMediaThumbnail_" \+ index'
-		$script:communityPreview | Should Match 'modelData\.thumbnail[\s\S]*modelData\.poster'
-		$script:communityPreviewTest | Should Match 'test_steam_gallery_keeps_bounded_selectable_thumbnails'
+		$script:communityPreview | Should Match 'steamMediaItems: root\.mediaItems'
+		$script:communityPreview | Should Match 'steamMediaIndex: root\.selectedMediaIndex'
+		$script:communityProviderDetails | Should Match 'objectName: "previewSteamMediaRail"'
+		$script:communityProviderDetails | Should Match 'objectName: "previewSteamMediaThumbnail_" \+ index'
+		$script:communityProviderDetails | Should Match 'modelData\.thumbnail[\s\S]*modelData\.poster'
+		$script:communityPreviewTest | Should Match 'test_steam_gallery_is_visible_and_selectable_without_expanding_the_card'
 		$script:communityPreviewTest | Should Match 'test_steam_manifest_only_trailers_keep_managed_posters_and_lazy_media_contract'
 		foreach ($token in @(
 			'application/vnd.apple.mpegurl', 'application/dash\+xml',
