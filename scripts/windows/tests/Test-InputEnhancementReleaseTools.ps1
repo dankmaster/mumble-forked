@@ -125,6 +125,8 @@ function Initialize-TestQtQuickPayload {
 		'mumble-updater.exe',
 		'Qt6Core.dll',
 		'Qt6Gui.dll',
+		'Qt6Multimedia.dll',
+		'Qt6MultimediaQuick.dll',
 		'Qt6Qml.dll',
 		'Qt6Quick.dll',
 		'Qt6QuickControls2.dll',
@@ -140,7 +142,12 @@ function Initialize-TestQtQuickPayload {
 		'Qt6WebEngineQuick.dll',
 		'QtWebEngineProcess.exe',
 		'platforms/qwindows.dll',
+		'multimedia/windowsmediaplugin.dll',
 		'tls/qopensslbackend.dll',
+		'qml/QtMultimedia/qmldir',
+		'qml/QtMultimedia/plugins.qmltypes',
+		'qml/QtMultimedia/quickmultimediaplugin.dll',
+		'qml/QtMultimedia/Video.qml',
 		'qml/QtQuick/qmldir',
 		'qml/QtQuick/Controls/qmldir',
 		'qml/QtQuick/Controls/qtquickcontrols2plugin.dll',
@@ -166,7 +173,8 @@ function Initialize-TestQtQuickPayload {
 		'resources/qtwebengine_resources.pak',
 		'translations/qtwebengine_locales/en-US.pak',
 		'qt.conf',
-		'direct-runtime-dependencies.txt'
+		'direct-runtime-dependencies.txt',
+		'delay-load-runtime-dependencies.txt'
 	)
 
 	foreach ($relativePath in $requiredPaths) {
@@ -179,7 +187,12 @@ function Initialize-TestQtQuickPayload {
 	}
 	[IO.File]::WriteAllLines(
 		(Join-Path $Root 'direct-runtime-dependencies.txt'),
-		@('Qt6Quick.dll', 'Qt6Qml.dll', 'Qt6WebEngineQuick.dll', 'Qt6WebEngineCore.dll'),
+		@('Qt6Quick.dll', 'Qt6Qml.dll'),
+		[Text.UTF8Encoding]::new($false)
+	)
+	[IO.File]::WriteAllLines(
+		(Join-Path $Root 'delay-load-runtime-dependencies.txt'),
+		@('Qt6WebEngineQuick.dll', 'Qt6WebEngineCore.dll'),
 		[Text.UTF8Encoding]::new($false)
 	)
 
@@ -725,6 +738,19 @@ try {
 		throw 'Promotion workflow is missing the stable compatibility publication section.'
 	}
 	$compatibilitySource = $promotionWorkflowSource.Substring($compatibilityOffset)
+	foreach ($legacyClientMarker in @(
+		'manifestVersion = 2',
+		'installerUrl = "$immutableBase/$installerName"',
+		'minUpdaterVersion = 3'
+	)) {
+		if (-not $compatibilitySource.Contains($legacyClientMarker)) {
+			throw "Stable compatibility publication is missing legacy-client marker '$legacyClientMarker'."
+		}
+	}
+	if ($compatibilitySource -notmatch
+		'installerUrl = "\$immutableBase/\$installerName"\r?\n\s+sha256 = \[string\]\$immutableQualification[.]installer[.]sha256\r?\n\s+installer =') {
+		throw 'Stable compatibility manifest must preserve the top-level MSI URL and SHA256 fallback for updater-v2 clients.'
+	}
 	$binaryUploadOffset = $compatibilitySource.IndexOf(
 		'gh release upload $legacyTag @binaryUploads', [StringComparison]::Ordinal)
 	$manifestUploadOffset = $compatibilitySource.IndexOf(
