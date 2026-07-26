@@ -90,6 +90,9 @@ jobs:
           if ($result.FailedCount -ne 0) {
             throw "$($result.FailedCount) Qt Quick/community release gate script test(s) failed."
           }
+          # Expected negative contract cases can leave a native process exit
+          # code behind after all Pester assertions have passed.
+          $global:LASTEXITCODE = 0
 
       - name: Initialize submodules with retry
         shell: bash
