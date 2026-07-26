@@ -4650,9 +4650,17 @@ namespace {
 		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
 		state.insert(QStringLiteral("renderActive"), card->property("renderActive").toBool());
 		state.insert(QStringLiteral("inlinePlaybackActive"), card->property("inlinePlaybackActive").toBool());
+		state.insert(QStringLiteral("inlineProviderLoadTimeoutRunning"),
+			card->property("inlineProviderLoadTimeoutRunning").toBool());
+		state.insert(QStringLiteral("inlineProviderLoadElapsedMs"),
+			card->property("inlineProviderLoadElapsedMs").toDouble());
+		state.insert(QStringLiteral("inlineProviderLoadTimeoutMs"),
+			card->property("inlineProviderLoadTimeoutMs").toInt());
 		state.insert(QStringLiteral("localPlaybackSupported"), card->property("localPlaybackSupported").toBool());
 		state.insert(QStringLiteral("mediaSessionId"), card->property("mediaSessionId").toString());
 		state.insert(QStringLiteral("embedPosterSource"), card->property("embedPosterSource").toString());
+		state.insert(QStringLiteral("embedPosterFallbackActive"),
+			card->property("embedPosterFallbackActive").toBool());
 		state.insert(QStringLiteral("playAccessibilityName"),
 			card->property("playAccessibilityName").toString());
 		QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
@@ -4806,6 +4814,15 @@ namespace {
 		state.insert(QStringLiteral("timestamp"), modelRow.value(QStringLiteral("timestamp")));
 		state.insert(QStringLiteral("previewState"), previewState);
 		state.insert(QStringLiteral("preview"), preview);
+		const QString thumbnailSource = preview.value(QStringLiteral("thumbnailUrl")).toString();
+		const std::shared_ptr< QmlImagePipeline > imagePipeline = host->imagePipeline();
+		state.insert(QStringLiteral("thumbnailSourceRegistered"),
+			!thumbnailSource.isEmpty() && imagePipeline && imagePipeline->containsSource(thumbnailSource));
+		if (imagePipeline) {
+			state.insert(QStringLiteral("imagePipelineSourceBytes"), imagePipeline->sourceBytes());
+			state.insert(QStringLiteral("imagePipelineCachedBytes"), imagePipeline->cachedBytes());
+			state.insert(QStringLiteral("imagePipelineSourceCount"), imagePipeline->sourceCountForTest());
+		}
 		state.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), stableId));
 		return state;
 	}
@@ -6000,6 +6017,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("windowExposed"), host->window()->isExposed());
 		response.insert(QStringLiteral("windowVisibility"), static_cast< int >(host->window()->visibility()));
 		response.insert(QStringLiteral("connected"), host->sessionController()->connected());
+#ifdef Q_OS_WIN
+		response.insert(QStringLiteral("d3dVBlankThreadDisabled"),
+			qEnvironmentVariableIntValue("QT_D3D_NO_VBLANK_THREAD") != 0);
+#endif
 		response.insert(QStringLiteral("activeScopeToken"), host->activeScopeController()->scopeToken());
 		response.insert(QStringLiteral("roomCount"), host->roomModel()->rowCount());
 		response.insert(QStringLiteral("participantCount"), host->participantModel()->rowCount());
@@ -6337,7 +6358,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 				? "requestInlinePlaybackWithFocus" : "requestCurrentMediaWithFocus";
 			handled = QMetaObject::invokeMethod(card, method, Qt::DirectConnection);
 		} else if (action == QLatin1String("popout") || action == QLatin1String("open-popout")) {
-			if (card->property("hasEmbedPreview").toBool()) {
+			if (!card->property("hasPopoutAction").toBool()) {
+				handled = false;
+			} else if (card->property("hasEmbedPreview").toBool()) {
 				const QString url = card->property("safeEmbedUrl").toString();
 				const QString provider = card->property("safeEmbedProvider").toString();
 				handled = !url.isEmpty() && !provider.isEmpty()

@@ -1121,7 +1121,8 @@ Window {
 													root.mediaSessionController.play()
 											}
 											onPopoutPlayRequested: (url, provider) => {
-												if (!root.mediaSessionController)
+												if (!root.mediaSessionController
+														|| root.mediaSessionController.detachedPlaybackSupported === false)
 													return
 												const sameMedia = root.mediaSessionController.active
 													&& String(root.mediaSessionController.sessionId || "") === messageDelegate.stableId
@@ -1164,7 +1165,8 @@ Window {
 													root.mediaSessionController.play()
 											}
 											onPopoutDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
-												if (!root.mediaSessionController)
+												if (!root.mediaSessionController
+														|| root.mediaSessionController.detachedPlaybackSupported === false)
 													return
 												const sameMedia = root.mediaSessionController.active
 													&& String(root.mediaSessionController.sessionId || "") === messageDelegate.stableId

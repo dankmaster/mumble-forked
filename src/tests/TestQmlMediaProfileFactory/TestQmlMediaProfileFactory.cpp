@@ -8,6 +8,8 @@
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QEventLoop>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QScopedPointer>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QGuiApplication>
@@ -228,10 +230,36 @@ void TestQmlMediaProfileFactory::activeSessionNavigationAcceptsSafeRedirectsAndN
 	QVERIFY(directSession.openDirect(primary, QStringLiteral("video/mp4"), audio,
 		QStringLiteral("audio/mp4"), QStringLiteral("direct-session")));
 	QmlMediaProfileFactory directProfiles(&directSession);
-	QVERIFY(directProfiles.isNavigationRequestAllowed(
+	const QUrl directDocumentUrl = directProfiles.videoDocumentUrl();
+	QCOMPARE(directDocumentUrl.scheme(), QStringLiteral("qrc"));
+	QCOMPARE(directDocumentUrl.path(), QStringLiteral("/media-player/AdaptiveMediaPlayer.html"));
+	const QJsonObject directPayload = QJsonDocument::fromJson(QByteArray::fromBase64(
+		directDocumentUrl.fragment().toLatin1(), QByteArray::Base64UrlEncoding)).object();
+	QCOMPARE(directPayload.value(QStringLiteral("sourceUrl")).toString(),
+		QStringLiteral("https://media.example.com/video.mp4"));
+	QCOMPARE(directPayload.value(QStringLiteral("mediaMime")).toString(), QStringLiteral("video/mp4"));
+	QVERIFY(!directPayload.value(QStringLiteral("adaptive")).toBool());
+	const QUrl directAudioDocumentUrl = directProfiles.audioDocumentUrl();
+	QCOMPARE(directAudioDocumentUrl.scheme(), QStringLiteral("qrc"));
+	const QJsonObject directAudioPayload = QJsonDocument::fromJson(QByteArray::fromBase64(
+		directAudioDocumentUrl.fragment().toLatin1(), QByteArray::Base64UrlEncoding)).object();
+	QCOMPARE(directAudioPayload.value(QStringLiteral("sourceUrl")).toString(),
+		QStringLiteral("https://media.example.com/audio.m4a"));
+	QCOMPARE(directAudioPayload.value(QStringLiteral("mediaMime")).toString(),
+		QStringLiteral("audio/mp4"));
+	QVERIFY(!directAudioPayload.value(QStringLiteral("adaptive")).toBool());
+	QVERIFY(directProfiles.isNavigationRequestAllowed(directDocumentUrl, {}));
+	QVERIFY(directProfiles.isNavigationRequestAllowed(directAudioDocumentUrl, {}));
+	QVERIFY(!directProfiles.isNavigationRequestAllowed(
 		QUrl(QStringLiteral("https://media.example.com/video.mp4#renderer")), primary));
-	QVERIFY(directProfiles.isNavigationRequestAllowed(
+	QVERIFY(!directProfiles.isNavigationRequestAllowed(
 		QUrl(QStringLiteral("https://media.example.com/audio.m4a#renderer")), audio));
+	QVERIFY(QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("direct"), directSession.url(), directSession.audioUrl(),
+		directSession.url(), directDocumentUrl, directSession.mediaMime()));
+	QVERIFY(QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("direct"), directSession.url(), directSession.audioUrl(),
+		directSession.audioUrl(), directDocumentUrl, directSession.mediaMime()));
 	QVERIFY(!directProfiles.isNavigationRequestAllowed(
 		QUrl(QStringLiteral("https://cdn.example.com/audio.m4a")), audio));
 	directSession.closePlayer();
@@ -249,8 +277,12 @@ void TestQmlMediaProfileFactory::activeSessionNavigationAcceptsSafeRedirectsAndN
 	const QUrl documentUrl = manifestProfiles.videoDocumentUrl();
 	QCOMPARE(documentUrl.scheme(), QStringLiteral("qrc"));
 	QCOMPARE(documentUrl.path(), QStringLiteral("/media-player/AdaptiveMediaPlayer.html"));
-	QCOMPARE(QUrl(QString::fromUtf8(QByteArray::fromBase64(documentUrl.fragment().toLatin1(),
-		QByteArray::Base64UrlEncoding))), manifest);
+	const QJsonObject manifestPayload = QJsonDocument::fromJson(QByteArray::fromBase64(
+		documentUrl.fragment().toLatin1(), QByteArray::Base64UrlEncoding)).object();
+	QCOMPARE(QUrl(manifestPayload.value(QStringLiteral("sourceUrl")).toString()), manifest);
+	QCOMPARE(manifestPayload.value(QStringLiteral("mediaMime")).toString(),
+		QStringLiteral("application/vnd.apple.mpegurl"));
+	QVERIFY(manifestPayload.value(QStringLiteral("adaptive")).toBool());
 	QVERIFY(manifestProfiles.isNavigationRequestAllowed(documentUrl, {}));
 	QVERIFY(!manifestProfiles.isNavigationRequestAllowed(manifest, documentUrl));
 	// Child objects are subresources only; the same-origin capability must not

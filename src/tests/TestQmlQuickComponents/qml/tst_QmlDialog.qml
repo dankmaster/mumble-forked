@@ -31,6 +31,7 @@ TestCase {
     }
 
     function cleanup() {
+		testCase.height = 760;
 		loader.item.beforeOpen = null;
 		loader.item.visualFixtureMode = false;
 		dialogState.setValidationError("hiddenAdvanced", "");
@@ -722,6 +723,11 @@ TestCase {
 	}
 
 	function test_partially_visible_composite_editor_keeps_its_own_viewport_accessible() {
+		// Give this geometry contract an explicitly bounded host viewport. Generic
+		// single-page dialogs otherwise grow to their natural content height, so
+		// whether the nested editor is partially visible depends on the preceding
+		// test's final polish turn.
+		testCase.height = 600;
 		const rows = [];
 		for (let index = 0; index < 12; ++index) {
 			rows.push({ "type": index + 1, "name": "Event " + (index + 1),
@@ -736,11 +742,17 @@ TestCase {
 			"initialFocusId": "dialogCloseButton"
 		});
 
-		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
-		const eventList = findChild(loader.item.contentItem, "messageEventList");
-		const barrier = findChild(loader.item.contentItem,
-			"dialogFieldViewportAccessibilityBarrier_event-editor");
+		let scroll = null;
+		let eventList = null;
+		let barrier = null;
 		tryVerify(function() {
+			// Section replacement is asynchronous. Re-resolve the delegates on
+			// each polish turn instead of retaining the outgoing, now-hidden
+			// message editor from the preceding test.
+			scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+			eventList = findChild(loader.item.contentItem, "messageEventList");
+			barrier = findChild(loader.item.contentItem,
+				"dialogFieldViewportAccessibilityBarrier_event-editor");
 			return scroll !== null && eventList !== null && barrier !== null
 				&& eventList.visible && eventList.height > scroll.height;
 		});

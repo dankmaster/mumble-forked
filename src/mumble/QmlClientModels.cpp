@@ -4823,6 +4823,16 @@ bool MediaSessionBackend::playbackSourcePreparing() const { return m_playbackSou
 qulonglong MediaSessionBackend::playbackSourceGeneration() const { return m_playbackSourceGeneration; }
 QString MediaSessionBackend::provider() const { return m_provider; }
 bool MediaSessionBackend::detached() const { return m_detached; }
+bool MediaSessionBackend::detachedPlaybackSupported() const {
+#ifdef Q_OS_WIN
+	// A second QQuickWindow can deadlock the threaded D3D11 render loop while
+	// exposing its swapchain on Windows/NVIDIA systems. Inline WebEngine media
+	// uses the already-established main-window scenegraph and remains safe.
+	return false;
+#else
+	return true;
+#endif
+}
 bool MediaSessionBackend::playbackControllable() const {
 	return mediaProviderSupportsSynchronizedPlayback(m_provider);
 }
@@ -4948,6 +4958,7 @@ bool MediaSessionBackend::openInline(const QUrl &url, const QString &provider, c
 
 bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &provider,
 												 const QString &sessionId, const bool detached) {
+	const bool effectiveDetached = detached && detachedPlaybackSupported();
 	const QString requestedSessionId = sessionId.trimmed();
 	if (m_sharedAvailable && (!m_sharedJoined || requestedSessionId != m_sharedSessionId)) {
 		emit playbackRejected(tr("Leave or end the current watch-together session before opening other media."));
@@ -4966,7 +4977,7 @@ bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &p
 	m_url = normalized;
 	m_audioUrl = {};
 	m_provider = normalizedProvider;
-	m_detached = detached;
+	m_detached = effectiveDetached;
 	m_mediaMime.clear();
 	m_audioMime.clear();
 	m_sessionId = requestedSessionId;
@@ -4997,6 +5008,7 @@ bool MediaSessionBackend::openDirectInline(const QUrl &url, const QString &media
 bool MediaSessionBackend::openDirectWithPresentation(const QUrl &url, const QString &mediaMime,
 											   const QUrl &audioUrl, const QString &audioMime,
 											   const QString &sessionId, const bool detached) {
+	const bool effectiveDetached = detached && detachedPlaybackSupported();
 	if (m_sharedAvailable) {
 		emit playbackRejected(tr("Leave or end the current watch-together session before opening other media."));
 		return false;
@@ -5029,7 +5041,7 @@ bool MediaSessionBackend::openDirectWithPresentation(const QUrl &url, const QStr
 	m_provider = QStringLiteral("direct");
 	m_mediaMime = normalizedMediaMime;
 	m_audioMime = normalizedAudioMime;
-	m_detached = detached;
+	m_detached = effectiveDetached;
 	m_sessionId = sessionId.trimmed();
 	m_state = QStringLiteral("loading");
 	m_position = 0.0;
@@ -5224,7 +5236,10 @@ bool MediaSessionBackend::reopenSharedPlayer() {
 	m_sharedOperationStatus = QStringLiteral("reconnecting");
 	m_sharedOperationError.clear();
 	emit stateChanged();
-	if (!open(m_sharedUrl, m_sharedProvider, m_sharedSessionId)) return false;
+	if (!openWithPresentation(m_sharedUrl, m_sharedProvider, m_sharedSessionId,
+			detachedPlaybackSupported())) {
+		return false;
+	}
 	m_remoteStateSessionId = m_sharedSessionId;
 	m_remoteStateGeneration = m_sharedGeneration;
 	m_position = m_sharedPosition;
@@ -5272,7 +5287,7 @@ bool MediaSessionBackend::supportsSynchronizedPlayback(const QString &provider) 
 }
 
 void MediaSessionBackend::detach() {
-	if (!m_active || m_detached) return;
+	if (!m_active || m_detached || !detachedPlaybackSupported()) return;
 	m_detached = true;
 	emit sourceChanged();
 	emit stateChanged();
@@ -5468,9 +5483,9 @@ void MediaSessionBackend::reportTypedError(const QString &code, const QString &m
 }
 
 void MediaSessionBackend::rejectPlayback(const QString &message) {
-	// Validation happens before a player window becomes active, so an error-only
-	// state would otherwise remain invisible. Reuse the shell's typed rejection
-	// channel to publish a native toast while preserving the inspectable state.
+	// Preserve typed, inspectable state for the owning card or automation. The
+	// shell deliberately does not turn this into a global toast over unrelated
+	// chat or media content.
 	reportTypedError(QStringLiteral("source-rejected"), message);
 	emit playbackRejected(m_error);
 }
@@ -5487,7 +5502,10 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 	const QString previousState = m_state;
 	const double previousPosition = m_position;
 	const bool sourceChanged = !m_active || m_sessionId != remoteSessionId || m_url != url;
-	if (sourceChanged && !open(url, provider, remoteSessionId)) return;
+	if (sourceChanged && !openWithPresentation(url, provider, remoteSessionId,
+			detachedPlaybackSupported())) {
+		return;
+	}
 	m_remoteStateSessionId = remoteSessionId;
 	if (generation != 0 || !sameRemoteSession) m_remoteStateGeneration = generation;
 	m_syncGeneration = generation == 0 ? m_syncGeneration + 1 : qMax(m_syncGeneration, generation);

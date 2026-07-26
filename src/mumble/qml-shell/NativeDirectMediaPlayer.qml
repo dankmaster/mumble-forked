@@ -34,6 +34,19 @@ Item {
 	readonly property bool rendererHealthy: !_mainFailed
 	readonly property string rendererState: sourceUrl.length === 0 ? (sourcePreparing ? "loading" : "empty")
 		: _mainFailed ? "error" : _mainReady ? "active" : "loading"
+	readonly property string playbackPhase: resolvePlaybackPhase(
+		sourceUrl.length > 0,
+		sourcePreparing,
+		_mainFailed,
+		_mainReady,
+		primaryPlayer ? primaryPlayer.playbackState : MediaPlayer.StoppedState,
+		primaryPlayer ? primaryPlayer.mediaStatus === MediaPlayer.EndOfMedia : false)
+	readonly property string playbackStatusText: playbackPhaseLabel(playbackPhase)
+	readonly property string playbackStatusDetail: secondaryAudioDegraded
+		? qsTr("%1 Separate audio is unavailable.").arg(playbackStatusText)
+		: playbackInputEnabled
+			? playbackStatusText
+			: qsTr("%1 Playback is controlled by the session host.").arg(playbackStatusText)
 	readonly property bool secondaryAudioActive: secondaryAudioUrl.length > 0
 		&& !_secondaryFailed
 	readonly property bool secondaryAudioDegraded: secondaryAudioWarning.length > 0
@@ -43,7 +56,12 @@ Item {
 	property string secondaryAudioWarning: ""
 	readonly property int mediaGeneration: _generation
 	readonly property int secondaryAudioGeneration: _secondaryGeneration
-	readonly property bool primaryAudioMuted: primaryAudio.muted
+	readonly property var primaryAudio: primaryPlayer && primaryPlayer.audioOutput
+		? primaryPlayer.audioOutput : null
+	readonly property var secondaryAudio: secondaryPlayer && secondaryPlayer.audioOutput
+		? secondaryPlayer.audioOutput : null
+	readonly property bool primaryAudioMuted: primaryAudio
+		? primaryAudio.muted : animationPresentation || sessionMuted()
 	readonly property bool secondaryLoadWatchdogActive: secondaryLoadWatchdog.running
 	readonly property var primaryPlayer: primaryPlayerLoader.item
 	readonly property var secondaryPlayer: secondaryPlayerLoader.item
@@ -68,8 +86,98 @@ Item {
 	property int secondaryLoadTimeoutMs: 8000
 	clip: true
 
+	Timer {
+		id: applySessionStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === root._generation)
+				root.applySessionState()
+		}
+	}
+
+	Timer {
+		id: mainAttemptTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (root._componentReady && root._enabled && generation === root._generation
+					&& root.sourceUrl.length > 0)
+				root._mainAttemptActive = true
+		}
+	}
+
+	Timer {
+		id: secondaryAttemptTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (root._componentReady && root._enabled
+					&& generation === root._secondaryGeneration
+					&& root.secondaryAudioUrl.length > 0)
+				root._secondaryAttemptActive = true
+		}
+	}
+
+	Timer {
+		id: retryTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			root._enabled = true
+			root.restartMainAttempt()
+			root.restartSecondaryAttempt()
+		}
+	}
+
+	Timer {
+		id: preparedSecondaryWarningTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.applyPreparedSecondaryAudioWarning()
+	}
+
 	function boundedVolume() {
 		return Math.max(0, Math.min(100, Number(session ? session.volume : 100)))
+	}
+
+	function resolvePlaybackPhase(sourceAvailable, preparing, failed, ready,
+			playbackState, atEnd) {
+		if (failed)
+			return "error"
+		if (!sourceAvailable)
+			return preparing ? "loading" : "empty"
+		if (!ready)
+			return "loading"
+		if (atEnd)
+			return "ended"
+		if (playbackState === MediaPlayer.PlayingState)
+			return "playing"
+		if (playbackState === MediaPlayer.PausedState)
+			return "paused"
+		return "ready"
+	}
+
+	function playbackPhaseLabel(phase) {
+		switch (String(phase || "")) {
+		case "loading":
+			return qsTr("Loading media")
+		case "ready":
+			return qsTr("Ready to play")
+		case "playing":
+			return qsTr("Playing")
+		case "paused":
+			return qsTr("Paused")
+		case "ended":
+			return qsTr("Playback finished")
+		case "error":
+			return qsTr("Media unavailable")
+		default:
+			return qsTr("No media selected")
+		}
 	}
 
 	function sessionMuted() {
@@ -141,11 +249,10 @@ Item {
 		_mainReady = true
 		_mainFailed = false
 		reportLoadProgress(progress === undefined ? 100 : progress)
-		if (!wasReady)
-			Qt.callLater(function() {
-				if (root._generation === expectedGeneration)
-					root.applySessionState()
-			})
+		if (!wasReady) {
+			applySessionStateTimer.generation = expectedGeneration
+			applySessionStateTimer.restart()
+		}
 		return true
 	}
 
@@ -216,11 +323,8 @@ Item {
 		resetLifecycle()
 		const generation = _generation
 		_mainAttemptActive = false
-		Qt.callLater(function() {
-			if (root._componentReady && root._enabled && root._generation === generation
-					&& root.sourceUrl.length > 0)
-				root._mainAttemptActive = true
-		})
+		mainAttemptTimer.generation = generation
+		mainAttemptTimer.restart()
 		return generation
 	}
 
@@ -238,12 +342,8 @@ Item {
 		resetSecondaryLifecycle()
 		const generation = _secondaryGeneration
 		_secondaryAttemptActive = false
-		Qt.callLater(function() {
-			if (root._componentReady && root._enabled
-					&& root._secondaryGeneration === generation
-					&& root.secondaryAudioUrl.length > 0)
-				root._secondaryAttemptActive = true
-		})
+		secondaryAttemptTimer.generation = generation
+		secondaryAttemptTimer.restart()
 		return generation
 	}
 
@@ -303,8 +403,10 @@ Item {
 
 	function setVolume(volume) {
 		const normalized = Math.max(0, Math.min(100, Number(volume || 0))) / 100
-		primaryAudio.volume = normalized
-		secondaryAudio.volume = normalized
+		if (primaryAudio)
+			primaryAudio.volume = normalized
+		if (secondaryAudio)
+			secondaryAudio.volume = normalized
 		return true
 	}
 
@@ -313,8 +415,10 @@ Item {
 		// Keep the primary track audible while the optional separate track loads.
 		// Switch atomically only after that track is actually ready; timeout/error
 		// therefore degrades without an audible multi-second gap.
-		primaryAudio.muted = animationPresentation || value || _secondaryReady
-		secondaryAudio.muted = animationPresentation || value
+		if (primaryAudio)
+			primaryAudio.muted = animationPresentation || value || _secondaryReady
+		if (secondaryAudio)
+			secondaryAudio.muted = animationPresentation || value
 		return true
 	}
 
@@ -340,11 +444,7 @@ Item {
 		_mainAttemptActive = false
 		_secondaryAttemptActive = false
 		secondaryLoadWatchdog.stop()
-		Qt.callLater(function() {
-			root._enabled = true
-			root.restartMainAttempt()
-			root.restartSecondaryAttempt()
-		})
+		retryTimer.restart()
 		return true
 	}
 
@@ -370,7 +470,7 @@ Item {
 	onSecondaryAudioUrlChanged: {
 		if (_componentReady) {
 			restartSecondaryAttempt()
-			Qt.callLater(applyPreparedSecondaryAudioWarning)
+			preparedSecondaryWarningTimer.restart()
 		}
 	}
 	onAnimationPresentationChanged: {
@@ -389,25 +489,20 @@ Item {
 			_animationInitialPausePending = false
 		}
 	}
-	onPreparedSecondaryAudioWarningChanged: Qt.callLater(applyPreparedSecondaryAudioWarning)
+	onPreparedSecondaryAudioWarningChanged: preparedSecondaryWarningTimer.restart()
 	Component.onCompleted: {
 		_componentReady = true
 		restartMainAttempt()
 		restartSecondaryAttempt()
-		Qt.callLater(applyPreparedSecondaryAudioWarning)
+		preparedSecondaryWarningTimer.restart()
 	}
-	Component.onDestruction: shutdown()
-
-	AudioOutput {
-		id: primaryAudio
-		volume: root.boundedVolume() / 100
-		muted: root.animationPresentation || root.sessionMuted()
-	}
-
-	AudioOutput {
-		id: secondaryAudio
-		volume: root.boundedVolume() / 100
-		muted: root.animationPresentation || root.sessionMuted()
+	Component.onDestruction: {
+		applySessionStateTimer.stop()
+		mainAttemptTimer.stop()
+		secondaryAttemptTimer.stop()
+		retryTimer.stop()
+		preparedSecondaryWarningTimer.stop()
+		shutdown()
 	}
 
 	Loader {
@@ -416,7 +511,11 @@ Item {
 		sourceComponent: MediaPlayer {
 			property int generation: -1
 			property string attemptSource: ""
-			audioOutput: primaryAudio
+			audioOutput: AudioOutput {
+				objectName: "nativeDirectPrimaryAudioOutput"
+				volume: root.boundedVolume() / 100
+				muted: root.animationPresentation || root.sessionMuted()
+			}
 			videoOutput: videoOutput
 			loops: root.animationPresentation ? MediaPlayer.Infinite : 1
 			Component.onCompleted: {
@@ -471,7 +570,11 @@ Item {
 		sourceComponent: MediaPlayer {
 			property int generation: -1
 			property string attemptSource: ""
-			audioOutput: secondaryAudio
+			audioOutput: AudioOutput {
+				objectName: "nativeDirectSecondaryAudioOutput"
+				volume: root.boundedVolume() / 100
+				muted: root.animationPresentation || root.sessionMuted()
+			}
 			Component.onCompleted: {
 				generation = root._secondaryGeneration
 				attemptSource = root.secondaryAudioUrl
@@ -507,11 +610,10 @@ Item {
 		Accessible.role: Accessible.Pane
 		Accessible.name: root.animationPresentation
 			? qsTr("Silent looping animated image") : qsTr("Direct media playback")
-		Accessible.description: root.playbackInputEnabled
-			? (root.animationPresentation
-				? qsTr("Use the animation control to pause or resume")
-				: qsTr("Native media playback surface"))
-			: qsTr("Playback is controlled by the session host")
+		Accessible.description: root.animationPresentation
+			? qsTr("%1 Use the animation control to pause or resume.").arg(
+				root.playbackStatusText)
+			: root.playbackStatusDetail
 	}
 
 	Rectangle {
@@ -555,7 +657,7 @@ Item {
 			}
 			Label {
 				Layout.fillWidth: true
-				text: qsTr("Playing with the native media engine")
+				text: root.playbackStatusText
 				textFormat: Text.PlainText
 				color: Theme.mediaOverlayTextMuted
 				font.pixelSize: Theme.fontLabel

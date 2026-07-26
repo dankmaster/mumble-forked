@@ -24,6 +24,8 @@ Rectangle {
 	property string visualFixtureMode: ""
 	readonly property bool animationPresentation:
 		String(presentationMode || "").trim().toLowerCase() === "animated-image"
+	readonly property bool providerPostPresentation:
+		String(presentationMode || "").trim().toLowerCase() === "provider-post-card"
 	readonly property var providerPresentation: ProviderPresentation.resolve(
 		String(presentationProvider || "").trim()
 			|| (session ? session.provider : ""))
@@ -46,30 +48,42 @@ Rectangle {
 		return String(session ? session.provider || "" : "").toLowerCase() === "direct"
 			&& (mime === "application/vnd.apple.mpegurl" || mime === "application/dash+xml")
 	}
-	readonly property bool nativeDirectMedia: normalizedVisualFixtureMode.length === 0
-		&& ready && String(session ? session.provider || "" : "").toLowerCase() === "direct"
-		&& !adaptiveManifest && String(session ? session.url || "" : "").trim().length > 0
+	readonly property bool directMediaDocument: ready
+		&& String(session ? session.provider || "" : "").toLowerCase() === "direct"
+		&& String(session ? session.url || "" : "").trim().length > 0
 		&& String(session ? session.error || "" : "").length === 0
+	// Direct transport is intentionally hosted by the isolated WebEngine
+	// document. Creating QtMultimedia players inside virtualized chat delegates
+	// can deadlock Windows Media Foundation while a delegate is destroyed.
+	readonly property bool nativeDirectMedia: false
 	readonly property string rendererDocumentUrl: playbackDocumentUrl()
+	readonly property string audioRendererDocumentUrl: audioPlaybackDocumentUrl()
+	readonly property bool isolatedMediaDocument: directMediaDocument
+		&& /^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(rendererDocumentUrl)
+	readonly property bool isolatedAudioDocument:
+		/^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(audioRendererDocumentUrl)
 	readonly property string normalizedAspect: normalizeAspect(aspect)
 	readonly property int mediaGeneration: _mediaGeneration
 	readonly property bool documentReady: visualFixtureRendererReady
 		|| (nativeDirectMedia && nativePlayerLoader.item
 			&& nativePlayerLoader.item.documentReady)
+		|| (providerPostPresentation && providerDocumentPresented)
 		|| (!nativeDirectMedia && _documentReadyGeneration === _mediaGeneration
 			&& _mediaGeneration > 0 && _rendererHealthy)
 	readonly property bool surfaceVerified: documentReady
 	readonly property bool transportVerified: visualFixtureRendererReady
 		|| (nativeDirectMedia && documentReady)
 		|| (_transportVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0)
-	readonly property bool playbackVerified: documentReady
+	readonly property bool playbackVerified: !providerPostPresentation && documentReady
 		&& ((session && String(session.state || "") === "playing")
 			|| (_playbackVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0))
 	readonly property string surfaceVerificationState: visualFixtureRendererReady ? "verified"
+		: providerPostPresentation && providerDocumentPresented ? "verified"
 		: nativeDirectMedia ? (documentReady ? "verified" : rendererHealthy ? "pending" : "idle")
 		: String(session ? session.error || "" : "").length > 0
 			&& _surfaceVerificationState === "idle" ? "failed" : _surfaceVerificationState
 	readonly property string surfaceVerificationEvidence: visualFixtureRendererReady ? "fixture"
+		: providerPostPresentation && providerDocumentPresented ? "provider-document"
 		: nativeDirectMedia && documentReady ? "native-media" : _surfaceVerificationEvidence
 	readonly property string surfaceVerificationDetail: _surfaceVerificationDetail
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
@@ -87,6 +101,12 @@ Rectangle {
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 	readonly property bool webSurfaceActive: playerLoader.active
 	readonly property bool nativeSurfaceActive: nativePlayerLoader.active
+	// Once WebEngine has finished loading the provider document, let that real
+	// surface own the presentation while transport verification continues.
+	// Keeping Mumble's loading chrome above an already visible provider page
+	// obscures consent, sign-in, image, and player controls.
+	readonly property bool providerDocumentPresented: !nativeDirectMedia
+		&& rendererHealthy && !!session && session.loadProgress >= 99
 	readonly property string rendererBackend: visualFixtureRendererReady ? "fixture"
 		: nativeSurfaceActive ? "native" : webSurfaceActive ? "webengine" : "none"
 	readonly property bool secondaryAudioActive: nativeSurfaceActive && nativePlayerLoader.item
@@ -123,7 +143,7 @@ Rectangle {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
-	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int documentReadyProbeMaxAttempts: isolatedMediaDocument ? 400 : 160
 	property int _transportVerifiedGeneration: -1
 	property int _playbackVerifiedGeneration: -1
 	property string _surfaceVerificationState: "idle"
@@ -134,6 +154,13 @@ Rectangle {
 	property double _verifiedProbeStartedAt: 0
 	property int providerVerificationStabilityMs: 1200
 	property int providerVerificationProbeCount: 3
+	property int providerDocumentLoadTimeoutMs: 12000
+	property double _providerDocumentLoadStartedAt: 0
+	property double _providerDocumentLoadElapsedMs: 0
+	readonly property bool providerDocumentLoadTimeoutRunning:
+		providerDocumentLoadTimeoutTimer.running
+	readonly property double providerDocumentLoadElapsedMs:
+		_providerDocumentLoadElapsedMs
 	property int statePollTimeoutMs: 3000
 	property int _statePollGeneration: -1
 	property int _statePollToken: -1
@@ -149,6 +176,7 @@ Rectangle {
 	property int _audioStatePollToken: -1
 	property int _nextAudioStatePollToken: 0
 	property int _audioMissingStatePolls: 0
+	property bool _animationInitialPausePending: false
 	// Controls only become meaningful once the provider transport is proven.
 	// Keeping them hidden while a challenge/error document loads avoids the
 	// misleading 0:00 / 0:00 bar that previously appeared under broken embeds.
@@ -157,13 +185,82 @@ Rectangle {
 		&& !animationPresentation
 	implicitHeight: mediaViewportHeight
 		+ (nativeControlsVisible ? inlineControls.implicitHeight : 0)
-		+ (providerVerificationRequired ? verificationStrip.height : 0)
+		+ (secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.height : 0)
 	color: Theme.mediaCanvas
 	border.color: Theme.surfaceBorder
 	Accessible.role: Accessible.Pane
-	Accessible.name: animationPresentation
+	Accessible.name: providerPostPresentation
+		? qsTr("%1 embedded post").arg(providerLabel)
+		: animationPresentation
 		? qsTr("%1 inline animated image").arg(providerLabel)
 		: qsTr("%1 inline media player").arg(providerLabel)
+	Accessible.description: providerVerificationRequired ? surfaceVerificationDetail : ""
+
+	Timer {
+		id: deferredPlaybackStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === inlinePlayer.mediaGeneration)
+				inlinePlayer.applyDesiredPlaybackState(generation)
+		}
+	}
+
+	Timer {
+		id: deferredMediaProbeTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: inlinePlayer.probeMediaDocumentReady(generation)
+	}
+
+	Timer {
+		id: deferredReloadTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (playerLoader.item)
+				playerLoader.item.reload()
+			if (audioPlayerLoader.item)
+				audioPlayerLoader.item.reload()
+		}
+	}
+
+	Timer {
+		id: deferredFocusTimer
+		interval: 0
+		repeat: false
+		property bool failureOnly: false
+		onTriggered: {
+			if (failureOnly)
+				inlinePlayer.focusFailureControl()
+			else
+				inlinePlayer.focusInitialControl()
+		}
+	}
+
+	Timer {
+		id: providerDocumentLoadTimeoutTimer
+		interval: 250
+		repeat: true
+		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
+			&& !inlinePlayer.documentReady
+			&& inlinePlayer.surfaceVerificationState !== "blocked"
+			&& (!inlinePlayer.providerPostPresentation
+				|| !inlinePlayer.providerDocumentPresented)
+		onTriggered: {
+			if (inlinePlayer._providerDocumentLoadStartedAt <= 0) {
+				inlinePlayer.armProviderDocumentLoadTimeout()
+				return
+			}
+			inlinePlayer._providerDocumentLoadElapsedMs = Math.max(0,
+				Date.now() - inlinePlayer._providerDocumentLoadStartedAt)
+			if (inlinePlayer._providerDocumentLoadElapsedMs
+					>= Math.max(1000, inlinePlayer.providerDocumentLoadTimeoutMs))
+				inlinePlayer.recoverProviderDocumentLoadTimeout()
+		}
+	}
 
 	function fallbackProviderMark(label) {
 		const words = String(label || "").trim().split(/\s+/).filter(function(word) {
@@ -177,13 +274,35 @@ Rectangle {
 			.join("").toUpperCase()
 	}
 
+	function armProviderDocumentLoadTimeout() {
+		_providerDocumentLoadStartedAt = Date.now()
+		_providerDocumentLoadElapsedMs = 0
+	}
+
+	function recoverProviderDocumentLoadTimeout() {
+		if (nativeDirectMedia || documentReady
+				|| surfaceVerificationState === "blocked"
+				|| (providerPostPresentation && providerDocumentPresented)
+				|| !ready || !session)
+			return false
+		// Keep the real native poster and metadata card as the fallback. A
+		// provider document that never finishes must not leave an infinite busy
+		// overlay or emit a global notification over unrelated media.
+		_providerDocumentLoadStartedAt = 0
+		_providerDocumentLoadElapsedMs = 0
+		session.closePlayer()
+		return true
+	}
+
 	function playerScript(command, value) {
 		const provider = JSON.stringify(String(session ? session.provider : ""))
+		const animated = animationPresentation ? "true" : "false"
 		const numericValue = Number(value || 0)
-		return "(function(){const provider=" + provider + ";"
+		return "(function(){const provider=" + provider + ";const animated=" + animated + ";"
 			+ "const yt=document.getElementById('movie_player')||document.querySelector('.html5-video-player');"
 			+ "const isYt=provider==='youtube'&&yt&&typeof yt.getPlayerState==='function';"
 			+ "const media=document.querySelector('video,audio');"
+			+ "if(media&&animated){media.loop=true;media.muted=true;media.volume=0;}"
 			+ (command === "play"
 				? "window.__mumbleMediaPlayError='';if(isYt&&typeof yt.playVideo==='function'){yt.playVideo();return true;}if(media){const result=media.play();if(result&&typeof result.catch==='function')result.catch(function(error){window.__mumbleMediaPlayError=String(error&&error.message||error||'Playback was blocked');});return true;}return false;"
 				: command === "pause"
@@ -206,6 +325,15 @@ Rectangle {
 				return documentUrl
 		}
 		return String(session ? session.url || "" : "")
+	}
+
+	function audioPlaybackDocumentUrl() {
+		if (mediaProfileFactory && typeof mediaProfileFactory.audioDocumentUrl !== "undefined") {
+			const documentUrl = String(mediaProfileFactory.audioDocumentUrl || "")
+			if (documentUrl.length > 0)
+				return documentUrl
+		}
+		return String(session ? session.audioUrl || "" : "")
 	}
 
 	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
@@ -240,6 +368,7 @@ Rectangle {
 		_missingStatePolls = 0
 		_rendererHealthy = !!rendererIsHealthy
 		_transportRetryCount = 0
+		_animationInitialPausePending = animationPresentation && !animationAutoPlayEnabled
 		return _mediaGeneration
 	}
 
@@ -299,7 +428,22 @@ Rectangle {
 		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (session)
 			session.reportLoadProgress(100)
-		Qt.callLater(function() { inlinePlayer.applyDesiredPlaybackState(generation) })
+		deferredPlaybackStateTimer.generation = generation
+		deferredPlaybackStateTimer.restart()
+		return true
+	}
+
+	function completeProviderPostDocumentLoad(generation) {
+		if (generation !== _mediaGeneration || !_rendererHealthy)
+			return false
+		_documentReadyGeneration = generation
+		_documentReadyProbeGeneration = -1
+		_surfaceVerificationState = "verified"
+		_surfaceVerificationEvidence = "provider-document"
+		_surfaceVerificationDetail = ""
+		documentReadyProbeState = "verified:provider-document"
+		if (session)
+			session.reportLoadProgress(100)
 		return true
 	}
 
@@ -327,7 +471,7 @@ Rectangle {
 		if (generation !== _mediaGeneration)
 			return false
 		const evaluation = MediaPlaybackProbe.classify(value,
-			session ? session.provider : "", adaptiveManifest,
+			session ? session.provider : "", isolatedMediaDocument,
 			background ? 0 : documentReadyProbeAttempts,
 			background ? 2147483647 : documentReadyProbeMaxAttempts)
 		_surfaceVerificationEvidence = String(evaluation.evidence || "")
@@ -391,7 +535,7 @@ Rectangle {
 		try {
 			webPlayer.runJavaScript(
 				MediaPlaybackProbe.probeScript(session ? session.provider : "",
-					adaptiveManifest),
+					isolatedMediaDocument),
 				function(value) {
 					if (inlinePlayer._documentReadyProbeGeneration !== generation)
 						return
@@ -670,7 +814,10 @@ Rectangle {
 		runPlayerScript(playerScript("mute", session.muted ? 1 : 0), generation)
 		if (Number(session.position || 0) > 0.05)
 			runPlayerScript(playerScript("seek", session.position), generation)
-		requestPlaybackState(session.state === "playing" ? "playing" : "paused", generation)
+		const requestedState = _animationInitialPausePending
+			? "paused" : session.state === "playing" ? "playing" : "paused"
+		_animationInitialPausePending = false
+		requestPlaybackState(requestedState, generation)
 	}
 
 	function requestPlaybackState(state, expectedGeneration) {
@@ -693,15 +840,25 @@ Rectangle {
 			retryButton.forceActiveFocus()
 			return retryButton.activeFocus
 		}
-		if (animationToggleButton.visible && animationToggleButton.enabled) {
-			animationToggleButton.forceActiveFocus()
-			return animationToggleButton.activeFocus
-		}
-		if (providerCloseButton.visible && providerCloseButton.enabled) {
-			providerCloseButton.forceActiveFocus()
-			return providerCloseButton.activeFocus
-		}
 		return inlineControls.focusInitialControl()
+	}
+
+	onAnimationAutoPlayEnabledChanged: {
+		if (animationPresentation && !animationAutoPlayEnabled) {
+			_animationInitialPausePending = true
+			if (documentReady) {
+				deferredPlaybackStateTimer.generation = mediaGeneration
+				deferredPlaybackStateTimer.restart()
+			}
+		}
+	}
+
+	onPresentationModeChanged: {
+		_animationInitialPausePending = animationPresentation && !animationAutoPlayEnabled
+		if (documentReady) {
+			deferredPlaybackStateTimer.generation = mediaGeneration
+			deferredPlaybackStateTimer.restart()
+		}
 	}
 
 	function focusFailureControl() {
@@ -758,16 +915,30 @@ Rectangle {
 	}
 
 	onSessionChanged: {
+		armProviderDocumentLoadTimeout()
 		invalidateMediaDocument()
 		invalidateAudioDocument()
 	}
-	onReadyChanged: if (!ready) {
-		invalidateMediaDocument()
-		invalidateAudioDocument()
+	onReadyChanged: {
+		if (ready) {
+			armProviderDocumentLoadTimeout()
+		} else {
+			_providerDocumentLoadStartedAt = 0
+			_providerDocumentLoadElapsedMs = 0
+			invalidateMediaDocument()
+			invalidateAudioDocument()
+		}
 	}
-	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked)
-		Qt.callLater(focusInitialControl)
+	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked) {
+		deferredFocusTimer.failureOnly = false
+		deferredFocusTimer.restart()
+	}
 	Component.onDestruction: {
+		deferredPlaybackStateTimer.stop()
+		deferredMediaProbeTimer.stop()
+		deferredReloadTimer.stop()
+		deferredFocusTimer.stop()
+		providerDocumentLoadTimeoutTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()
@@ -782,7 +953,8 @@ Rectangle {
 				if (inlinePlayer.rendererHealthy || inlinePlayer.documentReady)
 					inlinePlayer.invalidateMediaDocument()
 				inlinePlayer.invalidateAudioDocument()
-				Qt.callLater(inlinePlayer.focusFailureControl)
+				deferredFocusTimer.failureOnly = true
+				deferredFocusTimer.restart()
 			}
 		}
 		function onSourceChanged() {
@@ -816,151 +988,7 @@ Rectangle {
 			inlinePlayer.verificationNavigationActive = false
 			inlinePlayer.invalidateMediaDocument()
 			inlinePlayer.invalidateAudioDocument()
-			Qt.callLater(function() {
-				if (playerLoader.item)
-					playerLoader.item.reload()
-				if (audioPlayerLoader.item)
-					audioPlayerLoader.item.reload()
-			})
-		}
-	}
-
-	Rectangle {
-		id: inlineToolbar
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.top: parent.top
-		height: Theme.controlHeight + Theme.space2
-		z: 6
-		color: "transparent"
-		border.width: 0
-		gradient: Gradient {
-			GradientStop { position: 0.0; color: Theme.withAlpha(Theme.embedOverlayBase, 0.82) }
-			GradientStop { position: 1.0; color: "transparent" }
-		}
-
-		Rectangle {
-			id: inlineProviderBadge
-			objectName: "inlineMediaProviderBadge"
-			anchors.left: parent.left
-			anchors.leftMargin: Theme.space3
-			anchors.verticalCenter: parent.verticalCenter
-			width: inlineProviderRow.implicitWidth + Theme.space2
-			height: 24
-			radius: height / 2
-			color: inlinePlayer.providerAccent
-			border.color: Theme.withAlpha(inlinePlayer.providerOnAccent, 0.24)
-			border.width: 1
-			Accessible.role: Accessible.StaticText
-			Accessible.name: inlinePlayer.animationPresentation
-				? qsTr("%1 animated image").arg(inlinePlayer.providerLabel)
-				: qsTr("%1 media player").arg(inlinePlayer.providerLabel)
-			Row {
-				id: inlineProviderRow
-				anchors.centerIn: parent
-				spacing: Theme.space1
-				Label {
-					objectName: "inlineMediaProviderMark"
-					anchors.verticalCenter: parent.verticalCenter
-					textFormat: Text.PlainText
-					text: inlinePlayer.providerMark
-					color: inlinePlayer.providerOnAccent
-					font.pixelSize: Theme.fontCaption
-					font.weight: Font.Bold
-					Accessible.ignored: true
-				}
-				Rectangle {
-					anchors.verticalCenter: parent.verticalCenter
-					width: 1
-					height: 12
-					visible: inlineProviderLabel.visible
-					color: Theme.withAlpha(inlinePlayer.providerOnAccent, 0.34)
-				}
-				Label {
-					id: inlineProviderLabel
-					objectName: "inlineMediaProviderLabel"
-					visible: !inlinePlayer.compactProviderChrome
-					textFormat: Text.PlainText
-					text: inlinePlayer.providerLabel
-					color: inlinePlayer.providerOnAccent
-					font.pixelSize: Theme.fontCaption
-					font.weight: Font.DemiBold
-					Accessible.ignored: true
-				}
-			}
-		}
-
-		Label {
-			objectName: "inlineMediaStatusLabel"
-			visible: false
-			anchors.left: inlineProviderBadge.right
-			anchors.right: toolbarActions.left
-			anchors.leftMargin: Theme.space2
-			anchors.rightMargin: Theme.space2
-			anchors.verticalCenter: parent.verticalCenter
-			textFormat: Text.PlainText
-			text: session && session.sharedAvailable && session.sharedJoined
-				? qsTr("Watching together in chat") : qsTr("Playing in chat")
-			color: Theme.mediaOverlayTextStrong
-			font.pixelSize: Theme.fontLabel
-			font.bold: true
-			elide: Text.ElideRight
-		}
-		Row {
-			id: toolbarActions
-			anchors.right: parent.right
-			anchors.rightMargin: Theme.space2
-			anchors.verticalCenter: parent.verticalCenter
-			spacing: Theme.space2
-			ModernIconButton {
-				id: animationToggleButton
-				objectName: "inlineMediaAnimationToggleButton"
-				visible: inlinePlayer.animationPresentation
-					&& inlinePlayer.ready && inlinePlayer.documentReady
-				enabled: inlinePlayer.providerInputEnabled
-				overlay: true
-				dense: true
-				text: session && String(session.state || "") === "playing"
-					? qsTr("Pause animation") : qsTr("Resume animation")
-				iconName: session && String(session.state || "") === "playing" ? "pause" : "play"
-				Accessible.description: qsTr("Pause or resume this silent looping animation")
-				onClicked: {
-					if (!inlinePlayer.session)
-						return
-					if (String(inlinePlayer.session.state || "") === "playing")
-						inlinePlayer.session.pause()
-					else
-						inlinePlayer.session.play()
-				}
-			}
-			ModernIconButton {
-				objectName: "inlineMediaPopoutButton"
-				visible: !inlinePlayer.animationPresentation
-				overlay: true
-				dense: true
-				text: qsTr("Pop out")
-				iconName: "external"
-				Accessible.description: qsTr("Move playback to a separate movable window")
-				onClicked: if (inlinePlayer.session) inlinePlayer.session.detach()
-			}
-			ModernIconButton {
-				objectName: "inlineMediaExternalButton"
-				overlay: true
-				dense: true
-				visible: false
-				text: qsTr("Browser")
-				iconName: "external"
-				onClicked: Qt.openUrlExternally(inlinePlayer.externalMediaUrl())
-			}
-			ModernButton {
-				id: providerCloseButton
-				objectName: "inlineMediaProviderCloseButton"
-				visible: !inlinePlayer.nativeControlsVisible
-				dense: true
-				text: qsTr("Close")
-				Accessible.description: qsTr("Close the provider player and return to the preview")
-				onClicked: inlineControls.requestClose()
-			}
+			deferredReloadTimer.restart()
 		}
 	}
 
@@ -973,7 +1001,7 @@ Rectangle {
 		anchors.bottom: parent.bottom
 		anchors.bottomMargin: (inlinePlayer.nativeControlsVisible
 			? inlineControls.implicitHeight : 0)
-			+ (inlinePlayer.providerVerificationRequired ? verificationStrip.height : 0)
+			+ (secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.height : 0)
 		color: Theme.mediaCanvas
 		border.color: inlinePlayer.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1083,7 +1111,7 @@ Rectangle {
 			activeFocusOnTab: inlinePlayer.providerInputEnabled
 			Accessible.ignored: !inlinePlayer.providerInputEnabled
 			settings.playbackRequiresUserGesture: false
-			settings.localContentCanAccessRemoteUrls: inlinePlayer.adaptiveManifest
+			settings.localContentCanAccessRemoteUrls: inlinePlayer.isolatedMediaDocument
 			Accessible.name: qsTr("Embedded media provider playback")
 			onLoadProgressChanged: {
 				if (loadGeneration !== inlinePlayer.mediaGeneration
@@ -1094,7 +1122,8 @@ Rectangle {
 				inlinePlayer.session.reportLoadProgress(Math.min(99, loadProgress))
 				if (loadProgress === 100) {
 					const generation = loadGeneration
-					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
+					deferredMediaProbeTimer.generation = generation
+					deferredMediaProbeTimer.restart()
 				}
 			}
 			onLoadingChanged: function(request) {
@@ -1110,7 +1139,12 @@ Rectangle {
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					inlinePlayer.session.reportLoadProgress(99)
-					Qt.callLater(function() { inlinePlayer.probeMediaDocumentReady(generation) })
+					if (inlinePlayer.providerPostPresentation) {
+						inlinePlayer.completeProviderPostDocumentLoad(generation)
+					} else {
+						deferredMediaProbeTimer.generation = generation
+						deferredMediaProbeTimer.restart()
+					}
 				}
 			}
 			onRenderProcessTerminated: {
@@ -1207,6 +1241,7 @@ Rectangle {
 	Timer {
 		interval: 1500
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
+			&& !inlinePlayer.providerPostPresentation
 			&& inlinePlayer.documentReady && inlinePlayer.rendererHealthy
 			&& inlinePlayer.session && inlinePlayer.session.error.length === 0
 		repeat: true
@@ -1234,28 +1269,6 @@ Rectangle {
 			preventStealing: true
 			propagateComposedEvents: false
 			onWheel: function(wheel) { wheel.accepted = true }
-		}
-
-		Rectangle {
-			anchors.horizontalCenter: parent.horizontalCenter
-			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space3
-			width: Math.min(parent.width - Theme.space4 * 2, guestPlaybackLabel.implicitWidth + Theme.space4)
-			height: guestPlaybackLabel.implicitHeight + Theme.space2
-			radius: height / 2
-			color: Theme.withAlpha(Theme.embedOverlayBase, 0.88)
-			border.color: inlinePlayer.providerAccentBorder
-			Label {
-				id: guestPlaybackLabel
-				anchors.centerIn: parent
-				width: Math.min(implicitWidth, parent.width - Theme.space3)
-				text: qsTr("Host controls playback · local audio controls remain available")
-				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				elide: Text.ElideRight
-			}
 		}
 	}
 
@@ -1298,8 +1311,9 @@ Rectangle {
 			id: audioPlayer
 			profile: inlinePlayer.mediaProfileFactory
 				? inlinePlayer.mediaProfileFactory.audioProfile : null
-			url: inlinePlayer.session ? inlinePlayer.session.audioUrl : ""
+			url: inlinePlayer.audioRendererDocumentUrl
 			settings.playbackRequiresUserGesture: false
+			settings.localContentCanAccessRemoteUrls: inlinePlayer.isolatedAudioDocument
 			onLoadingChanged: function(request) {
 				if (request.status === WebEngineView.LoadStartedStatus) {
 					audioPlayerLoader.loadGeneration = inlinePlayer.beginAudioDocumentLoad()
@@ -1317,9 +1331,8 @@ Rectangle {
 					if (!inlinePlayer.markAudioDocumentReady(generation))
 						return
 					audioPlayerLoader.documentReady = true
-					Qt.callLater(function() {
-						inlinePlayer.applyDesiredPlaybackState(inlinePlayer.mediaGeneration)
-					})
+					deferredPlaybackStateTimer.generation = inlinePlayer.mediaGeneration
+					deferredPlaybackStateTimer.restart()
 				}
 			}
 			onRenderProcessTerminated: {
@@ -1358,18 +1371,15 @@ Rectangle {
 	}
 
 	Rectangle {
+		id: secondaryAudioWarningPanel
 		objectName: "inlineMediaSecondaryAudioWarning"
-		parent: playerCanvas
-		anchors.left: playerLoader.left
-		anchors.right: playerLoader.right
-		anchors.bottom: playerLoader.bottom
-		anchors.margins: Theme.space3
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: inlineControls.top
 		height: secondaryAudioWarningRow.implicitHeight + Theme.space2
 		visible: inlinePlayer.secondaryAudioDegraded && inlinePlayer.ready
-		radius: Theme.innerRadius
-		color: Theme.withAlpha(Theme.embedOverlayBase, 0.94)
+		color: Theme.embedSurface
 		border.color: Theme.withAlpha(Theme.warning, 0.62)
-		z: 7
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Video continues without the separate audio track")
 		Accessible.description: inlinePlayer.secondaryAudioWarning
@@ -1389,59 +1399,9 @@ Rectangle {
 				Layout.fillWidth: true
 				text: qsTr("Video remains available. %1").arg(inlinePlayer.secondaryAudioWarning)
 				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				wrapMode: Text.Wrap
-			}
-		}
-	}
-
-	Rectangle {
-		id: verificationStrip
-		objectName: "inlineMediaVerificationStrip"
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.bottom: parent.bottom
-		visible: inlinePlayer.providerVerificationRequired
-		height: visible
-			? Math.max(Theme.controlHeight + Theme.space2,
-				verificationRow.implicitHeight + Theme.space2) : 0
-		color: Theme.embedSurface
-		border.color: inlinePlayer.providerAccentBorder
-		z: 8
-		Accessible.role: Accessible.AlertMessage
-		Accessible.name: qsTr("%1 verification required").arg(inlinePlayer.providerLabel)
-		Accessible.description: inlinePlayer.surfaceVerificationDetail
-
-		RowLayout {
-			id: verificationRow
-			anchors.fill: parent
-			anchors.leftMargin: Theme.space3
-			anchors.rightMargin: Theme.space2
-			anchors.topMargin: Theme.space1
-			anchors.bottomMargin: Theme.space1
-			spacing: Theme.space2
-
-			ModernIcon {
-				name: "warning"
-				size: 18
-				color: Theme.warning
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "inlineMediaVerificationText"
-				Layout.fillWidth: true
-				text: inlinePlayer.surfaceVerificationDetail
-				textFormat: Text.PlainText
 				color: Theme.textMain
 				font.pixelSize: Theme.fontCaption
 				wrapMode: Text.Wrap
-			}
-			ModernButton {
-				objectName: "inlineMediaVerificationReloadButton"
-				text: qsTr("Reload player")
-				Accessible.description: qsTr("Reload after completing provider verification")
-				onClicked: if (session) session.retry()
 			}
 		}
 	}
@@ -1453,6 +1413,7 @@ Rectangle {
 		anchors.fill: playerLoader
 		visible: inlinePlayer.ready && !inlinePlayer.documentReady
 			&& !inlinePlayer.providerVerificationRequired && session.error.length === 0
+			&& !inlinePlayer.providerDocumentPresented
 		color: Theme.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
@@ -1540,7 +1501,10 @@ Rectangle {
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("%1 playback failed").arg(inlinePlayer.providerLabel)
 		Accessible.description: session ? session.error : ""
-		onVisibleChanged: if (visible) Qt.callLater(inlinePlayer.focusFailureControl)
+		onVisibleChanged: if (visible) {
+			deferredFocusTimer.failureOnly = true
+			deferredFocusTimer.restart()
+		}
 		ColumnLayout {
 			anchors.centerIn: parent
 			width: Math.min(parent.width - Theme.space5 * 2, 480)

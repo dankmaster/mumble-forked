@@ -19,6 +19,7 @@ TestCase {
 		property var videoProfile: null
 		property var audioProfile: null
 		property string videoDocumentUrl: ""
+		property string audioDocumentUrl: ""
 		property bool providerStatePersistent: true
 		property bool navigationAllowed: true
 		property int retryCalls: 0
@@ -138,6 +139,7 @@ TestCase {
 		mediaRuntime.runtimePreparing = false
 		mediaRuntime.runtimeError = ""
 		mediaRuntime.videoDocumentUrl = ""
+		mediaRuntime.audioDocumentUrl = ""
 		mediaRuntime.navigationAllowed = true
 		mediaRuntime.retryCalls = 0
 		windowLoader.item.invalidateMediaDocumentIfNeeded()
@@ -176,23 +178,32 @@ TestCase {
 		compare(window.externalMediaUrl(), session.url)
 	}
 
-	function test_non_adaptive_direct_media_uses_native_surface_without_webengine_runtime() {
+	function test_non_adaptive_direct_media_uses_isolated_webengine_runtime() {
 		const window = windowLoader.item
+		window.visualFixtureMode = "active"
+		mediaRuntime.runtimeReady = true
 		session.provider = "direct"
-		session.mediaMime = "audio/wav"
-		session.url = "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="
+		session.mediaMime = "video/mp4"
+		session.url = "https://video.twimg.com/amplify_video/example/vid/avc1/source.mp4"
+		session.audioUrl = "https://v.redd.it/example/DASH_AUDIO_128.mp4"
+		mediaRuntime.videoDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#direct"
+		mediaRuntime.audioDocumentUrl = "qrc:/media-player/AdaptiveMediaPlayer.html#audio"
 		session.active = true
 		wait(0)
 
-		verify(window.nativeDirectMedia)
-		verify(window.nativeSurfaceActive)
+		verify(window.directMediaDocument)
+		verify(window.isolatedMediaDocument)
+		verify(window.isolatedAudioDocument)
+		compare(window.audioRendererDocumentUrl, mediaRuntime.audioDocumentUrl)
+		verify(!window.nativeDirectMedia)
+		verify(!window.nativeSurfaceActive)
 		verify(!window.webSurfaceActive)
-		compare(window.rendererBackend, "native")
-		verify(findChild(window.contentItem, "mediaSessionNativeSurface") !== null)
+		compare(window.rendererBackend, "fixture")
+		verify(findChild(window.contentItem, "mediaSessionWebSurface") !== null)
 
 		session.active = false
 		wait(0)
-		verify(!window.nativeSurfaceActive)
+		verify(!window.webSurfaceActive)
 	}
 
 	function test_watch_together_guest_blocks_provider_input_but_keeps_local_audio_controls() {
@@ -243,9 +254,14 @@ TestCase {
 		compare(session.errorReports, 0)
 		compare(session.error, "")
 		const warning = findChild(window.contentItem, "mediaSessionSecondaryAudioWarning")
+		const canvas = findChild(window.contentItem, "mediaSessionCanvas")
 		const failure = findChild(window.contentItem, "mediaSessionFailureSurface")
-		verify(warning !== null && warning.visible)
+		verify(warning !== null && warning.visible && canvas !== null)
 		compare(warning.Accessible.name, "Video continues without the separate audio track")
+		const warningOrigin = warning.mapToItem(window.contentItem, 0, 0)
+		const canvasOrigin = canvas.mapToItem(window.contentItem, 0, 0)
+		verify(warningOrigin.y >= canvasOrigin.y + canvas.height - 0.5,
+			"degraded-audio status must remain below, not over, the media canvas")
 		verify(failure !== null && !failure.visible)
 
 		const replacementGeneration = window.beginMediaDocumentLoad("about:blank#retry")
@@ -275,6 +291,29 @@ TestCase {
 		verify(!window.webSurfaceActive)
 		compare(window.rendererState, "error")
 		session.active = false
+	}
+
+	function test_loaded_provider_document_is_not_covered_while_transport_probe_settles() {
+		const window = windowLoader.item
+		const loadingSurface = findChild(window.contentItem, "mediaSessionLoadingSurface")
+		session.active = true
+		session.state = "loading"
+		session.loadProgress = 98
+		window.beginMediaDocumentLoad("about:blank#provider-document")
+		wait(0)
+
+		verify(!window.documentReady)
+		verify(!window.providerDocumentPresented)
+		verify(loadingSurface !== null && loadingSurface.visible)
+
+		session.loadProgress = 99
+		wait(0)
+		verify(!window.documentReady)
+		verify(window.providerDocumentPresented)
+		verify(!loadingSurface.visible)
+
+		session.active = false
+		session.loadProgress = 0
 	}
 
 	function test_runtime_error_surface_remains_actionable_across_retry() {
@@ -486,7 +525,12 @@ TestCase {
 		verify(window.providerVerificationRequired)
 		verify(window.surfaceVerificationDetail.indexOf("kept for later playback") >= 0)
 		compare(session.errorReports, 0)
-		verify(findChild(window.contentItem, "mediaSessionVerificationStrip").visible)
+		verify(findChild(window.contentItem, "mediaSessionVerificationStrip") === null)
+		const canvas = findChild(window.contentItem, "mediaSessionCanvas")
+		const controls = findChild(window.contentItem, "mediaSessionWindowControls")
+		verify(canvas !== null && controls !== null)
+		verify(canvas.Accessible.description.indexOf("kept for later playback") >= 0)
+		compare(controls.transportAvailable, false)
 
 		generation = window.beginMediaDocumentLoad("about:blank#consent")
 		verify(window.applyMediaSurfaceProbeResult(generation, {
@@ -565,7 +609,8 @@ TestCase {
 		compare(window.presentationProvider, "reddit")
 		compare(window.providerLabel, "Reddit")
 		compare(window.providerMark, "R")
-		compare(findChild(window.contentItem, "mediaSessionProviderLabel").text, "Reddit")
+		verify(findChild(window.contentItem, "mediaSessionProviderLabel") === null)
+		compare(window.title, "Reddit player")
 
 		window.visualFixtureMode = ""
 		session.active = false
@@ -651,35 +696,23 @@ TestCase {
 		verify(canvas !== null)
 		compare(canvas.Accessible.name, "YouTube detached media player")
 
-		const badge = findChild(window.contentItem, "mediaSessionProviderBadge")
-		const badgeMark = findChild(window.contentItem, "mediaSessionProviderMark")
-		const badgeLabel = findChild(window.contentItem, "mediaSessionProviderLabel")
-		const stateLabel = findChild(window.contentItem, "mediaSessionSurfaceStateLabel")
-		verify(badge !== null && badge.visible)
-		compare(String(badge.color), String(window.providerAccent))
-		compare(badge.Accessible.name, "YouTube media player, detached window")
-		compare(badgeMark.text, "YT")
-		compare(badgeLabel.text, "YouTube")
-		compare(stateLabel.text, "· DETACHED")
-		compare(String(badgeMark.color), String(window.providerOnAccent))
-		compare(String(badgeLabel.color), String(window.providerOnAccent))
+		verify(findChild(window.contentItem, "mediaSessionProviderBadge") === null)
+		verify(findChild(window.contentItem, "mediaSessionProviderMark") === null)
+		verify(findChild(window.contentItem, "mediaSessionProviderLabel") === null)
+		verify(findChild(window.contentItem, "mediaSessionSurfaceStateLabel") === null)
 
 		session.sharedAvailable = true
 		session.sharedJoined = true
 		session.sharedHost = false
 		wait(0)
-		compare(stateLabel.text, "· SYNCED")
-		compare(badge.Accessible.name, "YouTube media player, synchronized with host")
+		compare(canvas.Accessible.name, "YouTube detached media player")
 		session.sharedHost = true
 		wait(0)
-		compare(stateLabel.text, "· HOSTING")
-		compare(badge.Accessible.name, "YouTube media player, hosting watch together")
+		compare(canvas.Accessible.name, "YouTube detached media player")
 
 		window.width = 680
 		wait(0)
 		verify(window.compactProviderChrome)
-		verify(!badgeLabel.visible)
-		verify(badgeMark.visible)
 
 		session.sharedAvailable = false
 		session.sharedJoined = false

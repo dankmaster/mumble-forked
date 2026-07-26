@@ -118,6 +118,22 @@ void configureBundledQtWebEnginePaths(const QString &applicationFilePath) {
 	}
 }
 
+void configureQtQuickGraphicsWorkarounds() {
+	// Qt 6.9's DXGI VSync service can wait indefinitely for its WaitForVBlank
+	// worker while rebuilding a stale DXGI factory after a display power or
+	// topology change. The GUI thread then waits for QSGRenderThread during the
+	// next expose event, freezing the entire client. Qt's own supported
+	// environment switch keeps the D3D renderer but uses its traditional
+	// timer-based update fallback instead of the vulnerable VBlank worker.
+	//
+	// Preserve an explicit process/user override for diagnostics and future Qt
+	// validation. This must run before MumbleApplication constructs the first
+	// QQuickWindow/QRhi instance.
+	if (!qEnvironmentVariableIsSet("QT_D3D_NO_VBLANK_THREAD")) {
+		qputenv("QT_D3D_NO_VBLANK_THREAD", QByteArrayLiteral("1"));
+	}
+}
+
 bool environmentBoolean(const char *name, const bool defaultValue) {
 	if (!qEnvironmentVariableIsSet(name)) {
 		return defaultValue;
@@ -442,6 +458,7 @@ int main(int argc, char **argv) {
 
 #if defined(Q_OS_WIN)
 	SetDllDirectory(L"");
+	configureQtQuickGraphicsWorkarounds();
 	configureBundledQtWebEnginePaths(QString::fromLocal8Bit(argv[0]));
 	configureQtWebEngineGraphicsWorkarounds();
 #	ifdef MUMBLE_DELAYLOAD_WEBENGINE_QUICK

@@ -95,11 +95,17 @@ TestCase {
         signalName: "externalOpenRequested"
     }
 
-    SignalSpy {
-        id: imageOpenSpy
-        target: previewLoader.item
-        signalName: "imageOpenRequested"
-    }
+	SignalSpy {
+		id: imageOpenSpy
+		target: previewLoader.item
+		signalName: "imageOpenRequested"
+	}
+
+	SignalSpy {
+		id: imageRefreshSpy
+		target: previewLoader.item
+		signalName: "imageRefreshRequested"
+	}
 
 	SignalSpy {
 		id: inlinePlaySpy
@@ -135,6 +141,7 @@ TestCase {
 		id: inlineSession
 		property bool active: false
 		property bool detached: true
+		property bool detachedPlaybackSupported: true
 		property string sessionId: ""
 		property string provider: "youtube"
 		property string url: "https://www.youtube.com/embed/test"
@@ -155,6 +162,7 @@ TestCase {
 		property int volume: 100
 		property bool muted: false
 		property int detachCalls: 0
+		property int playCalls: 0
 		property int pauseCalls: 0
 		property int retryCalls: 0
 		property int closeCalls: 0
@@ -166,6 +174,10 @@ TestCase {
 		function pause() {
 			pauseCalls += 1
 			state = "paused"
+		}
+		function play() {
+			playCalls += 1
+			state = "playing"
 		}
 		function retry() {
 			retryCalls += 1
@@ -214,6 +226,7 @@ TestCase {
         directMediaSpy.clear()
         externalOpenSpy.clear()
         imageOpenSpy.clear()
+		imageRefreshSpy.clear()
 		inlinePlaySpy.clear()
 		popoutPlaySpy.clear()
 		popoutDirectMediaSpy.clear()
@@ -255,6 +268,7 @@ TestCase {
 			previewOverflowMenu.close()
 		inlineSession.active = false
 		inlineSession.detached = true
+		inlineSession.detachedPlaybackSupported = true
 		inlineSession.sessionId = ""
 		inlineSession.url = "https://www.youtube.com/embed/test"
 		inlineSession.audioUrl = ""
@@ -268,6 +282,7 @@ TestCase {
 		inlineSession.sharedJoined = false
 		inlineSession.sharedHost = false
 		inlineSession.detachCalls = 0
+		inlineSession.playCalls = 0
 		inlineSession.pauseCalls = 0
 		inlineSession.retryCalls = 0
 		inlineSession.closeCalls = 0
@@ -672,7 +687,7 @@ TestCase {
 		compare(attachmentLoader.item.implicitHeight, attachmentHeight)
 	}
 
-	function test_expanded_product_keeps_inset_content_inside_card() {
+	function test_product_uses_one_inset_gallery_card_without_duplicate_media() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready",
@@ -699,19 +714,229 @@ TestCase {
 		const header = findChild(card, "previewGenericHeader")
 		const details = findChild(card, "providerDetails")
 		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
+		const commerceCard = findChild(card, "providerCommerceCard")
+		const commerceHero = findChild(card, "providerCommerceHero")
+		const commerceTitle = findChild(card, "providerCommerceTitle")
 		verify(content !== null && header !== null && details !== null && expandedPanel !== null)
+		verify(commerceCard !== null && commerceHero !== null && commerceTitle !== null)
 		tryVerify(function() { return card.expanded && card.implicitHeight > 180 })
 		previewLoader.height = Math.ceil(card.implicitHeight)
 		wait(0)
-		tryCompare(header, "width", content.width)
+		compare(header.visible, false)
+		tryCompare(commerceCard, "visible", true)
 		tryCompare(details, "width", content.width)
-		const headerOrigin = header.mapToItem(content, 0, 0)
-		verify(headerOrigin.x >= -0.5)
-		verify(headerOrigin.x + header.width <= content.width + 0.5,
-			"generic header width " + header.width + " escaped inset content width " + content.width)
-		const panelOrigin = expandedPanel.mapToItem(card, 0, 0)
-		verify(Math.abs(panelOrigin.x) <= 1)
-		verify(Math.abs(expandedPanel.width - card.width) <= 1)
+		const commerceOrigin = commerceCard.mapToItem(content, 0, 0)
+		verify(commerceOrigin.x >= -0.5)
+		verify(commerceOrigin.x + commerceCard.width <= content.width + 0.5)
+		compare(commerceTitle.text, "Logitech G Pro X Superlight 2")
+		tryCompare(commerceHero, "visible", true)
+		compare(expandedPanel.visible, false)
+	}
+
+	function test_article_uses_compact_image_tldr_and_human_date_without_detail_tiles() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "article",
+			"title": "Government halves the price of monthly transit passes",
+			"description": "Public transit monthly passes will cost half as much for six months.",
+			"url": "https://news.example.com/transit",
+			"mediaItems": [{
+				"kind": "image",
+				"mime": "image/jpeg",
+				"url": "image://mumble/article-hero?g=1"
+			}],
+			"metadata": {
+				"previewKind": "article",
+				"previewProvider": "goteborgsposten",
+				"articlePublisher": "Göteborgs-Posten",
+				"articleSection": "Politics",
+				"articleAuthor": "Karin Jansson",
+				"articlePublishedAt": "2026-05-25T18:17:01.000Z",
+				"articleTitle": "Government halves the price of monthly transit passes",
+				"articleDescription": "Public transit monthly passes will cost half as much for six months."
+			}
+		}
+		card.previewIdentity = "message:article-tldr"
+
+		const header = findChild(card, "previewGenericHeader")
+		const article = findChild(card, "providerArticleCard")
+		const hero = findChild(card, "providerArticleHero")
+		const title = findChild(card, "providerArticleTitle")
+		const tldr = findChild(card, "providerArticleTldr")
+		const meta = findChild(card, "providerArticleMeta")
+		const stats = findChild(card, "providerDetailsStats")
+		verify(header !== null && article !== null && hero !== null && title !== null
+			&& tldr !== null && meta !== null && stats !== null)
+		compare(header.visible, false)
+		tryCompare(article, "visible", true)
+		tryCompare(hero, "visible", true)
+		compare(title.text, "Government halves the price of monthly transit passes")
+		compare(tldr.text, "Public transit monthly passes will cost half as much for six months.")
+		verify(meta.text.indexOf("Göteborgs-Posten") >= 0)
+		verify(meta.text.indexOf("Politics") >= 0)
+		verify(meta.text.indexOf("T18:17:01") < 0)
+		compare(stats.visible, false)
+		compare(findChild(card, "previewDescription").visible, false)
+	}
+
+	function test_marketplace_gallery_uses_all_images_and_keeps_navigation_outside_the_photo() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "marketplaceListing",
+			"title": "MSI RTX 4070 Ti SUPER 16G",
+			"description": "Sparingly used and works perfectly.",
+			"url": "https://www.blocket.se/recommerce/forsale/item/17926061",
+			"mediaItems": [
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-one?g=1" },
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-two?g=1" },
+				{ "kind": "image", "mime": "image/jpeg",
+				  "url": "image://mumble/blocket-three?g=1" }
+			],
+			"metadata": {
+				"previewKind": "marketplaceListing",
+				"previewProvider": "blocket",
+				"marketplaceProvider": "Blocket",
+				"listingPrice": "8 500 kr",
+				"listingLocation": "Stockholm",
+				"listingCondition": "Used",
+				"listingId": "17926061",
+				"listingDescription": "Sparingly used and works perfectly."
+			}
+		}
+		card.previewIdentity = "message:blocket-gallery"
+
+		const gallery = findChild(card, "providerCommerceCard")
+		const hero = findChild(card, "providerCommerceHero")
+		const heroImage = findChild(card, "providerCommerceHeroImage")
+		const controls = findChild(card, "providerCommerceGalleryControls")
+		const price = findChild(card, "providerCommercePrice")
+		verify(gallery !== null && hero !== null && heroImage !== null
+			&& controls !== null && price !== null)
+		tryCompare(gallery, "visible", true)
+		tryCompare(hero, "visible", true)
+		tryCompare(controls, "visible", true)
+		compare(price.text, "8 500 kr")
+		compare(card.selectedMediaIndex, 0)
+		card.selectedMediaIndex = 1
+		wait(0)
+		compare(heroImage.source.toString(), "image://mumble/blocket-two?g=1")
+		const controlsOrigin = controls.mapToItem(card, 0, 0)
+		const heroOrigin = hero.mapToItem(card, 0, 0)
+		verify(controlsOrigin.y >= heroOrigin.y + hero.height - 1)
+	}
+
+	function test_active_provider_player_has_only_external_actions_below_media_and_no_duplicate_spotify_details() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Bobo & Gileus",
+			"url": "https://open.spotify.com/album/example",
+			"embedUrl": "https://open.spotify.com/embed/album/example",
+			"embedKind": "spotify",
+			"embedAspect": "compact-audio",
+			"metadata": {
+				"previewKind": "audio",
+				"previewProvider": "spotify",
+				"audioProvider": "Spotify",
+				"audioProgram": "Bobo & Gileus"
+			}
+		}
+		card.previewIdentity = "message:spotify-clean-surface"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "spotify"
+		inlineSession.playbackControllable = false
+		inlineSession.detached = false
+
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
+		const content = findChild(card, "previewContent")
+		const actionFlow = findChild(card, "previewActionFlow")
+		const details = findChild(card, "providerDetails")
+		const closeButton = findChild(card, "previewInlineCloseButton")
+		const originalButton = findChild(card, "previewEmbedOriginalButton")
+		verify(panel !== null && mediaSlot !== null && content !== null && actionFlow !== null
+			&& details !== null && closeButton !== null && originalButton !== null)
+		tryCompare(card, "providerOwnsDetails", true)
+		compare(details.visible, false)
+		const collapsedHeight = card.implicitHeight
+
+		inlineSession.active = true
+		tryCompare(card, "inlinePlaybackActive", true)
+		compare(card.inlineProviderOwnsDetails, true)
+		compare(details.visible, false)
+		tryVerify(function() {
+			return Math.abs(card.implicitHeight - collapsedHeight) <= 1
+		})
+		tryCompare(closeButton, "visible", true)
+		tryCompare(originalButton, "visible", true)
+		tryVerify(function() {
+			const settledPanelOrigin = panel.mapToItem(card, 0, 0)
+			const settledCloseOrigin = closeButton.mapToItem(card, 0, 0)
+			return mediaSlot.height >= panel.height - 1
+				&& settledCloseOrigin.y >= settledPanelOrigin.y + panel.height - 1
+		}, 5000, "Provider actions did not settle below the media viewport")
+		const panelOrigin = panel.mapToItem(card, 0, 0)
+		const closeOrigin = closeButton.mapToItem(card, 0, 0)
+		verify(closeOrigin.y >= panelOrigin.y + panel.height - 1,
+			"closeOrigin.y=" + closeOrigin.y + ", panelOrigin.y=" + panelOrigin.y
+				+ ", panel.height=" + panel.height + ", mediaSlot.height=" + mediaSlot.height
+				+ ", actionFlow.y=" + actionFlow.y + ", actionFlow.height=" + actionFlow.height
+				+ ", actionFlow.implicitHeight=" + actionFlow.implicitHeight
+				+ ", content.height=" + content.height + ", content.implicitHeight=" + content.implicitHeight
+				+ ", card.height=" + card.height + ", card.implicitHeight=" + card.implicitHeight)
+		verify(findChild(card, "previewEmbedProviderBadge") === null)
+		verify(findChild(card, "previewEmbedProviderState") === null)
+		closeButton.clicked()
+		compare(inlineSession.closeCalls, 1)
+		tryCompare(card, "inlinePlaybackActive", false)
+	}
+
+	function test_video_backed_animation_pause_action_lives_below_the_media() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Animated reaction",
+			"url": "https://x.com/example/status/1",
+			"mediaUrl": "https://video.twimg.com/tweet_video/example.mp4",
+			"mediaMime": "video/mp4",
+			"metadata": {
+				"previewProvider": "x",
+				"contentBranch": "animated-gif-video-backed",
+				"mediaPresentation": "animated-image"
+			}
+		}
+		card.previewIdentity = "message:animated-footer"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "direct"
+		inlineSession.state = "playing"
+		inlineSession.detached = false
+		inlineSession.active = true
+
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const toggle = findChild(card, "previewInlineAnimationToggleButton")
+		verify(panel !== null && toggle !== null)
+		tryCompare(toggle, "visible", true)
+		compare(toggle.text, "Pause animation")
+		const panelOrigin = panel.mapToItem(card, 0, 0)
+		const toggleOrigin = toggle.mapToItem(card, 0, 0)
+		verify(toggleOrigin.y >= panelOrigin.y + panel.height - 1)
+		toggle.clicked()
+		compare(inlineSession.pauseCalls, 1)
+		compare(inlineSession.state, "paused")
+		compare(toggle.text, "Resume animation")
+		toggle.clicked()
+		compare(inlineSession.playCalls, 1)
+		compare(inlineSession.state, "playing")
 	}
 
     function test_direct_media_gallery_is_bounded_and_typed() {
@@ -840,7 +1065,7 @@ TestCase {
 			  "accessibleDescription": "Loads the provider post in this preview",
 			  "popoutLabel": "Open in separate viewer",
 			  "popoutDescription": "Open the provider post in a separate window",
-			  "localPlayback": false, "stageVisible": false },
+			  "localPlayback": true, "stageVisible": true },
 			// Instagram historically used /p/ for video posts. Typed metadata must
 			// be able to recover the playable media kind from that generic path.
 			{ "path": "p/legacy-video", "metadataKind": "reel", "normalizedKind": "reel",
@@ -878,10 +1103,12 @@ TestCase {
 				"metadata": { "instagramMediaKind": fixture.metadataKind }
 			}
 			card.previewIdentity = "message:instagram-semantics:" + index
+			wait(0)
 			compare(card.instagramEmbedMediaKind, fixture.normalizedKind)
 			compare(card.normalizedEmbedAspect, fixture.aspect)
 			compare(card.localPlaybackSupported, fixture.localPlayback)
 			compare(card.inlineMediaStageVisible, fixture.stageVisible)
+			compare(card.providerPostPresentation, fixture.normalizedKind === "post")
 			verify(!card.sharedPlaybackSupported)
 			verify(!card.watchTogetherSupported)
 			compare(inlineButton.visible, fixture.stageVisible)
@@ -894,8 +1121,9 @@ TestCase {
 
 			if (overflowButton.visible)
 				overflowButton.clicked()
-			compare(popoutButton.visible, fixture.localPlayback)
-			if (fixture.localPlayback) {
+			const popoutExpected = fixture.localPlayback && fixture.normalizedKind !== "post"
+			compare(popoutButton.visible, popoutExpected)
+			if (popoutExpected) {
 				compare(popoutButton.text, fixture.popoutLabel)
 				compare(popoutButton.Accessible.description, fixture.popoutDescription)
 			}
@@ -908,9 +1136,6 @@ TestCase {
 				compare(inlinePlaySpy.count, inlineRequests)
 				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][0], embedUrl)
 				compare(inlinePlaySpy.signalArguments[inlineRequests - 1][1], "instagram")
-			} else {
-				compare(inlinePlaySpy.count, inlineRequests)
-				verify(findChild(card, "previewOpenButton").visible)
 			}
 		}
 	}
@@ -1266,6 +1491,89 @@ TestCase {
 		findChild(card, "previewOverflowMenu").close()
 	}
 
+	function test_platform_capability_hides_and_blocks_detached_media() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Inline-only clip",
+			"url": "https://provider.example/watch/inline-only",
+			"mediaUrl": "data:video/mp4;base64,AAAA", "mediaMime": "video/mp4"
+		}
+		card.previewIdentity = "message:inline-only"
+		card.mediaSessionId = "message:inline-only"
+		card.mediaSessionController = inlineSession
+		inlineSession.detachedPlaybackSupported = false
+		wait(0)
+
+		const popoutButton = findChild(card, "previewPopoutButton")
+		verify(popoutButton !== null)
+		verify(card.localPlaybackSupported)
+		verify(!card.hasPopoutAction)
+		verify(!popoutButton.visible)
+		card.requestCurrentDirectMediaPopout()
+		compare(popoutDirectMediaSpy.count, 0)
+	}
+
+	function test_stalled_real_poster_retries_before_requesting_hydration() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Real Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=10"
+		}
+		card.previewIdentity = "message:instagram-real-poster"
+		wait(0)
+
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10")
+		verify(card.recoverStalledEmbedPoster(Image.Loading))
+		compare(card.embedPosterRetryAttempt, 1)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10&qmlRetry=1")
+		verify(card.recoverStalledEmbedPoster(Image.Loading))
+		compare(card.embedPosterRetryAttempt, 2)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10&qmlRetry=2")
+		verify(!card.recoverStalledEmbedPoster(Image.Loading))
+		compare(imageRefreshSpy.count, 1)
+		verify(card.imageRefreshQueued)
+		verify(card.embedPosterFallbackActive)
+		compare(card.effectiveEmbedPosterSource, "")
+		verify(card.embedPosterUnavailable)
+		verify(!card.inlineMediaStageVisible)
+		verify(findChild(card, "previewOpenButton").visible)
+
+		// A backend hydration response may legitimately keep the same generation
+		// when the managed source is still registered. Give that settled source
+		// one bounded new QML request instead of permanently retaining local
+		// fallback state.
+		card.preview = {
+			"state": "ready", "title": "Real Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=10"
+		}
+		tryVerify(function() { return !card.embedPosterFallbackActive })
+		compare(card.embedPosterHydrationRetryCount, 1)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=10")
+		verify(card.inlineMediaStageVisible)
+
+		card.preview = {
+			"state": "ready", "title": "Refreshed Instagram poster",
+			"url": "https://www.instagram.com/p/real/",
+			"embedUrl": "https://www.instagram.com/p/real/embed/",
+			"embedKind": "instagram",
+			"thumbnailUrl": "image://mumble/instagram-real-poster?g=11"
+		}
+		wait(0)
+		verify(!card.embedPosterFallbackActive)
+		compare(card.effectiveEmbedPosterSource,
+			"image://mumble/instagram-real-poster?g=11")
+	}
+
 	function test_video_backed_animation_keeps_mp4_transport_but_uses_view_semantics() {
 		const card = previewLoader.item
 		card.preview = {
@@ -1373,7 +1681,7 @@ TestCase {
 		compare(card.providerLabel, "YouTube")
 	}
 
-	function test_active_social_provider_owns_details_without_duplicate_native_post() {
+	function test_active_social_provider_keeps_mumble_details_and_stable_geometry() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready",
@@ -1403,16 +1711,97 @@ TestCase {
 		verify(details !== null)
 		compare(details.providerToken, "instagram")
 		compare(details.presentation, "identity")
-		verify(card.inlineProviderOwnsDetails)
-		verify(!details.visible)
-		compare(details.height, 0)
+		verify(!card.inlineProviderOwnsDetails)
+		verify(details.visible)
+		verify(details.height > 0)
 		compare(card.inlineControlsEstimate, 0)
+		const activeCardHeight = card.implicitHeight
+		const activeDetailsHeight = details.height
 
 		inlineSession.active = false
 		inlineSession.detached = true
 		wait(0)
 		verify(!card.inlineProviderOwnsDetails)
 		verify(details.visible)
+		compare(details.height, activeDetailsHeight)
+		compare(card.implicitHeight, activeCardHeight)
+	}
+
+	function test_provider_post_keeps_native_transition_until_adapter_is_ready() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Stable Instagram transition",
+			"url": "https://www.instagram.com/reel/stable/",
+			"embedUrl": "https://www.instagram.com/reel/stable/embed/",
+			"embedKind": "instagram",
+			"embedAspect": "short",
+			"thumbnailUrl": "image://mumble/preview/stable",
+			"metadata": {
+				"provider": "instagram",
+				"instagramMediaKind": "reel",
+				"mediaPresentation": "provider-post-card"
+			}
+		}
+		card.previewIdentity = "message:instagram-stable-transition"
+		card.mediaSessionId = "message:instagram-stable-transition"
+		card.mediaSessionController = inlineSession
+		card.visualMediaFixtureMode = "loading"
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "instagram"
+		inlineSession.detached = false
+		inlineSession.active = true
+		wait(0)
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const details = findChild(card, "providerDetails")
+		verify(loader !== null && details !== null)
+		verify(card.inlineAdapterPending)
+		tryCompare(loader, "opacity", 0)
+		verify(details.visible)
+		const loadingHeight = card.implicitHeight
+
+		loader.item.visualFixtureMode = "active"
+		tryVerify(function() { return card.inlineAdapterReady })
+		tryCompare(loader, "opacity", 1)
+		compare(card.implicitHeight, loadingHeight)
+		verify(details.visible)
+	}
+
+	function test_x_uses_the_common_mumble_social_post_card() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Shared card state keeps scrolling stable.",
+			"subtitle": "Ada",
+			"description": "@ada",
+			"url": "https://x.com/ada/status/123",
+			"metadata": {
+				"provider": "x",
+				"xDisplayName": "Ada",
+				"xHandle": "@ada",
+				"xVerified": true
+			}
+		}
+		card.previewIdentity = "message:x-common-social-card"
+		wait(0)
+
+		const details = findChild(card, "providerDetails")
+		const socialPost = findChild(card, "providerSocialPost")
+		const xCard = findChild(card, "providerXCard")
+		const genericHeader = findChild(card, "previewGenericHeader")
+		verify(details !== null && socialPost !== null && genericHeader !== null)
+		compare(details.providerToken, "x")
+		compare(details.xPresentation, true)
+		compare(details.socialBespokePresentation, false)
+		compare(details.genericSocialPostPresentation, true)
+		compare(details.presentation, "socialPost")
+		verify(socialPost.visible)
+		verify(xCard === null || !xCard.visible)
+		compare(genericHeader.visible, false)
+		compare(findChild(card, "providerSocialAuthor").text, "Ada")
+		compare(findChild(card, "providerSocialPostText").text,
+			"Shared card state keeps scrolling stable.")
 	}
 
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {
@@ -1494,7 +1883,7 @@ TestCase {
 		}
 	}
 
-	function test_provider_embed_badges_keep_brand_and_twitch_state_visible_before_playback() {
+	function test_provider_identity_and_state_never_cover_the_media_surface() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready", "title": "Mumble Dev",
@@ -1508,45 +1897,15 @@ TestCase {
 		const providerBadge = findChild(card, "previewEmbedProviderBadge")
 		const stateBadge = findChild(card, "previewEmbedProviderState")
 		const posterScrim = findChild(card, "previewTwitchPosterScrim")
-		const scrimTop = findChild(card, "previewTwitchPosterScrimTop")
-		const scrimMiddle = findChild(card, "previewTwitchPosterScrimMiddle")
-		const scrimBottom = findChild(card, "previewTwitchPosterScrimBottom")
 		const details = findChild(card, "providerDetails")
-		verify(providerBadge !== null && stateBadge !== null && details !== null)
-		verify(posterScrim !== null && scrimTop !== null && scrimMiddle !== null
-			&& scrimBottom !== null)
-		tryCompare(providerBadge, "visible", true)
-		compare(providerBadge.presentation, "overlay")
-		tryCompare(stateBadge, "visible", true)
-		tryCompare(posterScrim, "visible", true)
+		verify(providerBadge === null && stateBadge === null && posterScrim === null)
+		verify(findChild(card, "previewTwitchPosterCopy") === null)
+		verify(details !== null)
 		compare(details.providerToken, "twitch")
 		compare(details.providerStateLabel, "Live")
 		compare(card.normalizedEmbedAspect, "twitch")
 		verify(card.embedMediaWidth <= 520)
 		verify(Math.abs(card.embedMediaWidth / card.embedMediaHeight - 4 / 3) < 0.01)
-		const posterCopy = findChild(card, "previewTwitchPosterCopy")
-		const posterTitle = findChild(card, "previewTwitchPosterTitle")
-		const posterNote = findChild(card, "previewTwitchPosterNote")
-		compare(posterCopy.visible, true)
-		compare(posterTitle.text, "Mumble Dev")
-		compare(posterNote.text,
-			"Twitch may require playback confirmation.")
-		compare(String(posterTitle.color), String(Theme.mediaOverlayTextStrong))
-		compare(String(posterNote.color), String(Theme.mediaOverlayTextMuted))
-		compare(posterCopy.Accessible.ignored, true)
-		compare(posterTitle.Accessible.ignored, true)
-		compare(posterNote.Accessible.ignored, true)
-		verify(scrimTop.color.a < 0.01)
-		verify(scrimMiddle.color.a >= 0.83)
-		verify(scrimBottom.color.a >= 0.95)
-		verify(Math.abs(providerBadge.color.r - details.providerAccent.r) < 0.01)
-		verify(Math.abs(providerBadge.color.g - details.providerAccent.g) < 0.01)
-		verify(Math.abs(providerBadge.color.b - details.providerAccent.b) < 0.01)
-		verify(Math.abs(providerBadge.color.a - 0.92) < 0.01)
-		verify(Math.abs(stateBadge.color.r - details.providerStateColor.r) < 0.01)
-		verify(Math.abs(stateBadge.color.g - details.providerStateColor.g) < 0.01)
-		verify(Math.abs(stateBadge.color.b - details.providerStateColor.b) < 0.01)
-		verify(Math.abs(stateBadge.color.a - 0.92) < 0.01)
 		compare(findChild(card, "previewProviderChip").visible, false)
 	}
 

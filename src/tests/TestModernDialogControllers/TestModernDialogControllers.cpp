@@ -3647,11 +3647,41 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
-	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 11")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
+	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
+	QVERIFY(source.contains(QStringLiteral("data-old-hires")));
+	QVERIFY(source.contains(QStringLiteral("data-a-dynamic-image")));
+	QVERIFY(source.contains(QStringLiteral(
+		"amazonProductImageItemsFromHtml(url, html)")));
+	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationComplete")));
+	QVERIFY(source.contains(QStringLiteral("richPreviewClientHydrationVersion")));
+	QVERIFY(source.contains(QStringLiteral("QNetworkRequest::AlwaysNetwork")));
+	QVERIFY(source.contains(QStringLiteral(
+		"constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024")));
+	QVERIFY(source.contains(QStringLiteral(
+		"scope == PersistentChatPreviewHtmlScope::BoundedDocument")));
+	QVERIFY(source.contains(QStringLiteral(
+		"}, PersistentChatPreviewHtmlScope::BoundedDocument);")));
+	QVERIFY(source.contains(QStringLiteral(
+		"const PersistentChatPreviewHtmlScope htmlScope =")));
+	QVERIFY(source.contains(QStringLiteral(
+		"richPreviewProviderForUrl(previewUrl)")));
+	QVERIFY(source.contains(QStringLiteral(
+		": PersistentChatPreviewHtmlScope::HeadOnly;")));
+	QVERIFY(source.contains(QStringLiteral(
+		"}, htmlScope);")));
+	QVERIFY(source.contains(QStringLiteral("instagramPosterUrl")));
+	QVERIFY(source.contains(QStringLiteral("requestPersistentChatPreviewPosterImage(")));
 	QVERIFY(source.contains(QStringLiteral(
 		"providerMetadata.insert(QStringLiteral(\"previewProvider\"), target->providerKey)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
+	QVERIFY(source.contains(QStringLiteral("redditPostOEmbedUrl(url)")));
+	QVERIFY(source.contains(QStringLiteral("redditPostEmbedUrl(previewUrl)")));
+	QVERIFY(source.contains(QStringLiteral("redditVideoIdFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral("redditPosterUrlFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"https://www.youtube-nocookie.com/embed/%1")));
 	QVERIFY(source.contains(QStringLiteral(

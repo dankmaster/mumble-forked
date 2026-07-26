@@ -53,6 +53,30 @@ Rectangle {
 	signal externalRequested()
 	signal exitConfirmed(string disposition)
 
+	Timer {
+		id: closePromptRestoreTimer
+		interval: 0
+		repeat: false
+		property var candidate: null
+		onTriggered: {
+			const target = candidate && candidate.forceActiveFocus && candidate.visible
+				&& candidate.enabled ? candidate : closeButton
+			candidate = null
+			if (target && target.visible && target.enabled)
+				target.forceActiveFocus(Qt.PopupFocusReason)
+		}
+	}
+
+	Timer {
+		id: closePromptInitialFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (mediaCloseCancelButton.visible && mediaCloseCancelButton.enabled)
+				mediaCloseCancelButton.forceActiveFocus(Qt.PopupFocusReason)
+		}
+	}
+
 	function formatTime(seconds) {
 		const safe = Math.max(0, Math.floor(Number(seconds) || 0))
 		const hours = Math.floor(safe / 3600)
@@ -119,12 +143,8 @@ Rectangle {
 		focusBeforeClosePrompt = null
 		if (!shouldRestore)
 			return
-		Qt.callLater(function() {
-			const target = candidate && candidate.forceActiveFocus && candidate.visible
-				&& candidate.enabled ? candidate : closeButton
-			if (target && target.visible && target.enabled)
-				target.forceActiveFocus(Qt.PopupFocusReason)
-		})
+		closePromptRestoreTimer.candidate = candidate
+		closePromptRestoreTimer.restart()
 	}
 
 	function focusInitialControl() {
@@ -139,6 +159,11 @@ Rectangle {
 				return true
 		}
 		return false
+	}
+
+	Component.onDestruction: {
+		closePromptRestoreTimer.stop()
+		closePromptInitialFocusTimer.stop()
 	}
 
 	implicitHeight: embedded
@@ -503,9 +528,7 @@ Rectangle {
 		width: Math.min(460, parent ? parent.width - Theme.space5 * 2 : 460)
 		title: session.sharedHost ? qsTr("End this shared session?") : qsTr("Leave shared playback?")
 		onAboutToShow: if (!root.focusBeforeClosePrompt) root.rememberClosePromptFocus()
-		onOpened: Qt.callLater(function() {
-			mediaCloseCancelButton.forceActiveFocus(Qt.PopupFocusReason)
-		})
+		onOpened: closePromptInitialFocusTimer.restart()
 		onClosed: root.handleClosePromptClosed()
 		header: null
 		footer: null

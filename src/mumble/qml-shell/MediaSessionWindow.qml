@@ -45,16 +45,30 @@ ApplicationWindow {
 		return String(mediaSession.provider || "").toLowerCase() === "direct"
 			&& (mime === "application/vnd.apple.mpegurl" || mime === "application/dash+xml")
 	}
-	readonly property bool nativeDirectMedia: providerSurfaceRequested
+	readonly property bool directMediaDocument: mediaSession.active && hasMediaSource
+		&& mediaSession.error.length === 0
 		&& String(mediaSession.provider || "").toLowerCase() === "direct"
-		&& !adaptiveManifest
+	// Keep direct playback out of QtMultimedia. The local WebEngine document
+	// owns raw audio/video and adaptive manifests so closing or recycling the
+	// QML surface cannot deadlock Windows Media Foundation teardown.
+	readonly property bool nativeDirectMedia: false
 	readonly property string rendererDocumentUrl: playbackDocumentUrl()
+	readonly property string audioRendererDocumentUrl: audioPlaybackDocumentUrl()
+	readonly property bool isolatedMediaDocument: directMediaDocument
+		&& /^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(rendererDocumentUrl)
+	readonly property bool isolatedAudioDocument:
+		/^qrc:\/media-player\/AdaptiveMediaPlayer\.html(?:#|$)/i.test(audioRendererDocumentUrl)
 	readonly property bool providerSurfaceRequested: normalizedVisualFixtureMode.length === 0
 		&& mediaSession.active && hasMediaSource && mediaSession.error.length === 0
 	readonly property bool providerSurfaceAllowed: providerSurfaceRequested
 		&& !nativeDirectMedia && mediaRuntimeReady
 	readonly property bool webSurfaceActive: playerLoader.active
 	readonly property bool nativeSurfaceActive: nativePlayerLoader.active
+	// A loaded provider document must stay directly visible while the deeper
+	// media/transport probe settles. Do not cover real provider controls,
+	// consent, or verification UI with Mumble-owned loading chrome.
+	readonly property bool providerDocumentPresented: !nativeDirectMedia
+		&& rendererHealthy && mediaSession.loadProgress >= 99
 	readonly property string rendererBackend: visualFixtureRendererReady ? "fixture"
 		: nativeSurfaceActive ? "native" : webSurfaceActive ? "webengine" : "none"
 	readonly property bool secondaryAudioActive: nativeSurfaceActive && nativePlayerLoader.item
@@ -126,7 +140,7 @@ ApplicationWindow {
 	property double _documentReadyProbeStartedAt: 0
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
-	property int documentReadyProbeMaxAttempts: adaptiveManifest ? 400 : 160
+	property int documentReadyProbeMaxAttempts: isolatedMediaDocument ? 400 : 160
 	property int _transportVerifiedGeneration: -1
 	property int _playbackVerifiedGeneration: -1
 	property string _surfaceVerificationState: "idle"
@@ -149,6 +163,32 @@ ApplicationWindow {
 	property bool _rendererHealthy: false
 	property string _documentUrl: ""
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
+
+	Timer {
+		id: initialControlsFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: controls.focusInitialControl()
+	}
+
+	Timer {
+		id: desiredPlaybackStateTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: {
+			if (generation === mediaWindow.mediaGeneration)
+				mediaWindow.applyDesiredPlaybackState(generation)
+		}
+	}
+
+	Timer {
+		id: mediaDocumentProbeTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		onTriggered: mediaWindow.probeMediaDocumentReady(generation)
+	}
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised
@@ -220,11 +260,14 @@ ApplicationWindow {
 				minimumWidth, minimumHeight)
 		if (!restored)
 			applyInitialWindowSize()
-		Qt.callLater(controls.focusInitialControl)
+		initialControlsFocusTimer.restart()
 	}
 	onSharedGuestPlaybackLockedChanged: if (sharedGuestPlaybackLocked)
-		Qt.callLater(controls.focusInitialControl)
+		initialControlsFocusTimer.restart()
 	Component.onDestruction: {
+		initialControlsFocusTimer.stop()
+		desiredPlaybackStateTimer.stop()
+		mediaDocumentProbeTimer.stop()
 		if (nativePlayerLoader.item)
 			nativePlayerLoader.item.shutdown()
 		invalidateMediaDocument()
@@ -356,7 +399,8 @@ ApplicationWindow {
 		if (playerLoader.item && playerLoader.item.loadGeneration === generation)
 			playerLoader.item.documentReady = true
 		mediaSession.reportLoadProgress(100)
-		Qt.callLater(function() { mediaWindow.applyDesiredPlaybackState(generation) })
+		desiredPlaybackStateTimer.generation = generation
+		desiredPlaybackStateTimer.restart()
 		return true
 	}
 
@@ -384,7 +428,7 @@ ApplicationWindow {
 		if (generation !== _mediaGeneration)
 			return false
 		const evaluation = MediaPlaybackProbe.classify(value,
-			mediaSession.provider, adaptiveManifest,
+			mediaSession.provider, isolatedMediaDocument,
 			background ? 0 : documentReadyProbeAttempts,
 			background ? 2147483647 : documentReadyProbeMaxAttempts)
 		_surfaceVerificationEvidence = String(evaluation.evidence || "")
@@ -446,7 +490,7 @@ ApplicationWindow {
 		try {
 			webPlayer.runJavaScript(
 				MediaPlaybackProbe.probeScript(mediaSession.provider,
-					adaptiveManifest),
+					isolatedMediaDocument),
 				function(value) {
 					if (mediaWindow._documentReadyProbeGeneration !== generation)
 						return
@@ -565,6 +609,15 @@ ApplicationWindow {
 				return documentUrl
 		}
 		return String(mediaSession.url || "")
+	}
+
+	function audioPlaybackDocumentUrl() {
+		if (mediaProfileFactory && typeof mediaProfileFactory.audioDocumentUrl !== "undefined") {
+			const documentUrl = String(mediaProfileFactory.audioDocumentUrl || "")
+			if (documentUrl.length > 0)
+				return documentUrl
+		}
+		return String(mediaSession.audioUrl || "")
 	}
 
 	function navigationRequestAllowed(requestUrl, firstPartyUrl, verificationMode) {
@@ -904,7 +957,7 @@ ApplicationWindow {
 			audioPlayerLoader.item.documentReady = false
 			audioPlayerLoader.item.loadGeneration = generation
 			audioPlayerLoader.item.acceptedNavigationGeneration = generation
-			audioPlayerLoader.item.acceptedNavigationUrl = String(mediaSession.audioUrl || "")
+			audioPlayerLoader.item.acceptedNavigationUrl = audioRendererDocumentUrl
 			audioPlayerLoader.item.reload()
 		}
 	}
@@ -927,7 +980,7 @@ ApplicationWindow {
 			audioPlayerLoader.item.documentReady = false
 			audioPlayerLoader.item.loadGeneration = generation
 			audioPlayerLoader.item.acceptedNavigationGeneration = generation
-			audioPlayerLoader.item.acceptedNavigationUrl = String(mediaSession.audioUrl || "")
+			audioPlayerLoader.item.acceptedNavigationUrl = audioRendererDocumentUrl
 			audioPlayerLoader.item.reload()
 		}
 	}
@@ -1000,7 +1053,7 @@ ApplicationWindow {
 		anchors.left: parent.left
 		anchors.right: parent.right
 		anchors.top: parent.top
-		anchors.bottom: verificationStrip.visible ? verificationStrip.top : controls.top
+		anchors.bottom: secondaryAudioWarningPanel.visible ? secondaryAudioWarningPanel.top : controls.top
 		color: Theme.mediaCanvas
 		border.color: mediaWindow.rendererState === "error"
 			? Theme.withAlpha(Theme.danger, 0.55) : Theme.surfaceBorder
@@ -1008,6 +1061,8 @@ ApplicationWindow {
 		clip: true
 		Accessible.role: Accessible.Pane
 		Accessible.name: qsTr("%1 detached media player").arg(mediaWindow.providerLabel)
+		Accessible.description: mediaWindow.providerVerificationRequired
+			? mediaWindow.surfaceVerificationDetail : ""
 	}
 
 	Rectangle {
@@ -1112,7 +1167,7 @@ ApplicationWindow {
 			activeFocusOnTab: mediaWindow.providerInputEnabled
 			Accessible.ignored: !mediaWindow.providerInputEnabled
 			settings.playbackRequiresUserGesture: false
-			settings.localContentCanAccessRemoteUrls: mediaWindow.adaptiveManifest
+			settings.localContentCanAccessRemoteUrls: mediaWindow.isolatedMediaDocument
 			onLoadProgressChanged: {
 				if (loadGeneration !== mediaWindow.mediaGeneration
 						|| !mediaWindow.rendererHealthy || !mediaSession.active)
@@ -1120,8 +1175,10 @@ ApplicationWindow {
 				// Reserve 100 for the shared media-surface probe. A completed HTML
 				// request can still be a provider challenge or error document.
 				mediaSession.reportLoadProgress(Math.min(99, loadProgress))
-				if (loadProgress === 100)
-					Qt.callLater(function() { mediaWindow.probeMediaDocumentReady(loadGeneration) })
+				if (loadProgress === 100) {
+					mediaDocumentProbeTimer.generation = loadGeneration
+					mediaDocumentProbeTimer.restart()
+				}
 			}
             onLoadingChanged: function(request) {
 				const callbackGeneration = loadGeneration > 0 ? loadGeneration : mediaWindow.mediaGeneration
@@ -1148,9 +1205,8 @@ ApplicationWindow {
 						mediaSession.reportError(request.errorString)
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					mediaSession.reportLoadProgress(99)
-					Qt.callLater(function() {
-						mediaWindow.probeMediaDocumentReady(generation)
-					})
+					mediaDocumentProbeTimer.generation = generation
+					mediaDocumentProbeTimer.restart()
 				}
             }
             onRenderProcessTerminated: function(status, exitCode) {
@@ -1292,28 +1348,6 @@ ApplicationWindow {
 			propagateComposedEvents: false
 			onWheel: function(wheel) { wheel.accepted = true }
 		}
-
-		Rectangle {
-			anchors.horizontalCenter: parent.horizontalCenter
-			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space3
-			width: Math.min(parent.width - Theme.space4 * 2, guestPlaybackLabel.implicitWidth + Theme.space4)
-			height: guestPlaybackLabel.implicitHeight + Theme.space2
-			radius: height / 2
-			color: Theme.withAlpha(Theme.embedOverlayBase, 0.88)
-			border.color: mediaWindow.providerAccentBorder
-			Label {
-				id: guestPlaybackLabel
-				anchors.centerIn: parent
-				width: Math.min(implicitWidth, parent.width - Theme.space3)
-				text: qsTr("Host controls playback · local audio controls remain available")
-				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				elide: Text.ElideRight
-			}
-		}
 	}
 
 	Timer {
@@ -1361,11 +1395,12 @@ ApplicationWindow {
 			Accessible.ignored: true
 			profile: mediaWindow.mediaProfileFactory
 				? mediaWindow.mediaProfileFactory.audioProfile : null
-            url: mediaSession.audioUrl
+            url: mediaWindow.audioRendererDocumentUrl
             settings.playbackRequiresUserGesture: false
+			settings.localContentCanAccessRemoteUrls: mediaWindow.isolatedAudioDocument
             onLoadingChanged: function(request) {
 				const callbackGeneration = loadGeneration > 0 ? loadGeneration : mediaWindow.mediaGeneration
-				if (!mediaWindow.requestUrlMatches(request.url, mediaSession.audioUrl,
+				if (!mediaWindow.requestUrlMatches(request.url, mediaWindow.audioRendererDocumentUrl,
 						acceptedNavigationUrl, acceptedNavigationGeneration, callbackGeneration))
 					return
 				if (request.status === WebEngineView.LoadStartedStatus) {
@@ -1386,7 +1421,8 @@ ApplicationWindow {
 						request.errorString || qsTr("The separate audio track could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					documentReady = true
-					Qt.callLater(function() { mediaWindow.applyDesiredPlaybackState(generation) })
+					desiredPlaybackStateTimer.generation = generation
+					desiredPlaybackStateTimer.restart()
 				}
             }
             onRenderProcessTerminated: function(status, exitCode) {
@@ -1414,7 +1450,8 @@ ApplicationWindow {
             onCertificateError: function(error) { error.rejectCertificate() }
             onContextMenuRequested: function(request) { request.accepted = true }
             onNavigationRequested: function(request) {
-				if (!mediaWindow.navigationRequestAllowed(request.url, mediaSession.audioUrl)) {
+				if (!mediaWindow.navigationRequestAllowed(
+						request.url, mediaWindow.audioRendererDocumentUrl)) {
                     request.action = WebEngineNavigationRequest.IgnoreRequest
 					return
 				}
@@ -1431,80 +1468,15 @@ ApplicationWindow {
     }
 
 	Rectangle {
-		id: mediaProviderBadge
-		objectName: "mediaSessionProviderBadge"
-		parent: playerCanvas
-		anchors.left: parent.left
-		anchors.top: parent.top
-		anchors.margins: Theme.space3
-		width: providerBadgeRow.implicitWidth + Theme.space3
-		height: 28
-		radius: height / 2
-		visible: mediaWindow.rendererState === "active"
-		color: mediaWindow.providerAccent
-		border.color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.24)
-		z: 3
-		Accessible.role: Accessible.StaticText
-		Accessible.name: mediaWindow.detachedProviderAccessibleName()
-		Row {
-			id: providerBadgeRow
-			anchors.centerIn: parent
-			spacing: Theme.space1
-			Label {
-				objectName: "mediaSessionProviderMark"
-				anchors.verticalCenter: parent.verticalCenter
-				text: mediaWindow.providerMark
-				textFormat: Text.PlainText
-				color: mediaWindow.providerOnAccent
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.Bold
-				Accessible.ignored: true
-			}
-			Rectangle {
-				anchors.verticalCenter: parent.verticalCenter
-				width: 1
-				height: 14
-				visible: mediaProviderLabel.visible
-				color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.34)
-			}
-			Label {
-				id: mediaProviderLabel
-				objectName: "mediaSessionProviderLabel"
-				visible: !mediaWindow.compactProviderChrome
-				textFormat: Text.PlainText
-				text: mediaWindow.providerLabel
-				color: mediaWindow.providerOnAccent
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "mediaSessionSurfaceStateLabel"
-				textFormat: Text.PlainText
-				text: mediaSession.sharedAvailable && mediaSession.sharedJoined
-					? (mediaSession.sharedHost ? qsTr("· HOSTING") : qsTr("· SYNCED"))
-					: qsTr("· DETACHED")
-				color: Theme.withAlpha(mediaWindow.providerOnAccent, 0.82)
-				font.pixelSize: Theme.fontCaption
-				font.weight: Font.DemiBold
-				Accessible.ignored: true
-			}
-		}
-	}
-
-	Rectangle {
+		id: secondaryAudioWarningPanel
 		objectName: "mediaSessionSecondaryAudioWarning"
-		parent: playerCanvas
-		anchors.left: playerLoader.left
-		anchors.right: playerLoader.right
-		anchors.bottom: playerLoader.bottom
-		anchors.margins: Theme.space3
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: controls.top
 		height: secondaryAudioWarningRow.implicitHeight + Theme.space2
 		visible: mediaWindow.secondaryAudioDegraded && mediaSession.active
-		radius: Theme.innerRadius
-		color: Theme.withAlpha(Theme.embedOverlayBase, 0.94)
+		color: Theme.embedSurface
 		border.color: Theme.withAlpha(Theme.warning, 0.62)
-		z: 7
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Video continues without the separate audio track")
 		Accessible.description: mediaWindow.secondaryAudioWarning
@@ -1524,7 +1496,7 @@ ApplicationWindow {
 				Layout.fillWidth: true
 				text: qsTr("Video remains available. %1").arg(mediaWindow.secondaryAudioWarning)
 				textFormat: Text.PlainText
-				color: Theme.mediaOverlayTextStrong
+				color: Theme.textMain
 				font.pixelSize: Theme.fontCaption
 				wrapMode: Text.Wrap
 			}
@@ -1538,6 +1510,7 @@ ApplicationWindow {
 		anchors.fill: playerLoader
 		visible: mediaWindow.rendererState === "loading"
 			&& !mediaWindow.providerVerificationRequired
+			&& !mediaWindow.providerDocumentPresented
 		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.96)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
@@ -1773,56 +1746,6 @@ ApplicationWindow {
             }
         }
     }
-
-	Rectangle {
-		id: verificationStrip
-		objectName: "mediaSessionVerificationStrip"
-		anchors.left: parent.left
-		anchors.right: parent.right
-		anchors.bottom: controls.top
-		visible: mediaWindow.providerVerificationRequired
-		height: visible
-			? Math.max(Theme.controlHeight + Theme.space2,
-				verificationRow.implicitHeight + Theme.space2) : 0
-		color: Theme.embedSurface
-		border.color: mediaWindow.providerAccentBorder
-		z: 8
-		Accessible.role: Accessible.AlertMessage
-		Accessible.name: qsTr("%1 verification required").arg(mediaWindow.providerLabel)
-		Accessible.description: mediaWindow.surfaceVerificationDetail
-
-		RowLayout {
-			id: verificationRow
-			anchors.fill: parent
-			anchors.leftMargin: Theme.space3
-			anchors.rightMargin: Theme.space2
-			anchors.topMargin: Theme.space1
-			anchors.bottomMargin: Theme.space1
-			spacing: Theme.space2
-
-			ModernIcon {
-				name: "warning"
-				size: 18
-				color: Theme.warning
-				Accessible.ignored: true
-			}
-			Label {
-				objectName: "mediaSessionVerificationText"
-				Layout.fillWidth: true
-				text: mediaWindow.surfaceVerificationDetail
-				textFormat: Text.PlainText
-				color: Theme.textMain
-				font.pixelSize: Theme.fontCaption
-				wrapMode: Text.Wrap
-			}
-			ModernButton {
-				objectName: "mediaSessionVerificationReloadButton"
-				text: qsTr("Reload player")
-				Accessible.description: qsTr("Reload after completing provider verification")
-				onClicked: mediaWindow.retryMediaRenderer()
-			}
-		}
-	}
 
     MediaSessionControls {
         id: controls

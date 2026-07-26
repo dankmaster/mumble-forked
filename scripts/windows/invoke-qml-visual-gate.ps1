@@ -1492,6 +1492,10 @@ foreach ($case in $selectedCases) {
 				-not [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_embed_provider)
 			$expectedImageObjectName = if ($inlineMediaStageExpected) { "previewEmbedPoster" }
 				elseif ($richPreviewVariant -eq "steam") { "providerSteamHeroImage" }
+				elseif ($richPreviewVariant -in @(
+					"product", "vehicle", "property", "marketplace"
+				)) { "providerCommerceHeroImage" }
+				elseif ($richPreviewVariant -eq "article") { "providerArticleHeroImage" }
 				else { "previewCompactImage" }
 			$matchingVisibleImages = @($visibleImages | Where-Object {
 				[string]$_.objectName -eq $expectedImageObjectName -and [string]$_.statusName -eq "ready" -and

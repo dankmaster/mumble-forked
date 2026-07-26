@@ -3787,6 +3787,9 @@ struct PersistentChatPreviewOEmbedTarget {
 	bool socialPost = false;
 };
 
+std::optional< QString > redditPostIdFromUrl(const QUrl &url);
+QUrl redditPostOEmbedUrl(const QUrl &postUrl);
+
 struct PersistentChatPreviewPlayableMediaMeta {
 	QString url;
 	QString mime;
@@ -4670,6 +4673,13 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		siteLabel     = QObject::tr("SoundCloud");
 		fallbackTitle = QObject::tr("SoundCloud track");
 		openLabel     = QObject::tr("Open on SoundCloud");
+	} else if (redditPostIdFromUrl(url)) {
+		endpoint      = redditPostOEmbedUrl(url);
+		providerKey   = QStringLiteral("reddit");
+		siteLabel     = QObject::tr("Reddit");
+		fallbackTitle = QObject::tr("Reddit post");
+		openLabel     = QObject::tr("Open on Reddit");
+		socialPost    = true;
 	} else if (host == QLatin1String("streamable.com")) {
 		setUrlEndpoint(QStringLiteral("https://api.streamable.com/oembed.json"));
 		providerKey   = QStringLiteral("streamable");
@@ -4730,8 +4740,8 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 11;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 8;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 9;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
@@ -5558,7 +5568,12 @@ void insertPreviewMetadataValue(QVariantMap &metadata, const QString &key, const
 }
 
 QString decodedPreviewText(const QString &text);
-QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType);
+enum class PersistentChatPreviewHtmlScope {
+	HeadOnly,
+	BoundedDocument,
+};
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType,
+						   PersistentChatPreviewHtmlScope scope);
 QString extractHtmlTitle(const QString &html);
 QString trimmedPreviewText(QString text, int maxLength);
 bool previewDescriptionIsPlaceholder(const QString &description);
@@ -8412,6 +8427,39 @@ QString amazonProductImageFromHtml(const QString &html) {
 	return image;
 }
 
+QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString &html) {
+	QVariantList images;
+	QSet< QString > seenImages;
+
+	static const QRegularExpression s_oldHiresPattern(
+		QLatin1String("\\bdata-old-hires\\s*=\\s*(['\"])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	QRegularExpressionMatchIterator oldHiresMatches = s_oldHiresPattern.globalMatch(html);
+	while (oldHiresMatches.hasNext() && images.size() < 16) {
+		appendPreviewImageItem(images, seenImages, baseUrl, oldHiresMatches.next().captured(2));
+	}
+
+	static const QRegularExpression s_dynamicImagesAttributePattern(
+		QLatin1String("\\bdata-a-dynamic-image\\s*=\\s*(['\"])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	static const QRegularExpression s_dynamicImageUrlPattern(
+		QLatin1String("https?://[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp)(?:\\?[^\"'<>\\\\\\s]*)?"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator dynamicAttributes = s_dynamicImagesAttributePattern.globalMatch(html);
+	while (dynamicAttributes.hasNext() && images.size() < 16) {
+		const QString dynamicImages = decodedPreviewText(dynamicAttributes.next().captured(2));
+		QRegularExpressionMatchIterator imageUrls = s_dynamicImageUrlPattern.globalMatch(dynamicImages);
+		while (imageUrls.hasNext() && images.size() < 16) {
+			appendPreviewImageItem(images, seenImages, baseUrl, imageUrls.next().captured(0));
+		}
+	}
+
+	if (images.isEmpty()) {
+		appendPreviewImageItem(images, seenImages, baseUrl, amazonProductImageFromHtml(html));
+	}
+	return images;
+}
+
 QString gameStoreMetaPriceText(const QHash< QString, QString > &metaTags) {
 	const QString amount = previewMetaValue(metaTags,
 											QStringList { QStringLiteral("product:price:amount"),
@@ -8763,6 +8811,10 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), productImage);
 		QVariantList productImages;
 		QSet< QString > seenProductImages;
+		if (amazonProduct) {
+			appendPreviewImageItems(productImages, seenProductImages, url,
+									amazonProductImageItemsFromHtml(url, html));
+		}
 		appendPreviewImageItems(productImages, seenProductImages, url, productData.images);
 		if (!productImage.isEmpty()) {
 			appendPreviewImageItem(productImages, seenProductImages, url, productImage);
@@ -9018,6 +9070,31 @@ QVariantMap previewMetadataWithSwedishData(QVariantMap metadata, const QUrl &url
 		metadata.insert(it.key(), it.value());
 	}
 	return metadata;
+}
+
+bool richPreviewClientHydrationComplete(const QUrl &url, const QVariantMap &metadata) {
+	if (isAmazonPreviewUrl(url)) {
+		return !metadata.value(QStringLiteral("productTitle")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("productImages")).toList().isEmpty();
+	}
+	if (isBlocketPreviewUrl(url)
+		&& metadata.value(QStringLiteral("previewProvider")).toString() == QLatin1String("blocket")) {
+		return !metadata.value(QStringLiteral("listingTitle")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("listingPrice")).toString().trimmed().isEmpty()
+			   && !metadata.value(QStringLiteral("listingImages")).toList().isEmpty();
+	}
+	return true;
+}
+
+QUrl richPreviewClientPageUrl(const QUrl &url) {
+	QUrl pageUrl = flashbackPreviewPageUrl(url);
+	if (const std::optional< QString > productId = amazonProductIdFromUrl(url); productId) {
+		pageUrl.setScheme(QStringLiteral("https"));
+		pageUrl.setPath(QStringLiteral("/dp/%1").arg(*productId));
+		pageUrl.setQuery(QString());
+		pageUrl.setFragment(QString());
+	}
+	return pageUrl;
 }
 
 bool isBlueskyPostUrl(const QUrl &url) {
@@ -9590,6 +9667,68 @@ std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
 	}
 
 	return videoId;
+}
+
+std::optional< QString > redditPostIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("reddit.com") && host != QLatin1String("old.reddit.com")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	for (int index = 0; index + 1 < segments.size(); ++index) {
+		if (segments.at(index).compare(QLatin1String("comments"), Qt::CaseInsensitive) != 0) {
+			continue;
+		}
+		const QString postId = segments.at(index + 1);
+		if (isValidRedditVideoId(postId)) {
+			return postId;
+		}
+		break;
+	}
+
+	return std::nullopt;
+}
+
+QUrl redditPostOEmbedUrl(const QUrl &postUrl) {
+	QUrl endpoint(QStringLiteral("https://www.reddit.com/oembed"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("url"), postUrl.toString(QUrl::FullyEncoded));
+	endpoint.setQuery(query);
+	return endpoint;
+}
+
+QUrl redditPostEmbedUrl(const QUrl &postUrl) {
+	QUrl embedUrl;
+	embedUrl.setScheme(QStringLiteral("https"));
+	embedUrl.setHost(QStringLiteral("embed.reddit.com"));
+	embedUrl.setPath(postUrl.path());
+	return embedUrl;
+}
+
+QString redditVideoIdFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_redditMediaUrlPattern(
+		QLatin1String(R"(https://v\.redd\.it/([A-Za-z0-9_-]{5,64}))"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_redditMediaUrlPattern.match(html);
+	const QString videoId               = match.hasMatch() ? match.captured(1) : QString();
+	return isValidRedditVideoId(videoId) ? videoId : QString();
+}
+
+QUrl redditPosterUrlFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_redditPosterPattern(
+		QLatin1String(R"(\bposter\s*=\s*["'](https://[^"']+)["'])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_redditPosterPattern.match(html);
+	if (!match.hasMatch()) {
+		return {};
+	}
+	const QString decoded = QTextDocumentFragment::fromHtml(match.captured(1)).toPlainText().trimmed();
+	const QUrl posterUrl(decoded);
+	return posterUrl.isValid() && posterUrl.scheme().toLower() == QLatin1String("https")
+			   && isSafePreviewTarget(posterUrl)
+		? posterUrl
+		: QUrl();
 }
 
 QUrl redditVideoMetadataUrl(const QString &videoId) {
@@ -11750,6 +11889,7 @@ QString decodedPreviewText(const QString &text) {
 }
 
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_HEAD_MAX_BYTES = 512 * 1024;
+constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_TAG_MAX_CHARS  = 16 * 1024;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_KEY_MAX_CHARS  = 128;
 constexpr qsizetype PERSISTENT_CHAT_PREVIEW_HTML_VALUE_MAX_CHARS = 8 * 1024;
@@ -11787,8 +11927,12 @@ QString previewHtmlCharsetFromBytes(const QByteArray &bytes) {
 	return (!match.captured(1).isEmpty() ? match.captured(1) : match.captured(2)).trimmed().toLower();
 }
 
-QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType) {
-	const QByteArray boundedBytes     = persistentChatPreviewHtmlHeadPrefix(bytes);
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType,
+						   PersistentChatPreviewHtmlScope scope) {
+	const QByteArray boundedBytes =
+		scope == PersistentChatPreviewHtmlScope::BoundedDocument
+			? bytes.left(PERSISTENT_CHAT_PREVIEW_HTML_DOCUMENT_MAX_BYTES)
+			: persistentChatPreviewHtmlHeadPrefix(bytes);
 	const QString contentTypeCharset = previewHtmlCharsetFromContentType(contentType);
 	const QString charset = !contentTypeCharset.isEmpty() ? contentTypeCharset : previewHtmlCharsetFromBytes(boundedBytes);
 	if (charset == QLatin1String("iso-8859-1") || charset == QLatin1String("latin1")
@@ -12085,6 +12229,7 @@ struct InstagramPreviewMetadata {
 	QString caption;
 	QString createdAt;
 	QString mediaKind;
+	QString posterUrl;
 	QString avatarUrl;
 	QString ownerUserId;
 	std::optional< qlonglong > likeCount;
@@ -12097,6 +12242,11 @@ InstagramPreviewMetadata instagramPreviewMetadataFromMetaTags(const QUrl &url,
 	InstagramPreviewMetadata metadata;
 	metadata.mediaKind = instagramPreviewMediaKind(url);
 	metadata.ownerUserId = metaTags.value(QLatin1String("instapp:owner_user_id")).trimmed();
+	const QUrl posterUrl(previewImageMetaTag(metaTags));
+	if (posterUrl.isValid() && posterUrl.scheme().toLower() == QLatin1String("https")
+		&& isSafePreviewTarget(posterUrl)) {
+		metadata.posterUrl = posterUrl.toString(QUrl::FullyEncoded);
+	}
 
 	const QString twitterTitle = metaTags.value(QLatin1String("twitter:title")).trimmed();
 	static const QRegularExpression s_twitterTitlePattern(
@@ -12187,6 +12337,7 @@ void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, c
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramHandle"), instagram.handle);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCaption"), instagram.caption);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCreatedAt"), instagram.createdAt);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramPosterUrl"), instagram.posterUrl);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramAvatarUrl"), instagram.avatarUrl);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramOwnerUserId"), instagram.ownerUserId);
 	if (instagram.likeCount) {
@@ -12236,10 +12387,10 @@ struct PersistentChatPreviewHtmlParseResult {
 	std::optional< InstagramPreviewMetadata > instagramMetadata;
 };
 
-PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(const QByteArray &bytes,
-														 const QString &contentType) {
+PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(
+	const QByteArray &bytes, const QString &contentType, PersistentChatPreviewHtmlScope scope) {
 	PersistentChatPreviewHtmlParseResult result;
-	result.html     = decodedPreviewHtml(bytes, contentType);
+	result.html     = decodedPreviewHtml(bytes, contentType, scope);
 	result.metaTags = extractMetaTags(result.html);
 	result.title    = extractHtmlTitle(result.html);
 	return result;
@@ -12248,12 +12399,14 @@ PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(const QByteA
 void parsePersistentChatPreviewHtmlAsync(
 	QObject *context, const QString &group, const QString &key, QByteArray bytes, QString contentType,
 	std::function< void(PersistentChatPreviewHtmlParseResult &) > transform,
-	std::function< void(PersistentChatPreviewHtmlParseResult) > completion) {
+	std::function< void(PersistentChatPreviewHtmlParseResult) > completion,
+	PersistentChatPreviewHtmlScope scope = PersistentChatPreviewHtmlScope::HeadOnly) {
 	const qint64 estimatedBytes = bytes.size();
 	persistentChatPreviewWorkerQueue().submit< PersistentChatPreviewHtmlParseResult >(
 		context, group, key, estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
-		[bytes = std::move(bytes), contentType = std::move(contentType), transform = std::move(transform)]() {
-			PersistentChatPreviewHtmlParseResult result = parsePersistentChatPreviewHtml(bytes, contentType);
+		[bytes = std::move(bytes), contentType = std::move(contentType), transform = std::move(transform), scope]() {
+			PersistentChatPreviewHtmlParseResult result =
+				parsePersistentChatPreviewHtml(bytes, contentType, scope);
 			if (transform) {
 				transform(result);
 			}
@@ -14435,9 +14588,6 @@ void MainWindow::applyShellLayout() {
 						});
 			}
 			MediaSessionBackend *mediaSession = m_qmlShellHost->mediaSession();
-			connect(mediaSession, &MediaSessionBackend::playbackRejected, this, [this](const QString &message) {
-				publishModernToast(QStringLiteral("warning"), tr("Media playback"), message);
-			});
 			const auto sendWatchTogether = [this, mediaSession](MumbleProto::WatchTogetherEvent event,
 													 const QString &sessionID, const QUrl &sourceURL,
 													 const QString &provider, const QString &title,
@@ -30742,7 +30892,8 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	}
 	const QString expectedPreviewSource = it->canonicalUrl;
 	if (it->metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
-		== INSTAGRAM_PREVIEW_METADATA_VERSION) {
+			== INSTAGRAM_PREVIEW_METADATA_VERSION
+		&& !it->thumbnailImage.isNull()) {
 		return false;
 	}
 	if (m_pendingPersistentChatInstagramMetadataRequests.contains(previewKey)) {
@@ -30757,6 +30908,8 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	}
 	QNetworkRequest pageRequest(requestUrl);
 	prepareInstagramPreviewMetadataRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
 	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
 	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(requestUrl), false);
 	connect(pageReply, &QNetworkReply::finished, this,
@@ -30788,6 +30941,10 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 					}
 					if (parsed.instagramMetadata) {
 						applyInstagramPreviewMetadata(*previewIt, requestUrl, *parsed.instagramMetadata);
+						if (!parsed.instagramMetadata->posterUrl.isEmpty()) {
+							requestPersistentChatPreviewPosterImage(
+								previewKey, QUrl(parsed.instagramMetadata->posterUrl), QStringLiteral("image/jpeg"));
+						}
 					}
 					previewIt->metadataFinished = true;
 					ensurePersistentChatPreviewSiteSnapshot(previewKey);
@@ -30844,11 +31001,19 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 			const QUrl cachedUrl(cached.canonicalUrl);
 			const bool invalid = isGameStorePreviewUrl(cachedUrl)
 				|| (richPreviewProviderForUrl(cachedUrl)
-					&& cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
-						   != RICH_PREVIEW_METADATA_VERSION)
+					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+							!= RICH_PREVIEW_METADATA_VERSION
+						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+							   != RICH_PREVIEW_METADATA_VERSION))
+				|| (redditPostIdFromUrl(cachedUrl)
+					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+							!= RICH_PREVIEW_METADATA_VERSION
+						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+							   != RICH_PREVIEW_METADATA_VERSION))
 				|| (isInstagramPreviewUrl(cachedUrl)
-					&& cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
-						   != INSTAGRAM_PREVIEW_METADATA_VERSION)
+					&& (cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
+							!= INSTAGRAM_PREVIEW_METADATA_VERSION
+						|| cached.thumbnailImage.isNull()))
 				|| (isTwitchHost(cachedUrl.host())
 					&& cached.metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
 						   != TWITCH_PREVIEW_METADATA_VERSION)
@@ -31790,13 +31955,21 @@ void MainWindow::startNextPersistentChatVideoPoster() {
 				|| m_activePersistentChatVideoPosterSource != source) {
 				return;
 			}
-			// Mapping a hardware-backed frame and smooth-scaling a large source can
-			// be expensive. Detach the decoder immediately and perform that CPU work
-			// on the bounded preview worker instead of the UI thread.
+			// Detach the decoder immediately. Mapping a hardware-backed QVideoFrame on
+			// a short-lived preview worker creates a Qt Multimedia thread-local QRhi.
+			// Its D3D11/NVIDIA teardown can then hold the Windows loader queue while
+			// WebEngine is delay-loaded, leaving real media stuck on "Preparing".
+			// Materialize the frame on the owning GUI thread and offload only the
+			// potentially expensive CPU scaling of the detached QImage.
 			disconnect(m_persistentChatVideoPosterSink, nullptr, this, nullptr);
 			disconnect(m_persistentChatVideoPosterPlayer, nullptr, this, nullptr);
 			m_persistentChatVideoPosterPlayer->pause();
-			const QSize frameSize = frame.size();
+			const QImage detachedFrame = frame.toImage();
+			if (detachedFrame.isNull()) {
+				finishPersistentChatVideoPoster(previewKey, source);
+				return;
+			}
+			const QSize frameSize = detachedFrame.size();
 			const qint64 estimatedBytes = frameSize.isValid()
 				? static_cast< qint64 >(frameSize.width()) * frameSize.height() * 4
 				: 0;
@@ -31804,7 +31977,7 @@ void MainWindow::startNextPersistentChatVideoPoster() {
 				this, persistentChatPreviewWorkerGroup(previewKey),
 				persistentChatPreviewWorkerSourceKey(QStringLiteral("video-poster"), source),
 				estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
-				[frame]() mutable { return persistentChatThumbnailImage(frame.toImage()); },
+				[detachedFrame]() { return persistentChatThumbnailImage(detachedFrame); },
 				[this, previewKey, source](std::optional< QImage > image) {
 					finishPersistentChatVideoPoster(previewKey, source,
 						image ? std::move(*image) : QImage());
@@ -32454,6 +32627,12 @@ bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &pre
 		for (auto metadataIt = webhallenMetadata.cbegin(); metadataIt != webhallenMetadata.cend(); ++metadataIt) {
 			previewIt->metadata.insert(metadataIt.key(), metadataIt.value());
 		}
+		if (richPreviewClientHydrationComplete(previewUrl, previewIt->metadata)) {
+			previewIt->metadata.insert(
+				QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+		} else {
+			previewIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+		}
 		applyPersistentChatListingMediaItems(*previewIt);
 
 		const QString productTitle = previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
@@ -32500,8 +32679,10 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
-		|| it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
-			   == RICH_PREVIEW_METADATA_VERSION) {
+		|| (it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+				== RICH_PREVIEW_METADATA_VERSION
+			&& it->metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
+				   == RICH_PREVIEW_METADATA_VERSION)) {
 		return false;
 	}
 
@@ -32509,9 +32690,11 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 	it->remoteMediaFinished  = false;
 	const QString expectedPreviewSource = it->canonicalUrl;
 
-	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
+	const QUrl previewPageUrl = richPreviewClientPageUrl(previewUrl);
 	QNetworkRequest pageRequest(previewPageUrl);
 	preparePreviewRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
 	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
 	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(previewPageUrl), false);
 	connect(pageReply, &QNetworkReply::finished, this,
@@ -32595,6 +32778,12 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 
 		for (auto it = parsed.metadata.cbegin(); it != parsed.metadata.cend(); ++it) {
 			previewIt->metadata.insert(it.key(), it.value());
+		}
+		if (richPreviewClientHydrationComplete(previewUrl, previewIt->metadata)) {
+			previewIt->metadata.insert(
+				QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+		} else {
+			previewIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
 		}
 		const QString threadPostUrl =
 			previewIt->metadata.value(QStringLiteral("forumThreadPostUrl")).toString().trimmed();
@@ -32716,7 +32905,7 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 		}
 
 		publishPersistentChatPreviewUpdate(previewKey);
-	});
+	}, PersistentChatPreviewHtmlScope::BoundedDocument);
 	});
 
 	return true;
@@ -33437,7 +33626,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	}
 
 	const bool hasEmbedTarget = previewEmbedTargetForUrl(previewUrl).has_value();
-	if (hasEmbedTarget) {
+	const bool isRedditPost = target->providerKey == QLatin1String("reddit");
+	if (hasEmbedTarget || isRedditPost) {
 		it->siteSnapshotRequested = false;
 		it->siteSnapshotFinished  = true;
 		it->thumbnailFinished     = true;
@@ -33446,6 +33636,14 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	providerMetadata.insert(QStringLiteral("provider"), target->providerKey);
 	providerMetadata.insert(QStringLiteral("previewProvider"), target->providerKey);
 	providerMetadata.insert(QStringLiteral("providerName"), target->siteLabel);
+	if (isRedditPost) {
+		providerMetadata.insert(QStringLiteral("previewKind"), QStringLiteral("socialPost"));
+		providerMetadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+		providerMetadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+		if (const std::optional< QString > postId = redditPostIdFromUrl(previewUrl)) {
+			providerMetadata.insert(QStringLiteral("redditPostId"), *postId);
+		}
+	}
 	it->metadata = providerMetadata;
 
 	QNetworkRequest request(target->url);
@@ -33453,7 +33651,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target, hasEmbedTarget]() {
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, previewUrl, target, hasEmbedTarget, isRedditPost]() {
 		const QByteArray data     = reply->readAll();
 		const bool success        = reply->error() == QNetworkReply::NoError;
 		const QString failureText = previewFailureText(reply);
@@ -33477,14 +33676,31 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				const QString author     = object.value(QStringLiteral("author_name")).toString().trimmed();
 				const QString provider   = object.value(QStringLiteral("provider_name")).toString().trimmed();
 				const QString html       = object.value(QStringLiteral("html")).toString();
-				const QString postText   = target->socialPost ? xPostTextFromOEmbedHtml(html) : QString();
+				const QString postText =
+					target->socialPost && !isRedditPost ? xPostTextFromOEmbedHtml(html) : QString();
 
 				previewIt->title = !postText.isEmpty()
 									   ? postText
 									   : (title.isEmpty() ? target->fallbackTitle : trimmedPreviewText(title, 280));
 				if (!author.isEmpty()) {
-					previewIt->subtitle =
-						target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
+					if (isRedditPost) {
+						static const QRegularExpression s_redditSubredditPattern(
+							QLatin1String(R"(href=["']https://www\.reddit\.com/r/([^/"']+)/?["'])"),
+							QRegularExpression::CaseInsensitiveOption);
+						const QRegularExpressionMatch subredditMatch =
+							s_redditSubredditPattern.match(html);
+						const QString subreddit = subredditMatch.hasMatch()
+													  ? subredditMatch.captured(1).trimmed()
+													  : QString();
+						const QString redditAuthor = author.startsWith(QLatin1String("u/"))
+														 ? author : QStringLiteral("u/%1").arg(author);
+						previewIt->subtitle = subreddit.isEmpty()
+												  ? redditAuthor
+												  : QStringLiteral("%1 · r/%2").arg(redditAuthor, subreddit);
+					} else {
+						previewIt->subtitle =
+							target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
+					}
 					previewIt->description = target->socialPost ? target->siteLabel : QString();
 				} else {
 					previewIt->subtitle = provider.isEmpty() ? target->siteLabel : provider;
@@ -33560,7 +33776,7 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		}
 		if (!success && previewDescriptionIsPlaceholder(previewIt->description)) {
 			previewIt->description = hasEmbedTarget ? QString() : failureText;
-			if (!hasEmbedTarget && previewIt->mediaDataUrl.isEmpty()) {
+			if (!hasEmbedTarget && !isRedditPost && previewIt->mediaDataUrl.isEmpty()) {
 				previewIt->failed = true;
 			}
 		}
@@ -33568,7 +33784,91 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 			previewIt->thumbnailFinished = true;
 		}
 		publishPersistentChatPreviewUpdate(previewKey);
+		if (isRedditPost) {
+			requestPersistentChatRedditPostPreview(previewKey, previewUrl);
+		}
 	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRedditPostPreview(const QString &previewKey, const QUrl &previewUrl) {
+	const std::optional< QString > postId = redditPostIdFromUrl(previewUrl);
+	const QUrl embedUrl                   = redditPostEmbedUrl(previewUrl);
+	if (previewKey.isEmpty() || !postId || !Global::get().nam || !isSafePreviewTarget(embedUrl)
+		|| embedUrl.scheme().toLower() != QLatin1String("https")) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| it->mediaKind == QLatin1String("video")) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+	QVariantMap metadata     = it->metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("providerName"), tr("Reddit"));
+	metadata.insert(QStringLiteral("previewKind"), QStringLiteral("socialPost"));
+	metadata.insert(QStringLiteral("redditPostId"), *postId);
+	metadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+	metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+	it->metadata = metadata;
+
+	QNetworkRequest request(embedUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, embedUrl]() {
+				const QByteArray data     = reply->readAll();
+				const bool success        = reply->error() == QNetworkReply::NoError;
+				const QString failureText = previewFailureText(reply);
+				reply->deleteLater();
+
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) {
+					return;
+				}
+
+				previewIt->remoteMediaRequested = false;
+				const QString html = success ? QString::fromUtf8(data) : QString();
+				const QString videoId = redditVideoIdFromEmbedHtml(html);
+				const QUrl posterUrl = redditPosterUrlFromEmbedHtml(html);
+				QVariantMap resolvedMetadata = previewIt->metadata;
+				if (success && !html.isEmpty()) {
+					resolvedMetadata.insert(QStringLiteral("richPreviewClientHydrationVersion"),
+											RICH_PREVIEW_METADATA_VERSION);
+				} else {
+					resolvedMetadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+				}
+				if (posterUrl.isValid()) {
+					requestPersistentChatPreviewPosterImage(previewKey, posterUrl);
+				}
+
+				if (!videoId.isEmpty()) {
+					resolvedMetadata.insert(QStringLiteral("redditVideoId"), videoId);
+					resolvedMetadata.insert(QStringLiteral("redditEmbedUrl"),
+											embedUrl.toString(QUrl::FullyEncoded));
+				}
+				previewIt->metadata = resolvedMetadata;
+				if (!videoId.isEmpty()) {
+					if (requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)) {
+						publishPersistentChatPreviewUpdate(previewKey);
+						return;
+					}
+				}
+
+				previewIt->remoteMediaFinished = true;
+				previewIt->metadataFinished    = true;
+				previewIt->failed              = false;
+				publishPersistentChatPreviewUpdate(previewKey);
+			});
 
 	return true;
 }
@@ -34321,6 +34621,7 @@ bool MainWindow::refreshRestoredPersistentChatPreview(const QString &previewKey)
 				&& !s_richProductSessionRefreshes.contains(previewKey)) {
 				s_richProductSessionRefreshes.insert(previewKey);
 				restoredIt->metadata.remove(QStringLiteral("richPreviewMetadataVersion"));
+				restoredIt->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
 				restoredIt->remoteMediaFinished = false;
 				requestPersistentChatRichProviderPreview(previewKey, restoredPreviewUrl);
 			}
@@ -35430,13 +35731,17 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				return;
 			}
 
-			// Modern SPA pages often advertise a very large Content-Length even though the useful
-			// preview metadata is available near the start of <head>. Parse the prefix we did receive
-			// instead of failing the entire preview outright.
+			// Modern SPA pages often advertise a very large Content-Length. Generic links only need
+			// the bounded <head>, while known rich providers may keep their real product/listing data
+			// later in the already size-limited response document.
 			const qint64 maxPageBytes = previewMaxPageBytesForUrl(previewPageUrl);
 			const QByteArray htmlBytes =
 				data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
 			const QVariantMap baseMetadata = it->metadata;
+			const PersistentChatPreviewHtmlScope htmlScope =
+				richPreviewProviderForUrl(previewUrl)
+					? PersistentChatPreviewHtmlScope::BoundedDocument
+					: PersistentChatPreviewHtmlScope::HeadOnly;
 			parsePersistentChatPreviewHtmlAsync(
 				this, persistentChatPreviewWorkerGroup(previewKey),
 				persistentChatPreviewWorkerSourceKey(QStringLiteral("html:page"),
@@ -35484,6 +35789,14 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->description      = parsed.description;
 			for (auto metadataIt = parsed.metadata.cbegin(); metadataIt != parsed.metadata.cend(); ++metadataIt) {
 				it->metadata.insert(metadataIt.key(), metadataIt.value());
+			}
+			if (richPreviewProviderForUrl(previewUrl)) {
+				if (richPreviewClientHydrationComplete(previewUrl, it->metadata)) {
+					it->metadata.insert(
+						QStringLiteral("richPreviewClientHydrationVersion"), RICH_PREVIEW_METADATA_VERSION);
+				} else {
+					it->metadata.remove(QStringLiteral("richPreviewClientHydrationVersion"));
+				}
 			}
 			if (parsed.instagramMetadata) {
 				applyInstagramPreviewMetadata(*it, previewUrl, *parsed.instagramMetadata);
@@ -35619,7 +35932,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				renderIfVisible();
 			});
 			renderIfVisible();
-		});
+		}, htmlScope);
 		});
 }
 

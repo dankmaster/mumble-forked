@@ -174,7 +174,8 @@ ApplicationWindow {
 	property string motdSeenRequestSignature: ""
 	property url mediaSessionWindowComponentUrl: Qt.resolvedUrl("MediaSessionWindow.qml")
 	property Item mediaWindowFailureFocusReturnItem: null
-	readonly property bool mediaSessionWindowRequested: mediaSession.active && mediaSession.detached
+	readonly property bool mediaSessionWindowRequested: mediaSession.detachedPlaybackSupported
+		&& mediaSession.active && mediaSession.detached
 	readonly property bool mediaRuntimeContractAvailable: !!mediaProfiles
 		&& typeof mediaProfiles.runtimeReady !== "undefined"
 	readonly property bool mediaRuntimeReady: !mediaRuntimeContractAvailable
@@ -3720,6 +3721,7 @@ ApplicationWindow {
 							spacing: Theme.space2
 
 							Label {
+								id: activityLogTimestamp
 								objectName: "activityLogTimestamp"
 								Layout.preferredWidth: root.activityLogTimeColumnWidth
 								Layout.alignment: Qt.AlignTop
@@ -4026,6 +4028,8 @@ ApplicationWindow {
 											mediaSession.play()
 									}
 									onPopoutDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
+										if (!mediaSession.detachedPlaybackSupported)
+											return
 										const sameMedia = mediaSession.active
 											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
 											&& String(mediaSession.provider || "") === "direct"
@@ -4059,6 +4063,8 @@ ApplicationWindow {
 											mediaSession.play()
 									}
 									onPopoutPlayRequested: (url, provider) => {
+										if (!mediaSession.detachedPlaybackSupported)
+											return
 										const sameMedia = mediaSession.active
 											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
 											&& String(mediaSession.provider || "").toLowerCase() === String(provider || "").toLowerCase()

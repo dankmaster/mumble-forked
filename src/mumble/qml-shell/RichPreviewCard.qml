@@ -18,6 +18,15 @@ Rectangle {
 	property string mediaSessionId: ""
 	property string visualMediaFixtureMode: ""
 	property url inlinePlayerComponentUrl: Qt.resolvedUrl("InlineMediaPlayer.qml")
+	readonly property bool inlineProviderLoadTimeoutRunning:
+		inlineMediaLoader.item
+			? Boolean(inlineMediaLoader.item.providerDocumentLoadTimeoutRunning) : false
+	readonly property double inlineProviderLoadElapsedMs:
+		inlineMediaLoader.item
+			? Number(inlineMediaLoader.item.providerDocumentLoadElapsedMs || 0) : 0
+	readonly property int inlineProviderLoadTimeoutMs:
+		inlineMediaLoader.item
+			? Number(inlineMediaLoader.item.providerDocumentLoadTimeoutMs || 0) : 0
 	property bool renderActive: true
 	property bool animationsEnabled: true
 	property bool hoverEffectsEnabled: true
@@ -28,6 +37,13 @@ Rectangle {
 	property string savedSizePreset: ""
     property int selectedMediaIndex: 0
     property bool imageRefreshQueued: false
+	property int embedPosterRetryAttempt: 0
+	property int embedPosterRetryNonce: 0
+	property int embedPosterRecoveryIntervalMs: 2500
+	property int embedPosterRetryLimit: 2
+	property bool embedPosterFallbackActive: false
+	property int embedPosterHydrationRetryCount: 0
+	property int embedPosterHydrationRetryLimit: 1
 	property bool sensitiveMediaRevealed: false
 	property bool restoreInlinePlaybackFocus: false
 	property bool inlineFocusEligibleForRestore: false
@@ -119,7 +135,6 @@ Rectangle {
 	readonly property string mediaPresentation: safeText(preview && preview.metadata
 		? preview.metadata.mediaPresentation : "", 64).toLowerCase()
 	readonly property bool animatedImagePresentation: mediaPresentation === "animated-image"
-	readonly property bool providerPostPresentation: mediaPresentation === "provider-post-card"
 	// Direct media is represented by typed media fields and never by a generic
 	// sender-controlled WebEngine embed.
 	readonly property bool hasEmbedPreview: safeEmbedUrl.length > 0 && safeEmbedProvider.length > 0
@@ -127,11 +142,12 @@ Rectangle {
 	readonly property string instagramEmbedMediaKind: normalizedInstagramEmbedMediaKind()
 	readonly property bool instagramStaticPost: normalizedEmbedProvider === "instagram"
 		&& instagramEmbedMediaKind === "post"
+	readonly property bool providerPostPresentation: mediaPresentation === "provider-post-card"
+		|| instagramStaticPost
 	// Local rendering and synchronized room playback are separate capabilities.
 	// A provider can be viewed or played in this card without implementing the
 	// deterministic state contract required by Watch Together.
-	readonly property bool localPlaybackSupported: hasDirectMedia
-		|| (hasEmbedPreview && !instagramStaticPost)
+	readonly property bool localPlaybackSupported: hasDirectMedia || hasEmbedPreview
 	readonly property bool sharedPlaybackSupported: hasEmbedPreview
 		&& normalizedEmbedProvider === "youtube" && isSupportedYouTubeSharedPlaybackUrl(safeEmbedUrl)
 	// Compatibility alias for callers and automation that already consume this
@@ -178,6 +194,8 @@ Rectangle {
 	readonly property string embedPosterSource: hasEmbedPreview
 		? safeRenderImageSource(preview ? (preview.thumbnailUrl || preview.posterUrl || "") : "")
 		: imageSource
+	readonly property string effectiveEmbedPosterSource: embedPosterFallbackActive
+		? "" : posterSourceWithRetry(embedPosterSource, embedPosterRetryNonce)
 	readonly property bool fullBleedEmbed: hasEmbedPreview
 		&& normalizedEmbedAspect !== "short" && normalizedEmbedAspect !== "square"
 	readonly property real embedMediaWidth: normalizedEmbedAspect === "short"
@@ -208,8 +226,9 @@ Rectangle {
 		: currentMediaKind === "audio" ? actionAvailableWidth : width
 	readonly property real embedPanelHeight: !inlineMediaStageVisible ? 0
 		: inlinePlaybackActive
-			? Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
-				inlineMediaLoader.item ? inlineMediaLoader.item.implicitHeight : 0)
+			? providerPostPresentation ? inlineMediaViewportHeight
+				: Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
+					inlineMediaLoader.item ? inlineMediaLoader.item.implicitHeight : 0)
 			: inlineMediaViewportHeight
 	readonly property bool currentMediaManagedAnimated: currentMediaKind === "image"
 		&& !!currentMedia.managedAnimated && /^file:\/\//i.test(imageSource)
@@ -243,23 +262,39 @@ Rectangle {
 		&& originalProviderUrl.length > 0
 	readonly property bool hasSizeActions: inlineMediaStageVisible
 	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
+		&& !providerPostPresentation
+		&& (!mediaSessionController
+			|| mediaSessionController.detachedPlaybackSupported !== false)
 	readonly property bool hasOverflowActions: hasPopoutAction || canExpand
 		|| hasSecondaryOriginalOpenAction || hasSizeActions
 	readonly property bool inlinePlaybackActive: !!mediaSessionController
 		&& mediaSessionController.active && !mediaSessionController.detached
 		&& String(mediaSessionController.sessionId || "") === mediaSessionId
+	readonly property bool inlineAdapterReady: inlinePlaybackActive
+		&& inlineMediaLoader.status === Loader.Ready && !!inlineMediaLoader.item
+		&& inlineMediaLoader.item.documentReady === true
+	readonly property bool inlineAdapterPending: inlinePlaybackActive
+		&& providerPostPresentation && !inlineAdapterReady
 	readonly property bool directInlinePlaybackActive: inlinePlaybackActive && !hasEmbedPreview
 		&& hasDirectMedia && String(mediaSessionController ? mediaSessionController.provider || "" : "") === "direct"
-	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported)
+	readonly property bool embedPosterUnavailable: hasEmbedPreview && embedPosterFallbackActive
+		&& !inlinePlaybackActive
+	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported
+		&& !embedPosterUnavailable)
 		|| hasDirectMedia
 	readonly property string inlinePresentationProvider: hasEmbedPreview
 		? normalizedEmbedProvider
 		: String(providerDetails.providerToken || providerLabel || "").trim()
+	// Provider players are adapters inside the Mumble-owned card. Keep the
+	// native identity/details surface mounted while an adapter activates so
+	// transient player state cannot collapse the delegate, move the scroll
+	// anchor, or make the card alternate between two ownership models.
 	readonly property bool inlineProviderOwnsDetails: inlinePlaybackActive
 		&& hasEmbedPreview
-		&& (providerDetails.presentation === "socialPost"
-			|| ["instagram", "tiktok", "facebook"].indexOf(
-				providerDetails.providerToken) >= 0)
+		&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0
+	readonly property bool providerOwnsDetails: inlineProviderOwnsDetails
+		|| (hasEmbedPreview
+			&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0)
 	readonly property bool fullBleedMediaStage: (hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed
 	readonly property string genericProviderMark: buildGenericProviderMark()
 	readonly property bool genericHeaderShowsIdentityMark: previewState === "ready"
@@ -307,12 +342,25 @@ Rectangle {
 
 	onMediaRuntimeErrorChanged: focusInlineRuntimeRetry()
     onPreviewIdentityChanged: resetForReuse()
+	onEmbedPosterSourceChanged: {
+		embedPosterHydrationRetryCount = 0
+		resetEmbedPosterRecovery()
+	}
     onPreviewChanged: {
 		// Required-property assignment can notify before the dependent mediaItems
 		// binding has completed its first evaluation in a newly reused delegate.
 		const itemCount = mediaItems && mediaItems.length !== undefined ? mediaItems.length : 0
 		selectedMediaIndex = Math.max(0, Math.min(selectedMediaIndex, Math.max(0, itemCount - 1)))
+		const retryHydratedPoster = embedPosterFallbackActive && renderActive
+			&& embedPosterHydrationRetryCount < embedPosterHydrationRetryLimit
         imageRefreshQueued = false
+		if (retryHydratedPoster) {
+			embedPosterHydrationRetryCount += 1
+			Qt.callLater(function() {
+				if (root.embedPosterFallbackActive && root.renderActive)
+					root.resetEmbedPosterRecovery()
+			})
+		}
     }
 	onContentWarningChanged: sensitiveMediaRevealed = false
 	onThumbnailBlurChanged: sensitiveMediaRevealed = false
@@ -339,6 +387,63 @@ Rectangle {
 	ButtonGroup {
 		id: previewSizeGroup
 		exclusive: true
+	}
+
+	Timer {
+		id: inlineFocusRestoreTimer
+		interval: 0
+		repeat: false
+		property int generation: -1
+		property int attempt: 0
+		onTriggered: root.restoreInlinePlaybackTriggerFocus(generation, attempt)
+	}
+
+	Timer {
+		id: embedPosterRecoveryTimer
+		interval: root.embedPosterRecoveryIntervalMs
+		repeat: false
+		onTriggered: root.recoverStalledEmbedPoster()
+	}
+
+	Timer {
+		id: inlineFocusHandoffTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.handOffInlinePlaybackFocus()
+	}
+
+	Timer {
+		id: inlineFailureFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (root.inlinePlayerComponentFailed && inlineComponentRetryButton.visible)
+				inlineComponentRetryButton.forceActiveFocus()
+		}
+	}
+
+	Timer {
+		id: inlineComponentRetryTimer
+		interval: 0
+		repeat: false
+		onTriggered: {
+			if (inlineMediaLoader.active)
+				inlineMediaLoader.updateSource()
+		}
+	}
+
+	Timer {
+		id: inlineRuntimeRetryFocusTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.focusInlineRuntimeRetryNow()
+	}
+
+	Timer {
+		id: currentMediaRequestTimer
+		interval: 0
+		repeat: false
+		onTriggered: root.requestCurrentMedia()
 	}
 
 	Rectangle {
@@ -372,6 +477,8 @@ Rectangle {
 		sizePresetOverride = ""
         selectedMediaIndex = 0
         imageRefreshQueued = false
+		embedPosterHydrationRetryCount = 0
+		resetEmbedPosterRecovery()
 		sensitiveMediaRevealed = false
 		restoreInlinePlaybackFocus = false
 		inlineFocusEligibleForRestore = false
@@ -386,6 +493,39 @@ Rectangle {
         imageRefreshQueued = true
         imageRefreshRequested()
     }
+
+	function resetEmbedPosterRecovery() {
+		embedPosterRecoveryTimer.stop()
+		embedPosterRetryAttempt = 0
+		embedPosterRetryNonce = 0
+		embedPosterFallbackActive = false
+	}
+
+	function posterSourceWithRetry(source, nonce) {
+		const normalized = String(source || "")
+		if (normalized.length === 0 || Number(nonce || 0) <= 0)
+			return normalized
+		return normalized + (normalized.indexOf("?") >= 0 ? "&" : "?")
+			+ "qmlRetry=" + Number(nonce)
+	}
+
+	function recoverStalledEmbedPoster(statusOverride) {
+		const status = statusOverride === undefined ? embedPoster.status : statusOverride
+		if ((status !== Image.Loading && status !== Image.Error) || !renderActive
+				|| embedPosterSource.length === 0 || mediaRequiresReveal)
+			return false
+		if (embedPosterRetryAttempt < embedPosterRetryLimit) {
+			embedPosterRetryAttempt += 1
+			embedPosterRetryNonce += 1
+			return true
+		}
+		// The provider metadata remains real and actionable even when its image
+		// transport stalls. Stop presenting an endless busy state and fall back
+		// to the provider action surface until hydration supplies a new source.
+		embedPosterFallbackActive = true
+		requestImageRefresh()
+		return false
+	}
 
     function safeExternalUrl(value) {
 		const url = String(value === undefined || value === null ? "" : value).trim().slice(0, 2048)
@@ -613,10 +753,7 @@ Rectangle {
 			mediaSessionController.reportTypedError("renderer-component-unavailable", message)
 		else if (typeof mediaSessionController.reportError === "function")
 			mediaSessionController.reportError(message)
-		Qt.callLater(function() {
-			if (inlinePlayerComponentFailed && inlineComponentRetryButton.visible)
-				inlineComponentRetryButton.forceActiveFocus()
-		})
+		inlineFailureFocusTimer.restart()
 	}
 
 	function retryInlinePlayerComponent() {
@@ -625,10 +762,7 @@ Rectangle {
 		if (typeof mediaSessionController.retry === "function")
 			mediaSessionController.retry()
 		inlineMediaLoader.source = ""
-		Qt.callLater(function() {
-			if (inlineMediaLoader.active)
-				inlineMediaLoader.updateSource()
-		})
+		inlineComponentRetryTimer.restart()
 	}
 
 	function retryInlineMediaRuntime() {
@@ -654,19 +788,21 @@ Rectangle {
 		if (!mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
 				|| !inlineFocusRequestMatchesCurrentSession())
 			return
-		Qt.callLater(function() {
-			if (!root.mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
-					|| !inlineRuntimeRetryButton.visible
-					|| !root.inlineFocusRequestMatchesCurrentSession())
-				return
-			const activeItem = root.Window ? root.Window.activeFocusItem : null
-			// Runtime preparation is asynchronous. Do not pull focus back from a
-			// different product surface when the user has moved on in the meantime.
-			if (activeItem && !root.itemIsWithin(activeItem, root))
-				return
-			inlineRuntimeRetryButton.forceActiveFocus(Qt.OtherFocusReason)
-			root.retainInlinePlaybackFocusForRestore(true)
-		})
+		inlineRuntimeRetryFocusTimer.restart()
+	}
+
+	function focusInlineRuntimeRetryNow() {
+		if (!mediaRuntimeCanRetry || !inlineRuntimeLoadingSurface.visible
+				|| !inlineRuntimeRetryButton.visible
+				|| !inlineFocusRequestMatchesCurrentSession())
+			return
+		const activeItem = root.Window ? root.Window.activeFocusItem : null
+		// Runtime preparation is asynchronous. Do not pull focus back from a
+		// different product surface when the user has moved on in the meantime.
+		if (activeItem && !itemIsWithin(activeItem, root))
+			return
+		inlineRuntimeRetryButton.forceActiveFocus(Qt.OtherFocusReason)
+		retainInlinePlaybackFocusForRestore(true)
 	}
 
 	function inlineFocusRequestMatchesCurrentSession() {
@@ -679,10 +815,18 @@ Rectangle {
 	}
 
 	function handOffInlinePlaybackFocus() {
-		if (!inlineFocusRequestMatchesCurrentSession() || !inlineMediaLoader.item
-				|| !inlineMediaLoader.item.focusInitialControl)
+		if (!inlineFocusRequestMatchesCurrentSession())
 			return false
-		return inlineMediaLoader.item.focusInitialControl()
+		if (inlineMediaLoader.item && inlineMediaLoader.item.focusInitialControl
+				&& inlineMediaLoader.item.focusInitialControl())
+			return true
+		const target = previewInlineAnimationToggleButton.visible
+			? previewInlineAnimationToggleButton : previewInlineCloseButton
+		if (!target.visible || !target.enabled)
+			return false
+		target.forceActiveFocus(Qt.OtherFocusReason)
+		retainInlinePlaybackFocusForRestore(target.activeFocus)
+		return target.activeFocus
 	}
 
 	function captureInlinePlaybackFocusForRestore() {
@@ -720,16 +864,16 @@ Rectangle {
 			clearInlinePlaybackFocusRequest()
 			return
 		}
-		Qt.callLater(function() {
-			root.restoreInlinePlaybackTriggerFocus(generation, attempt + 1)
-		})
+		inlineFocusRestoreTimer.generation = generation
+		inlineFocusRestoreTimer.attempt = attempt + 1
+		inlineFocusRestoreTimer.restart()
 	}
 
 	function scheduleInlinePlaybackFocusRestore() {
 		const generation = ++inlineFocusRestoreGeneration
-		Qt.callLater(function() {
-			root.restoreInlinePlaybackTriggerFocus(generation, 0)
-		})
+		inlineFocusRestoreTimer.generation = generation
+		inlineFocusRestoreTimer.attempt = 0
+		inlineFocusRestoreTimer.restart()
 	}
 
 	function clearInlinePlaybackFocusRequest() {
@@ -756,6 +900,7 @@ Rectangle {
 		// moving it to the existing detached surface; guests and local-only media
 		// may safely suppress their card-local renderer without affecting peers.
 		if (mediaSessionController.sharedHost
+				&& mediaSessionController.detachedPlaybackSupported !== false
 				&& typeof mediaSessionController.detach === "function") {
 			mediaSessionController.detach()
 			return true
@@ -768,8 +913,17 @@ Rectangle {
 	}
 
 	onRenderActiveChanged: {
-		if (!renderActive)
+		if (!renderActive) {
+			embedPosterRecoveryTimer.stop()
 			preserveInlinePlaybackWhenHidden()
+		} else {
+			if (embedPosterFallbackActive) {
+				embedPosterHydrationRetryCount = 0
+				resetEmbedPosterRecovery()
+			} else if (embedPoster.status === Image.Loading) {
+				embedPosterRecoveryTimer.restart()
+			}
+		}
 	}
 	onInlinePlaybackActiveChanged: {
 		if (inlinePlaybackActive) {
@@ -784,7 +938,17 @@ Rectangle {
 		if (!visible)
 			preserveInlinePlaybackWhenHidden()
 	}
-	Component.onDestruction: preserveInlinePlaybackWhenHidden()
+	Component.onDestruction: {
+		inlineFocusRestoreGeneration += 1
+		inlineFocusRestoreTimer.stop()
+		inlineFocusHandoffTimer.stop()
+		inlineFailureFocusTimer.stop()
+		inlineComponentRetryTimer.stop()
+		inlineRuntimeRetryFocusTimer.stop()
+		currentMediaRequestTimer.stop()
+		embedPosterRecoveryTimer.stop()
+		preserveInlinePlaybackWhenHidden()
+	}
 
 	function safeDirectMediaUrl(value, kind) {
 		const url = String(value === undefined || value === null ? "" : value).trim()
@@ -983,7 +1147,7 @@ Rectangle {
 	}
 
 	function requestCurrentDirectMediaPopout() {
-		if (!hasDirectMedia)
+		if (!hasDirectMedia || !hasPopoutAction)
 			return
 		const pairedAudioUrl = !animatedImagePresentation
 			&& currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
@@ -1049,8 +1213,9 @@ Rectangle {
 				id: embedPoster
 				objectName: "previewEmbedPoster"
 				anchors.fill: parent
-				source: root.renderActive && !root.inlinePlaybackActive && !root.mediaRequiresReveal
-					? root.embedPosterSource : ""
+				source: root.renderActive && (!root.inlinePlaybackActive || root.inlineAdapterPending)
+					&& !root.mediaRequiresReveal
+					? root.effectiveEmbedPosterSource : ""
 				asynchronous: true
 				cache: false
 				sourceSize: Qt.size(Math.min(1280, root.inlineMediaStageWidth * Screen.devicePixelRatio),
@@ -1059,41 +1224,24 @@ Rectangle {
 				// the provider action, including audio embeds. PreserveAspectFit left
 				// square album art floating in a wide empty strip for Spotify.
 				fillMode: Image.PreserveAspectCrop
-				visible: status === Image.Ready && !root.inlinePlaybackActive
-				onStatusChanged: if (status === Image.Error && root.embedPosterSource.length > 0)
-					root.requestImageRefresh()
-			}
-
-			Rectangle {
-				anchors.fill: parent
-				visible: !root.inlinePlaybackActive
-				color: root.withAlpha(Theme.embedOverlayBase, embedPoster.status === Image.Ready ? 0.30 : 0.18)
-			}
-
-			Rectangle {
-				objectName: "previewTwitchPosterScrim"
-				anchors.fill: parent
-				visible: providerDetails.variant === "twitch" && !root.inlinePlaybackActive
-				color: "transparent"
-				gradient: Gradient {
-					orientation: Gradient.Vertical
-					GradientStop {
-						objectName: "previewTwitchPosterScrimTop"
-						position: 0.42
-						color: root.withAlpha(Theme.mediaCanvas, 0)
-					}
-					GradientStop {
-						objectName: "previewTwitchPosterScrimMiddle"
-						position: 0.72
-						color: root.withAlpha(Theme.mediaCanvas, 0.84)
-					}
-					GradientStop {
-						objectName: "previewTwitchPosterScrimBottom"
-						position: 1.0
-						color: root.withAlpha(Theme.mediaCanvas, 0.96)
-					}
+				visible: status === Image.Ready
+					&& (!root.inlinePlaybackActive || root.inlineAdapterPending)
+				onStatusChanged: {
+					if (status === Image.Loading && root.renderActive)
+						embedPosterRecoveryTimer.restart()
+					else
+						embedPosterRecoveryTimer.stop()
+					if (status === Image.Ready)
+						root.embedPosterRetryAttempt = 0
+					else if (status === Image.Error && root.embedPosterSource.length > 0)
+						root.recoverStalledEmbedPoster(status)
 				}
-				Accessible.ignored: true
+			}
+
+			Rectangle {
+				anchors.fill: parent
+				visible: !root.inlinePlaybackActive || root.inlineAdapterPending
+				color: root.withAlpha(Theme.embedOverlayBase, embedPoster.status === Image.Ready ? 0.30 : 0.18)
 			}
 
 			Button {
@@ -1124,92 +1272,6 @@ Rectangle {
 				}
 			}
 
-			ProviderIdentityBadge {
-				objectName: "previewEmbedProviderBadge"
-				anchors.left: parent.left
-				anchors.top: parent.top
-				anchors.margins: Theme.space2
-				z: 2
-				visible: root.providerLabel.length > 0 && !root.inlinePlaybackActive
-					&& !(providerDetails.genericSocialPostPresentation && providerDetails.ownsHeader)
-				width: Math.min(parent.width - Theme.space4, implicitWidth)
-				height: implicitHeight
-				providerToken: providerDetails.providerToken
-				badgeText: root.providerLabel
-				presentation: "overlay"
-				accent: providerDetails.providerAccent
-				foreground: Theme.contrastText(providerDetails.providerAccent)
-			}
-
-			Rectangle {
-				objectName: "previewEmbedProviderState"
-				anchors.right: parent.right
-				anchors.top: parent.top
-				anchors.margins: Theme.space2
-				z: 2
-				visible: providerDetails.providerStateLabel.length > 0 && !root.inlinePlaybackActive
-				width: Math.min(parent.width / 2, embedProviderStateLabel.implicitWidth + Theme.space2 * 2)
-				height: Theme.space5
-				radius: height / 2
-				color: root.withAlpha(providerDetails.providerStateColor, 0.92)
-
-				Label {
-					id: embedProviderStateLabel
-					anchors.fill: parent
-					anchors.leftMargin: Theme.space2
-					anchors.rightMargin: Theme.space2
-					text: providerDetails.providerStateLabel
-					textFormat: Text.PlainText
-					color: Theme.contrastText(providerDetails.providerStateColor)
-					font.pixelSize: Theme.fontCaption
-					font.bold: true
-					elide: Text.ElideRight
-					horizontalAlignment: Text.AlignHCenter
-					verticalAlignment: Text.AlignVCenter
-					Accessible.ignored: true
-				}
-			}
-
-			ColumnLayout {
-				objectName: "previewTwitchPosterCopy"
-				anchors.left: parent.left
-				anchors.right: parent.right
-				anchors.bottom: parent.bottom
-				anchors.margins: Theme.space3
-				anchors.rightMargin: Math.max(Theme.space3, parent.width * 0.25)
-				z: 2
-				visible: providerDetails.variant === "twitch" && !root.inlinePlaybackActive
-				spacing: Theme.space1
-				Accessible.ignored: true
-				Label {
-					objectName: "previewTwitchPosterTitle"
-					Layout.fillWidth: true
-					text: root.displayTitle.length > 0 ? root.displayTitle : qsTr("Twitch")
-					textFormat: Text.PlainText
-					color: Theme.mediaOverlayTextStrong
-					font.pixelSize: Theme.fontTitle
-					font.bold: true
-					elide: Text.ElideRight
-					Accessible.ignored: true
-				}
-				Label {
-					objectName: "previewTwitchPosterNote"
-					Layout.fillWidth: true
-					visible: text.length > 0
-					text: root.safeText(root.preview && root.preview.metadata
-						? (root.preview.metadata.twitchDisclaimer
-							|| root.preview.metadata.twitchPlaybackNote || "") : "", 512)
-					textFormat: Text.PlainText
-					color: Theme.mediaOverlayTextMuted
-					font.pixelSize: Theme.fontCaption
-					font.bold: true
-					wrapMode: Text.Wrap
-					maximumLineCount: 2
-					elide: Text.ElideRight
-					Accessible.ignored: true
-				}
-			}
-
 			ModernIcon {
 				objectName: "previewEmptyPosterIcon"
 				anchors.centerIn: parent
@@ -1224,8 +1286,10 @@ Rectangle {
 			ModernBusyIndicator {
 				objectName: "previewEmbedBusyIndicator"
 				anchors.centerIn: parent
-				running: !root.inlinePlaybackActive && !root.mediaRequiresReveal
-					&& (root.previewState === "loading" || embedPoster.status === Image.Loading)
+				running: !root.mediaRequiresReveal
+					&& ((!root.inlinePlaybackActive
+							&& (root.previewState === "loading" || embedPoster.status === Image.Loading))
+						|| root.inlineAdapterPending)
 				visible: running
 				animated: root.animationsEnabled
 				Accessible.name: qsTr("Loading provider preview")
@@ -1321,14 +1385,21 @@ Rectangle {
 				anchors.fill: parent
 				active: root.inlinePlaybackActive && root.renderActive && !root.mediaRequiresReveal
 					&& root.mediaRuntimeReady
+				opacity: root.providerPostPresentation && !root.inlineAdapterReady ? 0 : 1
+				enabled: opacity > 0
+				Accessible.ignored: opacity <= 0
 				asynchronous: true
+				Behavior on opacity {
+					NumberAnimation { duration: root.animationDuration }
+				}
 				function updateSource() {
 					if (active) {
 						setSource(root.inlinePlayerComponentUrl, {
 							"session": root.mediaSessionController,
 							"aspect": root.inlineMediaAspect,
 							"presentationProvider": root.inlinePresentationProvider,
-							"presentationMode": root.mediaPresentation,
+							"presentationMode": root.providerPostPresentation
+								? "provider-post-card" : root.mediaPresentation,
 							"animationAutoPlayEnabled": root.animationsEnabled,
 							"mediaProfileFactory": root.mediaProfileFactory,
 							"visualFixtureMode": root.visualMediaFixtureMode
@@ -1343,7 +1414,7 @@ Rectangle {
 					updateSource()
 				}
 				onLoaded: if (root.restoreInlinePlaybackFocus)
-					Qt.callLater(function() { root.handOffInlinePlaybackFocus() })
+					inlineFocusHandoffTimer.restart()
 				onStatusChanged: if (status === Loader.Error && active)
 					root.reportInlinePlayerComponentFailure()
 				Component.onCompleted: updateSource()
@@ -1764,7 +1835,8 @@ Rectangle {
 		Item {
 			id: expandedMediaSlot
 			Layout.fillWidth: true
-			Layout.preferredHeight: !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
+			Layout.preferredHeight: !providerDetails.ownsMediaGallery
+				&& !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
 									|| root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
 			visible: Layout.preferredHeight > 0
@@ -1980,7 +2052,8 @@ Rectangle {
 			id: providerDetails
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
-			visible: !root.inlineProviderOwnsDetails
+			height: visible ? implicitHeight : 0
+			visible: !root.providerOwnsDetails
 			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
 			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""
@@ -1995,7 +2068,7 @@ Rectangle {
 			onSteamMediaSelectionRequested: (index) => root.selectedMediaIndex = index
 			onSteamMediaOpenRequested: (index) => {
 				root.selectedMediaIndex = index
-				Qt.callLater(function() { root.requestCurrentMedia() })
+				currentMediaRequestTimer.restart()
 			}
 		}
 
@@ -2020,6 +2093,51 @@ Rectangle {
 				Accessible.name: root.openLabel + ": " + root.displayTitle
 				Accessible.description: qsTr("Open the original provider page for more details")
 				onClicked: root.externalOpenRequested(root.originalProviderUrl)
+			}
+
+			ModernIconButton {
+				id: previewInlineAnimationToggleButton
+				objectName: "previewInlineAnimationToggleButton"
+				visible: root.inlinePlaybackActive && root.animatedImagePresentation
+				enabled: !!root.mediaSessionController
+				dense: true
+				iconName: root.mediaSessionController
+					&& String(root.mediaSessionController.state || "") === "playing"
+					? "pause" : "play"
+				text: root.mediaSessionController
+					&& String(root.mediaSessionController.state || "") === "playing"
+					? qsTr("Pause animation") : qsTr("Resume animation")
+				Accessible.description: qsTr("Pause or resume this silent looping animation")
+				onClicked: {
+					if (!root.mediaSessionController)
+						return
+					if (String(root.mediaSessionController.state || "") === "playing")
+						root.mediaSessionController.pause()
+					else
+						root.mediaSessionController.play()
+				}
+				onActiveFocusChanged: root.retainInlinePlaybackFocusForRestore(activeFocus)
+			}
+
+			ModernButton {
+				id: previewInlineCloseButton
+				objectName: "previewInlineCloseButton"
+				visible: root.inlinePlaybackActive
+				dense: true
+				text: qsTr("Close player")
+				Accessible.description: qsTr("Close inline media and return to the preview")
+				onClicked: {
+					root.retainInlinePlaybackFocusForRestore(activeFocus)
+					if (root.mediaSessionController
+							&& typeof root.mediaSessionController.closePlayer === "function")
+						root.mediaSessionController.closePlayer()
+					else if (root.mediaSessionController
+							&& typeof root.mediaSessionController.close === "function")
+						root.mediaSessionController.close()
+					if (!root.inlinePlaybackActive && root.restoreInlinePlaybackFocus)
+						root.scheduleInlinePlaybackFocusRestore()
+				}
+				onActiveFocusChanged: root.retainInlinePlaybackFocusForRestore(activeFocus)
 			}
 
             ModernButton {

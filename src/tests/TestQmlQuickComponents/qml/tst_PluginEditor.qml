@@ -545,7 +545,13 @@ TestCase {
 		compare(failed.Accessible.role, Accessible.ListItem)
 		compare(failed.Accessible.name, "Failed: Spatial Worlds — Signature verification failed")
 		compare(failed.Accessible.description, "Error code: signature-invalid")
-		verify(results.width <= card.width + 0.5)
-		verify(failed.width <= results.width + 0.5)
+		tryVerify(function() {
+			return results.width <= card.width + 0.5
+				&& failed.width <= results.width + 0.5
+		}, 5000, "Plugin operation result geometry did not settle inside the card")
+		verify(results.width <= card.width + 0.5,
+			"results.width=" + results.width + ", card.width=" + card.width)
+		verify(failed.width <= results.width + 0.5,
+			"failed.width=" + failed.width + ", results.width=" + results.width)
 	}
 }

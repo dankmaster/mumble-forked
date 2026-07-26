@@ -118,7 +118,8 @@ TestCase {
 		let count = item.visible && !item.Accessible.ignored
 			&& item.Accessible.role === Accessible.Grouping ? 1 : 0
 		const cardNames = ["providerSteamCard", "providerGoogleSearch", "providerFlashbackThread",
-			"providerXPost", "providerInstagramPost", "providerGitHubRepository",
+			"providerArticleCard", "providerCommerceCard",
+			"providerSocialPost", "providerXPost", "providerInstagramPost", "providerGitHubRepository",
 			"providerTwitchStream"]
 		for (let index = 0; index < cardNames.length; ++index) {
 			const card = findChild(item, cardNames[index])
@@ -222,7 +223,8 @@ TestCase {
 		compare(item.variant, data.variant)
 		const expectedPresentation = data.family === "finance" ? "market"
 			: data.family === "commerce" ? "commerce"
-			: ["audio", "x", "instagram", "github", "twitch"].indexOf(data.variant) >= 0
+			: data.variant === "x" ? "socialPost"
+			: ["audio", "instagram", "github", "twitch"].indexOf(data.variant) >= 0
 				? "identity" : "details"
 		compare(item.presentation, expectedPresentation)
 		verify(item.hasDetails)
@@ -255,13 +257,14 @@ TestCase {
 			"productSpecs": [{ "label": "Memory", "value": "32 GB" }]
 		}, "product", true, "", "Product")
 		compare(item.presentation, "commerce")
-		compare(findChild(item, "providerDetailsPrimary").text, "1 499 kr")
-		compare(findChild(item, "providerCommerceStatus").text, "In stock")
-		compare(findChild(item, "providerSummaryBody").text,
+		verify(findChild(item, "providerCommerceCard").visible)
+		compare(findChild(item, "providerCommercePrice").text, "1 499 kr")
+		compare(findChild(item, "providerCommerceStatusLine").text, "In stock")
+		compare(findChild(item, "providerCommerceDescription").text,
 			"A bounded plain-text product description.")
-		compare(findChild(item, "providerSummaryBody").textFormat, Text.PlainText)
-		compare(findChild(item, "providerStat_0").presentation, "spec")
-		compare(findChild(item, "providerStat_0").color.a, 0)
+		compare(findChild(item, "providerCommerceDescription").textFormat, Text.PlainText)
+		verify(findChild(item, "providerCommerceFact_0") !== null)
+		verify(item.visibleStats.some(function(entry) { return entry.value === "32 GB" }))
 	}
 
 	function test_identity_first_families_keep_provider_accent_small_and_metrics_flat() {
@@ -292,12 +295,9 @@ TestCase {
 			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
 			"xRepostCount": 12000, "xLikeCount": 362000
 		}, "x", true, "", "Post", "X", "Frame pacing is a feature.")
-		compare(item.presentation, "identity")
-		compare(item.identityTitle, "Mumble Design")
-		verify(item.identitySubtitle.indexOf("@mumbledesign") >= 0)
-		verify(findChild(item, "providerXPost").visible)
-		verify(findChild(item, "providerXVerified").visible)
-		compare(findChild(item, "providerXPostText").text, "Frame pacing is a feature.")
+		compare(item.presentation, "socialPost")
+		verify(findChild(item, "providerSocialPost").visible)
+		compare(findChild(item, "providerSocialPostText").text, "Post")
 		compare(findChild(item, "providerIdentity").visible, false)
 		compare(findChild(item, "providerDetailsStats").visible, false)
 
@@ -569,7 +569,7 @@ TestCase {
 		verify(card.Accessible.description.indexOf("..") < 0)
 
 		const socialFixtures = [
-			{ "kind": "x", "name": "providerXPost", "metadata": {
+			{ "kind": "x", "name": "providerSocialPost", "metadata": {
 				"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
 				"xLikeCount": 42 }, "description": "Frame pacing." },
 			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
@@ -602,7 +602,29 @@ TestCase {
 		item = setFixture({
 			"previewKind": "product", "productPrice": "1 499 kr"
 		}, "product", true, "", "Generic product")
-		compare(item.Accessible.ignored, false)
+		card = findChild(item, "providerCommerceCard")
+		compare(item.Accessible.ignored, true)
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
+		compare(card.Accessible.name, "Product details")
+		compare(exposedProviderGroupingCount(item), 1)
+
+		item = setFixture({
+			"previewProvider": "gp", "previewKind": "article",
+			"articleTitle": "Government halves transit pass prices",
+			"articlePublisher": "Göteborgs-Posten",
+			"articleSection": "Politics",
+			"articlePublishedAt": "2026-05-25T18:17:01.000Z",
+			"articleDescription": "A concise plain-text summary."
+		}, "article", false, "gp")
+		card = findChild(item, "providerArticleCard")
+		compare(item.Accessible.ignored, true)
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
+		compare(card.Accessible.name, "Article details")
+		verify(card.Accessible.description.indexOf("Government halves transit pass prices") >= 0)
+		compare(findChild(item, "providerArticleTldr").text, "A concise plain-text summary.")
+		verify(findChild(item, "providerArticleMeta").text.indexOf("T18:17:01") < 0)
 		compare(exposedProviderGroupingCount(item), 1)
 	}
 
@@ -615,9 +637,11 @@ TestCase {
 		compare(loader.item, null)
 		compare(instantiatedSocialCardCount(item), 0)
 
+		item = setFixture({ "previewKind": "x", "xHandle": "@mumble" }, "x", false)
+		tryCompare(loader, "active", false)
+		verify(findChild(item, "providerSocialPost").visible)
+
 		const fixtures = [
-			{ "kind": "x", "name": "providerXPost", "metadata": {
-				"previewKind": "x", "xHandle": "@mumble" } },
 			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
 				"provider": "instagram", "instagramHandle": "@mumble" } },
 			{ "kind": "github", "name": "providerGitHubRepository", "metadata": {
@@ -721,18 +745,19 @@ TestCase {
 		for (const width of [340, 420, 680, 760, 1082]) {
 			detailsLoader.width = width
 			tryCompare(item, "width", width)
-			const stats = findChild(item, "providerDetailsStats")
-			tryCompare(stats, "width", width)
+			const card = findChild(item, "providerCommerceCard")
+			tryCompare(card, "width", width)
 			compare(item.compactLayout, width < 440)
 			for (let index = 0; index < item.visibleStats.length; ++index) {
-				const tile = findChild(item, "providerStat_" + index)
+				const tile = findChild(item, "providerCommerceFact_" + index)
 				verify(tile !== null)
-				const position = tile.mapToItem(item, 0, 0)
-				verify(position.x >= -0.5 && position.x + tile.width <= width + 0.5,
-					"stat " + index + " bounds " + position.x + "+" + tile.width + " at " + width)
+				tryVerify(function() {
+					const position = tile.mapToItem(item, 0, 0)
+					return position.x >= -0.5 && position.x + tile.width <= width + 0.5
+				}, 1000, "stat " + index + " remains bounded at " + width)
 			}
 			for (let index = 0; index < item.visibleChips.length; ++index) {
-				const chip = findChild(item, "providerChip_" + index)
+				const chip = findChild(item, "providerCommerceHighlight_" + index)
 				verify(chip !== null)
 				tryVerify(function() {
 					const position = chip.mapToItem(item, 0, 0)
@@ -748,8 +773,8 @@ TestCase {
 		}, "vehicleListing", true)
 		detailsLoader.width = 680
 		tryCompare(item, "width", 680)
-		const chip = findChild(item, "providerChip_0")
-		const label = findChild(item, "providerChipLabel_0")
+		const chip = findChild(item, "providerCommerceHighlight_0")
+		const label = findChild(item, "providerCommerceHighlightLabel_0")
 		verify(chip !== null && label !== null)
 		compare(label.text, "CarPlay")
 		verify(chip.width >= label.implicitWidth + Theme.space2 * 2,
@@ -791,12 +816,12 @@ TestCase {
 			"product", false, "inet")
 		verify(item.bodyTextCanExpand)
 		verify(item.canExpand)
-		const summaryBody = findChild(item, "providerSummaryBody")
+		const summaryBody = findChild(item, "providerCommerceDescription")
 		verify(summaryBody !== null && summaryBody.visible)
-		compare(summaryBody.maximumLineCount, 2)
+		compare(summaryBody.maximumLineCount, 3)
 		item.expanded = true
 		compare(item.canExpand, true, "expanded cards must retain the collapse action")
-		compare(summaryBody.maximumLineCount, 5)
+		compare(summaryBody.maximumLineCount, 6)
 
 		item = setFixture({ "previewKind": "instagram", "instagramHandle": "@mumble",
 			"instagramMediaKind": "Carousel" }, "instagram", false, "instagram")
@@ -884,7 +909,7 @@ TestCase {
 			"listingEndsAt": "18:30", "listingId": "123456789",
 			"listingSpecs": [{ "label": "Size", "value": "M" }]
 		}, "marketplaceListing", true, "", "Road bike")
-		compare(item.ownsHeader, false)
+		compare(item.ownsHeader, true)
 		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
 			"Condition|Location|Sale|Ends|Listing|Size")
 		compare(item.allStats.map(function(entry) { return entry.label }).join("|"),
@@ -901,7 +926,7 @@ TestCase {
 		}, "product", true, "", "Acme Workstation")
 		item.previewImageSource = "image://mumble/product-thumb?g=1"
 		wait(0)
-		compare(item.ownsHeader, false)
+		compare(item.ownsHeader, true)
 		compare(item.previewImageSource, "image://mumble/product-thumb?g=1")
 		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
 			"Availability|Delivery|Brand|Memory")
@@ -913,7 +938,7 @@ TestCase {
 			"vehicleKind": "SUV", "vehicleYear": "2024",
 			"vehicleHighlights": ["CarPlay", "SUV"]
 		}, "vehicleListing", true, "", "Example SUV")
-		compare(item.ownsHeader, false)
+		compare(item.ownsHeader, true)
 		compare(item.allStats.map(function(entry) { return entry.label }).join("|"), "Year")
 		compare(item.rawChips.map(function(entry) { return entry.text }).join("|"), "CarPlay|SUV")
 		compare(item.allChips.map(function(entry) { return entry.text }).join("|"), "CarPlay")
@@ -923,7 +948,7 @@ TestCase {
 			"realEstateArea": "82 m²", "realEstateRooms": "3 rooms",
 			"realEstateFee": "4 200 kr/month", "listingLocation": "Uppsala"
 		}, "realEstate", true, "", "Central apartment")
-		compare(item.ownsHeader, false)
+		compare(item.ownsHeader, true)
 		compare(item.rawStats.map(function(entry) { return entry.label }).join("|"),
 			"Area|Rooms|Fee|Location")
 		compare(item.allStats.map(function(entry) { return entry.label }).join("|"),
@@ -1050,28 +1075,13 @@ TestCase {
 	function test_social_provider_cards_have_distinct_compact_and_expanded_hierarchy() {
 		detailsLoader.width = 680
 		let item = setFixture({
-			"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
-			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
-			"xRepostCount": 12000, "xQuoteCount": 420, "xLikeCount": 362000,
-			"xViewCount": 8100000, "xBookmarkCount": 9000
-		}, "x", false, "", "", "", "Frame pacing is a product feature.")
-		let card = findChild(item, "providerXPost")
-		verify(card.visible)
-		compare(findChild(item, "providerXDisplayName").text, "Mumble Design")
-		verify(findChild(item, "providerXByline").text.indexOf("Mumble Design") < 0)
-		verify(findChild(item, "providerXMetric_2") !== null)
-		compare(findChild(item, "providerXMetric_3"), null)
-		item.expanded = true
-		tryVerify(function() { return findChild(item, "providerXMetric_5") !== null })
-
-		item = setFixture({
 			"provider": "instagram", "instagramDisplayName": "Mumble Quick",
 			"instagramHandle": "@mumblequick", "instagramCreatedAt": "18:30",
 			"instagramCaption": "A native caption with stable delegate reuse.",
 			"instagramMediaKind": "reel", "instagramLikeCount": 18420,
 			"instagramCommentCount": 318
 		}, "instagram", false)
-		card = findChild(item, "providerInstagramPost")
+		let card = findChild(item, "providerInstagramPost")
 		verify(card.visible)
 		compare(findChild(item, "providerInstagramDisplayName").text, "Mumble Quick")
 		verify(findChild(item, "providerInstagramByline").text.indexOf("Mumble Quick") < 0)
@@ -1208,33 +1218,13 @@ TestCase {
 	}
 
 	function test_social_provider_avatars_use_managed_sources_and_initial_fallbacks() {
-		const xManaged = "image://mumble/x-avatar?g=21"
-		let item = setFixture({
-			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
-			"xHandle": "@mumbledesign", "xAvatarUrl": xManaged
-		}, "x", false)
-		let avatar = findChild(item, "providerXAvatar")
-		verify(avatar !== null)
-		compare(item.xAvatarSource, xManaged)
-		compare(avatar.source.toString(), xManaged)
-		compare(avatar.asynchronous, true)
-		compare(avatar.cache, false)
-		compare(findChild(item, "providerXAvatarFallback").text, "MD")
-		item.metadata = {
-			"provider": "x", "previewKind": "x", "xDisplayName": "Mumble Design",
-			"xHandle": "@mumbledesign", "xAvatarUrl": "https://cdn.example.test/x.png"
-		}
-		wait(0)
-		compare(item.xAvatarSource, "")
-		compare(avatar.source.toString(), "")
-
 		const instagramManaged = "image://mumble/instagram-avatar?g=22"
-		item = setFixture({
+		let item = setFixture({
 			"provider": "instagram", "previewKind": "instagram",
 			"instagramDisplayName": "Mumble Quick", "instagramHandle": "@mumblequick",
 			"instagramAvatarUrl": instagramManaged
 		}, "instagram", false)
-		avatar = findChild(item, "providerInstagramAvatar")
+		let avatar = findChild(item, "providerInstagramAvatar")
 		verify(avatar !== null)
 		compare(item.instagramAvatarSource, instagramManaged)
 		compare(avatar.source.toString(), instagramManaged)
@@ -1341,9 +1331,8 @@ TestCase {
 			"productDelivery": "<a>Tomorrow</a>"
 		}, "product", true)
 		compare(findChild(item, "providerWarningText").textFormat, Text.PlainText)
-		compare(findChild(item, "providerDetailsPrimary").textFormat, Text.PlainText)
-		compare(findChild(item, "providerStatLabel_0").textFormat, Text.PlainText)
-		compare(findChild(item, "providerStatValue_0").textFormat, Text.PlainText)
+		compare(findChild(item, "providerCommercePrice").textFormat, Text.PlainText)
+		compare(findChild(item, "providerCommerceFactLabel_0").textFormat, Text.PlainText)
 		compare(item.activeFocusOnTab, false)
 		compare(item.activeFocus, false)
 		compare(item.Accessible.role, Accessible.Grouping)
@@ -1357,9 +1346,9 @@ TestCase {
 			"vehiclePrice": "245 000 kr", "vehicleHighlights": ["CarPlay"]
 		}, "vehicleListing", true)
 		verify(item.minimumProviderContrast(item.providerForeground, item.providerAccent) >= 4.5)
-		compare(String(findChild(item, "providerDetailsPrimary").color),
+		compare(String(findChild(item, "providerCommercePrice").color),
 			String(item.providerForeground))
-		compare(String(findChild(item, "providerChipLabel_0").color),
+		compare(String(findChild(item, "providerCommerceHighlightLabel_0").color),
 			String(item.providerForeground))
 
 		item = setFixture({
@@ -1389,23 +1378,24 @@ TestCase {
 			String(item.providerStateForeground))
 	}
 
-	function test_generic_details_expose_each_stat_and_chip_once() {
+	function test_commerce_details_expose_one_group_and_ignore_visual_duplicates() {
 		detailsLoader.width = 680
 		const item = setFixture({
 			"previewProvider": "bytbil", "previewKind": "vehicleListing",
 			"vehiclePrice": "245 000 kr", "vehicleYear": "2024",
 			"vehicleHighlights": ["CarPlay"]
 		}, "vehicleListing", true)
-		compare(item.ownsHeader, false)
+		compare(item.ownsHeader, true)
+		compare(item.Accessible.ignored, true)
+		const card = findChild(item, "providerCommerceCard")
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
 		compare(occurrenceCount(item.Accessible.description, "245 000 kr"), 1)
 		compare(occurrenceCount(item.Accessible.description, "2024"), 1)
 		compare(occurrenceCount(item.Accessible.description, "CarPlay"), 1)
-		compare(findChild(item, "providerDetailsPrimary").Accessible.ignored, true)
-		compare(findChild(item, "providerStat_0").Accessible.ignored, true)
-		compare(findChild(item, "providerStatLabel_0").Accessible.ignored, true)
-		compare(findChild(item, "providerStatValue_0").Accessible.ignored, true)
-		compare(findChild(item, "providerChip_0").Accessible.ignored, true)
-		compare(findChild(item, "providerChipLabel_0").Accessible.ignored, true)
+		compare(findChild(item, "providerCommercePrice").Accessible.ignored, true)
+		compare(findChild(item, "providerCommerceFactLabel_0").Accessible.ignored, true)
+		compare(findChild(item, "providerCommerceHighlightLabel_0").Accessible.ignored, true)
 	}
 
 	function test_flashback_uses_theme_surfaces_with_gold_brand_accent() {
@@ -1417,16 +1407,14 @@ TestCase {
 			"forumQuoteAuthor": "qmlvän", "forumQuoteExcerpt": "Quoted context."
 		}, "forum", true, "flashback")
 		const card = findChild(item, "providerFlashbackThread")
-		compare(String(card.color), String(Theme.embedSurface))
-		compare(String(card.border.color), String(Theme.embedBorder))
-		compare(String(findChild(item, "providerFlashbackMasthead").color),
-			String(Theme.embedRevealSurface))
+		compare(String(card.color), String(item.withAlpha(item.providerAccent, 0.055)))
+		compare(String(card.border.color), String(item.providerAccentBorder))
+		compare(findChild(item, "providerFlashbackMasthead").color.a, 0)
 		compare(String(findChild(item, "providerFlashbackQuote").color),
-			String(Theme.embedRevealSurface))
-		compare(String(findChild(item, "providerFlashbackFooter").color),
-			String(Theme.embedRevealSurface))
+			String(Theme.panel))
+		compare(findChild(item, "providerFlashbackFooter").color.a, 0)
 		compare(String(findChild(item, "providerFlashbackLogo").color),
-			String(Theme.textStrong))
+			String(item.providerForeground))
 		compare(String(findChild(item, "providerFlashbackReply").color),
 			String(Theme.textMain))
 		compare(String(findChild(item, "providerFlashbackAuthorAvatarBackground").color),
@@ -1443,8 +1431,15 @@ TestCase {
 				"provider": "google-search", "googleSearchQuery": "Qt Quick" } },
 			{ "kind": "forum", "provider": "flashback", "metadata": {
 				"provider": "flashback", "forumThreadTitle": "Renderloopar" } },
-			{ "kind": "x", "provider": "", "metadata": {
-				"previewKind": "x", "xHandle": "@mumble" } },
+			{ "kind": "article", "provider": "gp", "metadata": {
+				"previewProvider": "gp", "previewKind": "article",
+				"articleTitle": "A concise article" } },
+			{ "kind": "product", "provider": "amazon", "metadata": {
+				"previewProvider": "amazon", "previewKind": "product",
+				"productPrice": "149 kr" } },
+			{ "kind": "vehicleListing", "provider": "blocket", "metadata": {
+				"previewProvider": "blocket", "previewKind": "vehicleListing",
+				"vehiclePrice": "245 000 kr" } },
 			{ "kind": "instagram", "provider": "instagram", "metadata": {
 				"provider": "instagram", "instagramHandle": "@mumble" } },
 			{ "kind": "github", "provider": "github", "metadata": {
