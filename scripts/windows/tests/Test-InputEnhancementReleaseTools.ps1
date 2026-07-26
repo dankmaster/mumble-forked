@@ -1699,7 +1699,7 @@ try {
 	$testUpdaterSourcePath = (Get-Process -Id $PID -ErrorAction Stop).Path
 	if ([string]::IsNullOrWhiteSpace($testUpdaterSourcePath) -or
 		-not (Test-Path -LiteralPath $testUpdaterSourcePath -PathType Leaf) -or
-		[IO.Path]::GetExtension($testUpdaterSourcePath) -cne '.exe') {
+		[IO.Path]::GetExtension($testUpdaterSourcePath) -ine '.exe') {
 		throw "The executing PowerShell process is not a usable deterministic PE fixture: '$testUpdaterSourcePath'."
 	}
 	$testUpdaterSource = Get-Item -LiteralPath $testUpdaterSourcePath -ErrorAction Stop
@@ -3801,3 +3801,8 @@ raise SystemExit(1)
 	}
 	Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Several fail-closed cases intentionally invoke native commands that exit
+# nonzero. GitHub's pwsh wrapper propagates the last native exit code even after
+# the PowerShell test script itself completed successfully.
+$global:LASTEXITCODE = 0
