@@ -181,7 +181,7 @@ namespace {
 					continue;
 				}
 				MumbleProto::ChatHistoryGrantSync response;
-				if (!response.ParseFromArray(payload.constData(), payload.size())) {
+				if (!response.ParseFromArray(payload.constData(), static_cast< int >(payload.size()))) {
 					QTest::qFail("Grant response protobuf could not be parsed", __FILE__, __LINE__);
 					return {};
 				}
