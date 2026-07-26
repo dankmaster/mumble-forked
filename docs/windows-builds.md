@@ -134,11 +134,11 @@ manifest fields, updater handoff, runtime validation, and fallback behavior.
   `gst-launch-1.0.exe`, `gst-inspect-1.0.exe`, plugins, or the helper's
   GStreamer LiveKit capability probe are missing.
 - The shared/WebEngine workflow pins the reusable codec environment to release
-  `2025-11`, commit `127cccc01d`, suffix `webengine-codecs-v1`, and ONNX
+  `2025-11`, commit `127cccc01d`, suffix `webengine-codecs-v2`, and ONNX
   Runtime `1.18.1`.
 - The shared/WebEngine workflow looks for
-  `mumble_env.x64-windows.<commit>.webengine-codecs-v1.7z` or split
-  `mumble_env.x64-windows.<commit>.webengine-codecs-v1.7z.001/.002/...` assets
+  `mumble_env.x64-windows.<commit>.webengine-codecs-v2.7z` or split
+  `mumble_env.x64-windows.<commit>.webengine-codecs-v2.7z.001/.002/...` assets
   under this repo's `build-env-2025-11-webengine-codecs` GitHub release tag.
   Normal client/MSI workflows fail fast if that archive is missing instead of
   falling back to a slow local Qt/vcpkg bootstrap path.
@@ -238,7 +238,7 @@ shared Windows CI lane expects:
 .\scripts\windows\publish-windows-build-environment.ps1 `
   -EnvironmentRelease 2025-11 `
   -EnvironmentCommit 127cccc01d `
-  -EnvironmentVersionSuffix webengine-codecs-v1 `
+  -EnvironmentVersionSuffix webengine-codecs-v2 `
   -BuildType shared `
   -ReleaseTag build-env-2025-11-webengine-codecs `
   -Upload `
@@ -249,8 +249,9 @@ Notes:
 
 - For shared/WebEngine environments, the script refuses to publish unless
   `webengine_proprietary_codecs` is enabled in the Qt WebEngine target
-  metadata. WebChannel is no longer an explicit client dependency; vcpkg may
-  still install it transitively when Qt WebEngine requires it.
+  metadata and the Qt Multimedia Quick/QML runtime is complete. WebChannel is
+  no longer an explicit client dependency; vcpkg may still install it
+  transitively when Qt WebEngine requires it.
 - By default the script creates split
   `mumble_env.x64-windows.<commit>.<suffix>.7z.001` style volumes under
   `.tmp\build-env-archives\` using a `1900m` size cap, so the assets fit under

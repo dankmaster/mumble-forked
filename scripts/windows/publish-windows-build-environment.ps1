@@ -300,6 +300,10 @@ function Assert-EnvironmentLooksReady {
 	if ($BuildType -eq "shared") {
 		$requiredPaths += @(
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6Multimedia\Qt6MultimediaTargets.cmake"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\bin\Qt6Multimedia.dll"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\bin\Qt6MultimediaQuick.dll"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\Qt6\qml\QtMultimedia\quickmultimediaplugin.dll"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\icudtl.dat"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\qtwebengine_resources.pak"),
@@ -352,6 +356,7 @@ function New-ReleaseNotes {
 	}
 	$lines += @(
 		"- Shared Windows environments are expected to include Qt WebEngine proprietary codecs",
+		"- Shared Windows environments are expected to include the Qt Multimedia Quick/QML runtime",
 		"- Generated from a local build_env checkout",
 		"- Intended for GitHub Actions release-asset reuse"
 	)

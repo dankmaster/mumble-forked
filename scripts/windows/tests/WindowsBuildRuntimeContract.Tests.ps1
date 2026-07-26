@@ -10,6 +10,9 @@ Describe "Windows helper runtime capability gate" {
 		)
 		$updatePackageScriptPath = Join-Path $PSScriptRoot "..\create-windows-update-package.ps1"
 		$updatePackageScriptText = Get-Content -Raw -LiteralPath $updatePackageScriptPath
+		$environmentPublisherScriptText = Get-Content -Raw -LiteralPath (
+			Join-Path $PSScriptRoot "..\publish-windows-build-environment.ps1"
+		)
 		$tokens = $null
 		$parseErrors = $null
 		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -171,6 +174,15 @@ Describe "Windows helper runtime capability gate" {
 			$artifactAssertionScriptText | Should Match ([regex]::Escape($path))
 			$updatePackageScriptText | Should Match ([regex]::Escape($path))
 			(@(Get-RequiredQtQuickPayloadPaths) -contains $path) | Should Be $true
+		}
+
+		foreach ($path in @(
+			"share\Qt6Multimedia\Qt6MultimediaTargets.cmake",
+			"bin\Qt6Multimedia.dll",
+			"bin\Qt6MultimediaQuick.dll",
+			"Qt6\qml\QtMultimedia\quickmultimediaplugin.dll"
+		)) {
+			$environmentPublisherScriptText | Should Match ([regex]::Escape($path))
 		}
 	}
 
