@@ -6961,7 +6961,7 @@ void Server::runStonksValuationRefresh() {
 		return;
 	}
 
-	context->pending = context->symbols.size();
+	context->pending = static_cast< int >(context->symbols.size());
 	const auto fetchSymbol = std::make_shared< std::function< void(const QString &, int) > >();
 	const std::weak_ptr< std::function< void(const QString &, int) > > weakFetchSymbol = fetchSymbol;
 	const auto startNextSymbol = std::make_shared< std::function< void() > >();
