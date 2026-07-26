@@ -542,6 +542,7 @@ jobs:
       INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX: ${{ vars.INPUT_ENHANCEMENT_TELEMETRY_AGGREGATE_PUBLIC_KEY_HEX }}
       INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256: ${{ vars.INPUT_ENHANCEMENT_ROLLOUT_QUERY_SHA256 }}
       EXPECTED_SIGNER_SUBJECT: ${{ vars.AZURE_ARTIFACT_SIGNING_EXPECTED_SUBJECT }}
+      VERIFIED_SOURCE_SHA: ${{ needs.verify-candidate.outputs.source_sha }}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -574,7 +575,7 @@ jobs:
           if ([int]$pointer.schemaVersion -ne 2 -or
               [string]$pointer.channel -cne $env:PROMOTION_CHANNEL -or
               [string]$pointer.immutableTag -cne $env:IMMUTABLE_TAG -or
-              [string]$pointer.sourceSha -cne '${{ needs.verify-candidate.outputs.source_sha }}' -or
+              [string]$pointer.sourceSha -cne $env:VERIFIED_SOURCE_SHA -or
               [string]$pointer.detachedSignature.publicKeyHex -cne $env:INPUT_ENHANCEMENT_ED25519_PUBLIC_KEY_HEX.ToLowerInvariant()) {
             throw "Promotion handoff does not match the verified signed candidate."
           }

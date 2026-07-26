@@ -682,6 +682,12 @@ try {
 	}
 	$promotionWorkflowPath = Join-Path $scriptsRoot '..\..\.github\workflows\input-enhancement-promote.yml'
 	$promotionWorkflowSource = Get-Content -LiteralPath $promotionWorkflowPath -Raw
+	$publisherStepMarker = '- name: Publish only the verified signed channel artifacts'
+	$publisherStepOffset = $promotionWorkflowSource.IndexOf($publisherStepMarker, [StringComparison]::Ordinal)
+	if ($publisherStepOffset -lt 0 -or
+		$promotionWorkflowSource.Substring($publisherStepOffset).Contains('${{')) {
+		throw 'Promotion publisher must pass workflow expressions through short env fields instead of its oversized run block.'
+	}
 	if ([regex]::Matches($promotionWorkflowSource, 'Assert-InputEnhancementPromotionPolicy').Count -lt 3) {
 		throw 'Promotion workflow must enforce the shared policy gate before download, evidence handling, and publication.'
 	}

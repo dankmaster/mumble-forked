@@ -41,6 +41,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $files = @(Get-ChildItem .\scripts\windows -File | Where-Object {
+            $_.Extension -in '.ps1', '.psm1' -and
             $_.Name -match 'input-enhancement|InputEnhancement'
           }) + @(
             Get-Item .\scripts\windows\tests\Test-InputEnhancementReleaseTools.ps1
