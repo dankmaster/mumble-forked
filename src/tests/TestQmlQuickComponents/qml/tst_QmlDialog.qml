@@ -1911,7 +1911,7 @@ TestCase {
 		compare(dialogState.lastAction, "finishAudioSetupWizard");
 		compare(dialogState.lastPayload.silenceThreshold, 18);
 		compare(dialogState.lastPayload.speechThreshold, 62);
-		compare(dialogState.lastPayload.voiceHold, 37);
+		compare(dialogState.lastPayload.voiceHold, 40);
 		compare(dialogState.lastPayload.vadSource, 1);
 		compare(dialogState.lastPayload.inputGateMode, 0);
 		compare(Object.keys(dialogState.lastPayload).length, 5);
@@ -1953,6 +1953,22 @@ TestCase {
 		setup.voiceSamples = 10;
 		setup.chooseMethod();
 		compare(setup.suggestedMethod, 2);
+
+		setup.ambientSamples = [
+			[18, 17, 18, 16, 95],
+			[8, 7, 8, 6, 96],
+			[7, 6, 7, 5, 94]
+		];
+		setup.ambientPeaks = [95, 96, 94];
+		setup.voiceSums = [520, 720, 500];
+		setup.voicePeaks = [70, 88, 68];
+		setup.voiceSamples = 10;
+		setup.chooseMethod();
+		compare(setup.ambientBaseline(1), 8);
+		compare(setup.suggestedMethod, 1);
+		compare(setup.suggestedStopThreshold, 22);
+		compare(setup.suggestedStartThreshold, 45);
+		compare(setup.suggestedVoiceHold, 40);
 	}
 
 	function test_input_enhancement_blind_comparison_routes_only_opaque_tokens() {

@@ -1759,6 +1759,7 @@ void TestModernDialogControllers::pluginLoadActionUsesAsyncRuntimeReconciliation
 
 void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 	Settings settings;
+	QCOMPARE(settings.iVoiceHold, 40);
 	settings.vsVAD           = Settings::Amplitude;
 	settings.noiseCancelMode = Settings::NoiseCancelOff;
 

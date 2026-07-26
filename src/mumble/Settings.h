@@ -183,7 +183,7 @@ struct Settings {
 	int iMinLoudness                    = 1000;
 	/// Actual mic hold time is (iVoiceHold / 100) seconds, where iVoiceHold is specified in 'frames',
 	/// each of which is has a size of iFrameSize (see AudioInput.h)
-	int iVoiceHold                                      = 20;
+	int iVoiceHold                                      = 40;
 	int iJitterBufferSize                               = 1;
 	bool bAllowLowDelay                                 = true;
 	NoiseCancel noiseCancelMode                         = NoiseCancelSpeex;

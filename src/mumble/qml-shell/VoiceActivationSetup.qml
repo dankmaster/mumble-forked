@@ -19,6 +19,7 @@ Rectangle {
 	property int ticksRemaining: 0
 	property int totalTicks: 1
 	property var ambientPeaks: [0, 0, 0]
+	property var ambientSamples: [[], [], []]
 	property var voiceSums: [0, 0, 0]
 	property var voicePeaks: [0, 0, 0]
 	property int voiceSamples: 0
@@ -31,6 +32,8 @@ Rectangle {
 	readonly property bool captureRunning: setupState === 1 || setupState === 3
 	readonly property bool resultReady: setupState === 4 || setupState === 5
 	readonly property bool inputAvailable: meter && meter.available !== false
+	readonly property int suggestedVoiceHold: Math.max(40,
+		Math.min(80, Number(field.voiceHold || 20)))
 	readonly property real progress: totalTicks > 0
 		? Math.max(0, Math.min(1, 1 - ticksRemaining / totalTicks)) : 0
 
@@ -45,6 +48,7 @@ Rectangle {
 
 	function resetSamples() {
 		ambientPeaks = [0, 0, 0]
+		ambientSamples = [[], [], []]
 		voiceSums = [0, 0, 0]
 		voicePeaks = [0, 0, 0]
 		voiceSamples = 0
@@ -75,8 +79,13 @@ Rectangle {
 	function sampleCurrentFrame() {
 		const values = metrics()
 		if (setupState === 1) {
-			for (let index = 0; index < 3; ++index)
+			const samples = [ambientSamples[0].slice(), ambientSamples[1].slice(),
+				ambientSamples[2].slice()]
+			for (let index = 0; index < 3; ++index) {
 				ambientPeaks[index] = Math.max(Number(ambientPeaks[index] || 0), values[index])
+				samples[index].push(values[index])
+			}
+			ambientSamples = samples
 		} else if (setupState === 3) {
 			for (let index = 0; index < 3; ++index) {
 				voiceSums[index] = Number(voiceSums[index] || 0) + values[index]
@@ -90,12 +99,24 @@ Rectangle {
 		return voiceSamples > 0 ? Number(voiceSums[method] || 0) / voiceSamples : 0
 	}
 
+	function ambientBaseline(method) {
+		const source = ambientSamples[method] || []
+		if (source.length < 5)
+			return Number(ambientPeaks[method] || 0)
+
+		const values = []
+		for (let index = 0; index < source.length; ++index)
+			values.push(boundedMetric(source[index]))
+		values.sort(function(left, right) { return left - right })
+		return values[Math.floor((values.length - 1) * 0.8)]
+	}
+
 	function marginFor(method) {
-		return voiceAverage(method) - Number(ambientPeaks[method] || 0)
+		return voiceAverage(method) - ambientBaseline(method)
 	}
 
 	function thresholdsFor(method) {
-		const ambient = Number(ambientPeaks[method] || 0)
+		const ambient = ambientBaseline(method)
 		const average = voiceAverage(method)
 		const peak = Number(voicePeaks[method] || 0)
 		const usableVoice = Math.max(average, peak * 0.72)
@@ -110,7 +131,7 @@ Rectangle {
 		const hybridMargin = marginFor(2)
 		const volumeMargin = marginFor(0)
 		const speechAverage = voiceAverage(1)
-		const ambientSpeech = Number(ambientPeaks[1] || 0)
+		const ambientSpeech = ambientBaseline(1)
 
 		let method = 1
 		if (speechAverage < 18 && volumeMargin >= 10) {
@@ -155,7 +176,7 @@ Rectangle {
 			"silenceThreshold": suggestedStopThreshold,
 			"speechThreshold": suggestedStartThreshold,
 			"vadSource": selectedMethod,
-			"voiceHold": Number(field.voiceHold || 20),
+			"voiceHold": suggestedVoiceHold,
 			"inputGateMode": 0
 		})
 		setupState = 5
@@ -312,8 +333,9 @@ Rectangle {
 			Label {
 				Layout.fillWidth: true
 				textFormat: Text.PlainText
-				text: qsTr("Stop %1% · Start %2% · Extra input gate off")
+				text: qsTr("Stop %1% · Start %2% · Release %3 ms · Extra input gate off")
 					.arg(root.suggestedStopThreshold).arg(root.suggestedStartThreshold)
+					.arg(root.suggestedVoiceHold * 10)
 				color: Theme.textMain
 				font.pixelSize: 11
 				wrapMode: Text.Wrap
