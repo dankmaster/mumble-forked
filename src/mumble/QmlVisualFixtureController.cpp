@@ -774,7 +774,8 @@ namespace {
 			{ QStringLiteral("positionsRedacted"), false }, { QStringLiteral("positions"), QVariantList { position } }
 		};
 		const QVariantMap stonks {
-			{ QStringLiteral("supported"), true }, { QStringLiteral("enabled"), true },
+			{ QStringLiteral("supported"), true }, { QStringLiteral("accessSupported"), true },
+			{ QStringLiteral("allowed"), true }, { QStringLiteral("enabled"), true },
 			{ QStringLiteral("registered"), true }, { QStringLiteral("canAdmin"), true },
 			{ QStringLiteral("selfUserId"), 1 }, { QStringLiteral("selectedUserId"), 1 },
 			{ QStringLiteral("selectedUserName"), QStringLiteral("Demo User") },
@@ -2220,6 +2221,20 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		requestedFocusName = focusTarget.toString().trimmed();
 		requestedFocusItem = quickItemByObjectName(presentationWindow->contentItem(), requestedFocusName);
 		if (!requestedFocusItem || requestedFocusName.isEmpty()) {
+			// Product-dialog editors are loaded through QML Loader. The dialog
+			// window can present its first valid frame one queued turn before a
+			// nested editor (for example StonksEditor) publishes the nominated
+			// focus control. Let the bounded focus loop consume another complete
+			// frame instead of making its first attempt the only real attempt.
+			if (attempt + 1 < maximumFocusAttempts) {
+				presentationWindow->requestUpdate();
+				QString frameError;
+				if (!waitForPresentedFrame(&frameError, presentationWindow)) {
+					if (error) *error = QStringLiteral("Visual focus target presentation failed: %1").arg(frameError);
+					return {};
+				}
+				continue;
+			}
 			if (error) {
 				*error = QStringLiteral("The visual fixture returned an invalid focus target "
 								"(variant type=%1, object name='%2').")
@@ -2485,9 +2500,9 @@ bool QmlVisualFixtureController::applySurface(const QString &surfaceVariant, QSt
 	const bool preserveDetachedMediaWindow =
 		surfaceVariant.startsWith(QLatin1String("media-detached-"))
 		&& m_host->mediaSession()->active() && m_host->mediaSession()->detached();
-	// The appServer fixture is a real second-level state of the immediately
-	// preceding app menu. Preserve that already-present parent instead of starting
-	// its exit transition and reopening it in the same scene turn.
+	// menu-app-server is retained as the dark-theme pair for the now-flat app
+	// menu. Preserve the immediately preceding light popup so QML can update its
+	// theme without racing a close/reopen transition in the same scene turn.
 	const bool preserveProductMenus = surfaceVariant == QLatin1String("menu-app-server");
 	resetSurfaceFixtures(preserveDetachedMediaWindow, preserveProductMenus);
 	if (captureWindow) *captureWindow = QStringLiteral("main");
@@ -2783,7 +2798,8 @@ bool QmlVisualFixtureController::applySurface(const QString &surfaceVariant, QSt
 		if (!QMetaObject::invokeMethod(m_host->window(), "openAttachment", Q_RETURN_ARG(QVariant, opened),
 								  Q_ARG(QVariant, QVariant(attachment)),
 								  Q_ARG(QVariant, QVariant(QStringLiteral("Qt Quick attachment artwork"))),
-								  Q_ARG(QVariant, QVariant(QString())))
+								  Q_ARG(QVariant, QVariant(QString())),
+								  Q_ARG(QVariant, QVariant()))
 			|| !opened.toBool()) {
 			if (error) *error = QStringLiteral("The attachment viewer visual fixture could not be opened.");
 			return false;
@@ -2822,25 +2838,25 @@ bool QmlVisualFixtureController::applySurface(const QString &surfaceVariant, QSt
 	if (surfaceVariant.startsWith(QLatin1String("async-"))) {
 		AsyncOperationModel *operations = m_host->operationModel();
 		if (surfaceVariant == QLatin1String("async-running")) {
-			operations->startStructuredOperation(QStringLiteral("visual:update"), QStringLiteral("plugin-update"),
-				QStringLiteral("Updating plugins"), QStringLiteral("Downloading Positional Audio"), 3, true);
-			operations->updateStructuredProgress(QStringLiteral("visual:update"), QStringLiteral("download"),
-				1, 3, 42, 7340032, 12582912);
+			operations->startStructuredOperation(QStringLiteral("visual:attachment-save"), QString(),
+				QStringLiteral("Saving attachment"), QStringLiteral("Downloading original image"), 1, true);
+			operations->updateStructuredProgress(QStringLiteral("visual:attachment-save"), QStringLiteral("download"),
+				0, 1, 0, 7340032, 12582912);
 		} else {
-			operations->startStructuredOperation(QStringLiteral("visual:update"), QStringLiteral("plugin-update"),
-				QStringLiteral("Plugin update results"), QStringLiteral("2 of 3 plugins completed"), 3, false);
-			operations->appendItemResult(QStringLiteral("visual:update"), QStringLiteral("plugin:1"), 1,
-				true, false, {}, QStringLiteral("Positional Audio updated"));
+			operations->startStructuredOperation(QStringLiteral("visual:attachment-save"), QString(),
+				QStringLiteral("Attachment operation results"), QStringLiteral("1 of 2 attachments completed"), 2, false);
+			operations->appendItemResult(QStringLiteral("visual:attachment-save"), QStringLiteral("attachment:1"), 0,
+				true, false, {}, QStringLiteral("Community dashboard saved"));
 			if (surfaceVariant == QLatin1String("async-error")) {
-				operations->appendItemResult(QStringLiteral("visual:update"), QStringLiteral("plugin:2"), 2,
-					false, false, QStringLiteral("network-error"), QStringLiteral("Update server unavailable"));
-				operations->finishOperation(QStringLiteral("visual:update"), false,
-					QStringLiteral("partial-failure"), QStringLiteral("One plugin could not be updated"));
+				operations->appendItemResult(QStringLiteral("visual:attachment-save"), QStringLiteral("attachment:2"), 0,
+					false, false, QStringLiteral("write-error"), QStringLiteral("Performance trace could not be saved"));
+				operations->finishOperation(QStringLiteral("visual:attachment-save"), false,
+					QStringLiteral("partial-failure"), QStringLiteral("One attachment could not be saved"));
 			} else {
-				operations->appendItemResult(QStringLiteral("visual:update"), QStringLiteral("plugin:2"), 2,
-					true, false, {}, QStringLiteral("Stream Deck updated"));
-				operations->finishOperation(QStringLiteral("visual:update"), true, {},
-					QStringLiteral("All selected plugins are up to date"));
+				operations->appendItemResult(QStringLiteral("visual:attachment-save"), QStringLiteral("attachment:2"), 0,
+					true, false, {}, QStringLiteral("Performance trace saved"));
+				operations->finishOperation(QStringLiteral("visual:attachment-save"), true, {},
+					QStringLiteral("All attachments saved"));
 			}
 		}
 		return true;

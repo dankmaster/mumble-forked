@@ -382,15 +382,13 @@ Describe "Qt Quick visual manifest validation" {
 			"async-running", "async-error", "async-success", "update-banner", "watch-together-hosting",
 			"toast-single", "toast-duplicate",
 			"media-inline-loading", "media-inline-active", "media-inline-error",
-			"media-inline-retry", "media-inline-external", "media-inline-controls",
-			"media-detached-loading", "media-detached-active", "media-detached-error",
-			"media-detached-retry", "media-detached-external", "media-detached-controls"
+			"media-inline-retry", "media-inline-external", "media-inline-controls"
 		)
 		$surfaceCases = @($matrix.cases | Where-Object {
 			$_.PSObject.Properties.Name -contains "surface_variant"
 		})
 		$pairedSurfaces = @("attachment-viewer", "image-viewer", "screen-share-view-active")
-		@($matrix.cases).Count | Should Be 174
+		@($matrix.cases).Count | Should Be 168
 		$surfaceCases.Count | Should Be ($expectedSurfaces.Count + $pairedSurfaces.Count)
 		@($surfaceCases.surface_variant | Sort-Object -Unique) | Should Be @($expectedSurfaces | Sort-Object)
 		foreach ($surface in $expectedSurfaces) {
@@ -418,21 +416,21 @@ Describe "Qt Quick visual manifest validation" {
 		$gateScript | Should Not Match '"media-inline-[^"]+" \{ @\("Inline media player",'
 	}
 
-	It "gates provider failure surfaces by the product's provider-specific error title" {
+	It "gates inline provider failure surfaces by the product's provider-specific error title" {
 		$gateScript = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
-		foreach ($surface in @(
-			"media-inline-error", "media-inline-retry", "media-inline-external",
-			"media-detached-error", "media-detached-retry", "media-detached-external"
-		)) {
+		foreach ($surface in @("media-inline-error", "media-inline-retry", "media-inline-external")) {
 			$gateScript | Should Match ('"{0}" \{{ @\([^\r\n]*"YouTube playback failed"' -f $surface)
 		}
-		$gateScript | Should Not Match '"media-(?:inline|detached)-(?:error|retry|external)" \{ @\([^\r\n]*"Media playback failed"'
+		$gateScript | Should Not Match '"media-inline-(?:error|retry|external)" \{ @\([^\r\n]*"Media playback failed"'
 	}
 
-	It "gates detached loading by the provider-owned progress semantics" {
-		$gateScript = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
-		$gateScript | Should Match '"media-detached-loading" \{ @\("Loading YouTube media", "Loading media player"\) \}'
-		$gateScript | Should Not Match '"media-detached-loading" \{ @\("Loading media"\) \}'
+	It "excludes detached media surfaces that the Windows product disables for render-loop safety" {
+		$matrix = Get-Content -Raw "$PSScriptRoot\..\qml-visual-gate-matrix.json" | ConvertFrom-Json
+		@($matrix.cases | Where-Object {
+			[string](Get-QmlVisualCaseValue $_ "surface_variant" "") -like "media-detached-*"
+		}).Count | Should Be 0
+		$models = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlClientModels.cpp"
+		$models | Should Match '(?s)bool MediaSessionBackend::detachedPlaybackSupported\(\) const \{\s*#ifdef Q_OS_WIN.*?return false;'
 	}
 
 	It "gates attachment image previews by their exact accessible alt label" {
@@ -509,6 +507,10 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'reportedOffsetDelta\s*-gt\s*1\.0'
 		$worker | Should Match 'did not execute a stable six-row production prepend'
 		$worker | Should Match '"chat-history-prepend-anchor"\s*\{\s*@\('
+		$worker | Should Match 'command\s*=\s*"qmlTimelinePresentationState"'
+		$worker | Should Match 'presentationPending'
+		$worker | Should Match 'presentationFinalizing'
+		$worker | Should Match 'did not finish its production timeline presentation'
 	}
 
 	It "covers model-backed profile text-room and chat-background menus" {
@@ -601,6 +603,7 @@ Describe "Qt Quick visual manifest validation" {
 		}
 		$controller | Should Match 'QStringLiteral\("aclEditor"\)'
 		$controller | Should Match 'QStringLiteral\("kind"\), QStringLiteral\("stonks"\)'
+		$controller | Should Match '(?s)QVariantMap visualStonksDialog\(\).*QStringLiteral\("accessSupported"\), true.*QStringLiteral\("allowed"\), true'
 		$controller | Should Match 'applySharedState\('
 		$controller | Should Match 'sharedHost\(\)'
 		$controller | Should Match 'QStringLiteral\("direct-message-attachment"\)'
@@ -608,6 +611,9 @@ Describe "Qt Quick visual manifest validation" {
 		$controller | Should Match 'visualMenuAction\(QStringLiteral\("acl"\), QStringLiteral\("Room access & settings\.\.\."\)'
 		$worker | Should Match 'Watch Together: Community release watch party'
 		$worker | Should Match 'Inherit access rules from parent room'
+		$worker | Should Match 'Changes apply to Root / Lobby \(room ID 1\)'
+		$worker | Should Match 'These permissions belong to the target room shown above\.'
+		$worker | Should Match '"Rule for all"'
 		$worker | Should Match 'Portfolio data is ready\.'
 		$worker | Should Match 'Message attachments'
 		$worker | Should Match '"menu-room"\s*\{\s*@\("Send room message…", "Copy room URL", "Room access & settings\.\.\."'
@@ -836,13 +842,14 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'exposes a stale cancellation action'
 	}
 
-	It "keeps media-surface fixtures explicit and network-independent" {
+	It "keeps supported Windows inline-media fixtures explicit and network-independent" {
 		$matrix = Get-Content -Raw "$PSScriptRoot\..\qml-visual-gate-matrix.json" | ConvertFrom-Json
 		$media = @($matrix.cases | Where-Object {
 			[string](Get-QmlVisualCaseValue $_ "surface_variant" "") -like "media-*"
 		})
-		$media.Count | Should Be 12
+		$media.Count | Should Be 6
 		foreach ($case in $media) {
+			[string]$case.surface_variant | Should Match '^media-inline-'
 			[string]$case.rich_preview_variant | Should Be "youtube"
 			[string]$case.presentation_family | Should Be "embed"
 			[string]$case.case_variant | Should Be "youtube"
@@ -965,6 +972,13 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'providerToken') | Should Be $true
 		($worker -match 'providerFamily') | Should Be $true
 		($worker -match 'providerPresentation') | Should Be $true
+		($worker -match '"x"\s*\{[\s\S]*?variant = "x"; token = "x"; family = "social"; presentation = "socialPost"') |
+			Should Be $true
+		($worker -match '"x"\s*\{\s*"Social post"; break\s*\}') | Should Be $true
+		($worker -match 'requiredRichPreviewStateProperties') | Should Be $true
+		($worker -match 'missingRichPreviewStateProperties') | Should Be $true
+		($worker -match '"settings-audio-input"\s*\{[\s\S]*?"Detection guide"[\s\S]*?"Set up voice activation"') |
+			Should Be $true
 		($worker -match 'cardX.*timelineX') | Should Be $true
 		($worker -match 'steam.*providerSteamHeroImage') | Should Be $true
 		($worker -match 'product.*vehicle.*property.*marketplace[\s\S]*providerCommerceHeroImage') |
@@ -1353,8 +1367,8 @@ Describe "Qt Quick connected fixture contract" {
 		$modernMenu | Should Match 'parent\s*=\s*hostItem'
 		$modernMenu | Should Match 'devicePixelRatio here is a\s*\n?\s*// correctness bug'
 		$mainQml | Should Match '(?s)id:\s*appMenuPopup.*?parent:\s*root\.contentItem'
-		$mainQml | Should Match 'normalized\s*=\s*"appServer"'
-		$mainQml | Should Match 'candidate\.payload\.id[\s\S]*substring\(0, 7\) === "server\."'
+		$mainQml | Should Match 'alias === "appserver"[\s\S]*normalized\s*=\s*"app"'
+		$mainQml | Should Match 'groupId === "server"[\s\S]*"label": ""'
 		$semanticMenu | Should Match 'function representativeGroupIcon\(group, items\)'
 		$semanticMenu | Should Match '"icon": representativeGroupIcon\(group, items\)'
 		$semanticMenu | Should Not Match 'group\.icon\s*\|\|\s*"menu"'
@@ -1374,12 +1388,18 @@ Describe "Qt Quick connected fixture contract" {
 		$operationCard = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\AsyncOperationCard.qml"
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($controller -match '(?s)presentationWindow->requestUpdate\(\);.*waitForPresentedFrame\(&frameError, presentationWindow\).*Initial visual surface presentation failed.*maximumFocusAttempts') | Should Be $true
+		($controller -match '(?s)!requestedFocusItem \|\| requestedFocusName\.isEmpty\(\).*attempt \+ 1 < maximumFocusAttempts.*presentationWindow->requestUpdate\(\).*Visual focus target presentation failed.*continue;') | Should Be $true
 		($controller -match '(?s)QElapsedTimer exposureElapsed.*QCoreApplication::processEvents.*std::atomic_bool.*QQuickWindow::frameSwapped.*QQuickWindow::afterFrameEnd.*QQuickWindow::afterRendering.*QQuickWindow::afterAnimating.*Qt::DirectConnection.*QElapsedTimer presentationElapsed.*frameEventTurns') | Should Be $true
 		($controller -match 'guardedWindow->grabWindow\(\)') | Should Be $false
 		($mainQml -match 'operationOverlay\.visualFixtureFocusTarget') | Should Be $true
 		($operationCard -match '(?s)visualFixtureFocusTarget:.*cancelOperationButton\.visible.*cancelOperationButton') | Should Be $true
+		($mainQml -match '(?s)surface\.indexOf\("async-"\) === 0.*operationCancelButton.*return operationTarget\.objectName.*return ""') |
+			Should Be $true
 		($worker -match 'focus_target\s*-ne\s*"operationCancelButton"') | Should Be $true
-		($worker -match '(?s)Cancel Updating plugins.*-contains "focused"') | Should Be $true
+		($worker -match '(?s)Cancel Saving attachment.*-contains "focused"') | Should Be $true
+		($controller -match '(?s)visual:attachment-save.*QString\(\).*Saving attachment.*Downloading original image') |
+			Should Be $true
+		($controller -match 'visual:update.*plugin-update') | Should Be $false
 	}
 
 	It "opens Manual Plugin before applying and verifies its deterministic fixture state" {
@@ -1562,7 +1582,7 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'Abs\(\[double\]\$Viewport\.railPosition\s*-\s*\$expectedRailPosition\)') | Should Be $true
 	}
 
-	It "closes stale product menus before resolving a live-context menu probe" {
+	It "maps the legacy server case to the real flat app menu without a sequential popup race" {
 		$qml = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
 		$probe = [regex]::Match(
 			$qml,
@@ -1570,10 +1590,15 @@ Describe "Qt Quick connected fixture contract" {
 		)
 		$probe.Success | Should Be $true
 		$body = $probe.Groups['body'].Value
+		$preserveIndex = $body.IndexOf('const preserveOpenAppMenu')
 		$resetIndex = $body.IndexOf('closeProductMenus()')
-		$dispatchIndex = $body.IndexOf('if (normalized === "app" || normalized === "appServer")')
-		($resetIndex -ge 0) | Should Be $true
+		$dispatchIndex = $body.IndexOf('if (normalized === "app")')
+		($preserveIndex -ge 0) | Should Be $true
+		($resetIndex -gt $preserveIndex) | Should Be $true
 		($dispatchIndex -gt $resetIndex) | Should Be $true
+		$body | Should Match 'const legacyAppServerAlias[\s\S]*normalized = "app"'
+		$body | Should Match 'if \(!menu\.visible\)[\s\S]*openMenuAt\(menu'
+		$body | Should Not Match 'normalized = "appServer"'
 	}
 
 	It "materializes and selects an actionable message before opening its product menu" {
@@ -1588,6 +1613,7 @@ Describe "Qt Quick connected fixture contract" {
 		$worker | Should Match '\$surface\.StartsWith\("menu-"[\s\S]*role\)\.Equals\("PopupMenu"'
 		$worker | Should Match '\$expectedMenuContainerCount = 1'
 		$worker | Should Match 'menuContainers\.Count -ne \$expectedMenuContainerCount'
+		$worker | Should Match '"menu-app" \{ @\([\s\S]*"Server information…"[\s\S]*"Access tokens…"'
 		$worker | Should Match '"menu-app-server" \{ @\([\s\S]*"Server information…"[\s\S]*"Access tokens…"'
 		$menu = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\ModernMenu.qml"
 		$menu | Should Match 'property:\s*"Accessible\.role"[\s\S]*Accessible\.PopupMenu'

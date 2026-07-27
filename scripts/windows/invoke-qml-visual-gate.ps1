@@ -341,10 +341,10 @@ function Assert-QmlAccessibilityEvidence {
 	if ($surface -eq "async-running") {
 		$focusedCancelNodes = @($nodes | Where-Object {
 			([string]$_.role).Equals("Button", [StringComparison]::OrdinalIgnoreCase) -and
-			[string]$_.name -eq "Cancel Updating plugins" -and
+			[string]$_.name -eq "Cancel Saving attachment" -and
 			@($_.states) -contains "focused"
 		})
-		if ($focusedCancelNodes.Count -ne 1 -or [string]$focus.leaf.name -ne "Cancel Updating plugins") {
+		if ($focusedCancelNodes.Count -ne 1 -or [string]$focus.leaf.name -ne "Cancel Saving attachment") {
 			throw "Async-running case '$CaseId' does not expose its cancel action as the focused accessibility node."
 		}
 	}
@@ -494,6 +494,10 @@ function Assert-QmlAccessibilityEvidence {
 		}
 	}
 	$requiredSurfaceNames = switch ($surface) {
+		"menu-app" { @(
+			"Server information…", "Search…", "Connect to a server…",
+			"Disconnect…", "Access tokens…", "Root room access & settings..."
+		) }
 		"menu-app-server" { @(
 			"Server information…", "Search…", "Connect to a server…",
 			"Disconnect…", "Access tokens…", "Root room access & settings..."
@@ -513,7 +517,10 @@ function Assert-QmlAccessibilityEvidence {
 			"Search this conversation", "Search messages in this conversation", "No matches",
 			"Close conversation search"
 		) }
-		"settings-audio-input" { @("Settings", "Audio Input", "Quick setup", "Cancel", "Apply", "Done") }
+		"settings-audio-input" { @(
+			"Settings", "Audio Input", "Detection guide", "Set up voice activation",
+			"Cancel", "Apply", "Done"
+		) }
 		"settings-audio-input-advanced" { @(
 			"Settings", "Audio Input", "Input gate", "Stop threshold",
 			"Hide advanced settings", "Cancel", "Apply", "Done"
@@ -587,9 +594,11 @@ function Assert-QmlAccessibilityEvidence {
 			"Certificate", "Current certificate", "Certificate action", "Action: Create", "Name", "Email", "Close", "Apply"
 		) }
 		"dialog-acl-populated" { @(
-			"Room access & settings", "Target room", "Root / Lobby", "Access rules and groups",
-			"Rules and groups", "Inherit access rules from parent room", "Room password", "Groups",
-			"scrim-team", "Added members", "Kira (#2)", "Save changes"
+			"Room access & settings",
+			"Changes apply to Root / Lobby (room ID 1). Access rules inherit through the room tree unless overridden here.",
+			"Access rules and groups", "These permissions belong to the target room shown above.",
+			"Inherit access rules from parent room", "Room password", "Groups", "scrim-team",
+			"Added members", "Kira (#2)", "Access rules", "Rule for all", "Save changes"
 		) }
 		"dialog-stonks-populated" { @(
 			"Stonks", "Portfolio data is ready.", "Overview", "Portfolio", "Leaderboard",
@@ -648,8 +657,7 @@ function Assert-QmlAccessibilityEvidence {
 			"Upload interrupted", "Retry release-notes.pdf", "Alex", "Message Lobby"
 		) }
 		"chat-attachment-states" { @(
-			"Here are the assets from the latest community-test pass.", "Message attachments",
-			"Community test dashboard", "Loading Performance trace",
+			"Message attachments", "Community test dashboard", "Loading Performance trace",
 			"Preview unavailable", "Retry preview for Failed attachment preview"
 		) }
 		"chat-history-prepend-anchor" { @(
@@ -685,9 +693,9 @@ function Assert-QmlAccessibilityEvidence {
 		"manual-plugin" { @("Position and orientation", "Identity and link state") }
 		"ptt-idle" { @("Hold to push to talk") }
 		"ptt-active" { @("Transmitting, release push to talk") }
-		"async-running" { @("Updating plugins: Downloading Positional Audio") }
-		"async-error" { @("Plugin update results: One plugin could not be updated") }
-		"async-success" { @("Plugin update results: All selected plugins are up to date") }
+		"async-running" { @("Saving attachment: Downloading original image") }
+		"async-error" { @("Attachment operation results: One attachment could not be saved") }
+		"async-success" { @("Attachment operation results: All attachments saved") }
 		"update-banner" { @("Mumble update ready") }
 		"watch-together-hosting" { @(
 			"Watch Together: Community release watch party", "HOSTING", "2 participants",
@@ -873,7 +881,7 @@ function Assert-QmlAccessibilityEvidence {
 			# visible after it, e.g. "Twitch stream: Mumble Dev".
 			"twitch" { "Twitch stream"; break }
 			"flashback" { "Discussion details"; break }
-			"x" { "Mumble Design"; break }
+			"x" { "Social post"; break }
 			"github" { "Repository details"; break }
 			"vehicle" { "Vehicle details"; break }
 			"property" { "Property details"; break }
@@ -1143,6 +1151,14 @@ foreach ($case in $selectedCases) {
 	if ($captureWindow -ne $expectedCaptureWindow) {
 		throw "Case '$($case.id)' targeted window '$captureWindow'; expected '$expectedCaptureWindow'."
 	}
+	# Main-window sizing has a dedicated setHostViewport handshake below that
+	# waits for both the logical dimensions and the navigation endpoint. Windows
+	# can report the previous width in this earlier state-injection response while
+	# the resize is still being presented, so defer only the main-window size
+	# assertion to that stronger handshake. Separate windows have no later
+	# viewport contract and must still match here.
+	$appliedSizeMatches = $captureWindow -eq "main" -or
+		([int]$applied.width -eq [int]$case.width -and [int]$applied.height -eq [int]$case.height)
 	if ([string]$applied.case_id -ne [string]$case.id -or [string]$applied.state -ne [string]$case.state -or
 		[string]$applied.theme -ne [string]$case.theme -or [string]$applied.layout -ne [string]$case.layout -or
 		[string]$applied.density -ne $density -or
@@ -1153,7 +1169,7 @@ foreach ($case in $selectedCases) {
 		[string]$applied.case_variant -ne $caseVariant -or
 		[string]$applied.surface_variant -ne $surfaceVariant -or
 		[bool]$applied.surface_present -ne ($surfaceVariant -ne "none") -or
-		[int]$applied.width -ne [int]$case.width -or [int]$applied.height -ne [int]$case.height -or
+		-not $appliedSizeMatches -or
 		[Math]::Abs([double]$applied.actual_device_pixel_ratio - $actualDevicePixelRatio) -gt 0.001) {
 		$appliedJson = $applied | ConvertTo-Json -Compress -Depth 10
 		throw "Automation did not apply visual case '$($case.id)' exactly. Expected $([int]$case.width)x$([int]$case.height) at DPR $actualDevicePixelRatio; applied: $appliedJson"
@@ -1345,6 +1361,35 @@ foreach ($case in $selectedCases) {
 		throw "Separate-window case '$($case.id)' cannot request the main navigation drawer."
 	}
 
+	# Message models are populated synchronously, but the production timeline keeps
+	# rich rows behind its bounded presentation surface while delegates hydrate and
+	# the tail anchor settles. A visually stable loading pane is not the requested
+	# case, so wait for that production handshake before accepting any main-window
+	# capture instead of relying on unrelated earlier matrix cases for timing.
+	if ($captureWindow -eq "main" -and $expectedMessageCount -gt 0) {
+		$timelinePresentation = $null
+		$timelinePresentationReady = $false
+		$timelinePresentationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+		do {
+			$timelineResponse = Invoke-Automation @{
+				command = "qmlTimelinePresentationState"
+			}
+			$timelinePresentation = $timelineResponse.timeline
+			$timelinePresentationReady = $null -ne $timelinePresentation -and
+				[int]$timelinePresentation.count -eq $expectedMessageCount -and
+				-not [bool]$timelinePresentation.presentationPending -and
+				-not [bool]$timelinePresentation.presentationFinalizing
+			if (-not $timelinePresentationReady) {
+				Start-Sleep -Milliseconds 25
+			}
+		} while (-not $timelinePresentationReady -and
+			[DateTime]::UtcNow -lt $timelinePresentationDeadline)
+		if (-not $timelinePresentationReady) {
+			$timelineJson = $timelinePresentation | ConvertTo-Json -Compress -Depth 8
+			throw "Case '$($case.id)' did not finish its production timeline presentation: $timelineJson"
+		}
+	}
+
 	$richBodyState = $null
 	if ($caseVariant -eq "rich-image-link") {
 		$richBodyMessageId = [string]$applied.rich_body_message_id
@@ -1419,7 +1464,7 @@ foreach ($case in $selectedCases) {
 				break
 			}
 			"x" {
-				[pscustomobject]@{ variant = "x"; token = "x"; family = "social"; presentation = "identity" }
+				[pscustomobject]@{ variant = "x"; token = "x"; family = "social"; presentation = "socialPost" }
 				break
 			}
 			"github" {
@@ -1468,7 +1513,28 @@ foreach ($case in $selectedCases) {
 				generation = $applied.generation
 				messageId = [string]$applied.rich_preview_message_id
 			}
-			$richPreviewCardState = $previewResponse.card
+			$cardProperty = $previewResponse.PSObject.Properties["card"]
+			$richPreviewCardState = if ($null -ne $cardProperty) { $cardProperty.Value } else { $null }
+			$requiredRichPreviewStateProperties = @(
+				"cardVisible", "cardWidth", "cardHeight", "cardX", "cardY",
+				"timelineVisible", "timelineWidth", "timelineHeight", "timelineX", "timelineY",
+				"previewState", "compact", "expanded", "userExpanded", "rendered",
+				"visibleImages", "visibleImageCount", "imageReadyCount", "imageLoadingCount", "imageErrorCount",
+				"mediaVisible", "mediaWidth", "mediaHeight", "mediaX", "mediaY", "playVisible",
+				"openSurfaceVisible", "providerDetailsVisible", "providerVariant", "providerToken",
+				"providerFamily", "providerPresentation"
+			)
+			$missingRichPreviewStateProperties = @(if ($null -eq $richPreviewCardState) {
+				$requiredRichPreviewStateProperties
+			} else {
+				$requiredRichPreviewStateProperties | Where-Object {
+					-not ($richPreviewCardState.PSObject.Properties.Name -contains $_)
+				}
+			})
+			if ($missingRichPreviewStateProperties.Count -gt 0) {
+				Start-Sleep -Milliseconds 25
+				continue
+			}
 			$cardInsideTimeline = [bool]$richPreviewCardState.cardVisible -and
 				[double]$richPreviewCardState.cardWidth -gt 0 -and [double]$richPreviewCardState.cardHeight -gt 0 -and
 				[bool]$richPreviewCardState.timelineVisible -and [double]$richPreviewCardState.timelineHeight -gt 0 -and

@@ -2249,6 +2249,45 @@ TestCase {
 		dialogState.setValidationError("audio.delay", "");
 	}
 
+	function test_settings_initial_focus_reveals_advanced_collapsible_field() {
+		const basicFields = [];
+		for (let index = 0; index < 12; ++index) {
+			basicFields.push({
+				"id": "basic" + index, "type": "text",
+				"label": "Basic field " + index, "value": "Value " + index
+			});
+		}
+		dialogState.setSections([
+			{ "id": "basic", "title": "Basic", "fields": basicFields },
+			{
+				"id": "voiceActivation", "title": "Voice activation tuning",
+				"advanced": true, "collapsible": true, "expandedByDefault": false,
+				"fields": [{
+					"id": "audio.vadMin", "type": "range", "label": "Stop threshold",
+					"value": 80, "minimum": 0, "maximum": 100
+				}]
+			}
+		]);
+		dialogState.setSpecialState("settings", {
+			"id": "advanced-initial-focus", "width": 900, "height": 480,
+			"pages": [{ "id": "audioInput", "label": "Audio Input" }],
+			"activePage": "audioInput", "showAdvanced": true,
+			"initialFocusId": "audio.vadMin", "primaryActionId": "save"
+		});
+
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		let section = null;
+		let threshold = null;
+		tryVerify(function() {
+			section = findChild(loader.item.contentItem, "dialogSection_voiceActivation");
+			threshold = findChild(loader.item.contentItem, "dialogField_audio.vadMin");
+			return scroll !== null && section !== null && threshold !== null
+				&& threshold.visible && threshold.activeFocus;
+		});
+		compare(section.Accessible.description, "Expanded section");
+		tryVerify(function() { return scroll.contentItem.contentY > 0; });
+	}
+
 	function test_result_list_virtualizes_ten_thousand_stable_rows_and_supports_keyboard() {
 		const items = [];
 		for (let index = 0; index < 10000; ++index) {

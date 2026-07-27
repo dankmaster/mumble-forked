@@ -409,6 +409,20 @@ Dialog {
 		}
 		return false
 	}
+	function settingsContainsField(fieldId) {
+		const requested = String(fieldId || "")
+		if (requested.length === 0)
+			return false
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = (sections[sectionIndex] || {}).fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				if (String((fields[fieldIndex] || {}).id || "") === requested)
+					return true
+			}
+		}
+		return false
+	}
 	function settingsSectionExpansionKey(section, sectionIndex) {
 		const dialogId = String(dialogState.state.id || "dialog")
 		const pageId = String(dialogState.activePage || "single")
@@ -576,8 +590,26 @@ Dialog {
 	function scheduleInitialFocusReveal() {
 		Qt.callLater(dialog.ensureActiveInitialFocusVisible)
 	}
-	function applyInitialFocus() {
+	function applyInitialFocus(retriesRemaining) {
 		if (!visible || !contentItem) return ""
+		const explicitRequested = explicitMetadataFocusId()
+		if (dialogState.kind === "settings" && settingsContainsField(explicitRequested)) {
+			if (!showAdvanced && invalidFieldIsAdvanced(explicitRequested))
+				showAdvanced = true
+			const expandedSection = expandSettingsSectionForField(explicitRequested)
+			const explicitTarget = focusObjectInTree(
+				contentItem, normalizedFocusObjectName(explicitRequested))
+			if (!explicitTarget) {
+				const retries = Number.isFinite(Number(retriesRemaining))
+					? Math.max(0, Number(retriesRemaining)) : 3
+				if (expandedSection || retries > 0) {
+					Qt.callLater(function() {
+						dialog.applyInitialFocus(Math.max(0, retries - 1))
+					})
+				}
+				return ""
+			}
+		}
 		const target = initialFocusTarget()
 		if (target && target.enabled !== false && target.visible !== false && target.forceActiveFocus) {
 			alignSettingsNavigationFocus(target)

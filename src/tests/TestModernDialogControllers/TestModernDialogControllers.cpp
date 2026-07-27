@@ -2674,6 +2674,9 @@ void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestr
 	QVERIFY(firstFrameWait > requestUpdate);
 	QVERIFY(navigationCloseTimer > firstFrameWait);
 	QVERIFY(focusAttempts > navigationCloseTimer);
+	QVERIFY(fixtureSource.contains(QStringLiteral("attempt + 1 < maximumFocusAttempts")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("Visual focus target presentation failed")));
+	QVERIFY(fixtureSource.indexOf(QStringLiteral("continue;"), focusAttempts) > focusAttempts);
 
 	const qsizetype applySurfaceStart = fixtureSource.indexOf(
 		QStringLiteral("bool QmlVisualFixtureController::applySurface"));
@@ -3292,8 +3295,13 @@ void TestModernDialogControllers::automationWalkProbesUseDeterministicFixtures()
 	QVERIFY(menuBody.contains(QStringLiteral("candidateIsSelf")));
 	QVERIFY(menuBody.contains(QStringLiteral("root.navigationRailModel.get(index)")));
 	QVERIFY(menuBody.contains(QStringLiteral("rail.requestParticipantMenu(participantId")));
+	QVERIFY(menuBody.contains(QStringLiteral("const legacyAppServerAlias")));
+	QVERIFY(menuBody.contains(QStringLiteral("normalized = \"app\"")));
+	QVERIFY(menuBody.contains(QStringLiteral("const preserveOpenAppMenu")));
+	QVERIFY(!menuBody.contains(QStringLiteral("normalized = \"appServer\"")));
 	QVERIFY(menuBody.contains(QStringLiteral("\"fixtureUsed\": false")));
 	QVERIFY(!menuBody.contains(QStringLiteral("automation:participant:4294967295")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("Q_ARG(QVariant, QVariant())")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("QStringLiteral(\"isSelf\"), true")));
 }
 

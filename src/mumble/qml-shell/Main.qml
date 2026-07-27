@@ -1174,6 +1174,8 @@ ApplicationWindow {
 	function openAutomationMenuProbe(variant) {
 		const inputVariant = normalizedMenuVariant(variant)
 		const alias = inputVariant.toLowerCase()
+		const legacyAppServerAlias = alias === "appserver" || alias === "app-server"
+			|| alias === "server-submenu"
 		let normalized = inputVariant
 		if (alias === "self" || alias === "profile")
 			normalized = "profile"
@@ -1183,33 +1185,29 @@ ApplicationWindow {
 			normalized = "chatBackground"
 		else if (alias === "textroom" || alias === "textroomreal")
 			normalized = "textRoom"
-		else if (alias === "appserver" || alias === "app-server" || alias === "server-submenu")
-			normalized = "appServer"
+		else if (legacyAppServerAlias)
+			// Server actions now live directly in the application menu. Keep the
+			// legacy visual-case alias as a dark-theme capture of that real
+			// surface instead of trying to open a submenu the product removed.
+			normalized = "app"
 		else if (alias === "app" || alias === "room" || alias === "message")
 			normalized = alias
-		closeProductMenus()
+		// The legacy dark app-server case immediately follows the light app-menu
+		// case. Reuse that already-open popup while its theme updates; closing and
+		// reopening the same QQuickPopup in one scene turn races its exit
+		// transition. Isolated runs still take the normal fresh-open path below.
+		const preserveOpenAppMenu = legacyAppServerAlias && appMenuPopup.visible
+		if (!preserveOpenAppMenu)
+			closeProductMenus()
 		automationMenuVariant = normalized
 		automationMenuSurface = null
 		automationMenuFocusItem = null
 		let handled = true
 		let menu = null
-		if (normalized === "app" || normalized === "appServer") {
+		if (normalized === "app") {
 			menu = appMenuPopup
-			openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
-			if (normalized === "appServer") {
-				let firstServerAction = null
-				for (let index = 0; index < appMenuPopup.count; ++index) {
-					const candidate = appMenuPopup.itemAt(index)
-					if (candidate && candidate.payload
-							&& String(candidate.payload.id || "").substring(0, 7) === "server.") {
-						firstServerAction = candidate
-						break
-					}
-				}
-				handled = !!firstServerAction
-				if (handled)
-					automationMenuFocusItem = firstServerAction
-			}
+			if (!menu.visible)
+				openMenuAt(menu, Qt.point(root.width - menu.width - 24, 72))
 		} else if (normalized === "profile") {
 			menu = profileMenuPopup
 			openProfileMenu(Qt.point(root.width - menu.width - 24, root.height - 90))
@@ -1501,6 +1499,10 @@ ApplicationWindow {
 				operationTarget.forceActiveFocus(Qt.OtherFocusReason)
 				return operationTarget.objectName
 			}
+			// The ListView delegate can arrive one presented frame after its
+			// controller row. Report a pending target so the bounded fixture loop
+			// retries it instead of silently focusing the app-menu fallback.
+			return ""
 		}
 		if (surface.indexOf("toast-") === 0) {
 			const toastTarget = visualFixtureItemByObjectName(root.contentItem, "toastDismissButton")
@@ -2678,7 +2680,7 @@ ApplicationWindow {
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
 					maximumBodyHeight: root.height <= 560
-						? (root.activeScopeHasScreenShare ? 60 : root.compactNavigation ? 68 : 88)
+						? (root.activeScopeHasScreenShare ? 60 : root.compactNavigation ? 80 : 88)
 						: root.compactNavigation ? Math.max(112, Math.min(160, root.height * 0.18))
 						: Math.max(132, Math.min(220, root.height * 0.28))
 					maximumImageHeight: root.height <= 560
@@ -3826,6 +3828,7 @@ ApplicationWindow {
 									visible: (messageDelegate.startsGroup && !messageDelegate.own)
 										|| messageDelegate.systemMessage
 									Label {
+										id: messageSenderLabel
 										Layout.fillWidth: true
 										textFormat: Text.PlainText
 										text: title || qsTr("System")
@@ -3833,9 +3836,21 @@ ApplicationWindow {
 										font.bold: true
 										font.pixelSize: Theme.fontCaption
 										elide: Text.ElideRight
+										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| !messageDelegate.itemContainedInViewport(messageSenderLabel)
 									}
-                                    Label { textFormat: Text.PlainText; text: timestamp; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; visible: timestamp.length > 0 }
 									Label {
+										id: messageTimestampLabel
+										textFormat: Text.PlainText
+										text: timestamp
+										color: Theme.textMuted
+										font.pixelSize: Theme.fontCaption
+										visible: timestamp.length > 0
+										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| !messageDelegate.itemContainedInViewport(messageTimestampLabel)
+									}
+									Label {
+										id: messageStatusLabel
 										Layout.maximumWidth: root.narrowShell ? 72 : 120
 										textFormat: Text.PlainText
 										text: status
@@ -3843,6 +3858,8 @@ ApplicationWindow {
 										font.pixelSize: Theme.fontCaption
 										visible: status.length > 0
 										elide: Text.ElideRight
+										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| !messageDelegate.itemContainedInViewport(messageStatusLabel)
 									}
                                 }
 								Rectangle {
@@ -4491,7 +4508,13 @@ ApplicationWindow {
 					// their own minimum height. Reserve the complete reply row plus the
 					// intervening layout gap so compact combinations never overflow the
 					// composer's semantic or visual bounds.
-					readonly property int baseHeight: Math.max(90, Theme.railFooterHeight)
+					readonly property int outerMargin: root.narrowShell ? Theme.space2 : 14
+					readonly property int targetRowHeight: 16
+					readonly property int inputRowMinimumHeight: 30
+					readonly property int baseHeight: Math.max(
+						outerMargin * 2 + Theme.space2 * 2 + targetRowHeight
+							+ Theme.chatMetadataSpacing + inputRowMinimumHeight,
+						Theme.railFooterHeight)
 					Layout.preferredHeight: visible ? (activeScope.hasPendingReply ? baseHeight + 44 : baseHeight)
 						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * Theme.composerLineHeight
 						+ (composer.attachments.count > 0 ? 58 : 0)
@@ -4563,7 +4586,7 @@ ApplicationWindow {
 						anchors.top: parent.top
 						anchors.bottom: parent.bottom
 						anchors.horizontalCenter: parent.horizontalCenter
-						anchors.topMargin: root.narrowShell ? Theme.space2 : 14
+						anchors.topMargin: composerSurface.outerMargin
 						anchors.bottomMargin: anchors.topMargin
 						width: Math.max(1, Math.min(root.conversationLaneMaximumWidth,
 							parent.width - (root.narrowShell ? Theme.space2 : 14) * 2))
@@ -4605,7 +4628,7 @@ ApplicationWindow {
 									id: composerTargetRow
 									objectName: "composerTargetRow"
 									Layout.fillWidth: true
-									Layout.preferredHeight: 16
+									Layout.preferredHeight: composerSurface.targetRowHeight
 									spacing: Theme.chatMetadataSpacing
 									ModernIcon {
 										Layout.alignment: Qt.AlignVCenter
@@ -4839,6 +4862,7 @@ ApplicationWindow {
 									id: composerInputRow
 									Layout.fillWidth: true
 									Layout.fillHeight: true
+									Layout.minimumHeight: composerSurface.inputRowMinimumHeight
 									spacing: Theme.space1
 									ModernIconButton {
 										id: composerAttachButton

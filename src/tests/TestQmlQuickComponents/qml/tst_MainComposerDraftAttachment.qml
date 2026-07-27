@@ -77,7 +77,10 @@ TestCase {
 	}
 
 	function test_draft_upload_exposes_localized_status_and_progress() {
-		verify(/visible:\s*!activeScope\.activity[\s\S]*readonly property int baseHeight:\s*Math\.max\(90,\s*Theme\.railFooterHeight\)[\s\S]*Layout\.preferredHeight:\s*visible\s*\?\s*\(activeScope\.hasPendingReply\s*\?\s*baseHeight \+ 44\s*:\s*baseHeight\)/.test(mainSource))
+		verify(/visible:\s*!activeScope\.activity/.test(mainSource))
+		verify(/readonly property int baseHeight:\s*Math\.max\([\s\S]{0,240}outerMargin \* 2[\s\S]{0,240}inputRowMinimumHeight,[\s\S]{0,80}Theme\.railFooterHeight\)/.test(mainSource))
+		verify(/Layout\.preferredHeight:\s*visible\s*\?\s*\(activeScope\.hasPendingReply\s*\?\s*baseHeight \+ 44\s*:\s*baseHeight\)/.test(mainSource))
+		verify(/id:\s*composerInputRow[\s\S]{0,160}Layout\.minimumHeight:\s*composerSurface\.inputRowMinimumHeight/.test(mainSource))
 		verify(/readonly property string normalizedStatus:[\s\S]*readonly property real boundedProgress:/.test(mainSource))
 		verify(/qsTr\("Uploading · %1%"\)\.arg\(progressPercent\)/.test(mainSource))
 		verify(/qsTr\("Preparing attachment…"\)/.test(mainSource))
@@ -146,6 +149,12 @@ TestCase {
 	function test_partial_chat_rows_do_not_leak_unclipped_accessibility_nodes() {
 		verify(/accessibilityViewportVisible:\s*height\s*>\s*timeline\.height[\s\S]*y\s*\+\s*height\s*>\s*timeline\.contentY\s*\+\s*0\.5[\s\S]*y\s*>=\s*timeline\.contentY\s*-\s*0\.5[\s\S]*y\s*\+\s*height\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*\+\s*0\.5/.test(mainSource))
 		verify(/id:\s*timeline[\s\S]*Accessible\.role:\s*Accessible\.List[\s\S]*target:\s*timeline\.contentItem[\s\S]*property:\s*"Accessible\.ignored"[\s\S]*value:\s*true/.test(mainSource))
+		for (const labelId of ["messageSenderLabel", "messageTimestampLabel", "messageStatusLabel"]) {
+			const escapedId = labelId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+			verify(new RegExp("id:\\s*" + escapedId
+				+ "[\\s\\S]{0,520}Accessible\\.ignored:\\s*root\\.backgroundAccessibilitySuppressed"
+				+ "[\\s\\S]{0,180}!messageDelegate\\.itemContainedInViewport\\(" + escapedId + "\\)").test(mainSource))
+		}
 	}
 
 	function test_scope_change_does_not_leave_focus_in_hidden_conversation_search() {
