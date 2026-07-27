@@ -346,7 +346,9 @@ namespace {
 			} else if (sequence <= 0) {
 				body = QStringLiteral("Older history item %1 loaded incrementally.").arg(sequence + 7);
 			} else {
-				body = QStringLiteral("History message %1 keeps the timeline scrollable.").arg(sequence);
+				// Stay comfortably below every bubble-width threshold. This fixture
+				// verifies viewport anchoring, not text wrapping.
+				body = QStringLiteral("History message %1.").arg(sequence);
 			}
 			messages.push_back(QVariantMap {
 				{ QStringLiteral("messageKey"), visualHistoryMessageID(generation, sequence) },
