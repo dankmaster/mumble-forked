@@ -2759,8 +2759,10 @@ Dialog {
 			readonly property bool thresholdEditorAvailable: field.active !== false
 				&& String(field.silenceThresholdFieldId || "").length > 0
 				&& String(field.speechThresholdFieldId || "").length > 0
-			property real previewSilenceThreshold: 0
-			property real previewSpeechThreshold: 100
+			property real previewSilenceThreshold: Math.max(0,
+				Math.min(100, Number(field.silenceThreshold || 0)))
+			property real previewSpeechThreshold: Math.max(previewSilenceThreshold,
+				Math.min(100, Number(field.speechThreshold === undefined ? 100 : field.speechThreshold)))
 			readonly property int silenceThreshold: Math.round(Math.max(0,
 				Math.min(100, previewSilenceThreshold)))
 			readonly property int speechThreshold: Math.round(Math.max(silenceThreshold,
@@ -2776,7 +2778,6 @@ Dialog {
 				previewSpeechThreshold = startValue
 			}
 			onFieldChanged: Qt.callLater(syncThresholdPreview)
-			Component.onCompleted: syncThresholdPreview()
 			width: parent ? parent.width : 0
 			spacing: Math.max(6, Theme.spacing - 3)
 			RowLayout {
