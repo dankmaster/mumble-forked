@@ -45,6 +45,7 @@
 #include "UserLockFile.h"
 #include "Version.h"
 #include "VersionCheck.h"
+#include "VoiceActivationDebugCapture.h"
 #include "Global.h"
 
 #include "widgets/TrayIcon.h"
@@ -539,6 +540,7 @@ int main(int argc, char **argv) {
 	}
 
 	initLog();
+	VoiceActivationDebugCapture::initializeFromEnvironment();
 
 	os_init();
 

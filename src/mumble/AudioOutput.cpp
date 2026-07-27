@@ -16,6 +16,7 @@
 #include "Timer.h"
 #include "User.h"
 #include "Utils.h"
+#include "VoiceActivationDebugCapture.h"
 #include "VoiceRecorder.h"
 #include "Global.h"
 
@@ -523,6 +524,14 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 		float *output = (eSampleFormat == SampleFloat) ? reinterpret_cast< float * >(outbuff) : fOutput.data();
 		memset(output, 0, sizeof(float) * frameCount * iChannels);
 
+		VoiceActivationDebugCapture &diagnosticCapture = VoiceActivationDebugCapture::instance();
+		const bool captureVoiceDiagnostic              = diagnosticCapture.enabled();
+		static std::vector< float > diagnosticServerMix;
+		if (captureVoiceDiagnostic) {
+			diagnosticServerMix.resize(frameCount);
+			std::fill(diagnosticServerMix.begin(), diagnosticServerMix.end(), 0.0f);
+		}
+
 		if (haveAudio) {
 			// There are audio sources available -> mix those sources together and feed them into the audio backend
 			static std::vector< float > speaker;
@@ -698,6 +707,19 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 				emit audioSourceFetched(pfBuffer, frameCount, static_cast< unsigned int >(channels), SAMPLE_RATE,
 										static_cast< bool >(user), user);
 
+				if (captureVoiceDiagnostic && speech && !qobject_cast< RecordUser * >(speech->p)) {
+					if (speech->bStereo) {
+						for (std::size_t i = 0; i < frameCount; ++i) {
+							diagnosticServerMix[i] +=
+								(pfBuffer[2 * i] / 2.0f + pfBuffer[2 * i + 1] / 2.0f) * volumeAdjustment * mul;
+						}
+					} else {
+						for (std::size_t i = 0; i < frameCount; ++i) {
+							diagnosticServerMix[i] += pfBuffer[i] * volumeAdjustment * mul;
+						}
+					}
+				}
+
 				// If recording is enabled add the current audio source to the recording buffer
 				if (recorder) {
 					if (speech) {
@@ -862,6 +884,10 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 			if (recorder && recorder->isInMixDownMode()) {
 				recorder->addBuffer(nullptr, recbuff, static_cast< int >(frameCount));
 			}
+		}
+
+		if (captureVoiceDiagnostic) {
+			diagnosticCapture.captureServerMix(diagnosticServerMix.data(), frameCount, iMixerFreq);
 		}
 
 		bool pluginModifiedAudio = false;

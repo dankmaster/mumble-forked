@@ -21,6 +21,7 @@
 #include "SpeechCleanupProcessor.h"
 #include "User.h"
 #include "Utils.h"
+#include "VoiceActivationDebugCapture.h"
 #include "VoiceRecorder.h"
 #include "WebRTCAudioEchoCanceller.h"
 #include "Global.h"
@@ -2283,6 +2284,15 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	if (!bRunning)
 		return;
 
+	VoiceActivationDebugCapture &diagnosticCapture = VoiceActivationDebugCapture::instance();
+	const bool captureVoiceDiagnostic              = diagnosticCapture.enabled();
+	const std::uint64_t diagnosticTimestampUs =
+		captureVoiceDiagnostic ? diagnosticCapture.timestampMicroseconds() : 0;
+	std::array< short, iFrameSize > diagnosticRawInput = {};
+	if (captureVoiceDiagnostic) {
+		std::copy_n(chunk.mic, iFrameSize, diagnosticRawInput.begin());
+	}
+
 	sum = 1.0f;
 	max = 1;
 	for (unsigned int i = 0; i < iFrameSize; i++) {
@@ -2514,10 +2524,14 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	float level                = voiceActivityLevelFor(Global::get().s.vsVAD, amplitudeLevel, fSpeechProb);
 
 	bool bIsSpeech = false;
+	bool vadCandidate = false;
+	bool gateAllowed  = false;
 
 	if (!speechCleanupDrainFrame.draining) {
-		bIsSpeech = voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
-		bIsSpeech = inputGateAllowsSpeech(bIsSpeech, amplitudeLevel, fSpeechProb);
+		vadCandidate =
+			voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
+		gateAllowed = inputGateAllowsSpeech(vadCandidate, amplitudeLevel, fSpeechProb);
+		bIsSpeech   = gateAllowed;
 		if (!bIsSpeech && Global::get().s.inputGateMode != Settings::InputGateOff) {
 			iHoldFrames = Global::get().s.iVoiceHold;
 		}
@@ -2596,6 +2610,35 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 			m_inputGateReleaseFrames  = 0;
 			iHoldFrames               = Global::get().s.iVoiceHold;
 		}
+	}
+
+	if (captureVoiceDiagnostic) {
+		const float rawPeakDb =
+			dMaxMic > 0.0f ? std::max(20.0f * std::log10(dMaxMic / 32768.0f), -96.0f) : -96.0f;
+		VoiceActivationDebugCapture::InputMetrics metrics;
+		metrics.rawRmsDb            = dPeakMic;
+		metrics.rawPeakDb           = rawPeakDb;
+		metrics.processedRmsDb      = dPeakSignal;
+		metrics.cleanRmsDb          = dPeakCleanMic;
+		metrics.amplitudeLevel      = amplitudeLevel;
+		metrics.speechProbability   = fSpeechProb;
+		metrics.selectedLevel       = level;
+		metrics.silenceThreshold    = Global::get().s.fVADmin;
+		metrics.speechThreshold     = Global::get().s.fVADmax;
+		metrics.vadSource           = static_cast< int >(Global::get().s.vsVAD);
+		metrics.inputGateMode       = static_cast< int >(Global::get().s.inputGateMode);
+		metrics.transmitMode        = static_cast< int >(Global::get().s.atTransmit);
+		metrics.vadCandidate        = vadCandidate;
+		metrics.gateAllowed         = gateAllowed;
+		metrics.gateOpen            = m_inputGateOpen;
+		metrics.acousticSpeech      = acousticSpeech;
+		metrics.transmitting        = bIsSpeech;
+		metrics.transmissionBlocked = transmissionBlocked;
+		metrics.holdFrames          = iHoldFrames;
+		metrics.gateAttackFrames    = m_inputGateAttackFrames;
+		metrics.gateReleaseFrames   = m_inputGateReleaseFrames;
+		diagnosticCapture.captureInputFrame(diagnosticRawInput.data(), iFrameSize, iSampleRate, metrics,
+											diagnosticTimestampUs);
 	}
 
 	if (bIsSpeech) {

@@ -322,6 +322,8 @@ set(MUMBLE_SOURCES
 	"VoiceRecorder.h"
 	"VoiceRecorderSessionAdapter.cpp"
 	"VoiceRecorderSessionAdapter.h"
+	"VoiceActivationDebugCapture.cpp"
+	"VoiceActivationDebugCapture.h"
 	"VolumeAdjustmentController.cpp"
 	"VolumeAdjustmentController.h"
 	"WebRTCAudioEchoCanceller.cpp"
