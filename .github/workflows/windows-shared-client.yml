@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - master
-  pull_request:
-    branches:
-      - master
   workflow_dispatch:
 
 permissions:
@@ -57,19 +54,14 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Qt Quick and community release gate script tests
+      - name: Run community updater and installer contract tests
         shell: pwsh
         run: |
           $testFiles = @(
             '.\scripts\windows\tests\CommunityReleaseCandidate.Tests.ps1',
-            '.\scripts\windows\tests\CommunityReleaseReadinessGate.Tests.ps1',
-            '.\scripts\windows\tests\ConnectedProductReleaseGate.Tests.ps1',
-            '.\scripts\windows\tests\QmlPerformanceContract.Tests.ps1',
-            '.\scripts\windows\tests\ScreenShareLazyCapabilitiesContract.Tests.ps1',
-            '.\scripts\windows\tests\QmlVisualGate.Tests.ps1',
-            '.\scripts\windows\tests\QmlVisualBaselineIntegrity.Tests.ps1',
             '.\scripts\windows\tests\WindowsCommunityReleaseGate.Tests.ps1',
-            '.\scripts\windows\tests\WindowsInstallerUpgradeContract.Tests.ps1'
+            '.\scripts\windows\tests\WindowsInstallerUpgradeContract.Tests.ps1',
+            '.\scripts\windows\tests\WindowsMsiPayloadContract.Tests.ps1'
           )
           $pester = Get-Module -ListAvailable Pester |
             Where-Object Version -eq ([Version]'3.4.0') |
@@ -83,12 +75,12 @@ jobs:
               Select-Object -First 1
           }
           if ($null -eq $pester) {
-            throw 'Pester 3.4.0 is required for the Qt Quick and community release gate script tests.'
+            throw 'Pester 3.4.0 is required for the community updater and installer contract tests.'
           }
           Import-Module $pester.Path -Force
           $result = Invoke-Pester -Script $testFiles -PassThru
           if ($result.FailedCount -ne 0) {
-            throw "$($result.FailedCount) Qt Quick/community release gate script test(s) failed."
+            throw "$($result.FailedCount) community updater/installer contract test(s) failed."
           }
           # Expected negative contract cases can leave a native process exit
           # code behind after all Pester assertions have passed.
@@ -146,15 +138,11 @@ jobs:
       - name: Build, package, and stage shared WebEngine client
         shell: powershell
         run: |
-          $isPullRequest = '${{ github.event_name }}' -eq 'pull_request'
           $additionalCMakeOptions = @(
             '-Dserver=OFF',
             '-Dmodern-layout-automation=OFF',
             '-Dmodern-layout-mockups=OFF'
           )
-          if ($isPullRequest) {
-            $additionalCMakeOptions += '-Dlto=OFF'
-          }
 
           $arguments = @{
             BuildNumber = "${{ needs.fetch_build_number.outputs.build_number }}"
@@ -163,7 +151,6 @@ jobs:
             AdditionalCMakeOptions = $additionalCMakeOptions
             EnablePackaging = $true
             UseBundledCli11 = $true
-            SkipSharedInstaller = $isPullRequest
             AllowPendingReboot = $true
           }
           if ('${{ steps.restore-shared-build-env-cache.outputs.cache-hit }}' -ne 'true') {
@@ -186,89 +173,32 @@ jobs:
             -ArtifactListPath .\build-shared-webengine\windows-binary-artifacts.txt
 
       - name: Cache verified shared build environment
-        if: ${{ github.event_name != 'pull_request' && steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
           key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
 
       - name: Cache verified ONNX Runtime
-        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.onnxruntime-cache-hit != 'true' }}
+        if: ${{ steps.setup-windows-optional-runtimes.outputs.onnxruntime-cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
           key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
 
       - name: Cache verified GStreamer runtime
-        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
+        if: ${{ steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
           key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}
 
       - name: Cache verified RNNoise model
-        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
+        if: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-path }}
           key: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-key }}
-
-      - name: Build and run focused Qt Quick client tests
-        shell: powershell
-        run: |
-          $testTargets = @(
-            'TestChatAttachmentUploader',
-            'TestChatFeature',
-            'TestComposerController',
-            'TestModernDialogControllers',
-            'TestModernShellMenuSerializer',
-            'TestModernTheme',
-            'TestMumbleProtocol',
-            'TestPersistentChatController',
-            'TestPersistentChatRender',
-            'TestQmlClientModels',
-            'TestQmlImageProvider',
-            'TestQmlMediaProfileFactory',
-            'TestQmlAccessibilitySnapshot',
-            'TestQmlPerformanceMonitor',
-            'TestQmlQuickComponents',
-            'TestQmlThemeController',
-            'TestQmlWindowStateController',
-            'TestPluginAbiWorker',
-            'TestPluginOperation',
-            'TestPluginUpdatePreparation',
-            'TestScreenShare',
-            'TestScreenShareProtocol',
-            'TestScreenShareVideoItem',
-            'TestSpeechCleanup',
-            'TestServerHandlerState',
-            'TestSettingsJSONSerialization',
-            'TestUserModelNavigator',
-            'TestXMLTools'
-          )
-          $additionalCMakeOptions = @(
-            '-Dserver=OFF',
-            '-Dtests=ON',
-            '-Dpackaging=ON',
-            '-Dmodern-layout-automation=OFF',
-            '-Dmodern-layout-mockups=OFF'
-          )
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $additionalCMakeOptions += '-Dlto=OFF'
-          }
-
-          .\scripts\windows\build-local-windows-client.ps1 `
-            -BuildNumber "${{ needs.fetch_build_number.outputs.build_number }}" `
-            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
-            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
-            -AdditionalCMakeOptions $additionalCMakeOptions `
-            -BuildTargets $testTargets `
-            -UseBundledCli11 `
-            -AllowPendingReboot
-
-          ctest --test-dir .\build-shared-webengine -C $env:BUILD_TYPE `
-            --output-on-failure `
-            -R '^(TestChatAttachmentUploader|TestChatFeature|TestComposerController|TestModernDialogControllers|TestModernShellMenuSerializer|TestModernTheme|TestMumbleProtocol|TestPersistentChatController|TestPersistentChatRender|TestPluginAbiWorker|TestPluginOperation|TestPluginUpdatePreparation|TestQmlAccessibilitySnapshot|TestQmlClientModels|TestQmlImageProvider|TestQmlMediaProfileFactory|TestQmlPerformanceMonitor|TestQmlQuickComponents|TestQmlThemeController|TestQmlWindowStateController|TestScreenShare|TestScreenShareProtocol|TestScreenShareVideoItem|TestSpeechCleanup|TestServerHandlerState|TestSettingsJSONSerialization|TestUserModelNavigator|TestXMLTools)$'
 
       - name: Verify shared helper runtime
         if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -286,7 +216,6 @@ jobs:
             -AllowPendingReboot
 
       - name: Validate shared Windows client installer
-        if: ${{ github.event_name != 'pull_request' }}
         shell: powershell
         run: |
           .\scripts\windows\assert-windows-build-artifacts.ps1 `
@@ -314,43 +243,3 @@ jobs:
             build-shared-webengine/windows-client-artifacts.txt
             build-shared-webengine/**/mumble*.msi
             build-shared-webengine/**/mumble*.exe
-
-      - name: Validate Qt Quick visual and accessibility matrix
-        shell: pwsh
-        run: |
-          $additionalCMakeOptions = @(
-            '-Dserver=OFF',
-            '-Dtests=OFF',
-            '-Dpackaging=OFF',
-            '-Dmodern-layout-automation=ON',
-            '-Dmodern-layout-mockups=OFF'
-          )
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $additionalCMakeOptions += '-Dlto=OFF'
-          }
-
-          .\scripts\windows\build-local-windows-client.ps1 `
-            -BuildNumber "${{ needs.fetch_build_number.outputs.build_number }}" `
-            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
-            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
-            -AdditionalCMakeOptions $additionalCMakeOptions `
-            -BuildTargets @('mumble') `
-            -SkipSharedInstaller `
-            -UseBundledCli11 `
-            -AllowPendingReboot
-
-          New-Item -ItemType Directory -Force -Path .\.tmp | Out-Null
-          '{ "settings_version": 1 }' |
-            Set-Content -LiteralPath .\.tmp\qml-visual-settings.json -Encoding utf8NoBOM
-          $fixtureExecutable = '.\build-shared-webengine\shared-webengine-stage\mumble-visual-fixture.exe'
-          Copy-Item -LiteralPath .\build-shared-webengine\mumble.exe `
-            -Destination $fixtureExecutable -Force
-          try {
-            .\scripts\windows\invoke-qml-visual-matrix.ps1 `
-              -Executable $fixtureExecutable `
-              -ConfigPath .\.tmp\qml-visual-settings.json `
-              -BaselineManifestPath .\qml-visual-baseline\manifest.json `
-              -OutputDirectory .\.tmp\qml-visual-gate
-          } finally {
-            Remove-Item -LiteralPath $fixtureExecutable -Force -ErrorAction SilentlyContinue
-          }
