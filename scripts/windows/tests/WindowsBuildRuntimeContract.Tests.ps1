@@ -13,6 +13,12 @@ Describe "Windows helper runtime capability gate" {
 		$environmentPublisherScriptText = Get-Content -Raw -LiteralPath (
 			Join-Path $PSScriptRoot "..\publish-windows-build-environment.ps1"
 		)
+		$sharedEnvironmentWorkflowText = Get-Content -Raw -LiteralPath (
+			Join-Path $PSScriptRoot "..\..\..\.github\workflows\windows-shared-build-environment.yml"
+		)
+		$sharedEnvironmentInstallerText = Get-Content -Raw -LiteralPath (
+			Join-Path $PSScriptRoot "..\..\..\.github\actions\install-dependencies\install_windows_shared_x86_64.sh"
+		)
 		$tokens = $null
 		$parseErrors = $null
 		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -184,6 +190,23 @@ Describe "Windows helper runtime capability gate" {
 		)) {
 			$environmentPublisherScriptText | Should Match ([regex]::Escape($path))
 		}
+	}
+
+	It "seeds new shared environment versions from the previous published environment" {
+		$sharedEnvironmentWorkflowText | Should Match 'MUMBLE_SHARED_WINDOWS_ENVIRONMENT_BOOTSTRAP_VERSION_SUFFIX'
+		$sharedEnvironmentWorkflowText | Should Match 'MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION=mumble_env\.x64-windows\.'
+		$sharedEnvironmentWorkflowText | Should Match 'restore-keys:'
+		$sharedEnvironmentWorkflowText | Should Match 'MUMBLE_FORCE_ENVIRONMENT_DEPENDENCY_REFRESH=ON'
+		$sharedEnvironmentInstallerText | Should Match 'Seeding shared Windows environment from'
+		$sharedEnvironmentInstallerText | Should Match 'MUMBLE_FORCE_ENVIRONMENT_DEPENDENCY_REFRESH'
+		$sharedEnvironmentInstallerText | Should Match 'refresh did not produce the required WebEngine and Qt Multimedia QML runtime'
+	}
+
+	It "uses balanced multithreaded compression for build environment publication" {
+		$environmentPublisherScriptText | Should Match '\[int\]\$CompressionLevel = 5'
+		$environmentPublisherScriptText | Should Match '"-mx=\$CompressionLevel"'
+		$environmentPublisherScriptText | Should Match '"-mmt=on"'
+		$sharedEnvironmentWorkflowText | Should Match '-CompressionLevel 5'
 	}
 
 	It "rejects the unused Qt Multimedia Widgets runtime from every Windows payload gate" {

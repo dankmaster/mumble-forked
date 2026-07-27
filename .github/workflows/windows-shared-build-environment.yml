@@ -15,6 +15,7 @@ env:
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG: build-env-2025-11-webengine-codecs
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v2
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_BOOTSTRAP_VERSION_SUFFIX: webengine-codecs-v1
 
 jobs:
   build-and-publish-shared-environment:
@@ -33,6 +34,7 @@ jobs:
           echo "MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE=https://github.com/${{ github.repository }}/releases/download/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG}" >> "$GITHUB_ENV"
           echo "MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}" >> "$GITHUB_ENV"
           echo "MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION=mumble_env.x64-windows.${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}.${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_BOOTSTRAP_VERSION_SUFFIX}" >> "$GITHUB_ENV"
           echo "MUMBLE_ENVIRONMENT_DIR_OVERRIDE=$GITHUB_WORKSPACE/build_env/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE}-${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}-shared" >> "$GITHUB_ENV"
           echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_SKIP_DATABASE_SETUP=ON" >> "$GITHUB_ENV"
@@ -46,6 +48,13 @@ jobs:
         with:
           path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
           key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
+          restore-keys: |
+            mumble_env.x64-windows.${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}.webengine-codecs-
+
+      - name: Prepare incremental environment refresh
+        if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: echo "MUMBLE_FORCE_ENVIRONMENT_DEPENDENCY_REFRESH=ON" >> "$GITHUB_ENV"
 
       - name: Build shared codec environment
         if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
@@ -67,6 +76,7 @@ jobs:
             -EnvironmentVersionSuffix "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX }}" `
             -BuildType shared `
             -ReleaseTag "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG }}" `
+            -CompressionLevel 5 `
             -Upload `
             -CreateRelease `
             -Clobber

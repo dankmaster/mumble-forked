@@ -77,11 +77,32 @@ if have_archive_extractor; then
 	fi
 fi
 
-if ! shared_environment_has_webengine_runtime; then
+if ! is_environment_ready "$MUMBLE_ENVIRONMENT_DIR" \
+	&& have_archive_extractor \
+	&& [[ -n "${MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION:-}" ]] \
+	&& [[ "$MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION" != "$MUMBLE_ENVIRONMENT_VERSION" ]]; then
+	current_environment_version="$MUMBLE_ENVIRONMENT_VERSION"
+	bootstrap_archive_url="$MUMBLE_ENVIRONMENT_SOURCE/$MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION.7z"
+	bootstrap_split_archive_url="$bootstrap_archive_url.001"
+	if remote_file_exists "$bootstrap_archive_url" || remote_file_exists "$bootstrap_split_archive_url"; then
+		echo "Seeding shared Windows environment from $MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION"
+		MUMBLE_ENVIRONMENT_VERSION="$MUMBLE_ENVIRONMENT_BOOTSTRAP_VERSION"
+		make_build_env_available "7z"
+		MUMBLE_ENVIRONMENT_VERSION="$current_environment_version"
+	fi
+fi
+
+if [[ "${MUMBLE_FORCE_ENVIRONMENT_DEPENDENCY_REFRESH:-}" = "ON" ]] \
+	|| ! shared_environment_has_webengine_runtime; then
 	require_shared_environment_bootstrap_allowed "Shared Windows WebEngine environment is missing required WebEngine/proprietary-codec runtime content."
 	ensure_build_env_repo_checkout
 	ensure_vcpkg_bootstrapped
 	install_mumble_vcpkg_dependencies "x64-windows"
+fi
+
+if ! shared_environment_has_webengine_runtime; then
+	echo "Shared Windows environment refresh did not produce the required WebEngine and Qt Multimedia QML runtime." 1>&2
+	exit 1
 fi
 
 if ! environment_has_triplet "x86-windows"; then

@@ -9,6 +9,8 @@ param(
 	[ValidateSet("x86_64")]
 	[string]$Architecture = "x86_64",
 	[string]$VolumeSize = "1900m",
+	[ValidateRange(1, 9)]
+	[int]$CompressionLevel = 5,
 	[string]$OutputDirectory = "",
 	[string]$ReleaseTag = "",
 	[string]$Repository = "",
@@ -442,6 +444,7 @@ Write-Host "Resolved build type: $($metadata.BuildType)"
 Write-Host "Triplet: $triplet"
 Write-Host "Archive path: $archivePath"
 Write-Host "Volume size: $VolumeSize"
+Write-Host "Compression level: $CompressionLevel"
 if ($Upload) {
 	Write-Host "GitHub repository: $repositoryToUse"
 	Write-Host "GitHub release tag: $releaseTagToUse"
@@ -458,7 +461,7 @@ $environmentLeaf = Split-Path -Leaf $metadata.EnvironmentDir
 
 Push-Location $environmentParent
 try {
-	$sevenZipArgs = @("a", "-t7z", "-mx=9", "-mmt=on")
+	$sevenZipArgs = @("a", "-t7z", "-mx=$CompressionLevel", "-mmt=on")
 	if (-not [string]::IsNullOrWhiteSpace($VolumeSize)) {
 		$sevenZipArgs += "-v$VolumeSize"
 	}
