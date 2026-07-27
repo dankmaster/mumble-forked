@@ -152,6 +152,7 @@ ApplicationWindow {
 	property var automationMenuSurface: null
 	property var automationMenuFocusItem: null
 	property bool visualFixtureOverrideActive: false
+	property string visualFixtureSurfaceVariant: "none"
 	Component {
 		id: composerTextCursorDelegate
 		// Preserve real keyboard focus in visual fixtures while keeping the
@@ -2844,6 +2845,11 @@ ApplicationWindow {
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
 						objectName: "chatTimelineScrollBar"
+						// This fixture verifies production history anchoring, not
+						// subpixel scrollbar rounding. Keep that unrelated Qt
+						// implementation detail out of its deterministic evidence.
+						visible: root.visualFixtureSurfaceVariant !== "chat-history-prepend-anchor"
+						Accessible.ignored: !visible
 						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
 							if (pressed) {

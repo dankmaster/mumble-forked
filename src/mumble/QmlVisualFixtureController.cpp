@@ -1889,6 +1889,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		}
 	} fixtureOverrideRollback { m_host, previousFixtureOverride };
 	QQuickWindow *window = m_host->window();
+	window->setProperty("visualFixtureSurfaceVariant", surfaceVariant);
 	const int initialExpectedMessageCount = visualMessageCount(state, surfaceVariant, false);
 	const int finalExpectedMessageCount = visualMessageCount(state, surfaceVariant, true);
 	QVariantMap prependFixtureState;

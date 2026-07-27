@@ -498,6 +498,7 @@ Describe "Qt Quick visual manifest validation" {
 		$controller | Should Match 'chat->replaceMessages\(fixtureMessages\)'
 		$controller | Should Match 'm_host->chatModel\(\)->replaceMessages\(prependedMessages\)'
 		$controller | Should Match 'anchorAfterRow == anchorBeforeRow \+ VisualHistoryPrependMessageCount'
+		$controller | Should Match 'visualFixtureSurfaceVariant'
 		$controller | Should Match 'QStringLiteral\("chat_fixture_state"\)'
 		$worker | Should Match 'requiredChatStateProperties'
 		$worker | Should Match 'expectedNumericState'

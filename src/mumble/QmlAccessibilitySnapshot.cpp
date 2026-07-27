@@ -167,6 +167,7 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 
 	QList< ChildEntry > children;
 	children.reserve(std::min(interface->childCount(), context.limits.maximumChildrenPerNode));
+	const QRect parentRect = normalizedRect(interface->rect(), context);
 	for (int index = 0; index < interface->childCount(); ++index) {
 		QAccessibleInterface *child = interface->child(index);
 		if (!child || !child->isValid()) {
@@ -184,12 +185,20 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 		if (childRect.isNull() || childRect.isEmpty()) {
 			continue;
 		}
+		// Qt Quick's ListView cache can keep a valid, nominally visible Client
+		// wrapper for a delegate that is wholly outside its clipped viewport.
+		// It is not observable by assistive technology in this presentation and
+		// its incubation timing must not change the semantic snapshot.
+		const QRect normalizedChildRect = normalizedRect(childRect, context);
+		if (!normalizedChildRect.intersects(parentRect)) {
+			continue;
+		}
 		if (children.size() >= context.limits.maximumChildrenPerNode) {
 			context.truncated = true;
 			node.insert(QStringLiteral("childrenTruncated"), true);
 			break;
 		}
-		children.push_back({ child, index, normalizedRect(childRect, context), static_cast< int >(child->role()),
+		children.push_back({ child, index, normalizedChildRect, static_cast< int >(child->role()),
 							 boundedString(child->text(QAccessible::Name), context),
 							 boundedString(child->text(QAccessible::Description), context) });
 	}

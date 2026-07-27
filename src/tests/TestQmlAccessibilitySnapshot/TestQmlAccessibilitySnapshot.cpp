@@ -58,6 +58,7 @@ private slots:
 	void serializesDeterministicallyAndBoundsStrings();
 	void omitsInvisibleAndOffscreenChildren();
 	void omitsNonMaterializedChildrenWithNullBounds();
+	void omitsChildrenWhollyOutsideTheirParentBounds();
 	void serializesButtonsAsSemanticLeaves();
 	void normalizesScreenCoordinatesToRootWindow();
 	void guardsCyclesAndBudgets();
@@ -139,6 +140,27 @@ void TestQmlAccessibilitySnapshot::omitsNonMaterializedChildrenWithNullBounds() 
 	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
 	QCOMPARE(children.size(), 1);
 	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(), QStringLiteral("materialized"));
+#else
+	QSKIP("Qt was built without accessibility support.");
+#endif
+}
+
+void TestQmlAccessibilitySnapshot::omitsChildrenWhollyOutsideTheirParentBounds() {
+#if QT_CONFIG(accessibility)
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
+	TestAccessible above(QStringLiteral("cached above"), QRect(10, -30, 100, 20));
+	TestAccessible touchingBottom(QStringLiteral("cached below"), QRect(10, 300, 100, 20));
+	TestAccessible partiallyVisible(QStringLiteral("partially visible"), QRect(10, 290, 100, 20));
+	root.addChild(&above);
+	root.addChild(&touchingBottom);
+	root.addChild(&partiallyVisible);
+
+	const QVariantMap result = QmlAccessibilitySnapshot::serialize(&root);
+	QVERIFY(result.value(QStringLiteral("ok")).toBool());
+	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
+	QCOMPARE(children.size(), 1);
+	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(),
+			 QStringLiteral("partially visible"));
 #else
 	QSKIP("Qt was built without accessibility support.");
 #endif
