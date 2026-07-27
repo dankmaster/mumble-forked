@@ -434,9 +434,9 @@ public:
 	float voiceActivityLevel() const;
 	static float voiceActivityLevelFor(Settings::VADSource source, float amplitudeLevel, float speechProbability);
 	static bool voiceActivityTriggers(float level, float silenceThreshold, float speechThreshold, bool wasTransmitting);
-	static bool inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool candidateSpeech, float amplitudeLevel,
-										 float speechProbability, bool &gateOpen, int &attackFrames,
-										 int &releaseFrames);
+	static bool inputGateAllowsSpeechFor(Settings::InputGateMode mode, Settings::VADSource source,
+										 bool candidateSpeech, float amplitudeLevel, float speechProbability,
+										 bool &gateOpen, int &attackFrames, int &releaseFrames);
 
 	static int clampFramesPerPacket(int frames);
 	static int packetDurationMsForFrames(int frames);

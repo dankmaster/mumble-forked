@@ -161,9 +161,9 @@ bool AudioInput::voiceActivityTriggers(float level, float silenceThreshold, floa
 	return level > speechThreshold || (level > silenceThreshold && wasTransmitting);
 }
 
-bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool candidateSpeech, float amplitudeLevel,
-										  float speechProbability, bool &gateOpen, int &attackFrames,
-										  int &releaseFrames) {
+bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, Settings::VADSource source,
+										  bool candidateSpeech, float amplitudeLevel, float speechProbability,
+										  bool &gateOpen, int &attackFrames, int &releaseFrames) {
 	if (mode == Settings::InputGateOff) {
 		gateOpen      = false;
 		attackFrames  = 0;
@@ -174,10 +174,23 @@ bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool can
 	const InputGateParameters parameters = inputGateParametersFor(mode);
 	amplitudeLevel                       = std::clamp(amplitudeLevel, 0.0f, 1.0f);
 	speechProbability                    = std::clamp(speechProbability, 0.0f, 1.0f);
+	const auto sourceClearsGate = [source, amplitudeLevel, speechProbability](float amplitudeFloor,
+																			 float speechProbabilityFloor) {
+		switch (source) {
+			case Settings::Amplitude:
+				return amplitudeLevel >= amplitudeFloor;
+			case Settings::SignalToNoise:
+				return speechProbability >= speechProbabilityFloor;
+			case Settings::Hybrid:
+				return amplitudeLevel >= amplitudeFloor && speechProbability >= speechProbabilityFloor;
+		}
+
+		return false;
+	};
 	const bool openCandidate =
-		candidateSpeech && amplitudeLevel >= parameters.openAmplitude && speechProbability >= parameters.openSpeechProb;
-	const bool keepCandidate = candidateSpeech && amplitudeLevel >= parameters.closeAmplitude
-							   && speechProbability >= parameters.closeSpeechProb;
+		candidateSpeech && sourceClearsGate(parameters.openAmplitude, parameters.openSpeechProb);
+	const bool keepCandidate =
+		candidateSpeech && sourceClearsGate(parameters.closeAmplitude, parameters.closeSpeechProb);
 
 	if (gateOpen) {
 		if (keepCandidate) {
@@ -213,8 +226,9 @@ bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool can
 }
 
 bool AudioInput::inputGateAllowsSpeech(bool candidateSpeech, float amplitudeLevel, float speechProbability) {
-	return inputGateAllowsSpeechFor(Global::get().s.inputGateMode, candidateSpeech, amplitudeLevel, speechProbability,
-									m_inputGateOpen, m_inputGateAttackFrames, m_inputGateReleaseFrames);
+	return inputGateAllowsSpeechFor(Global::get().s.inputGateMode, Global::get().s.vsVAD, candidateSpeech,
+									amplitudeLevel, speechProbability, m_inputGateOpen, m_inputGateAttackFrames,
+									m_inputGateReleaseFrames);
 }
 
 void Resynchronizer::addMic(short *mic) {

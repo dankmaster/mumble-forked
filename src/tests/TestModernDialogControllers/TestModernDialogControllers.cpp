@@ -2359,22 +2359,41 @@ void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignal
 	bool gateOpen  = false;
 	int attack     = 0;
 	int release    = 0;
-	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateOff, true, 0.0f, 0.0f, gateOpen, attack, release));
-	QVERIFY(!AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, true, 0.05f, 0.80f, gateOpen, attack,
-												  release));
-	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, true, 0.20f, 0.40f, gateOpen, attack,
-												 release));
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateOff, Settings::Amplitude, true, 0.0f, 0.0f,
+												 gateOpen, attack, release));
+
+	// An additional gate must only refine the selected detector. In particular,
+	// volume fallback must keep working when speech probability does not react,
+	// and speech probability must keep working for quiet speech.
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::Amplitude, true, 0.20f, 0.0f,
+												 gateOpen, attack, release));
 	QVERIFY(gateOpen);
-	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, false, 0.0f, 0.0f, gateOpen, attack,
-												 release));
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::Amplitude, false, 0.0f, 0.0f,
+												 gateOpen, attack, release));
 
 	gateOpen = false;
 	attack   = 0;
 	release  = 0;
-	QVERIFY(!AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, true, 0.30f, 0.60f, gateOpen, attack,
-												  release));
-	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, true, 0.30f, 0.60f, gateOpen, attack,
-												 release));
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::SignalToNoise, true, 0.0f,
+												 0.40f, gateOpen, attack, release));
+
+	gateOpen = false;
+	attack   = 0;
+	release  = 0;
+	QVERIFY(!AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::Hybrid, true, 0.20f, 0.0f,
+												  gateOpen, attack, release));
+	QVERIFY(!AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::Hybrid, true, 0.0f, 0.40f,
+												  gateOpen, attack, release));
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateBalanced, Settings::Hybrid, true, 0.20f, 0.40f,
+												 gateOpen, attack, release));
+
+	gateOpen = false;
+	attack   = 0;
+	release  = 0;
+	QVERIFY(!AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, Settings::Hybrid, true, 0.30f, 0.60f,
+												  gateOpen, attack, release));
+	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, Settings::Hybrid, true, 0.30f, 0.60f,
+												 gateOpen, attack, release));
 }
 
 void TestModernDialogControllers::settingsControllerRollsBackVoiceReplayPreview() {

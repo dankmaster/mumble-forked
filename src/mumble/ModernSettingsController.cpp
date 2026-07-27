@@ -701,9 +701,9 @@ namespace {
 			optionItem(static_cast< int >(Settings::InputGateOff), QObject::tr("Off"), true,
 					   QObject::tr("Preserve the classic voice-activity behavior.")),
 			optionItem(static_cast< int >(Settings::InputGateBalanced), QObject::tr("Balanced"), true,
-					   QObject::tr("Require voice activity, speech probability, and a small level floor before opening.")),
+					   QObject::tr("Add a modest floor and short hold to the selected detection method.")),
 			optionItem(static_cast< int >(Settings::InputGateStrict), QObject::tr("Strict"), true,
-					   QObject::tr("Reject more non-voice audio, with a higher chance of clipping very soft speech."))
+					   QObject::tr("Raise the selected method's floor, with a higher chance of clipping very soft speech."))
 		};
 	}
 
