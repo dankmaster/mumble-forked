@@ -3449,6 +3449,11 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		// Keep the synthetic room rows last so no live badge leaks into the fixture.
 		rooms->replaceRoomStates(voiceRooms, textRooms);
 		navigation->replaceRoomStates(voiceRooms, textRooms);
+		// Scope/model publication can also queue a stale composer capability from
+		// the preceding fixture. Reassert the final connected-room capability
+		// after every synthetic model has settled so matrix order cannot disable
+		// an otherwise sendable composer.
+		composer->setCanSend(scopeState.value(QStringLiteral("canSend")).toBool());
 		return;
 	}
 

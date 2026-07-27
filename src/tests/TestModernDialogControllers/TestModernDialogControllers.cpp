@@ -2738,6 +2738,8 @@ void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestr
 	QVERIFY(fixtureSource.count(QStringLiteral("composer_has_pending_reply")) >= 2);
 	QVERIFY(fixtureSource.contains(QStringLiteral("previewCanRetry")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("chat->replaceMessages(fixtureMessages)")));
+	QVERIFY(fixtureSource.contains(
+		QStringLiteral("composer->setCanSend(scopeState.value(QStringLiteral(\"canSend\")).toBool())")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("m_host->chatModel()->messages()")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("m_host->chatModel()->replaceMessages(prependedMessages)")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("positionVisualFixtureTimelineAt")));
