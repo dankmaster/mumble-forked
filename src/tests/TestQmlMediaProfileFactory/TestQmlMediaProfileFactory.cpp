@@ -337,7 +337,7 @@ void TestQmlMediaProfileFactory::explicitMediaActivationLoadsDelayedProfileAndVi
 	activationTimer.start();
 	QVERIFY(session.open(QUrl(QStringLiteral("https://www.youtube-nocookie.com/embed/lazy-load-probe")),
 						   QStringLiteral("youtube"), QStringLiteral("lazy-load-probe")));
-	QVERIFY(session.detached());
+	QCOMPARE(session.detached(), session.detachedPlaybackSupported());
 	QVERIFY2(activationTimer.elapsed() < 50, "Explicit activation synchronously blocked while resolving WebEngine.");
 	QVERIFY(profiles.runtimePreparing() || profiles.runtimeReady());
 	QTRY_VERIFY_WITH_TIMEOUT(profiles.runtimeReady(), 5000);

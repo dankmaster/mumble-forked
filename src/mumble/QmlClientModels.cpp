@@ -4308,14 +4308,18 @@ bool AsyncOperationModel::finishStructuredOperation(const QString &operationId, 
 }
 
 void AsyncOperationModel::interruptOperations(const QString &prefix) {
+	QStringList matchingOperationIds;
 	for (int index = 0; index < rowCount(); ++index) {
 		const QVariantMap row = get(index);
 		const QString id = row.value(QStringLiteral("id")).toString();
 		const QString status = row.value(QStringLiteral("status")).toString();
 		if (id.startsWith(prefix)
 			&& (status == QLatin1String("running") || status == QLatin1String("cancelling"))) {
-			finishOperation(id, false, QStringLiteral("cancelled"), tr("Operation cancelled"));
+			matchingOperationIds.push_back(id);
 		}
+	}
+	for (const QString &id : std::as_const(matchingOperationIds)) {
+		finishOperation(id, false, QStringLiteral("cancelled"), tr("Operation cancelled"));
 	}
 }
 

@@ -1118,8 +1118,10 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 		QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
 		QStringLiteral("QVariantMap modernServerLogMessageState"));
 	QVERIFY(!roomState.isEmpty());
-	QVERIFY(roomState.contains(QStringLiteral("const bool canUseTools = modernShellToolsAllowed()")));
-	QVERIFY(roomState.contains(QStringLiteral("const bool canUseServerLog = modernServerLogAvailable()")));
+	QVERIFY(roomState.contains(QRegularExpression(
+		QStringLiteral(R"(const\s+bool\s+canUseTools\s*=\s*modernShellToolsAllowed\(\))"))));
+	QVERIFY(roomState.contains(QRegularExpression(
+		QStringLiteral(R"(const\s+bool\s+canUseServerLog\s*=\s*modernServerLogAvailable\(\))"))));
 	QVERIFY(roomState.contains(QStringLiteral("if (canUseServerLog)")));
 	QVERIFY(roomState.contains(QStringLiteral("if (debugTool && !canUseTools)")));
 
@@ -4177,9 +4179,11 @@ void TestQmlClientModels::asyncOperationsClampProgressAndInterruptByPrefix() {
 	QVERIFY(indeterminate.value(QStringLiteral("indeterminate")).toBool());
 
 	operations.interruptOperations(QStringLiteral("plugin-update:"));
-	QCOMPARE(operations.get(0).value(QStringLiteral("status")).toString(), QStringLiteral("cancelled"));
-	QCOMPARE(operations.get(1).value(QStringLiteral("status")).toString(), QStringLiteral("cancelled"));
-	QCOMPARE(operations.get(2).value(QStringLiteral("status")).toString(), QStringLiteral("running"));
+	QVERIFY(!operations.hasOperation(QStringLiteral("plugin-update:one")));
+	QVERIFY(!operations.hasOperation(QStringLiteral("plugin-update:two")));
+	QCOMPARE(operations.rowCount(), 1);
+	QCOMPARE(operations.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("download:one"));
+	QCOMPARE(operations.get(0).value(QStringLiteral("status")).toString(), QStringLiteral("running"));
 }
 
 void TestQmlClientModels::asyncOperationsExposeStructuredPluginResults() {
@@ -4727,7 +4731,7 @@ void TestQmlClientModels::mediaSessionValidatesDirectMedia() {
 	QCOMPARE(media.mediaMime(), QStringLiteral("video/mp4"));
 	QCOMPARE(media.audioMime(), QStringLiteral("audio/mp4"));
 	QCOMPARE(media.audioUrl(), audio);
-	QVERIFY(media.detached());
+	QCOMPARE(media.detached(), media.detachedPlaybackSupported());
 	QCOMPARE(sourceSpy.count(), 1);
 	QVERIFY(media.isNavigationAllowed(video));
 	QVERIFY(media.isNavigationAllowed(audio));
