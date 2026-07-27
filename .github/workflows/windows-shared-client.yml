@@ -185,6 +185,34 @@ jobs:
             -RequireGStreamerRuntime `
             -ArtifactListPath .\build-shared-webengine\windows-binary-artifacts.txt
 
+      - name: Cache verified shared build environment
+        if: ${{ github.event_name != 'pull_request' && steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
+          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
+
+      - name: Cache verified ONNX Runtime
+        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.onnxruntime-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
+          key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
+
+      - name: Cache verified GStreamer runtime
+        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
+          key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}
+
+      - name: Cache verified RNNoise model
+        if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-path }}
+          key: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-key }}
+
       - name: Build and run focused Qt Quick client tests
         shell: powershell
         run: |
@@ -326,27 +354,3 @@ jobs:
           } finally {
             Remove-Item -LiteralPath $fixtureExecutable -Force -ErrorAction SilentlyContinue
           }
-
-      - if: ${{ github.event_name != 'pull_request' && steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
-          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
-
-      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.onnxruntime-cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
-          key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
-
-      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
-          key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}
-
-      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-path }}
-          key: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-key }}
