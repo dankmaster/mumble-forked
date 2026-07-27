@@ -1378,7 +1378,8 @@ foreach ($case in $selectedCases) {
 			$timelinePresentationReady = $null -ne $timelinePresentation -and
 				[int]$timelinePresentation.count -eq $expectedMessageCount -and
 				-not [bool]$timelinePresentation.presentationPending -and
-				-not [bool]$timelinePresentation.presentationFinalizing
+				-not [bool]$timelinePresentation.presentationFinalizing -and
+				-not [bool]$timelinePresentation.scopeResetPending
 			if (-not $timelinePresentationReady) {
 				Start-Sleep -Milliseconds 25
 			}

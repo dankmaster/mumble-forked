@@ -510,6 +510,7 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'command\s*=\s*"qmlTimelinePresentationState"'
 		$worker | Should Match 'presentationPending'
 		$worker | Should Match 'presentationFinalizing'
+		$worker | Should Match 'scopeResetPending'
 		$worker | Should Match 'did not finish its production timeline presentation'
 	}
 

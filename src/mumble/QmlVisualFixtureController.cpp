@@ -2007,6 +2007,50 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			return {};
 		}
 	}
+	// State injection is synchronous, but the production timeline deliberately
+	// finishes scope replacement and tail anchoring over queued scene turns.
+	// Surface-specific mutations must not race that handshake on a fresh
+	// process (where there is no earlier matrix case to provide incidental
+	// warm-up).
+	if (presentationWindow == window && initialExpectedMessageCount > 0) {
+		QVariantMap timelinePresentation;
+		bool timelineReady = false;
+		QElapsedTimer timelineTimer;
+		timelineTimer.start();
+		while (timelineTimer.elapsed() < 5000) {
+			QVariant result;
+			if (!QMetaObject::invokeMethod(window, "timelinePresentationState",
+					Q_RETURN_ARG(QVariant, result))) {
+				if (error) *error = QStringLiteral("The visual fixture could not read timeline presentation state.");
+				return {};
+			}
+			timelinePresentation = result.toMap();
+			timelineReady =
+				timelinePresentation.value(QStringLiteral("count")).toInt() == initialExpectedMessageCount
+				&& !timelinePresentation.value(QStringLiteral("presentationPending")).toBool()
+				&& !timelinePresentation.value(QStringLiteral("presentationFinalizing")).toBool()
+				&& !timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool();
+			if (timelineReady) break;
+			window->requestUpdate();
+			QString frameError;
+			if (!waitForPresentedFrame(&frameError, presentationWindow)) {
+				if (error) *error = QStringLiteral("Timeline presentation failed: %1").arg(frameError);
+				return {};
+			}
+		}
+		if (!timelineReady) {
+			if (error) {
+				*error = QStringLiteral("The visual fixture timeline did not finish presentation "
+					"(count %1/%2, pending %3, finalizing %4, scope reset %5).")
+					.arg(timelinePresentation.value(QStringLiteral("count")).toInt())
+					.arg(initialExpectedMessageCount)
+					.arg(timelinePresentation.value(QStringLiteral("presentationPending")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("presentationFinalizing")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool());
+			}
+			return {};
+		}
+	}
 	if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
 		const QString fixtureGeneration = QString::number(m_generation + 1);
 		const QString anchorID = visualHistoryMessageID(fixtureGeneration, 12);

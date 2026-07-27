@@ -1719,6 +1719,7 @@ ApplicationWindow {
 			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
 			"presentationPending": timeline.scopePresentationPending,
 			"presentationFinalizing": timeline.scopePresentationFinalizing,
+			"scopeResetPending": timeline.scopeResetPending,
 			"presentationFastPath": timeline.scopePresentationFastPath,
 			"observationActive": timeline.scopePresentationObservationActive,
 			"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
@@ -1732,6 +1733,7 @@ ApplicationWindow {
 			"durationMs": timeline.scopePresentationStartedAt > 0
 				? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
 			"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
+				&& !timeline.scopeResetPending
 				&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
 				&& !timeline.restoringBottom && !timeline.prependAnchorActive
 		}
