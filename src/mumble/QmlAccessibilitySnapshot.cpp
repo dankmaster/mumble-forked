@@ -118,6 +118,46 @@ struct ChildEntry {
 	QString description;
 };
 
+bool isAnonymousClientNode(const QVariantMap &node) {
+	return node.value(QStringLiteral("role")).toString() == QLatin1String("Client")
+		&& node.value(QStringLiteral("name")).toString().isEmpty()
+		&& node.value(QStringLiteral("description")).toString().isEmpty()
+		&& node.value(QStringLiteral("states")).toList().isEmpty()
+		&& !node.contains(QStringLiteral("cycle")) && !node.contains(QStringLiteral("truncated"))
+		&& !node.value(QStringLiteral("childrenTruncated")).toBool();
+}
+
+QString serializedStateKey(const QVariantMap &node) {
+	QStringList states;
+	for (const QVariant &state : node.value(QStringLiteral("states")).toList()) {
+		states.push_back(state.toString());
+	}
+	return states.join(QChar(0x1f));
+}
+
+bool serializedNodeLessThan(const QVariant &leftValue, const QVariant &rightValue) {
+	const QVariantMap left = leftValue.toMap();
+	const QVariantMap right = rightValue.toMap();
+	const QVariantMap leftRect = left.value(QStringLiteral("rect")).toMap();
+	const QVariantMap rightRect = right.value(QStringLiteral("rect")).toMap();
+	return std::make_tuple(leftRect.value(QStringLiteral("y")).toInt(),
+			   leftRect.value(QStringLiteral("x")).toInt(),
+			   leftRect.value(QStringLiteral("height")).toInt(),
+			   leftRect.value(QStringLiteral("width")).toInt(),
+			   left.value(QStringLiteral("role")).toString(),
+			   left.value(QStringLiteral("name")).toString(),
+			   left.value(QStringLiteral("description")).toString(), serializedStateKey(left),
+			   left.value(QStringLiteral("children")).toList().size())
+		 < std::make_tuple(rightRect.value(QStringLiteral("y")).toInt(),
+			   rightRect.value(QStringLiteral("x")).toInt(),
+			   rightRect.value(QStringLiteral("height")).toInt(),
+			   rightRect.value(QStringLiteral("width")).toInt(),
+			   right.value(QStringLiteral("role")).toString(),
+			   right.value(QStringLiteral("name")).toString(),
+			   right.value(QStringLiteral("description")).toString(), serializedStateKey(right),
+			   right.value(QStringLiteral("children")).toList().size());
+}
+
 QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, TraversalContext &context) {
 	if (!interface || !interface->isValid()) {
 		return { { QStringLiteral("invalid"), true } };
@@ -217,8 +257,20 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 			node.insert(QStringLiteral("childrenTruncated"), true);
 			break;
 		}
-		serializedChildren.push_back(serializeNode(child.interface, depth + 1, context));
+		const QVariantMap serializedChild = serializeNode(child.interface, depth + 1, context);
+		// Qt Quick may insert or remove anonymous Client wrappers as controls are
+		// incubated and delegates are reused. They carry no accessibility
+		// semantics, so promote their meaningful descendants and discard empty
+		// decoration before comparing snapshots.
+		if (isAnonymousClientNode(serializedChild)) {
+			for (const QVariant &grandchild : serializedChild.value(QStringLiteral("children")).toList()) {
+				serializedChildren.push_back(grandchild);
+			}
+		} else {
+			serializedChildren.push_back(serializedChild);
+		}
 	}
+	std::stable_sort(serializedChildren.begin(), serializedChildren.end(), serializedNodeLessThan);
 	node.insert(QStringLiteral("children"), serializedChildren);
 	return node;
 }

@@ -59,6 +59,7 @@ private slots:
 	void omitsInvisibleAndOffscreenChildren();
 	void omitsNonMaterializedChildrenWithNullBounds();
 	void omitsChildrenWhollyOutsideTheirParentBounds();
+	void flattensAnonymousStructuralClients();
 	void serializesButtonsAsSemanticLeaves();
 	void normalizesScreenCoordinatesToRootWindow();
 	void guardsCyclesAndBudgets();
@@ -161,6 +162,28 @@ void TestQmlAccessibilitySnapshot::omitsChildrenWhollyOutsideTheirParentBounds()
 	QCOMPARE(children.size(), 1);
 	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(),
 			 QStringLiteral("partially visible"));
+#else
+	QSKIP("Qt was built without accessibility support.");
+#endif
+}
+
+void TestQmlAccessibilitySnapshot::flattensAnonymousStructuralClients() {
+#if QT_CONFIG(accessibility)
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
+	TestAccessible outerWrapper(QString(), QRect(0, 0, 400, 300), QAccessible::Client);
+	TestAccessible innerWrapper(QString(), QRect(10, 10, 200, 100), QAccessible::Client);
+	TestAccessible decorativeLeaf(QString(), QRect(10, 10, 20, 20), QAccessible::Client);
+	TestAccessible semanticLeaf(QStringLiteral("Message text"), QRect(20, 30, 120, 20), QAccessible::StaticText);
+	root.addChild(&outerWrapper);
+	outerWrapper.addChild(&innerWrapper);
+	innerWrapper.addChild(&decorativeLeaf);
+	innerWrapper.addChild(&semanticLeaf);
+
+	const QVariantMap result = QmlAccessibilitySnapshot::serialize(&root);
+	QVERIFY(result.value(QStringLiteral("ok")).toBool());
+	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
+	QCOMPARE(children.size(), 1);
+	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(), QStringLiteral("Message text"));
 #else
 	QSKIP("Qt was built without accessibility support.");
 #endif
