@@ -1829,6 +1829,10 @@ FocusScope {
 					Layout.fillWidth: true
 					Layout.preferredHeight: implicitHeight
 					spacing: Theme.space1
+					// The commerce card owns the complete spoken summary. These
+					// visual pills otherwise surface as timing-dependent unnamed
+					// Client nodes in Qt Quick accessibility snapshots.
+					Accessible.ignored: true
 					Repeater {
 						model: root.visibleStats
 						delegate: Rectangle {
@@ -1866,6 +1870,7 @@ FocusScope {
 					Layout.preferredHeight: implicitHeight
 					visible: root.visibleChips.length > 0
 					spacing: Theme.space1
+					Accessible.ignored: true
 					Repeater {
 						model: root.visibleChips
 						delegate: Rectangle {

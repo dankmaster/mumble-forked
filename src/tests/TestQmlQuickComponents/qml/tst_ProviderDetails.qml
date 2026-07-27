@@ -1394,6 +1394,8 @@ TestCase {
 		compare(occurrenceCount(item.Accessible.description, "2024"), 1)
 		compare(occurrenceCount(item.Accessible.description, "CarPlay"), 1)
 		compare(findChild(item, "providerCommercePrice").Accessible.ignored, true)
+		compare(findChild(item, "providerCommerceFacts").Accessible.ignored, true)
+		compare(findChild(item, "providerCommerceHighlights").Accessible.ignored, true)
 		compare(findChild(item, "providerCommerceFactLabel_0").Accessible.ignored, true)
 		compare(findChild(item, "providerCommerceHighlightLabel_0").Accessible.ignored, true)
 	}
