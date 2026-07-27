@@ -1757,7 +1757,7 @@ namespace {
 		field.insert(QStringLiteral("calibrationTooltip"),
 					 QObject::tr("Measure room sound and normal speech, then compare suitable detection methods."));
 		field.insert(QStringLiteral("calibrationStatusText"),
-					 QObject::tr("Run the guided check for this microphone. Manual tuning is available in Advanced."));
+					 QObject::tr("Run the guided check for this microphone, or adjust the manual thresholds directly below the live meter."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -1766,6 +1766,8 @@ namespace {
 		field.insert(QStringLiteral("sourceLabel"), vadSourceLabel(settings.vsVAD));
 		field.insert(QStringLiteral("silenceThreshold"), vadThresholdFromFloat(settings.fVADmin));
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
+		field.insert(QStringLiteral("silenceThresholdFieldId"), QStringLiteral("audio.vadMin"));
+		field.insert(QStringLiteral("speechThresholdFieldId"), QStringLiteral("audio.vadMax"));
 		field.insert(QStringLiteral("voiceHold"), settings.iVoiceHold);
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
 		field.insert(QStringLiteral("inputGateMode"), static_cast< int >(settings.inputGateMode));
@@ -4772,8 +4774,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		if (voiceActivityTransmit) {
 			sections.push_back(advancedSection(collapsibleSection(
 				audioInputSection(
-					QStringLiteral("voiceActivation"), QObject::tr("Voice activation tuning"),
-					QObject::tr("Guided setup above is the safest starting point. Open this only to tune detection manually."),
+					QStringLiteral("voiceActivation"), QObject::tr("Voice activation details"),
+					QObject::tr("Change the detection method, input gate, or release delay only when the controls beside the live meter are not enough."),
 					QVariantList {
 						hintedField(selectField(QStringLiteral("audio.vadSource"), QObject::tr("Detection method"),
 												static_cast< int >(m_draft.vsVAD), vadSourceOptions()),
@@ -4781,14 +4783,6 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 						hintedField(selectField(QStringLiteral("audio.inputGateMode"), QObject::tr("Input gate"),
 												static_cast< int >(m_draft.inputGateMode), inputGateModeOptions()),
 									QObject::tr("Off is recommended after guided setup; stricter gates may clip soft words.")),
-						hintedField(rangeField(QStringLiteral("audio.vadMin"), QObject::tr("Stop threshold"),
-												vadThresholdFromFloat(m_draft.fVADmin), 0, 100, 1,
-												QStringLiteral("%")),
-									QObject::tr("Close the microphone when the live signal falls below this level.")),
-						hintedField(rangeField(QStringLiteral("audio.vadMax"), QObject::tr("Start threshold"),
-												vadThresholdFromFloat(m_draft.fVADmax), 0, 100, 1,
-												QStringLiteral("%")),
-									QObject::tr("Open the microphone when the live signal rises above this level.")),
 						hintedField(numberField(QStringLiteral("audio.voiceHold"), QObject::tr("Release delay"),
 												m_draft.iVoiceHold, 0, 250, 1, QObject::tr(" frames")),
 									QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) }),

@@ -1864,6 +1864,8 @@ TestCase {
 			"value": { "available": true, "connected": true, "amplitude": 72, "signalToNoise": 48,
 				"hybrid": 63, "transmitting": true, "peakCleanMicDb": -17 },
 			"vadSource": 2, "silenceThreshold": 18, "speechThreshold": 62, "voiceHold": 37, "active": true,
+			"silenceThresholdFieldId": "audio.vadMin",
+			"speechThresholdFieldId": "audio.vadMax",
 			"staticMeter": false, "calibrationActionId": "finishAudioSetupWizard",
 			"calibrationLabel": "Audio setup", "replayStartActionId": "startVoiceReplay",
 			"replayStopActionId": "stopVoiceReplay", "replayLabel": "Replay"
@@ -1871,9 +1873,34 @@ TestCase {
 		const track = findChild(loader.item.contentItem, "voiceMeterTrack_audio.inputMeter");
 		const fill = findChild(loader.item.contentItem, "voiceMeterFill_audio.inputMeter");
 		const meter = findChild(loader.item.contentItem, "voiceMeter_audio.inputMeter");
-		tryVerify(function() { return track !== null && fill !== null && track.width > 0; });
+		const thresholdEditor = findChild(loader.item.contentItem, "voiceThresholdEditor_audio.inputMeter");
+		const stopThreshold = findChild(loader.item.contentItem, "dialogField_audio.vadMin");
+		const startThreshold = findChild(loader.item.contentItem, "dialogField_audio.vadMax");
+		tryVerify(function() {
+			return track !== null && fill !== null && track.width > 0
+				&& thresholdEditor !== null && thresholdEditor.visible
+				&& stopThreshold !== null && startThreshold !== null
+				&& stopThreshold.width > 100 && startThreshold.width > 100;
+		});
 		compare(meter.meterValue, 63);
+		compare(meter.silenceThreshold, 18);
+		compare(meter.speechThreshold, 62);
+		compare(stopThreshold.value, 18);
+		compare(startThreshold.value, 62);
 		tryVerify(function() { return Math.round((fill.width / track.width) * 100) === 63; });
+
+		const revisionBeforeThresholdDrag = dialogState.revision;
+		const stopPressX = Math.round(stopThreshold.handle.x + stopThreshold.handle.width / 2);
+		const stopTargetX = Math.round(stopThreshold.leftPadding + stopThreshold.availableWidth * 0.34);
+		const stopY = Math.round(stopThreshold.height / 2);
+		mousePress(stopThreshold, stopPressX, stopY, Qt.LeftButton);
+		mouseMove(stopThreshold, stopTargetX, stopY, 20, Qt.LeftButton);
+		verify(meter.silenceThreshold > 18);
+		compare(dialogState.revision, revisionBeforeThresholdDrag);
+		mouseRelease(stopThreshold, stopTargetX, stopY, Qt.LeftButton);
+		tryCompare(dialogState, "revision", revisionBeforeThresholdDrag + 1);
+		compare(dialogState.fieldValue("audio.vadMin"), meter.silenceThreshold);
+
 		const structuralRevision = dialogState.revision
 		verify(dialogState.updatePresentationFieldValue("audio.inputMeter", {
 			"available": true, "connected": true, "amplitude": 28, "signalToNoise": 34,

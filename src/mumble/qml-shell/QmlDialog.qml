@@ -2756,10 +2756,27 @@ Dialog {
 			readonly property real meterValue: Math.max(0, Math.min(100,
 				vadSource === 1 ? Number(meter.signalToNoise || 0)
 					: vadSource === 2 ? Number(meter.hybrid || 0) : Number(meter.amplitude || 0)))
-			readonly property int silenceThreshold: Math.max(0, Math.min(100, Number(field.silenceThreshold || 0)))
-			readonly property int speechThreshold: Math.max(silenceThreshold,
-				Math.min(100, Number(field.speechThreshold === undefined ? 100 : field.speechThreshold)))
+			readonly property bool thresholdEditorAvailable: field.active !== false
+				&& String(field.silenceThresholdFieldId || "").length > 0
+				&& String(field.speechThresholdFieldId || "").length > 0
+			property real previewSilenceThreshold: 0
+			property real previewSpeechThreshold: 100
+			readonly property int silenceThreshold: Math.round(Math.max(0,
+				Math.min(100, previewSilenceThreshold)))
+			readonly property int speechThreshold: Math.round(Math.max(silenceThreshold,
+				Math.min(100, previewSpeechThreshold)))
 			readonly property bool replayActive: Number(field.loopbackMode || meter.loopbackMode || 0) !== 0
+			function syncThresholdPreview() {
+				if (voiceStopThresholdControl.pressed || voiceStartThresholdControl.pressed)
+					return
+				const stopValue = Math.max(0, Math.min(100, Number(field.silenceThreshold || 0)))
+				const startValue = Math.max(stopValue,
+					Math.min(100, Number(field.speechThreshold === undefined ? 100 : field.speechThreshold)))
+				previewSilenceThreshold = stopValue
+				previewSpeechThreshold = startValue
+			}
+			onFieldChanged: Qt.callLater(syncThresholdPreview)
+			Component.onCompleted: syncThresholdPreview()
 			width: parent ? parent.width : 0
 			spacing: Math.max(6, Theme.spacing - 3)
 			RowLayout {
@@ -2839,6 +2856,146 @@ Dialog {
 				}
 				Item { Layout.fillWidth: true }
 				Label { textFormat: Text.PlainText; text: qsTr("Voice %1%").arg(voiceMeterRoot.speechThreshold); color: Theme.textMuted; font.pixelSize: 10 }
+			}
+			ColumnLayout {
+				id: voiceThresholdEditor
+				objectName: "voiceThresholdEditor_" + String(voiceMeterRoot.field.id || "")
+				Layout.fillWidth: true
+				visible: voiceMeterRoot.thresholdEditorAvailable
+				spacing: Theme.space1
+				property bool stopDirty: false
+				property bool startDirty: false
+				function commitStopThreshold() {
+					if (!stopDirty)
+						return
+					stopDirty = false
+					dialog.updateFieldValue(String(voiceMeterRoot.field.silenceThresholdFieldId),
+						Math.round(voiceMeterRoot.previewSilenceThreshold))
+				}
+				function commitStartThreshold() {
+					if (!startDirty)
+						return
+					startDirty = false
+					dialog.updateFieldValue(String(voiceMeterRoot.field.speechThresholdFieldId),
+						Math.round(voiceMeterRoot.previewSpeechThreshold))
+				}
+				Rectangle {
+					Layout.fillWidth: true
+					Layout.preferredHeight: 1
+					color: Theme.divider
+				}
+				RowLayout {
+					Layout.fillWidth: true
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Manual thresholds")
+						color: Theme.textStrong
+						font.bold: true
+					}
+					Label {
+						textFormat: Text.PlainText
+						text: qsTr("Adjust while speaking")
+						color: Theme.textMuted
+						font.pixelSize: 10
+					}
+				}
+				Label {
+					Layout.fillWidth: true
+					textFormat: Text.PlainText
+					text: qsTr("The meter follows the handles immediately. The setting is applied once you release a handle.")
+					color: Theme.textMuted
+					font.pixelSize: 10
+					wrapMode: Text.Wrap
+				}
+				RowLayout {
+					Layout.fillWidth: true
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Stop · closes the microphone")
+						color: Theme.textMuted
+						font.pixelSize: 11
+					}
+					Label {
+						objectName: "dialogRangeValue_" + String(voiceMeterRoot.field.silenceThresholdFieldId || "")
+						textFormat: Text.PlainText
+						text: qsTr("%1%").arg(voiceMeterRoot.silenceThreshold)
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontLabel
+						font.weight: Font.DemiBold
+						Accessible.ignored: true
+					}
+				}
+				ModernSlider {
+					id: voiceStopThresholdControl
+					objectName: "dialogField_" + String(voiceMeterRoot.field.silenceThresholdFieldId || "")
+					Layout.fillWidth: true
+					from: 0
+					to: Math.max(0, voiceMeterRoot.previewSpeechThreshold)
+					stepSize: 1
+					value: voiceMeterRoot.previewSilenceThreshold
+					snapMode: Slider.SnapOnRelease
+					live: true
+					Accessible.name: qsTr("Stop threshold")
+					Accessible.description: qsTr("Closes the microphone below %1 percent").arg(
+						voiceMeterRoot.silenceThreshold)
+					onMoved: {
+						voiceMeterRoot.previewSilenceThreshold = Math.min(value,
+							voiceMeterRoot.previewSpeechThreshold)
+						voiceThresholdEditor.stopDirty = true
+						if (!pressed)
+							voiceThresholdEditor.commitStopThreshold()
+					}
+					onPressedChanged: {
+						if (!pressed)
+							voiceThresholdEditor.commitStopThreshold()
+					}
+				}
+				RowLayout {
+					Layout.fillWidth: true
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Start · opens the microphone")
+						color: Theme.textMuted
+						font.pixelSize: 11
+					}
+					Label {
+						objectName: "dialogRangeValue_" + String(voiceMeterRoot.field.speechThresholdFieldId || "")
+						textFormat: Text.PlainText
+						text: qsTr("%1%").arg(voiceMeterRoot.speechThreshold)
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontLabel
+						font.weight: Font.DemiBold
+						Accessible.ignored: true
+					}
+				}
+				ModernSlider {
+					id: voiceStartThresholdControl
+					objectName: "dialogField_" + String(voiceMeterRoot.field.speechThresholdFieldId || "")
+					Layout.fillWidth: true
+					from: Math.min(100, voiceMeterRoot.previewSilenceThreshold)
+					to: 100
+					stepSize: 1
+					value: voiceMeterRoot.previewSpeechThreshold
+					snapMode: Slider.SnapOnRelease
+					live: true
+					Accessible.name: qsTr("Start threshold")
+					Accessible.description: qsTr("Opens the microphone above %1 percent").arg(
+						voiceMeterRoot.speechThreshold)
+					onMoved: {
+						voiceMeterRoot.previewSpeechThreshold = Math.max(value,
+							voiceMeterRoot.previewSilenceThreshold)
+						voiceThresholdEditor.startDirty = true
+						if (!pressed)
+							voiceThresholdEditor.commitStartThreshold()
+					}
+					onPressedChanged: {
+						if (!pressed)
+							voiceThresholdEditor.commitStartThreshold()
+					}
+				}
 			}
 			Label {
 				textFormat: Text.PlainText

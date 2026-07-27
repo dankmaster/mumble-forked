@@ -924,14 +924,19 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	for (const QVariant &optionValue : vadSourceOptionList) {
 		QVERIFY(!optionValue.toMap().value(QStringLiteral("hint")).toString().trimmed().isEmpty());
 	}
-	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.vadMin"))
-			 .value(QStringLiteral("label"))
-			 .toString(),
-		 QStringLiteral("Stop threshold"));
-	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.vadMax"))
-			 .value(QStringLiteral("label"))
-			 .toString(),
-		 QStringLiteral("Start threshold"));
+	const QVariantMap microphoneCheckSection =
+		findSection(voiceActivitySections, QStringLiteral("microphoneCheck"));
+	const QVariantMap voiceMeterField =
+		findField(microphoneCheckSection, QStringLiteral("audio.inputMeter"));
+	QCOMPARE(voiceMeterField.value(QStringLiteral("silenceThresholdFieldId")).toString(),
+			 QStringLiteral("audio.vadMin"));
+	QCOMPARE(voiceMeterField.value(QStringLiteral("speechThresholdFieldId")).toString(),
+			 QStringLiteral("audio.vadMax"));
+	QVERIFY(voiceMeterField.value(QStringLiteral("calibrationStatusText"))
+				.toString()
+				.contains(QStringLiteral("directly below the live meter")));
+	QVERIFY(findField(voiceActivationSection, QStringLiteral("audio.vadMin")).isEmpty());
+	QVERIFY(findField(voiceActivationSection, QStringLiteral("audio.vadMax")).isEmpty());
 	QCOMPARE(findField(voiceActivationSection, QStringLiteral("audio.voiceHold"))
 			 .value(QStringLiteral("suffix"))
 			 .toString(),
