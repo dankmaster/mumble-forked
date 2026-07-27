@@ -12,7 +12,53 @@
 #include <QDebug>
 #include <QIODevice>
 
+#include <cmath>
+
 namespace {
+bool matchesLegacyVoiceActivationDefaults(const nlohmann::json &json) {
+	const nlohmann::json empty = nlohmann::json::object();
+	const nlohmann::json &misc =
+		json.contains("misc") && json.at("misc").is_object() ? json.at("misc") : empty;
+	if (misc.contains("modern_audio_setup_version")) {
+		try {
+			if (misc.at("modern_audio_setup_version").get< unsigned int >() > 0) {
+				return false;
+			}
+		} catch (...) {
+			// Treat a malformed revision as legacy only when the complete audio
+			// tuple below still matches the former defaults.
+		}
+	}
+
+	const nlohmann::json &audio =
+		json.contains("audio") && json.at("audio").is_object() ? json.at("audio") : empty;
+	const auto missingOrString = [&audio](const char *key, const char *legacyValue) {
+		if (!audio.contains(key)) {
+			return true;
+		}
+		try {
+			return audio.at(key).get< std::string >() == legacyValue;
+		} catch (...) {
+			return false;
+		}
+	};
+	const auto missingOrNumber = [&audio](const char *key, const double legacyValue) {
+		if (!audio.contains(key)) {
+			return true;
+		}
+		try {
+			const double value = audio.at(key).get< double >();
+			return std::isfinite(value) && std::abs(value - legacyValue) <= 0.0001;
+		} catch (...) {
+			return false;
+		}
+	};
+
+	return missingOrString("vad_mode", "Amplitude") && missingOrNumber("vad_min", 0.80)
+		   && missingOrNumber("vad_max", 0.98) && missingOrString("input_gate_mode", "Off")
+		   && missingOrNumber("voice_hold", 20.0);
+}
+
 void removeRetiredFrontendSettings(nlohmann::json &json) {
 	if (json.contains("ui") && json.at("ui").is_object()) {
 		auto &ui = json["ui"];
@@ -252,6 +298,7 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	nlohmann::json json = j;
 
 	migrateSettings(json, settingsVersion);
+	const bool replaceLegacyVoiceActivationDefaults = matchesLegacyVoiceActivationDefaults(json);
 
 #define PROCESS(category, key, variable) \
 	load(json, #category, SettingsKeys::key, settings.variable, settings.variable, true);
@@ -259,6 +306,10 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	PROCESS_ALL_SETTINGS
 
 #undef PROCESS
+
+	if (settings.normalizeVoiceActivationSettings(replaceLegacyVoiceActivationDefaults)) {
+		qInfo("Normalized voice activation settings while loading the client configuration");
+	}
 
 	const bool hasInputEnhancement = json.contains("audio") && json.at("audio").is_object()
 								 && json.at("audio").contains("input_enhancement");

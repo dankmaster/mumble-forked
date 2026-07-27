@@ -465,6 +465,9 @@ target_compile_definitions(mumble_client_object_lib
 )
 target_compile_definitions(mumble_client_object_lib PRIVATE
 	"MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX=\"${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}\"")
+if(unsigned-community-release)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_UNSIGNED_COMMUNITY_RELEASE=1)
+endif()
 
 set_target_properties(mumble PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 

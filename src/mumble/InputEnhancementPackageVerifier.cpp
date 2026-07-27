@@ -496,7 +496,9 @@ namespace {
 
 InputEnhancementPackageVerifier::InputEnhancementPackageVerifier(Configuration configuration)
 	: m_configuration(std::move(configuration)),
-	  m_developmentBypass(m_configuration.currentBuild == 0 && m_configuration.rawPublicKey.isEmpty()),
+	  m_unmanagedBypass(m_configuration.rawPublicKey.isEmpty()
+						&& (m_configuration.currentBuild == 0
+							|| m_configuration.allowUnsignedCommunityRelease)),
 	  m_manualProfileCpuClass(CpuClass::Low) {
 	m_report.store(std::make_shared< const PackageVerificationReport >(), std::memory_order_release);
 }
@@ -515,10 +517,10 @@ InputEnhancementPackageVerifier::~InputEnhancementPackageVerifier() {
 }
 
 PackageVerificationReport InputEnhancementPackageVerifier::verify() {
-	if (m_developmentBypass) {
+	if (m_unmanagedBypass) {
 		// Verification may be repeated by tests or a future package refresh. Drop
 		// the previously published unsigned catalog before inspecting the current
-		// package so a manifest-free build-0 run can never inherit stale neural
+		// package so a manifest-free unmanaged run can never inherit stale neural
 		// authorization from an earlier successful verification.
 		m_snapshot.store({}, std::memory_order_release);
 		const QString modelManifestPath =
@@ -528,11 +530,11 @@ PackageVerificationReport InputEnhancementPackageVerifier::verify() {
 		const bool modelManifestExists  = QFileInfo::exists(modelManifestPath);
 		const bool recipeManifestExists = QFileInfo::exists(recipeManifestPath);
 
-		// Build-0 clients do not authenticate manifests with the production key,
-		// but packaged product profiles must still be bound to the exact catalog
-		// and model bytes that will be initialized. Preserve the manifest-free
-		// unmanaged mode for Original/Light development, while refusing to invent
-		// a neural model identity when no catalog is present.
+		// Unmanaged developer/community clients do not authenticate manifests with
+		// a production key, but packaged product profiles must still be bound to
+		// the exact catalog and model bytes that will be initialized. Preserve the
+		// manifest-free mode for Original/Light while refusing to invent a neural
+		// model identity when no catalog is present.
 		if (modelManifestExists || recipeManifestExists) {
 			const auto modelBytes = readBounded(modelManifestPath, maximumModelManifestBytes);
 			const auto recipeBytes = readBounded(recipeManifestPath, maximumRecipeManifestBytes);
@@ -619,7 +621,7 @@ bool InputEnhancementPackageVerifier::verificationHealthy() const noexcept {
 	if (!readyForHealthMarker()) {
 		return false;
 	}
-	if (!m_developmentBypass) {
+	if (!m_unmanagedBypass) {
 		return m_verified.load(std::memory_order_acquire);
 	}
 	const auto current = m_report.load(std::memory_order_acquire);
@@ -627,7 +629,7 @@ bool InputEnhancementPackageVerifier::verificationHealthy() const noexcept {
 }
 
 bool InputEnhancementPackageVerifier::managedBySignedPackage() const noexcept {
-	return !m_developmentBypass;
+	return !m_unmanagedBypass;
 }
 
 bool InputEnhancementPackageVerifier::hasVerifiedPackage() const noexcept {
@@ -639,7 +641,7 @@ bool InputEnhancementPackageVerifier::modelAuthorized(const QString &modelId, co
 	// A neural product profile always needs a concrete catalog entry, including
 	// in an unmanaged build-0 client. This prevents a development run from
 	// reporting an empty active-model hash as if it were qualified evidence.
-	if (!current || (!m_developmentBypass && !m_verified.load(std::memory_order_acquire))
+	if (!current || (!m_unmanagedBypass && !m_verified.load(std::memory_order_acquire))
 		|| !verificationHealthy()) {
 		return false;
 	}
@@ -674,7 +676,7 @@ bool InputEnhancementPackageVerifier::modelsAuthorized(const QStringList &modelI
 
 bool InputEnhancementPackageVerifier::modelSnapshotAuthorized(const QString &modelId) const {
 	const auto current = snapshot();
-	if (!current || (!m_developmentBypass && !m_verified.load(std::memory_order_acquire))
+	if (!current || (!m_unmanagedBypass && !m_verified.load(std::memory_order_acquire))
 		|| !verificationHealthy()) {
 		return false;
 	}
@@ -691,9 +693,9 @@ bool InputEnhancementPackageVerifier::recipeAuthorized(const Recipe &recipe) con
 		// Original/Light path. Neural recipes are rejected separately by
 		// modelAuthorized(), so they can never initialize without an attested
 		// model asset and SHA-256.
-		return m_developmentBypass && verificationHealthy() && !recipe.usesNeuralProcessor();
+		return m_unmanagedBypass && verificationHealthy() && !recipe.usesNeuralProcessor();
 	}
-	if ((!m_developmentBypass && !m_verified.load(std::memory_order_acquire)) || !verificationHealthy()) {
+	if ((!m_unmanagedBypass && !m_verified.load(std::memory_order_acquire)) || !verificationHealthy()) {
 		return false;
 	}
 	const auto iterator = current->recipes.constFind(recipe.id());

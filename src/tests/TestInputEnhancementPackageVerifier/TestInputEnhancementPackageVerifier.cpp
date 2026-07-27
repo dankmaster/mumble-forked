@@ -192,7 +192,7 @@ private slots:
 	void rejectsMismatchedExecutionSemantics();
 	void missingSignatureAndReleaseKeyFailClosed();
 	void asynchronousManualProfileProbePublishesOnlyCompletedCache();
-	void onlyKeylessBuildZeroCanRunUnmanaged();
+	void keylessUnmanagedModesAreExplicit();
 };
 
 void TestInputEnhancementPackageVerifier::acceptsExactSignedCatalogAndPublishesModelHashes() {
@@ -455,7 +455,7 @@ void TestInputEnhancementPackageVerifier::asynchronousManualProfileProbePublishe
 	QCOMPARE(*verifier.cachedManualProfileCpuClass(), CpuClass::Low);
 }
 
-void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() {
+void TestInputEnhancementPackageVerifier::keylessUnmanagedModesAreExplicit() {
 	QTemporaryDir root;
 	QVERIFY(root.isValid());
 	auto developmentConfiguration = configuration(root);
@@ -471,7 +471,22 @@ void TestInputEnhancementPackageVerifier::onlyKeylessBuildZeroCanRunUnmanaged() 
 	QVERIFY(verifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Light })));
 	QVERIFY(!verifier.modelAuthorized(QStringLiteral("local:e2e-model"), QStringLiteral("missing.bin")));
 
-	// An unsigned build-0 package is not production-authenticated, but the same
+	QTemporaryDir communityRoot;
+	QVERIFY(communityRoot.isValid());
+	auto communityConfiguration = configuration(communityRoot);
+	communityConfiguration.rawPublicKey.clear();
+	communityConfiguration.currentBuild                   = 83;
+	communityConfiguration.allowUnsignedCommunityRelease = true;
+	InputEnhancementPackageVerifier communityVerifier(std::move(communityConfiguration));
+	const PackageVerificationReport communityReport = communityVerifier.verify();
+	QVERIFY(communityReport.ready);
+	QVERIFY(communityReport.unmanaged);
+	QVERIFY(!communityReport.verified);
+	QVERIFY(!communityVerifier.managedBySignedPackage());
+	QVERIFY(communityVerifier.verificationHealthy());
+	QVERIFY(communityVerifier.recipeAuthorized(RecipeCatalog::resolve({ Profile::Light })));
+
+	// An unsigned unmanaged package is not production-authenticated, but the same
 	// strict parser must bind its product recipes to exact, re-hashed assets.
 	// This is what makes localhost E2E diagnostics useful without allowing an
 	// empty or invented active-model SHA-256.

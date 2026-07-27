@@ -79,8 +79,9 @@ struct PackageVerificationReport final {
 };
 
 /// Verifies the immutable package-local input model and recipe catalogs before
-/// AudioInput is constructed. Release-like builds fail closed; only a build-0
-/// developer client with no embedded key is allowed to run unmanaged.
+/// AudioInput is constructed. Signed release builds fail closed. Build-0
+/// developer clients and an explicitly configured unsigned community release
+/// may run unmanaged while retaining exact local manifest and asset hashing.
 class InputEnhancementPackageVerifier final {
 public:
 	struct Configuration final {
@@ -88,6 +89,7 @@ public:
 		QByteArray rawPublicKey;
 		std::uint64_t currentBuild = 0;
 		QString supportedCatalogRevision;
+		bool allowUnsignedCommunityRelease = false;
 	};
 
 	static constexpr qsizetype maximumModelManifestBytes  = 1024 * 1024;
@@ -170,7 +172,7 @@ private:
 	std::atomic< std::shared_ptr< const PackageVerificationReport > > m_report;
 	std::atomic_bool m_ready{ false };
 	std::atomic_bool m_verified{ false };
-	const bool m_developmentBypass;
+	const bool m_unmanagedBypass;
 	mutable std::once_flag m_manualProfileProbeOnce;
 	mutable CpuClass m_manualProfileCpuClass;
 	mutable std::atomic_bool m_manualProfileProbeReady{ false };

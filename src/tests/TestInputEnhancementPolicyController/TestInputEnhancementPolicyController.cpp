@@ -118,7 +118,7 @@ class TestInputEnhancementPolicyController : public QObject {
 	Q_OBJECT
 
 private slots:
-	void buildZeroWithoutKeyIsTheOnlyUnmanagedDevelopmentMode();
+	void keylessUnmanagedModesAreExplicit();
 	void releaseLikeKeylessBuildFailsClosed();
 	void validPairIsPersistedAndRestored();
 	void invalidExpiredAndMismatchedCandidatesKeepTheLastValidPolicy();
@@ -239,7 +239,7 @@ void TestInputEnhancementPolicyController::packagedBootstrapRequiresValidCurrent
 	}
 }
 
-void TestInputEnhancementPolicyController::buildZeroWithoutKeyIsTheOnlyUnmanagedDevelopmentMode() {
+void TestInputEnhancementPolicyController::keylessUnmanagedModesAreExplicit() {
 	QTemporaryDir cacheRoot;
 	QVERIFY(cacheRoot.isValid());
 	auto config = configuration(cacheRoot);
@@ -256,6 +256,19 @@ void TestInputEnhancementPolicyController::buildZeroWithoutKeyIsTheOnlyUnmanaged
 	controller.start();
 	QVERIFY(controller.readyForHealthMarker());
 	QVERIFY(controller.policyDecisionHealthy());
+
+	auto communityConfig = configuration(cacheRoot);
+	communityConfig.rawPublicKey.clear();
+	communityConfig.currentBuild                   = 83;
+	communityConfig.allowUnsignedCommunityRelease = true;
+
+	InputEnhancementPolicyController communityController(std::move(communityConfig));
+	QVERIFY(!communityController.managedBySignedPolicy());
+	QVERIFY(communityController.available());
+	QVERIFY(!communityController.forceOriginal());
+	communityController.start();
+	QVERIFY(communityController.readyForHealthMarker());
+	QVERIFY(communityController.policyDecisionHealthy());
 }
 
 void TestInputEnhancementPolicyController::releaseLikeKeylessBuildFailsClosed() {

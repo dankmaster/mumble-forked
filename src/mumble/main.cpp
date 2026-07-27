@@ -845,12 +845,15 @@ int main(int argc, char **argv) {
 	packageConfiguration.rawPublicKey       = Mumble::InputEnhancement::configuredPolicyPublicKey();
 	packageConfiguration.currentBuild       = Version::getPatch(Version::get());
 	packageConfiguration.supportedCatalogRevision = Mumble::InputEnhancement::productRecipeCatalogRevision();
+#if defined(MUMBLE_UNSIGNED_COMMUNITY_RELEASE)
+	packageConfiguration.allowUnsignedCommunityRelease = true;
+#endif
 	Global::get().inputEnhancementPackageVerifier =
 		new Mumble::InputEnhancement::InputEnhancementPackageVerifier(std::move(packageConfiguration));
 	const Mumble::InputEnhancement::PackageVerificationReport packageReport =
 		Global::get().inputEnhancementPackageVerifier->verify();
 	if (packageReport.unmanaged) {
-		qInfo("Input enhancement package manifests are unmanaged for this build-0 developer client");
+		qInfo("Input enhancement package manifests use the explicit unmanaged developer/community lane");
 	} else if (!packageReport.verified) {
 		qWarning("Input enhancement package verification failed (reason=%d, detail=\"%s\"); new product profiles "
 				 "will use Original",
@@ -870,6 +873,9 @@ int main(int argc, char **argv) {
 	policyConfiguration.manifestUrl =
 		Mumble::InputEnhancement::InputEnhancementPolicyController::manifestUrlFromEnvironment();
 	policyConfiguration.remoteFetchEnabled = true;
+#if defined(MUMBLE_UNSIGNED_COMMUNITY_RELEASE)
+	policyConfiguration.allowUnsignedCommunityRelease = true;
+#endif
 	Global::get().inputEnhancementPolicyController =
 		new Mumble::InputEnhancement::InputEnhancementPolicyController(
 			std::move(policyConfiguration), Global::get().nam, &a);

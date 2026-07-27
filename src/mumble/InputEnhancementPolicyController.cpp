@@ -92,11 +92,13 @@ InputEnhancementPolicyController::InputEnhancementPolicyController(Configuration
 													std::make_shared< OpenSslEd25519Verifier >(),
 													m_configuration.currentBuild, m_configuration.recipeSetVersion)),
 	  m_effectiveState(pack({ true, false, false, true, Profile::Original })) {
-	// A build-number-0 developer client with no embedded release key remains
-	// usable for local/E2E audio work. This is not controlled by an environment
-	// variable and cannot bypass a release build carrying the embedded key.
-	m_developmentBypass = m_configuration.currentBuild == 0 && m_configuration.rawPublicKey.isEmpty();
-	if (m_developmentBypass) {
+	// A build-number-0 developer client and the compile-time-selected unsigned
+	// community lane remain usable without a release key. This cannot bypass a
+	// build that actually carries an embedded signing key.
+	m_unmanagedBypass = m_configuration.rawPublicKey.isEmpty()
+						&& (m_configuration.currentBuild == 0
+							|| m_configuration.allowUnsignedCommunityRelease);
+	if (m_unmanagedBypass) {
 		publishUnmanagedDevelopmentState();
 	}
 
@@ -122,7 +124,7 @@ void InputEnhancementPolicyController::start() {
 		return;
 	}
 	m_started = true;
-	if (m_developmentBypass) {
+	if (m_unmanagedBypass) {
 		markInitialDecisionReady();
 		return;
 	}
@@ -149,7 +151,7 @@ void InputEnhancementPolicyController::start() {
 }
 
 bool InputEnhancementPolicyController::restorePackagedBootstrap(const QDateTime &nowUtc) {
-	if (m_developmentBypass || !m_configuration.packagedBootstrapEnabled) {
+	if (m_unmanagedBypass || !m_configuration.packagedBootstrapEnabled) {
 		return false;
 	}
 	const QString directory = m_configuration.packagedBootstrapDirectory.trimmed().isEmpty()
@@ -179,7 +181,7 @@ bool InputEnhancementPolicyController::restorePackagedBootstrap(const QDateTime 
 }
 
 void InputEnhancementPolicyController::refresh() {
-	if (m_developmentBypass || m_fetchInProgress || !m_configuration.remoteFetchEnabled || !m_networkManager
+	if (m_unmanagedBypass || m_fetchInProgress || !m_configuration.remoteFetchEnabled || !m_networkManager
 		|| !isAllowedHttpsUrl(m_configuration.manifestUrl)) {
 		return;
 	}
@@ -212,7 +214,7 @@ void InputEnhancementPolicyController::refresh() {
 PolicyDecision InputEnhancementPolicyController::acceptDownloadedCandidate(const QByteArray &canonicalManifest,
 																		   const QByteArray &rawSignature,
 																		   const QDateTime &nowUtc) {
-	if (m_developmentBypass) {
+	if (m_unmanagedBypass) {
 		return { {}, PolicyRejection::InvalidPublicKey, false, false, false };
 	}
 	if (canonicalManifest.isEmpty() || canonicalManifest.size() > maximumManifestBytes
@@ -231,7 +233,7 @@ PolicyDecision InputEnhancementPolicyController::acceptDownloadedCandidate(const
 }
 
 bool InputEnhancementPolicyController::restoreCache(const QDateTime &nowUtc) {
-	if (m_developmentBypass) {
+	if (m_unmanagedBypass) {
 		return false;
 	}
 	const QString preferred             = currentSlot();
@@ -261,7 +263,7 @@ bool InputEnhancementPolicyController::restoreCache(const QDateTime &nowUtc) {
 }
 
 void InputEnhancementPolicyController::reevaluate(const QDateTime &nowUtc) {
-	if (!m_developmentBypass) {
+	if (!m_unmanagedBypass) {
 		publish(m_store->current(nowUtc));
 	}
 }
@@ -527,7 +529,7 @@ void InputEnhancementPolicyController::finishRefresh(bool accepted) {
 }
 
 void InputEnhancementPolicyController::scheduleNextRefresh() {
-	if (!m_started || m_developmentBypass || !m_configuration.remoteFetchEnabled || !m_networkManager
+	if (!m_started || m_unmanagedBypass || !m_configuration.remoteFetchEnabled || !m_networkManager
 		|| !isAllowedHttpsUrl(m_configuration.manifestUrl)
 		|| !isAllowedHttpsUrl(signatureUrlForManifest(m_configuration.manifestUrl))) {
 		m_refreshTimer.stop();

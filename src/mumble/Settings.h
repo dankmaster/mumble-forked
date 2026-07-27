@@ -140,6 +140,11 @@ struct Settings {
 	static const QString cqsDefaultPushClickOff;
 	static const QString cqsDefaultMuteCue;
 	static const QPoint UNSPECIFIED_POSITION;
+	static constexpr VADSource RECOMMENDED_VAD_SOURCE             = Hybrid;
+	static constexpr float RECOMMENDED_VAD_SILENCE_THRESHOLD     = 0.21f;
+	static constexpr float RECOMMENDED_VAD_SPEECH_THRESHOLD      = 0.32f;
+	static constexpr InputGateMode RECOMMENDED_INPUT_GATE_MODE   = InputGateOff;
+	static constexpr int RECOMMENDED_VOICE_HOLD                  = 40;
 
 	AudioTransmit atTransmit = VAD;
 	quint64 uiDoublePush     = 0;
@@ -183,7 +188,7 @@ struct Settings {
 	int iMinLoudness                    = 1000;
 	/// Actual mic hold time is (iVoiceHold / 100) seconds, where iVoiceHold is specified in 'frames',
 	/// each of which is has a size of iFrameSize (see AudioInput.h)
-	int iVoiceHold                                      = 40;
+	int iVoiceHold                                      = RECOMMENDED_VOICE_HOLD;
 	int iJitterBufferSize                               = 1;
 	bool bAllowLowDelay                                 = true;
 	NoiseCancel noiseCancelMode                         = NoiseCancelSpeex;
@@ -204,10 +209,10 @@ struct Settings {
 	IdleAction iaeIdleAction         = Nothing;
 	bool bUndoIdleActionUponActivity = false;
 
-	VADSource vsVAD                     = Amplitude;
-	float fVADmin                       = 0.80f;
-	float fVADmax                       = 0.98f;
-	InputGateMode inputGateMode         = InputGateOff;
+	VADSource vsVAD                     = RECOMMENDED_VAD_SOURCE;
+	float fVADmin                       = RECOMMENDED_VAD_SILENCE_THRESHOLD;
+	float fVADmax                       = RECOMMENDED_VAD_SPEECH_THRESHOLD;
+	InputGateMode inputGateMode         = RECOMMENDED_INPUT_GATE_MODE;
 	int iFramesPerPacket                = 2;
 	QString qsAudioInput                = {};
 	QString qsAudioOutput               = {};
@@ -548,6 +553,7 @@ struct Settings {
 	void load(const QString &path, bool skipSettingsBackupPrompt = false);
 	void load(bool skipSettingsBackupPrompt = false);
 	void normalizeModernOnlyFrontendState();
+	bool normalizeVoiceActivationSettings(bool replaceLegacyDefaults = false);
 
 	void legacyLoad(const QString &path = {});
 

@@ -1,9 +1,6 @@
 name: Windows Shared Client Installer
 
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
 
 permissions:

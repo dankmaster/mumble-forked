@@ -80,6 +80,7 @@ public:
 		QString recipeSetVersion;
 		QUrl manifestUrl;
 		bool remoteFetchEnabled = true;
+		bool allowUnsignedCommunityRelease = false;
 		/// Optional signed bootstrap pair packaged beside the executable. An
 		/// empty directory resolves to QCoreApplication::applicationDirPath().
 		/// The files are never treated as URLs and pass the same key/build/
@@ -182,7 +183,7 @@ private:
 	QTimer m_refreshTimer;
 	bool m_started                = false;
 	bool m_fetchInProgress        = false;
-	bool m_developmentBypass      = false;
+	bool m_unmanagedBypass        = false;
 	bool m_initialDecisionPending = false;
 };
 

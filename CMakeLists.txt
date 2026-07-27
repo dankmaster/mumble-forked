@@ -12,6 +12,16 @@ set(MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX "" CACHE STRING
 	"Raw 32-byte Ed25519 public key, encoded as 64 hexadecimal characters, for signed input-enhancement policy verification.")
 option(input-enhancement-signed-policy-required
 	"Fail configuration unless a valid input-enhancement Ed25519 policy public key is embedded." OFF)
+option(unsigned-community-release
+	"Allow an explicitly keyless mumble-forked community release to use locally verified unsigned catalogs and the compatibility updater channel." OFF)
+if(unsigned-community-release AND input-enhancement-signed-policy-required)
+	message(FATAL_ERROR
+		"unsigned-community-release cannot be combined with input-enhancement-signed-policy-required")
+endif()
+if(unsigned-community-release AND NOT "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" STREQUAL "")
+	message(FATAL_ERROR
+		"unsigned-community-release cannot be combined with an embedded input-enhancement policy public key")
+endif()
 if(NOT "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" STREQUAL "")
 	string(LENGTH "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX_LENGTH)
 	if(NOT MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX_LENGTH EQUAL 64 OR
@@ -24,6 +34,8 @@ if(NOT "${MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX}" STREQUAL "")
 elseif(input-enhancement-signed-policy-required)
 	message(FATAL_ERROR
 		"A release requiring signed input-enhancement policy was configured without MUMBLE_INPUT_ENHANCEMENT_POLICY_PUBLIC_KEY_HEX")
+elseif(unsigned-community-release)
+	message(STATUS "Configuring the explicit unsigned mumble-forked community release lane")
 endif()
 set(BUILD_RELEASE_DATE CACHE STRING "The release date to be used in the generated appstream metadata.")
 

@@ -1436,10 +1436,18 @@ void VersionCheck::performRequest() {
 		request(configuredManifestUrl(), RequestKind::Manifest);
 	} else if (!qEnvironmentVariable("MUMBLE_FORK_UPDATE_URL").trimmed().isEmpty()) {
 		request(configuredReleaseApiUrl(), RequestKind::Release);
+#if defined(MUMBLE_UNSIGNED_COMMUNITY_RELEASE)
+	} else {
+		// The public mumble-forked community lane is intentionally keyless and
+		// keeps both the updater-v2 clients and the current client on the same
+		// compatibility manifest.
+		request(configuredManifestUrl(), RequestKind::Manifest);
+#else
 	} else {
 		const QUrl pointerUrl        = configuredChannelPointerUrl();
 		m_channelPointerSignatureURL = channelPointerSignatureUrl(pointerUrl);
 		request(pointerUrl, RequestKind::ChannelPointer);
+#endif
 	}
 }
 

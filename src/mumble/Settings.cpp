@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -93,6 +94,62 @@ void Settings::normalizeModernOnlyFrontendState() {
 	qbaConnectDialogGeometry.clear();
 	qbaConnectDialogHeader.clear();
 	searchDialogPosition = UNSPECIFIED_POSITION;
+}
+
+bool Settings::normalizeVoiceActivationSettings(const bool replaceLegacyDefaults) {
+	bool changed = false;
+	const auto replace = [&changed](auto &target, const auto value) {
+		if (target != value) {
+			target  = value;
+			changed = true;
+		}
+	};
+
+	if (replaceLegacyDefaults) {
+		replace(vsVAD, RECOMMENDED_VAD_SOURCE);
+		replace(fVADmin, RECOMMENDED_VAD_SILENCE_THRESHOLD);
+		replace(fVADmax, RECOMMENDED_VAD_SPEECH_THRESHOLD);
+		replace(inputGateMode, RECOMMENDED_INPUT_GATE_MODE);
+		replace(iVoiceHold, RECOMMENDED_VOICE_HOLD);
+	}
+
+	if (atTransmit < Continuous || atTransmit > PushToTalk) {
+		replace(atTransmit, VAD);
+	}
+	if (vsVAD < Amplitude || vsVAD > Hybrid) {
+		replace(vsVAD, RECOMMENDED_VAD_SOURCE);
+	}
+	if (inputGateMode < InputGateOff || inputGateMode > InputGateStrict) {
+		replace(inputGateMode, RECOMMENDED_INPUT_GATE_MODE);
+	}
+
+	float silenceThreshold = fVADmin;
+	float speechThreshold  = fVADmax;
+	if (!std::isfinite(silenceThreshold) || !std::isfinite(speechThreshold) || silenceThreshold < 0.0f
+		|| silenceThreshold > 1.0f || speechThreshold < 0.0f || speechThreshold > 1.0f) {
+		silenceThreshold = RECOMMENDED_VAD_SILENCE_THRESHOLD;
+		speechThreshold  = RECOMMENDED_VAD_SPEECH_THRESHOLD;
+	} else {
+		if (speechThreshold < silenceThreshold) {
+			std::swap(silenceThreshold, speechThreshold);
+		}
+
+		constexpr float minimumThresholdGap = 0.01f;
+		if (speechThreshold - silenceThreshold < minimumThresholdGap) {
+			if (silenceThreshold + minimumThresholdGap <= 1.0f) {
+				speechThreshold = silenceThreshold + minimumThresholdGap;
+			} else {
+				silenceThreshold = speechThreshold - minimumThresholdGap;
+			}
+		}
+	}
+	replace(fVADmin, silenceThreshold);
+	replace(fVADmax, speechThreshold);
+	if (iVoiceHold < 5 || iVoiceHold > 80) {
+		replace(iVoiceHold, RECOMMENDED_VOICE_HOLD);
+	}
+
+	return changed;
 }
 
 bool Shortcut::isServerSpecific() const {
@@ -1027,6 +1084,10 @@ void Settings::legacyLoad(const QString &path) {
 			inputEnhancement = Mumble::InputEnhancement::safeOriginalSettings();
 		}
 	}
+
+	normalizeVoiceActivationSettings(
+		vsVAD == Amplitude && qAbs(fVADmin - 0.80f) <= 0.0001f && qAbs(fVADmax - 0.98f) <= 0.0001f
+		&& inputGateMode == InputGateOff && iVoiceHold == 20);
 }
 
 void Settings::migratePluginSettings(const MigratedPath &path) {
