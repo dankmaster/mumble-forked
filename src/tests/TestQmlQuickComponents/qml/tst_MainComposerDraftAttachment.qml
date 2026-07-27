@@ -60,10 +60,10 @@ TestCase {
 		verify(/readonly property bool usesCompactActionOverlay:\s*hasMessageActions\s*(?:\r?\n)/.test(mainSource))
 		verify(!/readonly property bool usesCompactActionOverlay:[^\n]*(?:\n[^\n]*){0,2}!wideContent/.test(mainSource))
 		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent/.test(mainSource))
-		verify(/id:\s*messageFooter[\s\S]*Layout\.rightMargin:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*compactMessageActionTray\.width/.test(mainSource))
+		verify(/id:\s*messageFooter[\s\S]*Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/.test(mainSource))
 		verify(/objectName:\s*"chatCompactMessageActionTray"[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay/.test(mainSource))
 		verify(/id:\s*compactMessageActionTray[\s\S]*anchors\.bottom:\s*parent\.bottom/.test(mainSource))
-		verify(/id:\s*messageBody[\s\S]*Layout\.rightMargin:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*compactMessageActionTray\.width/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]*Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/.test(mainSource))
 		verify(/objectName:\s*"compactMessageReactButton"[\s\S]*iconName:\s*"reaction"/.test(mainSource))
 	}
 
@@ -126,6 +126,12 @@ TestCase {
 		verify(/onMovementStarted[\s\S]*!prependMutationInProgress[\s\S]*releasePrependAnchor\(\)/.test(mainSource))
 		verify(/FrameAnimation[\s\S]*prependAnchorCorrectionFrames > 0[\s\S]*timeline\.restorePrependAnchor\(\)/.test(mainSource))
 		verify(/objectName:\s*"chatTimelineScrollBar"[\s\S]*visible:\s*root\.visualFixtureSurfaceVariant\s*!==\s*"chat-history-prepend-anchor"[\s\S]*Accessible\.ignored:\s*!visible/.test(mainSource))
+	}
+
+	function test_compact_message_actions_reserve_current_row_width() {
+		verify(/readonly property int compactActionButtonCount:[\s\S]{0,260}readonly property real compactActionTextInset:/.test(mainSource))
+		compare((mainSource.match(/Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/g) || []).length, 2)
+		verify(/id:\s*compactMessageActionTray[\s\S]{0,320}width:\s*messageDelegate\.compactActionTrayWidth/.test(mainSource))
 	}
 
 	function test_message_reply_card_reserves_its_accessibility_margins() {

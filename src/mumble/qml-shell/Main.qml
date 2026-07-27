@@ -3685,6 +3685,13 @@ ApplicationWindow {
 							|| hasReplyContent || hasDeliveryStatus
 							|| (own && !systemMessage && timestamp.length > 0)
 						readonly property bool usesCompactActionOverlay: hasMessageActions
+						readonly property int compactActionButtonCount:
+							(canReply ? 1 : 0) + (canReact ? 1 : 0)
+							+ (!!source.deliveryCanRetry ? 1 : 0) + (canDelete ? 1 : 0)
+						readonly property real compactActionTrayWidth: usesCompactActionOverlay
+							? compactActionButtonCount * 30 + Theme.space1 : 0
+						readonly property real compactActionTextInset: usesCompactActionOverlay
+							? compactActionTrayWidth + Theme.space2 : 0
 						readonly property bool performancePreviewMaterialized: messagePreviewLoader.status === Loader.Ready
 							&& !!messagePreviewLoader.item
 						readonly property bool performanceAttachmentMaterialized: messageAttachmentLoader.status === Loader.Ready
@@ -3932,8 +3939,7 @@ ApplicationWindow {
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
-									Layout.rightMargin: messageDelegate.usesCompactActionOverlay
-										? compactMessageActionTray.width + Theme.space2 : 0
+									Layout.rightMargin: messageDelegate.compactActionTextInset
 									resourceActive: !messageDelegate.accessibilityPooled
 									animationsEnabled: !root.visualFixtureOverrideActive
 									hoverEffectsEnabled: !root.visualFixtureOverrideActive
@@ -4116,8 +4122,7 @@ ApplicationWindow {
 									readonly property bool quickReactionsExpanded: messageDelegate.canReact
 										&& root.quickReactionMessageId === messageDelegate.stableId
 									Layout.fillWidth: true
-									Layout.rightMargin: messageDelegate.usesCompactActionOverlay
-										? compactMessageActionTray.width + Theme.space2 : 0
+									Layout.rightMargin: messageDelegate.compactActionTextInset
 									visible: messageDelegate.hasEmbeddedFooterContent
 									spacing: Theme.space2
 
@@ -4311,7 +4316,7 @@ ApplicationWindow {
 									anchors.right: parent.right
 									anchors.bottomMargin: Theme.space1
 									anchors.rightMargin: Theme.space1
-									width: compactMessageActionButtons.implicitWidth + Theme.space1
+									width: messageDelegate.compactActionTrayWidth
 									height: 34
 									visible: messageDelegate.usesCompactActionOverlay
 										&& (messageDelegate.hovered || messageDelegate.quickReactionsExpanded)
