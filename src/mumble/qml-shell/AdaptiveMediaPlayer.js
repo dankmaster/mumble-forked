@@ -98,6 +98,27 @@
     });
   }
 
+  function installPrimaryClickPlayback(media) {
+    media.addEventListener("click", function(event) {
+      if (event.button !== 0 || !state.ready) return;
+      const videoPresentation = media.videoWidth > 0
+        || /^video\//.test(state.mediaMime) || state.adaptive;
+      if (!videoPresentation) return;
+      if (!media.paused && !media.ended) {
+        media.pause();
+        return;
+      }
+      if (media.ended) media.currentTime = 0;
+      window.__mumbleMediaPlayError = "";
+      const playback = media.play();
+      if (playback && playback.catch) {
+        playback.catch(function(error) {
+          window.__mumbleMediaPlayError = errorText(error);
+        });
+      }
+    });
+  }
+
   async function initialize() {
     const request = decodeRequest();
     state.adaptive = request.adaptive;
@@ -106,6 +127,7 @@
     state.manifestOrigin = request.adaptive ? request.sourceUrl.origin : "";
     state.sourceUrl = request.sourceUrl.href;
     const media = document.getElementById("mumble-isolated-media");
+    installPrimaryClickPlayback(media);
 
     if (request.adaptive) {
       state.stage = "attaching";

@@ -3184,6 +3184,12 @@ TestCase {
 
 		card.userExpanded = true
 		tryVerify(function() { return card.expanded && card.implicitHeight > 180 })
+		const expandedSlot = findChild(card, "previewExpandedMediaSlot")
+		verify(expandedSlot !== null)
+		verify(card.clip, "rich preview media must not paint outside its delegate")
+		compare(expandedSlot.Layout.minimumHeight, expandedSlot.Layout.preferredHeight)
+		verify(expandedSlot.Layout.minimumHeight >= 180,
+			"expanded media layout must reserve the visible panel height")
 		// The expanded media surface grows beyond the compact fixture height. Keep
 		// the following attachment fixture below it so pointer tests exercise the
 		// media button rather than a later sibling layered over the same pixels.

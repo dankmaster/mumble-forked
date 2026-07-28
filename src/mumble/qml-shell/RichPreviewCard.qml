@@ -326,6 +326,7 @@ Rectangle {
 		string presentationAspect)
 
 	implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
+	clip: true
 	radius: Theme.innerRadius
 	color: effectiveHovered
 		? Theme.mixColors(Theme.previewCardHover, providerDetails.providerAccent, 0.055)
@@ -1835,11 +1836,13 @@ Rectangle {
 
 		Item {
 			id: expandedMediaSlot
+			objectName: "previewExpandedMediaSlot"
 			Layout.fillWidth: true
 			Layout.preferredHeight: !providerDetails.ownsMediaGallery
 				&& !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
 									|| root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
+			Layout.minimumHeight: Layout.preferredHeight
 			visible: Layout.preferredHeight > 0
 
 			Rectangle {
