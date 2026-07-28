@@ -14591,6 +14591,7 @@ void MainWindow::applyShellLayout() {
 			const auto sendWatchTogether = [this, mediaSession](MumbleProto::WatchTogetherEvent event,
 													 const QString &sessionID, const QUrl &sourceURL,
 													 const QString &provider, const QString &title,
+													 const QString &presentationAspect,
 													 const double position, const bool paused,
 													 const qulonglong targetHostSession) {
 				const bool supported = Global::get().sh && Global::get().uiSession != 0
@@ -14618,6 +14619,8 @@ void MainWindow::applyShellLayout() {
 									 : MumbleProto::WatchTogetherSourceDirectMedia);
 				}
 				if (!title.trimmed().isEmpty()) sync.set_title(u8(title.trimmed()));
+				if (!presentationAspect.trimmed().isEmpty())
+					sync.set_presentation_aspect(u8(presentationAspect.trimmed().toLower()));
 				if (event == MumbleProto::WatchTogetherEventState
 					|| event == MumbleProto::WatchTogetherEventStart) {
 					sync.set_position_seconds(qMax(0.0, position));
@@ -14630,9 +14633,9 @@ void MainWindow::applyShellLayout() {
 			};
 			connect(mediaSession, &MediaSessionBackend::sharedStartRequested, this,
 					[sendWatchTogether](const QString &sessionID, const QUrl &url, const QString &provider,
-										const QString &title) {
+										const QString &title, const QString &presentationAspect) {
 						sendWatchTogether(MumbleProto::WatchTogetherEventStart, sessionID, url, provider, title,
-										  0.0, true, 0);
+										  presentationAspect, 0.0, true, 0);
 					});
 			connect(mediaSession, &MediaSessionBackend::sharedEventRequested, this,
 					[sendWatchTogether](const QString &sessionID, const QString &event,
@@ -14642,11 +14645,11 @@ void MainWindow::applyShellLayout() {
 						else if (event == QLatin1String("end")) protocolEvent = MumbleProto::WatchTogetherEventEnd;
 						else if (event == QLatin1String("host-transfer"))
 							protocolEvent = MumbleProto::WatchTogetherEventHostTransfer;
-						sendWatchTogether(protocolEvent, sessionID, {}, {}, {}, 0.0, true, targetHostSession);
+						sendWatchTogether(protocolEvent, sessionID, {}, {}, {}, {}, 0.0, true, targetHostSession);
 					});
 			connect(mediaSession, &MediaSessionBackend::sharedPlaybackStateRequested, this,
 					[sendWatchTogether](const QString &sessionID, const double position, const bool paused) {
-						sendWatchTogether(MumbleProto::WatchTogetherEventState, sessionID, {}, {}, {}, position,
+						sendWatchTogether(MumbleProto::WatchTogetherEventState, sessionID, {}, {}, {}, {}, position,
 										  paused, 0);
 					});
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);

@@ -19,6 +19,7 @@
 	<file alias="ModernTextArea.qml">qml-shell/ModernTextArea.qml</file>
 	<file alias="ModernSpinBox.qml">qml-shell/ModernSpinBox.qml</file>
 	<file alias="InputEnhancementCalibration.qml">qml-shell/InputEnhancementCalibration.qml</file>
+	<file alias="AudioDebugPanel.qml">qml-shell/AudioDebugPanel.qml</file>
 	<file alias="VoiceActivationSetup.qml">qml-shell/VoiceActivationSetup.qml</file>
 	<file alias="AsyncOperationCard.qml">qml-shell/AsyncOperationCard.qml</file>
 	<file alias="ToastPill.qml">qml-shell/ToastPill.qml</file>
@@ -63,6 +64,7 @@
 	<file alias="NativeDirectMediaPlayer.qml">qml-shell/NativeDirectMediaPlayer.qml</file>
 	<file alias="MediaSessionControls.qml">qml-shell/MediaSessionControls.qml</file>
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
+	<file alias="WatchTogetherStage.qml">qml-shell/WatchTogetherStage.qml</file>
 	<file alias="ChatMessageFrame.qml">qml-shell/ChatMessageFrame.qml</file>
 	<file alias="QuickReactionBar.qml">qml-shell/QuickReactionBar.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>

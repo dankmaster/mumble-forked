@@ -70,6 +70,16 @@ import Mumble.Theme 1.0
 	Accessible.description: String(payload.hint || secondaryText || "")
 	Accessible.checked: checked
 
+	// The custom leading slot below owns selection rendering. Suppress Qt
+	// Quick Controls' style-provided indicator so checked rows never paint a
+	// second checkmark behind or beside our icon.
+	indicator: Item {
+		implicitWidth: 0
+		implicitHeight: 0
+		visible: false
+		Accessible.ignored: true
+	}
+
 	Keys.onRightPressed: event => event.accepted = item.openAttachedSubmenu(true)
 	Keys.onReturnPressed: event => event.accepted = item.openAttachedSubmenu(true)
 	Keys.onEnterPressed: event => event.accepted = item.openAttachedSubmenu(true)

@@ -2377,6 +2377,7 @@ Dialog {
                                             if (type === "note") return noteField
 											if (type === "voiceMeter") return voiceMeterField
 											if (type === "inputEnhancementCalibration") return inputEnhancementCalibrationField
+											if (type === "audioDebug") return audioDebugField
 											if (type === "devicePriorityList") return devicePriorityListField
 											if (type === "readonly" || type === "status") return readonlyField
                                             if (type === "checkbox" || type === "toggle") return checkboxField
@@ -3045,6 +3046,20 @@ Dialog {
 			width: parent ? parent.width : 0
 			InputEnhancementCalibration {
 				field: calibrationFieldRoot.field
+				controller: dialogState
+			}
+		}
+	}
+	Component {
+		id: audioDebugField
+		ColumnLayout {
+			id: audioDebugFieldRoot
+			objectName: "dialogField_" + String((field || {}).id || "")
+			property var field: ({})
+			width: parent ? parent.width : 0
+			AudioDebugPanel {
+				Layout.fillWidth: true
+				field: audioDebugFieldRoot.field
 				controller: dialogState
 			}
 		}

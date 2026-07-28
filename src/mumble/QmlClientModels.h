@@ -894,6 +894,7 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(bool sharedJoined READ sharedJoined NOTIFY stateChanged)
 	Q_PROPERTY(bool sharedHost READ sharedHost NOTIFY stateChanged)
 	Q_PROPERTY(QString sharedTitle READ sharedTitle NOTIFY stateChanged)
+	Q_PROPERTY(QString sharedAspect READ sharedAspect NOTIFY stateChanged)
 	Q_PROPERTY(QString sharedSessionId READ sharedSessionId NOTIFY stateChanged)
 	Q_PROPERTY(qulonglong sharedScopeId READ sharedScopeId NOTIFY stateChanged)
 	Q_PROPERTY(qulonglong sharedHostSession READ sharedHostSession NOTIFY stateChanged)
@@ -935,6 +936,7 @@ public:
 	bool sharedJoined() const;
 	bool sharedHost() const;
 	QString sharedTitle() const;
+	QString sharedAspect() const;
 	QString sharedSessionId() const;
 	qulonglong sharedScopeId() const;
 	qulonglong sharedHostSession() const;
@@ -973,7 +975,8 @@ public:
 								 const QString &audioMime, const QString &sessionId);
 	Q_INVOKABLE bool openDirectInline(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
 									   const QString &audioMime, const QString &sessionId);
-	Q_INVOKABLE bool startShared(const QUrl &url, const QString &provider, const QString &title);
+	Q_INVOKABLE bool startShared(const QUrl &url, const QString &provider, const QString &title,
+								const QString &presentationAspect = QString());
 	Q_INVOKABLE void joinShared();
 	Q_INVOKABLE void leaveShared();
 	Q_INVOKABLE void endShared();
@@ -1002,7 +1005,8 @@ public:
 	void applySharedState(const QString &sessionId, const QUrl &url, const QString &provider, const QString &title,
 					  qulonglong scopeId, qulonglong actorSession, qulonglong hostSession,
 					  const QVariantList &participantSessions, const QString &event, double position, bool paused,
-					  qulonglong generation, qulonglong selfSession);
+					  qulonglong generation, qulonglong selfSession,
+					  const QString &presentationAspect = QString());
 	void clearSharedState();
 
 signals:
@@ -1020,7 +1024,7 @@ signals:
 	void retryRequested();
 	void playbackRejected(const QString &message);
 	void sharedStartRequested(const QString &sessionId, const QUrl &url, const QString &provider,
-						  const QString &title);
+						  const QString &title, const QString &presentationAspect);
 	void sharedEventRequested(const QString &sessionId, const QString &event, qulonglong targetHostSession);
 	void sharedPlaybackStateRequested(const QString &sessionId, double position, bool paused);
 
@@ -1053,6 +1057,7 @@ private:
 	bool m_sharedJoined = false;
 	bool m_sharedHost = false;
 	QString m_sharedTitle;
+	QString m_sharedAspect = QStringLiteral("wide");
 	QString m_sharedSessionId;
 	QUrl m_sharedUrl;
 	QString m_sharedProvider;

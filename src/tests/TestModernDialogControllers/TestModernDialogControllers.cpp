@@ -7,10 +7,13 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QLockFile>
 #include <QtTest>
 
 #include <algorithm>
+#include <array>
 #include <QTemporaryDir>
 
 #include "AudioInput.h"
@@ -26,6 +29,7 @@
 #include "GlobalShortcutTypes.h"
 #include "Log.h"
 #include "MainWindow.h"
+#include "VoiceActivationDebugCapture.h"
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 #	include "WASAPIDeviceRouting.h"
 #endif
@@ -152,6 +156,7 @@ private slots:
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void audioInputVoiceActivitySnapshotIsBounded();
 	void audioInputRollbackBindingRequiresOpenedRunningCapture();
+	void audioDebugCaptureWritesMetricsWithoutRemoteAudio();
 	void nativeAutomationBoundariesRemainTypedAndDeterministic();
 	void visualFixturePresentationWaitIsBoundedAndDestroySafe();
 	void mediaAutomationReadinessStateIsTyped();
@@ -839,7 +844,8 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(audioInputSectionIds,
 			 QStringList({ QStringLiteral("microphone"), QStringLiteral("transmission"),
 						   QStringLiteral("microphoneCheck"), QStringLiteral("voiceProcessing"),
-						   QStringLiteral("processingCalibration"), QStringLiteral("processingDetails"),
+						   QStringLiteral("processingCalibration"), QStringLiteral("audioDebug"),
+						   QStringLiteral("processingDetails"),
 						   QStringLiteral("networkVoice"), QStringLiteral("idleBehavior") }));
 
 	const QVariantMap microphoneSection = findSection(audioInputSections, QStringLiteral("microphone"));
@@ -889,6 +895,23 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(calibrationField.value(QStringLiteral("inputEnhancementCalibrationUnavailableReason"))
 				.toString()
 				.contains(QLatin1String("Start the selected input device")));
+
+	const QVariantMap audioDebugSection = findSection(audioInputSections, QStringLiteral("audioDebug"));
+	QVERIFY(audioDebugSection.value(QStringLiteral("advanced")).toBool());
+	QVERIFY(audioDebugSection.value(QStringLiteral("collapsible")).toBool());
+	QVERIFY(!audioDebugSection.value(QStringLiteral("expandedByDefault")).toBool());
+	const QVariantMap audioDebug =
+		findField(audioDebugSection, QStringLiteral("audio.audioDebug"));
+	QCOMPARE(audioDebug.value(QStringLiteral("type")).toString(), QStringLiteral("audioDebug"));
+	QCOMPARE(audioDebug.value(QStringLiteral("startActionId")).toString(),
+			 QStringLiteral("audioDebug.start"));
+	QCOMPARE(audioDebug.value(QStringLiteral("stopActionId")).toString(),
+			 QStringLiteral("audioDebug.stop"));
+	QCOMPARE(audioDebug.value(QStringLiteral("defaultCaptureRawInput")).toBool(), true);
+	QCOMPARE(audioDebug.value(QStringLiteral("defaultCaptureServerMix")).toBool(), false);
+	QVERIFY(audioDebug.value(QStringLiteral("privacyText"))
+				.toString()
+				.contains(QLatin1String("Nothing is uploaded")));
 
 	const QVariantMap processingDetails = findSection(audioInputSections, QStringLiteral("processingDetails"));
 	QVERIFY(processingDetails.value(QStringLiteral("advanced")).toBool());
@@ -2515,6 +2538,159 @@ void TestModernDialogControllers::audioInputRollbackBindingRequiresOpenedRunning
 	QVERIFY(AudioInput::canAuthorizeInputEnhancementRollbackBinding(true, true, true));
 }
 
+void TestModernDialogControllers::audioDebugCaptureWritesMetricsWithoutRemoteAudio() {
+	VoiceActivationDebugCapture &capture = VoiceActivationDebugCapture::instance();
+	capture.stop();
+	QTemporaryDir temporaryDirectory;
+	QVERIFY(temporaryDirectory.isValid());
+	const QString captureDirectory = QDir(temporaryDirectory.path()).filePath(QStringLiteral("capture"));
+
+	DraftInputRegistrar registrar;
+	Settings settings;
+	settings.qsAudioInput  = QStringLiteral("DraftTestInput");
+	settings.qsOSSInput    = QStringLiteral("mic-b");
+	settings.atTransmit    = Settings::VAD;
+	settings.vsVAD         = Settings::Hybrid;
+	settings.inputGateMode = Settings::InputGateStrict;
+	settings.fVADmin       = 0.23f;
+	settings.fVADmax       = 0.47f;
+	settings.iVoiceHold    = 37;
+	settings.iQuality      = 72000;
+	settings.iFramesPerPacket = 3;
+	settings.modernAudioSetupVersion = 2;
+	settings.inputEnhancement.defaultPreference.profile =
+		Mumble::InputEnhancement::Profile::Balanced;
+	settings.inputEnhancement.defaultPreference.reduction = 42;
+	settings.inputEnhancement.defaultPreference.character = 61;
+	const QByteArray secretMarker = QByteArrayLiteral("AUDIO_DEBUG_MUST_NOT_PACKAGE_THIS");
+	settings.qsUsername           = QString::fromLatin1(secretMarker);
+	settings.qsLastServer         = QString::fromLatin1(secretMarker);
+	settings.qsProxyPassword      = QString::fromLatin1(secretMarker);
+	settings.noiseCancelCustomModelPath =
+		QStringLiteral("C:/private/") + QString::fromLatin1(secretMarker);
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("audioInput"));
+	const ModernSettingsController::ActionResult start = controller.invokeAction(
+		QStringLiteral("audioDebug.start"),
+		QVariantMap { { QStringLiteral("diagnosticDirectory"), captureDirectory },
+					  { QStringLiteral("durationSeconds"), 10 },
+					  { QStringLiteral("captureRawInput"), false },
+					  { QStringLiteral("captureServerMix"), false } });
+	const bool started = capture.enabled();
+
+	if (started) {
+		QVERIFY(!capture.capturesRawInput());
+		QVERIFY(!capture.capturesServerMix());
+		std::array< short, 480 > samples = {};
+		VoiceActivationDebugCapture::InputMetrics metrics;
+		metrics.rawRmsDb          = -36.0f;
+		metrics.speechProbability = 0.72f;
+		metrics.selectedLevel     = 0.51f;
+		metrics.vadCandidate      = true;
+		capture.captureInputFrame(samples.data(), static_cast< unsigned int >(samples.size()), 48000,
+								  metrics, capture.timestampMicroseconds());
+	}
+	const ModernSettingsController::ActionResult stop =
+		controller.invokeAction(QStringLiteral("audioDebug.stop"), {});
+
+	QVERIFY(start.stateChanged);
+	QVERIFY(started);
+	QVERIFY(stop.stateChanged);
+	QVERIFY(!capture.enabled());
+	QVERIFY(QFileInfo::exists(QDir(captureDirectory).filePath(QStringLiteral("metrics.csv"))));
+	QVERIFY(!QFileInfo::exists(QDir(captureDirectory).filePath(QStringLiteral("raw-input.wav"))));
+	QVERIFY(!QFileInfo::exists(QDir(captureDirectory).filePath(QStringLiteral("server-mix.wav"))));
+	QVERIFY(QFileInfo::exists(QDir(captureDirectory).filePath(QStringLiteral("audio-settings.json"))));
+
+	QFile metricsFile(QDir(captureDirectory).filePath(QStringLiteral("metrics.csv")));
+	QVERIFY(metricsFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QByteArray metricsContents = metricsFile.readAll();
+	QVERIFY(metricsContents.contains("speech_probability"));
+	QVERIFY(metricsContents.contains("-36.000000"));
+	QVERIFY(metricsContents.contains("0.720000"));
+
+	QFile manifestFile(QDir(captureDirectory).filePath(QStringLiteral("capture-manifest.json")));
+	QVERIFY(manifestFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QByteArray manifestContents = manifestFile.readAll();
+	QJsonParseError manifestParseError;
+	const QJsonDocument manifestDocument =
+		QJsonDocument::fromJson(manifestContents, &manifestParseError);
+	QCOMPARE(manifestParseError.error, QJsonParseError::NoError);
+	QVERIFY(manifestDocument.isObject());
+	const QJsonObject manifest = manifestDocument.object();
+	QCOMPARE(manifest.value(QStringLiteral("schema_version")).toInt(), 3);
+	QVERIFY(manifestContents.contains("\"raw_input\": {\"captured\": false"));
+	QVERIFY(manifestContents.contains("\"server_mix\": {\"captured\": false"));
+	const QJsonObject manifestSettings =
+		manifest.value(QStringLiteral("settings_snapshot")).toObject();
+	QCOMPARE(manifestSettings.value(QStringLiteral("captured")).toBool(), true);
+	QCOMPARE(manifestSettings.value(QStringLiteral("file")).toString(),
+			 QStringLiteral("audio-settings.json"));
+
+	QFile settingsFile(QDir(captureDirectory).filePath(QStringLiteral("audio-settings.json")));
+	QVERIFY(settingsFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QByteArray settingsContents = settingsFile.readAll();
+	QJsonParseError settingsParseError;
+	const QJsonDocument settingsDocument =
+		QJsonDocument::fromJson(settingsContents, &settingsParseError);
+	QCOMPARE(settingsParseError.error, QJsonParseError::NoError);
+	QVERIFY(settingsDocument.isObject());
+	const QJsonObject settingsSnapshot = settingsDocument.object();
+	QCOMPARE(settingsSnapshot.value(QStringLiteral("schema_version")).toInt(), 1);
+	const QJsonObject privacy = settingsSnapshot.value(QStringLiteral("privacy")).toObject();
+	QCOMPARE(privacy.value(QStringLiteral("audio_settings_only")).toBool(), true);
+	QCOMPARE(privacy.value(QStringLiteral("audio_device_display_names_included")).toBool(), true);
+	QCOMPARE(privacy.value(QStringLiteral("account_or_server_identity_included")).toBool(), false);
+	QCOMPARE(privacy.value(QStringLiteral("credentials_or_tokens_included")).toBool(), false);
+	QCOMPARE(privacy.value(QStringLiteral("custom_filesystem_paths_included")).toBool(), false);
+	QCOMPARE(privacy.value(QStringLiteral("raw_device_identifiers_included")).toBool(), false);
+	const QJsonObject draft =
+		settingsSnapshot.value(QStringLiteral("settings_dialog_draft")).toObject();
+	const QJsonObject input = draft.value(QStringLiteral("audio_input")).toObject();
+	QCOMPARE(input.value(QStringLiteral("effective_backend")).toString(),
+			 QStringLiteral("DraftTestInput"));
+	QCOMPARE(input.value(QStringLiteral("selected_device_display_name")).toString(),
+			 QStringLiteral("Microphone B"));
+	QVERIFY(!input.value(QStringLiteral("selected_device_fingerprint_sha256")).toString().isEmpty());
+	const QJsonObject transmission = draft.value(QStringLiteral("transmission")).toObject();
+	QCOMPARE(transmission.value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("voice_activity"));
+	QCOMPARE(transmission.value(QStringLiteral("vad_source")).toString(),
+			 QStringLiteral("speech_and_volume"));
+	QCOMPARE(transmission.value(QStringLiteral("input_gate_mode")).toString(),
+			 QStringLiteral("strict"));
+	QCOMPARE(transmission.value(QStringLiteral("voice_hold_frames")).toInt(), 37);
+	const QJsonObject processing = draft.value(QStringLiteral("processing")).toObject();
+	const QJsonObject enhancement =
+		processing.value(QStringLiteral("input_enhancement")).toObject();
+	QCOMPARE(enhancement.value(QStringLiteral("profile")).toString(),
+			 QStringLiteral("balanced"));
+	QCOMPARE(enhancement.value(QStringLiteral("noise_reduction")).toInt(), 42);
+	QCOMPARE(enhancement.value(QStringLiteral("natural_clear_character")).toInt(), 61);
+	const QJsonObject networkVoice = draft.value(QStringLiteral("network_voice")).toObject();
+	QCOMPARE(networkVoice.value(QStringLiteral("bitrate_bps")).toInt(), 72000);
+	QCOMPARE(networkVoice.value(QStringLiteral("frames_per_packet")).toInt(), 3);
+	QVERIFY(!settingsContents.contains(secretMarker));
+	QVERIFY(!settingsContents.contains("C:/private/"));
+	QVERIFY(!settingsContents.contains("mic-b"));
+
+	QFile noticeFile(QDir(captureDirectory).filePath(QStringLiteral("CAPTURE_NOTICE.txt")));
+	QVERIFY(noticeFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QByteArray noticeContents = noticeFile.readAll();
+	QVERIFY(noticeContents.contains("audio-settings.json"));
+	QVERIFY(noticeContents.contains("credential"));
+	QVERIFY(noticeContents.contains("raw device identifiers are excluded"));
+
+	const QVariantMap field = dialogField(controller.state(), QStringLiteral("audio.audioDebug"));
+	QCOMPARE(field.value(QStringLiteral("active")).toBool(), false);
+	QCOMPARE(field.value(QStringLiteral("hasCapture")).toBool(), true);
+	QCOMPARE(field.value(QStringLiteral("directory")).toString(),
+			 QDir::toNativeSeparators(captureDirectory));
+	QVERIFY(field.value(QStringLiteral("privacyText"))
+				.toString()
+				.contains(QLatin1String("audio-settings snapshot")));
+}
+
 void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterministic() {
 	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
 	const QString audioInputPath = QFINDTESTDATA("../../mumble/AudioInput.h");
@@ -3065,7 +3241,7 @@ void TestModernDialogControllers::mediaAutomationReadinessStateIsTyped() {
 			 QStringLiteral("errorCode"), QStringLiteral("detached"), QStringLiteral("provider"),
 			 QStringLiteral("position"), QStringLiteral("duration"), QStringLiteral("syncGeneration"),
 			 QStringLiteral("sharedAvailable"), QStringLiteral("sharedJoined"),
-			 QStringLiteral("sharedHost"), QStringLiteral("sharedSessionId"),
+			 QStringLiteral("sharedHost"), QStringLiteral("sharedAspect"), QStringLiteral("sharedSessionId"),
 			 QStringLiteral("sharedScopeId"), QStringLiteral("sharedHostSession"),
 			 QStringLiteral("sharedParticipantSessions"), QStringLiteral("sharedOperationStatus"),
 			 QStringLiteral("sharedOperationError"),
@@ -3145,7 +3321,8 @@ void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers
 			qPrintable(QStringLiteral("Missing live automation command: %1").arg(command)));
 	}
 	QVERIFY(automationSource.contains(QStringLiteral("directMessages->sendDraft()")));
-	QVERIFY(automationSource.contains(QStringLiteral("media->startShared(url, provider, title)")));
+	QVERIFY(automationSource.contains(
+		QStringLiteral("media->startShared(url, provider, title, presentationAspect)")));
 	QVERIFY(automationSource.contains(QStringLiteral("media->joinShared()")));
 	QVERIFY(automationSource.contains(QStringLiteral("media->leaveShared()")));
 	QVERIFY(automationSource.contains(QStringLiteral("media->endShared()")));
@@ -3233,10 +3410,12 @@ void TestModernDialogControllers::detachedMediaWindowWaitsForRuntimeReadiness() 
 	QVERIFY(windowSource.contains(QStringLiteral("close.accepted = true")));
 	QVERIFY(windowSource.contains(QStringLiteral("close.accepted = false")));
 	QVERIFY(windowSource.contains(QStringLiteral("controls.requestClose()")));
-	QVERIFY(mainSource.contains(QStringLiteral("function startWatchTogether(url, provider, title)")));
+	QVERIFY(mainSource.contains(
+		QStringLiteral("function startWatchTogether(url, provider, title, presentationAspect)")));
 	QVERIFY(mainSource.contains(QStringLiteral("onManagedImageOpenRequested")));
 	QVERIFY(mainSource.contains(QStringLiteral("onPreviewSizePresetRequested")));
-	QVERIFY(directMessageSource.contains(QStringLiteral("root.watchTogetherRequested(url, provider, title)")));
+	QVERIFY(directMessageSource.contains(
+		QStringLiteral("root.watchTogetherRequested(url, provider, title, presentationAspect)")));
 	QVERIFY(directMessageSource.contains(QStringLiteral("root.managedImageOpenRequested(")));
 	QVERIFY(directMessageSource.contains(QStringLiteral("savedSizePreset: root.savedPreviewSizePreset")));
 	QVERIFY(profileFactorySource.contains(QStringLiteral(

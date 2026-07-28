@@ -10006,6 +10006,17 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 			deny(QStringLiteral("Watch-together sources must use an approved https provider embed URL."));
 			return;
 		}
+
+		const QString presentationAspect = msg.has_presentation_aspect()
+			? u8(msg.presentation_aspect()).trimmed().toLower() : QStringLiteral("wide");
+		static const QSet< QString > supportedPresentationAspects {
+			QStringLiteral("wide"), QStringLiteral("short"), QStringLiteral("square")
+		};
+		if (!supportedPresentationAspects.contains(presentationAspect)) {
+			deny(QStringLiteral("Invalid watch-together presentation aspect."));
+			return;
+		}
+		msg.set_presentation_aspect(u8(presentationAspect));
 	}
 
 	if (event == MumbleProto::WatchTogetherEventStateRequest) {
@@ -10041,6 +10052,9 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 		}
 		if (!msg.has_source_kind() && stored.has_source_kind()) {
 			msg.set_source_kind(stored.source_kind());
+		}
+		if (!msg.has_presentation_aspect() && stored.has_presentation_aspect()) {
+			msg.set_presentation_aspect(stored.presentation_aspect());
 		}
 		if (!msg.has_position_seconds() && stored.has_position_seconds()) {
 			msg.set_position_seconds(stored.position_seconds());

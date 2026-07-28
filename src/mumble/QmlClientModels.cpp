@@ -4803,6 +4803,14 @@ QString normalizedMediaErrorCode(const QString &code) {
 	static const QRegularExpression validCode(QStringLiteral("^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"));
 	return validCode.match(normalized).hasMatch() ? normalized : QStringLiteral("playback-failed");
 }
+
+QString normalizedSharedPresentationAspect(const QString &aspect) {
+	const QString normalized = aspect.trimmed().toLower();
+	static const QSet< QString > supported {
+		QStringLiteral("wide"), QStringLiteral("short"), QStringLiteral("square")
+	};
+	return supported.contains(normalized) ? normalized : QStringLiteral("wide");
+}
 }
 
 bool MediaSessionBackend::active() const { return m_active; }
@@ -4810,6 +4818,7 @@ bool MediaSessionBackend::sharedAvailable() const { return m_sharedAvailable; }
 bool MediaSessionBackend::sharedJoined() const { return m_sharedJoined; }
 bool MediaSessionBackend::sharedHost() const { return m_sharedHost; }
 QString MediaSessionBackend::sharedTitle() const { return m_sharedTitle; }
+QString MediaSessionBackend::sharedAspect() const { return m_sharedAspect; }
 QString MediaSessionBackend::sharedSessionId() const { return m_sharedSessionId; }
 qulonglong MediaSessionBackend::sharedScopeId() const { return m_sharedScopeId; }
 qulonglong MediaSessionBackend::sharedHostSession() const { return m_sharedHostSession; }
@@ -5140,7 +5149,8 @@ void MediaSessionBackend::prepareNativePlaybackSources() {
 	}));
 }
 
-bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, const QString &title) {
+bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, const QString &title,
+									  const QString &presentationAspect) {
 	QUrl normalized;
 	QString validationError;
 	if (!validateSource(url, provider, &normalized, &validationError)) {
@@ -5167,6 +5177,7 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_sharedJoined = false;
 	m_sharedHost = false;
 	m_sharedTitle = title.trimmed();
+	m_sharedAspect = normalizedSharedPresentationAspect(presentationAspect);
 	m_sharedSessionId = sessionId;
 	m_sharedUrl = normalized;
 	m_sharedProvider = normalizedProvider;
@@ -5183,7 +5194,7 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_errorCode.clear();
 	armSharedOperationAcknowledgementTimeout(SharedOperationKind::Start, sessionId);
 	emit stateChanged();
-	emit sharedStartRequested(sessionId, normalized, m_sharedProvider, m_sharedTitle);
+	emit sharedStartRequested(sessionId, normalized, m_sharedProvider, m_sharedTitle, m_sharedAspect);
 	return true;
 }
 
@@ -5557,7 +5568,8 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 										 const qulonglong actorSession, const qulonglong hostSession,
 										 const QVariantList &participantSessions, const QString &event,
 										 double position, const bool paused, const qulonglong generation,
-										 const qulonglong selfSession) {
+										 const qulonglong selfSession,
+										 const QString &presentationAspect) {
 	const QString id = sessionId.trimmed();
 	const QString normalizedEvent = event.trimmed().toLower();
 	if (id.isEmpty()) return;
@@ -5611,6 +5623,10 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	m_sharedJoined = joined;
 	m_sharedHost = selfSession != 0 && hostSession == selfSession;
 	m_sharedTitle = title.trimmed();
+	// Preserve the host's locally selected aspect when talking to an older
+	// server that cannot echo the optional presentation field.
+	if (!presentationAspect.trimmed().isEmpty() || !sameSession)
+		m_sharedAspect = normalizedSharedPresentationAspect(presentationAspect);
 	m_sharedSessionId = id;
 	m_sharedUrl = normalizedUrl;
 	m_sharedProvider = canonicalMediaProvider(normalizedUrl, provider);
@@ -5675,6 +5691,7 @@ void MediaSessionBackend::clearSharedState() {
 	m_sharedJoined = false;
 	m_sharedHost = false;
 	m_sharedTitle.clear();
+	m_sharedAspect = QStringLiteral("wide");
 	m_sharedSessionId.clear();
 	m_sharedUrl = {};
 	m_sharedProvider.clear();

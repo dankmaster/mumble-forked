@@ -4987,20 +4987,24 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 		QStringLiteral("spotify"), QStringLiteral("Unsupported shared track")));
 	QVERIFY(!media.sharedAvailable());
 
-	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Shared clip")));
+	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Shared clip"),
+		QStringLiteral("short")));
 	QVERIFY(media.sharedAvailable());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedAspect(), QStringLiteral("short"));
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("starting"));
 	QVERIFY(media.sharedOperationError().isEmpty());
 	QCOMPARE(startSpy.count(), 1);
+	QCOMPARE(startSpy.constFirst().at(4).toString(), QStringLiteral("short"));
 	const QString sessionId = media.sharedSessionId();
 	QVERIFY(!sessionId.isEmpty());
 
 	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Shared clip"), 42, 17, 17,
-							 { 17 }, QStringLiteral("start"), 0.0, true, 100, 17);
+							 { 17 }, QStringLiteral("start"), 0.0, true, 100, 17, QStringLiteral("short"));
 	QVERIFY(media.active());
 	QVERIFY(media.sharedJoined());
 	QVERIFY(media.sharedHost());
+	QCOMPARE(media.sharedAspect(), QStringLiteral("short"));
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
 	QCOMPARE(media.sharedParticipantCount(), 1);
 	media.reportPlaybackState(1.25, 90.0, false);
@@ -5027,6 +5031,7 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 	QCOMPARE(eventSpy.constLast().at(1).toString(), QStringLiteral("end"));
 	QVERIFY(!media.sharedAvailable());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedAspect(), QStringLiteral("wide"));
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("idle"));
 	QVERIFY(media.sharedOperationError().isEmpty());
 }
@@ -5158,13 +5163,15 @@ void TestQmlClientModels::mediaSessionSharedSuccessCancelsAcknowledgementTimeout
 	media.setCurrentVoiceScopeId(42);
 	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
 	const QUrl url(QStringLiteral("https://www.youtube.com/embed/acknowledged-start"));
-	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Acknowledged start")));
+	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Acknowledged start"),
+		QStringLiteral("short")));
 	const QString sessionId = media.sharedSessionId();
 	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Acknowledged start"),
 		42, 17, 17, { 17 }, QStringLiteral("start"), 0.0, true, 1, 17);
 
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
 	QVERIFY(media.sharedJoined());
+	QCOMPARE(media.sharedAspect(), QStringLiteral("short"));
 	QTest::qWait(75);
 	QCOMPARE(media.sharedSessionId(), sessionId);
 	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));

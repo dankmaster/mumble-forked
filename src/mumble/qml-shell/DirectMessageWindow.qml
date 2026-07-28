@@ -45,7 +45,8 @@ Window {
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	signal managedImageOpenRequested(string source, string title, string messageId)
 	signal managedAttachmentOpenRequested(var attachment, string messageId)
-	signal watchTogetherRequested(string url, string provider, string title)
+	signal watchTogetherRequested(string url, string provider, string title,
+		string presentationAspect)
 	signal previewSizePresetRequested(string preferenceKey, string preset)
 	Component {
 		id: directMessageCursorDelegate
@@ -1187,8 +1188,8 @@ Window {
 														audioMime, messageDelegate.stableId))
 													root.mediaSessionController.play()
 											}
-											onWatchTogetherRequested: (url, provider, title) =>
-												root.watchTogetherRequested(url, provider, title)
+											onWatchTogetherRequested: (url, provider, title, presentationAspect) =>
+												root.watchTogetherRequested(url, provider, title, presentationAspect)
 											onSizePresetRequested: preset => root.previewSizePresetRequested(
 												root.previewPreferenceKey(messageDelegate.stableId), preset)
 										}
