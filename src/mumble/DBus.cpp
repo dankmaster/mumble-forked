@@ -24,7 +24,7 @@ void MumbleDBus::openUrl(const QString &url, const QDBusMessage &msg) {
 	valid      = valid && (u.scheme() == QLatin1String("mumble"));
 	if (!valid) {
 		QDBusConnection::sessionBus().send(
-			msg.createErrorReply(QLatin1String("net.sourceforge.mumble.Error.url"), QLatin1String("Invalid URL")));
+			msg.createErrorReply(dbusErrorPrefix() + QLatin1String(".url"), QLatin1String("Invalid URL")));
 	} else {
 		Global::get().mw->openUrl(u);
 	}
@@ -33,8 +33,8 @@ void MumbleDBus::openUrl(const QString &url, const QDBusMessage &msg) {
 void MumbleDBus::getCurrentUrl(const QDBusMessage &msg) {
 	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 	if (!serverHandler || !serverHandler->isRunning() || !Global::get().uiSession) {
-		QDBusConnection::sessionBus().send(msg.createErrorReply(
-			QLatin1String("net.sourceforge.mumble.Error.connection"), QLatin1String("Not connected")));
+		QDBusConnection::sessionBus().send(
+			msg.createErrorReply(dbusErrorPrefix() + QLatin1String(".connection"), QLatin1String("Not connected")));
 		return;
 	}
 	QString host, user, pw;
@@ -70,8 +70,8 @@ void MumbleDBus::getCurrentUrl(const QDBusMessage &msg) {
 void MumbleDBus::getTalkingUsers(const QDBusMessage &msg) {
 	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 	if (!serverHandler || !serverHandler->isRunning() || !Global::get().uiSession) {
-		QDBusConnection::sessionBus().send(msg.createErrorReply(
-			QLatin1String("net.sourceforge.mumble.Error.connection"), QLatin1String("Not connected")));
+		QDBusConnection::sessionBus().send(
+			msg.createErrorReply(dbusErrorPrefix() + QLatin1String(".connection"), QLatin1String("Not connected")));
 		return;
 	}
 	QStringList names;
@@ -100,8 +100,8 @@ void MumbleDBus::setTransmitMode(unsigned int mode, const QDBusMessage &msg) {
 			transmitMode = Settings::PushToTalk;
 			break;
 		default:
-			QDBusConnection::sessionBus().send(msg.createErrorReply(
-				QLatin1String("net.sourceforge.mumble.Error.transmitMode"), QLatin1String("Invalid transmit mode")));
+			QDBusConnection::sessionBus().send(msg.createErrorReply(dbusErrorPrefix() + QLatin1String(".transmitMode"),
+																	QLatin1String("Invalid transmit mode")));
 			return;
 	}
 	Global::get().mw->setTransmissionMode(transmitMode);
