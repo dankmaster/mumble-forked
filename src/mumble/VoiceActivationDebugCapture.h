@@ -33,6 +33,10 @@ public:
 		bool captureRawInput             = true;
 		bool captureServerMix            = false;
 		std::string gitHead;
+		/// Pre-serialized, troubleshooting-safe audio settings supplied by the
+		/// settings controller. The capture layer deliberately never reads the
+		/// complete application configuration.
+		std::string settingsSnapshotJson;
 	};
 
 	struct Status {
@@ -128,6 +132,7 @@ private:
 	std::filesystem::path m_directory;
 	std::string m_startedAtUtc;
 	std::string m_gitHead;
+	bool m_hasSettingsSnapshot = false;
 	std::chrono::steady_clock::time_point m_startedAt;
 	std::chrono::seconds m_maxDuration = std::chrono::seconds(300);
 	std::atomic< std::int64_t > m_startedAtSteadyMicroseconds { 0 };

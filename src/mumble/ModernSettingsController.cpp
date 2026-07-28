@@ -31,12 +31,17 @@
 #	include "WASAPI.h"
 #endif
 
-#include <QtCore/QDir>
-#include <QtCore/QDebug>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
+#include <QtCore/QDebug>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMap>
 #include <QtCore/QObject>
 #include <QtCore/QPair>
@@ -1906,6 +1911,497 @@ namespace {
 		return QDir::cleanPath(candidate);
 	}
 
+	QString audioDebugFingerprint(const QString &identifier) {
+		const QString normalized = identifier.trimmed();
+		return normalized.isEmpty()
+				   ? QString()
+				   : QString::fromLatin1(
+						 QCryptographicHash::hash(normalized.toUtf8(), QCryptographicHash::Sha256).toHex());
+	}
+
+	bool audioDebugIsHexDigest(const QString &value, const qsizetype expectedLength) {
+		return value.size() == expectedLength
+			   && std::all_of(value.cbegin(), value.cend(), [](const QChar character) {
+					  const ushort code = character.toLower().unicode();
+					  return (code >= QLatin1Char('0').unicode() && code <= QLatin1Char('9').unicode())
+							 || (code >= QLatin1Char('a').unicode() && code <= QLatin1Char('f').unicode());
+				  });
+	}
+
+	QString audioDebugTransmitModeKey(const Settings::AudioTransmit mode) {
+		switch (mode) {
+			case Settings::Continuous:
+				return QStringLiteral("continuous");
+			case Settings::VAD:
+				return QStringLiteral("voice_activity");
+			case Settings::PushToTalk:
+				return QStringLiteral("push_to_talk");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugVadSourceKey(const Settings::VADSource source) {
+		switch (source) {
+			case Settings::Amplitude:
+				return QStringLiteral("amplitude");
+			case Settings::SignalToNoise:
+				return QStringLiteral("speech_probability");
+			case Settings::Hybrid:
+				return QStringLiteral("speech_and_volume");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugInputGateKey(const Settings::InputGateMode mode) {
+		switch (mode) {
+			case Settings::InputGateOff:
+				return QStringLiteral("off");
+			case Settings::InputGateBalanced:
+				return QStringLiteral("balanced");
+			case Settings::InputGateStrict:
+				return QStringLiteral("strict");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugNoiseCancelKey(const Settings::NoiseCancel mode) {
+		switch (mode) {
+			case Settings::NoiseCancelOff:
+				return QStringLiteral("off");
+			case Settings::NoiseCancelSpeex:
+				return QStringLiteral("speex");
+			case Settings::NoiseCancelRNN:
+				return QStringLiteral("neural");
+			case Settings::NoiseCancelBoth:
+				return QStringLiteral("speex_and_neural");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugCleanupBackendKey(const Settings::SpeechCleanupBackend backend) {
+		switch (backend) {
+			case Settings::RNNoiseBackend:
+				return QStringLiteral("rnnoise");
+			case Settings::DTLNBackend:
+				return QStringLiteral("dtln");
+			case Settings::DeepFilterNetBackend:
+				return QStringLiteral("deepfilternet");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugEnhancementProfileKey(const Mumble::InputEnhancement::Profile profile) {
+		using Profile = Mumble::InputEnhancement::Profile;
+		switch (profile) {
+			case Profile::Original:
+				return QStringLiteral("original");
+			case Profile::Light:
+				return QStringLiteral("light");
+			case Profile::Balanced:
+				return QStringLiteral("balanced");
+			case Profile::Quality:
+				return QStringLiteral("quality");
+			case Profile::Auto:
+				return QStringLiteral("auto");
+			case Profile::VoiceFocus:
+				return QStringLiteral("voice_focus");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugEchoCancellationKey(const EchoCancelOptionID option) {
+		switch (option) {
+			case EchoCancelOptionID::DISABLED:
+				return QStringLiteral("disabled");
+			case EchoCancelOptionID::SPEEX_MIXED:
+				return QStringLiteral("speex_mixed");
+			case EchoCancelOptionID::SPEEX_MULTICHANNEL:
+				return QStringLiteral("speex_multichannel");
+			case EchoCancelOptionID::APPLE_AEC:
+				return QStringLiteral("apple_aec");
+			case EchoCancelOptionID::WEBRTC_AEC:
+				return QStringLiteral("webrtc_aec");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugLoopbackKey(const Settings::LoopMode mode) {
+		switch (mode) {
+			case Settings::None:
+				return QStringLiteral("none");
+			case Settings::Local:
+				return QStringLiteral("local");
+			case Settings::Server:
+				return QStringLiteral("server");
+		}
+		return QStringLiteral("unknown");
+	}
+
+	QString audioDebugDeviceLabel(const QList< audioDevice > &choices, const QVariant &selected) {
+		for (const audioDevice &choice : choices) {
+			if (deviceChoiceMatches(choice.second, selected)) {
+				return choice.first;
+			}
+		}
+		return selected.toString().trimmed().isEmpty()
+				   ? QObject::tr("System default")
+				   : QObject::tr("Configured device (currently unavailable)");
+	}
+
+	QJsonObject audioDebugDeviceIdentity(const Mumble::InputEnhancement::DeviceIdentity &identity) {
+		const QString fingerprintSource =
+			identity.stableHardwareId.isEmpty() ? identity.physicalId : identity.stableHardwareId;
+		return QJsonObject {
+			{ QStringLiteral("backend"), identity.backendId },
+			{ QStringLiteral("display_name"), identity.displayName },
+			{ QStringLiteral("device_fingerprint_sha256"), audioDebugFingerprint(fingerprintSource) },
+			{ QStringLiteral("follows_system_default"), identity.followsSystemDefault },
+			{ QStringLiteral("stable_identity"), identity.stable },
+		};
+	}
+
+	QJsonObject audioDebugAudioInputSettings(const Settings &settings) {
+		QString backend = settings.qsAudioInput.trimmed();
+		if (backend.isEmpty()) {
+			backend = AudioInputRegistrar::current;
+		}
+		const QVariant selected = inputDeviceChoiceFor(settings, backend);
+		const QList< audioDevice > choices = inputDeviceChoices(backend);
+		const Mumble::InputEnhancement::DeviceIdentity identity =
+			draftInputEnhancementDeviceIdentity(settings);
+		QString displayName = identity.displayName;
+		if (displayName.isEmpty()) {
+			displayName = audioDebugDeviceLabel(choices, selected);
+		}
+		const QString fingerprintSource =
+			identity.stableHardwareId.isEmpty()
+				? (identity.physicalId.isEmpty() ? selected.toString() : identity.physicalId)
+				: identity.stableHardwareId;
+
+		QJsonObject input {
+			{ QStringLiteral("configured_backend"), settings.qsAudioInput },
+			{ QStringLiteral("effective_backend"), backend },
+			{ QStringLiteral("selected_device_display_name"), displayName },
+			{ QStringLiteral("selected_device_fingerprint_sha256"),
+			  audioDebugFingerprint(fingerprintSource) },
+			{ QStringLiteral("identity_resolved"), !fingerprintSource.trimmed().isEmpty() },
+			{ QStringLiteral("follows_system_default"),
+			  identity.followsSystemDefault || selected.toString().trimmed().isEmpty() },
+			{ QStringLiteral("stable_device_identity"),
+			  !fingerprintSource.trimmed().isEmpty() && identity.stable },
+			{ QStringLiteral("exclusive_mode"), settings.bExclusiveInput },
+			{ QStringLiteral("channel_mask_hex"),
+			  QStringLiteral("0x%1").arg(settings.uiAudioInputChannelMask, 16, 16, QLatin1Char('0')) },
+		};
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (backend == QLatin1String("WASAPI")) {
+			input.insert(QStringLiteral("routing_policy"), settings.qsWASAPIInputRoutingPolicy);
+			input.insert(QStringLiteral("latency_profile"), settings.qsWASAPILatencyProfile);
+			input.insert(QStringLiteral("audio_role"), settings.qsWASAPIRole);
+			QJsonArray priorities;
+			for (const Mumble::WASAPI::DeviceDescriptor &descriptor :
+				 wasapiPriorities(settings.qsWASAPIInputDevicePriorities,
+								  settings.qsWASAPIInputDeviceIdentity)) {
+				priorities.append(QJsonObject {
+					{ QStringLiteral("display_name"), descriptor.displayName },
+					{ QStringLiteral("device_fingerprint_sha256"),
+					  audioDebugFingerprint(Mumble::WASAPI::stableHardwareId(descriptor)) },
+				});
+			}
+			input.insert(QStringLiteral("device_priorities"), priorities);
+		}
+#endif
+		return input;
+	}
+
+	QJsonObject audioDebugAudioOutputSettings(const Settings &settings) {
+		QString backend = settings.qsAudioOutput.trimmed();
+		if (backend.isEmpty()) {
+			backend = AudioOutputRegistrar::current;
+		}
+		const QVariant selected = outputDeviceChoiceFor(settings, backend);
+		const QList< audioDevice > choices = outputDeviceChoices(backend);
+		QString displayName = audioDebugDeviceLabel(choices, selected);
+
+		QJsonObject output {
+			{ QStringLiteral("configured_backend"), settings.qsAudioOutput },
+			{ QStringLiteral("effective_backend"), backend },
+			{ QStringLiteral("selected_device_display_name"), displayName },
+			{ QStringLiteral("selected_device_fingerprint_sha256"),
+			  audioDebugFingerprint(selected.toString()) },
+			{ QStringLiteral("exclusive_mode"), settings.bExclusiveOutput },
+			{ QStringLiteral("output_delay_10ms_frames"), settings.iOutputDelay },
+		};
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+		if (backend == QLatin1String("WASAPI")) {
+			const QList< Mumble::WASAPI::DeviceDescriptor > priorities =
+				wasapiPriorities(settings.qsWASAPIOutputDevicePriorities,
+								 settings.qsWASAPIOutputDeviceIdentity);
+			if (!priorities.isEmpty()) {
+				displayName = priorities.constFirst().displayName;
+				output.insert(QStringLiteral("selected_device_display_name"), displayName);
+				output.insert(
+					QStringLiteral("selected_device_fingerprint_sha256"),
+					audioDebugFingerprint(Mumble::WASAPI::stableHardwareId(priorities.constFirst())));
+			}
+			output.insert(QStringLiteral("routing_policy"), settings.qsWASAPIOutputRoutingPolicy);
+			output.insert(QStringLiteral("latency_profile"), settings.qsWASAPILatencyProfile);
+			output.insert(QStringLiteral("audio_role"), settings.qsWASAPIRole);
+			QJsonArray priorityObjects;
+			for (const Mumble::WASAPI::DeviceDescriptor &descriptor : priorities) {
+				priorityObjects.append(QJsonObject {
+					{ QStringLiteral("display_name"), descriptor.displayName },
+					{ QStringLiteral("device_fingerprint_sha256"),
+					  audioDebugFingerprint(Mumble::WASAPI::stableHardwareId(descriptor)) },
+				});
+			}
+			output.insert(QStringLiteral("device_priorities"), priorityObjects);
+		}
+#endif
+		return output;
+	}
+
+	QJsonObject audioDebugCuratedSettings(const Settings &settings) {
+		const Mumble::InputEnhancement::DeviceIdentity identity =
+			draftInputEnhancementDeviceIdentity(settings);
+		const Mumble::InputEnhancement::DefaultPreference &preference =
+			Mumble::InputEnhancement::preferenceForDevice(settings.inputEnhancement, identity);
+		const Mumble::InputEnhancement::DeviceProfileState *deviceProfile =
+			Mumble::InputEnhancement::findDeviceProfile(settings.inputEnhancement, identity);
+		const Mumble::InputEnhancement::BackendAvailability backends =
+			Mumble::InputEnhancement::BackendAvailability::compiled();
+
+		QJsonObject transmission {
+			{ QStringLiteral("mode"), audioDebugTransmitModeKey(settings.atTransmit) },
+			{ QStringLiteral("mode_value"), static_cast< int >(settings.atTransmit) },
+			{ QStringLiteral("vad_source"), audioDebugVadSourceKey(settings.vsVAD) },
+			{ QStringLiteral("vad_source_value"), static_cast< int >(settings.vsVAD) },
+			{ QStringLiteral("silence_threshold"), settings.fVADmin },
+			{ QStringLiteral("speech_threshold"), settings.fVADmax },
+			{ QStringLiteral("input_gate_mode"), audioDebugInputGateKey(settings.inputGateMode) },
+			{ QStringLiteral("input_gate_mode_value"), static_cast< int >(settings.inputGateMode) },
+			{ QStringLiteral("voice_hold_frames"), settings.iVoiceHold },
+			{ QStringLiteral("voice_hold_ms"), settings.iVoiceHold * 10 },
+			{ QStringLiteral("push_to_talk_hold_ms"), static_cast< double >(settings.pttHold) },
+			{ QStringLiteral("double_push_lockout_ms"), static_cast< double >(settings.uiDoublePush) },
+			{ QStringLiteral("transmit_position"), settings.bTransmitPosition },
+			{ QStringLiteral("vad_audio_cue"), settings.audioCueEnabledVAD },
+			{ QStringLiteral("ptt_audio_cue"), settings.audioCueEnabledPTT },
+		};
+
+		QJsonObject enhancement {
+			{ QStringLiteral("settings_schema_version"), settings.inputEnhancement.schemaVersion },
+			{ QStringLiteral("profile"), audioDebugEnhancementProfileKey(preference.profile) },
+			{ QStringLiteral("profile_value"), static_cast< int >(preference.profile) },
+			{ QStringLiteral("noise_reduction"), preference.reduction },
+			{ QStringLiteral("natural_clear_character"), preference.character },
+			{ QStringLiteral("auto_adapt_requested"), preference.autoAdapt },
+			{ QStringLiteral("auto_adapt_active"),
+			  Mumble::InputEnhancement::runtimeAutoAdaptationEnabled(preference) },
+			{ QStringLiteral("legacy_override_active"),
+			  currentInputEnhancementUsesLegacyOverride(settings) },
+			{ QStringLiteral("device_profile_present"), deviceProfile != nullptr },
+			{ QStringLiteral("device_profile_calibrated"),
+			  deviceProfile ? deviceProfile->calibrated : false },
+			{ QStringLiteral("probation_pending"),
+			  deviceProfile ? deviceProfile->pendingValidation : false },
+			{ QStringLiteral("last_known_good_present"),
+			  deviceProfile && deviceProfile->lastKnownGood.has_value() },
+			{ QStringLiteral("recipe_catalog_revision"),
+			  Mumble::InputEnhancement::productRecipeCatalogRevision() },
+			{ QStringLiteral("compiled_backends"),
+			  QJsonObject {
+				  { QStringLiteral("rnnoise"), backends.rnnoise },
+				  { QStringLiteral("deepfilternet"), backends.deepFilterNet },
+				  { QStringLiteral("dtln"), backends.dtln },
+			  } },
+		};
+
+		QJsonObject processing {
+			{ QStringLiteral("input_enhancement"), enhancement },
+			{ QStringLiteral("legacy_suppression_mode"),
+			  audioDebugNoiseCancelKey(settings.noiseCancelMode) },
+			{ QStringLiteral("legacy_suppression_mode_value"),
+			  static_cast< int >(settings.noiseCancelMode) },
+			{ QStringLiteral("neural_backend"),
+			  audioDebugCleanupBackendKey(settings.noiseCancelBackend) },
+			{ QStringLiteral("neural_backend_value"),
+			  static_cast< int >(settings.noiseCancelBackend) },
+			{ QStringLiteral("neural_model_id"), settings.noiseCancelModelId },
+			{ QStringLiteral("custom_model_configured"),
+			  !settings.noiseCancelCustomModelPath.trimmed().isEmpty() },
+			{ QStringLiteral("speex_suppression_db"), settings.iSpeexNoiseCancelStrength },
+			{ QStringLiteral("echo_cancellation"),
+			  audioDebugEchoCancellationKey(settings.echoOption) },
+			{ QStringLiteral("echo_cancellation_value"),
+			  static_cast< int >(settings.echoOption) },
+			{ QStringLiteral("minimum_loudness"), settings.iMinLoudness },
+			{ QStringLiteral("maximum_amplification_slider"),
+			  amplificationFromMinLoudness(settings.iMinLoudness) },
+		};
+
+		QJsonObject networkVoice {
+			{ QStringLiteral("bitrate_bps"), settings.iQuality },
+			{ QStringLiteral("frames_per_packet"), settings.iFramesPerPacket },
+			{ QStringLiteral("packet_duration_ms"),
+			  AudioInput::packetDurationMsForFrames(settings.iFramesPerPacket) },
+			{ QStringLiteral("jitter_buffer_size"), settings.iJitterBufferSize },
+			{ QStringLiteral("allow_opus_low_delay"), settings.bAllowLowDelay },
+			{ QStringLiteral("experimental_high_bitrate"),
+			  settings.experimentalHighBitrateEnabled },
+			{ QStringLiteral("force_tcp"), settings.bTCPCompat },
+			{ QStringLiteral("quality_of_service"), settings.bQoS },
+			{ QStringLiteral("loopback_mode"), audioDebugLoopbackKey(settings.lmLoopMode) },
+			{ QStringLiteral("loopback_mode_value"), static_cast< int >(settings.lmLoopMode) },
+			{ QStringLiteral("simulated_packet_loss"), settings.dPacketLoss },
+			{ QStringLiteral("simulated_max_packet_delay"), settings.dMaxPacketDelay },
+		};
+
+		return QJsonObject {
+			{ QStringLiteral("audio_input"), audioDebugAudioInputSettings(settings) },
+			{ QStringLiteral("audio_output"), audioDebugAudioOutputSettings(settings) },
+			{ QStringLiteral("transmission"), transmission },
+			{ QStringLiteral("processing"), processing },
+			{ QStringLiteral("network_voice"), networkVoice },
+			{ QStringLiteral("modern_audio_setup_version"),
+			  static_cast< int >(settings.modernAudioSetupVersion) },
+		};
+	}
+
+	QJsonObject audioDebugRuntimeState(const Settings &settings) {
+		const AudioInputPtr input = currentAudioInput();
+		QJsonObject runtime {
+			{ QStringLiteral("audio_input_present"), static_cast< bool >(input) },
+			{ QStringLiteral("audio_input_thread_running"), input && input->isRunning() },
+		};
+		if (!input) {
+			runtime.insert(QStringLiteral("active_input_device"), QJsonValue::Null);
+			runtime.insert(QStringLiteral("input_enhancement_healthy"), QJsonValue::Null);
+			runtime.insert(QStringLiteral("active_input_enhancement_binding"), QJsonValue::Null);
+			return runtime;
+		}
+
+		const Mumble::InputEnhancement::DeviceIdentity identity = input->inputDeviceIdentity();
+		runtime.insert(QStringLiteral("active_input_device"), audioDebugDeviceIdentity(identity));
+		runtime.insert(QStringLiteral("input_enhancement_healthy"),
+					   input->inputEnhancementHealthyForUpdate());
+		const Mumble::InputEnhancement::DefaultPreference &preference =
+			Mumble::InputEnhancement::preferenceForDevice(settings.inputEnhancement, identity);
+		const std::optional< Mumble::InputEnhancement::RecipeBinding > binding =
+			input->healthyActiveInputEnhancementBinding(identity, preference);
+		if (!binding) {
+			runtime.insert(QStringLiteral("active_input_enhancement_binding"), QJsonValue::Null);
+			return runtime;
+		}
+
+		runtime.insert(
+			QStringLiteral("active_input_enhancement_binding"),
+			QJsonObject {
+				{ QStringLiteral("catalog_revision"), binding->catalogRevision },
+				{ QStringLiteral("recipe_id"), binding->recipeId },
+				{ QStringLiteral("recipe_revision"), static_cast< int >(binding->recipeRevision) },
+				{ QStringLiteral("requested_profile"),
+				  audioDebugEnhancementProfileKey(binding->requestedProfile) },
+				{ QStringLiteral("effective_profile"),
+				  audioDebugEnhancementProfileKey(binding->effectiveProfile) },
+				{ QStringLiteral("engine_value"), static_cast< int >(binding->engine) },
+				{ QStringLiteral("model_id"), binding->modelId },
+				{ QStringLiteral("model_sha256"), binding->modelSha256 },
+				{ QStringLiteral("execution_fingerprint"), binding->executionFingerprint },
+				{ QStringLiteral("latency_budget_samples"),
+				  static_cast< int >(binding->latencyBudgetSamples) },
+			});
+		return runtime;
+	}
+
+	QJsonObject audioDebugReleaseProvenance() {
+		QFile provenanceFile(
+			QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("release-provenance.json")));
+		if (!provenanceFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			return {};
+		}
+		QJsonParseError parseError;
+		const QJsonDocument document = QJsonDocument::fromJson(provenanceFile.readAll(), &parseError);
+		if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+			return {};
+		}
+		const QJsonObject source = document.object();
+		QJsonObject sanitized;
+		for (const QString &key :
+			 { QStringLiteral("git_head"), QStringLiteral("build_variant"),
+			   QStringLiteral("executable_sha256") }) {
+			const QString value = source.value(key).toString().trimmed();
+			const bool validDigest =
+				(key != QLatin1String("git_head") || audioDebugIsHexDigest(value, 40))
+				&& (key != QLatin1String("executable_sha256") || audioDebugIsHexDigest(value, 64));
+			if (!value.isEmpty() && validDigest) {
+				sanitized.insert(key, value);
+			}
+		}
+		return sanitized;
+	}
+
+	std::string audioDebugSettingsSnapshot(const Settings &draft,
+										   const QJsonObject &releaseProvenance) {
+		const QJsonObject draftSettings = audioDebugCuratedSettings(draft);
+		QJsonObject application {
+			{ QStringLiteral("version"), Version::getRelease() },
+			{ QStringLiteral("qt_version"), QString::fromLatin1(qVersion()) },
+			{ QStringLiteral("os"), QSysInfo::prettyProductName() },
+			{ QStringLiteral("kernel_type"), QSysInfo::kernelType() },
+			{ QStringLiteral("kernel_version"), QSysInfo::kernelVersion() },
+			{ QStringLiteral("cpu_architecture"), QSysInfo::currentCpuArchitecture() },
+			{ QStringLiteral("build_cpu_architecture"), QSysInfo::buildCpuArchitecture() },
+		};
+		application.insert(QStringLiteral("release_provenance"),
+						   releaseProvenance.isEmpty() ? QJsonValue::Null
+													   : QJsonValue(releaseProvenance));
+		QJsonObject root {
+			{ QStringLiteral("schema_version"), 1 },
+			{ QStringLiteral("captured_at_utc"),
+			  QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) },
+			{ QStringLiteral("source"), QStringLiteral("mumble_audio_debug") },
+			{ QStringLiteral("application"), application },
+			{ QStringLiteral("privacy"),
+			  QJsonObject {
+				  { QStringLiteral("audio_settings_only"), true },
+				  { QStringLiteral("audio_device_display_names_included"), true },
+				  { QStringLiteral("account_or_server_identity_included"), false },
+				  { QStringLiteral("credentials_or_tokens_included"), false },
+				  { QStringLiteral("custom_filesystem_paths_included"), false },
+				  { QStringLiteral("raw_device_identifiers_included"), false },
+				  { QStringLiteral("excluded"),
+					QJsonArray {
+						QStringLiteral("usernames"),
+						QStringLiteral("server addresses and names"),
+						QStringLiteral("passwords, tokens, certificates, and proxy settings"),
+						QStringLiteral("custom model paths"),
+						QStringLiteral("raw audio device identifiers"),
+						QStringLiteral("unrelated application preferences"),
+					} },
+			  } },
+			{ QStringLiteral("settings_dialog_draft"), draftSettings },
+		};
+
+		const bool activeRuntimeSettingsAvailable = Global::g_global_struct != nullptr;
+		const Settings &runtimeSettings =
+			activeRuntimeSettingsAvailable ? Global::get().s : draft;
+		const QJsonObject activeSettings = audioDebugCuratedSettings(runtimeSettings);
+		root.insert(QStringLiteral("active_runtime_settings_available"),
+					activeRuntimeSettingsAvailable);
+		root.insert(QStringLiteral("active_runtime_settings"),
+					activeRuntimeSettingsAvailable ? QJsonValue(activeSettings)
+												   : QJsonValue::Null);
+		root.insert(
+			QStringLiteral("dialog_draft_matches_active_runtime"),
+			activeRuntimeSettingsAvailable
+				? QJsonValue(QJsonDocument(draftSettings).toJson(QJsonDocument::Compact)
+							 == QJsonDocument(activeSettings).toJson(QJsonDocument::Compact))
+				: QJsonValue::Null);
+		root.insert(QStringLiteral("runtime"), audioDebugRuntimeState(runtimeSettings));
+		return QJsonDocument(root).toJson(QJsonDocument::Indented).toStdString();
+	}
+
 	QVariantMap audioDebugField(const QString &uiError) {
 		const VoiceActivationDebugCapture::Status status =
 			VoiceActivationDebugCapture::instance().status();
@@ -1966,7 +2462,7 @@ namespace {
 		field.insert(QStringLiteral("defaultCaptureServerMix"), false);
 		field.insert(
 			QStringLiteral("privacyText"),
-			QObject::tr("Metrics stay on this computer. Raw microphone audio is optional; received voices are a separate opt-in. Nothing is uploaded."));
+			QObject::tr("Metrics and a sanitized audio-settings snapshot stay on this computer. Raw microphone audio is optional; received voices are a separate opt-in. Nothing is uploaded."));
 		field.insert(
 			QStringLiteral("guidanceText"),
 			QObject::tr("Reproduce clipping, false voice detection, or missing speech during the bounded capture. Audio Debug observes the current detector and gate without changing calibration."));
@@ -4017,6 +4513,11 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			payload.value(QStringLiteral("captureRawInput"), true).toBool();
 		options.captureServerMix =
 			payload.value(QStringLiteral("captureServerMix"), false).toBool();
+		const QJsonObject releaseProvenance = audioDebugReleaseProvenance();
+		options.gitHead =
+			releaseProvenance.value(QStringLiteral("git_head")).toString().toStdString();
+		options.settingsSnapshotJson =
+			audioDebugSettingsSnapshot(m_draft, releaseProvenance);
 		if (!capture.start(options)) {
 			m_audioDebugUiError =
 				QObject::tr("Audio Debug could not create its private local capture folder.");

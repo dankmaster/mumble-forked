@@ -134,8 +134,9 @@ bool VoiceActivationDebugCapture::start(const StartOptions &requestedOptions) {
 		std::chrono::seconds(std::clamp< std::int64_t >(requestedOptions.maxDuration.count(), 10, 3600));
 	m_captureRawInput.store(requestedOptions.captureRawInput, std::memory_order_relaxed);
 	m_captureServerMix.store(requestedOptions.captureServerMix, std::memory_order_relaxed);
-	m_gitHead   = requestedOptions.gitHead;
-	m_startedAt = std::chrono::steady_clock::now();
+	m_gitHead             = requestedOptions.gitHead;
+	m_hasSettingsSnapshot = !requestedOptions.settingsSnapshotJson.empty();
+	m_startedAt           = std::chrono::steady_clock::now();
 	m_startedAtSteadyMicroseconds.store(
 		std::chrono::duration_cast< std::chrono::microseconds >(m_startedAt.time_since_epoch()).count(),
 		std::memory_order_release);
@@ -153,6 +154,19 @@ bool VoiceActivationDebugCapture::start(const StartOptions &requestedOptions) {
 	m_droppedServerItems.store(0, std::memory_order_relaxed);
 	m_stoppedElapsedUs.store(0, std::memory_order_relaxed);
 
+	if (m_hasSettingsSnapshot) {
+		std::ofstream settingsSnapshot(m_directory / "audio-settings.json",
+									  std::ios::out | std::ios::trunc | std::ios::binary);
+		if (!settingsSnapshot.is_open()) {
+			return false;
+		}
+		settingsSnapshot << requestedOptions.settingsSnapshotJson;
+		settingsSnapshot.flush();
+		if (!settingsSnapshot.good()) {
+			return false;
+		}
+	}
+
 	{
 		const bool captureRawInput  = m_captureRawInput.load(std::memory_order_relaxed);
 		const bool captureServerMix = m_captureServerMix.load(std::memory_order_relaxed);
@@ -161,6 +175,12 @@ bool VoiceActivationDebugCapture::start(const StartOptions &requestedOptions) {
 			   << "This directory contains voice-activation metrics"
 			   << (captureRawInput ? " and raw microphone audio" : "")
 			   << (captureServerMix ? " and voices received from the Mumble server" : "") << ".\n"
+			   << (m_hasSettingsSnapshot
+					   ? "audio-settings.json contains only troubleshooting-relevant audio settings and runtime "
+						 "context; account, server, credential, custom-path, and raw device identifiers are excluded.\n"
+						 "Readable audio device names are included; opaque device identifiers are represented only "
+						 "by SHA-256 fingerprints.\n"
+					   : "")
 			   << "Nothing is uploaded automatically. Treat the files as private and delete them when no longer needed.\n"
 			   << "The capture stops when the client exits or after " << m_maxDuration.count() << " seconds.\n";
 	}
@@ -533,7 +553,7 @@ void VoiceActivationDebugCapture::writeManifest() noexcept {
 	const bool captureRawInput  = m_captureRawInput.load(std::memory_order_relaxed);
 	const bool captureServerMix = m_captureServerMix.load(std::memory_order_relaxed);
 	manifest << "{\n"
-			 << "  \"schema_version\": 2,\n"
+			 << "  \"schema_version\": 3,\n"
 			 << "  \"started_at_utc\": \"" << m_startedAtUtc << "\",\n"
 			 << "  \"git_head\": \"" << m_gitHead << "\",\n"
 			 << "  \"raw_input\": {\"captured\": " << (captureRawInput ? "true" : "false")
@@ -544,6 +564,8 @@ void VoiceActivationDebugCapture::writeManifest() noexcept {
 			 << ", \"sample_rate\": " << serverRate << ", \"samples\": " << serverSamples
 			 << ", \"scope\": \"incoming remote speech before device playback; local UI samples excluded\"},\n"
 			 << "  \"metrics_file\": \"metrics.csv\",\n"
+			 << "  \"settings_snapshot\": {\"captured\": " << (m_hasSettingsSnapshot ? "true" : "false")
+			 << ", \"file\": " << (m_hasSettingsSnapshot ? "\"audio-settings.json\"" : "null") << "},\n"
 			 << "  \"max_duration_seconds\": " << m_maxDuration.count() << ",\n"
 			 << "  \"duration_limit_reached\": "
 			 << (m_limitReached.load(std::memory_order_relaxed) ? "true" : "false") << ",\n"
