@@ -1377,6 +1377,16 @@ namespace {
 			if (!itemExternalUrl.isEmpty()) normalizedItem.insert(QStringLiteral("externalUrl"), itemExternalUrl);
 			if (!thumbnail.isEmpty()) normalizedItem.insert(QStringLiteral("thumbnail"), thumbnail);
 			if (!poster.isEmpty()) normalizedItem.insert(QStringLiteral("poster"), poster);
+			const QString contentBranch =
+				item.value(QStringLiteral("contentBranch")).toString().trimmed().toLower().left(64);
+			const QString mediaPresentation =
+				item.value(QStringLiteral("mediaPresentation")).toString().trimmed().toLower().left(64);
+			if (!contentBranch.isEmpty()) {
+				normalizedItem.insert(QStringLiteral("contentBranch"), contentBranch);
+			}
+			if (!mediaPresentation.isEmpty()) {
+				normalizedItem.insert(QStringLiteral("mediaPresentation"), mediaPresentation);
+			}
 			QString streamKind = item.value(QStringLiteral("streamKind")).toString().trimmed().toLower();
 			const bool hlsManifest = itemMime == QLatin1String("application/vnd.apple.mpegurl");
 			const bool dashManifest = itemMime == QLatin1String("application/dash+xml");

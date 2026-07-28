@@ -21,6 +21,12 @@ ColumnLayout {
 	property string accessibleTitle: ""
 	readonly property var currentItem: mediaItems.length > 0
 		? mediaItems[Math.max(0, Math.min(selectedIndex, mediaItems.length - 1))] : ({})
+	readonly property string currentPresentation: String(currentItem.presentation
+		|| currentItem.mediaPresentation || "").toLowerCase()
+	readonly property string currentContentBranch: String(currentItem.contentBranch || "").toLowerCase()
+	readonly property bool currentAnimatedPresentation:
+		currentPresentation === "animated-image"
+		|| currentContentBranch.indexOf("animated") >= 0
 	readonly property string currentKind: currentItem.managedAnimated
 		? "animated-image" : String(currentItem.kind || "")
 	readonly property string currentImageSource: currentKind === "image"
@@ -149,7 +155,9 @@ ColumnLayout {
 					Accessible.ignored: true
 				}
 				Label {
-					text: root.currentKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
+					text: root.currentKind === "audio" ? qsTr("Play audio")
+						: root.currentAnimatedPresentation ? qsTr("Play animation")
+						: qsTr("Play video")
 					textFormat: Text.PlainText
 					color: Theme.contrastText(root.accent)
 					font.pixelSize: Theme.fontLabel
@@ -171,6 +179,8 @@ ColumnLayout {
 			Accessible.name: {
 				const title = root.accessibleTitle.length > 0
 					? root.accessibleTitle : qsTr("preview media")
+				if (root.currentKind === "video" && root.currentAnimatedPresentation)
+					return qsTr("Play animation: %1").arg(title)
 				if (root.currentKind === "video")
 					return qsTr("Play %1").arg(title)
 				if (root.currentKind === "audio")

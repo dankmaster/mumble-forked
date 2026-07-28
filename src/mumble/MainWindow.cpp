@@ -11177,7 +11177,18 @@ bool previewDescriptionIsPlaceholder(const QString &description) {
 	return normalized.isEmpty() || normalized == QObject::tr("Fetching page metadata")
 		   || normalized == QObject::tr("Preview unavailable")
 		   || normalized == QObject::tr("Preview exceeded size limit")
-		   || normalized == QObject::tr("Preview request timed out");
+		   || normalized == QObject::tr("Preview request timed out")
+		   || normalized == QObject::tr("Animated image preview")
+		   || normalized == QObject::tr("Image preview")
+		   || normalized == QObject::tr("Video preview")
+		   || normalized == QObject::tr("Direct image preview");
+}
+
+bool imgurDescriptionIsBoilerplate(const QString &description) {
+	const QString normalized = description.simplified().toLower();
+	return normalized == QLatin1String("the magic of the internet")
+		   || normalized.startsWith(QLatin1String("discover the magic of the internet"))
+		   || normalized.startsWith(QLatin1String("explore and share the latest images"));
 }
 
 bool isYouTubeClipUrl(const QUrl &url);
@@ -12154,6 +12165,48 @@ QHash< QString, QString > extractMetaTags(const QString &html) {
 	}
 
 	return tags;
+}
+
+QVariantMap tenorPageMetadata(const QString &html, const QHash< QString, QString > &metaTags) {
+	QVariantMap metadata;
+	QString title = metaTags.value(
+		QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title")));
+	if (title.trimmed().isEmpty()) {
+		title = extractHtmlTitle(html);
+	}
+	title = trimmedPreviewText(title, 512);
+	const qsizetype titleSuffix = title.indexOf(QLatin1String(" - "));
+	if (titleSuffix > 0) {
+		title = title.left(titleSuffix).trimmed();
+	}
+	if (!title.isEmpty()) {
+		metadata.insert(QStringLiteral("tenorResolvedTitle"), title);
+	}
+
+	static const QRegularExpression s_contentUrlMarker(
+		QLatin1String("\\bitemprop\\s*=\\s*[\"']contentUrl[\"']"),
+		QRegularExpression::CaseInsensitiveOption);
+	static const QRegularExpression s_altAttribute(
+		QLatin1String("\\balt\\s*=\\s*([\"'])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch marker = s_contentUrlMarker.match(html);
+	if (marker.hasMatch()) {
+		const qsizetype imageStart =
+			html.indexOf(QLatin1String("<img"), marker.capturedEnd(), Qt::CaseInsensitive);
+		const qsizetype imageEnd = imageStart >= 0
+			? html.indexOf(QLatin1Char('>'), imageStart + 4) : -1;
+		if (imageStart >= 0 && imageEnd > imageStart && imageEnd - imageStart <= 4096) {
+			const QRegularExpressionMatch alt =
+				s_altAttribute.match(html.mid(imageStart, imageEnd - imageStart + 1));
+			if (alt.hasMatch()) {
+				const QString description = trimmedPreviewText(alt.captured(2), 1024);
+				if (!description.isEmpty()) {
+					metadata.insert(QStringLiteral("tenorContentDescription"), description);
+				}
+			}
+		}
+	}
+	return metadata;
 }
 
 QString instagramNormalizedHandle(QString handle) {
@@ -33944,9 +33997,17 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					previewIt->siteSnapshotFinished  = true;
 				}
 
-				previewIt->title = !postText.isEmpty()
-									   ? postText
-									   : (title.isEmpty() ? target->fallbackTitle : trimmedPreviewText(title, 280));
+				QString resolvedTitle = !postText.isEmpty()
+											? postText
+											: (title.isEmpty() ? target->fallbackTitle : trimmedPreviewText(title, 280));
+				if (target->providerKey == QLatin1String("tenor")) {
+					const QString tenorTitle =
+						previewIt->metadata.value(QStringLiteral("tenorResolvedTitle")).toString().trimmed();
+					if (!tenorTitle.isEmpty()) {
+						resolvedTitle = tenorTitle;
+					}
+				}
+				previewIt->title = resolvedTitle;
 				if (!author.isEmpty()) {
 					if (isRedditPost) {
 						static const QRegularExpression s_redditSubredditPattern(
@@ -33971,6 +34032,14 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					previewIt->subtitle = provider.isEmpty() ? target->siteLabel : provider;
 					if (target->socialPost) {
 						previewIt->description = target->siteLabel;
+					}
+				}
+				if (target->providerKey == QLatin1String("tenor")) {
+					const QString tenorDescription =
+						previewIt->metadata.value(QStringLiteral("tenorContentDescription"))
+							.toString().trimmed();
+					if (!tenorDescription.isEmpty()) {
+						previewIt->description = tenorDescription;
 					}
 				}
 
@@ -34080,9 +34149,11 @@ bool MainWindow::requestPersistentChatTenorMediaPreview(const QString &previewKe
 						 QByteArrayLiteral("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
-		const QByteArray data = reply->readAll();
-		const bool success    = reply->error() == QNetworkReply::NoError;
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, previewUrl]() {
+		const QByteArray data       = reply->readAll();
+		const bool success          = reply->error() == QNetworkReply::NoError;
+		const QString contentType   =
+			reply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
 		reply->deleteLater();
 
 		auto previewIt = m_persistentChatPreviews.find(previewKey);
@@ -34090,17 +34161,51 @@ bool MainWindow::requestPersistentChatTenorMediaPreview(const QString &previewKe
 			return;
 		}
 
-		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
-		if (success) {
-			if (const std::optional< PersistentChatPreviewPlayableMediaMeta > media =
-					tenorPlayableMediaFromHtml(data);
-				media) {
-				applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(media->url), media->mime,
-													   media->contentBranch, media->mediaPresentation);
-			}
+		if (!success || data.isEmpty() || !previewContentTypeLooksHtml(contentType)) {
+			previewIt->remoteMediaRequested = false;
+			previewIt->remoteMediaFinished  = true;
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
 		}
-		publishPersistentChatPreviewUpdate(previewKey);
+
+		parsePersistentChatPreviewHtmlAsync(
+			this, persistentChatPreviewWorkerGroup(previewKey),
+			persistentChatPreviewWorkerSourceKey(
+				QStringLiteral("html:tenor"), previewUrl.toString(QUrl::FullyEncoded)),
+			data, contentType,
+			[](PersistentChatPreviewHtmlParseResult &parsed) {
+				parsed.playableMediaMeta = tenorPlayableMediaFromHtml(parsed.html.toUtf8());
+				parsed.metadata = tenorPageMetadata(parsed.html, parsed.metaTags);
+			},
+			[this, previewKey](PersistentChatPreviewHtmlParseResult parsed) {
+				auto parsedPreview = m_persistentChatPreviews.find(previewKey);
+				if (parsedPreview == m_persistentChatPreviews.end()) {
+					return;
+				}
+				parsedPreview->remoteMediaRequested = false;
+				parsedPreview->remoteMediaFinished  = true;
+				for (auto it = parsed.metadata.cbegin(); it != parsed.metadata.cend(); ++it) {
+					parsedPreview->metadata.insert(it.key(), it.value());
+				}
+				const QString title =
+					parsed.metadata.value(QStringLiteral("tenorResolvedTitle")).toString().trimmed();
+				const QString description =
+					parsed.metadata.value(QStringLiteral("tenorContentDescription")).toString().trimmed();
+				if (!title.isEmpty()) {
+					parsedPreview->title = title;
+				}
+				if (!description.isEmpty()) {
+					parsedPreview->description = description;
+				}
+				if (parsed.playableMediaMeta) {
+					applyPersistentChatRemotePlayableMedia(
+						*parsedPreview, QUrl(parsed.playableMediaMeta->url),
+						parsed.playableMediaMeta->mime, parsed.playableMediaMeta->contentBranch,
+						parsed.playableMediaMeta->mediaPresentation);
+				}
+				publishPersistentChatPreviewUpdate(previewKey);
+			},
+			PersistentChatPreviewHtmlScope::BoundedDocument);
 	});
 
 	return true;
@@ -35102,6 +35207,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		const bool handledAnimatedOEmbed =
 			(giphyMedia || tenorPreview) && requestPersistentChatOEmbedPreview(previewKey, previewUrl);
 		const bool handledTenorMedia = requestPersistentChatTenorMediaPreview(previewKey, previewUrl);
+		const bool handledXPost = requestPersistentChatXPostPreview(previewKey, previewUrl);
 		if (imgurId && preview.mediaKind == QLatin1String("video")) {
 			requestPersistentChatPreviewPosterImage(
 				previewKey, QUrl(QStringLiteral("https://i.imgur.com/%1h.jpg").arg(*imgurId)),
@@ -35118,7 +35224,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
 			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview && !handledAnimatedOEmbed
-				&& !handledTenorMedia) {
+				&& !handledTenorMedia && !handledXPost) {
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 			}
 			renderIfVisible();
@@ -36163,6 +36269,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					}
 					if (const std::optional< QString > imgurId = imgurSingleMediaIdFromUrl(previewUrl);
 						imgurId) {
+						if (imgurDescriptionIsBoilerplate(parsed.description)) {
+							parsed.description.clear();
+						}
 						const QString declaredTitle = parsed.title.trimmed().toLower();
 						const QString twitterPlayer =
 							parsed.metaTags.value(QStringLiteral("twitter:player")).trimmed().toLower();

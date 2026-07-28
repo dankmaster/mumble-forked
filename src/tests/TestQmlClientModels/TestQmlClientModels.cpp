@@ -2639,6 +2639,8 @@ void TestQmlClientModels::chatTimelinePreservesStreamingManifestsAndManagedArtwo
 			{ QStringLiteral("kind"), QStringLiteral("video") },
 			{ QStringLiteral("mime"), QStringLiteral("application/vnd.apple.mpegurl") },
 			{ QStringLiteral("streamKind"), QStringLiteral("hls") },
+			{ QStringLiteral("contentBranch"), QStringLiteral("live-video") },
+			{ QStringLiteral("mediaPresentation"), QStringLiteral("video-player") },
 			{ QStringLiteral("url"), QStringLiteral("https://cdn.cloudflare.steamstatic.com/trailer/master.m3u8") },
 			{ QStringLiteral("thumbnail"), QStringLiteral("image://mumble/steam-hls-thumb?g=1") },
 			{ QStringLiteral("poster"), QStringLiteral("image://mumble/steam-hls-poster?g=2") }
@@ -2675,6 +2677,9 @@ void TestQmlClientModels::chatTimelinePreservesStreamingManifestsAndManagedArtwo
 		QStringLiteral("image://mumble/steam-hls-thumb?g=1"));
 	QCOMPARE(hls.value(QStringLiteral("poster")).toString(),
 		QStringLiteral("image://mumble/steam-hls-poster?g=2"));
+	QCOMPARE(hls.value(QStringLiteral("contentBranch")).toString(), QStringLiteral("live-video"));
+	QCOMPARE(hls.value(QStringLiteral("mediaPresentation")).toString(),
+		QStringLiteral("video-player"));
 	QVERIFY(hls.value(QStringLiteral("directPlayable")).toBool());
 
 	const QVariantMap dash = normalized.at(1).toMap();
@@ -3424,9 +3429,11 @@ void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
 	QVERIFY(resolvedEmbedPath.contains("giphyPlayableMediaFromUrl(previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatOEmbedPreview(previewKey, previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatTenorMediaPreview(previewKey, previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatXPostPreview(previewKey, previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("imgurSingleMediaIdFromUrl(previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("animated-gif-video-backed"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatPreviewPosterImage("));
+	QVERIFY(resolvedEmbedPath.contains("!handledTenorMedia && !handledXPost"));
 
 	const QString cachePath = QFINDTESTDATA("../../mumble/PersistentChatMediaCache.cpp");
 	QVERIFY2(!cachePath.isEmpty(), "PersistentChatMediaCache.cpp test data was not found");

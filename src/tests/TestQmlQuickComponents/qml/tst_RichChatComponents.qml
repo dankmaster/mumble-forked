@@ -2286,6 +2286,7 @@ TestCase {
 		verify(poster.width >= viewport.width - 1)
 		verify(poster.height >= viewport.height - 1)
 		verify(prompt.visible)
+		compare(primaryAction.Accessible.name, "Play animation: Tenor GIF")
 		verify(primaryAction.width >= viewport.width - 1)
 		verify(primaryAction.height >= viewport.height - 1)
 
