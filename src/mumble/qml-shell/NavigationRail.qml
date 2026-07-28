@@ -171,7 +171,11 @@ Rectangle {
 				|| selectionState.selectedVoiceChannelId === null)
 			return false
 		const parts = String(scopeToken || "").split(":")
-		return parts.length === 2 && parts[1] === String(selectionState.selectedVoiceChannelId)
+		if (parts.length !== 2)
+			return false
+		const scopeKind = String(parts[0]).toLowerCase()
+		return (scopeKind === "0" || scopeKind === "channel")
+			&& parts[1] === String(selectionState.selectedVoiceChannelId)
 	}
 
 	function roomExpandedFor(scopeToken, payload) {
