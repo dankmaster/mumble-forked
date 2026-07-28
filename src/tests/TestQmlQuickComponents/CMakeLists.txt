@@ -21,6 +21,21 @@ target_link_libraries(TestQmlQuickComponents PRIVATE
 
 add_test(NAME TestQmlQuickComponents COMMAND $<TARGET_FILE:TestQmlQuickComponents>)
 configure_client_test_runtime(TestQmlQuickComponents TestQmlQuickComponents)
+if(WIN32)
+	add_test(
+		NAME TestQmlQuickComponentsDirectLaunchGuard
+		COMMAND
+			${CMAKE_COMMAND}
+			"-DTEST_EXECUTABLE=$<TARGET_FILE:TestQmlQuickComponents>"
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/VerifyDirectLaunchGuard.cmake"
+	)
+	set_tests_properties(
+		TestQmlQuickComponentsDirectLaunchGuard
+		PROPERTIES
+			TIMEOUT 15
+			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+	)
+endif()
 set_tests_properties(
 	TestQmlQuickComponents
 	PROPERTIES

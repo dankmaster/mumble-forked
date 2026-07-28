@@ -28,6 +28,21 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${test-lto})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
 
 function(configure_client_test_runtime TEST_NAME TARGET_NAME)
+	if(WIN32)
+		# Qt creates a blocking Windows MessageBox if a GUI test is launched
+		# without its platform-plugin environment. Compile a pre-main guard into
+		# every client test so accidental direct execution fails in the terminal
+		# before Qt can initialize any GUI subsystem.
+		target_sources(
+			${TARGET_NAME}
+			PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/ClientTestRuntimeGuard.cpp"
+		)
+		target_compile_definitions(
+			${TARGET_NAME}
+			PRIVATE "MUMBLE_CLIENT_TEST_TARGET_NAME=\"${TARGET_NAME}\""
+		)
+	endif()
+
 	if(WIN32 AND dtln AND DEFINED ONNXRUNTIME_RUNTIME AND NOT "${ONNXRUNTIME_RUNTIME}" STREQUAL "")
 		add_custom_command(
 			TARGET ${TARGET_NAME}
