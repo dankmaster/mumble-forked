@@ -44,9 +44,11 @@ ColumnLayout {
 	Rectangle {
 		id: mediaViewport
 		objectName: "embedDocumentMediaViewport"
-		Layout.fillWidth: root.viewportPreferredWidth <= 0
+		Layout.fillWidth: true
 		Layout.preferredWidth: root.viewportPreferredWidth > 0
-			? Math.min(root.width, root.viewportPreferredWidth) : -1
+			? root.viewportPreferredWidth : root.width
+		Layout.maximumWidth: root.viewportPreferredWidth > 0
+			? root.viewportPreferredWidth : Number.POSITIVE_INFINITY
 		Layout.preferredHeight: root.resolvedViewportHeight
 		Layout.minimumHeight: Layout.preferredHeight
 		Layout.maximumHeight: Layout.preferredHeight

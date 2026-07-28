@@ -4699,6 +4699,9 @@ namespace {
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("providerDetails")) : nullptr;
 		QObject *documentGallery = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewDocumentMediaGallery")) : nullptr;
+		QQuickItem *documentViewport = cardItem
+			? qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+				cardItem, QStringLiteral("embedDocumentMediaViewport"))) : nullptr;
 		QObject *documentImage = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentMediaImage")) : nullptr;
 		QObject *documentAnimation = cardItem
@@ -4724,6 +4727,13 @@ namespace {
 			providerDetails ? providerDetails->property("presentation").toString() : QString());
 		state.insert(QStringLiteral("documentGalleryVisible"),
 			documentGallery && documentGallery->property("visible").toBool());
+		appendSceneRect(QStringLiteral("documentGallery"),
+			qobject_cast< QQuickItem * >(documentGallery));
+		appendSceneRect(QStringLiteral("documentViewport"), documentViewport);
+		appendSceneRect(QStringLiteral("documentImage"),
+			qobject_cast< QQuickItem * >(documentImage));
+		appendSceneRect(QStringLiteral("documentPlaybackPrompt"),
+			qobject_cast< QQuickItem * >(documentPlaybackPrompt));
 		state.insert(QStringLiteral("documentGalleryCurrentKind"),
 			documentGallery ? documentGallery->property("currentKind").toString() : QString());
 		state.insert(QStringLiteral("documentGalleryCurrentImageSource"),

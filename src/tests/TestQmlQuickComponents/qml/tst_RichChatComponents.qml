@@ -2215,6 +2215,88 @@ TestCase {
 		compare(directMediaSpy.signalArguments[0][1], "video/mp4")
 	}
 
+	function test_typed_video_poster_viewport_fills_the_card_and_stays_clickable() {
+		const card = previewLoader.item
+		const sourceUrl = "https://tenor.com/view/what-is-this-gif-2935825949418015718"
+		const mediaUrl = "https://media.tenor.com/KL4mJXVvS-YAAAPo/what-is-this.mp4"
+		const posterUrl = "image://mumble/embed-poster"
+		card.preview = {
+			"state": "ready",
+			"title": "Tenor GIF",
+			"description": "Animated image preview",
+			"url": sourceUrl,
+			"mediaUrl": mediaUrl,
+			"mediaMime": "video/mp4",
+			"mediaKind": "video",
+			"thumbnailUrl": posterUrl,
+			"metadata": {
+				"provider": "tenor",
+				"contentBranch": "animated-gif-video-backed",
+				"mediaPresentation": "animated-image"
+			},
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "media",
+				"provider": { "id": "tenor", "label": "Tenor", "host": "tenor.com" },
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "video",
+					"title": "Tenor GIF",
+					"description": "Animated image preview"
+				},
+				"thread": {},
+				"facts": [],
+				"media": [{
+					"id": "media:0",
+					"kind": "video",
+					"mime": "video/mp4",
+					"url": mediaUrl,
+					"posterUrl": posterUrl,
+					"thumbnailUrl": posterUrl,
+					"contentBranch": "animated-gif-video-backed",
+					"presentation": "animated-image",
+					"directPlayable": true
+				}],
+				"playback": { "mode": "native", "provider": "tenor" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-tenor-poster"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "tenor"
+		inlineSession.active = false
+		inlineSession.detached = true
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const viewport = findChild(card, "embedDocumentMediaViewport")
+		const poster = findChild(card, "embedDocumentMediaImage")
+		const prompt = findChild(card, "embedDocumentPlaybackPrompt")
+		const primaryAction = findChild(card, "embedDocumentMediaPrimaryAction")
+		verify(gallery !== null && viewport !== null && poster !== null)
+		verify(prompt !== null && primaryAction !== null)
+		tryVerify(function() {
+			return viewport.width >= gallery.width - 1 && viewport.width > 300
+		}, 1000, "typed poster viewport did not fill the gallery")
+		tryCompare(poster, "status", Image.Ready)
+		verify(poster.visible)
+		verify(poster.width >= viewport.width - 1)
+		verify(poster.height >= viewport.height - 1)
+		verify(prompt.visible)
+		verify(primaryAction.width >= viewport.width - 1)
+		verify(primaryAction.height >= viewport.height - 1)
+
+		const restingHeight = card.implicitHeight
+		primaryAction.clicked()
+		compare(directMediaSpy.count, 1)
+		compare(directMediaSpy.signalArguments[0][0], mediaUrl)
+		compare(directMediaSpy.signalArguments[0][1], "video/mp4")
+		compare(card.implicitHeight, restingHeight)
+	}
+
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {
 		const card = previewLoader.item
 		card.preview = {
