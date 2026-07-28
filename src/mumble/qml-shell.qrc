@@ -26,6 +26,7 @@
 	<file alias="ModernMenu.qml">qml-shell/ModernMenu.qml</file>
 	<file alias="PayloadMenu.qml">qml-shell/PayloadMenu.qml</file>
 	<file alias="SemanticMenu.qml">qml-shell/SemanticMenu.qml</file>
+	<file alias="CircularAvatar.qml">qml-shell/CircularAvatar.qml</file>
 	<file alias="NavigationRail.qml">qml-shell/NavigationRail.qml</file>
 	<file alias="ConversationSearchBar.qml">qml-shell/ConversationSearchBar.qml</file>
 	<file alias="ModalAccessibilityBarrier.qml">qml-shell/ModalAccessibilityBarrier.qml</file>

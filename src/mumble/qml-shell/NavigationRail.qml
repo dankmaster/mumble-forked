@@ -2145,34 +2145,37 @@ Rectangle {
 					anchors.leftMargin: 22 + Math.min(Number(payload.parentDepth || 0), 5) * 11
 					anchors.rightMargin: 4
 					spacing: 5
-					Rectangle {
+					CircularAvatar {
 						id: participantAvatar
 						objectName: "navigationParticipantAvatar_" + participantDelegate.participantObjectKey
 						Layout.preferredWidth: 26
 						Layout.preferredHeight: 26
-						radius: navigationRail.classicUserIcons ? 0 : 13
-						clip: !navigationRail.classicUserIcons
-						color: navigationRail.classicUserIcons ? "transparent"
-							: participantDelegate.isListener
+						avatarVisible: !navigationRail.classicUserIcons
+						animationsEnabled: !navigationRail.visualFixtureMode
+						source: participantDelegate.avatarSource
+						fallbackText: roomDelegate.title.length > 0
+							? roomDelegate.title.slice(0, 1).toUpperCase() : "?"
+						fallbackColor: participantDelegate.isListener ? Theme.accent : Theme.textStrong
+						backgroundColor: participantDelegate.isListener
 							? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12) : Theme.strip
-						border.width: navigationRail.classicUserIcons ? 0
-							: participantDelegate.talking || participantDelegate.isListener
-							? 2 : participantDelegate.isSelf ? 1 : 0
-						border.color: participantDelegate.isListener ? Theme.accent
-							: participantDelegate.talking
-							? navigationRail.toneColor(participantDelegate.talkTone, Theme.success) : Theme.divider
-						Image {
-							id: participantAvatarImage
-							objectName: "navigationParticipantAvatarImage_" + participantDelegate.participantObjectKey
-							anchors.fill: parent
-							source: participantDelegate.avatarSource
-							sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
-								Math.max(1, Math.ceil(height * 2)))
-							asynchronous: true
-							cache: false
-							fillMode: Image.PreserveAspectCrop
-							visible: !navigationRail.classicUserIcons && status === Image.Ready
-						}
+						borderWidth: participantDelegate.isListener ? 2 : 1
+						borderColor: participantDelegate.isListener ? Theme.accent
+							: participantDelegate.isSelf ? Theme.divider : Theme.quietBorder
+						highlighted: participantDelegate.talking
+						highlightColor: navigationRail.toneColor(
+							participantDelegate.talkTone, Theme.success)
+						imageObjectName: "navigationParticipantAvatarImage_"
+							+ participantDelegate.participantObjectKey
+						imageEffectObjectName: "navigationParticipantAvatarImageEffect_"
+							+ participantDelegate.participantObjectKey
+						fallbackObjectName: "navigationParticipantAvatarFallback_"
+							+ participantDelegate.participantObjectKey
+						maskObjectName: "navigationParticipantAvatarMask_"
+							+ participantDelegate.participantObjectKey
+						haloObjectName: "navigationParticipantAvatarHalo_"
+							+ participantDelegate.participantObjectKey
+						ringObjectName: "navigationParticipantAvatarRing_"
+							+ participantDelegate.participantObjectKey
 						Image {
 							id: participantClassicIcon
 							objectName: "navigationParticipantClassicIcon_"
@@ -2184,20 +2187,6 @@ Rectangle {
 								Math.max(1, Math.ceil(height * 2)))
 							fillMode: Image.PreserveAspectFit
 							visible: navigationRail.classicUserIcons
-							Accessible.ignored: true
-						}
-						Label {
-							objectName: "navigationParticipantAvatarFallback_"
-								+ participantDelegate.participantObjectKey
-							anchors.centerIn: parent
-							visible: !navigationRail.classicUserIcons
-								&& participantAvatarImage.status !== Image.Ready
-							textFormat: Text.PlainText
-							text: roomDelegate.title.length > 0
-								? roomDelegate.title.slice(0, 1).toUpperCase() : "?"
-							color: participantDelegate.isListener ? Theme.accent : Theme.textStrong
-							font.pixelSize: 11
-							font.bold: true
 							Accessible.ignored: true
 						}
 						Rectangle {
@@ -2544,43 +2533,27 @@ Rectangle {
 					RowLayout {
 						anchors.fill: parent
 						spacing: 10
-						Rectangle {
+						CircularAvatar {
 							id: selfAvatar
 							objectName: "selfAvatar"
 							Layout.preferredWidth: Theme.avatarMedium
 							Layout.preferredHeight: Theme.avatarMedium
-							radius: Math.max(8, Theme.innerRadius - 2)
-							clip: true
-							color: Theme.accentSubtle
-							border.width: 1
-							border.color: selfAvatarImage.status === Image.Ready
-								? Theme.quietBorder : Theme.withAlpha(Theme.accent, 0.58)
-							readonly property string avatarSource: navigationRail.safeAvatarSource(
+							source: navigationRail.safeAvatarSource(
 								((clientSession.selfMenu || ({})).avatarUrl) || "")
-							Image {
-								id: selfAvatarImage
-								objectName: "selfAvatarImage"
-								anchors.fill: parent
-								source: selfAvatar.avatarSource
-								sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
-									Math.max(1, Math.ceil(height * 2)))
-								asynchronous: true
-								cache: false
-								fillMode: Image.PreserveAspectCrop
-								visible: status === Image.Ready
-							}
-							Label {
-								objectName: "selfAvatarFallback"
-								anchors.centerIn: parent
-								visible: selfAvatarImage.status !== Image.Ready
-								textFormat: Text.PlainText
-								text: clientSession.selfName.length > 0
-									? clientSession.selfName.slice(0, 1).toUpperCase() : "?"
-								color: Theme.textStrong
-								font.pixelSize: Theme.fontLabel
-								font.bold: true
-								Accessible.ignored: true
-							}
+							fallbackText: clientSession.selfName.length > 0
+								? clientSession.selfName.slice(0, 1).toUpperCase() : "?"
+							backgroundColor: Theme.accentSubtle
+							fallbackColor: Theme.textStrong
+							borderWidth: 1
+							borderColor: imageReady ? Theme.quietBorder
+								: Theme.withAlpha(Theme.accent, 0.58)
+							animationsEnabled: !navigationRail.visualFixtureMode
+							imageObjectName: "selfAvatarImage"
+							imageEffectObjectName: "selfAvatarImageEffect"
+							fallbackObjectName: "selfAvatarFallback"
+							maskObjectName: "selfAvatarMask"
+							haloObjectName: "selfAvatarHalo"
+							ringObjectName: "selfAvatarRing"
 							Rectangle {
 								objectName: "selfPresenceDot"
 								anchors.right: parent.right

@@ -1592,6 +1592,10 @@ TestCase {
 		const participant = findChild(loader.item, "navigationParticipant_42")
 		const avatar = findChild(loader.item, "navigationParticipantAvatar_42")
 		const avatarImage = findChild(loader.item, "navigationParticipantAvatarImage_42")
+		const avatarEffect = findChild(loader.item, "navigationParticipantAvatarImageEffect_42")
+		const avatarMask = findChild(loader.item, "navigationParticipantAvatarMask_42")
+		const avatarHalo = findChild(loader.item, "navigationParticipantAvatarHalo_42")
+		const avatarRing = findChild(loader.item, "navigationParticipantAvatarRing_42")
 		const talk = findChild(loader.item, "navigationParticipantTalk_42")
 		const talkChip = findChild(loader.item, "navigationParticipantStatus_42_talking")
 		const muted = findChild(loader.item, "navigationParticipantStatus_42_selfMuted")
@@ -1604,11 +1608,22 @@ TestCase {
 		verify(participant !== null)
 		participant.focusRow()
 		verify(avatar !== null && avatar.visible)
-		verify(avatarImage !== null)
+		verify(avatarImage !== null && avatarEffect !== null && avatarMask !== null)
+		verify(avatarHalo !== null && avatarRing !== null)
+		compare(avatar.radius, avatar.width / 2)
+		compare(avatarMask.radius, Math.min(avatarMask.width, avatarMask.height) / 2)
+		verify(avatarMask.layer.enabled)
+		verify(avatarMask.antialiasing)
+		compare(avatar.highlighted, true)
+		tryCompare(avatarHalo, "opacity", 1)
+		compare(avatarRing.border.width, 2)
+		compare(String(avatarRing.border.color), String(Theme.success))
 		compare(String(avatarImage.source),
 			"image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=7")
 		compare(avatarImage.sourceSize.width, 52)
 		compare(avatarImage.sourceSize.height, 52)
+		tryCompare(avatar, "imageReady", true)
+		tryCompare(avatarEffect, "visible", true)
 		verify(talk !== null && talk.visible)
 		compare(talkChip, null)
 		verify(muted !== null && muted.visible)
@@ -1632,13 +1647,16 @@ TestCase {
 	}
 
 	function test_classic_user_icons_replace_avatars_and_talk_dots_live() {
+		const avatar = findChild(loader.item, "navigationParticipantAvatar_42")
 		const avatarImage = findChild(loader.item, "navigationParticipantAvatarImage_42")
+		const avatarEffect = findChild(loader.item, "navigationParticipantAvatarImageEffect_42")
 		const avatarFallback = findChild(loader.item, "navigationParticipantAvatarFallback_42")
 		const talk = findChild(loader.item, "navigationParticipantTalk_42")
 		const classic = findChild(loader.item, "navigationParticipantClassicIcon_42")
 		const listenerClassic = findChild(loader.item,
 			"navigationParticipantClassicIcon_listener:2:42")
-		verify(avatarImage !== null && avatarFallback !== null && talk !== null)
+		verify(avatar !== null && avatarImage !== null && avatarEffect !== null)
+		verify(avatarFallback !== null && talk !== null)
 		verify(classic !== null && listenerClassic !== null)
 		verify(!classic.visible)
 		verify(talk.visible)
@@ -1647,13 +1665,57 @@ TestCase {
 		tryCompare(classic, "visible", true)
 		compare(String(classic.source), "qrc:/native/talking_on.svg")
 		compare(String(listenerClassic.source), "qrc:/native/talking_off.svg")
-		verify(!avatarImage.visible)
-		verify(!avatarFallback.visible)
+		compare(avatar.avatarVisible, false)
+		verify(!avatarEffect.visible)
 		verify(!talk.visible)
 
 		loader.item.classicUserIcons = false
 		tryCompare(classic, "visible", false)
+		compare(avatar.avatarVisible, true)
 		tryCompare(talk, "visible", true)
+	}
+
+	function test_speaking_avatar_highlight_tracks_live_talk_state_and_tone() {
+		const previousPayload = navigationRows.get(1).payload
+		const previousStatus = navigationRows.get(1).status
+		const avatar = findChild(loader.item, "navigationParticipantAvatar_42")
+		const halo = findChild(loader.item, "navigationParticipantAvatarHalo_42")
+		const ring = findChild(loader.item, "navigationParticipantAvatarRing_42")
+		verify(avatar !== null && halo !== null && ring !== null)
+
+		navigationRows.setProperty(1, "status", "passive")
+		navigationRows.setProperty(1, "payload", {
+			"rowKind": "participant", "parentScopeToken": "channel:1",
+			"participantSession": "42", "entryKind": "user",
+			"avatarUrl": "image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=7",
+			"talking": false, "talkTone": "", "badges": [],
+			"localVolume": { "db": 0, "visible": true },
+			"statuses": [], "source": { "session": "42", "entryKind": "user", "actions": [] }
+		})
+		tryCompare(avatar, "highlighted", false)
+		tryCompare(halo, "opacity", 0)
+		compare(ring.border.width, 1)
+		compare(String(ring.border.color), String(Theme.quietBorder))
+
+		navigationRows.setProperty(1, "status", "talking")
+		navigationRows.setProperty(1, "payload", {
+			"rowKind": "participant", "parentScopeToken": "channel:1",
+			"participantSession": "42", "entryKind": "user",
+			"avatarUrl": "image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=7",
+			"talking": true, "talkTone": "warning", "badges": ["Talking"],
+			"localVolume": { "db": 0, "visible": true },
+			"statuses": [{ "kind": "talking", "label": "Talking", "tone": "warning" }],
+			"source": { "session": "42", "entryKind": "user", "actions": [] }
+		})
+		tryCompare(avatar, "highlighted", true)
+		tryCompare(halo, "opacity", 1)
+		compare(String(avatar.highlightColor), String(Theme.warning))
+		compare(ring.border.width, 2)
+		compare(String(ring.border.color), String(Theme.warning))
+
+		navigationRows.setProperty(1, "payload", previousPayload)
+		navigationRows.setProperty(1, "status", previousStatus)
+		wait(0)
 	}
 
 	function test_source_only_action_capability_and_missing_talk_state_stay_correct() {
@@ -1688,14 +1750,22 @@ TestCase {
 
 		const selfAvatar = findChild(loader.item, "selfAvatar")
 		const selfAvatarImage = findChild(loader.item, "selfAvatarImage")
+		const selfAvatarEffect = findChild(loader.item, "selfAvatarImageEffect")
 		const selfAvatarFallback = findChild(loader.item, "selfAvatarFallback")
-		verify(selfAvatar !== null && selfAvatarImage !== null && selfAvatarFallback !== null)
+		const selfAvatarMask = findChild(loader.item, "selfAvatarMask")
+		verify(selfAvatar !== null && selfAvatarImage !== null && selfAvatarEffect !== null)
+		verify(selfAvatarFallback !== null && selfAvatarMask !== null)
 		compare(selfAvatarFallback.Accessible.ignored, true)
-		compare(selfAvatar.avatarSource,
+		compare(String(selfAvatar.source),
 			"image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8")
-		compare(String(selfAvatarImage.source), selfAvatar.avatarSource)
+		compare(String(selfAvatarImage.source), String(selfAvatar.source))
 		compare(selfAvatarImage.sourceSize.width, Theme.avatarMedium * 2)
 		compare(selfAvatarImage.sourceSize.height, Theme.avatarMedium * 2)
+		tryCompare(selfAvatar, "imageReady", true)
+		tryCompare(selfAvatarEffect, "visible", true)
+		compare(selfAvatar.radius, selfAvatar.width / 2)
+		compare(selfAvatarMask.radius,
+			Math.min(selfAvatarMask.width, selfAvatarMask.height) / 2)
 	}
 
 	function test_listener_row_keeps_stable_identity_and_scope_actions_without_selection() {
@@ -1821,8 +1891,8 @@ TestCase {
 		verify(nameLabel.Accessible.ignored)
 		verify(statusLabel.Accessible.ignored)
 		compare(avatar.width, Theme.avatarMedium)
-		verify(avatar.radius < avatar.width / 2,
-			"The profile avatar should use the polished rounded-square silhouette")
+		compare(avatar.radius, avatar.width / 2,
+			"The profile avatar should use the same circular silhouette as channel avatars")
 		compare(actionGroup.spacing, Theme.space1)
 		compare(String(statusLabel.color), String(Theme.success))
 		compare(String(presence.color), String(Theme.success))
