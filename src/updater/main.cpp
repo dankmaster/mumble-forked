@@ -4045,6 +4045,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
 	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runHealthQualifiedInstaller(options);
 	bool installerRan    = !packageMode;
+	bool packageRestartAttempted = false;
 
 	if (packageMode && !updateSucceeded(updateExitCode) && !updateCancelled(updateExitCode)
 		&& fileExists(options.installerPath) && installerFallbackHasNoPendingNativeTransaction(options)) {
@@ -4055,10 +4056,6 @@ DWORD runUpdate(const Options &requestedOptions) {
 		installerRan   = true;
 	} else if (packageMode && updateCancelled(updateExitCode)) {
 		appendLog(options, L"Package update was cancelled; MSI fallback will not run.");
-	} else if (packageMode && !updateSucceeded(updateExitCode)) {
-		appendLog(options,
-				  L"Package update failed and no safe verified MSI fallback was available; any native recovery journal "
-				  L"must be resolved first.");
 	}
 	if (packageMode && !installerRan && options.noRelaunch && updateSucceeded(updateExitCode)) {
 		const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(
@@ -4092,6 +4089,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 		appendLog(options, L"Package update completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);
+		packageRestartAttempted = true;
 		updateExitCode = restartPackageAndQualify(options);
 	} else if (packageMode && updateCancelled(updateExitCode) && !options.noRelaunch) {
 		appendLog(options, L"Update was cancelled; restarting Mumble without applying the MSI fallback.");
@@ -4103,6 +4101,47 @@ DWORD runUpdate(const Options &requestedOptions) {
 		}
 		if (!restart.launched) {
 			updateExitCode = restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+		}
+	}
+
+	if (packageMode && !installerRan && !updateSucceeded(updateExitCode) && !updateCancelled(updateExitCode)) {
+		if (installerFallbackHasNoPendingNativeTransaction(options)) {
+			std::string fallbackError;
+			if (Mumble::UpdateHealth::writeInstallerFallbackRequest(
+					packageWorkRoot(options), std::filesystem::path(options.appPath), lowerSha256(options.packageSha256),
+					static_cast< std::uint32_t >(updateExitCode), &fallbackError)) {
+				appendLog(options,
+						  L"Package update failed safely; the restored client will use the verified MSI on its next "
+						  L"update attempt.");
+				if (!options.noRelaunch && !packageRestartAttempted) {
+					appendLog(options, L"Restarting the restored client so it can offer the verified MSI fallback.");
+					postUiProgress(100, false);
+					Sleep(800);
+					RelaunchResult restart = relaunchMumble(options);
+					if (restart.process) {
+						CloseHandle(restart.process);
+					}
+					if (!restart.launched) {
+						appendLog(options, L"The restored client could not be restarted automatically.");
+					}
+				}
+			} else {
+				appendLog(options, L"Package update failed safely, but the MSI fallback request could not be persisted. "
+									 + wideFromUtf8(fallbackError));
+			}
+		} else {
+			appendLog(options,
+					  L"Package update failed and no safe verified MSI fallback was available; the native recovery "
+					  L"journal must be resolved first.");
+		}
+	}
+
+	if (updateSucceeded(updateExitCode)) {
+		std::string fallbackCleanupError;
+		if (!Mumble::UpdateHealth::removeInstallerFallbackRequest(
+				packageWorkRoot(options), std::filesystem::path(options.appPath), &fallbackCleanupError)) {
+			appendLog(options, L"Unable to remove a stale MSI fallback request. "
+								   + wideFromUtf8(fallbackCleanupError));
 		}
 	}
 

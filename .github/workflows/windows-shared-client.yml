@@ -58,7 +58,8 @@ jobs:
             '.\scripts\windows\tests\CommunityReleaseCandidate.Tests.ps1',
             '.\scripts\windows\tests\WindowsCommunityReleaseGate.Tests.ps1',
             '.\scripts\windows\tests\WindowsInstallerUpgradeContract.Tests.ps1',
-            '.\scripts\windows\tests\WindowsMsiPayloadContract.Tests.ps1'
+            '.\scripts\windows\tests\WindowsMsiPayloadContract.Tests.ps1',
+            '.\scripts\windows\tests\WindowsSparseUpdatePackage.Tests.ps1'
           )
           $pester = Get-Module -ListAvailable Pester |
             Where-Object Version -eq ([Version]'3.4.0') |

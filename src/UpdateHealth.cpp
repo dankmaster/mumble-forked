@@ -324,6 +324,11 @@ std::filesystem::path healthMarkerPath(const std::filesystem::path &updateRoot, 
 			  + pending.transactionId + ".json");
 }
 
+std::filesystem::path installerFallbackRequestPath(const std::filesystem::path &updateRoot,
+												   const std::filesystem::path &appPath) {
+	return updateRoot / "installer-fallback" / (installationKey(appPath.parent_path()) + ".json");
+}
+
 bool writePendingState(const std::filesystem::path &updateRoot, const PendingUpdate &pending, std::string *error) {
 	if (pending.updaterProtocolVersion != UpdaterProtocolVersion || !validTransactionId(pending.transactionId)
 		|| !safeIdentity(pending.packageIdentity) || !validSha256(pending.expectedExecutableSha256)
@@ -492,6 +497,61 @@ bool removePendingState(const std::filesystem::path &updateRoot, const std::file
 	}
 	if (!std::filesystem::remove(path, filesystemError) || filesystemError) {
 		setError(error, "Unable to remove update-health pending state.");
+		return false;
+	}
+	return true;
+}
+
+bool writeInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+								   const std::string &packageIdentity, const std::uint32_t updateExitCode,
+								   std::string *error) {
+	if (appPath.empty() || !validSha256(packageIdentity) || updateExitCode == 0) {
+		setError(error, "Refusing invalid installer fallback request.");
+		return false;
+	}
+	const json document{
+		{ "schema", InstallerFallbackRequestSchemaVersion },
+		{ "packageIdentity", packageIdentity },
+		{ "updateExitCode", updateExitCode },
+		{ "requestedAtUnixMilliseconds", unixMillisecondsNow() },
+	};
+	return writeJsonAtomic(installerFallbackRequestPath(updateRoot, appPath), document, error);
+}
+
+std::optional< InstallerFallbackRequest >
+	readInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+								 std::string *error) {
+	std::ifstream stream(installerFallbackRequestPath(updateRoot, appPath), std::ios::binary);
+	if (!stream) {
+		return std::nullopt;
+	}
+	try {
+		const json document = json::parse(stream);
+		InstallerFallbackRequest request;
+		request.packageIdentity = document.value("packageIdentity", "");
+		request.updateExitCode =
+			document.value("updateExitCode", static_cast< std::uint32_t >(0));
+		if (document.value("schema", 0u) != InstallerFallbackRequestSchemaVersion
+			|| !validSha256(request.packageIdentity) || request.updateExitCode == 0) {
+			setError(error, "Invalid installer fallback request.");
+			return std::nullopt;
+		}
+		return request;
+	} catch (const std::exception &exception) {
+		setError(error, std::string("Unable to parse installer fallback request: ") + exception.what());
+		return std::nullopt;
+	}
+}
+
+bool removeInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+									std::string *error) {
+	std::error_code filesystemError;
+	const std::filesystem::path path = installerFallbackRequestPath(updateRoot, appPath);
+	if (!std::filesystem::exists(path, filesystemError)) {
+		return !filesystemError;
+	}
+	if (!std::filesystem::remove(path, filesystemError) || filesystemError) {
+		setError(error, "Unable to remove installer fallback request.");
 		return false;
 	}
 	return true;

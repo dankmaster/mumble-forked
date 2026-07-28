@@ -28,6 +28,7 @@ function New-TestPackage {
 		[string] $PackageRoot,
 		[string] $PackagePath,
 		[System.Collections.IDictionary] $Files,
+		[System.Collections.IDictionary] $ManifestFiles = $null,
 		[bool] $RequireHealth,
 		[int] $MinUpdaterVersion = 4,
 		[switch] $OmitMinUpdaterVersion,
@@ -48,9 +49,23 @@ function New-TestPackage {
 		}
 	}
 
-	$manifestFiles = @(
-		Get-ChildItem -LiteralPath (Join-Path $PackageRoot 'payload') -File -Recurse | ForEach-Object {
-			$relative = [System.IO.Path]::GetRelativePath((Join-Path $PackageRoot 'payload'), $_.FullName).Replace('\', '/')
+	$manifestSourceRoot = Join-Path $PackageRoot 'payload'
+	if ($null -ne $ManifestFiles) {
+		$manifestSourceRoot = Join-Path $PackageRoot 'target-manifest'
+		[System.IO.Directory]::CreateDirectory($manifestSourceRoot) | Out-Null
+		foreach ($entry in $ManifestFiles.GetEnumerator()) {
+			$target = Join-Path $manifestSourceRoot $entry.Key
+			if ($entry.Value -is [System.IO.FileInfo]) {
+				[System.IO.Directory]::CreateDirectory((Split-Path -Parent $target)) | Out-Null
+				[System.IO.File]::Copy($entry.Value.FullName, $target, $true)
+			} else {
+				Write-Utf8File -Path $target -Content ([string] $entry.Value)
+			}
+		}
+	}
+	$manifestEntries = @(
+		Get-ChildItem -LiteralPath $manifestSourceRoot -File -Recurse | ForEach-Object {
+			$relative = [System.IO.Path]::GetRelativePath($manifestSourceRoot, $_.FullName).Replace('\', '/')
 			[ordered]@{
 				path = $relative
 				size = $_.Length
@@ -67,7 +82,7 @@ function New-TestPackage {
 			minimumStableRuntimeMilliseconds = 10000
 			timeoutMilliseconds = 45000
 		}
-		files = $manifestFiles
+		files = $manifestEntries
 	}
 	if ($OmitMinUpdaterVersion) {
 		$manifest.Remove('minUpdaterVersion')
@@ -173,6 +188,34 @@ function Invoke-Updater {
 	$arguments += $ExtraArguments
 	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 	$startInfo.FileName = $UpdaterExecutable
+	$startInfo.UseShellExecute = $false
+	$startInfo.CreateNoWindow = $true
+	foreach ($argument in $arguments) {
+		$startInfo.ArgumentList.Add([string] $argument)
+	}
+	$process = [System.Diagnostics.Process]::Start($startInfo)
+	$process.WaitForExit()
+	return $process.ExitCode
+}
+
+function Invoke-UpdaterPrepare {
+	param(
+		[string] $PackagePath,
+		[string] $AppPath,
+		[string] $UpdateRoot
+	)
+	$packageSha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+	$arguments = @(
+		'--package', $PackagePath,
+		'--package-sha256', $packageSha256,
+		'--app', $AppPath,
+		'--working-dir', (Split-Path -Parent $AppPath),
+		'--updater-log', (Join-Path $UpdateRoot 'mumble-updater.log'),
+		'--prepare',
+		'--no-ui'
+	)
+	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+	$startInfo.FileName = $UpdaterPath
 	$startInfo.UseShellExecute = $false
 	$startInfo.CreateNoWindow = $true
 	foreach ($argument in $arguments) {
@@ -399,6 +442,50 @@ try {
 	Set-TestInstalledPackageState -PackagePath $knownGoodPackage -AppRoot $appRoot -AppPath $appPath `
 		-UpdateRoot $updateRoot -Files $knownGoodFiles
 
+	# A sparse archive carries the complete target manifest but only files that
+	# differ from its known base. Prove the real updater prepares it when the
+	# unchanged installed client matches, and fails closed before mutation when
+	# that omitted base file does not match.
+	$sparsePackage = Join-Path $testRoot 'sparse.zip'
+	$sparseTargetFiles = [ordered]@{
+		'mumble.exe' = $knownGoodClientSource
+		'mumble-updater.exe' = 'sparse-updater'
+		'new-managed.dll' = 'sparse-new-file'
+	}
+	$sparsePayloadFiles = [ordered]@{
+		'mumble-updater.exe' = 'sparse-updater'
+		'new-managed.dll' = 'sparse-new-file'
+	}
+	New-TestPackage -PackageRoot (Join-Path $testRoot 'sparse-package') -PackagePath $sparsePackage `
+		-Files $sparsePayloadFiles -ManifestFiles $sparseTargetFiles -RequireHealth $true
+	$sparsePrepareExit = Invoke-UpdaterPrepare -PackagePath $sparsePackage -AppPath $appPath -UpdateRoot $updateRoot
+	if ($sparsePrepareExit -ne 0) {
+		throw "Sparse package preparation failed with exit $sparsePrepareExit."
+	}
+	$sparseIdentity = (Get-FileHash -LiteralPath $sparsePackage -Algorithm SHA256).Hash.ToLowerInvariant()
+	$sparseStageRoot = Join-Path (Join-Path $updateRoot 'prepared-packages') $sparseIdentity
+	if (Test-Path -LiteralPath (Join-Path $sparseStageRoot 'payload\mumble.exe')) {
+		throw 'Sparse package unexpectedly staged an unchanged file that was absent from its payload.'
+	}
+	foreach ($changedPath in @('mumble-updater.exe', 'new-managed.dll')) {
+		if (-not (Test-Path -LiteralPath (Join-Path $sparseStageRoot "payload\$changedPath") -PathType Leaf)) {
+			throw "Sparse package did not stage changed file '$changedPath'."
+		}
+	}
+
+	$knownGoodClientBackup = Join-Path $testRoot 'known-good-client-backup.exe'
+	Copy-Item -LiteralPath $appPath -Destination $knownGoodClientBackup -Force
+	Write-Utf8File -Path $appPath -Content 'locally-diverged-client'
+	$beforeSparseMismatchHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
+	$sparseMismatchExit = Invoke-UpdaterPrepare -PackagePath $sparsePackage -AppPath $appPath -UpdateRoot $updateRoot
+	if ($sparseMismatchExit -eq 0) {
+		throw 'Sparse package unexpectedly prepared against a mismatched omitted base file.'
+	}
+	if ((Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash -ne $beforeSparseMismatchHash) {
+		throw 'Sparse base mismatch mutated the installed application during prepare.'
+	}
+	Copy-Item -LiteralPath $knownGoodClientBackup -Destination $appPath -Force
+
 	# The package digest is an admission credential, not descriptive metadata.
 	# A mismatch must fail before any application or recovery state is mutated.
 	$beforeDigestMismatchHash = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash
@@ -431,6 +518,15 @@ try {
 	Assert-KnownGoodPayload -AppRoot $appRoot -AppPath $appPath -KnownGoodClientSource $knownGoodClientSource
 	if ((Get-TestRecoveryValues).Count -ne 0) {
 		throw 'No-relaunch health rollback left a persistent recovery trigger behind.'
+	}
+	$fallbackRequestPath = Join-Path (Join-Path $updateRoot 'installer-fallback') `
+		("$([MumbleUpdateHealthTestKey]::FromPath($appRoot)).json")
+	$fallbackRequest = Get-Content -LiteralPath $fallbackRequestPath -Raw | ConvertFrom-Json
+	$brokenIdentity = (Get-FileHash -LiteralPath $brokenPackage -Algorithm SHA256).Hash.ToLowerInvariant()
+	if ([int]$fallbackRequest.schema -ne 1 -or
+		[string]$fallbackRequest.packageIdentity -cne $brokenIdentity -or
+		[int64]$fallbackRequest.updateExitCode -le 0) {
+		throw ("Safe native package failure did not persist the exact lazy MSI fallback request. schema={0}, package={1}, expectedPackage={2}, exit={3}" -f $fallbackRequest.schema, $fallbackRequest.packageIdentity, $brokenIdentity, $fallbackRequest.updateExitCode)
 	}
 
 	# Crash immediately after the durable journal is committed. No application

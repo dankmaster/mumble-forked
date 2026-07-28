@@ -150,6 +150,7 @@ jobs:
         id: prepare-assets
         shell: powershell
         env:
+          GH_TOKEN: ${{ github.token }}
           MUMBLE_FORKED_UPDATE_ANNOUNCEMENT: ${{ inputs.update_announcement }}
           MUMBLE_FORKED_RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
@@ -187,6 +188,55 @@ jobs:
             }
 
             return ([string]$commit).Trim()
+          }
+
+          function Get-ReleaseAssetNameFromUrl {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Url
+            )
+
+            $uri = [Uri]$Url
+            $name = [Uri]::UnescapeDataString([IO.Path]::GetFileName($uri.AbsolutePath))
+            if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com' -or
+                $name -notmatch '^[A-Za-z0-9._-]+$') {
+              throw "Previous mumble-forked release contains an unsafe asset URL: $Url"
+            }
+            return $name
+          }
+
+          function Get-VerifiedReleaseAsset {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Tag,
+              [Parameter(Mandatory = $true)]
+              [string]$AssetName,
+              [Parameter(Mandatory = $true)]
+              [string]$ExpectedSha256,
+              [Parameter(Mandatory = $true)]
+              [int64]$ExpectedSize,
+              [Parameter(Mandatory = $true)]
+              [string]$DestinationDirectory
+            )
+
+            if ($AssetName -notmatch '^[A-Za-z0-9._-]+$' -or
+                $ExpectedSha256 -notmatch '^[0-9A-Fa-f]{64}$' -or $ExpectedSize -le 0) {
+              throw "Previous mumble-forked release asset metadata is invalid for '$AssetName'."
+            }
+            New-Item -ItemType Directory -Force -Path $DestinationDirectory | Out-Null
+            $downloadOutput = @(gh release download $Tag --repo $env:GITHUB_REPOSITORY --pattern $AssetName `
+              --dir $DestinationDirectory --clobber 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to download previous mumble-forked asset '$AssetName': $($downloadOutput -join ' ')"
+            }
+            $downloadOutput | ForEach-Object { Write-Host $_ }
+            $path = Join-Path $DestinationDirectory $AssetName
+            $item = Get-Item -LiteralPath $path -ErrorAction Stop
+            $actualSha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+            if ([int64]$item.Length -ne $ExpectedSize -or $actualSha256 -cne $ExpectedSha256.ToUpperInvariant()) {
+              throw "Previous mumble-forked asset '$AssetName' failed its published size/SHA256 check."
+            }
+            return $item.FullName
           }
 
           function New-AutomatedChangelog {
@@ -267,21 +317,110 @@ jobs:
           $hashPath = "$assetPath.sha256"
           Set-Content -LiteralPath $hashPath -Value "$($hash.Hash)  $assetName"
 
+          $baseReleaseRoot = Join-Path $releaseDir 'previous-release'
+          $baseManifestPath = ''
+          $baseManifestSha256 = ''
+          $baseCommit = ''
+          $baseBuild = 0
+          $baseSourceKind = 'none'
+          $releaseViewOutput = @(gh release view "${{ env.MUMBLE_FORKED_RELEASE_TAG }}" `
+            --repo $env:GITHUB_REPOSITORY --json tagName --jq '.tagName' 2>&1)
+          if ($LASTEXITCODE -eq 0) {
+            New-Item -ItemType Directory -Force -Path $baseReleaseRoot | Out-Null
+            gh release download "${{ env.MUMBLE_FORKED_RELEASE_TAG }}" --repo $env:GITHUB_REPOSITORY `
+              --pattern 'mumble-forked-update.json' --dir $baseReleaseRoot --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to download the previous mumble-forked update manifest."
+            }
+            $previousUpdateManifestPath = Join-Path $baseReleaseRoot 'mumble-forked-update.json'
+            $previousUpdate = Get-Content -LiteralPath $previousUpdateManifestPath -Raw | ConvertFrom-Json
+            $previousPackage = $previousUpdate.package
+            if ([int]$previousUpdate.manifestVersion -ne 2 -or
+                [string]$previousUpdate.commit -notmatch '^[0-9a-f]{40}$' -or
+                [int]$previousUpdate.build -le 0 -or
+                [string]$previousPackage.sha256 -notmatch '^[0-9A-Fa-f]{64}$' -or
+                [int64]$previousPackage.size -le 0) {
+              throw "The previous mumble-forked update manifest is not a usable sparse-package base."
+            }
+            $baseCommit = [string]$previousUpdate.commit
+            $baseBuild = [int]$previousUpdate.build
+
+            if ($null -ne $previousPackage.fileManifest) {
+              $fileManifestAsset = $previousPackage.fileManifest
+              $fileManifestName = Get-ReleaseAssetNameFromUrl -Url ([string]$fileManifestAsset.url)
+              $baseManifestPath = Get-VerifiedReleaseAsset `
+                -Tag "${{ env.MUMBLE_FORKED_RELEASE_TAG }}" `
+                -AssetName $fileManifestName `
+                -ExpectedSha256 ([string]$fileManifestAsset.sha256) `
+                -ExpectedSize ([int64]$fileManifestAsset.size) `
+                -DestinationDirectory $baseReleaseRoot
+              $baseSourceKind = 'standalone-file-manifest'
+            } else {
+              # One-time bridge for releases published before the standalone
+              # file manifest existed. Verify the old full package, then read
+              # only its manifest.json. Future releases avoid this 390 MiB
+              # bootstrap download.
+              $previousPackageName = Get-ReleaseAssetNameFromUrl -Url ([string]$previousPackage.url)
+              $previousPackagePath = Get-VerifiedReleaseAsset `
+                -Tag "${{ env.MUMBLE_FORKED_RELEASE_TAG }}" `
+                -AssetName $previousPackageName `
+                -ExpectedSha256 ([string]$previousPackage.sha256) `
+                -ExpectedSize ([int64]$previousPackage.size) `
+                -DestinationDirectory $baseReleaseRoot
+              Add-Type -AssemblyName System.IO.Compression.FileSystem
+              $baseManifestPath = Join-Path $baseReleaseRoot 'mumble-forked-update-files.json'
+              $archive = [System.IO.Compression.ZipFile]::OpenRead($previousPackagePath)
+              try {
+                $manifestEntries = @($archive.Entries | Where-Object { $_.FullName -ceq 'manifest.json' })
+                if ($manifestEntries.Count -ne 1) {
+                  throw "The previous mumble-forked package does not contain exactly one manifest.json."
+                }
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+                  $manifestEntries[0], $baseManifestPath, $true)
+              } finally {
+                $archive.Dispose()
+              }
+              $baseSourceKind = 'verified-legacy-package'
+            }
+
+            $baseFileManifest = Get-Content -LiteralPath $baseManifestPath -Raw | ConvertFrom-Json
+            if ([string]$baseFileManifest.commit -cne $baseCommit -or
+                [int]$baseFileManifest.build -ne $baseBuild) {
+              throw "The previous update file manifest is not bound to the published previous release."
+            }
+            $baseManifestSha256 =
+              (Get-FileHash -LiteralPath $baseManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+
           $packageName = "mumble-forked-$projectVersion.mumble-update"
           $packagePath = Join-Path $releaseDir $packageName
-          .\scripts\windows\create-windows-update-package.ps1 `
-            -StageRoot ".\build-shared-webengine\shared-webengine-stage" `
-            -OutputPath $packagePath `
-            -Version $projectVersion `
-            -Build ([int]$buildNumber) `
-            -Commit $currentCommit `
-            -RequireUpdaterRuntime `
-            -RequireGStreamerRuntime `
-            -Validate
+          $packageMetadataPath = Join-Path $releaseDir 'mumble-forked-update-package.json'
+          $fileManifestName = 'mumble-forked-update-files.json'
+          $fileManifestPath = Join-Path $releaseDir $fileManifestName
+          $packageArguments = @{
+            StageRoot = ".\build-shared-webengine\shared-webengine-stage"
+            OutputPath = $packagePath
+            Version = $projectVersion
+            Build = [int]$buildNumber
+            Commit = $currentCommit
+            ManifestOutPath = $packageMetadataPath
+            TargetManifestOutPath = $fileManifestPath
+            RequireUpdaterRuntime = $true
+            RequireGStreamerRuntime = $true
+            Validate = $true
+          }
+          if (-not [string]::IsNullOrWhiteSpace($baseManifestPath)) {
+            $packageArguments.BaseManifestPath = $baseManifestPath
+            $packageArguments.ExpectedBaseManifestSha256 = $baseManifestSha256
+          }
+          .\scripts\windows\create-windows-update-package.ps1 @packageArguments
+          $packageMetadata = Get-Content -LiteralPath $packageMetadataPath -Raw | ConvertFrom-Json
           $packageHash = Get-FileHash -LiteralPath $packagePath -Algorithm SHA256
           $packageHashPath = "$packagePath.sha256"
           Set-Content -LiteralPath $packageHashPath -Value "$($packageHash.Hash)  $packageName"
           $packageSize = (Get-Item -LiteralPath $packagePath).Length
+          $fileManifestHash = Get-FileHash -LiteralPath $fileManifestPath -Algorithm SHA256
+          $fileManifestSize = (Get-Item -LiteralPath $fileManifestPath).Length
 
           $notesPath = Join-Path $releaseDir "release-notes.md"
           $changelogPath = Join-Path $releaseDir "changelog.md"
@@ -291,6 +430,7 @@ jobs:
           $releaseUrl = "https://github.com/${{ github.repository }}/releases/tag/${{ env.MUMBLE_FORKED_RELEASE_TAG }}"
           $installerUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.MUMBLE_FORKED_RELEASE_TAG }}/$assetName"
           $packageUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.MUMBLE_FORKED_RELEASE_TAG }}/$packageName"
+          $fileManifestUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.MUMBLE_FORKED_RELEASE_TAG }}/$fileManifestName"
           $previousCommit = Get-PreviousForkedReleaseCommit -Tag "${{ env.MUMBLE_FORKED_RELEASE_TAG }}"
           $changelog = New-AutomatedChangelog -PreviousCommit $previousCommit -CurrentCommit $currentCommit -Repository "${{ github.repository }}"
           [System.IO.File]::WriteAllText($changelogPath, "$changelog`n", [System.Text.UTF8Encoding]::new($false))
@@ -324,6 +464,18 @@ jobs:
               # fields above. Current updater-v4 clients select the package.
               minUpdaterVersion = 3
               applyMode = "replace-staged-payload"
+              payloadMode = [string]$packageMetadata.payloadMode
+              payloadFileCount = [int]$packageMetadata.payloadFileCount
+              targetFileCount = [int]$packageMetadata.targetFileCount
+              removedFileCount = [int]$packageMetadata.removedFileCount
+              baseCommit = [string]$packageMetadata.baseCommit
+              baseBuild = [int]$packageMetadata.baseBuild
+              baseManifestSha256 = [string]$packageMetadata.baseManifestSha256
+              fileManifest = [ordered]@{
+                url = $fileManifestUrl
+                sha256 = $fileManifestHash.Hash
+                size = [int64]$fileManifestSize
+              }
             }
             preferredUpdate = "package"
             publishedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -358,7 +510,11 @@ jobs:
           $notesLines.Add("- SHA256: $($hash.Hash)")
           $notesLines.Add("- Update package: $packageName")
           $notesLines.Add("- Update package SHA256: $($packageHash.Hash)")
-          $notesLines.Add("- Preferred update path: package for current clients, verified MSI fallback for updater-v2 clients")
+          $notesLines.Add("- Update package payload: $($packageMetadata.payloadFileCount)/$($packageMetadata.targetFileCount) files ($($packageMetadata.payloadMode))")
+          if (-not [string]::IsNullOrWhiteSpace($baseCommit)) {
+            $notesLines.Add("- Sparse base: build $baseBuild, commit $baseCommit ($baseSourceKind)")
+          }
+          $notesLines.Add("- Preferred update path: changed-file package; verified MSI is downloaded only after package failure by current clients")
           $notesLines.Add("")
           $notesLines.Add("Windows may show a SmartScreen warning because this is not an official signed public release.")
           [System.IO.File]::WriteAllLines($notesPath, $notesLines, [System.Text.UTF8Encoding]::new($false))
@@ -377,7 +533,8 @@ jobs:
             "",
             "Update metadata:",
             "preferredUpdate: package",
-            "updater-v2 fallback: verified MSI"
+            "older-client fallback: verified MSI",
+            "package payload: $($packageMetadata.payloadFileCount)/$($packageMetadata.targetFileCount) files ($($packageMetadata.payloadMode))"
           )
           [System.IO.File]::WriteAllLines($previewPath, $previewLines, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Updater announcement preview:"
@@ -387,6 +544,7 @@ jobs:
           "hash_path=$hashPath" >> $env:GITHUB_OUTPUT
           "package_path=$packagePath" >> $env:GITHUB_OUTPUT
           "package_hash_path=$packageHashPath" >> $env:GITHUB_OUTPUT
+          "file_manifest_path=$fileManifestPath" >> $env:GITHUB_OUTPUT
           "changelog_path=$changelogPath" >> $env:GITHUB_OUTPUT
           "manifest_path=$manifestPath" >> $env:GITHUB_OUTPUT
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
@@ -437,6 +595,7 @@ jobs:
             "${{ steps.prepare-assets.outputs.hash_path }}" `
             "${{ steps.prepare-assets.outputs.package_path }}" `
             "${{ steps.prepare-assets.outputs.package_hash_path }}" `
+            "${{ steps.prepare-assets.outputs.file_manifest_path }}" `
             "${{ steps.prepare-assets.outputs.changelog_path }}" `
             "${{ steps.prepare-assets.outputs.manifest_path }}" `
             --repo $env:GITHUB_REPOSITORY `
@@ -454,6 +613,7 @@ jobs:
             build-shared-webengine/mumble-forked-release/mumble-forked-*.msi.sha256
             build-shared-webengine/mumble-forked-release/mumble-forked-*.mumble-update
             build-shared-webengine/mumble-forked-release/mumble-forked-*.mumble-update.sha256
+            build-shared-webengine/mumble-forked-release/mumble-forked-update-files.json
             build-shared-webengine/mumble-forked-release/changelog.md
             build-shared-webengine/mumble-forked-release/mumble-forked-update.json
             build-shared-webengine/mumble-forked-release/release-notes.md

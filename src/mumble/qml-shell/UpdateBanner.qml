@@ -15,6 +15,7 @@ Rectangle {
                                        : tone === "success" ? Theme.success
                                        : Theme.accent
     readonly property var actions: state.actions || []
+	readonly property string closeActionId: String(state.closeActionId || "")
     readonly property bool compactLayout: width < 560
     readonly property bool actionsWrapped: actionFlow.implicitHeight > Theme.controlHeight + 1
     readonly property real contentAvailableWidth: Math.max(1,
@@ -127,5 +128,17 @@ Rectangle {
                 }
             }
         }
+
+		ModernIconButton {
+			id: closeButton
+			objectName: "updateBannerCloseButton"
+			Layout.alignment: Qt.AlignTop | Qt.AlignRight
+			visible: root.closeActionId.length > 0
+			dense: true
+			iconName: "close"
+			text: qsTr("Close update notification")
+			Accessible.description: String(root.state.title || qsTr("Update"))
+			onClicked: root.actionRequested(root.closeActionId)
+		}
     }
 }

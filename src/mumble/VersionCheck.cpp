@@ -9,6 +9,7 @@
 #include "MainWindow.h"
 #include "NetworkConfig.h"
 #include "UiTheme.h"
+#include "UpdateHealth.h"
 #include "Version.h"
 #include "Global.h"
 
@@ -310,7 +311,27 @@ bool canUsePackageUpdate(const QJsonObject &info) {
 #endif
 }
 
+bool installerFallbackWasRequested(const QJsonObject &info) {
+#ifdef Q_OS_WIN
+	if (!canUseInstallerUpdate(info)) {
+		return false;
+	}
+	const std::filesystem::path updateRoot(
+		Global::get().qdBasePath.filePath(QStringLiteral("Updates")).toStdWString());
+	const std::filesystem::path appPath(QCoreApplication::applicationFilePath().toStdWString());
+	std::string error;
+	const auto request = Mumble::UpdateHealth::readInstallerFallbackRequest(updateRoot, appPath, &error);
+	return request && request->packageIdentity == packageExpectedSha256(info).toStdString();
+#else
+	Q_UNUSED(info);
+	return false;
+#endif
+}
+
 QString selectedUpdateMode(const QJsonObject &info) {
+	if (installerFallbackWasRequested(info)) {
+		return QStringLiteral("installer");
+	}
 	if (canUsePackageUpdate(info)) {
 		return QStringLiteral("package");
 	}
@@ -866,6 +887,7 @@ private:
 	bool m_cancelled    = false;
 	bool m_downloadingFallbackInstaller = false;
 	bool m_downloadingRecoveryInstaller = false;
+	bool m_fallbackAttempted = false;
 	int m_redirectCount = 0;
 	std::function< void(const QString &) > m_readyCallback;
 	std::function< void(const QString &) > m_failureCallback;
@@ -1034,32 +1056,39 @@ private:
 			return;
 		}
 		if (m_downloadingFallbackInstaller) {
-			m_fallbackInstallerPath = m_targetPath;
+			m_primaryUpdatePath = m_targetPath;
+			m_fallbackInstallerPath.clear();
 			prepareRecoveryOrFinish();
 			return;
 		}
 
 		m_primaryUpdatePath = m_targetPath;
-		if (m_updateMode == QLatin1String("package") && canUseInstallerUpdate(m_info)) {
-			const QString fallbackPath = updateAssetPathForMode(m_info, QStringLiteral("installer"));
-			const QString fallbackSha256 = installerExpectedSha256(m_info);
-			const qint64 fallbackSize    = installerExpectedSize(m_info);
-			if (fileMatchesSha256(fallbackPath, fallbackSha256, fallbackSize)) {
-				m_fallbackInstallerPath = fallbackPath;
-				prepareRecoveryOrFinish();
-				return;
-			}
-
-			beginDownload(installerDownloadUrl(m_info), fallbackSha256, fallbackSize, fallbackPath, true);
-			return;
-		}
-
 		prepareRecoveryOrFinish();
 	}
 
+	void beginLazyInstallerFallback() {
+		m_fallbackAttempted = true;
+		m_updateMode        = QStringLiteral("installer");
+		const QString fallbackPath   = updateAssetPathForMode(m_info, QStringLiteral("installer"));
+		const QString fallbackSha256 = installerExpectedSha256(m_info);
+		const qint64 fallbackSize    = installerExpectedSize(m_info);
+		if (fileMatchesSha256(fallbackPath, fallbackSha256, fallbackSize)) {
+			m_targetPath        = fallbackPath;
+			m_primaryUpdatePath = fallbackPath;
+			m_fallbackInstallerPath.clear();
+			prepareRecoveryOrFinish();
+			return;
+		}
+		beginDownload(installerDownloadUrl(m_info), fallbackSha256, fallbackSize, fallbackPath, true);
+	}
+
 	void prepareRecoveryOrFinish() {
-		if (m_updateMode != QLatin1String("package")
-			|| jsonInt(packageObject(m_info), QStringLiteral("minUpdaterVersion"), -1) < 4) {
+		const bool protocolPackage =
+			m_updateMode == QLatin1String("package")
+			&& jsonInt(packageObject(m_info), QStringLiteral("minUpdaterVersion"), -1) >= 4;
+		const bool qualifiedInstaller =
+			m_updateMode == QLatin1String("installer") && canUseRecoveryInstaller(m_info);
+		if (!protocolPackage && !qualifiedInstaller) {
 			preparePackageOrFinish();
 			return;
 		}
@@ -1104,10 +1133,13 @@ private:
 		m_prepareProcess->setArguments(arguments);
 		m_prepareProcess->setWorkingDirectory(updateDir.absolutePath());
 		connect(m_prepareProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-			if (m_prepareProcess) {
-				m_prepareProcess->deleteLater();
-				m_prepareProcess = nullptr;
+			QProcess *process = m_prepareProcess;
+			m_prepareProcess  = nullptr;
+			if (!process) {
+				return;
 			}
+			disconnect(process, nullptr, this, nullptr);
+			process->deleteLater();
 			showFailure(VersionCheck::tr("Mumble could not start the update prepare step."));
 		});
 		connect(m_prepareProcess, qOverload< int, QProcess::ExitStatus >(&QProcess::finished), this,
@@ -1148,6 +1180,11 @@ private:
 		if (m_file) {
 			m_file->cancelWriting();
 			m_file.reset();
+		}
+		if (m_updateMode == QLatin1String("package") && !m_fallbackAttempted
+			&& canUseInstallerUpdate(m_info)) {
+			beginLazyInstallerFallback();
+			return;
 		}
 		if (m_failureCallback) {
 			m_failureCallback(message);
@@ -1348,7 +1385,8 @@ QString VersionCheck::preparedFallbackInstallerPathForInfo(const QJsonObject &in
 	if (selectedUpdateMode(info) != QLatin1String("package") || !canUseInstallerUpdate(info)) {
 		return {};
 	}
-	return updateAssetPathForMode(info, QStringLiteral("installer"));
+	const QString path = updateAssetPathForMode(info, QStringLiteral("installer"));
+	return fileMatchesSha256(path, installerExpectedSha256(info), installerExpectedSize(info)) ? path : QString();
 }
 
 QString VersionCheck::preparedRecoveryInstallerPathForInfo(const QJsonObject &info) {

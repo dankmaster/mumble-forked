@@ -24,6 +24,12 @@ Param(
 
 	[string] $ManifestOutPath = "",
 
+	[string] $TargetManifestOutPath = "",
+
+	[string] $BaseManifestPath = "",
+
+	[string] $ExpectedBaseManifestSha256 = "",
+
 	[switch] $RequireUpdaterRuntime,
 
 	[switch] $RequireGStreamerRuntime,
@@ -76,6 +82,50 @@ function Assert-SafePackagePath {
 	$parts = $RelativePath -split '/'
 	if ($parts -contains '..') {
 		throw "Package manifest contains a parent traversal path: $RelativePath"
+	}
+}
+
+function Read-UpdateFileManifest {
+	Param(
+		[Parameter(Mandatory = $true)]
+		[string] $Path,
+
+		[Parameter(Mandatory = $true)]
+		[string] $Context
+	)
+
+	$manifest = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+	if ([int]$manifest.manifestVersion -ne 1 -or [string]$manifest.format -cne 'mumble-update-v1' -or
+		[string]$manifest.packageId -cne $PackageId -or @($manifest.files).Count -eq 0) {
+		throw "$Context is not a supported mumble-update-v1 file manifest."
+	}
+
+	$records = [System.Collections.Generic.Dictionary[string,object]]::new(
+		[System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($record in @($manifest.files)) {
+		$relativePath = [string]$record.path
+		Assert-SafePackagePath -RelativePath $relativePath
+		if ($relativePath.Contains('\') -or $relativePath.StartsWith('/') -or
+			@($relativePath.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0) {
+			throw "$Context contains a non-canonical path: $relativePath"
+		}
+		$sha256 = ([string]$record.sha256).Trim().ToLowerInvariant()
+		if ($sha256 -notmatch '^[0-9a-f]{64}$' -or [int64]$record.size -lt 0) {
+			throw "$Context contains an invalid record for '$relativePath'."
+		}
+		if ($records.ContainsKey($relativePath)) {
+			throw "$Context contains duplicate path '$relativePath'."
+		}
+		$records.Add($relativePath, [ordered]@{
+			path = $relativePath
+			size = [int64]$record.size
+			sha256 = $sha256
+		})
+	}
+
+	return [pscustomobject]@{
+		Manifest = $manifest
+		Records = $records
 	}
 }
 
@@ -442,22 +492,65 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
 	New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 }
 
+$baseManifest = $null
+$baseRecords = [System.Collections.Generic.Dictionary[string,object]]::new(
+	[System.StringComparer]::OrdinalIgnoreCase)
+$baseManifestHash = ""
+if (-not [string]::IsNullOrWhiteSpace($BaseManifestPath)) {
+	if ([string]::IsNullOrWhiteSpace($ExpectedBaseManifestSha256) -or
+		$ExpectedBaseManifestSha256.Trim() -notmatch '^[0-9A-Fa-f]{64}$') {
+		throw "ExpectedBaseManifestSha256 is required when BaseManifestPath is used."
+	}
+	$baseManifestResolved = (Resolve-Path -LiteralPath $BaseManifestPath).Path
+	$baseManifestHash = (Get-FileHash -LiteralPath $baseManifestResolved -Algorithm SHA256).Hash.ToLowerInvariant()
+	if ($baseManifestHash -cne $ExpectedBaseManifestSha256.Trim().ToLowerInvariant()) {
+		throw "Base update file manifest does not match ExpectedBaseManifestSha256."
+	}
+	$baseRead = Read-UpdateFileManifest -Path $baseManifestResolved -Context 'Base update file manifest'
+	$baseManifest = $baseRead.Manifest
+	$baseRecords = $baseRead.Records
+}
+
 $packageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mumble-update-package-" + [System.Guid]::NewGuid().ToString("N"))
 $payloadRoot = Join-Path $packageRoot "payload"
 
 try {
 	New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
-	Copy-Item -Path (Join-Path $stageRootResolved '*') -Destination $payloadRoot -Recurse -Force
 
-	$files = Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
-		$relativePath = Get-RelativePackagePath -Root $payloadRoot -Path $_.FullName
+	$files = @(Get-ChildItem -LiteralPath $stageRootResolved -Recurse -File | Sort-Object FullName | ForEach-Object {
+		$relativePath = Get-RelativePackagePath -Root $stageRootResolved -Path $_.FullName
 		Assert-SafePackagePath -RelativePath $relativePath
 		[ordered] @{
 			path = $relativePath
 			size = [int64] $_.Length
 			sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 		}
+	})
+	$targetRecords = [System.Collections.Generic.Dictionary[string,object]]::new(
+		[System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($record in $files) {
+		$targetRecords.Add([string]$record.path, $record)
 	}
+	$payloadFiles = @($files | Where-Object {
+		$relativePath = [string]$_.path
+		if (-not $baseRecords.ContainsKey($relativePath)) {
+			return $true
+		}
+		$baseRecord = $baseRecords[$relativePath]
+		return [int64]$baseRecord.size -ne [int64]$_.size -or
+			[string]$baseRecord.sha256 -cne [string]$_.sha256
+	})
+	foreach ($record in $payloadFiles) {
+		$relativeNativePath = ([string]$record.path).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+		$sourcePath = Join-Path $stageRootResolved $relativeNativePath
+		$destinationPath = Join-Path $payloadRoot $relativeNativePath
+		$destinationDirectory = Split-Path -Parent $destinationPath
+		if (-not [string]::IsNullOrWhiteSpace($destinationDirectory)) {
+			New-Item -ItemType Directory -Force -Path $destinationDirectory | Out-Null
+		}
+		Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+	}
+	$removedFileCount = @($baseRecords.Keys | Where-Object { -not $targetRecords.ContainsKey($_) }).Count
 
 	$manifest = [ordered] @{
 		manifestVersion = 1
@@ -478,7 +571,17 @@ try {
 	}
 
 	$manifestPath = Join-Path $packageRoot "manifest.json"
-	$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+	$manifestJson = $manifest | ConvertTo-Json -Depth 8
+	[System.IO.File]::WriteAllText($manifestPath, "$manifestJson`n", [System.Text.UTF8Encoding]::new($false))
+	if (-not [string]::IsNullOrWhiteSpace($TargetManifestOutPath)) {
+		$targetManifestFullPath = [System.IO.Path]::GetFullPath($TargetManifestOutPath)
+		$targetManifestDirectory = Split-Path -Parent $targetManifestFullPath
+		if (-not [string]::IsNullOrWhiteSpace($targetManifestDirectory)) {
+			New-Item -ItemType Directory -Force -Path $targetManifestDirectory | Out-Null
+		}
+		[System.IO.File]::WriteAllText($targetManifestFullPath, "$manifestJson`n",
+			[System.Text.UTF8Encoding]::new($false))
+	}
 
 	if (Test-Path -LiteralPath $outputFullPath) {
 		Remove-Item -LiteralPath $outputFullPath -Force
@@ -496,7 +599,24 @@ try {
 	}
 
 	if ($Validate) {
-		Test-PackageArchive -PackagePath $outputFullPath
+		$validationArguments = @{
+			PackagePath = $outputFullPath
+			ExpectedCommit = $Commit
+			ExpectedBuild = $Build
+			ExpectedVersion = $Version
+			TargetPayloadPath = $stageRootResolved
+		}
+		if (-not [string]::IsNullOrWhiteSpace($BaseManifestPath)) {
+			$validationArguments.BaseManifestPath = $baseManifestResolved
+			$validationArguments.ExpectedBaseManifestSha256 = $baseManifestHash
+		}
+		if ($RequireUpdaterRuntime) {
+			$validationArguments.RequireUpdaterRuntime = $true
+		}
+		if ($RequireGStreamerRuntime) {
+			$validationArguments.RequireGStreamerRuntime = $true
+		}
+		& (Join-Path $PSScriptRoot 'assert-windows-update-package.ps1') @validationArguments
 	}
 
 	$packageItem = Get-Item -LiteralPath $outputFullPath
@@ -515,12 +635,20 @@ try {
 			size = [int64] $packageItem.Length
 			minUpdaterVersion = $MinUpdaterVersion
 			applyMode = $ApplyMode
+			payloadMode = if ($null -eq $baseManifest) { 'full' } else { 'sparse' }
+			payloadFileCount = $payloadFiles.Count
+			targetFileCount = $files.Count
+			removedFileCount = $removedFileCount
+			baseCommit = if ($null -eq $baseManifest) { '' } else { [string]$baseManifest.commit }
+			baseBuild = if ($null -eq $baseManifest) { 0 } else { [int]$baseManifest.build }
+			baseManifestSha256 = $baseManifestHash
 		} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $metadataFullPath -Encoding utf8
 	}
 
 	Write-Host "Created $outputFullPath"
 	Write-Host "SHA256 $packageHash"
 	Write-Host "Size $($packageItem.Length)"
+	Write-Host "Payload $($payloadFiles.Count)/$($files.Count) files; removed from base $removedFileCount"
 } finally {
 	if (Test-Path -LiteralPath $packageRoot) {
 		Remove-Item -LiteralPath $packageRoot -Recurse -Force

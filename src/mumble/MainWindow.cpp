@@ -15726,7 +15726,8 @@ namespace {
 			return;
 		}
 		Global::get().s.qsForkUpdateSnoozedSignature = signature;
-		Global::get().s.iForkUpdateSnoozedUntilMs = QDateTime::currentMSecsSinceEpoch() + 24 * 60 * 60 * 1000;
+		Global::get().s.iForkUpdateSnoozedUntilMs =
+			QDateTime::currentMSecsSinceEpoch() + 7LL * 24 * 60 * 60 * 1000;
 		Global::get().s.save();
 	}
 
@@ -28034,13 +28035,19 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 			openModernVersionCheckResultDialog(m_modernVersionCheckInfo, true);
 		}
 		return true;
-	} else if (actionId == QLatin1String("app.update.dismiss")) {
+	} else if (actionId == QLatin1String("app.update.remind")) {
 		const QString phase = m_modernUpdateBannerState.value(QStringLiteral("phase")).toString();
 		if (!m_modernUpdateDownloadInProgress
-			&& phase != QLatin1String("handoff")) {
-			if (phase == QLatin1String("available") || phase == QLatin1String("manual")) {
-				snoozeModernUpdate(m_modernVersionCheckInfo);
-			}
+			&& (phase == QLatin1String("available") || phase == QLatin1String("manual"))) {
+			snoozeModernUpdate(m_modernVersionCheckInfo);
+			clearModernUpdateBannerState();
+		}
+		return true;
+	} else if (actionId == QLatin1String("app.update.dismiss")) {
+		const QString phase = m_modernUpdateBannerState.value(QStringLiteral("phase")).toString();
+		if (!m_modernUpdateDownloadInProgress && phase != QLatin1String("handoff")) {
+			// Closing is intentionally session-only. The next automatic check
+			// shows the update again unless the user chose the weekly reminder.
 			clearModernUpdateBannerState();
 		}
 		return true;
@@ -28189,7 +28196,7 @@ void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details"),
 												   QStringLiteral("accent")));
 	}
-	actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Remind tomorrow")));
+	actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.remind"), tr("Remind me next week")));
 
 	QVariantMap banner;
 	banner.insert(QStringLiteral("visible"), true);
@@ -28198,6 +28205,7 @@ void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
 	banner.insert(QStringLiteral("title"), tr("Update available"));
 	banner.insert(QStringLiteral("detail"), tr("%1 Latest: %2")
 											.arg(modernUpdateAnnouncementText(info), modernUpdateLatestLabel(info)));
+	banner.insert(QStringLiteral("closeActionId"), QStringLiteral("app.update.dismiss"));
 	banner.insert(QStringLiteral("actions"), actions);
 	setModernUpdateBannerState(banner);
 }
@@ -28307,7 +28315,6 @@ bool MainWindow::startModernForkUpdateDownload() {
 		return true;
 	}
 
-	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
 	clearModernUpdateSnooze(m_modernVersionCheckInfo);
 	m_modernUpdateDownloadInProgress = true;
 	m_modernPreparedUpdateInstallerPath.clear();
@@ -28331,11 +28338,17 @@ bool MainWindow::startModernForkUpdateDownload() {
 
 	VersionCheck::downloadUpdateFromInfo(
 		m_modernVersionCheckInfo, nullptr, false,
-		[this, updateMode](const QString &installerPath) {
+		[this](const QString &installerPath) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath = installerPath;
+			const QString preparedUpdateMode =
+				installerPath.endsWith(QLatin1String(".mumble-update"), Qt::CaseInsensitive)
+					? QStringLiteral("package")
+					: QStringLiteral("installer");
 			m_modernPreparedFallbackInstallerPath =
-				VersionCheck::preparedFallbackInstallerPathForInfo(m_modernVersionCheckInfo);
+				preparedUpdateMode == QLatin1String("package")
+					? VersionCheck::preparedFallbackInstallerPathForInfo(m_modernVersionCheckInfo)
+					: QString();
 			m_modernUpdateLastProgressPublishMs = 0;
 			m_modernUpdateLastProgressPercent = 100;
 
@@ -28345,15 +28358,15 @@ bool MainWindow::startModernForkUpdateDownload() {
 			readyBanner.insert(QStringLiteral("tone"), QStringLiteral("success"));
 			readyBanner.insert(QStringLiteral("title"), tr("Update ready to install"));
 			const bool hasMsiFallback =
-				updateMode == QLatin1String("package")
+				preparedUpdateMode == QLatin1String("package")
 				&& VersionCheck::canLaunchPreparedUpdate(m_modernPreparedFallbackInstallerPath,
 														 QStringLiteral("installer"));
 			readyBanner.insert(
 				QStringLiteral("detail"),
-				updateMode == QLatin1String("package")
+				preparedUpdateMode == QLatin1String("package")
 					? (hasMsiFallback
 						   ? tr("Mumble will close, mumble-updater will apply the package, use the MSI only if the package fails, and then reopen to restore this server and chat.")
-						   : tr("Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat."))
+						   : tr("Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat. If the package fails safely, the restored client will use the MSI on the next attempt."))
 					: tr("Mumble will close, mumble-updater will run the installer, and Mumble will reopen to restore this server and chat."));
 			readyBanner.insert(QStringLiteral("progressVisible"), true);
 			readyBanner.insert(QStringLiteral("progressIndeterminate"), false);
@@ -28425,7 +28438,10 @@ bool MainWindow::startModernForkUpdateDownload(const QJsonObject &info) {
 }
 
 bool MainWindow::restartForPreparedForkUpdate() {
-	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
+	const QString updateMode =
+		m_modernPreparedUpdateInstallerPath.endsWith(QLatin1String(".mumble-update"), Qt::CaseInsensitive)
+			? QStringLiteral("package")
+			: QStringLiteral("installer");
 	if (!VersionCheck::canLaunchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode)) {
 		m_modernPreparedFallbackInstallerPath.clear();
 		QVariantMap banner;
@@ -28457,9 +28473,13 @@ bool MainWindow::restartForPreparedForkUpdate() {
 	setModernUpdateBannerState(handoffBanner);
 
 	prepareUpdateResumeState();
+	const QString expectedUpdateSha256 =
+		updateMode == QLatin1String("package")
+			? VersionCheck::expectedUpdateSha256ForInfo(m_modernVersionCheckInfo)
+			: VersionCheck::expectedInstallerSha256ForInfo(m_modernVersionCheckInfo);
 	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode, true, true,
 											m_modernPreparedFallbackInstallerPath,
-											VersionCheck::expectedUpdateSha256ForInfo(m_modernVersionCheckInfo),
+											expectedUpdateSha256,
 											VersionCheck::expectedInstallerSha256ForInfo(m_modernVersionCheckInfo),
 											VersionCheck::preparedRecoveryInstallerPathForInfo(m_modernVersionCheckInfo),
 											VersionCheck::expectedRecoveryInstallerSha256ForInfo(m_modernVersionCheckInfo),

@@ -75,6 +75,8 @@ private slots:
 	void sessionAppliesTypedConnectionState();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
+	void updateReminderIsWeeklyAndClosingIsSessionOnly();
+	void updateInstallerFallbackIsLazyAndPackageBound();
 	void sessionPublishesTypedStonksState();
 	void sessionPublishesSemanticMenus();
 	void commandsRouteTypedAppActions();
@@ -3451,6 +3453,116 @@ void TestQmlClientModels::sessionPublishesTypedUpdateBanner() {
 	session.setUpdateBanner({});
 	QCOMPARE(spy.count(), 2);
 	QVERIFY(session.updateBanner().isEmpty());
+}
+
+void TestQmlClientModels::updateReminderIsWeeklyAndClosingIsSessionOnly() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile mainWindowFile(mainWindowPath);
+	QVERIFY(mainWindowFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(mainWindowFile.readAll());
+
+	const qsizetype snoozeStart = source.indexOf(QStringLiteral("void snoozeModernUpdate("));
+	const qsizetype snoozeEnd   = source.indexOf(QStringLiteral("\n\tQString repairedUtf8Mojibake"), snoozeStart);
+	QVERIFY(snoozeStart >= 0);
+	QVERIFY(snoozeEnd > snoozeStart);
+	const QString snoozeBody = source.mid(snoozeStart, snoozeEnd - snoozeStart);
+	QVERIFY(snoozeBody.contains(QStringLiteral("7LL * 24 * 60 * 60 * 1000")));
+
+	const qsizetype availableStart =
+		source.indexOf(QStringLiteral("void MainWindow::showModernForkUpdateAvailableBanner"));
+	const qsizetype availableEnd =
+		source.indexOf(QStringLiteral("void MainWindow::showModernForkUpdateDownloadProgress"), availableStart);
+	QVERIFY(availableStart >= 0);
+	QVERIFY(availableEnd > availableStart);
+	const QString availableBody = source.mid(availableStart, availableEnd - availableStart);
+	QVERIFY(availableBody.contains(QStringLiteral("app.update.remind")));
+	QVERIFY(availableBody.contains(QStringLiteral("Remind me next week")));
+	QVERIFY(availableBody.contains(QStringLiteral("closeActionId")));
+	QVERIFY(availableBody.contains(QStringLiteral("app.update.dismiss")));
+	QVERIFY(!availableBody.contains(QStringLiteral("Remind tomorrow")));
+
+	const qsizetype remindStart =
+		source.indexOf(QStringLiteral("actionId == QLatin1String(\"app.update.remind\")"));
+	const qsizetype dismissStart =
+		source.indexOf(QStringLiteral("actionId == QLatin1String(\"app.update.dismiss\")"), remindStart);
+	const qsizetype dismissEnd =
+		source.indexOf(QStringLiteral("actionId == QLatin1String(\"motd.show\")"), dismissStart);
+	QVERIFY(remindStart >= 0);
+	QVERIFY(dismissStart > remindStart);
+	QVERIFY(dismissEnd > dismissStart);
+	const QString remindBody = source.mid(remindStart, dismissStart - remindStart);
+	const QString dismissBody = source.mid(dismissStart, dismissEnd - dismissStart);
+	QVERIFY(remindBody.contains(QStringLiteral("snoozeModernUpdate(m_modernVersionCheckInfo)")));
+	QVERIFY(remindBody.contains(QStringLiteral("clearModernUpdateBannerState()")));
+	QVERIFY(!dismissBody.contains(QStringLiteral("snoozeModernUpdate")));
+	QVERIFY(dismissBody.contains(QStringLiteral("clearModernUpdateBannerState()")));
+}
+
+void TestQmlClientModels::updateInstallerFallbackIsLazyAndPackageBound() {
+	const QString versionCheckPath = QFINDTESTDATA("../../mumble/VersionCheck.cpp");
+	QVERIFY2(!versionCheckPath.isEmpty(), "VersionCheck.cpp test data was not found");
+	QFile versionCheckFile(versionCheckPath);
+	QVERIFY(versionCheckFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(versionCheckFile.readAll());
+
+	const qsizetype requestStart =
+		source.indexOf(QStringLiteral("bool installerFallbackWasRequested(const QJsonObject &info)"));
+	const qsizetype selectedModeStart =
+		source.indexOf(QStringLiteral("QString selectedUpdateMode(const QJsonObject &info)"), requestStart);
+	QVERIFY(requestStart >= 0);
+	QVERIFY(selectedModeStart > requestStart);
+	const QString requestBody = source.mid(requestStart, selectedModeStart - requestStart);
+	QVERIFY(requestBody.contains(QStringLiteral("readInstallerFallbackRequest")));
+	QVERIFY(requestBody.contains(
+		QStringLiteral("request->packageIdentity == packageExpectedSha256(info).toStdString()")));
+
+	const qsizetype selectedModeEnd = source.indexOf(QStringLiteral("\nQUrl selectedDownloadUrl"), selectedModeStart);
+	QVERIFY(selectedModeEnd > selectedModeStart);
+	const QString selectedModeBody = source.mid(selectedModeStart, selectedModeEnd - selectedModeStart);
+	QVERIFY(selectedModeBody.indexOf(QStringLiteral("installerFallbackWasRequested(info)"))
+			< selectedModeBody.indexOf(QStringLiteral("canUsePackageUpdate(info)")));
+	QVERIFY(selectedModeBody.contains(QStringLiteral("return QStringLiteral(\"installer\")")));
+
+	const qsizetype downloadedStart = source.indexOf(QStringLiteral("void finishDownloadedAsset()"));
+	const qsizetype lazyStart = source.indexOf(QStringLiteral("void beginLazyInstallerFallback()"), downloadedStart);
+	const qsizetype recoveryStart = source.indexOf(QStringLiteral("void prepareRecoveryOrFinish()"), lazyStart);
+	QVERIFY(downloadedStart >= 0);
+	QVERIFY(lazyStart > downloadedStart);
+	QVERIFY(recoveryStart > lazyStart);
+	const QString downloadedBody = source.mid(downloadedStart, lazyStart - downloadedStart);
+	QVERIFY(downloadedBody.contains(QStringLiteral("m_downloadingFallbackInstaller")));
+	QVERIFY(downloadedBody.contains(QStringLiteral("prepareRecoveryOrFinish()")));
+	const QString lazyBody = source.mid(lazyStart, recoveryStart - lazyStart);
+	QVERIFY(lazyBody.contains(QStringLiteral("installerDownloadUrl(m_info)")));
+	QVERIFY(lazyBody.contains(QStringLiteral("installerExpectedSha256(m_info)")));
+	QVERIFY(lazyBody.contains(QStringLiteral("prepareRecoveryOrFinish()")));
+
+	const qsizetype recoveryEnd = source.indexOf(QStringLiteral("void preparePackageOrFinish()"), recoveryStart);
+	QVERIFY(recoveryEnd > recoveryStart);
+	const QString recoveryBody = source.mid(recoveryStart, recoveryEnd - recoveryStart);
+	QVERIFY(recoveryBody.contains(QStringLiteral("qualifiedInstaller")));
+	QVERIFY(recoveryBody.contains(QStringLiteral("canUseRecoveryInstaller(m_info)")));
+	QVERIFY(recoveryBody.contains(QStringLiteral("recoveryInstallerDownloadUrl(m_info)")));
+
+	const qsizetype failureStart = source.indexOf(QStringLiteral("void showFailure(const QString &message)"));
+	const qsizetype failureEnd = source.indexOf(QStringLiteral("\n};"), failureStart);
+	QVERIFY(failureStart >= 0);
+	QVERIFY(failureEnd > failureStart);
+	const QString failureBody = source.mid(failureStart, failureEnd - failureStart);
+	QVERIFY(failureBody.contains(QStringLiteral("!m_fallbackAttempted")));
+	QVERIFY(failureBody.contains(QStringLiteral("beginLazyInstallerFallback()")));
+
+	const qsizetype preparedFallbackStart =
+		source.indexOf(QStringLiteral("QString VersionCheck::preparedFallbackInstallerPathForInfo"));
+	const qsizetype preparedFallbackEnd =
+		source.indexOf(QStringLiteral("QString VersionCheck::preparedRecoveryInstallerPathForInfo"),
+					   preparedFallbackStart);
+	QVERIFY(preparedFallbackStart >= 0);
+	QVERIFY(preparedFallbackEnd > preparedFallbackStart);
+	const QString preparedFallbackBody =
+		source.mid(preparedFallbackStart, preparedFallbackEnd - preparedFallbackStart);
+	QVERIFY(preparedFallbackBody.contains(QStringLiteral("fileMatchesSha256")));
 }
 
 void TestQmlClientModels::sessionPublishesTypedStonksState() {

@@ -635,6 +635,7 @@ TestCase {
 				"visible": true,
 				"title": "A client update is ready",
 				"detail": "Install it now or review the complete release notes before continuing.",
+				"closeActionId": "update.close",
 				"actions": [
 					{ "id": "update.install", "label": "Install update and restart Mumble" },
 					{ "id": "update.notes", "label": "Read the complete release notes" }
@@ -642,6 +643,8 @@ TestCase {
 			}
 		})
 		verify(banner !== null)
+		let closeActionId = ""
+		banner.actionRequested.connect(function(actionId) { closeActionId = actionId })
 		banner.height = banner.implicitHeight
 		const baseState = banner.state
 		banner.state = Object.assign({}, baseState, {
@@ -672,6 +675,11 @@ TestCase {
 			verify(button.x >= -0.5 && button.x + button.width <= flow.width + 0.5)
 			verify(button.Accessible.name.length > 0)
 		}
+		const closeButton = findChild(banner, "updateBannerCloseButton")
+		verify(closeButton !== null && closeButton.visible)
+		compare(closeButton.Accessible.name, "Close update notification")
+		mouseClick(closeButton)
+		compare(closeActionId, "update.close")
 
 		banner.width = 760
 		banner.height = banner.implicitHeight

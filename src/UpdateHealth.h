@@ -15,6 +15,7 @@ namespace Mumble::UpdateHealth {
 
 constexpr std::uint32_t SchemaVersion          = 3;
 constexpr std::uint32_t UpdaterProtocolVersion = 4;
+constexpr std::uint32_t InstallerFallbackRequestSchemaVersion = 1;
 constexpr std::uint64_t MinimumStableRuntimeMilliseconds = 10'000;
 constexpr std::uint64_t DefaultHealthTimeoutMilliseconds = 45'000;
 
@@ -55,11 +56,18 @@ struct PendingUpdate {
 	std::uint64_t healthTimeoutMilliseconds        = DefaultHealthTimeoutMilliseconds;
 };
 
+struct InstallerFallbackRequest {
+	std::string packageIdentity;
+	std::uint32_t updateExitCode = 0;
+};
+
 /// Returns a stable, case-insensitive key for an installation directory.
 std::string installationKey(const std::filesystem::path &appDirectory);
 
 std::filesystem::path pendingStatePath(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath);
 std::filesystem::path healthMarkerPath(const std::filesystem::path &updateRoot, const PendingUpdate &pending);
+std::filesystem::path installerFallbackRequestPath(const std::filesystem::path &updateRoot,
+												   const std::filesystem::path &appPath);
 
 bool writePendingState(const std::filesystem::path &updateRoot, const PendingUpdate &pending,
 					   std::string *error = nullptr);
@@ -78,5 +86,17 @@ bool markerConfirmsHealthy(const std::filesystem::path &updateRoot, const Pendin
 
 bool removePendingState(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
 						std::string *error = nullptr);
+
+/// Persists a same-installation request to use the verified MSI on the next
+/// update attempt. This is written only after a native package failure has no
+/// unresolved rollback journal.
+bool writeInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+								   const std::string &packageIdentity, std::uint32_t updateExitCode,
+								   std::string *error = nullptr);
+std::optional< InstallerFallbackRequest >
+	readInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+								 std::string *error = nullptr);
+bool removeInstallerFallbackRequest(const std::filesystem::path &updateRoot, const std::filesystem::path &appPath,
+									std::string *error = nullptr);
 
 } // namespace Mumble::UpdateHealth

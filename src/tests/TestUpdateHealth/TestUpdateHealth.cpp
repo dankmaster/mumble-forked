@@ -47,6 +47,7 @@ private slots:
 	void unsupportedUpdaterProtocolIsRejected();
 	void markerRequiresEveryStartupGate();
 	void terminalJournalPrecedesMarkerCleanup();
+	void installerFallbackRequestIsInstallationScoped();
 	void invalidRollbackPathIsRejected();
 	void installationKeyIsCaseInsensitive();
 	void installationKeyNormalizesExtendedDosPrefix();
@@ -219,6 +220,28 @@ void TestUpdateHealth::terminalJournalPrecedesMarkerCleanup() {
 	const auto restored = Mumble::UpdateHealth::readPendingState(root, pending.appPath, &error);
 	QVERIFY2(restored.has_value(), error.c_str());
 	QCOMPARE(restored->state, Mumble::UpdateHealth::TransactionState::Committed);
+}
+
+void TestUpdateHealth::installerFallbackRequestIsInstallationScoped() {
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const auto root    = filesystemPath(temporary.path());
+	const auto appPath = root / "Application" / "mumble.exe";
+	const auto other   = root / "Other" / "mumble.exe";
+	const std::string packageIdentity(64, 'a');
+
+	std::string error;
+	QVERIFY2(Mumble::UpdateHealth::writeInstallerFallbackRequest(root, appPath, packageIdentity, 5, &error),
+			 error.c_str());
+	const auto restored = Mumble::UpdateHealth::readInstallerFallbackRequest(root, appPath, &error);
+	QVERIFY2(restored.has_value(), error.c_str());
+	QCOMPARE(QString::fromStdString(restored->packageIdentity), QString(64, QLatin1Char('a')));
+	QCOMPARE(restored->updateExitCode, std::uint32_t{ 5 });
+	QVERIFY(!Mumble::UpdateHealth::readInstallerFallbackRequest(root, other, &error).has_value());
+
+	QVERIFY(!Mumble::UpdateHealth::writeInstallerFallbackRequest(root, appPath, "not-a-sha", 5, &error));
+	QVERIFY2(Mumble::UpdateHealth::removeInstallerFallbackRequest(root, appPath, &error), error.c_str());
+	QVERIFY(!Mumble::UpdateHealth::readInstallerFallbackRequest(root, appPath, &error).has_value());
 }
 
 void TestUpdateHealth::invalidRollbackPathIsRejected() {

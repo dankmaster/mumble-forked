@@ -13,6 +13,7 @@ The `mumble-forked MSI Release` workflow produces:
 - `mumble-forked-<version>.msi.sha256`
 - `mumble-forked-<version>.mumble-update`
 - `mumble-forked-<version>.mumble-update.sha256`
+- `mumble-forked-update-files.json`
 - `mumble-forked-update.json`
 - `changelog.md`
 - release notes and preview text
@@ -22,7 +23,14 @@ clients. Newer clients also understand `manifestVersion: 2`, structured
 `installer` and `package` entries, and `preferredUpdate`.
 
 Current releases use `preferredUpdate: "package"`. Package-capable clients
-download and verify the package first. Updater protocol v4 additionally
+download and verify the package first. The package archive contains only files
+that are new or changed relative to the previous published file manifest, while
+its internal `manifest.json` always describes the complete target installation.
+The separately published `mumble-forked-update-files.json` is the next
+release's authenticated comparison input; it is not trusted by the client as a
+substitute for the signed outer package identity.
+
+Updater protocol v4 additionally
 requires a signed channel-pointer-v2 recovery set: the candidate MSI and two
 previous immutable MSI assets, each with an exact size and SHA-256. The
 candidate also carries the SHA-256 of the exact signed `mumble.exe` extracted
@@ -30,6 +38,19 @@ from its MSI payload verification. The client
 selects the installed build when it is present in that set, otherwise the
 newest verified recovery MSI. Older clients ignore the additive package fields
 and continue to use the MSI through the preserved top-level fields.
+
+The public stable channel deliberately preserves the MSI as a fresh-install and
+recovery artifact. A current client does not download the candidate MSI during
+the normal package path. It fetches that verified MSI only if package download
+or preparation fails, or after the native updater records a safe apply failure
+and restarts the restored client. Cancellation never triggers fallback.
+
+For the unsigned public `mumble-forked` bridge, the outer release manifest
+advertises `minUpdaterVersion: 3` so build 84 can select the package. The
+package's authenticated internal manifest still requires updater protocol 4.
+Signed channel-pointer-v2 releases advertise version 4 in the outer pointer as
+well and therefore require the complete known-good recovery MSI set before
+handoff.
 
 `mumble-updater.exe` supports both `--installer <msi>` and
 `--package <mumble-update>`. Package mode now has a native prepare/commit split.
@@ -76,12 +97,16 @@ wrong-key build eligible.
 - Let newer clients prefer the package when supported and fall back to MSI when
   the package is missing, unsupported, fails validation before handoff, or
   reports failure after handoff.
+- Publish a complete target file manifest but transfer only changed/new files;
+  no binary-diff format is required.
+- Download the candidate MSI lazily, only after package failure.
 - Distinguish user cancellation from failure so cancelled elevation or installer
   flows do not trigger the MSI fallback.
-- Keep the first package format simple: full staged payload first, delta
-  packages later only if bandwidth becomes a real problem.
 - Make the user-facing flow explicit: available, downloading with progress,
   ready to install/restart, applying, failed/retry.
+- Make update reminders explicit: “Remind me next week” is the only persisted
+  postponement. Closing the banner is session-only and the next startup check
+  shows it again.
 - Require cryptographic integrity for downloaded assets. Treat SHA-256 as
   integrity and signing as the long-term trust boundary.
 
@@ -128,9 +153,21 @@ Example:
     "url": "https://github.com/dankmaster/mumble/releases/download/mumble-forked/mumble-forked-1.7.123.mumble-update",
     "sha256": "<package-sha256>",
     "size": 123456789,
-    "minUpdaterVersion": 4,
+    "minUpdaterVersion": 3,
     "applyMode": "replace-staged-payload",
-    "requiresElevation": "auto"
+    "requiresElevation": "auto",
+    "payloadMode": "sparse",
+    "payloadFileCount": 11,
+    "targetFileCount": 2032,
+    "removedFileCount": 0,
+    "baseCommit": "fedcba9876543210fedcba9876543210fedcba98",
+    "baseBuild": 122,
+    "baseManifestSha256": "<previous-target-manifest-sha256>",
+    "fileManifest": {
+      "url": "https://github.com/dankmaster/mumble/releases/download/mumble-forked/mumble-forked-update-files.json",
+      "sha256": "<complete-target-manifest-sha256>",
+      "size": 234567
+    }
   },
   "preferredUpdate": "package",
   "publishedAt": "2026-05-31T00:00:00.0000000Z"
@@ -144,6 +181,12 @@ Compatibility rules:
   it.
 - `preferredUpdate` is advisory. The client still validates local support,
   platform, trust, and package fields before choosing package mode.
+- `package.fileManifest` describes the complete target file set used to build
+  the next release. The package's own SHA-256 and internal manifest remain the
+  client admission boundary.
+- The public compatibility manifest may advertise updater version 3 while its
+  verified package internally requires version 4. Signed channel pointers use
+  version 4 in both places and fail closed without their recovery set.
 - A future signed manifest can wrap the same fields without changing the basic
   package decision logic.
 
@@ -174,26 +217,22 @@ example:
 mumble-forked-1.7.123.mumble-update
 ```
 
-The simplest implementation is a ZIP archive containing the already staged
-Windows payload from:
+The artifact is a ZIP archive generated from the already staged Windows payload
+at:
 
 ```text
 build-shared-webengine/shared-webengine-stage/
 ```
 
-Suggested archive layout:
+The internal manifest contains every target file. `payload/` contains only the
+changed/new subset relative to the verified previous target manifest:
 
 ```text
 manifest.json
 payload/
   mumble.exe
   mumble-updater.exe
-  Qt6Core.dll
-  gstreamer/
-    bin/
-    lib/gstreamer-1.0/
-    libexec/
-  ...
+  qml/changed-module.dll
 ```
 
 Internal `manifest.json` example:
@@ -220,7 +259,16 @@ Internal `manifest.json` example:
 ```
 
 The outer manifest verifies the downloaded package as one blob. The inner
-manifest verifies extracted files before they are copied into the app directory.
+manifest verifies the complete desired installation. During prepare, an omitted
+target file is accepted only when the installed file already has the target
+size and SHA-256. If it differs, prepare fails before mutation because the
+sparse archive cannot supply it. This makes the package safe for a client on an
+unexpected base: the client falls back to the verified MSI rather than applying
+an incomplete update.
+
+Files present in the previous installed manifest but absent from the new target
+are stale managed files. They are removed only after local-modification checks
+and remain covered by rollback.
 
 ## Client Selection Logic
 
@@ -231,10 +279,14 @@ New client behavior:
    SHA-256, choose package mode.
 3. For a v4 package, require channel-pointer schema v2 with the exact candidate
    MSI and exactly two previous recovery MSIs.
-4. Download and verify the candidate MSI plus the selected known-good MSI
-   before handoff. Neither may be substituted after verification.
-5. Otherwise use the existing MSI mode only for a legacy manifest.
-6. Otherwise show the release URL as a manual fallback.
+4. Download and prepare the package without downloading the candidate MSI.
+5. If package download/preparation fails, download and verify the candidate MSI
+   and present it as the ready update.
+6. If native apply fails after Mumble closes, the updater rolls back, records an
+   installation-scoped fallback request bound to that package SHA-256, and
+   restarts Mumble. The next update attempt downloads the verified MSI.
+7. Otherwise use the existing MSI mode for a legacy manifest or client.
+8. Otherwise show the release URL as a manual fallback.
 
 The Modern shell banner should not need a second UX model. It can keep the same
 states and actions:
@@ -244,7 +296,8 @@ states and actions:
 - ready
 - applying / installing
 - failed with retry
-- dismissed
+- remind next week
+- closed for this session
 
 Only the labels should vary:
 
@@ -360,12 +413,18 @@ shared payload has been staged and validated:
 1. Read `build-shared-webengine/shared-webengine-stage`.
 2. Verify the staged payload includes the pinned GStreamer runtime and that the
    packaged helper reports GStreamer LiveKit publish/view capability.
-3. Generate the internal package manifest with file sizes and SHA-256 hashes.
-4. Archive `manifest.json` and `payload/`.
-5. Hash the final `.mumble-update` archive.
-6. Add package fields to `mumble-forked-update.json`.
-7. Upload the package beside the MSI.
-8. Include the package in the workflow artifact.
+3. Download and verify the previous standalone target file manifest. For the
+   one-time bridge from a release that predates that asset, verify the previous
+   full package and extract only its `manifest.json`.
+4. Generate the complete target manifest with file sizes and SHA-256 hashes.
+5. Copy only changed/new files into `payload/`.
+6. Archive `manifest.json` and the sparse `payload/`.
+7. Publish the complete target manifest as
+   `mumble-forked-update-files.json`.
+8. Hash the final `.mumble-update` archive.
+9. Add package/base/file-manifest fields to `mumble-forked-update.json`.
+10. Upload the package and target manifest beside the MSI.
+11. Include both in the workflow artifact.
 
 The existing MSI asset, MSI `.sha256`, `changelog.md`, and manifest upload stay
 in place.
@@ -380,11 +439,28 @@ Releases use:
 }
 ```
 
-New clients choose package mode when the package fields validate. Before
-handoff, they also download and verify the MSI fallback when the manifest
-includes installer metadata. Older clients ignore the package fields and
-continue to use the MSI through the preserved `installerUrl` and top-level
-`sha256`.
+New clients choose package mode when the package fields validate and do not
+download the candidate MSI unless the package path fails. Older clients ignore
+the package fields and continue to use the MSI through the preserved
+`installerUrl` and top-level `sha256`.
+
+### Bridge From Build 84 And Older Fork Clients
+
+The first sparse-capable release is also a migration release:
+
+- Build 84 already understands the full-target-manifest/sparse-payload archive
+  semantics. Its older frontend still downloads the MSI eagerly, so it can
+  safely fall back during this one transition.
+- The new client installed by that release contains lazy MSI fallback. Every
+  later normal update therefore transfers only its sparse package unless
+  recovery is actually needed.
+- A package-capable client on an unexpected or much older base fails during
+  prepare before any installation mutation. Existing eager-fallback clients
+  already have the verified MSI; new clients download it at that point.
+- Fork clients too old to understand package fields keep reading the preserved
+  top-level MSI URL and SHA-256.
+- A manual MSI remains the final migration path for clients older than these
+  additive manifest contracts.
 
 ## Implementation Phase Ledger
 
@@ -426,8 +502,7 @@ Status: implemented.
 - Download package to the existing `Updates` directory.
 - Verify outer package SHA-256.
 - Keep MSI fallback when package fields are missing or invalid.
-- Prepare the verified MSI fallback beside the package when package mode is
-  selected and installer metadata is valid.
+- Fetch the verified MSI only after package failure.
 - Surface the selected mode in automation/debug summaries.
 
 Acceptance checks:
@@ -435,7 +510,8 @@ Acceptance checks:
 - New clients choose package mode for a valid package manifest.
 - New clients fall back to MSI for old manifests.
 - Bad package hash fails before handoff and keeps retry/details actions useful.
-- Package handoff passes the verified MSI fallback to `mumble-updater.exe`.
+- A safe native failure is bound to the exact package SHA-256 and selects MSI
+  mode on the next attempt.
 
 ### Phase 3: Updater Package Mode
 
@@ -469,6 +545,8 @@ Status: active hardening area.
 - Add CI validation that builds a package and verifies its manifest.
 - Add updater dry-run or test helper coverage for package argument parsing and
   manifest validation.
+- Verify exact sparse payload selection, complete target parity, base-manifest
+  digest binding, tamper rejection, and unexpected-base failure before mutation.
 - Exercise the Modern banner mockups for package-selected states.
 
 Acceptance checks:
@@ -490,7 +568,8 @@ candidate passes protected quality, release rehearsal, recovery and dogfood.
   the only trust boundary.
 - Introduce versioned production app directories if we want atomic switch and
   cleaner rollback.
-- Consider delta packages only after the full package flow is stable.
+- Consider block-level binary diffs only if changed-file packages are still too
+  large; they are not required for sparse release payloads.
 
 ## Remaining Decisions
 
@@ -498,5 +577,5 @@ candidate passes protected quality, release rehearsal, recovery and dogfood.
   MSI path; signing is still the long-term trust boundary.
 - Production layout: whether to keep the v1 in-place replacement path long-term,
   or move to versioned app directories for more atomic updates.
-- Delta packages: still deferred until the full package flow is boring and
-  bandwidth pressure is real.
+- Binary deltas: deferred. The current sparse package already avoids transferring
+  every unchanged runtime file.
