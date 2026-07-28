@@ -63,6 +63,7 @@ ColumnLayout {
 
 		Image {
 			id: stillImage
+			objectName: "embedDocumentMediaImage"
 			anchors.fill: parent
 			source: root.renderActive && !root.mediaRequiresReveal
 				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
@@ -74,6 +75,7 @@ ColumnLayout {
 
 		Loader {
 			id: animatedImageLoader
+			objectName: "embedDocumentAnimatedImageLoader"
 			property int mediaStatus: Image.Null
 			anchors.fill: parent
 			active: root.renderActive && !root.mediaRequiresReveal
@@ -120,6 +122,7 @@ ColumnLayout {
 
 		Rectangle {
 			id: playbackPrompt
+			objectName: "embedDocumentPlaybackPrompt"
 			anchors.centerIn: parent
 			visible: !root.mediaRequiresReveal
 				&& (root.currentKind === "video" || root.currentKind === "audio")

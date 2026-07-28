@@ -4697,6 +4697,14 @@ namespace {
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewCardOpenSurface")) : nullptr;
 		QObject *providerDetails = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("providerDetails")) : nullptr;
+		QObject *documentGallery = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewDocumentMediaGallery")) : nullptr;
+		QObject *documentImage = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentMediaImage")) : nullptr;
+		QObject *documentAnimation = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentAnimatedImageLoader")) : nullptr;
+		QObject *documentPlaybackPrompt = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentPlaybackPrompt")) : nullptr;
 		state.insert(QStringLiteral("playVisible"), playButton && playButton->property("visible").toBool());
 		state.insert(QStringLiteral("embedPosterStatus"),
 			embedPoster ? embedPoster->property("status").toInt() : -1);
@@ -4714,6 +4722,24 @@ namespace {
 			providerDetails ? providerDetails->property("family").toString() : QString());
 		state.insert(QStringLiteral("providerPresentation"),
 			providerDetails ? providerDetails->property("presentation").toString() : QString());
+		state.insert(QStringLiteral("documentGalleryVisible"),
+			documentGallery && documentGallery->property("visible").toBool());
+		state.insert(QStringLiteral("documentGalleryCurrentKind"),
+			documentGallery ? documentGallery->property("currentKind").toString() : QString());
+		state.insert(QStringLiteral("documentGalleryCurrentImageSource"),
+			documentGallery ? documentGallery->property("currentImageSource").toString() : QString());
+		state.insert(QStringLiteral("documentGalleryCompactFallback"),
+			documentGallery && documentGallery->property("compactFallback").toBool());
+		state.insert(QStringLiteral("documentImageSource"),
+			documentImage ? documentImage->property("source").toString() : QString());
+		state.insert(QStringLiteral("documentImageStatus"),
+			documentImage ? documentImage->property("status").toInt() : -1);
+		state.insert(QStringLiteral("documentImageVisible"),
+			documentImage && documentImage->property("visible").toBool());
+		state.insert(QStringLiteral("documentAnimationActive"),
+			documentAnimation && documentAnimation->property("active").toBool());
+		state.insert(QStringLiteral("documentPlaybackPromptVisible"),
+			documentPlaybackPrompt && documentPlaybackPrompt->property("visible").toBool());
 
 		bool focused = false;
 		if (window) {
