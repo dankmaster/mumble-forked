@@ -3330,20 +3330,81 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			 QStringLiteral("article"));
 	QCOMPARE(articleDocument.value(QStringLiteral("facts")).toList().size(), 1);
 
-	const QVariantMap directDocument = normalizedDocument({
+	const QVariantMap giphyDocument = normalizedDocument({
 		{ QStringLiteral("url"),
-		  QStringLiteral("https://media.giphy.com/media/xT4uQCfBOBGralHfOM/giphy.gif") },
+		  QStringLiteral("https://giphy.com/gifs/bbqfilms-ghostbusters-ecto-cooler-see-the-slime-xT4uQCfBOBGralHfOM") },
 		{ QStringLiteral("host"), QStringLiteral("media.giphy.com") },
 		{ QStringLiteral("title"), QStringLiteral("Ghostbusters animation") },
 		{ QStringLiteral("mediaKind"), QStringLiteral("image") },
 		{ QStringLiteral("mediaMime"), QStringLiteral("image/gif") },
 		{ QStringLiteral("mediaUrl"), QStringLiteral("image://mumble/giphy-animation?g=81") },
-		{ QStringLiteral("mediaAnimated"), true }
+		{ QStringLiteral("mediaAnimated"), true },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("giphy") },
+			{ QStringLiteral("contentBranch"), QStringLiteral("animated-gif") },
+			{ QStringLiteral("mediaPresentation"), QStringLiteral("animated-image") }
+		} }
+	});
+	QVERIFY(giphyDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(giphyDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("giphy"));
+	QCOMPARE(giphyDocument.value(QStringLiteral("media")).toList().size(), 1);
+	QCOMPARE(giphyDocument.value(QStringLiteral("media")).toList().first().toMap()
+				 .value(QStringLiteral("contentBranch")).toString(),
+			 QStringLiteral("animated-gif"));
+
+	const QVariantMap tenorDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://tenor.com/view/what-is-this-gif-2935825949418015718") },
+		{ QStringLiteral("host"), QStringLiteral("tenor.com") },
+		{ QStringLiteral("title"), QStringLiteral("What Is This GIF") },
+		{ QStringLiteral("mediaKind"), QStringLiteral("video") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("video/mp4") },
+		{ QStringLiteral("mediaUrl"),
+		  QStringLiteral("https://media.tenor.com/KL4mJXVvS-YAAAPo/what-is-this.mp4") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("image://mumble/tenor-poster?g=82") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("contentBranch"), QStringLiteral("animated-gif-video-backed") },
+			{ QStringLiteral("mediaPresentation"), QStringLiteral("animated-image") }
+		} }
+	});
+	QVERIFY(tenorDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(tenorDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("tenor"));
+	QCOMPARE(tenorDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(), QStringLiteral("native"));
+
+	const QVariantMap imgurDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://imgur.com/owLfF25") },
+		{ QStringLiteral("host"), QStringLiteral("imgur.com") },
+		{ QStringLiteral("title"), QStringLiteral("GIF on Imgur") },
+		{ QStringLiteral("mediaKind"), QStringLiteral("video") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("video/mp4") },
+		{ QStringLiteral("mediaUrl"), QStringLiteral("https://i.imgur.com/owLfF25.mp4") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("image://mumble/imgur-poster?g=83") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("contentBranch"), QStringLiteral("animated-gif-video-backed") },
+			{ QStringLiteral("mediaPresentation"), QStringLiteral("animated-image") }
+		} }
+	});
+	QVERIFY(imgurDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(imgurDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("imgur"));
+	QCOMPARE(imgurDocument.value(QStringLiteral("media")).toList().first().toMap()
+				 .value(QStringLiteral("contentBranch")).toString(),
+			 QStringLiteral("animated-gif-video-backed"));
+
+	const QVariantMap directDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://i.4cdn.org/wsg/1785247201381165.mp4") },
+		{ QStringLiteral("host"), QStringLiteral("i.4cdn.org") },
+		{ QStringLiteral("title"), QStringLiteral("Raw video") },
+		{ QStringLiteral("mediaKind"), QStringLiteral("video") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("video/mp4") },
+		{ QStringLiteral("mediaUrl"), QStringLiteral("https://i.4cdn.org/wsg/1785247201381165.mp4") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("image://mumble/raw-video-poster?g=84") }
 	});
 	QVERIFY(directDocument.value(QStringLiteral("commonPresentation")).toBool());
 	QCOMPARE(directDocument.value(QStringLiteral("provider")).toMap()
 				 .value(QStringLiteral("id")).toString(), QStringLiteral("direct"));
-	QCOMPARE(directDocument.value(QStringLiteral("media")).toList().size(), 1);
 }
 
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {

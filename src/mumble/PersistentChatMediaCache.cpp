@@ -23,7 +23,10 @@
 #include <algorithm>
 
 namespace {
-constexpr int CACHE_VERSION                  = 12;
+// Version 13 moves rich providers onto the typed embed-document contract.
+// Older entries can contain provider media rewritten as posterless data/video
+// URLs, which produces a large empty media viewport after the UI upgrade.
+constexpr int CACHE_VERSION                  = 13;
 constexpr qint64 CACHE_MAX_AGE_SECONDS       = 30LL * 24LL * 60LL * 60LL;
 constexpr quint64 CACHE_MAX_TOTAL_BYTES      = 512ULL * 1024ULL * 1024ULL;
 constexpr int CACHE_MAX_DATA_URL_CHARACTERS  = 40 * 1024 * 1024;
@@ -167,8 +170,11 @@ std::optional< PreviewEntry > loadPreview(const QString &previewKey) {
 	}
 
 	const QJsonObject object = document.object();
-	if (object.value(QStringLiteral("version")).toInt() != CACHE_VERSION
-		|| object.value(QStringLiteral("previewKey")).toString() != previewKey) {
+	if (object.value(QStringLiteral("version")).toInt() != CACHE_VERSION) {
+		QFile::remove(file.fileName());
+		return std::nullopt;
+	}
+	if (object.value(QStringLiteral("previewKey")).toString() != previewKey) {
 		return std::nullopt;
 	}
 

@@ -72,6 +72,28 @@ namespace {
 		if (host.endsWith(QLatin1String("blocket.se"))) {
 			return QStringLiteral("blocket");
 		}
+		if (host.endsWith(QLatin1String("giphy.com"))) {
+			return QStringLiteral("giphy");
+		}
+		if (host.endsWith(QLatin1String("tenor.com"))) {
+			return QStringLiteral("tenor");
+		}
+		if (host.endsWith(QLatin1String("imgur.com"))) {
+			return QStringLiteral("imgur");
+		}
+		if (host.endsWith(QLatin1String("reddit.com")) || host == QLatin1String("redd.it")
+			|| host.endsWith(QLatin1String("redd.it"))) {
+			return QStringLiteral("reddit");
+		}
+		if (host == QLatin1String("open.spotify.com") || host == QLatin1String("spotify.link")) {
+			return QStringLiteral("spotify");
+		}
+		if (host.endsWith(QLatin1String("soundcloud.com"))) {
+			return QStringLiteral("soundcloud");
+		}
+		if (host.endsWith(QLatin1String("amazon.se")) || host.endsWith(QLatin1String("amazon.com"))) {
+			return QStringLiteral("amazon");
+		}
 		return {};
 	}
 
@@ -90,6 +112,13 @@ namespace {
 			{ QStringLiteral("x"), QStringLiteral("X") },
 			{ QStringLiteral("flashback"), QStringLiteral("Flashback") },
 			{ QStringLiteral("blocket"), QStringLiteral("Blocket") },
+			{ QStringLiteral("giphy"), QStringLiteral("GIPHY") },
+			{ QStringLiteral("tenor"), QStringLiteral("Tenor") },
+			{ QStringLiteral("imgur"), QStringLiteral("Imgur") },
+			{ QStringLiteral("reddit"), QStringLiteral("Reddit") },
+			{ QStringLiteral("spotify"), QStringLiteral("Spotify") },
+			{ QStringLiteral("soundcloud"), QStringLiteral("SoundCloud") },
+			{ QStringLiteral("amazon"), QStringLiteral("Amazon") },
 			{ QStringLiteral("direct"), QStringLiteral("Media") }
 		};
 		return labels.value(provider, host);
@@ -182,7 +211,7 @@ namespace {
 				{ QStringLiteral("poster"), preview.value(QStringLiteral("thumbnailUrl")) },
 				{ QStringLiteral("title"), preview.value(QStringLiteral("title")) },
 				{ QStringLiteral("contentBranch"),
-				  preview.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("mediaContentBranch")) },
+				  preview.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("contentBranch")) },
 				{ QStringLiteral("mediaPresentation"),
 				  preview.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("mediaPresentation")) },
 				{ QStringLiteral("directPlayable"), !preview.value(QStringLiteral("mediaUrl")).toString().isEmpty() },
@@ -474,6 +503,10 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		|| provider == QLatin1String("steam") || provider == QLatin1String("instagram")
 		|| provider == QLatin1String("facebook") || provider == QLatin1String("x")
 		|| provider == QLatin1String("flashback") || provider == QLatin1String("blocket")
+		|| provider == QLatin1String("giphy") || provider == QLatin1String("tenor")
+		|| provider == QLatin1String("imgur") || provider == QLatin1String("reddit")
+		|| provider == QLatin1String("spotify") || provider == QLatin1String("soundcloud")
+		|| provider == QLatin1String("amazon")
 		|| provider == QLatin1String("direct")
 		|| type == QLatin1String("article");
 

@@ -436,11 +436,12 @@ ApplicationWindow {
 		return url
 	}
 
-	function messageBodyIsTypedPreviewSourceOnly(segments, preview) {
+	function messageBodyIsPreviewSourceOnly(segments, preview) {
 		const document = preview && preview.document ? preview.document : ({})
-		if (!document || document.commonPresentation !== true || !document.source)
-			return false
-		const sourceUrl = normalizedComparableSourceUrl(document.source.url || "")
+		const typedSourceUrl = document && document.commonPresentation === true && document.source
+			? document.source.url || "" : ""
+		const sourceUrl = normalizedComparableSourceUrl(typedSourceUrl
+			|| (preview ? preview.url || "" : ""))
 		if (sourceUrl.length === 0)
 			return false
 
@@ -3984,7 +3985,7 @@ ApplicationWindow {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
-										&& !root.messageBodyIsTypedPreviewSourceOnly(
+										&& !root.messageBodyIsPreviewSourceOnly(
 											messageDelegate.bodySegments || [],
 											messageDelegate.preview || ({}))
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed

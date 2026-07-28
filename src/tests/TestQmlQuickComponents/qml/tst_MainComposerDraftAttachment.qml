@@ -91,12 +91,13 @@ TestCase {
 		verify(/ModernBusyIndicator\s*\{[\s\S]*objectName:\s*"composerDraftAttachmentBusy_"[\s\S]*visible:\s*draftAttachment\.preparing[\s\S]*running:\s*visible/.test(mainSource))
 	}
 
-	function test_url_only_messages_keep_the_source_inside_the_typed_card_once() {
+	function test_url_only_messages_keep_the_source_inside_any_preview_card_once() {
 		verify(/function\s+normalizedComparableSourceUrl\(value\)/.test(mainSource))
-		verify(/function\s+messageBodyIsTypedPreviewSourceOnly\(segments,\s*preview\)/.test(mainSource))
-		verify(/document\.commonPresentation\s*!==\s*true/.test(mainSource))
+		verify(/function\s+messageBodyIsPreviewSourceOnly\(segments,\s*preview\)/.test(mainSource))
+		verify(/document\.commonPresentation\s*===\s*true/.test(mainSource))
+		verify(/preview\s*\?\s*preview\.url/.test(mainSource))
 		verify(/bodyUrl\s*!==\s*sourceUrl/.test(mainSource))
-		verify(/id:\s*messageBody[\s\S]{0,220}!root\.messageBodyIsTypedPreviewSourceOnly\(/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]{0,220}!root\.messageBodyIsPreviewSourceOnly\(/.test(mainSource))
 	}
 
 	function test_enter_sends_typed_pasted_dropped_or_attachment_drafts_without_breaking_ime() {

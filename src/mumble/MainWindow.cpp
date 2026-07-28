@@ -4246,6 +4246,23 @@ std::optional< PersistentChatPreviewPlayableMediaMeta > giphyPlayableMediaFromUr
 	};
 }
 
+std::optional< QString > imgurSingleMediaIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (!hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))) {
+		return std::nullopt;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.isEmpty()
+		|| (segments.size() > 1
+			&& (segments.first() == QLatin1String("a") || segments.first() == QLatin1String("gallery")))) {
+		return std::nullopt;
+	}
+	QString id = segments.last().section(QLatin1Char('.'), 0, 0);
+	static const QRegularExpression s_idPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{5,16}")));
+	return s_idPattern.match(id).hasMatch() ? std::optional< QString >(id) : std::nullopt;
+}
+
 bool isSteamStoreHost(const QString &host) {
 	const QString normalizedHost = normalizedPreviewHost(host);
 	return normalizedHost == QLatin1String("store.steampowered.com")
@@ -4733,6 +4750,12 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		siteLabel     = QObject::tr("Streamable");
 		fallbackTitle = QObject::tr("Streamable video");
 		openLabel     = QObject::tr("Open on Streamable");
+	} else if (hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))) {
+		setUrlEndpoint(QStringLiteral("https://tenor.com/oembed"));
+		providerKey   = QStringLiteral("tenor");
+		siteLabel     = QObject::tr("Tenor");
+		fallbackTitle = QObject::tr("Tenor GIF");
+		openLabel     = QObject::tr("Open on Tenor");
 	} else if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
 		setUrlEndpoint(QStringLiteral("https://giphy.com/services/oembed"));
 		providerKey   = QStringLiteral("giphy");
@@ -32669,7 +32692,7 @@ bool MainWindow::requestPersistentChatPreviewPosterImage(const QString &previewK
 
 	QUrl normalizedPosterUrl = normalizedRemotePlayableMediaUrl(posterUrl);
 	const QString mime       = playableMediaMimeForUrl(normalizedPosterUrl, suggestedMime);
-	if (!mime.startsWith(QLatin1String("image/")) || mime == QLatin1String("image/gif")
+	if (!mime.startsWith(QLatin1String("image/"))
 		|| !isTrustedRemotePlayableMediaUrl(normalizedPosterUrl, mime)) {
 		return false;
 	}
@@ -33869,6 +33892,21 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				const QString html       = object.value(QStringLiteral("html")).toString();
 				const QString postText =
 					target->socialPost && !isRedditPost ? xPostTextFromOEmbedHtml(html) : QString();
+				const bool animatedImageProvider =
+					target->providerKey == QLatin1String("giphy")
+					|| target->providerKey == QLatin1String("tenor");
+				const QString oEmbedMediaUrlString =
+					animatedImageProvider ? object.value(QStringLiteral("url")).toString().trimmed() : QString();
+				const QUrl oEmbedMediaUrl = previewIt->canonicalUrl.isEmpty()
+												? QUrl(oEmbedMediaUrlString)
+												: QUrl(previewIt->canonicalUrl).resolved(QUrl(oEmbedMediaUrlString));
+				if (animatedImageProvider && oEmbedMediaUrl.isValid()
+					&& applyPersistentChatRemotePlayableMedia(
+						*previewIt, oEmbedMediaUrl, QStringLiteral("image/gif"),
+						QStringLiteral("animated-gif"), QStringLiteral("animated-image"))) {
+					previewIt->siteSnapshotRequested = false;
+					previewIt->siteSnapshotFinished  = true;
+				}
 
 				previewIt->title = !postText.isEmpty()
 									   ? postText
@@ -33900,7 +33938,10 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					}
 				}
 
-				const QString thumbnailUrlString = object.value(QStringLiteral("thumbnail_url")).toString().trimmed();
+				QString thumbnailUrlString = object.value(QStringLiteral("thumbnail_url")).toString().trimmed();
+				if (thumbnailUrlString.isEmpty() && animatedImageProvider) {
+					thumbnailUrlString = oEmbedMediaUrlString;
+				}
 				const QUrl thumbnailUrl = previewIt->canonicalUrl.isEmpty()
 											  ? QUrl(thumbnailUrlString)
 											  : QUrl(previewIt->canonicalUrl).resolved(QUrl(thumbnailUrlString));
@@ -35998,6 +36039,31 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 						const QVariantMap clipMetadata = youtubeClipMetadataFromHtml(parsed.html);
 						for (auto it = clipMetadata.cbegin(); it != clipMetadata.cend(); ++it) {
 							parsed.metadata.insert(it.key(), it.value());
+						}
+					}
+					if (const std::optional< QString > imgurId = imgurSingleMediaIdFromUrl(previewUrl);
+						imgurId) {
+						const QString declaredTitle = parsed.title.trimmed().toLower();
+						const QString twitterPlayer =
+							parsed.metaTags.value(QStringLiteral("twitter:player")).trimmed().toLower();
+						const bool animated =
+							previewUrl.path().endsWith(QLatin1String(".gifv"), Qt::CaseInsensitive)
+							|| twitterPlayer.endsWith(QLatin1String(".gifv"))
+							|| declaredTitle.contains(QLatin1String("gif on imgur"));
+						const QString previewImage =
+							QStringLiteral("https://i.imgur.com/%1h.jpg").arg(*imgurId);
+						if (animated && !parsed.playableMediaMeta) {
+							parsed.playableMediaMeta = PersistentChatPreviewPlayableMediaMeta {
+								QStringLiteral("https://i.imgur.com/%1.mp4").arg(*imgurId),
+								QStringLiteral("video/mp4"),
+								QStringLiteral("animated-gif-video-backed"),
+								QStringLiteral("animated-image")
+							};
+							parsed.imageUrlString = previewImage;
+						} else if (parsed.imageUrlString.trimmed().isEmpty()) {
+							// Imgur serves a converted JPEG preview for public single-image IDs
+							// even when its SPA page omits useful Open Graph image metadata.
+							parsed.imageUrlString = previewImage;
 						}
 					}
 				},

@@ -27,6 +27,13 @@ ColumnLayout {
 		|| currentKind === "animated-image" ? String(currentItem.url || "")
 		: String(currentItem.posterUrl || currentItem.poster
 			|| currentItem.thumbnailUrl || currentItem.thumbnail || "")
+	readonly property bool compactFallback: viewportVisible
+		&& currentImageSource.length === 0 && !mediaRequiresReveal
+	readonly property real resolvedViewportHeight: !viewportVisible ? 0
+		: compactFallback ? Theme.controlHeight + Theme.space5
+		: viewportPreferredHeight > 0 ? viewportPreferredHeight
+		: expanded ? Math.min(420, Math.max(240, width * 9 / 16))
+		: Math.min(320, Math.max(180, width * 9 / 16))
 	signal selectionRequested(int index)
 	signal mediaRequested(int index)
 	signal revealRequested()
@@ -40,13 +47,7 @@ ColumnLayout {
 		Layout.fillWidth: root.viewportPreferredWidth <= 0
 		Layout.preferredWidth: root.viewportPreferredWidth > 0
 			? Math.min(root.width, root.viewportPreferredWidth) : -1
-		Layout.preferredHeight: root.viewportVisible
-			? (root.viewportPreferredHeight > 0
-				? root.viewportPreferredHeight
-				: root.expanded
-					? Math.min(420, Math.max(240, width * 9 / 16))
-					: Math.min(320, Math.max(180, width * 9 / 16)))
-			: 0
+		Layout.preferredHeight: root.resolvedViewportHeight
 		Layout.minimumHeight: Layout.preferredHeight
 		Layout.maximumHeight: Layout.preferredHeight
 		Layout.alignment: Qt.AlignHCenter

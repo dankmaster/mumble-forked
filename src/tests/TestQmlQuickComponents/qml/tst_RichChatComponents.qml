@@ -2153,6 +2153,68 @@ TestCase {
 		verify(findChild(card, "embedDocumentMediaThumbnail_1") !== null)
 	}
 
+	function test_posterless_typed_video_uses_compact_action_without_losing_full_surface_play() {
+		const card = previewLoader.item
+		const sourceUrl = "https://imgur.com/owLfF25"
+		const mediaUrl = "https://i.imgur.com/owLfF25.mp4"
+		card.preview = {
+			"state": "ready",
+			"title": "GIF on Imgur",
+			"url": sourceUrl,
+			"mediaUrl": mediaUrl,
+			"mediaMime": "video/mp4",
+			"mediaKind": "video",
+			"metadata": {
+				"provider": "imgur",
+				"contentBranch": "animated-gif-video-backed",
+				"mediaPresentation": "animated-image"
+			},
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "media",
+				"provider": { "id": "imgur", "label": "Imgur", "host": "imgur.com" },
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": { "type": "animated-image", "title": "GIF on Imgur" },
+				"thread": {},
+				"facts": [],
+				"media": [{
+					"id": "media:0",
+					"kind": "video",
+					"mime": "video/mp4",
+					"url": mediaUrl,
+					"contentBranch": "animated-gif-video-backed",
+					"presentation": "animated-image",
+					"directPlayable": true
+				}],
+				"playback": { "mode": "native", "provider": "imgur" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-imgur-posterless"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "imgur"
+		inlineSession.active = false
+		inlineSession.detached = true
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const viewport = findChild(card, "embedDocumentMediaViewport")
+		const primaryAction = findChild(card, "embedDocumentMediaPrimaryAction")
+		verify(gallery !== null && viewport !== null && primaryAction !== null)
+		verify(gallery.compactFallback)
+		verify(viewport.height <= Theme.controlHeight + Theme.space5 + 1)
+		verify(primaryAction.width >= viewport.width - 1)
+		verify(primaryAction.height >= viewport.height - 1)
+
+		primaryAction.clicked()
+		compare(directMediaSpy.count, 1)
+		compare(directMediaSpy.signalArguments[0][0], mediaUrl)
+		compare(directMediaSpy.signalArguments[0][1], "video/mp4")
+	}
+
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {
 		const card = previewLoader.item
 		card.preview = {
