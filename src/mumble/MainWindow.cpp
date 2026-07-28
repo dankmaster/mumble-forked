@@ -4246,6 +4246,42 @@ std::optional< PersistentChatPreviewPlayableMediaMeta > giphyPlayableMediaFromUr
 	};
 }
 
+std::optional< PersistentChatPreviewPlayableMediaMeta > tenorPlayableMediaFromHtml(const QByteArray &data) {
+	if (data.isEmpty()) {
+		return std::nullopt;
+	}
+
+	const QString html = QString::fromUtf8(data);
+	static const QRegularExpression s_mp4Pattern(
+		QLatin1String(
+			R"((https://(?:media[0-9]*\.)?tenor\.com/(?:m/)?[^"'<>[:space:]]+\.mp4(?:\?[^"'<>[:space:]]*)?))"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch mp4Match = s_mp4Pattern.match(html);
+	if (mp4Match.hasMatch()) {
+		return PersistentChatPreviewPlayableMediaMeta {
+			mp4Match.captured(1),
+			QStringLiteral("video/mp4"),
+			QStringLiteral("animated-gif-video-backed"),
+			QStringLiteral("animated-image")
+		};
+	}
+
+	static const QRegularExpression s_gifPattern(
+		QLatin1String(
+			R"((https://(?:media[0-9]*\.)?tenor\.com/(?:m/)?[^"'<>[:space:]]+\.gif(?:\?[^"'<>[:space:]]*)?))"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch gifMatch = s_gifPattern.match(html);
+	if (!gifMatch.hasMatch()) {
+		return std::nullopt;
+	}
+	return PersistentChatPreviewPlayableMediaMeta {
+		gifMatch.captured(1),
+		QStringLiteral("image/gif"),
+		QStringLiteral("animated-gif"),
+		QStringLiteral("animated-image")
+	};
+}
+
 std::optional< QString > imgurSingleMediaIdFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (!hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))) {
@@ -33939,7 +33975,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				}
 
 				QString thumbnailUrlString = object.value(QStringLiteral("thumbnail_url")).toString().trimmed();
-				if (thumbnailUrlString.isEmpty() && animatedImageProvider) {
+				if (thumbnailUrlString.isEmpty() && animatedImageProvider
+					&& previewIt->mediaDataUrl.isEmpty()) {
 					thumbnailUrlString = oEmbedMediaUrlString;
 				}
 				const QUrl thumbnailUrl = previewIt->canonicalUrl.isEmpty()
@@ -34019,6 +34056,51 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		if (isRedditPost) {
 			requestPersistentChatRedditPostPreview(previewKey, previewUrl);
 		}
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatTenorMediaPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)
+		|| !hostEqualsOrEndsWith(normalizedPreviewHost(previewUrl.host()), QStringLiteral("tenor.com"))) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+	QNetworkRequest request(previewUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		if (success) {
+			if (const std::optional< PersistentChatPreviewPlayableMediaMeta > media =
+					tenorPlayableMediaFromHtml(data);
+				media) {
+				applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(media->url), media->mime,
+													   media->contentBranch, media->mediaPresentation);
+			}
+		}
+		publishPersistentChatPreviewUpdate(previewKey);
 	});
 
 	return true;
@@ -34958,6 +35040,33 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			preview.metadata.insert(QStringLiteral("contentBranch"), QStringLiteral("photo-carousel"));
 			preview.metadata.insert(QStringLiteral("mediaPresentation"), QStringLiteral("provider-post-card"));
 		}
+		const std::optional< PersistentChatPreviewPlayableMediaMeta > giphyMedia =
+			giphyPlayableMediaFromUrl(previewUrl);
+		if (giphyMedia) {
+			preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("giphy"));
+			preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("giphy"));
+			applyPersistentChatRemotePlayableMedia(preview, QUrl(giphyMedia->url), giphyMedia->mime,
+												   QStringLiteral("animated-gif"),
+												   QStringLiteral("animated-image"));
+		}
+		const std::optional< QString > imgurId = imgurSingleMediaIdFromUrl(previewUrl);
+		if (imgurId) {
+			preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("imgur"));
+			preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("imgur"));
+			const bool animated =
+				previewUrl.path().endsWith(QLatin1String(".gifv"), Qt::CaseInsensitive)
+				|| preview.title.contains(QLatin1String("GIF on Imgur"), Qt::CaseInsensitive);
+			if (animated) {
+				applyPersistentChatRemotePlayableMedia(
+					preview, QUrl(QStringLiteral("https://i.imgur.com/%1.mp4").arg(*imgurId)),
+					QStringLiteral("video/mp4"), QStringLiteral("animated-gif-video-backed"),
+					QStringLiteral("animated-image"));
+			} else {
+				applyPersistentChatRemotePlayableMedia(
+					preview, QUrl(QStringLiteral("https://i.imgur.com/%1h.jpg").arg(*imgurId)),
+					QStringLiteral("image/jpeg"), QStringLiteral("image"), QStringLiteral("image-card"));
+			}
+		}
 		const QString vehicleTitle = preview.metadata.value(QStringLiteral("vehicleTitle")).toString().trimmed();
 		const QString vehicleDescription =
 			preview.metadata.value(QStringLiteral("vehicleDescription")).toString().trimmed();
@@ -34988,6 +35097,16 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
 		const bool handledYahooFinanceQuotePreview = applyYahooFinanceQuotePreviewFallback(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
+		const bool tenorPreview =
+			hostEqualsOrEndsWith(normalizedPreviewHost(previewUrl.host()), QStringLiteral("tenor.com"));
+		const bool handledAnimatedOEmbed =
+			(giphyMedia || tenorPreview) && requestPersistentChatOEmbedPreview(previewKey, previewUrl);
+		const bool handledTenorMedia = requestPersistentChatTenorMediaPreview(previewKey, previewUrl);
+		if (imgurId && preview.mediaKind == QLatin1String("video")) {
+			requestPersistentChatPreviewPosterImage(
+				previewKey, QUrl(QStringLiteral("https://i.imgur.com/%1h.jpg").arg(*imgurId)),
+				QStringLiteral("image/jpeg"));
+		}
 		requestPersistentChatInstagramMetadataPreview(previewKey, previewUrl);
 		if (handledYahooFinanceQuotePreview) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
@@ -34998,7 +35117,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		if (preview.previewAssetID > 0 && !handledRedditVideoPreview) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
-			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview) {
+			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview && !handledAnimatedOEmbed
+				&& !handledTenorMedia) {
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 			}
 			renderIfVisible();

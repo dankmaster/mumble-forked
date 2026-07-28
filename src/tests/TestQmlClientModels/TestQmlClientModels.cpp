@@ -62,6 +62,7 @@ private slots:
 	void chatTimelinePreservesStreamingManifestsAndManagedArtwork();
 	void chatTimelineNormalizesProviderMetadata();
 	void chatTimelineBuildsTypedEmbedDocuments();
+	void resolvedEmbedStateHydratesAnimatedProviderMedia();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void participantUpsertsAndRemovalsStayResetFree();
 	void workloadSourceStateRoundTripsExactly();
@@ -3405,6 +3406,33 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QVERIFY(directDocument.value(QStringLiteral("commonPresentation")).toBool());
 	QCOMPARE(directDocument.value(QStringLiteral("provider")).toMap()
 				 .value(QStringLiteral("id")).toString(), QStringLiteral("direct"));
+}
+
+void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly));
+	const QByteArray source = sourceFile.readAll();
+	const qsizetype embedStart =
+		source.indexOf("if (previewKey.startsWith(QLatin1String(\"embed:\")))");
+	const qsizetype embedEnd =
+		source.indexOf("if (previewKey.startsWith(QLatin1String(\"youtube:\")))", embedStart);
+	QVERIFY(embedStart >= 0);
+	QVERIFY(embedEnd > embedStart);
+	const QByteArray resolvedEmbedPath = source.mid(embedStart, embedEnd - embedStart);
+	QVERIFY(resolvedEmbedPath.contains("giphyPlayableMediaFromUrl(previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatOEmbedPreview(previewKey, previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatTenorMediaPreview(previewKey, previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("imgurSingleMediaIdFromUrl(previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("animated-gif-video-backed"));
+	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatPreviewPosterImage("));
+
+	const QString cachePath = QFINDTESTDATA("../../mumble/PersistentChatMediaCache.cpp");
+	QVERIFY2(!cachePath.isEmpty(), "PersistentChatMediaCache.cpp test data was not found");
+	QFile cacheFile(cachePath);
+	QVERIFY(cacheFile.open(QIODevice::ReadOnly));
+	QVERIFY(cacheFile.readAll().contains("constexpr int CACHE_VERSION                  = 14;"));
 }
 
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {

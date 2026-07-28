@@ -582,6 +582,7 @@ public:
 	bool requestPersistentChatIsThereAnyDealPreview(const QString &previewKey, const QString &appId);
 	bool requestPersistentChatIsThereAnyDealOverview(const QString &previewKey, const QString &gameId);
 	bool requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatTenorMediaPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditPostPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditDashManifestPreview(const QString &previewKey, const QString &videoId,
