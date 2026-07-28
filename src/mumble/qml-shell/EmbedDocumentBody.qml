@@ -18,19 +18,47 @@ ColumnLayout {
 		&& document.facts.length !== undefined ? document.facts : []
 	readonly property string contentType: String(content.type || "")
 	readonly property bool socialPresentation: document && document.presentation === "social"
+	readonly property bool marketplacePresentation: document
+		&& document.presentation === "marketplace"
 	signal externalOpenRequested(string url)
 
 	spacing: Theme.space3
 
 	RowLayout {
+		objectName: "embedDocumentAuthorRow"
 		Layout.fillWidth: true
+		visible: root.authorLine().length > 0
+			|| String(root.content.publishedAt || "").length > 0
 		spacing: Theme.space2
 
-		ProviderIdentityBadge {
-			providerToken: String(root.provider.id || "")
-			badgeText: String(root.provider.label || "")
-			presentation: "inline"
-			accent: root.accent
+		Rectangle {
+			Layout.preferredWidth: Theme.avatarSmall
+			Layout.preferredHeight: Theme.avatarSmall
+			visible: root.authorLine().length > 0
+			radius: width / 2
+			color: Theme.embedSurface
+			border.color: Theme.embedBorder
+			clip: true
+
+			Image {
+				id: authorAvatar
+				anchors.fill: parent
+				source: String(root.author.avatarUrl || "")
+				asynchronous: true
+				cache: false
+				fillMode: Image.PreserveAspectCrop
+			}
+
+			Label {
+				anchors.centerIn: parent
+				visible: authorAvatar.status !== Image.Ready
+				text: root.authorInitial()
+				textFormat: Text.PlainText
+				color: root.accent
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+				Accessible.ignored: true
+			}
 		}
 
 		ColumnLayout {
@@ -66,7 +94,8 @@ ColumnLayout {
 		text: String(root.content.title || "")
 		textFormat: Text.PlainText
 		color: Theme.textStrong
-		font.pixelSize: root.socialPresentation ? Theme.fontLabel : Theme.fontTitle
+		font.pixelSize: root.socialPresentation || root.marketplacePresentation
+			? Theme.fontLabel : Theme.fontTitle
 		font.weight: Font.DemiBold
 		lineHeight: 1.15
 		wrapMode: Text.Wrap
@@ -109,6 +138,8 @@ ColumnLayout {
 			delegate: Rectangle {
 				id: factCard
 				required property var modelData
+				required property int index
+				objectName: "embedDocumentFact_" + index
 
 				Layout.fillWidth: true
 				implicitHeight: factLayout.implicitHeight + Theme.space2 * 2
@@ -123,6 +154,7 @@ ColumnLayout {
 					spacing: 0
 
 					Label {
+						objectName: "embedDocumentFactLabel_" + factCard.index
 						Layout.fillWidth: true
 						text: String(factCard.modelData.label || "")
 						textFormat: Text.PlainText
@@ -131,6 +163,7 @@ ColumnLayout {
 						elide: Text.ElideRight
 					}
 					Label {
+						objectName: "embedDocumentFactValue_" + factCard.index
 						Layout.fillWidth: true
 						text: String(factCard.modelData.value === undefined
 							|| factCard.modelData.value === null ? "" : factCard.modelData.value)
@@ -153,6 +186,11 @@ ColumnLayout {
 		if (name.length > 0 && handle.length > 0 && name !== handle)
 			return name + " · " + handle
 		return name || handle
+	}
+
+	function authorInitial() {
+		const line = authorLine().replace(/^@/, "")
+		return line.length > 0 ? line.slice(0, 1).toUpperCase() : "?"
 	}
 
 	function displayDate(value) {

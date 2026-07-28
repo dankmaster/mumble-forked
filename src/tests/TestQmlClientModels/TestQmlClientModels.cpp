@@ -3046,8 +3046,21 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 				{ QStringLiteral("thumbnail"), QStringLiteral("image://mumble/x-thumb?g=41") },
 				{ QStringLiteral("title"), QStringLiteral("Post image") },
 				{ QStringLiteral("directPlayable"), true }
+			},
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/x-post-two?g=42") },
+				{ QStringLiteral("externalUrl"), QStringLiteral("https://pbs.twimg.com/media/test-two.jpg") },
+				{ QStringLiteral("thumbnail"), QStringLiteral("image://mumble/x-thumb-two?g=42") },
+				{ QStringLiteral("title"), QStringLiteral("Second post image") },
+				{ QStringLiteral("directPlayable"), true }
 			}
 		} },
+		{ QStringLiteral("mediaKind"), QStringLiteral("video") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("video/mp4") },
+		{ QStringLiteral("mediaUrl"), QStringLiteral("https://video.twimg.com/ext_tw_video/test.mp4") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("image://mumble/x-video-poster?g=43") },
 		{ QStringLiteral("metadata"), QVariantMap {
 			{ QStringLiteral("provider"), QStringLiteral("x") },
 			{ QStringLiteral("xDisplayName"), QStringLiteral("History in Memes") },
@@ -3094,10 +3107,16 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QCOMPARE(xThread.first().toMap().value(QStringLiteral("url")).toString(),
 			 QStringLiteral("https://x.com/source/status/2058970000000000000"));
 	QCOMPARE(xThread.last().toMap().value(QStringLiteral("role")).toString(), QStringLiteral("quote"));
-	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().size(), 1);
+	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().size(), 3);
 	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().first().toMap()
 				 .value(QStringLiteral("thumbnailUrl")).toString(),
 			 QStringLiteral("image://mumble/x-thumb?g=41"));
+	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().last().toMap()
+				 .value(QStringLiteral("kind")).toString(),
+			 QStringLiteral("video"));
+	QCOMPARE(xDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("native"));
 
 	const QString steamSource =
 		QStringLiteral("https://store.steampowered.com/app/730/CounterStrike_2/");
@@ -3147,7 +3166,9 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 		{ QStringLiteral("embedUrl"),
 		  QStringLiteral("https://www.youtube-nocookie.com/embed/M7lc1UVf-VE") },
 		{ QStringLiteral("metadata"), QVariantMap {
-			{ QStringLiteral("provider"), QStringLiteral("youtube") }
+			{ QStringLiteral("provider"), QStringLiteral("youtube") },
+			{ QStringLiteral("youtubeAuthor"), QStringLiteral("Google for Developers") },
+			{ QStringLiteral("youtubeContentKind"), QStringLiteral("live") }
 		} }
 	});
 	QCOMPARE(youtubeDocument.value(QStringLiteral("content")).toMap()
@@ -3156,6 +3177,10 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 				 .value(QStringLiteral("mode")).toString(), QStringLiteral("provider"));
 	QCOMPARE(youtubeDocument.value(QStringLiteral("source")).toMap()
 				 .value(QStringLiteral("url")).toString(), youtubeSource);
+	QCOMPARE(youtubeDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("author")).toMap()
+				 .value(QStringLiteral("name")).toString(),
+			 QStringLiteral("Google for Developers"));
 
 	const QVariantMap instagramDocument = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://www.instagram.com/p/DYzqx_9txNX/") },
@@ -3185,13 +3210,86 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 		{ QStringLiteral("host"), QStringLiteral("www.facebook.com") },
 		{ QStringLiteral("title"), QStringLiteral("Facebook reel") },
 		{ QStringLiteral("description"), QStringLiteral("A public reel") },
+		{ QStringLiteral("embedKind"), QStringLiteral("facebook") },
+		{ QStringLiteral("embedUrl"),
+		  QStringLiteral("https://www.facebook.com/plugins/video.php?href=example") },
 		{ QStringLiteral("metadata"), QVariantMap {
-			{ QStringLiteral("provider"), QStringLiteral("facebook") }
+			{ QStringLiteral("provider"), QStringLiteral("facebook") },
+			{ QStringLiteral("facebookMediaKind"), QStringLiteral("reel") },
+			{ QStringLiteral("facebookAuthor"), QStringLiteral("OskarSnickrar") },
+			{ QStringLiteral("facebookCaption"), QStringLiteral("Hittar inga ord… #oskarsnickrar") },
+			{ QStringLiteral("facebookViews"), QStringLiteral("211K") },
+			{ QStringLiteral("facebookReactions"), QStringLiteral("2.5K") }
 		} }
 	});
 	QVERIFY(facebookDocument.value(QStringLiteral("commonPresentation")).toBool());
 	QCOMPARE(facebookDocument.value(QStringLiteral("content")).toMap()
 				 .value(QStringLiteral("type")).toString(), QStringLiteral("social-post"));
+	QCOMPARE(facebookDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("description")).toString(),
+			 QStringLiteral("Hittar inga ord… #oskarsnickrar"));
+	QCOMPARE(facebookDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("author")).toMap()
+				 .value(QStringLiteral("name")).toString(),
+			 QStringLiteral("OskarSnickrar"));
+	QCOMPARE(facebookDocument.value(QStringLiteral("facts")).toList().size(), 2);
+	QCOMPARE(facebookDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("provider"));
+
+	const QVariantMap blocketDocument = normalizedDocument({
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.blocket.se/recommerce/forsale/item/17926061") },
+		{ QStringLiteral("host"), QStringLiteral("www.blocket.se") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/blocket-one?g=81") },
+				{ QStringLiteral("directPlayable"), true }
+			},
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/blocket-two?g=82") },
+				{ QStringLiteral("directPlayable"), true }
+			},
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/blocket-three?g=83") },
+				{ QStringLiteral("directPlayable"), true }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("blocket") },
+			{ QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") },
+			{ QStringLiteral("listingTitle"),
+			  QStringLiteral("MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC") },
+			{ QStringLiteral("listingDescription"),
+			  QStringLiteral("Fungerar perfekt. Sparsamt använd.") },
+			{ QStringLiteral("listingPrice"), QStringLiteral("7 500 kr") },
+			{ QStringLiteral("listingLocation"), QStringLiteral("65463 Karlstad") },
+			{ QStringLiteral("listingSpecs"), QVariantList {
+				QVariantMap {
+					{ QStringLiteral("key"), QStringLiteral("condition") },
+					{ QStringLiteral("label"), QStringLiteral("Condition") },
+					{ QStringLiteral("value"), QStringLiteral("As new") }
+				}
+			} }
+		} }
+	});
+	QVERIFY(blocketDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(blocketDocument.value(QStringLiteral("presentation")).toString(),
+			 QStringLiteral("marketplace"));
+	QCOMPARE(blocketDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(),
+			 QStringLiteral("marketplace-listing"));
+	QCOMPARE(blocketDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("title")).toString(),
+			 QStringLiteral("MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC"));
+	QCOMPARE(blocketDocument.value(QStringLiteral("media")).toList().size(), 3);
+	QCOMPARE(blocketDocument.value(QStringLiteral("facts")).toList().size(), 3);
 
 	const QVariantMap flashbackDocument = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://www.flashback.org/t3731783") },

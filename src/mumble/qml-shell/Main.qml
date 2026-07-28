@@ -429,6 +429,40 @@ ApplicationWindow {
 		return false
 	}
 
+	function normalizedComparableSourceUrl(value) {
+		let url = String(value === undefined || value === null ? "" : value).trim()
+		while (url.length > 1 && /\/$/.test(url))
+			url = url.slice(0, -1)
+		return url
+	}
+
+	function messageBodyIsTypedPreviewSourceOnly(segments, preview) {
+		const document = preview && preview.document ? preview.document : ({})
+		if (!document || document.commonPresentation !== true || !document.source)
+			return false
+		const sourceUrl = normalizedComparableSourceUrl(document.source.url || "")
+		if (sourceUrl.length === 0)
+			return false
+
+		let text = ""
+		let linkUrl = ""
+		for (const segment of (segments || [])) {
+			if (!segment || segment.text === undefined)
+				return false
+			text += String(segment.text)
+			const href = normalizedComparableSourceUrl(segment.href || "")
+			if (href.length > 0) {
+				if (linkUrl.length > 0 && linkUrl !== href)
+					return false
+				linkUrl = href
+			}
+		}
+		const bodyUrl = normalizedComparableSourceUrl(text)
+		if (!/^https?:\/\/\S+$/i.test(bodyUrl) || bodyUrl !== sourceUrl)
+			return false
+		return linkUrl.length === 0 || linkUrl === sourceUrl
+	}
+
 	function preferredAttachmentMessageWidth(attachments, ownOrSystem) {
 		const values = attachments || []
 		if (values.length <= 0)
@@ -3950,6 +3984,9 @@ ApplicationWindow {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
+										&& !root.messageBodyIsTypedPreviewSourceOnly(
+											messageDelegate.bodySegments || [],
+											messageDelegate.preview || ({}))
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
@@ -4935,19 +4972,24 @@ ApplicationWindow {
 										event.accepted = true
 								}
 								Keys.onPressed: event => {
-									if (!event.matches(StandardKey.Paste))
+									if (event.matches(StandardKey.Paste)) {
+										const attached = activeScope.canAttachImages && composer.pasteFromClipboard()
+										if (!attached)
+											composerInput.paste()
+										event.accepted = true
 										return
-									const attached = activeScope.canAttachImages && composer.pasteFromClipboard()
-									if (!attached)
-										composerInput.paste()
+									}
+									const returnKey = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+									if (!returnKey || (event.modifiers & Qt.ShiftModifier)
+											|| composerInput.inputMethodComposing)
+										return
+									if (text.trim().length > 0 || composer.attachments.count > 0)
+										composer.send()
+									// Empty Return is deliberately a no-op. Shift+Return is the
+									// only newline gesture, regardless of whether the draft came
+									// from typing, paste, drop, or an attachment.
 									event.accepted = true
 								}
-                                Keys.onReturnPressed: event => {
-                                    if (!(event.modifiers & Qt.ShiftModifier) && (text.trim().length > 0 || composer.attachments.count > 0)) {
-                                        composer.send()
-                                        event.accepted = true
-                                    }
-                                }
                             }
 									ModernIconButton {
 										id: composerSendButton

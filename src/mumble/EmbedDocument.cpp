@@ -69,6 +69,9 @@ namespace {
 		if (host.endsWith(QLatin1String("flashback.org"))) {
 			return QStringLiteral("flashback");
 		}
+		if (host.endsWith(QLatin1String("blocket.se"))) {
+			return QStringLiteral("blocket");
+		}
 		return {};
 	}
 
@@ -86,6 +89,7 @@ namespace {
 			{ QStringLiteral("facebook"), QStringLiteral("Facebook") },
 			{ QStringLiteral("x"), QStringLiteral("X") },
 			{ QStringLiteral("flashback"), QStringLiteral("Flashback") },
+			{ QStringLiteral("blocket"), QStringLiteral("Blocket") },
 			{ QStringLiteral("direct"), QStringLiteral("Media") }
 		};
 		return labels.value(provider, host);
@@ -128,6 +132,8 @@ namespace {
 			{ QStringLiteral("thumbnailUrl"), boundedText(item.value(QStringLiteral("thumbnail")), 4096) },
 			{ QStringLiteral("posterUrl"), boundedText(item.value(QStringLiteral("poster")), 4096) },
 			{ QStringLiteral("streamKind"), boundedText(item.value(QStringLiteral("streamKind")), 32) },
+			{ QStringLiteral("contentBranch"), boundedText(item.value(QStringLiteral("contentBranch")), 64) },
+			{ QStringLiteral("presentation"), boundedText(item.value(QStringLiteral("mediaPresentation")), 64) },
 			{ QStringLiteral("directPlayable"), item.value(QStringLiteral("directPlayable")).toBool() },
 			{ QStringLiteral("managedAnimated"), item.value(QStringLiteral("managedAnimated")).toBool() }
 		};
@@ -166,7 +172,7 @@ namespace {
 			}
 			append(entry.toMap(), index++);
 		}
-		if (result.isEmpty()) {
+		if (result.size() < 16) {
 			QVariantMap primary {
 				{ QStringLiteral("kind"), preview.value(QStringLiteral("mediaKind")) },
 				{ QStringLiteral("mime"), preview.value(QStringLiteral("mediaMime")) },
@@ -175,10 +181,14 @@ namespace {
 				{ QStringLiteral("thumbnail"), preview.value(QStringLiteral("thumbnailUrl")) },
 				{ QStringLiteral("poster"), preview.value(QStringLiteral("thumbnailUrl")) },
 				{ QStringLiteral("title"), preview.value(QStringLiteral("title")) },
+				{ QStringLiteral("contentBranch"),
+				  preview.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("mediaContentBranch")) },
+				{ QStringLiteral("mediaPresentation"),
+				  preview.value(QStringLiteral("metadata")).toMap().value(QStringLiteral("mediaPresentation")) },
 				{ QStringLiteral("directPlayable"), !preview.value(QStringLiteral("mediaUrl")).toString().isEmpty() },
 				{ QStringLiteral("managedAnimated"), preview.value(QStringLiteral("mediaAnimated")).toBool() }
 			};
-			append(primary, 0);
+			append(primary, index);
 		}
 		return result;
 	}
@@ -189,6 +199,10 @@ namespace {
 			firstText(metadata, { QStringLiteral("previewKind") }, 64).toLower();
 		if (provider == QLatin1String("steam") || previewKind == QLatin1String("gamestoreproduct")) {
 			return QStringLiteral("game");
+		}
+		if (provider == QLatin1String("blocket")
+			|| previewKind == QLatin1String("marketplacelisting")) {
+			return QStringLiteral("marketplace-listing");
 		}
 		if (provider == QLatin1String("x") || provider == QLatin1String("instagram")
 			|| provider == QLatin1String("facebook")) {
@@ -237,6 +251,12 @@ namespace {
 						  firstText(metadata, { QStringLiteral("forumPostAuthor") }, 256));
 			result.insert(QStringLiteral("avatarUrl"),
 						  firstText(metadata, { QStringLiteral("forumPostAuthorAvatarUrl") }, 4096));
+		} else if (provider == QLatin1String("youtube")) {
+			result.insert(QStringLiteral("name"),
+						  firstText(metadata, { QStringLiteral("youtubeAuthor") }, 256));
+		} else if (provider == QLatin1String("facebook")) {
+			result.insert(QStringLiteral("name"),
+						  firstText(metadata, { QStringLiteral("facebookAuthor") }, 256));
 		} else if (metadata.contains(QStringLiteral("articleAuthor"))) {
 			result.insert(QStringLiteral("name"),
 						  firstText(metadata, { QStringLiteral("articleAuthor") }, 256));
@@ -359,6 +379,26 @@ namespace {
 					   metadata.value(QStringLiteral("instagramLikeCount")));
 			appendFact(result, QStringLiteral("comments"), QStringLiteral("Comments"),
 					   metadata.value(QStringLiteral("instagramCommentCount")));
+		} else if (provider == QLatin1String("facebook")) {
+			appendFact(result, QStringLiteral("views"), QStringLiteral("Views"),
+					   metadata.value(QStringLiteral("facebookViews")));
+			appendFact(result, QStringLiteral("reactions"), QStringLiteral("Reactions"),
+					   metadata.value(QStringLiteral("facebookReactions")));
+		} else if (provider == QLatin1String("blocket")) {
+			appendFact(result, QStringLiteral("price"), QStringLiteral("Price"),
+					   metadata.value(QStringLiteral("listingPrice")));
+			appendFact(result, QStringLiteral("location"), QStringLiteral("Location"),
+					   metadata.value(QStringLiteral("listingLocation")));
+			for (const QVariant &entry : metadata.value(QStringLiteral("listingSpecs")).toList()) {
+				const QVariantMap spec = entry.toMap();
+				appendFact(result,
+						   firstText(spec, { QStringLiteral("key"), QStringLiteral("label") }, 64),
+						   firstText(spec, { QStringLiteral("label"), QStringLiteral("name") }, 128),
+						   spec.value(QStringLiteral("value")));
+				if (result.size() >= 6) {
+					break;
+				}
+			}
 		} else if (type == QLatin1String("article")) {
 			appendFact(result, QStringLiteral("section"), QStringLiteral("Section"),
 					   metadata.value(QStringLiteral("articleSection")));
@@ -390,6 +430,9 @@ namespace {
 		}
 		if (type == QLatin1String("game")) {
 			return QStringLiteral("game");
+		}
+		if (type == QLatin1String("marketplace-listing")) {
+			return QStringLiteral("marketplace");
 		}
 		if (type == QLatin1String("video") || type == QLatin1String("audio")
 			|| type == QLatin1String("image") || type == QLatin1String("animated-image")
@@ -430,7 +473,8 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	const bool commonPresentation = provider == QLatin1String("youtube")
 		|| provider == QLatin1String("steam") || provider == QLatin1String("instagram")
 		|| provider == QLatin1String("facebook") || provider == QLatin1String("x")
-		|| provider == QLatin1String("flashback") || provider == QLatin1String("direct")
+		|| provider == QLatin1String("flashback") || provider == QLatin1String("blocket")
+		|| provider == QLatin1String("direct")
 		|| type == QLatin1String("article");
 
 	QString title = firstText(preview, { QStringLiteral("title") }, 512);
@@ -450,9 +494,18 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	} else if (provider == QLatin1String("x")) {
 		description = title;
 		title.clear();
+	} else if (provider == QLatin1String("facebook")) {
+		const QString caption = firstText(metadata, { QStringLiteral("facebookCaption") }, 4096);
+		if (!caption.isEmpty()) {
+			description = caption;
+		}
+		title.clear();
 	} else if (provider == QLatin1String("flashback")) {
 		title = firstText(metadata, { QStringLiteral("forumThreadTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("forumPostExcerpt") }, 4096);
+	} else if (provider == QLatin1String("blocket")) {
+		title = firstText(metadata, { QStringLiteral("listingTitle") }, 512);
+		description = firstText(metadata, { QStringLiteral("listingDescription") }, 4096);
 	} else if (type == QLatin1String("article")) {
 		title = firstText(metadata, { QStringLiteral("articleTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("articleDescription") }, 4096);
@@ -489,7 +542,14 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 
 	const QString embedUrl = boundedText(preview.value(QStringLiteral("embedUrl")), 4096);
 	QString playbackMode = QStringLiteral("none");
-	if (!embedUrl.isEmpty() && type != QLatin1String("social-post")) {
+	const QString instagramKind =
+		firstText(metadata, { QStringLiteral("instagramMediaKind") }, 32).toLower();
+	const bool providerPlaybackAllowed =
+		type != QLatin1String("social-post")
+		|| provider == QLatin1String("facebook")
+		|| (provider == QLatin1String("instagram")
+			&& (instagramKind == QLatin1String("reel") || instagramKind == QLatin1String("tv")));
+	if (!embedUrl.isEmpty() && providerPlaybackAllowed) {
 		playbackMode = QStringLiteral("provider");
 	} else {
 		for (const QVariant &entry : media) {

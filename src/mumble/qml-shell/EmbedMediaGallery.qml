@@ -14,6 +14,9 @@ ColumnLayout {
 	property bool renderActive: true
 	property bool animationsEnabled: true
 	property bool mediaRequiresReveal: false
+	property bool viewportVisible: true
+	property real viewportPreferredWidth: 0
+	property real viewportPreferredHeight: 0
 	property color accent: Theme.accent
 	property string accessibleTitle: ""
 	readonly property var currentItem: mediaItems.length > 0
@@ -34,10 +37,20 @@ ColumnLayout {
 	Rectangle {
 		id: mediaViewport
 		objectName: "embedDocumentMediaViewport"
-		Layout.fillWidth: true
-		Layout.preferredHeight: root.expanded
-			? Math.min(420, Math.max(240, width * 9 / 16))
-			: Math.min(320, Math.max(180, width * 9 / 16))
+		Layout.fillWidth: root.viewportPreferredWidth <= 0
+		Layout.preferredWidth: root.viewportPreferredWidth > 0
+			? Math.min(root.width, root.viewportPreferredWidth) : -1
+		Layout.preferredHeight: root.viewportVisible
+			? (root.viewportPreferredHeight > 0
+				? root.viewportPreferredHeight
+				: root.expanded
+					? Math.min(420, Math.max(240, width * 9 / 16))
+					: Math.min(320, Math.max(180, width * 9 / 16)))
+			: 0
+		Layout.minimumHeight: Layout.preferredHeight
+		Layout.maximumHeight: Layout.preferredHeight
+		Layout.alignment: Qt.AlignHCenter
+		visible: root.viewportVisible
 		radius: Theme.innerRadius
 		color: Theme.mediaCanvas
 		border.color: Theme.withAlpha(root.accent, 0.32)
@@ -104,29 +117,60 @@ ColumnLayout {
 			color: Theme.withAlpha(Theme.mediaCanvas, root.currentImageSource.length > 0 ? 0.18 : 0)
 		}
 
-		ModernButton {
+		Rectangle {
+			id: playbackPrompt
 			anchors.centerIn: parent
 			visible: !root.mediaRequiresReveal
 				&& (root.currentKind === "video" || root.currentKind === "audio")
-			text: root.currentKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
-			tone: "accent"
-			Accessible.name: text + (root.accessibleTitle.length > 0
-				? ": " + root.accessibleTitle : "")
-			onClicked: root.mediaRequested(root.selectedIndex)
+			implicitWidth: playbackPromptContent.implicitWidth + Theme.space4
+			implicitHeight: Theme.controlHeight
+			width: implicitWidth
+			height: implicitHeight
+			radius: height / 2
+			color: root.accent
+			border.color: Theme.withAlpha(Theme.mediaOverlayTextStrong, 0.42)
+			border.width: 1
+			Accessible.ignored: true
+
+			Row {
+				id: playbackPromptContent
+				anchors.centerIn: parent
+				spacing: Theme.space2
+				ModernIcon {
+					name: root.currentKind === "audio" ? "volume" : "play"
+					size: Theme.avatarSmall
+					color: Theme.contrastText(root.accent)
+					Accessible.ignored: true
+				}
+				Label {
+					text: root.currentKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
+					textFormat: Text.PlainText
+					color: Theme.contrastText(root.accent)
+					font.pixelSize: Theme.fontLabel
+					font.weight: Font.DemiBold
+				}
+			}
 		}
 
 		Button {
+			objectName: "embedDocumentMediaPrimaryAction"
 			anchors.fill: parent
 			visible: !root.mediaRequiresReveal
-				&& (root.currentKind === "image" || root.currentKind === "animated-image")
 			hoverEnabled: true
 			background: Rectangle {
 				color: parent.down ? Theme.withAlpha(root.accent, 0.20)
 					: parent.hovered ? Theme.withAlpha(root.accent, 0.10) : "transparent"
 			}
 			contentItem: Item {}
-			Accessible.name: qsTr("Open %1").arg(root.accessibleTitle.length > 0
-				? root.accessibleTitle : qsTr("preview image"))
+			Accessible.name: {
+				const title = root.accessibleTitle.length > 0
+					? root.accessibleTitle : qsTr("preview media")
+				if (root.currentKind === "video")
+					return qsTr("Play %1").arg(title)
+				if (root.currentKind === "audio")
+					return qsTr("Play audio: %1").arg(title)
+				return qsTr("Open %1").arg(title)
+			}
 			onClicked: root.mediaRequested(root.selectedIndex)
 		}
 

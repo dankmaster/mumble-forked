@@ -75,6 +75,10 @@ Rectangle {
 	readonly property var typedDocumentFacts: typedDocumentActive
 		&& embedDocument.facts && embedDocument.facts.length !== undefined
 		? embedDocument.facts : []
+	readonly property var typedDocumentPlayback: typedDocumentActive
+		&& embedDocument.playback ? embedDocument.playback : ({})
+	readonly property string typedPlaybackMode:
+		safeText(typedDocumentPlayback.mode, 32).toLowerCase()
 	readonly property bool typedDocumentCanExpand: typedDocumentActive
 		&& (typedDocumentFacts.length > 0
 			|| (typedDocumentThread.items && typedDocumentThread.items.length > 0)
@@ -122,7 +126,7 @@ Rectangle {
 	] : [], 512)
 	readonly property string displayTitle: rawDisplayTitle.length > 0
 		&& !equivalentPreviewText(rawDisplayTitle, previewHost) ? rawDisplayTitle
-		: hasEmbedPreview ? fallbackEmbedTitle(safeEmbedProvider)
+		: hasEmbedGeometry ? fallbackEmbedTitle(safeEmbedProvider)
 		: previewHost.length > 0 ? previewHost : qsTr("Link preview")
 	readonly property string metadataLine: rawMetadataLine.length > 0
 		&& !equivalentPreviewText(rawMetadataLine, displayTitle) ? rawMetadataLine
@@ -156,6 +160,9 @@ Rectangle {
 	// sender-controlled WebEngine embed.
 	readonly property bool hasEmbedPreview: safeEmbedUrl.length > 0 && safeEmbedProvider.length > 0
 		&& normalizedEmbedProvider !== "direct"
+	readonly property bool reserveEmbedGeometry: !!preview
+		&& preview.reserveEmbedGeometry === true && safeEmbedProvider.length > 0
+	readonly property bool hasEmbedGeometry: hasEmbedPreview || reserveEmbedGeometry
 	readonly property string instagramEmbedMediaKind: normalizedInstagramEmbedMediaKind()
 	readonly property bool instagramStaticPost: normalizedEmbedProvider === "instagram"
 		&& instagramEmbedMediaKind === "post"
@@ -215,7 +222,7 @@ Rectangle {
 		: imageSource
 	readonly property string effectiveEmbedPosterSource: embedPosterFallbackActive
 		? "" : posterSourceWithRetry(embedPosterSource, embedPosterRetryNonce)
-	readonly property bool fullBleedEmbed: hasEmbedPreview
+	readonly property bool fullBleedEmbed: hasEmbedGeometry
 		&& normalizedEmbedAspect !== "short" && normalizedEmbedAspect !== "square"
 	readonly property real embedMediaWidth: normalizedEmbedAspect === "short"
 		? Math.min(actionAvailableWidth, compact ? 240 : expanded ? 340 : 280)
@@ -239,11 +246,23 @@ Rectangle {
 		: currentMediaKind === "audio" ? "compact-audio" : "wide"
 	readonly property real directInlineMediaHeight: currentMediaKind === "audio"
 		? Math.min(166, Math.max(128, actionAvailableWidth * 0.29)) : width * 9 / 16
-	readonly property real inlineMediaViewportHeight: hasEmbedPreview ? embedMediaHeight
-		: directInlineMediaHeight
-	readonly property real inlineMediaStageWidth: hasEmbedPreview ? embedMediaWidth
+	readonly property real typedNativeMediaHeight: expanded
+		? Math.min(420, Math.max(240, actionAvailableWidth * 9 / 16))
+		: Math.min(320, Math.max(180, actionAvailableWidth * 9 / 16))
+	readonly property real inlineMediaViewportHeight: typedDocumentUsesGallery
+		? (hasEmbedGeometry ? embedMediaHeight : typedNativeMediaHeight)
+		: hasEmbedGeometry ? embedMediaHeight : directInlineMediaHeight
+	readonly property real inlineMediaStageWidth: typedDocumentUsesGallery
+		? (hasEmbedGeometry ? embedMediaWidth : actionAvailableWidth)
+		: hasEmbedGeometry ? embedMediaWidth
 		: currentMediaKind === "audio" ? actionAvailableWidth : width
+	readonly property real reservedInlineControlsHeight:
+		localPlaybackSupported && inlineActionUsesPlaybackSemantics && !providerPostPresentation
+			? Theme.controlHeight + Theme.space2 * 2 : 0
+	readonly property real stableInlinePanelHeight: inlineMediaViewportHeight
+		+ reservedInlineControlsHeight
 	readonly property real embedPanelHeight: !inlineMediaStageVisible ? 0
+		: typedDocumentUsesGallery ? stableInlinePanelHeight
 		: inlinePlaybackActive
 			? providerPostPresentation ? inlineMediaViewportHeight
 				: Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
@@ -282,7 +301,7 @@ Rectangle {
 	readonly property bool hasSecondaryOriginalOpenAction: !typedDocumentActive
 		&& (hasPrimaryDirectAction || hasDirectMedia)
 		&& originalProviderUrl.length > 0
-	readonly property bool hasSizeActions: inlineMediaStageVisible
+	readonly property bool hasSizeActions: inlineMediaStageVisible && localPlaybackSupported
 	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
 		&& !providerPostPresentation
 		&& (!mediaSessionController
@@ -302,7 +321,8 @@ Rectangle {
 	readonly property bool embedPosterUnavailable: hasEmbedPreview && embedPosterFallbackActive
 		&& !inlinePlaybackActive
 	readonly property bool inlineMediaStageVisible:
-		((hasEmbedPreview && localPlaybackSupported && !embedPosterUnavailable)
+		(reserveEmbedGeometry
+			|| (hasEmbedPreview && localPlaybackSupported && !embedPosterUnavailable)
 			|| hasDirectMedia)
 		&& (!typedDocumentUsesGallery || inlinePlaybackActive)
 	readonly property string inlinePresentationProvider: hasEmbedPreview
@@ -318,7 +338,8 @@ Rectangle {
 	readonly property bool providerOwnsDetails: inlineProviderOwnsDetails
 		|| (hasEmbedPreview
 			&& ["spotify", "soundcloud"].indexOf(providerDetails.providerToken) >= 0)
-	readonly property bool fullBleedMediaStage: (hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed
+	readonly property bool fullBleedMediaStage: !typedDocumentUsesGallery
+		&& ((hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed)
 	readonly property string genericProviderMark: buildGenericProviderMark()
 	readonly property bool genericHeaderShowsIdentityMark: previewState === "ready"
 		&& !inlineMediaStageVisible && imageSource.length === 0 && !hasExternalImage
@@ -1068,9 +1089,12 @@ Rectangle {
 						"mime": safeText(item.mime, 128),
                         "url": renderSource,
                         "externalUrl": externalSource,
-						"title": safeText(item.title, 512),
+                        "title": safeText(item.title, 512),
+						"description": safeText(item.description, 2048),
                         "directPlayable": renderSource.length > 0,
-                        "managedAnimated": managedAnimated && /^file:\/\//i.test(renderSource),
+						"managedAnimated": managedAnimated && /^file:\/\//i.test(renderSource),
+						"contentBranch": safeText(item.contentBranch, 64),
+						"presentation": safeText(item.presentation, 64),
                         "thumbnail": safeRenderImageSource(item.thumbnailUrl || item.thumbnail || ""),
                         "poster": safeRenderImageSource(item.posterUrl || item.poster || "")
                     })
@@ -1081,16 +1105,23 @@ Rectangle {
 				const externalUrl = safeExternalUrl(item.externalUrl || item.url)
 				const directPlayable = item.directPlayable !== false && playbackUrl.length > 0
 				const targetUrl = directPlayable ? playbackUrl : externalUrl
-				if (kind.length > 0 && targetUrl.length > 0) {
+				const thumbnail = safeRenderImageSource(item.thumbnailUrl || item.thumbnail || "")
+				const poster = safeRenderImageSource(item.posterUrl || item.poster || "")
+				if (kind.length > 0
+						&& (targetUrl.length > 0 || thumbnail.length > 0 || poster.length > 0)) {
 					result.push({
 						"kind": kind,
 						"mime": safeText(item.mime, 128),
 						"url": targetUrl,
 						"externalUrl": externalUrl,
 						"title": safeText(item.title, 512),
+						"description": safeText(item.description, 2048),
 						"directPlayable": directPlayable,
-						"thumbnail": safeRenderImageSource(item.thumbnailUrl || item.thumbnail || ""),
-						"poster": safeRenderImageSource(item.posterUrl || item.poster || "")
+						"managedAnimated": !!item.managedAnimated,
+						"contentBranch": safeText(item.contentBranch, 64),
+						"presentation": safeText(item.presentation, 64),
+						"thumbnail": thumbnail,
+						"poster": poster
 					})
 				}
             }
@@ -1170,6 +1201,22 @@ Rectangle {
 							 safeText(currentMedia.title || displayTitle, 512))
     }
 
+	function requestTypedMedia() {
+		if (mediaRequiresReveal) {
+			sensitiveMediaRevealed = true
+			return
+		}
+		if (currentMediaKind === "image") {
+			requestCurrentMedia()
+			return
+		}
+		if (typedPlaybackMode === "provider" && hasEmbedPreview) {
+			requestInlinePlaybackWithFocus()
+			return
+		}
+		requestCurrentMediaWithFocus()
+	}
+
 	function requestCurrentMediaWithFocus() {
 		if (hasDirectMedia)
 			prepareInlinePlaybackFocus()
@@ -1213,16 +1260,27 @@ Rectangle {
 			onOpenRequested: function(url) { root.externalOpenRequested(url) }
 		}
 
-		Item {
-			id: embedMediaSlot
-			objectName: "previewEmbedMediaSlot"
+		ColumnLayout {
+			id: embedMediaComposition
+			objectName: "previewEmbedMediaComposition"
 			Accessible.ignored: true
 			Layout.fillWidth: true
-			Layout.preferredHeight: root.inlineMediaStageVisible ? root.embedPanelHeight : 0
-			Layout.minimumHeight: Layout.preferredHeight
+			spacing: Theme.space2
 			visible: root.inlineMediaStageVisible
+				|| (root.typedDocumentActive && root.previewState === "ready"
+					&& root.mediaItems.length > 0)
 
-			Rectangle {
+			Item {
+				id: embedMediaSlot
+				objectName: "previewEmbedMediaSlot"
+				Accessible.ignored: true
+				Layout.fillWidth: true
+				Layout.preferredHeight: root.inlineMediaStageVisible ? root.embedPanelHeight : 0
+				Layout.minimumHeight: Layout.preferredHeight
+				Layout.maximumHeight: Layout.preferredHeight
+				visible: root.inlineMediaStageVisible
+
+				Rectangle {
 			id: embedMediaPanel
 			objectName: "previewEmbedMediaPanel"
 			anchors.horizontalCenter: parent.horizontalCenter
@@ -1602,29 +1660,36 @@ Rectangle {
 						}
 					}
 				}
+				}
 			}
 			}
-		}
 
-		EmbedMediaGallery {
-			objectName: "previewDocumentMediaGallery"
-			Layout.fillWidth: true
-			visible: root.typedDocumentActive && root.previewState === "ready"
-				&& !root.inlinePlaybackActive && root.mediaItems.length > 0
-			mediaItems: root.mediaItems
-			selectedIndex: root.selectedMediaIndex
-			expanded: root.expanded
-			renderActive: root.renderActive
-			animationsEnabled: root.animationsEnabled
-			mediaRequiresReveal: root.mediaRequiresReveal
-			accent: providerDetails.providerAccent
-			accessibleTitle: root.displayTitle
-			onSelectionRequested: function(index) { root.selectedMediaIndex = index }
-			onMediaRequested: function(index) {
-				root.selectedMediaIndex = index
-				root.requestCurrentMedia()
+			EmbedMediaGallery {
+				objectName: "previewDocumentMediaGallery"
+				Layout.fillWidth: true
+				visible: root.typedDocumentActive && root.previewState === "ready"
+					&& root.mediaItems.length > 0
+					&& (!root.inlinePlaybackActive || root.mediaItems.length > 1)
+				mediaItems: root.mediaItems
+				selectedIndex: root.selectedMediaIndex
+				expanded: root.expanded
+				renderActive: root.renderActive
+				animationsEnabled: root.animationsEnabled
+				mediaRequiresReveal: root.mediaRequiresReveal
+				viewportVisible: !root.inlinePlaybackActive
+				viewportPreferredWidth: root.hasEmbedPreview
+					? root.embedMediaWidth : root.actionAvailableWidth
+				viewportPreferredHeight: root.typedDocumentUsesGallery
+					? root.stableInlinePanelHeight : 0
+				accent: providerDetails.providerAccent
+				accessibleTitle: root.displayTitle
+				onSelectionRequested: function(index) { root.selectedMediaIndex = index }
+				onMediaRequested: function(index) {
+					root.selectedMediaIndex = index
+					root.requestTypedMedia()
+				}
+				onRevealRequested: root.sensitiveMediaRevealed = true
 			}
-			onRevealRequested: root.sensitiveMediaRevealed = true
 		}
 
 		EmbedDocumentBody {

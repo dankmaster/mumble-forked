@@ -1302,6 +1302,45 @@ TestCase {
 		compare(panel.height, loadingMediaHeight)
 	}
 
+	function test_unresolved_youtube_clip_keeps_its_final_player_geometry() {
+		const card = previewLoader.item
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const playButton = findChild(card, "previewPlayButton")
+		verify(panel !== null && playButton !== null)
+
+		card.preview = {
+			"state": "loading", "loading": true,
+			"title": "Resolving YouTube Clip",
+			"url": "https://www.youtube.com/clip/UgkxU2HSeGL_NvmDJ-nQJrlLwllwMDBdGZFs",
+			"embedKind": "youtube", "embedAspect": "wide",
+			"reserveEmbedGeometry": true
+		}
+		card.previewIdentity = "message:youtube-clip-resolve"
+		tryCompare(panel, "visible", true)
+		tryCompare(playButton, "visible", false)
+		tryVerify(function() { return Math.abs(panel.height - card.width * 9 / 16) < 1 }, 1000)
+		const unresolvedCardHeight = card.implicitHeight
+		const unresolvedMediaHeight = panel.height
+
+		card.preview = {
+			"state": "ready", "loading": false,
+			"title": "YouTube Developers Live: Embedded Web Player Customization",
+			"url": "https://www.youtube.com/clip/UgkxU2HSeGL_NvmDJ-nQJrlLwllwMDBdGZFs",
+			"embedUrl": "https://www.youtube-nocookie.com/embed/NiXD4xVJM5Y?start=85&end=100",
+			"embedKind": "youtube", "embedAspect": "wide",
+			"metadata": {
+				"youtubeContentKind": "clip",
+				"youtubeResolvedVideoId": "NiXD4xVJM5Y",
+				"youtubeClipStartSeconds": 85,
+				"youtubeClipEndSeconds": 100
+			}
+		}
+		tryCompare(panel, "visible", true)
+		tryCompare(playButton, "visible", true)
+		compare(panel.height, unresolvedMediaHeight)
+		compare(card.implicitHeight, unresolvedCardHeight)
+	}
+
 	function test_active_inline_player_adds_controls_below_the_full_media_viewport() {
 		const card = previewLoader.item
 		const panel = findChild(card, "previewEmbedMediaPanel")
@@ -1969,6 +2008,149 @@ TestCase {
 		card.userExpanded = true
 		wait(0)
 		compare(findChild(card, "previewExpandedMediaSlot").visible, false)
+	}
+
+	function test_typed_bloket_document_keeps_real_listing_data_and_gallery_together() {
+		const card = previewLoader.item
+		const sourceUrl = "https://www.blocket.se/recommerce/forsale/item/17926061"
+		card.preview = {
+			"state": "ready",
+			"title": "MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC",
+			"description": "Fungerar perfekt. Sparsamt använd.",
+			"url": sourceUrl,
+			"metadata": { "provider": "blocket", "previewKind": "marketplaceListing" },
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "marketplace",
+				"provider": {
+					"id": "blocket",
+					"label": "Blocket",
+					"host": "www.blocket.se"
+				},
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "marketplace-listing",
+					"title": "MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC",
+					"description": "Fungerar perfekt. Sparsamt använd."
+				},
+				"thread": {},
+				"facts": [
+					{ "key": "price", "label": "Price", "value": "7 500 kr" },
+					{ "key": "location", "label": "Location", "value": "65463 Karlstad" },
+					{ "key": "condition", "label": "Condition", "value": "As new" }
+				],
+				"media": [
+					{ "id": "media:0", "kind": "image",
+						"url": "image://mumble/blocket-real-one?g=81",
+						"thumbnailUrl": "image://mumble/blocket-real-one?g=81",
+						"title": "Listing photo 1", "directPlayable": true },
+					{ "id": "media:1", "kind": "image",
+						"url": "image://mumble/blocket-real-two?g=82",
+						"thumbnailUrl": "image://mumble/blocket-real-two?g=82",
+						"title": "Listing photo 2", "directPlayable": true },
+					{ "id": "media:2", "kind": "image",
+						"url": "image://mumble/blocket-real-three?g=83",
+						"thumbnailUrl": "image://mumble/blocket-real-three?g=83",
+						"title": "Listing photo 3", "directPlayable": true }
+				],
+				"playback": { "mode": "none", "provider": "blocket" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-blocket-document"
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const sourceLabel = findChild(card, "embedSourceUrl")
+		const title = findChild(card, "embedDocumentTitle")
+		const description = findChild(card, "embedDocumentDescription")
+		verify(gallery !== null && gallery.visible)
+		compare(gallery.mediaItems.length, 3)
+		compare(sourceLabel.text, sourceUrl)
+		compare(title.text, "MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC")
+		compare(description.text, "Fungerar perfekt. Sparsamt använd.")
+		compare(findChild(card, "embedDocumentFactValue_0").text, "7 500 kr")
+		compare(findChild(card, "embedDocumentFactValue_1").text, "65463 Karlstad")
+		compare(findChild(card, "embedDocumentFactValue_2").text, "As new")
+		verify(findChild(card, "embedDocumentMediaThumbnail_0") !== null)
+		verify(findChild(card, "embedDocumentMediaThumbnail_1") !== null)
+		verify(findChild(card, "embedDocumentMediaThumbnail_2") !== null)
+	}
+
+	function test_typed_provider_gallery_keeps_height_and_thumbnails_when_playback_starts() {
+		const card = previewLoader.item
+		const sourceUrl = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+		const embedUrl = "https://www.youtube.com/embed/M7lc1UVf-VE"
+		card.preview = {
+			"state": "ready",
+			"title": "YouTube Developers Live",
+			"url": sourceUrl,
+			"embedUrl": embedUrl,
+			"embedKind": "youtube",
+			"embedAspect": "wide",
+			"metadata": { "provider": "youtube", "youtubeAuthor": "Google for Developers" },
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "media",
+				"provider": {
+					"id": "youtube",
+					"label": "YouTube",
+					"host": "www.youtube.com"
+				},
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "video",
+					"title": "YouTube Developers Live",
+					"author": { "name": "Google for Developers" }
+				},
+				"thread": {},
+				"facts": [],
+				"media": [
+					{ "id": "media:0", "kind": "video",
+						"posterUrl": "image://mumble/youtube-real-poster?g=91",
+						"title": "YouTube Developers Live", "directPlayable": false },
+					{ "id": "media:1", "kind": "image",
+						"url": "image://mumble/youtube-related-still?g=92",
+						"thumbnailUrl": "image://mumble/youtube-related-still?g=92",
+						"title": "Related still", "directPlayable": true }
+				],
+				"playback": { "mode": "provider", "provider": "youtube", "url": embedUrl },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-youtube-stable"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "youtube"
+		inlineSession.detached = false
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const primaryAction = findChild(card, "embedDocumentMediaPrimaryAction")
+		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
+		verify(gallery !== null && gallery.visible && primaryAction !== null)
+		verify(!mediaSlot.visible)
+		const restingHeight = card.implicitHeight
+		primaryAction.clicked()
+		compare(inlinePlaySpy.count, 1)
+		compare(inlinePlaySpy.signalArguments[0][0], embedUrl)
+		compare(inlinePlaySpy.signalArguments[0][1], "youtube")
+
+		inlineSession.active = true
+		tryCompare(card, "inlinePlaybackActive", true)
+		tryCompare(mediaSlot, "visible", true)
+		tryVerify(function() {
+			return Math.abs(card.implicitHeight - restingHeight) < 1
+		}, 1000, "typed player changed card height from " + restingHeight
+			+ " to " + card.implicitHeight)
+		verify(gallery.visible)
+		compare(gallery.viewportVisible, false)
+		verify(findChild(card, "embedDocumentMediaThumbnail_0") !== null)
+		verify(findChild(card, "embedDocumentMediaThumbnail_1") !== null)
 	}
 
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {

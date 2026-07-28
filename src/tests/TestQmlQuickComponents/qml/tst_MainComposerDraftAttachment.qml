@@ -91,6 +91,22 @@ TestCase {
 		verify(/ModernBusyIndicator\s*\{[\s\S]*objectName:\s*"composerDraftAttachmentBusy_"[\s\S]*visible:\s*draftAttachment\.preparing[\s\S]*running:\s*visible/.test(mainSource))
 	}
 
+	function test_url_only_messages_keep_the_source_inside_the_typed_card_once() {
+		verify(/function\s+normalizedComparableSourceUrl\(value\)/.test(mainSource))
+		verify(/function\s+messageBodyIsTypedPreviewSourceOnly\(segments,\s*preview\)/.test(mainSource))
+		verify(/document\.commonPresentation\s*!==\s*true/.test(mainSource))
+		verify(/bodyUrl\s*!==\s*sourceUrl/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]{0,220}!root\.messageBodyIsTypedPreviewSourceOnly\(/.test(mainSource))
+	}
+
+	function test_enter_sends_typed_pasted_dropped_or_attachment_drafts_without_breaking_ime() {
+		verify(/const returnKey = event\.key === Qt\.Key_Return \|\| event\.key === Qt\.Key_Enter/.test(mainSource))
+		verify(/!returnKey \|\| \(event\.modifiers & Qt\.ShiftModifier\)[\s\S]{0,100}composerInput\.inputMethodComposing/.test(mainSource))
+		verify(/text\.trim\(\)\.length > 0 \|\| composer\.attachments\.count > 0[\s\S]{0,80}composer\.send\(\)/.test(mainSource))
+		verify(/Empty Return is deliberately a no-op[\s\S]{0,180}event\.accepted = true/.test(mainSource))
+		verify(/event\.matches\(StandardKey\.Paste\)[\s\S]{0,220}composer\.pasteFromClipboard\(\)[\s\S]{0,160}composerInput\.paste\(\)/.test(mainSource))
+	}
+
 	function test_desktop_rail_and_conversation_dividers_share_geometry_on_both_sides() {
 		verify(/id:\s*shellHeader[\s\S]*Layout\.preferredHeight:\s*root\.compactNavigation[\s\S]*Theme\.railHeaderHeight/.test(mainSource))
 		verify(/id:\s*desktopNavigationRail[\s\S]*alignedHeaderHeight:\s*shellHeader\.height[\s\S]*alignedFooterHeight:\s*Math\.max\(Theme\.railFooterHeight,\s*composerSurface\.height\)/.test(mainSource))

@@ -3128,6 +3128,9 @@ struct YouTubePreviewTarget {
 	QString videoId;
 	QUrl canonicalUrl;
 	bool shorts = false;
+	bool live   = false;
+	int startSeconds = 0;
+	int endSeconds   = 0;
 };
 
 bool isYouTubeShortsUrl(const QUrl &url) {
@@ -3140,12 +3143,41 @@ bool isYouTubeShortsUrl(const QUrl &url) {
 	return !pathSegments.isEmpty() && pathSegments.front().compare(QLatin1String("shorts"), Qt::CaseInsensitive) == 0;
 }
 
+bool isYouTubeLiveUrl(const QUrl &url) {
+	const QString host = normalizedYouTubeHost(url.host());
+	if (host != QLatin1String("youtube.com")) {
+		return false;
+	}
+
+	const QStringList pathSegments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	return !pathSegments.isEmpty()
+		   && pathSegments.front().compare(QLatin1String("live"), Qt::CaseInsensitive) == 0;
+}
+
+bool isYouTubeClipUrl(const QUrl &url) {
+	const QString host = normalizedYouTubeHost(url.host());
+	if (host != QLatin1String("youtube.com")) {
+		return false;
+	}
+
+	const QStringList pathSegments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	if (pathSegments.size() != 2
+		|| pathSegments.front().compare(QLatin1String("clip"), Qt::CaseInsensitive) != 0) {
+		return false;
+	}
+	static const QRegularExpression s_clipIdPattern(QLatin1String("^[A-Za-z0-9_-]{12,128}$"));
+	return s_clipIdPattern.match(pathSegments.at(1)).hasMatch();
+}
+
 QUrl canonicalYouTubeUrl(const QUrl &sourceUrl, const QString &videoId) {
 	const bool shortsUrl = isYouTubeShortsUrl(sourceUrl);
+	const bool liveUrl   = isYouTubeLiveUrl(sourceUrl);
 	QUrl canonicalUrl(QStringLiteral("https://www.youtube.com/watch"));
 	QUrlQuery canonicalQuery;
 	if (shortsUrl) {
 		canonicalUrl.setPath(QStringLiteral("/shorts/%1").arg(videoId));
+	} else if (liveUrl) {
+		canonicalUrl.setPath(QStringLiteral("/live/%1").arg(videoId));
 	} else {
 		canonicalQuery.addQueryItem(QStringLiteral("v"), videoId);
 	}
@@ -3175,13 +3207,14 @@ std::optional< YouTubePreviewTarget > youtubePreviewTargetFromUrl(const QUrl &ur
 		return std::nullopt;
 	}
 
-	return YouTubePreviewTarget{ *videoId, canonicalYouTubeUrl(url, *videoId), isYouTubeShortsUrl(url) };
+	return YouTubePreviewTarget{ *videoId, canonicalYouTubeUrl(url, *videoId),
+								 isYouTubeShortsUrl(url), isYouTubeLiveUrl(url), 0, 0 };
 }
 
 std::optional< YouTubePreviewTarget > youtubePreviewTargetFromKeyPayload(const QString &payload) {
 	if (isValidYouTubeVideoId(payload)) {
 		const QUrl url(QString::fromLatin1("https://www.youtube.com/watch?v=%1").arg(payload));
-		return YouTubePreviewTarget{ payload, url, false };
+		return YouTubePreviewTarget{ payload, url, false, false, 0, 0 };
 	}
 
 	const QString decodedUrl = QUrl::fromPercentEncoding(payload.toUtf8());
@@ -3293,9 +3326,13 @@ QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
 	query.addQueryItem(QStringLiteral("origin"), QStringLiteral("https://www.mumble.info"));
 	query.addQueryItem(QStringLiteral("widget_referrer"), QStringLiteral("https://www.mumble.info/"));
 
-	const int startSeconds = youtubeStartSecondsFromUrl(target.canonicalUrl);
+	const int startSeconds =
+		target.startSeconds > 0 ? target.startSeconds : youtubeStartSecondsFromUrl(target.canonicalUrl);
 	if (startSeconds > 0) {
 		query.addQueryItem(QStringLiteral("start"), QString::number(startSeconds));
+	}
+	if (target.endSeconds > startSeconds) {
+		query.addQueryItem(QStringLiteral("end"), QString::number(target.endSeconds));
 	}
 
 	url.setQuery(query);
@@ -3303,6 +3340,16 @@ QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
 }
 
 QString youtubePreviewKeyForUrl(const QUrl &url) {
+	if (isYouTubeClipUrl(url)) {
+		QUrl canonicalClipUrl = url;
+		canonicalClipUrl.setScheme(QStringLiteral("https"));
+		canonicalClipUrl.setHost(QStringLiteral("www.youtube.com"));
+		canonicalClipUrl.setQuery(QString());
+		canonicalClipUrl.setFragment(QString());
+		return QString::fromLatin1("url:%1")
+			.arg(canonicalClipUrl.toString(QUrl::FullyEncoded));
+	}
+
 	const std::optional< YouTubePreviewTarget > target = youtubePreviewTargetFromUrl(url);
 	if (!target) {
 		return QString();
@@ -11074,8 +11121,11 @@ bool previewDescriptionIsPlaceholder(const QString &description) {
 		   || normalized == QObject::tr("Preview request timed out");
 }
 
+bool isYouTubeClipUrl(const QUrl &url);
+
 qint64 previewMaxPageBytesForUrl(const QUrl &url) {
-	if (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url) || isAmazonPreviewUrl(url)) {
+	if (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url) || isAmazonPreviewUrl(url)
+		|| isYouTubeClipUrl(url)) {
 		return 2 * 1024 * 1024;
 	}
 	return PREVIEW_MAX_PAGE_BYTES;
@@ -12221,6 +12271,102 @@ QString instagramJsonUserObject(const QString &html, const QString &ownerUserId,
 	}
 
 	return QString();
+}
+
+QVariantMap facebookPreviewMetadataFromMetaTags(const QHash< QString, QString > &metaTags) {
+	const QString title = metaTags.value(
+		QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"))).trimmed();
+	const QString caption = metaTags.value(
+		QLatin1String("og:description"), metaTags.value(QLatin1String("twitter:description"))).trimmed();
+
+	QVariantMap metadata {
+		{ QStringLiteral("provider"), QStringLiteral("facebook") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("facebook") },
+		{ QStringLiteral("previewKind"), QStringLiteral("video") },
+		{ QStringLiteral("facebookMediaKind"), QStringLiteral("reel") }
+	};
+	insertPreviewMetadataValue(metadata, QStringLiteral("facebookCaption"),
+							   trimmedPreviewText(caption, 1024));
+
+	static const QRegularExpression s_authorPattern(
+		QLatin1String("\\|\\s*([^\\|\\r\\n]+)\\s*$"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch authorMatch = s_authorPattern.match(title);
+	if (authorMatch.hasMatch()) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("facebookAuthor"),
+								   trimmedPreviewText(authorMatch.captured(1), 256));
+	}
+
+	static const QRegularExpression s_engagementPattern(
+		QLatin1String("^\\s*([\\d,.\\s]+[KMB]?)\\s+views?\\s*[·\\x{2022}]\\s*"
+					 "([\\d,.\\s]+[KMB]?)\\s+reactions?\\b"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch engagementMatch = s_engagementPattern.match(title);
+	if (engagementMatch.hasMatch()) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("facebookViews"),
+								   engagementMatch.captured(1));
+		insertPreviewMetadataValue(metadata, QStringLiteral("facebookReactions"),
+								   engagementMatch.captured(2));
+	}
+	return metadata;
+}
+
+QVariantMap youtubeClipMetadataFromHtml(const QString &html) {
+	QVariantMap metadata {
+		{ QStringLiteral("provider"), QStringLiteral("youtube") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("youtube") },
+		{ QStringLiteral("previewKind"), QStringLiteral("video") },
+		{ QStringLiteral("youtubeContentKind"), QStringLiteral("clip") }
+	};
+
+	static const QRegularExpression s_videoIdAttribute(
+		QLatin1String("\\bvideo-id\\s*=\\s*[\"']([A-Za-z0-9_-]{11})[\"']"),
+		QRegularExpression::CaseInsensitiveOption);
+	static const QRegularExpression s_videoIdJson(
+		QLatin1String("\"videoId\"\\s*:\\s*\"([A-Za-z0-9_-]{11})\""));
+	QRegularExpressionMatch videoIdMatch = s_videoIdAttribute.match(html);
+	if (!videoIdMatch.hasMatch()) {
+		videoIdMatch = s_videoIdJson.match(html);
+	}
+	const QString videoId = videoIdMatch.hasMatch() ? videoIdMatch.captured(1) : QString();
+	if (isValidYouTubeVideoId(videoId)) {
+		metadata.insert(QStringLiteral("youtubeResolvedVideoId"), videoId);
+	}
+
+	const qsizetype clipConfigOffset = html.indexOf(QLatin1String("\"clipConfig\""));
+	if (clipConfigOffset >= 0) {
+		const QString clipConfig = html.mid(clipConfigOffset, 8192);
+		static const QRegularExpression s_startTime(
+			QLatin1String("\"startTimeMs\"\\s*:\\s*\"?([0-9]{1,12})\"?"));
+		static const QRegularExpression s_endTime(
+			QLatin1String("\"endTimeMs\"\\s*:\\s*\"?([0-9]{1,12})\"?"));
+		const QRegularExpressionMatch startMatch = s_startTime.match(clipConfig);
+		const QRegularExpressionMatch endMatch   = s_endTime.match(clipConfig);
+		bool startOk                             = false;
+		bool endOk                               = false;
+		const qint64 startMs = startMatch.hasMatch() ? startMatch.captured(1).toLongLong(&startOk) : 0;
+		const qint64 endMs   = endMatch.hasMatch() ? endMatch.captured(1).toLongLong(&endOk) : 0;
+		const int startSeconds = startOk
+			? static_cast< int >(std::clamp< qint64 >(startMs / 1000, 0, 24 * 60 * 60)) : 0;
+		const int endSeconds = endOk
+			? static_cast< int >(std::clamp< qint64 >((endMs + 999) / 1000, 0, 24 * 60 * 60)) : 0;
+		if (startOk) {
+			metadata.insert(QStringLiteral("youtubeClipStartSeconds"), startSeconds);
+		}
+		if (endOk && endSeconds > startSeconds) {
+			metadata.insert(QStringLiteral("youtubeClipEndSeconds"), endSeconds);
+			metadata.insert(QStringLiteral("youtubeClipDurationSeconds"), endSeconds - startSeconds);
+		}
+	}
+
+	static const QRegularExpression s_author(
+		QLatin1String("\"ownerChannelName\"\\s*:\\s*\"([^\"\\\\]{1,256})\""));
+	const QRegularExpressionMatch authorMatch = s_author.match(html);
+	if (authorMatch.hasMatch()) {
+		metadata.insert(QStringLiteral("youtubeAuthor"),
+						trimmedPreviewText(authorMatch.captured(1), 256));
+	}
+	return metadata;
 }
 
 struct InstagramPreviewMetadata {
@@ -24205,6 +24351,13 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				if (embedTarget->kind == QLatin1String("twitch")) {
 					previewStub.insert(QStringLiteral("previewSize"), QStringLiteral("large"));
 				}
+			} else if (isYouTubeClipUrl(previewUrl)) {
+				// A Clip slug does not expose the underlying video ID until the
+				// bounded page hydration completes. Reserve the final wide player
+				// now so resolving the clip cannot move the chat scroll anchor.
+				previewStub.insert(QStringLiteral("embedKind"), QStringLiteral("youtube"));
+				previewStub.insert(QStringLiteral("embedAspect"), QStringLiteral("wide"));
+				previewStub.insert(QStringLiteral("reserveEmbedGeometry"), true);
 			}
 			messageState.insert(QStringLiteral("previewStub"), previewStub);
 		}
@@ -24504,7 +24657,20 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 	}
 
 	std::optional< PersistentChatPreviewEmbedTarget > embedTarget;
-	if (previewKey.startsWith(QLatin1String("youtube:"))) {
+	const QString resolvedYouTubeVideoId =
+		preview.metadata.value(QStringLiteral("youtubeResolvedVideoId")).toString().trimmed();
+	if (isYouTubeClipUrl(canonicalPreviewUrl) && isValidYouTubeVideoId(resolvedYouTubeVideoId)) {
+		const int clipStart = std::max(
+			0, preview.metadata.value(QStringLiteral("youtubeClipStartSeconds")).toInt());
+		const int clipEnd = std::max(
+			0, preview.metadata.value(QStringLiteral("youtubeClipEndSeconds")).toInt());
+		const YouTubePreviewTarget clipTarget {
+			resolvedYouTubeVideoId, canonicalPreviewUrl, false, false, clipStart, clipEnd
+		};
+		embedTarget = PersistentChatPreviewEmbedTarget {
+			QStringLiteral("youtube"), youtubeEmbedUrl(clipTarget), QStringLiteral("wide")
+		};
+	} else if (previewKey.startsWith(QLatin1String("youtube:"))) {
 		const QString youtubePayload = previewKey.mid(QStringLiteral("youtube:").size());
 		const std::optional< YouTubePreviewTarget > youtubeTarget = youtubePreviewTargetFromKeyPayload(youtubePayload);
 		if (youtubeTarget) {
@@ -34807,11 +34973,21 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		}
 		const QString videoId     = youtubeTarget->videoId;
 		const bool youtubeIsShort = youtubeTarget->shorts;
+		const bool youtubeIsLive  = youtubeTarget->live;
 		preview.canonicalUrl      = youtubeTarget->canonicalUrl.toString(QUrl::FullyEncoded);
-		preview.title = youtubeIsShort ? tr("Loading YouTube Shorts preview...") : tr("Loading YouTube preview...");
+		preview.title = youtubeIsShort ? tr("Loading YouTube Shorts preview...")
+			: youtubeIsLive ? tr("Loading YouTube live preview...") : tr("Loading YouTube preview...");
 		preview.subtitle      = tr("Fetching title and thumbnail");
 		preview.openLabel     = tr("Open on YouTube");
 		preview.mediaKind     = QStringLiteral("video");
+		preview.metadata = QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("youtube") },
+			{ QStringLiteral("previewProvider"), QStringLiteral("youtube") },
+			{ QStringLiteral("previewKind"), QStringLiteral("video") },
+			{ QStringLiteral("youtubeContentKind"),
+			  youtubeIsShort ? QStringLiteral("short")
+				: youtubeIsLive ? QStringLiteral("live") : QStringLiteral("video") }
+		};
 		m_persistentChatPreviews.insert(previewKey, preview);
 
 		QUrl oembedUrl(QLatin1String("https://www.youtube.com/oembed"));
@@ -34825,7 +35001,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		QNetworkReply *oembedReply = startPersistentChatPreviewGet(oembedRequest, previewKey);
 		applyPreviewReplyGuards(oembedReply, PREVIEW_MAX_PAGE_BYTES);
 		connect(oembedReply, &QNetworkReply::finished, this,
-				[this, oembedReply, previewKey, youtubeIsShort, renderIfVisible]() {
+				[this, oembedReply, previewKey, youtubeIsShort, youtubeIsLive, renderIfVisible]() {
 			const QByteArray response = oembedReply->readAll();
 			const bool success        = oembedReply->error() == QNetworkReply::NoError;
 			const QString failureText = previewFailureText(oembedReply);
@@ -34846,20 +35022,29 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					const QString title      = object.value(QLatin1String("title")).toString().trimmed();
 					const QString author     = object.value(QLatin1String("author_name")).toString().trimmed();
 					it->title                = title.isEmpty()
-												   ? (youtubeIsShort ? tr("YouTube Short") : tr("YouTube video"))
+												   ? (youtubeIsShort ? tr("YouTube Short")
+													  : youtubeIsLive ? tr("YouTube live video")
+																	  : tr("YouTube video"))
 												   : title;
 					it->subtitle             = author.isEmpty()
-												   ? (youtubeIsShort ? tr("YouTube Shorts") : tr("YouTube"))
+												   ? (youtubeIsShort ? tr("YouTube Shorts")
+													  : youtubeIsLive ? tr("YouTube Live") : tr("YouTube"))
 												   : (youtubeIsShort ? tr("YouTube Shorts by %1").arg(author)
-																	: tr("YouTube by %1").arg(author));
+													  : youtubeIsLive ? tr("YouTube Live by %1").arg(author)
+																	  : tr("YouTube by %1").arg(author));
+					if (!author.isEmpty()) {
+						it->metadata.insert(QStringLiteral("youtubeAuthor"), author);
+					}
 					renderIfVisible();
 					return;
 				}
 			}
 
 			if (it->title == tr("Loading YouTube preview...")
-				|| it->title == tr("Loading YouTube Shorts preview...")) {
-				it->title = youtubeIsShort ? tr("YouTube Short") : tr("YouTube video");
+				|| it->title == tr("Loading YouTube Shorts preview...")
+				|| it->title == tr("Loading YouTube live preview...")) {
+				it->title = youtubeIsShort ? tr("YouTube Short")
+					: youtubeIsLive ? tr("YouTube live video") : tr("YouTube video");
 			}
 			if (it->subtitle.isEmpty() || it->subtitle == tr("Fetching title and thumbnail")) {
 				it->subtitle = failureText;
@@ -34880,7 +35065,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		QNetworkReply *thumbnailReply = startPersistentChatPreviewGet(thumbnailRequest, previewKey);
 		applyPreviewReplyGuards(thumbnailReply, PREVIEW_MAX_IMAGE_BYTES);
 		connect(thumbnailReply, &QNetworkReply::finished, this,
-				[this, thumbnailReply, previewKey, youtubeIsShort, expectedThumbnailSource,
+				[this, thumbnailReply, previewKey, youtubeIsShort, youtubeIsLive, expectedThumbnailSource,
 				 expectedThumbnailRequestSource, renderIfVisible]() {
 			const QByteArray data     = thumbnailReply->readAll();
 			const bool success        = thumbnailReply->error() == QNetworkReply::NoError;
@@ -34898,7 +35083,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					this, persistentChatPreviewWorkerGroup(previewKey),
 					persistentChatPreviewWorkerSourceKey(QStringLiteral("thumbnail"),
 														   expectedThumbnailRequestSource), data,
-					[this, previewKey, youtubeIsShort, expectedThumbnailSource,
+					[this, previewKey, youtubeIsShort, youtubeIsLive, expectedThumbnailSource,
 					 expectedThumbnailRequestSource, failureText,
 					 renderIfVisible](QImage image) {
 						auto decodedIt = m_persistentChatPreviews.find(previewKey);
@@ -34916,8 +35101,10 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 						}
 						if (decodedIt->metadataFinished
 							&& (decodedIt->title == tr("Loading YouTube preview...")
-								|| decodedIt->title == tr("Loading YouTube Shorts preview..."))) {
-							decodedIt->title = youtubeIsShort ? tr("YouTube Short") : tr("YouTube video");
+								|| decodedIt->title == tr("Loading YouTube Shorts preview...")
+								|| decodedIt->title == tr("Loading YouTube live preview..."))) {
+							decodedIt->title = youtubeIsShort ? tr("YouTube Short")
+								: youtubeIsLive ? tr("YouTube live video") : tr("YouTube video");
 						}
 						if (decodedIt->metadataFinished && decodedIt->subtitle.isEmpty()) {
 							decodedIt->subtitle = failureText;
@@ -34934,8 +35121,10 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->thumbnailRequestSource.clear();
 			if (it->metadataFinished
 				&& (it->title == tr("Loading YouTube preview...")
-					|| it->title == tr("Loading YouTube Shorts preview..."))) {
-				it->title = youtubeIsShort ? tr("YouTube Short") : tr("YouTube video");
+					|| it->title == tr("Loading YouTube Shorts preview...")
+					|| it->title == tr("Loading YouTube live preview..."))) {
+				it->title = youtubeIsShort ? tr("YouTube Short")
+					: youtubeIsLive ? tr("YouTube live video") : tr("YouTube video");
 			}
 			if (it->metadataFinished && it->subtitle.isEmpty()) {
 				it->subtitle = failureText;
@@ -35543,16 +35732,13 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	}
 
 	if (!isImagePreview && isFacebookReelPreviewUrl(previewUrl) && previewEmbedTargetForUrl(previewUrl)) {
-		preview.title             = provider ? provider->fallbackTitle : tr("Facebook post");
-		preview.description       = tr("Video preview");
-		preview.mediaKind         = QStringLiteral("video");
-		preview.metadataFinished  = true;
-		preview.thumbnailFinished = true;
-		preview.failed            = false;
-		m_persistentChatPreviews.insert(previewKey, preview);
-		storePersistentChatPreviewDiskCache(previewKey);
-		renderIfVisible();
-		return;
+		preview.title       = provider ? provider->fallbackTitle : tr("Facebook video");
+		preview.description = tr("Fetching reel details");
+		preview.mediaKind   = QStringLiteral("video");
+		preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("facebook"));
+		preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("facebook"));
+		preview.metadata.insert(QStringLiteral("previewKind"), QStringLiteral("video"));
+		preview.metadata.insert(QStringLiteral("facebookMediaKind"), QStringLiteral("reel"));
 	}
 
 	if (!isImagePreview && applyPersistentChatRemotePlayableMedia(preview, previewUrl)) {
@@ -35764,7 +35950,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
 			const QVariantMap baseMetadata = it->metadata;
 			const PersistentChatPreviewHtmlScope htmlScope =
-				richPreviewProviderForUrl(previewUrl)
+				(richPreviewProviderForUrl(previewUrl) || isYouTubeClipUrl(previewUrl))
 					? PersistentChatPreviewHtmlScope::BoundedDocument
 					: PersistentChatPreviewHtmlScope::HeadOnly;
 			parsePersistentChatPreviewHtmlAsync(
@@ -35800,6 +35986,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					if (isInstagramPreviewUrl(previewUrl)) {
 						parsed.instagramMetadata =
 							instagramPreviewMetadataFromMetaTags(previewUrl, parsed.metaTags, parsed.html);
+					}
+					if (isFacebookReelPreviewUrl(previewUrl)) {
+						const QVariantMap facebookMetadata =
+							facebookPreviewMetadataFromMetaTags(parsed.metaTags);
+						for (auto it = facebookMetadata.cbegin(); it != facebookMetadata.cend(); ++it) {
+							parsed.metadata.insert(it.key(), it.value());
+						}
+					}
+					if (isYouTubeClipUrl(previewUrl)) {
+						const QVariantMap clipMetadata = youtubeClipMetadataFromHtml(parsed.html);
+						for (auto it = clipMetadata.cbegin(); it != clipMetadata.cend(); ++it) {
+							parsed.metadata.insert(it.key(), it.value());
+						}
 					}
 				},
 				[this, previewKey, previewUrl, previewPageUrl, expectedPagePreviewSource,

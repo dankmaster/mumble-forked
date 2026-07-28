@@ -1039,6 +1039,21 @@ namespace {
 			appendUnsignedInteger(QStringLiteral("instagramCommentCount"), MaxMetadataSafeInteger);
 			appendManagedImage(QStringLiteral("instagramAvatarUrl"));
 		};
+		const auto appendFacebookMetadata = [&] {
+			appendBoundedText(QStringLiteral("facebookMediaKind"), 64);
+			appendBoundedText(QStringLiteral("facebookAuthor"), 256);
+			appendBoundedText(QStringLiteral("facebookCaption"), MaxStructuredTextCharacters);
+			appendBoundedText(QStringLiteral("facebookViews"), 64);
+			appendBoundedText(QStringLiteral("facebookReactions"), 64);
+		};
+		const auto appendYouTubeMetadata = [&] {
+			appendBoundedText(QStringLiteral("youtubeContentKind"), 64);
+			appendBoundedText(QStringLiteral("youtubeAuthor"), 256);
+			appendBoundedText(QStringLiteral("youtubeResolvedVideoId"), 32);
+			appendUnsignedInteger(QStringLiteral("youtubeClipStartSeconds"), 24 * 60 * 60);
+			appendUnsignedInteger(QStringLiteral("youtubeClipEndSeconds"), 24 * 60 * 60);
+			appendUnsignedInteger(QStringLiteral("youtubeClipDurationSeconds"), 24 * 60 * 60);
+		};
 		const auto appendSteamMetadata = [&] {
 			for (const QString &key : { QStringLiteral("steamAppId"), QStringLiteral("steamAppName"),
 					 QStringLiteral("steamDeveloper"), QStringLiteral("steamGenres"),
@@ -1099,6 +1114,8 @@ namespace {
 		if (provider == QLatin1String("flashback") || previewKind == QLatin1String("forum"))
 			appendForumMetadata();
 		if (provider == QLatin1String("instagram")) appendInstagramMetadata();
+		if (provider == QLatin1String("facebook")) appendFacebookMetadata();
+		if (provider == QLatin1String("youtube")) appendYouTubeMetadata();
 		if (provider == QLatin1String("steam")) appendSteamMetadata();
 		if (provider == QLatin1String("bytbil") || previewKind == QLatin1String("vehicleListing"))
 			appendVehicleMetadata();
@@ -1157,6 +1174,8 @@ namespace {
 		appendGitHubMetadata();
 		appendForumMetadata();
 		appendInstagramMetadata();
+		appendFacebookMetadata();
+		appendYouTubeMetadata();
 		appendSteamMetadata();
 		appendVehicleMetadata();
 		appendGoogleSearchMetadata();
@@ -1380,6 +1399,8 @@ namespace {
 														 : QStringLiteral("ready"));
 		normalized.insert(QStringLiteral("singleUrl"), preview.value(QStringLiteral("singleUrl")).toBool());
 		normalized.insert(QStringLiteral("autoplay"), preview.value(QStringLiteral("autoplay")).toBool());
+		normalized.insert(QStringLiteral("reserveEmbedGeometry"),
+						  preview.value(QStringLiteral("reserveEmbedGeometry")).toBool());
 		const QVariantMap metadata = normalizedPreviewMetadata(preview.value(QStringLiteral("metadata")));
 		if (!metadata.isEmpty()) normalized.insert(QStringLiteral("metadata"), metadata);
 		const QVariantMap document = EmbedDocument::fromNormalizedPreview(normalized);
