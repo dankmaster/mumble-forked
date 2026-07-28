@@ -525,7 +525,7 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 		memset(output, 0, sizeof(float) * frameCount * iChannels);
 
 		VoiceActivationDebugCapture &diagnosticCapture = VoiceActivationDebugCapture::instance();
-		const bool captureVoiceDiagnostic              = diagnosticCapture.enabled();
+		const bool captureVoiceDiagnostic              = diagnosticCapture.capturesServerMix();
 		static std::vector< float > diagnosticServerMix;
 		if (captureVoiceDiagnostic) {
 			diagnosticServerMix.resize(frameCount);

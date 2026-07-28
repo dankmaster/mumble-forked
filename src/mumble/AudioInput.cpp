@@ -2286,10 +2286,11 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 
 	VoiceActivationDebugCapture &diagnosticCapture = VoiceActivationDebugCapture::instance();
 	const bool captureVoiceDiagnostic              = diagnosticCapture.enabled();
+	const bool captureRawVoiceDiagnostic           = captureVoiceDiagnostic && diagnosticCapture.capturesRawInput();
 	const std::uint64_t diagnosticTimestampUs =
 		captureVoiceDiagnostic ? diagnosticCapture.timestampMicroseconds() : 0;
-	std::array< short, iFrameSize > diagnosticRawInput = {};
-	if (captureVoiceDiagnostic) {
+	std::array< short, iFrameSize > diagnosticRawInput;
+	if (captureRawVoiceDiagnostic) {
 		std::copy_n(chunk.mic, iFrameSize, diagnosticRawInput.begin());
 	}
 

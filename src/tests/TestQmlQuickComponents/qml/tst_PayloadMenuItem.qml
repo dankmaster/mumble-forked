@@ -72,6 +72,10 @@ TestCase {
 		compare(actionLoader.item.Accessible.description, "Join the selected room")
 		compare(actionLoader.item.checked, true)
 		compare(findChild(actionLoader.item, "payloadLeadingIcon").name, "check")
+		verify(actionLoader.item.indicator !== null)
+		compare(actionLoader.item.indicator.visible, false)
+		compare(actionLoader.item.indicator.implicitWidth, 0)
+		compare(actionLoader.item.indicator.implicitHeight, 0)
 	}
 
 	function test_action_payload_renders_icon_secondary_state_shortcut_and_focus() {

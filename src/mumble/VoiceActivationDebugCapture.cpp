@@ -33,6 +33,14 @@ std::filesystem::path pathFromQString(const QString &path) {
 #endif
 }
 
+QString qStringFromPath(const std::filesystem::path &path) {
+#ifdef Q_OS_WIN
+	return QString::fromStdWString(path.wstring());
+#else
+	return QString::fromStdString(path.string());
+#endif
+}
+
 SNDFILE *openWaveFile(const std::filesystem::path &path, SF_INFO &info) {
 #ifdef Q_OS_WIN
 	return sf_wchar_open(path.c_str(), SFM_WRITE, &info);
@@ -78,37 +86,81 @@ VoiceActivationDebugCapture &VoiceActivationDebugCapture::instance() {
 }
 
 void VoiceActivationDebugCapture::initializeFromEnvironment() {
-	(void) instance();
-}
-
-VoiceActivationDebugCapture::VoiceActivationDebugCapture() : m_startedAt(std::chrono::steady_clock::now()) {
 	const QString configuredDirectory = qEnvironmentVariable(kCaptureDirectoryEnvironment).trimmed();
 	if (configuredDirectory.isEmpty()) {
 		return;
 	}
 
 	const QString absoluteDirectory = QDir(configuredDirectory).absolutePath();
-	if (!QDir().mkpath(absoluteDirectory)) {
-		qWarning() << "Voice activation diagnostic capture could not create" << absoluteDirectory;
-		return;
-	}
+	StartOptions options;
+	options.directory = pathFromQString(absoluteDirectory);
+	options.captureRawInput = true;
+	options.captureServerMix = true;
+	options.gitHead = qEnvironmentVariable(kCaptureGitHeadEnvironment).trimmed().toStdString();
 
-	bool limitOk          = false;
+	bool limitOk           = false;
 	const int limitSeconds = qEnvironmentVariableIntValue(kCaptureLimitEnvironment, &limitOk);
 	if (limitOk && limitSeconds >= 10 && limitSeconds <= 3600) {
-		m_maxDuration = std::chrono::seconds(limitSeconds);
+		options.maxDuration = std::chrono::seconds(limitSeconds);
 	}
 
-	m_directory   = pathFromQString(absoluteDirectory);
+	if (!instance().start(options)) {
+		qWarning() << "Voice activation diagnostic capture could not start in" << absoluteDirectory;
+	}
+}
+
+VoiceActivationDebugCapture::VoiceActivationDebugCapture() : m_startedAt(std::chrono::steady_clock::now()) {
+}
+
+VoiceActivationDebugCapture::~VoiceActivationDebugCapture() {
+	stop();
+}
+
+bool VoiceActivationDebugCapture::start(const StartOptions &requestedOptions) {
+	stop();
+
+	if (requestedOptions.directory.empty()) {
+		return false;
+	}
+
+	std::error_code directoryError;
+	std::filesystem::create_directories(requestedOptions.directory, directoryError);
+	if (directoryError) {
+		return false;
+	}
+
+	m_directory = requestedOptions.directory;
+	m_maxDuration =
+		std::chrono::seconds(std::clamp< std::int64_t >(requestedOptions.maxDuration.count(), 10, 3600));
+	m_captureRawInput.store(requestedOptions.captureRawInput, std::memory_order_relaxed);
+	m_captureServerMix.store(requestedOptions.captureServerMix, std::memory_order_relaxed);
+	m_gitHead   = requestedOptions.gitHead;
+	m_startedAt = std::chrono::steady_clock::now();
+	m_startedAtSteadyMicroseconds.store(
+		std::chrono::duration_cast< std::chrono::microseconds >(m_startedAt.time_since_epoch()).count(),
+		std::memory_order_release);
 	m_startedAtUtc =
 		QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toStdString();
-	m_gitHead = qEnvironmentVariable(kCaptureGitHeadEnvironment).trimmed().toStdString();
-	m_queue   = std::make_unique< PendingItem[] >(kQueueCapacity);
+	m_queue = std::make_unique< PendingItem[] >(kQueueCapacity);
+	m_readIndex = 0;
+	m_writeIndex = 0;
+	m_queueCount = 0;
+	m_metricsInputSamples = 0;
+	m_stop = false;
+	m_limitReached.store(false, std::memory_order_relaxed);
+	m_hadWriteError.store(false, std::memory_order_relaxed);
+	m_droppedInputItems.store(0, std::memory_order_relaxed);
+	m_droppedServerItems.store(0, std::memory_order_relaxed);
+	m_stoppedElapsedUs.store(0, std::memory_order_relaxed);
 
 	{
+		const bool captureRawInput  = m_captureRawInput.load(std::memory_order_relaxed);
+		const bool captureServerMix = m_captureServerMix.load(std::memory_order_relaxed);
 		std::ofstream notice(m_directory / "CAPTURE_NOTICE.txt", std::ios::out | std::ios::trunc);
 		notice << "LOCAL VOICE ACTIVATION DIAGNOSTIC CAPTURE\n\n"
-			   << "This directory can contain raw microphone audio and voices received from the Mumble server.\n"
+			   << "This directory contains voice-activation metrics"
+			   << (captureRawInput ? " and raw microphone audio" : "")
+			   << (captureServerMix ? " and voices received from the Mumble server" : "") << ".\n"
 			   << "Nothing is uploaded automatically. Treat the files as private and delete them when no longer needed.\n"
 			   << "The capture stops when the client exits or after " << m_maxDuration.count() << " seconds.\n";
 	}
@@ -117,18 +169,24 @@ VoiceActivationDebugCapture::VoiceActivationDebugCapture() : m_startedAt(std::ch
 		activeMarker << m_startedAtUtc << '\n';
 	}
 
-	m_inputWriter         = std::make_unique< WriterState >();
-	m_inputWriter->path   = m_directory / "raw-input.wav";
-	m_serverWriter        = std::make_unique< WriterState >();
-	m_serverWriter->path  = m_directory / "server-mix.wav";
+	if (m_captureRawInput.load(std::memory_order_relaxed)) {
+		m_inputWriter       = std::make_unique< WriterState >();
+		m_inputWriter->path = m_directory / "raw-input.wav";
+	}
+	if (m_captureServerMix.load(std::memory_order_relaxed)) {
+		m_serverWriter       = std::make_unique< WriterState >();
+		m_serverWriter->path = m_directory / "server-mix.wav";
+	}
 	m_metricsFile         = std::make_unique< std::ofstream >(m_directory / "metrics.csv",
 															 std::ios::out | std::ios::trunc);
 	if (!m_metricsFile->is_open()) {
-		qWarning() << "Voice activation diagnostic capture could not create metrics.csv in" << absoluteDirectory;
+		qWarning() << "Voice activation diagnostic capture could not create metrics.csv";
+		m_inputWriter.reset();
+		m_serverWriter.reset();
 		m_metricsFile.reset();
 		std::error_code error;
 		std::filesystem::remove(m_directory / ".capture-active", error);
-		return;
+		return false;
 	}
 
 	*m_metricsFile
@@ -140,19 +198,26 @@ VoiceActivationDebugCapture::VoiceActivationDebugCapture() : m_startedAt(std::ch
 
 	m_enabled.store(true, std::memory_order_release);
 	m_accepting.store(true, std::memory_order_release);
-	m_worker = std::thread([this] { workerLoop(); });
-
-	qWarning().noquote()
-		<< QStringLiteral("LOCAL VOICE DIAGNOSTIC CAPTURE ENABLED: %1 (raw microphone and incoming server voices; "
-						  "nothing is uploaded)")
-			   .arg(absoluteDirectory);
-}
-
-VoiceActivationDebugCapture::~VoiceActivationDebugCapture() {
-	if (!m_enabled.load(std::memory_order_acquire)) {
-		return;
+	try {
+		m_worker = std::thread([this] { workerLoop(); });
+	} catch (...) {
+		m_accepting.store(false, std::memory_order_release);
+		m_enabled.store(false, std::memory_order_release);
+		m_inputWriter.reset();
+		m_serverWriter.reset();
+		m_metricsFile.reset();
+		std::error_code error;
+		std::filesystem::remove(m_directory / ".capture-active", error);
+		return false;
 	}
 
+	qWarning().noquote()
+		<< QStringLiteral("LOCAL VOICE DIAGNOSTIC CAPTURE ENABLED: %1 (nothing is uploaded)")
+			   .arg(QDir::toNativeSeparators(qStringFromPath(m_directory)));
+	return true;
+}
+
+void VoiceActivationDebugCapture::stop() {
 	m_accepting.store(false, std::memory_order_release);
 	{
 		std::lock_guard< std::mutex > lock(m_queueMutex);
@@ -164,14 +229,46 @@ VoiceActivationDebugCapture::~VoiceActivationDebugCapture() {
 	}
 }
 
+VoiceActivationDebugCapture::Status VoiceActivationDebugCapture::status() const {
+	Status result;
+	result.active           = m_accepting.load(std::memory_order_acquire);
+	result.finalizing       = m_enabled.load(std::memory_order_acquire) && !result.active;
+	result.limitReached     = m_limitReached.load(std::memory_order_relaxed);
+	result.writeError       = m_hadWriteError.load(std::memory_order_relaxed);
+	result.captureRawInput  = m_captureRawInput.load(std::memory_order_relaxed);
+	result.captureServerMix = m_captureServerMix.load(std::memory_order_relaxed);
+	result.maxDurationSeconds = static_cast< std::uint64_t >(m_maxDuration.count());
+	result.droppedInputItems = m_droppedInputItems.load(std::memory_order_relaxed);
+	result.droppedServerItems = m_droppedServerItems.load(std::memory_order_relaxed);
+	result.directory         = m_directory;
+	if (!m_directory.empty()) {
+		std::uint64_t elapsedUs = m_stoppedElapsedUs.load(std::memory_order_relaxed);
+		if (elapsedUs == 0 && m_enabled.load(std::memory_order_acquire)) {
+			elapsedUs = timestampMicroseconds();
+		}
+		result.elapsedSeconds = elapsedUs / 1000000ULL;
+	}
+	return result;
+}
+
 bool VoiceActivationDebugCapture::enabled() const noexcept {
 	return m_accepting.load(std::memory_order_acquire);
 }
 
+bool VoiceActivationDebugCapture::capturesRawInput() const noexcept {
+	return enabled() && m_captureRawInput.load(std::memory_order_relaxed);
+}
+
+bool VoiceActivationDebugCapture::capturesServerMix() const noexcept {
+	return enabled() && m_captureServerMix.load(std::memory_order_relaxed);
+}
+
 std::uint64_t VoiceActivationDebugCapture::timestampMicroseconds() const noexcept {
-	const auto elapsed = std::chrono::steady_clock::now() - m_startedAt;
-	return static_cast< std::uint64_t >(
-		std::chrono::duration_cast< std::chrono::microseconds >(elapsed).count());
+	const std::int64_t now = std::chrono::duration_cast< std::chrono::microseconds >(
+								 std::chrono::steady_clock::now().time_since_epoch())
+								 .count();
+	const std::int64_t startedAt = m_startedAtSteadyMicroseconds.load(std::memory_order_acquire);
+	return now > startedAt ? static_cast< std::uint64_t >(now - startedAt) : 0;
 }
 
 void VoiceActivationDebugCapture::captureInputFrame(const short *samples, unsigned int sampleCount,
@@ -185,7 +282,7 @@ void VoiceActivationDebugCapture::captureInputFrame(const short *samples, unsign
 
 void VoiceActivationDebugCapture::captureServerMix(const float *samples, unsigned int sampleCount,
 													unsigned int sampleRate) noexcept {
-	if (!samples || sampleCount == 0 || sampleRate == 0 || !enabled()) {
+	if (!samples || sampleCount == 0 || sampleRate == 0 || !capturesServerMix()) {
 		return;
 	}
 	enqueueServer(samples, sampleCount, sampleRate, timestampMicroseconds());
@@ -196,18 +293,23 @@ bool VoiceActivationDebugCapture::beginEnqueue(PendingItem *&slot) noexcept {
 		return false;
 	}
 
+	if (!m_queueMutex.try_lock()) {
+		return false;
+	}
+	if (!enabled() || m_stop || m_queueCount >= kQueueCapacity) {
+		m_queueMutex.unlock();
+		return false;
+	}
+
 	const std::uint64_t elapsedUs = timestampMicroseconds();
 	const std::uint64_t limitUs =
 		static_cast< std::uint64_t >(m_maxDuration.count()) * 1000000ULL;
 	if (elapsedUs >= limitUs) {
 		m_limitReached.store(true, std::memory_order_relaxed);
 		m_accepting.store(false, std::memory_order_release);
-		return false;
-	}
-
-	m_queueMutex.lock();
-	if (m_stop || m_queueCount >= kQueueCapacity) {
+		m_stop = true;
 		m_queueMutex.unlock();
+		m_queueReady.notify_all();
 		return false;
 	}
 
@@ -245,8 +347,10 @@ void VoiceActivationDebugCapture::enqueueInput(const short *samples, unsigned in
 		if (includeMetrics) {
 			slot->metrics = metrics;
 		}
-		for (unsigned int i = 0; i < count; ++i) {
-			slot->samples[i] = static_cast< float >(samples[offset + i]) / 32768.0f;
+		if (m_captureRawInput.load(std::memory_order_relaxed)) {
+			for (unsigned int i = 0; i < count; ++i) {
+				slot->samples[i] = static_cast< float >(samples[offset + i]) / 32768.0f;
+			}
 		}
 
 		finishEnqueue();
@@ -281,11 +385,22 @@ void VoiceActivationDebugCapture::enqueueServer(const float *samples, unsigned i
 }
 
 void VoiceActivationDebugCapture::workerLoop() noexcept {
+	const std::chrono::steady_clock::time_point deadline = m_startedAt + m_maxDuration;
 	for (;;) {
 		PendingItem item;
 		{
 			std::unique_lock< std::mutex > lock(m_queueMutex);
-			m_queueReady.wait(lock, [this] { return m_stop || m_queueCount > 0; });
+			if (!m_stop && std::chrono::steady_clock::now() >= deadline) {
+				m_limitReached.store(true, std::memory_order_relaxed);
+				m_accepting.store(false, std::memory_order_release);
+				m_stop = true;
+			}
+			if (!m_stop && m_queueCount == 0
+				&& !m_queueReady.wait_until(lock, deadline, [this] { return m_stop || m_queueCount > 0; })) {
+				m_limitReached.store(true, std::memory_order_relaxed);
+				m_accepting.store(false, std::memory_order_release);
+				m_stop = true;
+			}
 			if (m_queueCount == 0 && m_stop) {
 				break;
 			}
@@ -314,11 +429,20 @@ void VoiceActivationDebugCapture::workerLoop() noexcept {
 
 	std::error_code error;
 	std::filesystem::remove(m_directory / ".capture-active", error);
+	m_stoppedElapsedUs.store(timestampMicroseconds(), std::memory_order_relaxed);
+	m_accepting.store(false, std::memory_order_release);
+	m_enabled.store(false, std::memory_order_release);
 }
 
 void VoiceActivationDebugCapture::processItem(const PendingItem &item) noexcept {
 	WriterState *writer = item.stream == Stream::RawInput ? m_inputWriter.get() : m_serverWriter.get();
 	if (!writer) {
+		if (item.stream == Stream::RawInput) {
+			if (item.hasMetrics) {
+				writeMetrics(item, m_metricsInputSamples);
+			}
+			m_metricsInputSamples += item.sampleCount;
+		}
 		return;
 	}
 
@@ -330,6 +454,12 @@ void VoiceActivationDebugCapture::processItem(const PendingItem &item) noexcept 
 		writer->file    = openWaveFile(writer->path, info);
 		if (!writer->file) {
 			m_hadWriteError.store(true, std::memory_order_relaxed);
+			if (item.stream == Stream::RawInput) {
+				if (item.hasMetrics) {
+					writeMetrics(item, m_metricsInputSamples);
+				}
+				m_metricsInputSamples += item.sampleCount;
+			}
 			return;
 		}
 		writer->sampleRate = item.sampleRate;
@@ -338,6 +468,12 @@ void VoiceActivationDebugCapture::processItem(const PendingItem &item) noexcept 
 
 	if (writer->sampleRate != item.sampleRate) {
 		m_hadWriteError.store(true, std::memory_order_relaxed);
+		if (item.stream == Stream::RawInput) {
+			if (item.hasMetrics) {
+				writeMetrics(item, m_metricsInputSamples);
+			}
+			m_metricsInputSamples += item.sampleCount;
+		}
 		return;
 	}
 
@@ -359,6 +495,9 @@ void VoiceActivationDebugCapture::processItem(const PendingItem &item) noexcept 
 
 	if (item.hasMetrics) {
 		writeMetrics(item, inputSampleIndex);
+	}
+	if (item.stream == Stream::RawInput) {
+		m_metricsInputSamples += item.sampleCount;
 	}
 }
 
@@ -391,15 +530,19 @@ void VoiceActivationDebugCapture::writeManifest() noexcept {
 	const std::uint64_t serverSamples = m_serverWriter ? m_serverWriter->writtenSamples : 0;
 	const unsigned int serverRate     = m_serverWriter ? m_serverWriter->sampleRate : 0;
 
+	const bool captureRawInput  = m_captureRawInput.load(std::memory_order_relaxed);
+	const bool captureServerMix = m_captureServerMix.load(std::memory_order_relaxed);
 	manifest << "{\n"
-			 << "  \"schema_version\": 1,\n"
+			 << "  \"schema_version\": 2,\n"
 			 << "  \"started_at_utc\": \"" << m_startedAtUtc << "\",\n"
 			 << "  \"git_head\": \"" << m_gitHead << "\",\n"
-			 << "  \"raw_input\": {\"file\": \"raw-input.wav\", \"sample_rate\": " << inputRate
-			 << ", \"samples\": " << inputSamples << "},\n"
-			 << "  \"server_mix\": {\"file\": \"server-mix.wav\", \"sample_rate\": " << serverRate
-			 << ", \"samples\": " << serverSamples << ", \"scope\": \"incoming remote speech before device playback; "
-				"local UI samples excluded\"},\n"
+			 << "  \"raw_input\": {\"captured\": " << (captureRawInput ? "true" : "false")
+			 << ", \"file\": " << (captureRawInput ? "\"raw-input.wav\"" : "null")
+			 << ", \"sample_rate\": " << inputRate << ", \"samples\": " << inputSamples << "},\n"
+			 << "  \"server_mix\": {\"captured\": " << (captureServerMix ? "true" : "false")
+			 << ", \"file\": " << (captureServerMix ? "\"server-mix.wav\"" : "null")
+			 << ", \"sample_rate\": " << serverRate << ", \"samples\": " << serverSamples
+			 << ", \"scope\": \"incoming remote speech before device playback; local UI samples excluded\"},\n"
 			 << "  \"metrics_file\": \"metrics.csv\",\n"
 			 << "  \"max_duration_seconds\": " << m_maxDuration.count() << ",\n"
 			 << "  \"duration_limit_reached\": "

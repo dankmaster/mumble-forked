@@ -19,15 +19,36 @@
 #include <string>
 #include <thread>
 
-/// Developer-only, explicitly enabled capture for tuning voice activation.
+/// Explicitly enabled, local-only capture for diagnosing voice activation.
 ///
-/// Set MUMBLE_VOICE_DIAGNOSTIC_DIR to an empty directory before starting the
-/// client. The capture writes synchronized raw microphone audio, incoming
-/// server speech and the activation metrics needed to compare detector modes.
-/// File I/O is performed by a background worker rather than either audio
-/// callback.
+/// The in-app Audio Debug surface starts bounded captures at runtime. The
+/// original MUMBLE_VOICE_DIAGNOSTIC_* environment variables remain supported
+/// for unattended developer captures. File I/O is performed by a background
+/// worker rather than either audio callback.
 class VoiceActivationDebugCapture final {
 public:
+	struct StartOptions {
+		std::filesystem::path directory;
+		std::chrono::seconds maxDuration = std::chrono::seconds(60);
+		bool captureRawInput             = true;
+		bool captureServerMix            = false;
+		std::string gitHead;
+	};
+
+	struct Status {
+		bool active           = false;
+		bool finalizing       = false;
+		bool limitReached     = false;
+		bool writeError       = false;
+		bool captureRawInput  = false;
+		bool captureServerMix = false;
+		std::uint64_t elapsedSeconds      = 0;
+		std::uint64_t maxDurationSeconds  = 0;
+		std::uint64_t droppedInputItems   = 0;
+		std::uint64_t droppedServerItems  = 0;
+		std::filesystem::path directory;
+	};
+
 	struct InputMetrics {
 		float rawRmsDb            = -96.0f;
 		float rawPeakDb           = -96.0f;
@@ -57,7 +78,12 @@ public:
 	/// Initializes the singleton on the main thread before audio callbacks begin.
 	static void initializeFromEnvironment();
 
+	bool start(const StartOptions &options);
+	void stop();
+	Status status() const;
 	bool enabled() const noexcept;
+	bool capturesRawInput() const noexcept;
+	bool capturesServerMix() const noexcept;
 	std::uint64_t timestampMicroseconds() const noexcept;
 
 	void captureInputFrame(const short *samples, unsigned int sampleCount, unsigned int sampleRate,
@@ -104,6 +130,9 @@ private:
 	std::string m_gitHead;
 	std::chrono::steady_clock::time_point m_startedAt;
 	std::chrono::seconds m_maxDuration = std::chrono::seconds(300);
+	std::atomic< std::int64_t > m_startedAtSteadyMicroseconds { 0 };
+	std::atomic< bool > m_captureRawInput { true };
+	std::atomic< bool > m_captureServerMix { true };
 
 	std::atomic< bool > m_enabled { false };
 	std::atomic< bool > m_accepting { false };
@@ -111,11 +140,13 @@ private:
 	std::atomic< bool > m_hadWriteError { false };
 	std::atomic< std::uint64_t > m_droppedInputItems { 0 };
 	std::atomic< std::uint64_t > m_droppedServerItems { 0 };
+	std::atomic< std::uint64_t > m_stoppedElapsedUs { 0 };
 
 	std::unique_ptr< PendingItem[] > m_queue;
 	std::size_t m_readIndex  = 0;
 	std::size_t m_writeIndex = 0;
 	std::size_t m_queueCount = 0;
+	std::uint64_t m_metricsInputSamples = 0;
 	bool m_stop              = false;
 	std::mutex m_queueMutex;
 	std::condition_variable m_queueReady;

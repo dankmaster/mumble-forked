@@ -200,7 +200,7 @@ Rectangle {
             text: qsTr("Join")
 			tone: "accent"
 			highlighted: true
-            Accessible.description: qsTr("Open the isolated media player and join synchronized playback")
+            Accessible.description: qsTr("Open the shared media player and join synchronized playback")
             onClicked: session.joinShared()
         }
         ModernButton {
@@ -212,7 +212,7 @@ Rectangle {
             text: qsTr("Open player")
 			tone: "accent"
 			highlighted: true
-			Accessible.description: qsTr("Reopen the isolated synchronized media player")
+			Accessible.description: qsTr("Reopen the synchronized media player")
             onClicked: session.reopenSharedPlayer()
         }
 		ModernButton {

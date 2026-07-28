@@ -696,11 +696,13 @@ TestCase {
 		watchTogetherSpy.target = fixture.window
 		sizePresetSpy.target = fixture.window
 
-		card.watchTogetherRequested(card.safeEmbedUrl, card.safeEmbedProvider, card.displayTitle)
+		card.watchTogetherRequested(card.safeEmbedUrl, card.safeEmbedProvider,
+			card.displayTitle, card.normalizedEmbedAspect)
 		compare(watchTogetherSpy.count, 1)
 		compare(watchTogetherSpy.signalArguments[0][0], "https://www.youtube.com/embed/dm-shared")
 		compare(watchTogetherSpy.signalArguments[0][1], "youtube")
 		compare(watchTogetherSpy.signalArguments[0][2], "Shared release stream")
+		compare(watchTogetherSpy.signalArguments[0][3], "wide")
 
 		card.setSizePreset("compact")
 		compare(sizePresetSpy.count, 1)

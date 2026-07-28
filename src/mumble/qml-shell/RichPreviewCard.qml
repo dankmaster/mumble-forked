@@ -322,7 +322,8 @@ Rectangle {
 	signal popoutPlayRequested(string url, string provider)
 	signal popoutDirectMediaRequested(string url, string mime, string audioUrl, string audioMime, string title)
 	signal sizePresetRequested(string preset)
-    signal watchTogetherRequested(string url, string provider, string title)
+	signal watchTogetherRequested(string url, string provider, string title,
+		string presentationAspect)
 
 	implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
 	radius: Theme.innerRadius
@@ -2217,7 +2218,7 @@ Rectangle {
 							? qsTr("Start a synchronized media session")
 							: qsTr("End or leave the active media session first")
 						onTriggered: root.watchTogetherRequested(root.safeEmbedUrl,
-							root.safeEmbedProvider, root.displayTitle)
+							root.safeEmbedProvider, root.displayTitle, root.normalizedEmbedAspect)
 					}
 					MenuItem {
 						objectName: "previewOpenOriginalButton"

@@ -129,7 +129,7 @@ TestCase {
 	}
 
 	function test_compact_message_actions_reserve_current_row_width() {
-		verify(/readonly property int compactActionButtonCount:[\s\S]{0,260}readonly property real compactActionTextInset:/.test(mainSource))
+		verify(/readonly property int compactActionButtonCount:[\s\S]{0,420}readonly property real compactActionTextInset:/.test(mainSource))
 		compare((mainSource.match(/Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/g) || []).length, 2)
 		verify(/id:\s*compactMessageActionTray[\s\S]{0,320}width:\s*messageDelegate\.compactActionTrayWidth/.test(mainSource))
 	}

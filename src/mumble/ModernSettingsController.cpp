@@ -26,13 +26,16 @@
 #include "SpeechCleanup.h"
 #include "UiTheme.h"
 #include "Version.h"
+#include "VoiceActivationDebugCapture.h"
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 #	include "WASAPI.h"
 #endif
 
+#include <QtCore/QDir>
 #include <QtCore/QDebug>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
+#include <QtCore/QFileInfo>
 #include <QtCore/QHash>
 #include <QtCore/QMap>
 #include <QtCore/QObject>
@@ -40,6 +43,7 @@
 #include <QtCore/QReadLocker>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QSet>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
 #include <QtCore/QUrl>
 #include <QtGui/QDesktopServices>
@@ -518,6 +522,9 @@ namespace {
 			{ QStringLiteral("audio.inputEnhancementExperimentalAuto"),
 			  QObject::tr(
 				  "Advanced experimental profile switching among Light, Balanced, and Quality; Voice Focus is excluded.") },
+			{ QStringLiteral("audio.audioDebug"),
+			  QObject::tr(
+				  "Capture bounded local voice-activation evidence without changing the current detector, gate, or calibration settings.") },
 			{ QStringLiteral("audio.noiseCancelMode"),
 			  QObject::tr("Choose whether local microphone noise suppression is disabled, classic, neural, or combined.") },
 			{ QStringLiteral("audio.noiseCancelBackend"),
@@ -1872,6 +1879,100 @@ namespace {
 		return field;
 	}
 
+	QString audioDebugPathString(const std::filesystem::path &path) {
+#ifdef Q_OS_WIN
+		return QString::fromStdWString(path.wstring());
+#else
+		return QString::fromStdString(path.string());
+#endif
+	}
+
+	std::filesystem::path audioDebugPath(const QString &path) {
+#ifdef Q_OS_WIN
+		return std::filesystem::path(path.toStdWString());
+#else
+		return std::filesystem::path(path.toStdString());
+#endif
+	}
+
+	QString nextAudioDebugDirectory() {
+		const QDir root(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
+		const QString base = root.filePath(QStringLiteral("audio-debug/%1").arg(
+			QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))));
+		QString candidate = base;
+		for (int suffix = 2; QFileInfo::exists(candidate); ++suffix) {
+			candidate = QStringLiteral("%1-%2").arg(base).arg(suffix);
+		}
+		return QDir::cleanPath(candidate);
+	}
+
+	QVariantMap audioDebugField(const QString &uiError) {
+		const VoiceActivationDebugCapture::Status status =
+			VoiceActivationDebugCapture::instance().status();
+		const QString directory = audioDebugPathString(status.directory);
+		const bool hasCapture    = !directory.isEmpty() && QFileInfo::exists(directory);
+		const qulonglong elapsed = status.elapsedSeconds;
+		const qulonglong maximum = status.maxDurationSeconds > 0 ? status.maxDurationSeconds : 60;
+		const qulonglong remaining = elapsed >= maximum ? 0 : maximum - elapsed;
+
+		QString statusText;
+		QString tone;
+		if (!uiError.isEmpty()) {
+			statusText = uiError;
+			tone       = QStringLiteral("danger");
+		} else if (status.active) {
+			statusText = QObject::tr("Recording locally · %1 seconds remaining").arg(remaining);
+			tone       = QStringLiteral("warning");
+		} else if (status.finalizing) {
+			statusText = QObject::tr("Finalizing diagnostic files…");
+			tone       = QStringLiteral("warning");
+		} else if (status.writeError) {
+			statusText = QObject::tr("Capture finished with a file-write error.");
+			tone       = QStringLiteral("danger");
+		} else if (status.limitReached) {
+			statusText = QObject::tr("Capture complete · duration limit reached");
+			tone       = QStringLiteral("success");
+		} else if (hasCapture) {
+			statusText = QObject::tr("Capture complete");
+			tone       = QStringLiteral("success");
+		} else {
+			statusText = QObject::tr("Ready");
+			tone       = QStringLiteral("accent");
+		}
+
+		QVariantMap field = fieldItem(QStringLiteral("audio.audioDebug"), QObject::tr("Audio Debug"),
+									  QStringLiteral("audioDebug"), status.active);
+		field.insert(QStringLiteral("active"), status.active);
+		field.insert(QStringLiteral("finalizing"), status.finalizing);
+		field.insert(QStringLiteral("hasCapture"), hasCapture);
+		field.insert(QStringLiteral("statusText"), statusText);
+		field.insert(QStringLiteral("tone"), tone);
+		field.insert(QStringLiteral("directory"), QDir::toNativeSeparators(directory));
+		field.insert(QStringLiteral("directoryUrl"),
+					 directory.isEmpty() ? QString() : QUrl::fromLocalFile(directory).toString());
+		field.insert(QStringLiteral("elapsedSeconds"), QVariant::fromValue(elapsed));
+		field.insert(QStringLiteral("maxDurationSeconds"), QVariant::fromValue(maximum));
+		field.insert(QStringLiteral("remainingSeconds"), QVariant::fromValue(remaining));
+		field.insert(QStringLiteral("captureRawInput"), status.captureRawInput);
+		field.insert(QStringLiteral("captureServerMix"), status.captureServerMix);
+		field.insert(QStringLiteral("droppedItems"),
+					 QVariant::fromValue(status.droppedInputItems + status.droppedServerItems));
+		field.insert(QStringLiteral("startActionId"), QStringLiteral("audioDebug.start"));
+		field.insert(QStringLiteral("stopActionId"), QStringLiteral("audioDebug.stop"));
+		field.insert(QStringLiteral("refreshActionId"), QStringLiteral("audioDebug.refresh"));
+		field.insert(QStringLiteral("openFolderActionId"), QStringLiteral("audioDebug.openFolder"));
+		field.insert(QStringLiteral("defaultDurationSeconds"), 60);
+		field.insert(QStringLiteral("defaultCaptureRawInput"), true);
+		field.insert(QStringLiteral("defaultCaptureServerMix"), false);
+		field.insert(
+			QStringLiteral("privacyText"),
+			QObject::tr("Metrics stay on this computer. Raw microphone audio is optional; received voices are a separate opt-in. Nothing is uploaded."));
+		field.insert(
+			QStringLiteral("guidanceText"),
+			QObject::tr("Reproduce clipping, false voice detection, or missing speech during the bounded capture. Audio Debug observes the current detector and gate without changing calibration."));
+		return field;
+	}
+
 	int amplificationFromMinLoudness(const int minLoudness) {
 		return qBound(0, kAmplificationSliderBase - minLoudness, kMaxAmplificationSliderValue);
 	}
@@ -2944,6 +3045,7 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	m_inputEnhancementCalibrationControls.reset();
 	m_inputEnhancementPreAutoPreference.reset();
 	m_inputEnhancementReadinessUiError.clear();
+	m_audioDebugUiError.clear();
 	m_original = settings;
 	m_draft    = settings;
 	m_stonksContext = normalizedStonksContext(stonksContext);
@@ -3891,6 +3993,62 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		return result;
 	}
 
+	if (action == QLatin1String("audioDebug.start")) {
+		VoiceActivationDebugCapture &capture = VoiceActivationDebugCapture::instance();
+		const VoiceActivationDebugCapture::Status current = capture.status();
+		if (current.active || current.finalizing) {
+			m_audioDebugUiError = QObject::tr("The current Audio Debug capture has not finished yet.");
+			result.stateChanged = true;
+			return result;
+		}
+
+		QString directory = payload.value(QStringLiteral("diagnosticDirectory")).toString().trimmed();
+		if (directory.isEmpty()) {
+			directory = nextAudioDebugDirectory();
+		} else {
+			directory = QDir(directory).absolutePath();
+		}
+
+		VoiceActivationDebugCapture::StartOptions options;
+		options.directory = audioDebugPath(directory);
+		options.maxDuration = std::chrono::seconds(
+			qBound(10, payload.value(QStringLiteral("durationSeconds"), 60).toInt(), 600));
+		options.captureRawInput =
+			payload.value(QStringLiteral("captureRawInput"), true).toBool();
+		options.captureServerMix =
+			payload.value(QStringLiteral("captureServerMix"), false).toBool();
+		if (!capture.start(options)) {
+			m_audioDebugUiError =
+				QObject::tr("Audio Debug could not create its private local capture folder.");
+		} else {
+			m_audioDebugUiError.clear();
+		}
+		result.stateChanged = true;
+		return result;
+	}
+
+	if (action == QLatin1String("audioDebug.stop")) {
+		VoiceActivationDebugCapture::instance().stop();
+		m_audioDebugUiError.clear();
+		result.stateChanged = true;
+		return result;
+	}
+
+	if (action == QLatin1String("audioDebug.refresh")) {
+		result.stateChanged = true;
+		return result;
+	}
+
+	if (action == QLatin1String("audioDebug.openFolder")) {
+		const QString directory =
+			audioDebugPathString(VoiceActivationDebugCapture::instance().status().directory);
+		result.stateChanged = false;
+		if (!directory.isEmpty()) {
+			QDesktopServices::openUrl(QUrl::fromLocalFile(directory));
+		}
+		return result;
+	}
+
 	if (action == QLatin1String("startInputEnhancementCalibration")) {
 		if (m_voiceReplayPreviousTransmitMode) {
 			m_inputEnhancementCalibrationUiError =
@@ -4811,6 +4969,13 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 						m_draft, m_inputEnhancementCalibrationWorker->snapshot(), inputEnhancementCalibrationUiError) }),
 				false)));
 		}
+
+		sections.push_back(advancedSection(collapsibleSection(
+			audioInputSection(
+				QStringLiteral("audioDebug"), QObject::tr("Audio Debug"),
+				QObject::tr("Capture bounded local evidence for clipping, false detections, and missing words without changing your settings."),
+				QVariantList { audioDebugField(m_audioDebugUiError) }),
+			false)));
 
 		sections.push_back(advancedSection(collapsibleSection(
 			audioInputSection(

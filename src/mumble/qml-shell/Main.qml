@@ -294,9 +294,9 @@ ApplicationWindow {
 		}, title, messageId)
 	}
 
-	function startWatchTogether(url, provider, title) {
+	function startWatchTogether(url, provider, title, presentationAspect) {
 		if (mediaSession && !mediaSession.sharedAvailable)
-			return mediaSession.startShared(url, provider, title)
+			return mediaSession.startShared(url, provider, title, presentationAspect)
 		return false
 	}
 
@@ -2718,6 +2718,20 @@ ApplicationWindow {
 					participantModel: root.navigationParticipantModel
 				}
 
+				WatchTogetherStage {
+					id: watchTogetherStage
+					Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.topMargin: visible ? Theme.space2 : 0
+					Layout.preferredHeight: visible ? implicitHeight : 0
+					session: mediaSession
+					mediaProfileFactory: mediaProfiles
+					visualMediaFixtureMode: root.visualMediaFixtureMode
+					maximumStageHeight: Math.max(240, Math.min(520, root.height * 0.56))
+					renderActive: visible
+				}
+
 				StonksRoomPanel {
 					id: stonksRoomPanel
 					objectName: "stonksRoomPanel"
@@ -4109,8 +4123,8 @@ ApplicationWindow {
 												&& mediaSession.playbackControllable)
 											mediaSession.play()
 									}
-									onWatchTogetherRequested: (url, provider, title) =>
-										root.startWatchTogether(url, provider, title)
+									onWatchTogetherRequested: (url, provider, title, presentationAspect) =>
+										root.startWatchTogether(url, provider, title, presentationAspect)
 									onSizePresetRequested: preset =>
 										root.rememberRichPreviewSizePreset(messageDelegate.stableId, preset)
 										}
@@ -5076,8 +5090,8 @@ ApplicationWindow {
 				onManagedAttachmentOpenRequested: (attachment, messageId) =>
 					root.openAttachment(attachment, "", messageId,
 						directMessages ? directMessages.timelineModel : null)
-				onWatchTogetherRequested: (url, provider, title) =>
-					root.startWatchTogether(url, provider, title)
+				onWatchTogetherRequested: (url, provider, title, presentationAspect) =>
+					root.startWatchTogether(url, provider, title, presentationAspect)
 				onPreviewSizePresetRequested: (preferenceKey, preset) =>
 					root.rememberRichPreviewSizePreset(preferenceKey, preset)
 			}

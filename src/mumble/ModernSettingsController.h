@@ -84,6 +84,7 @@ private:
 		m_inputEnhancementPreAutoPreference;
 	QString m_inputEnhancementCalibrationUiError;
 	QString m_inputEnhancementReadinessUiError;
+	QString m_audioDebugUiError;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;

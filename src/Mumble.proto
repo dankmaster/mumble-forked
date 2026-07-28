@@ -1201,6 +1201,9 @@ message WatchTogetherSync {
 	optional double playback_rate = 12 [default = 1];
 	optional uint64 updated_at = 13;
 	repeated uint32 participant_sessions = 14 [packed = true];
+	// Presentation is Mumble-owned and intentionally limited to stable layout
+	// families. Provider-specific rendering remains an adapter concern.
+	optional string presentation_aspect = 15 [default = "wide"];
 }
 
 message StonksPosition {

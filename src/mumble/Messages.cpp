@@ -2759,7 +2759,8 @@ void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &msg)
 		msg.has_title() ? u8(msg.title()) : QString(), msg.has_scope_id() ? msg.scope_id() : 0,
 		msg.has_actor_session() ? msg.actor_session() : 0, msg.has_host_session() ? msg.host_session() : 0,
 		participants, event, msg.position_seconds(), msg.paused(), msg.has_updated_at() ? msg.updated_at() : 0,
-		Global::get().uiSession);
+		Global::get().uiSession,
+		msg.has_presentation_aspect() ? u8(msg.presentation_aspect()) : QString());
 }
 
 void MainWindow::msgStonksRequest(const MumbleProto::StonksRequest &) {

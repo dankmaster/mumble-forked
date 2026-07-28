@@ -4358,6 +4358,7 @@ namespace {
 		state.insert(QStringLiteral("sharedJoined"), media && media->sharedJoined());
 		state.insert(QStringLiteral("sharedHost"), media && media->sharedHost());
 		state.insert(QStringLiteral("sharedTitle"), media ? media->sharedTitle() : QString());
+		state.insert(QStringLiteral("sharedAspect"), media ? media->sharedAspect() : QStringLiteral("wide"));
 		state.insert(QStringLiteral("sharedSessionId"), media ? media->sharedSessionId() : QString());
 		state.insert(QStringLiteral("sharedScopeId"), media ? media->sharedScopeId() : 0);
 		state.insert(QStringLiteral("sharedHostSession"), media ? media->sharedHostSession() : 0);
@@ -5927,10 +5928,13 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		const QUrl url(request.value(QStringLiteral("url")).toString().trimmed());
 		const QString provider = request.value(QStringLiteral("provider")).toString().trimmed();
 		const QString title = request.value(QStringLiteral("title")).toString().trimmed();
+		const QString presentationAspect =
+			request.value(QStringLiteral("presentationAspect"), QStringLiteral("wide")).toString().trimmed();
 		if (url.isEmpty()) return errorResponse(tr("Missing watch-together URL."));
 
 		MediaSessionBackend *media = host->mediaSession();
-		if (!media->startShared(url, provider, title)) return errorResponse(media->error());
+		if (!media->startShared(url, provider, title, presentationAspect))
+			return errorResponse(media->error());
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("handled"), true);
 		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
