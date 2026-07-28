@@ -70,6 +70,10 @@
 	<file alias="QuickReactionBar.qml">qml-shell/QuickReactionBar.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
 	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>
+	<file alias="EmbedDocumentBody.qml">qml-shell/EmbedDocumentBody.qml</file>
+	<file alias="EmbedMediaGallery.qml">qml-shell/EmbedMediaGallery.qml</file>
+	<file alias="EmbedSourceLink.qml">qml-shell/EmbedSourceLink.qml</file>
+	<file alias="EmbedThreadContext.qml">qml-shell/EmbedThreadContext.qml</file>
 	<file alias="RichPreviewCard.qml">qml-shell/RichPreviewCard.qml</file>
 	<file alias="ProviderDetails.qml">qml-shell/ProviderDetails.qml</file>
 	<file alias="AttachmentViewer.qml">qml-shell/AttachmentViewer.qml</file>

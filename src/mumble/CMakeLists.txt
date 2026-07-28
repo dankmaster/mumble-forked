@@ -217,6 +217,8 @@ set(MUMBLE_SOURCES
 	"ChatAttachmentUploader.h"
 	"ComposerController.cpp"
 	"ComposerController.h"
+	"EmbedDocument.cpp"
+	"EmbedDocument.h"
 	"MainWindow.cpp"
 	"MainWindow.h"
 	"Markdown.cpp"

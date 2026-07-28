@@ -2,6 +2,7 @@
 
 #include "QmlClientModels.h"
 #include "ChatPerfTrace.h"
+#include "EmbedDocument.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -59,6 +60,7 @@ private slots:
 	void chatTimelineNormalizesPreviewAndAttachments();
 	void chatTimelinePreservesStreamingManifestsAndManagedArtwork();
 	void chatTimelineNormalizesProviderMetadata();
+	void chatTimelineBuildsTypedEmbedDocuments();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void participantUpsertsAndRemovalsStayResetFree();
 	void workloadSourceStateRoundTripsExactly();
@@ -2367,12 +2369,26 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QCOMPARE(attachments.size(), 4);
 	QCOMPARE(attachments.first().toMap().value(QStringLiteral("url")).toString(),
 			 QStringLiteral("image://mumble/asset:1?g=1"));
+	const QVariantMap normalizedImageDocument =
+		attachments.first().toMap().value(QStringLiteral("document")).toMap();
+	QCOMPARE(normalizedImageDocument.value(QStringLiteral("schemaVersion")).toInt(),
+			 EmbedDocument::SchemaVersion);
+	QVERIFY(normalizedImageDocument.value(QStringLiteral("capabilities")).toMap()
+				.value(QStringLiteral("preview")).toBool());
 	const QVariantMap normalizedFile = attachments.at(1).toMap();
 	QCOMPARE(normalizedFile.value(QStringLiteral("assetId")).toULongLong(), 77ULL);
 	QCOMPARE(normalizedFile.value(QStringLiteral("kind")).toString(), QStringLiteral("document"));
 	QCOMPARE(normalizedFile.value(QStringLiteral("fileName")).toString(), QStringLiteral("notes.pdf"));
 	QCOMPARE(normalizedFile.value(QStringLiteral("byteSize")).toULongLong(), 4096ULL);
 	QVERIFY(normalizedFile.value(QStringLiteral("url")).toString().isEmpty());
+	const QVariantMap normalizedFileDocument =
+		normalizedFile.value(QStringLiteral("document")).toMap();
+	QCOMPARE(normalizedFileDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("kind")).toString(), QStringLiteral("document"));
+	QVERIFY(!normalizedFileDocument.value(QStringLiteral("capabilities")).toMap()
+				 .value(QStringLiteral("preview")).toBool());
+	QVERIFY(normalizedFileDocument.value(QStringLiteral("capabilities")).toMap()
+				.value(QStringLiteral("download")).toBool());
 	const QVariantMap normalizedInline = attachments.at(2).toMap();
 	QCOMPARE(normalizedInline.value(QStringLiteral("inlineToken")).toString(),
 		QStringLiteral("abcdef0123456789abcdef01"));
@@ -2952,6 +2968,239 @@ void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
 	QCOMPARE(sparse.value(QStringLiteral("vehicleWarning")).toString(), QStringLiteral("Check listing"));
 	QCOMPARE(sparse.value(QStringLiteral("googleSearchQuery")).toString(), QStringLiteral("Qt Quick"));
 	QVERIFY(!sparse.contains(QStringLiteral("rawHtml")));
+}
+
+void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
+	ChatTimelineModel model;
+	int sequence = 0;
+	const auto normalizedDocument = [&](const QVariantMap &preview) {
+		const QString key = QStringLiteral("embed-document:%1").arg(++sequence);
+		if (!model.upsertMessage({
+				{ QStringLiteral("messageKey"), key },
+				{ QStringLiteral("preview"), preview }
+			})) {
+			return QVariantMap {};
+		}
+		return model.get(model.rowCount() - 1)
+			.value(QStringLiteral("preview")).toMap()
+			.value(QStringLiteral("document")).toMap();
+	};
+
+	const QString xSource = QStringLiteral("https://x.com/historyinmemes/status/2058971862265151767");
+	const QVariantMap xDocument = normalizedDocument({
+		{ QStringLiteral("url"), xSource },
+		{ QStringLiteral("host"), QStringLiteral("x.com") },
+		{ QStringLiteral("title"), QStringLiteral("A real post with a reply chain") },
+		{ QStringLiteral("description"), QStringLiteral("@historyinmemes") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/x-post?g=41") },
+				{ QStringLiteral("externalUrl"), QStringLiteral("https://pbs.twimg.com/media/test.jpg") },
+				{ QStringLiteral("thumbnail"), QStringLiteral("image://mumble/x-thumb?g=41") },
+				{ QStringLiteral("title"), QStringLiteral("Post image") },
+				{ QStringLiteral("directPlayable"), true }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("x") },
+			{ QStringLiteral("xDisplayName"), QStringLiteral("History in Memes") },
+			{ QStringLiteral("xHandle"), QStringLiteral("@historyinmemes") },
+			{ QStringLiteral("xCreatedAt"), QStringLiteral("2026-07-20T10:20:00Z") },
+			{ QStringLiteral("xLikeCount"), 1234 },
+			{ QStringLiteral("xReplyContext"), QVariantList {
+				QVariantMap {
+					{ QStringLiteral("id"), QStringLiteral("2058970000000000000") },
+					{ QStringLiteral("url"),
+					  QStringLiteral("https://x.com/source/status/2058970000000000000") },
+					{ QStringLiteral("displayName"), QStringLiteral("Source") },
+					{ QStringLiteral("handle"), QStringLiteral("@source") },
+					{ QStringLiteral("text"), QStringLiteral("The parent post") }
+				}
+			} },
+			{ QStringLiteral("xQuotedPost"), QVariantMap {
+				{ QStringLiteral("id"), QStringLiteral("2058960000000000000") },
+				{ QStringLiteral("url"),
+				  QStringLiteral("https://x.com/quoted/status/2058960000000000000") },
+				{ QStringLiteral("displayName"), QStringLiteral("Quoted") },
+				{ QStringLiteral("handle"), QStringLiteral("@quoted") },
+				{ QStringLiteral("text"), QStringLiteral("The quoted post") }
+			} }
+		} }
+	});
+	QCOMPARE(xDocument.value(QStringLiteral("schemaVersion")).toInt(), EmbedDocument::SchemaVersion);
+	QVERIFY(xDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(xDocument.value(QStringLiteral("presentation")).toString(), QStringLiteral("social"));
+	QCOMPARE(xDocument.value(QStringLiteral("source")).toMap()
+				 .value(QStringLiteral("displayUrl")).toString(), xSource);
+	QCOMPARE(xDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("x"));
+	QCOMPARE(xDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(), QStringLiteral("social-post"));
+	QCOMPARE(xDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("author")).toMap()
+				 .value(QStringLiteral("handle")).toString(), QStringLiteral("@historyinmemes"));
+	const QVariantList xThread =
+		xDocument.value(QStringLiteral("thread")).toMap().value(QStringLiteral("items")).toList();
+	QCOMPARE(xThread.size(), 2);
+	QCOMPARE(xThread.first().toMap().value(QStringLiteral("role")).toString(),
+			 QStringLiteral("reply-context"));
+	QCOMPARE(xThread.first().toMap().value(QStringLiteral("url")).toString(),
+			 QStringLiteral("https://x.com/source/status/2058970000000000000"));
+	QCOMPARE(xThread.last().toMap().value(QStringLiteral("role")).toString(), QStringLiteral("quote"));
+	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().size(), 1);
+	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().first().toMap()
+				 .value(QStringLiteral("thumbnailUrl")).toString(),
+			 QStringLiteral("image://mumble/x-thumb?g=41"));
+
+	const QString steamSource =
+		QStringLiteral("https://store.steampowered.com/app/730/CounterStrike_2/");
+	const QVariantMap steamDocument = normalizedDocument({
+		{ QStringLiteral("url"), steamSource },
+		{ QStringLiteral("host"), QStringLiteral("store.steampowered.com") },
+		{ QStringLiteral("title"), QStringLiteral("Counter-Strike 2") },
+		{ QStringLiteral("description"), QStringLiteral("A game on Steam") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/steam-one?g=51") },
+				{ QStringLiteral("directPlayable"), true }
+			},
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/steam-two?g=52") },
+				{ QStringLiteral("directPlayable"), true }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("steam") },
+			{ QStringLiteral("steamAppName"), QStringLiteral("Counter-Strike 2") },
+			{ QStringLiteral("steamDeveloper"), QStringLiteral("Valve") },
+			{ QStringLiteral("steamPlatforms"), QStringLiteral("Windows, Linux") },
+			{ QStringLiteral("steamPrice"), QStringLiteral("Free to Play") },
+			{ QStringLiteral("steamReviewSummary"), QStringLiteral("Very Positive") }
+		} }
+	});
+	QCOMPARE(steamDocument.value(QStringLiteral("presentation")).toString(), QStringLiteral("game"));
+	QCOMPARE(steamDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(), QStringLiteral("game"));
+	QCOMPARE(steamDocument.value(QStringLiteral("media")).toList().size(), 2);
+	QCOMPARE(steamDocument.value(QStringLiteral("media")).toList().last().toMap()
+				 .value(QStringLiteral("url")).toString(),
+			 QStringLiteral("image://mumble/steam-two?g=52"));
+	QCOMPARE(steamDocument.value(QStringLiteral("facts")).toList().size(), 4);
+
+	const QString youtubeSource = QStringLiteral("https://www.youtube.com/watch?v=M7lc1UVf-VE");
+	const QVariantMap youtubeDocument = normalizedDocument({
+		{ QStringLiteral("url"), youtubeSource },
+		{ QStringLiteral("host"), QStringLiteral("youtube.com") },
+		{ QStringLiteral("title"), QStringLiteral("YouTube Developers Live") },
+		{ QStringLiteral("embedKind"), QStringLiteral("youtube") },
+		{ QStringLiteral("embedUrl"),
+		  QStringLiteral("https://www.youtube-nocookie.com/embed/M7lc1UVf-VE") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("youtube") }
+		} }
+	});
+	QCOMPARE(youtubeDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(), QStringLiteral("video"));
+	QCOMPARE(youtubeDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(), QStringLiteral("provider"));
+	QCOMPARE(youtubeDocument.value(QStringLiteral("source")).toMap()
+				 .value(QStringLiteral("url")).toString(), youtubeSource);
+
+	const QVariantMap instagramDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.instagram.com/p/DYzqx_9txNX/") },
+		{ QStringLiteral("host"), QStringLiteral("www.instagram.com") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/instagram-post?g=61") },
+				{ QStringLiteral("directPlayable"), true }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("instagram") },
+			{ QStringLiteral("instagramDisplayName"), QStringLiteral("Pontus Gustavsson") },
+			{ QStringLiteral("instagramHandle"), QStringLiteral("@guslarng") },
+			{ QStringLiteral("instagramCaption"), QStringLiteral("Frej Larsson release post") }
+		} }
+	});
+	QVERIFY(instagramDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(instagramDocument.value(QStringLiteral("presentation")).toString(),
+			 QStringLiteral("social"));
+	QCOMPARE(instagramDocument.value(QStringLiteral("media")).toList().size(), 1);
+
+	const QVariantMap facebookDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.facebook.com/reel/1327313299204519") },
+		{ QStringLiteral("host"), QStringLiteral("www.facebook.com") },
+		{ QStringLiteral("title"), QStringLiteral("Facebook reel") },
+		{ QStringLiteral("description"), QStringLiteral("A public reel") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("facebook") }
+		} }
+	});
+	QVERIFY(facebookDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(facebookDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(), QStringLiteral("social-post"));
+
+	const QVariantMap flashbackDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.flashback.org/t3731783") },
+		{ QStringLiteral("host"), QStringLiteral("www.flashback.org") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("flashback") },
+			{ QStringLiteral("forumThreadTitle"),
+			  QStringLiteral("Regeringen halverar priset på månadskort") },
+			{ QStringLiteral("forumPostExcerpt"), QStringLiteral("Trådstartens sammanfattning") },
+			{ QStringLiteral("forumQuoteAuthor"), QStringLiteral("citerad-användare") },
+			{ QStringLiteral("forumQuoteExcerpt"), QStringLiteral("Ett tidigare inlägg") },
+			{ QStringLiteral("forumQuotePostUrl"),
+			  QStringLiteral("https://www.flashback.org/sp95046057") }
+		} }
+	});
+	QCOMPARE(flashbackDocument.value(QStringLiteral("presentation")).toString(),
+			 QStringLiteral("thread"));
+	QCOMPARE(flashbackDocument.value(QStringLiteral("thread")).toMap()
+				 .value(QStringLiteral("items")).toList().size(), 1);
+
+	const QVariantMap articleDocument = normalizedDocument({
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.gp.se/politik/uppgifter-regeringen-halverar-priset-i-kollektivtrafiken") },
+		{ QStringLiteral("host"), QStringLiteral("www.gp.se") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("previewKind"), QStringLiteral("article") },
+			{ QStringLiteral("articlePublisher"), QStringLiteral("Göteborgs-Posten") },
+			{ QStringLiteral("articleTitle"),
+			  QStringLiteral("Uppgifter: Regeringen halverar priset i kollektivtrafiken") },
+			{ QStringLiteral("articleDescription"),
+			  QStringLiteral("Priset på månadskort ska halveras under ett halvår.") },
+			{ QStringLiteral("articlePublishedAt"), QStringLiteral("2026-05-25T18:17:01Z") },
+			{ QStringLiteral("articleSection"), QStringLiteral("Politik") }
+		} }
+	});
+	QVERIFY(articleDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(articleDocument.value(QStringLiteral("presentation")).toString(),
+			 QStringLiteral("article"));
+	QCOMPARE(articleDocument.value(QStringLiteral("facts")).toList().size(), 1);
+
+	const QVariantMap directDocument = normalizedDocument({
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://media.giphy.com/media/xT4uQCfBOBGralHfOM/giphy.gif") },
+		{ QStringLiteral("host"), QStringLiteral("media.giphy.com") },
+		{ QStringLiteral("title"), QStringLiteral("Ghostbusters animation") },
+		{ QStringLiteral("mediaKind"), QStringLiteral("image") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("image/gif") },
+		{ QStringLiteral("mediaUrl"), QStringLiteral("image://mumble/giphy-animation?g=81") },
+		{ QStringLiteral("mediaAnimated"), true }
+	});
+	QVERIFY(directDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(directDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("direct"));
+	QCOMPARE(directDocument.value(QStringLiteral("media")).toList().size(), 1);
 }
 
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {

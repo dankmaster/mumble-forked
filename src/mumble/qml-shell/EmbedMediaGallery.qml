@@ -1,0 +1,242 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import Mumble.Theme 1.0
+
+ColumnLayout {
+	id: root
+
+	property var mediaItems: []
+	property int selectedIndex: 0
+	property bool expanded: false
+	property bool renderActive: true
+	property bool animationsEnabled: true
+	property bool mediaRequiresReveal: false
+	property color accent: Theme.accent
+	property string accessibleTitle: ""
+	readonly property var currentItem: mediaItems.length > 0
+		? mediaItems[Math.max(0, Math.min(selectedIndex, mediaItems.length - 1))] : ({})
+	readonly property string currentKind: currentItem.managedAnimated
+		? "animated-image" : String(currentItem.kind || "")
+	readonly property string currentImageSource: currentKind === "image"
+		|| currentKind === "animated-image" ? String(currentItem.url || "")
+		: String(currentItem.posterUrl || currentItem.poster
+			|| currentItem.thumbnailUrl || currentItem.thumbnail || "")
+	signal selectionRequested(int index)
+	signal mediaRequested(int index)
+	signal revealRequested()
+
+	visible: mediaItems.length > 0
+	spacing: Theme.space2
+
+	Rectangle {
+		id: mediaViewport
+		objectName: "embedDocumentMediaViewport"
+		Layout.fillWidth: true
+		Layout.preferredHeight: root.expanded
+			? Math.min(420, Math.max(240, width * 9 / 16))
+			: Math.min(320, Math.max(180, width * 9 / 16))
+		radius: Theme.innerRadius
+		color: Theme.mediaCanvas
+		border.color: Theme.withAlpha(root.accent, 0.32)
+		border.width: 1
+		clip: true
+		Accessible.role: Accessible.Graphic
+		Accessible.name: root.accessibleTitle.length > 0
+			? root.accessibleTitle : qsTr("Preview media")
+
+		Image {
+			id: stillImage
+			anchors.fill: parent
+			source: root.renderActive && !root.mediaRequiresReveal
+				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
+			asynchronous: true
+			cache: false
+			fillMode: Image.PreserveAspectFit
+			visible: status === Image.Ready
+		}
+
+		Loader {
+			id: animatedImageLoader
+			property int mediaStatus: Image.Null
+			anchors.fill: parent
+			active: root.renderActive && !root.mediaRequiresReveal
+				&& root.currentKind === "animated-image"
+				&& root.currentImageSource.length > 0
+			onActiveChanged: mediaStatus = active ? Image.Loading : Image.Null
+			sourceComponent: AnimatedImage {
+				source: root.currentImageSource
+				asynchronous: true
+				cache: false
+				playing: root.animationsEnabled && visible && status === Image.Ready
+				fillMode: Image.PreserveAspectFit
+				onStatusChanged: animatedImageLoader.mediaStatus = status
+				Component.onCompleted: animatedImageLoader.mediaStatus = status
+			}
+		}
+
+		ModernBusyIndicator {
+			anchors.centerIn: parent
+			running: stillImage.status === Image.Loading
+				|| (animatedImageLoader.active
+					&& animatedImageLoader.mediaStatus === Image.Loading)
+			visible: running
+			animated: root.animationsEnabled
+			Accessible.name: qsTr("Loading preview media")
+		}
+
+		ModernIcon {
+			anchors.centerIn: parent
+			visible: !root.mediaRequiresReveal && root.currentImageSource.length === 0
+			name: root.currentKind === "audio" ? "volume"
+				: root.currentKind === "video" ? "play" : "eye"
+			size: Theme.space6
+			color: Theme.mediaOverlayTextMuted
+			Accessible.ignored: true
+		}
+
+		Rectangle {
+			anchors.fill: parent
+			visible: !root.mediaRequiresReveal
+				&& (root.currentKind === "video" || root.currentKind === "audio")
+			color: Theme.withAlpha(Theme.mediaCanvas, root.currentImageSource.length > 0 ? 0.18 : 0)
+		}
+
+		ModernButton {
+			anchors.centerIn: parent
+			visible: !root.mediaRequiresReveal
+				&& (root.currentKind === "video" || root.currentKind === "audio")
+			text: root.currentKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
+			tone: "accent"
+			Accessible.name: text + (root.accessibleTitle.length > 0
+				? ": " + root.accessibleTitle : "")
+			onClicked: root.mediaRequested(root.selectedIndex)
+		}
+
+		Button {
+			anchors.fill: parent
+			visible: !root.mediaRequiresReveal
+				&& (root.currentKind === "image" || root.currentKind === "animated-image")
+			hoverEnabled: true
+			background: Rectangle {
+				color: parent.down ? Theme.withAlpha(root.accent, 0.20)
+					: parent.hovered ? Theme.withAlpha(root.accent, 0.10) : "transparent"
+			}
+			contentItem: Item {}
+			Accessible.name: qsTr("Open %1").arg(root.accessibleTitle.length > 0
+				? root.accessibleTitle : qsTr("preview image"))
+			onClicked: root.mediaRequested(root.selectedIndex)
+		}
+
+		Rectangle {
+			anchors.fill: parent
+			visible: root.mediaRequiresReveal
+			color: Theme.embedRevealSurface
+
+			ModernButton {
+				anchors.centerIn: parent
+				text: qsTr("Reveal media")
+				tone: "accent"
+				onClicked: root.revealRequested()
+			}
+		}
+
+		Rectangle {
+			anchors.right: parent.right
+			anchors.bottom: parent.bottom
+			anchors.margins: Theme.space2
+			visible: root.mediaItems.length > 1
+			width: mediaCountLabel.implicitWidth + Theme.space2 * 2
+			height: Theme.space5
+			radius: height / 2
+			color: Theme.withAlpha(Theme.mediaCanvas, 0.84)
+
+			Label {
+				id: mediaCountLabel
+				anchors.centerIn: parent
+				text: qsTr("%1 / %2").arg(root.selectedIndex + 1).arg(root.mediaItems.length)
+				textFormat: Text.PlainText
+				color: Theme.mediaOverlayTextStrong
+				font.pixelSize: Theme.fontCaption
+			}
+		}
+	}
+
+	ScrollView {
+		Layout.fillWidth: true
+		Layout.preferredHeight: visible ? 64 : 0
+		visible: root.mediaItems.length > 1
+		ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+		ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+		contentWidth: thumbnailRow.implicitWidth
+		contentHeight: height
+
+		Row {
+			id: thumbnailRow
+			height: parent.height
+			spacing: Theme.space2
+
+			Repeater {
+				model: root.mediaItems
+
+				delegate: Button {
+					id: thumbnailButton
+					required property int index
+					required property var modelData
+					objectName: "embedDocumentMediaThumbnail_" + index
+
+					width: 82
+					height: 56
+					hoverEnabled: true
+					Accessible.name: qsTr("Show media %1 of %2")
+						.arg(index + 1).arg(root.mediaItems.length)
+					onClicked: root.selectionRequested(index)
+
+					background: Rectangle {
+						radius: Theme.innerRadius
+						color: thumbnailButton.down ? Theme.embedSelection : Theme.embedSurface
+						border.color: root.selectedIndex === thumbnailButton.index
+							? root.accent : Theme.embedBorder
+						border.width: root.selectedIndex === thumbnailButton.index ? 2 : 1
+					}
+
+					contentItem: Item {
+						Image {
+							anchors.fill: parent
+							anchors.margins: 2
+							source: {
+								const kind = thumbnailButton.modelData.managedAnimated
+									? "animated-image" : String(thumbnailButton.modelData.kind || "")
+								if (kind === "image" || kind === "animated-image")
+									return String(thumbnailButton.modelData.thumbnailUrl
+										|| thumbnailButton.modelData.thumbnail
+										|| thumbnailButton.modelData.url || "")
+								return String(thumbnailButton.modelData.posterUrl
+									|| thumbnailButton.modelData.poster
+									|| thumbnailButton.modelData.thumbnailUrl
+									|| thumbnailButton.modelData.thumbnail || "")
+							}
+							asynchronous: true
+							cache: false
+							fillMode: Image.PreserveAspectCrop
+						}
+						ModernIcon {
+							anchors.centerIn: parent
+							visible: {
+								const kind = String(thumbnailButton.modelData.kind || "")
+								return kind === "video" || kind === "audio"
+							}
+							name: String(thumbnailButton.modelData.kind || "") === "audio"
+								? "volume" : "play"
+							size: Theme.avatarSmall
+							color: Theme.mediaOverlayTextStrong
+							Accessible.ignored: true
+						}
+					}
+				}
+			}
+		}
+	}
+}

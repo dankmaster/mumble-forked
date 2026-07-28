@@ -61,8 +61,25 @@ Rectangle {
 		? String(mediaProfileFactory.runtimeError || "") : ""
 	readonly property bool mediaRuntimeCanRetry: mediaRuntimeError.length > 0
 		&& !!mediaProfileFactory && typeof mediaProfileFactory.retryRuntime === "function"
-    readonly property string previewState: preview
+	readonly property string previewState: preview
         ? (preview.state || (preview.failed ? "error" : preview.loading ? "loading" : "ready")) : ""
+	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
+	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1
+		&& embedDocument.commonPresentation === true
+	readonly property var typedDocumentContent: typedDocumentActive && embedDocument.content
+		? embedDocument.content : ({})
+	readonly property var typedDocumentMedia: typedDocumentActive && embedDocument.media
+		&& embedDocument.media.length !== undefined ? embedDocument.media : []
+	readonly property var typedDocumentThread: typedDocumentActive && embedDocument.thread
+		? embedDocument.thread : ({})
+	readonly property var typedDocumentFacts: typedDocumentActive
+		&& embedDocument.facts && embedDocument.facts.length !== undefined
+		? embedDocument.facts : []
+	readonly property bool typedDocumentCanExpand: typedDocumentActive
+		&& (typedDocumentFacts.length > 0
+			|| (typedDocumentThread.items && typedDocumentThread.items.length > 0)
+			|| String(typedDocumentContent.description || "").length > 240
+			|| mediaItems.length > 1)
 	readonly property string sanitizedDescription: safeText(preview ? preview.description : "", 4096)
 	readonly property string mediaErrorDescription: firstSafeText([
 		preview ? preview.errorDescription : "", preview ? preview.errorMessage : "",
@@ -181,6 +198,8 @@ Rectangle {
 	// expose it as an ordinary provider detail after the user has revealed it.
 	readonly property var providerMetadata: metadataForProviderDetails()
     readonly property var mediaItems: normalizedMediaItems()
+	readonly property bool typedDocumentUsesGallery: typedDocumentActive
+		&& mediaItems.length > 0
     readonly property var currentMedia: mediaItems.length > 0
         ? mediaItems[Math.max(0, Math.min(selectedMediaIndex, mediaItems.length - 1))] : ({})
     readonly property string currentMediaKind: mediaKind(currentMedia)
@@ -246,19 +265,22 @@ Rectangle {
 		&& (contentWarning.length > 0 || thumbnailBlur)
 	readonly property bool hasExpandedDescription: previewState === "ready"
 		&& displayDescription.length > 0
-		&& !providerDetails.ownsDescription
+		&& !providerDetails.ownsDescription && !typedDocumentActive
 	readonly property bool canExpand: !!preview && preview.previewSize !== "large"
 		&& (providerDetails.canExpand || hasExpandedDescription || hasRevealableMedia
-			|| hasEmbedPreview || mediaItems.length > 1)
+			|| hasEmbedPreview || mediaItems.length > 1 || typedDocumentCanExpand)
 	readonly property bool hasDetails: canExpand
 	readonly property bool hasPrimaryDirectAction: !hasEmbedPreview && !mediaRequiresReveal
 		&& !directInlinePlaybackActive && (hasExternalMedia || hasExternalImage)
 	readonly property string originalProviderUrl: safeExternalUrl(preview ? preview.url : "")
-	readonly property bool hasPrimaryOpenAction: !inlineMediaStageVisible && !hasPrimaryDirectAction
+	readonly property bool hasPrimaryOpenAction: !typedDocumentActive
+		&& !inlineMediaStageVisible && !hasPrimaryDirectAction
 		&& originalProviderUrl.length > 0
-	readonly property bool hasFooterOriginalOpenAction: inlineMediaStageVisible && hasEmbedPreview
+	readonly property bool hasFooterOriginalOpenAction: !typedDocumentActive
+		&& inlineMediaStageVisible && hasEmbedPreview
 		&& originalProviderUrl.length > 0
-	readonly property bool hasSecondaryOriginalOpenAction: (hasPrimaryDirectAction || hasDirectMedia)
+	readonly property bool hasSecondaryOriginalOpenAction: !typedDocumentActive
+		&& (hasPrimaryDirectAction || hasDirectMedia)
 		&& originalProviderUrl.length > 0
 	readonly property bool hasSizeActions: inlineMediaStageVisible
 	readonly property bool hasPopoutAction: localPlaybackSupported && !animatedImagePresentation
@@ -279,9 +301,10 @@ Rectangle {
 		&& hasDirectMedia && String(mediaSessionController ? mediaSessionController.provider || "" : "") === "direct"
 	readonly property bool embedPosterUnavailable: hasEmbedPreview && embedPosterFallbackActive
 		&& !inlinePlaybackActive
-	readonly property bool inlineMediaStageVisible: (hasEmbedPreview && localPlaybackSupported
-		&& !embedPosterUnavailable)
-		|| hasDirectMedia
+	readonly property bool inlineMediaStageVisible:
+		((hasEmbedPreview && localPlaybackSupported && !embedPosterUnavailable)
+			|| hasDirectMedia)
+		&& (!typedDocumentUsesGallery || inlinePlaybackActive)
 	readonly property string inlinePresentationProvider: hasEmbedPreview
 		? normalizedEmbedProvider
 		: String(providerDetails.providerToken || providerLabel || "").trim()
@@ -1009,7 +1032,8 @@ Rectangle {
             return ""
         const kind = String(item.kind || "").toLowerCase()
         const mime = String(item.mime || "").toLowerCase()
-        if (kind === "image" || kind === "gif" || mime.indexOf("image/") === 0)
+        if (kind === "image" || kind === "gif" || kind === "animated-image"
+				|| mime.indexOf("image/") === 0)
             return "image"
         if (kind === "audio" || mime.indexOf("audio/") === 0)
             return "audio"
@@ -1021,17 +1045,21 @@ Rectangle {
     function normalizedMediaItems() {
         if (!preview)
             return []
-        // C++ exposes this value as a QVariantList. It is array-like in QML,
-        // but Array.isArray() returns false for it and used to silently discard
-        // every gallery item in the real client while JavaScript-only tests
-        // continued to pass.
-        const sourceItems = preview.mediaItems && preview.mediaItems.length !== undefined
-            ? preview.mediaItems : []
+		const useTypedDocument = typedDocumentActive
+		// C++ exposes these values as QVariantList. They are array-like in QML,
+		// but Array.isArray() returns false for them and used to silently discard
+		// every gallery item in the real client while JavaScript-only tests
+		// continued to pass.
+        const sourceItems = useTypedDocument ? typedDocumentMedia
+			: preview.mediaItems && preview.mediaItems.length !== undefined
+				? preview.mediaItems : []
         const result = []
         for (let index = 0; index < sourceItems.length && result.length < 16; ++index) {
             const item = sourceItems[index] || {}
             if (mediaKind(item) === "image") {
-                const renderSource = safeRenderImageSource(item.url || "", !!item.managedAnimated)
+				const managedAnimated = !!item.managedAnimated
+					|| String(item.kind || "").toLowerCase() === "animated-image"
+                const renderSource = safeRenderImageSource(item.url || "", managedAnimated)
                 const externalSource = safeExternalUrl(item.externalUrl
                                                        || (renderSource.length === 0 ? item.url : ""))
                 if (renderSource.length > 0 || externalSource.length > 0) {
@@ -1042,9 +1070,9 @@ Rectangle {
                         "externalUrl": externalSource,
 						"title": safeText(item.title, 512),
                         "directPlayable": renderSource.length > 0,
-                        "managedAnimated": !!item.managedAnimated && /^file:\/\//i.test(renderSource),
-                        "thumbnail": safeRenderImageSource(item.thumbnail || ""),
-                        "poster": safeRenderImageSource(item.poster || "")
+                        "managedAnimated": managedAnimated && /^file:\/\//i.test(renderSource),
+                        "thumbnail": safeRenderImageSource(item.thumbnailUrl || item.thumbnail || ""),
+                        "poster": safeRenderImageSource(item.posterUrl || item.poster || "")
                     })
                 }
 		} else {
@@ -1061,13 +1089,13 @@ Rectangle {
 						"externalUrl": externalUrl,
 						"title": safeText(item.title, 512),
 						"directPlayable": directPlayable,
-						"thumbnail": safeRenderImageSource(item.thumbnail || ""),
-						"poster": safeRenderImageSource(item.poster || "")
+						"thumbnail": safeRenderImageSource(item.thumbnailUrl || item.thumbnail || ""),
+						"poster": safeRenderImageSource(item.posterUrl || item.poster || "")
 					})
 				}
             }
         }
-		if (result.length === 0 && (String(preview.mediaUrl || "").length > 0
+		if (!useTypedDocument && result.length === 0 && (String(preview.mediaUrl || "").length > 0
 								   || safeExternalUrl(preview.mediaExternalUrl || "").length > 0)) {
 			const fallbackKind = mediaKind({ "kind": preview.mediaKind || preview.kind,
 				"mime": preview.mediaMime })
@@ -1173,6 +1201,17 @@ Rectangle {
 		anchors.topMargin: root.contentTopInset
 		spacing: Theme.space3
 		z: 1
+
+		EmbedSourceLink {
+			objectName: "previewSourceLink"
+			Layout.fillWidth: true
+			sourceUrl: root.originalProviderUrl
+			providerLabel: root.typedDocumentActive && root.embedDocument.provider
+				? String(root.embedDocument.provider.label || root.providerLabel)
+				: root.providerLabel
+			accent: providerDetails.providerAccent
+			onOpenRequested: function(url) { root.externalOpenRequested(url) }
+		}
 
 		Item {
 			id: embedMediaSlot
@@ -1567,11 +1606,43 @@ Rectangle {
 			}
 		}
 
+		EmbedMediaGallery {
+			objectName: "previewDocumentMediaGallery"
+			Layout.fillWidth: true
+			visible: root.typedDocumentActive && root.previewState === "ready"
+				&& !root.inlinePlaybackActive && root.mediaItems.length > 0
+			mediaItems: root.mediaItems
+			selectedIndex: root.selectedMediaIndex
+			expanded: root.expanded
+			renderActive: root.renderActive
+			animationsEnabled: root.animationsEnabled
+			mediaRequiresReveal: root.mediaRequiresReveal
+			accent: providerDetails.providerAccent
+			accessibleTitle: root.displayTitle
+			onSelectionRequested: function(index) { root.selectedMediaIndex = index }
+			onMediaRequested: function(index) {
+				root.selectedMediaIndex = index
+				root.requestCurrentMedia()
+			}
+			onRevealRequested: root.sensitiveMediaRevealed = true
+		}
+
+		EmbedDocumentBody {
+			objectName: "previewDocumentBody"
+			Layout.fillWidth: true
+			visible: root.typedDocumentActive && root.previewState === "ready"
+			document: root.embedDocument
+			accent: providerDetails.providerAccent
+			expanded: root.expanded
+			onExternalOpenRequested: function(url) { root.externalOpenRequested(url) }
+		}
+
 		RowLayout {
 			id: genericHeader
 			objectName: "previewGenericHeader"
 			Layout.fillWidth: true
-			visible: !providerDetails.ownsHeader || root.previewState !== "ready"
+			visible: (!root.typedDocumentActive || root.previewState !== "ready")
+				&& (!providerDetails.ownsHeader || root.previewState !== "ready")
 			spacing: Theme.space3
 
 			Rectangle {
@@ -1838,7 +1909,7 @@ Rectangle {
 			id: expandedMediaSlot
 			objectName: "previewExpandedMediaSlot"
 			Layout.fillWidth: true
-			Layout.preferredHeight: !providerDetails.ownsMediaGallery
+			Layout.preferredHeight: !root.typedDocumentActive && !providerDetails.ownsMediaGallery
 				&& !root.inlineMediaStageVisible && !root.inlinePlaybackActive && root.expanded && (root.imageSource.length > 0
 									|| root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
@@ -2057,7 +2128,7 @@ Rectangle {
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
 			height: visible ? implicitHeight : 0
-			visible: !root.providerOwnsDetails
+			visible: !root.providerOwnsDetails && !root.typedDocumentActive
 			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
 			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""

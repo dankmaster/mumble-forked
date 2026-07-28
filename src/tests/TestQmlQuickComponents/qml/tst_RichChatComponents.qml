@@ -1804,6 +1804,173 @@ TestCase {
 			"Shared card state keeps scrolling stable.")
 	}
 
+	function test_typed_embed_document_keeps_full_source_and_reply_context_visible() {
+		const card = previewLoader.item
+		const sourceUrl = "https://x.com/historyinmemes/status/2058971862265151767"
+		card.preview = {
+			"state": "ready",
+			"title": "The current post",
+			"description": "@historyinmemes",
+			"url": sourceUrl,
+			"metadata": { "provider": "x" },
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "social",
+				"provider": { "id": "x", "label": "X", "host": "x.com" },
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "social-post",
+					"description": "The current post",
+					"publishedAt": "2026-07-20T10:20:00Z",
+					"author": { "name": "History in Memes", "handle": "@historyinmemes" }
+				},
+				"thread": {
+					"kind": "conversation",
+					"items": [
+						{
+							"role": "reply-context",
+							"authorName": "Source",
+							"authorHandle": "@source",
+							"text": "The parent post",
+							"url": "https://x.com/source/status/2058970000000000000"
+						},
+						{
+							"role": "quote",
+							"authorName": "Quoted",
+							"authorHandle": "@quoted",
+							"text": "The quoted post",
+							"url": "https://x.com/quoted/status/2058960000000000000"
+						}
+					]
+				},
+				"facts": [
+					{ "key": "likes", "label": "Likes", "value": 1234 }
+				],
+				"media": [],
+				"playback": { "mode": "none", "provider": "x" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-x-document"
+		wait(0)
+
+		verify(card.typedDocumentActive)
+		const sourceLink = findChild(card, "previewSourceLink")
+		const sourceLabel = findChild(card, "embedSourceUrl")
+		const body = findChild(card, "previewDocumentBody")
+		const genericHeader = findChild(card, "previewGenericHeader")
+		const details = findChild(card, "providerDetails")
+		verify(sourceLink !== null && sourceLink.visible)
+		verify(sourceLabel !== null && sourceLabel.visible)
+		compare(sourceLabel.text, sourceUrl)
+		compare(sourceLabel.elide, Text.ElideNone)
+		compare(sourceLink.Accessible.description, sourceUrl)
+		verify(body !== null && body.visible)
+		compare(genericHeader.visible, false)
+		compare(details.visible, false)
+		verify(findChild(card, "embedThreadContextItem_0") !== null)
+		verify(findChild(card, "embedThreadContextItem_1") !== null)
+		compare(findChild(card, "embedThreadContextUrl_0").text,
+			"https://x.com/source/status/2058970000000000000")
+
+		sourceLink.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], sourceUrl)
+		const contextUrl = findChild(card, "embedThreadContextUrl_1")
+		contextUrl.clicked()
+		compare(externalOpenSpy.count, 2)
+		compare(externalOpenSpy.signalArguments[1][0],
+			"https://x.com/quoted/status/2058960000000000000")
+	}
+
+	function test_typed_embed_document_uses_one_mixed_gallery_and_common_facts() {
+		const card = previewLoader.item
+		const sourceUrl = "https://store.steampowered.com/app/730/CounterStrike_2/"
+		card.preview = {
+			"state": "ready",
+			"title": "Counter-Strike 2",
+			"description": "For over two decades, Counter-Strike has offered an elite competitive experience.",
+			"url": sourceUrl,
+			"metadata": {
+				"provider": "steam",
+				"steamAppName": "Counter-Strike 2",
+				"steamDeveloper": "Valve"
+			},
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "game",
+				"provider": {
+					"id": "steam",
+					"label": "Steam",
+					"host": "store.steampowered.com"
+				},
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "game",
+					"title": "Counter-Strike 2",
+					"description": "For over two decades, Counter-Strike has offered an elite competitive experience."
+				},
+				"thread": {},
+				"facts": [
+					{ "key": "price", "label": "Price", "value": "Free to Play" },
+					{ "key": "developer", "label": "Developer", "value": "Valve" },
+					{ "key": "platforms", "label": "Platforms", "value": "Windows, Linux" }
+				],
+				"media": [
+					{
+						"id": "media:0",
+						"kind": "image",
+						"url": "image://mumble/steam-cs2-shot-one?g=71",
+						"thumbnailUrl": "image://mumble/steam-cs2-thumb-one?g=71",
+						"title": "Counter-Strike 2 screenshot one",
+						"directPlayable": true
+					},
+					{
+						"id": "media:1",
+						"kind": "image",
+						"url": "image://mumble/steam-cs2-shot-two?g=72",
+						"thumbnailUrl": "image://mumble/steam-cs2-thumb-two?g=72",
+						"title": "Counter-Strike 2 screenshot two",
+						"directPlayable": true
+					}
+				],
+				"playback": { "mode": "none", "provider": "steam" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:typed-steam-document"
+		card.userExpanded = false
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const sourceLabel = findChild(card, "embedSourceUrl")
+		const details = findChild(card, "providerDetails")
+		verify(gallery !== null && gallery.visible)
+		compare(gallery.mediaItems.length, 2)
+		compare(card.mediaItems[1].url, "image://mumble/steam-cs2-shot-two?g=72")
+		compare(sourceLabel.text, sourceUrl)
+		compare(details.visible, false)
+		const first = findChild(card, "embedDocumentMediaThumbnail_0")
+		const second = findChild(card, "embedDocumentMediaThumbnail_1")
+		verify(first !== null && second !== null)
+		compare(card.selectedMediaIndex, 0)
+		second.clicked()
+		compare(card.selectedMediaIndex, 1)
+		gallery.mediaRequested(1)
+		compare(imageOpenSpy.count, 1)
+		compare(imageOpenSpy.signalArguments[0][0],
+			"image://mumble/steam-cs2-shot-two?g=72")
+		const title = findChild(card, "embedDocumentTitle")
+		const description = findChild(card, "embedDocumentDescription")
+		compare(title.text, "Counter-Strike 2")
+		verify(description.text.indexOf("elite competitive experience") >= 0)
+		card.userExpanded = true
+		wait(0)
+		compare(findChild(card, "previewExpandedMediaSlot").visible, false)
+	}
+
 	function test_direct_reddit_media_preserves_provider_identity_for_inline_player() {
 		const card = previewLoader.item
 		card.preview = {

@@ -1,6 +1,7 @@
 add_executable(TestQmlClientModels
 	TestQmlClientModels.cpp
 	../../mumble/ClientActionRegistry.cpp
+	../../mumble/EmbedDocument.cpp
 	../../mumble/QmlClientModels.cpp
 )
 

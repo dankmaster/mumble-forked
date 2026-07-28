@@ -4,6 +4,7 @@
 #include "QmlClientModels.h"
 
 #include "ClientActionRegistry.h"
+#include "EmbedDocument.h"
 
 #include <QtCore/QCache>
 #include <QtCore/QCoreApplication>
@@ -899,6 +900,8 @@ namespace {
 					if (!text.isEmpty()) result.insert(key, text);
 				}
 			}
+			const QString url = safeExternalUrl(item.value(QStringLiteral("url")), true);
+			if (!url.isEmpty()) result.insert(QStringLiteral("url"), url);
 			return result;
 		};
 		const auto appendTwitchMetadata = [&] {
@@ -1379,6 +1382,8 @@ namespace {
 		normalized.insert(QStringLiteral("autoplay"), preview.value(QStringLiteral("autoplay")).toBool());
 		const QVariantMap metadata = normalizedPreviewMetadata(preview.value(QStringLiteral("metadata")));
 		if (!metadata.isEmpty()) normalized.insert(QStringLiteral("metadata"), metadata);
+		const QVariantMap document = EmbedDocument::fromNormalizedPreview(normalized);
+		if (!document.isEmpty()) normalized.insert(QStringLiteral("document"), document);
 		return normalized;
 	}
 
@@ -1449,6 +1454,11 @@ namespace {
 			}
 			if (attachment.contains(QStringLiteral("width"))) item.insert(QStringLiteral("width"), attachment.value(QStringLiteral("width")).toInt());
 			if (attachment.contains(QStringLiteral("height"))) item.insert(QStringLiteral("height"), attachment.value(QStringLiteral("height")).toInt());
+			if (attachment.contains(QStringLiteral("durationMs"))) {
+				item.insert(QStringLiteral("durationMs"), attachment.value(QStringLiteral("durationMs")).toULongLong());
+			}
+			const QVariantMap document = EmbedDocument::fromNormalizedAttachment(item);
+			if (!document.isEmpty()) item.insert(QStringLiteral("document"), document);
 			normalized.push_back(item);
 		}
 		return normalized;
