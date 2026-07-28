@@ -24,6 +24,7 @@ private slots:
 	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
+	void connectionHandoffBlocksRetiringServerSnapshots();
 	void navigationRailFlattensRoomsAndParticipantsIncrementally();
 	void navigationRailGroupsToolTextChannelsAfterRegularTextRooms();
 	void navigationRailPresentationStateStaysStableAndIncremental();
@@ -588,6 +589,50 @@ void TestQmlClientModels::connectionResetDropsRowsBeforeSameIdsAreReused() {
 	QCOMPARE(participants.get(0).value(QStringLiteral("participantSession")).toString(), QStringLiteral("11"));
 }
 
+void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
+		const qsizetype start = source.indexOf(startMarker);
+		const qsizetype end   = source.indexOf(endMarker, start);
+		return start >= 0 && end > start ? source.mid(start, end - start) : QString();
+	};
+
+	const QString connectMethod =
+		methodBody(QStringLiteral("void MainWindow::connectToServer("),
+				   QStringLiteral("void MainWindow::beginServerHandlerRecreation()"));
+	QVERIFY(!connectMethod.isEmpty());
+	const qsizetype handoffPending =
+		connectMethod.indexOf(QStringLiteral("m_qmlConnectionHandoffPending = true"));
+	const qsizetype clearState = connectMethod.indexOf(QStringLiteral("clearQmlConnectionState()"));
+	const qsizetype scheduleState = connectMethod.indexOf(QStringLiteral("scheduleQmlShellStateSync()"));
+	QVERIFY(handoffPending >= 0);
+	QVERIFY(clearState > handoffPending);
+	QVERIFY(scheduleState > clearState);
+
+	const QString roomState =
+		methodBody(QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
+				   QStringLiteral("QVariantMap modernServerLogMessageState"));
+	QVERIFY(!roomState.isEmpty());
+	QVERIFY(roomState.contains(QStringLiteral("!m_qmlConnectionHandoffPending")));
+	QVERIFY(roomState.contains(QStringLiteral("if (connected && hasPersistentChatCapabilities())")));
+	QVERIFY(roomState.contains(QStringLiteral("if (connected && target.directMessage && target.user)")));
+
+	const QString connectedMethod =
+		methodBody(QStringLiteral("void MainWindow::serverConnected()"),
+				   QStringLiteral("void MainWindow::serverDisconnected("));
+	QVERIFY(!connectedMethod.isEmpty());
+	const qsizetype releaseHandoff =
+		connectedMethod.indexOf(QStringLiteral("m_qmlConnectionHandoffPending = false"));
+	const qsizetype resetNewConnection =
+		connectedMethod.indexOf(QStringLiteral("clearQmlConnectionState()"));
+	QVERIFY(releaseHandoff >= 0);
+	QVERIFY(resetNewConnection > releaseHandoff);
+}
+
 void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
 	RoomModel rooms;
 	const QVariantList actions { QVariantMap { { QStringLiteral("id"), QStringLiteral("join") },
@@ -1124,7 +1169,7 @@ void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {
 		QStringLiteral(R"(const\s+bool\s+canUseTools\s*=\s*modernShellToolsAllowed\(\))"))));
 	QVERIFY(roomState.contains(QRegularExpression(
 		QStringLiteral(R"(const\s+bool\s+canUseServerLog\s*=\s*modernServerLogAvailable\(\))"))));
-	QVERIFY(roomState.contains(QStringLiteral("if (canUseServerLog)")));
+	QVERIFY(roomState.contains(QStringLiteral("if (connected && canUseServerLog)")));
 	QVERIFY(roomState.contains(QStringLiteral("if (debugTool && !canUseTools)")));
 
 	const QString selection = methodBody(

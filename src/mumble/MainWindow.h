@@ -274,6 +274,7 @@ public:
 	std::optional< PendingServerConnection > m_pendingServerConnection;
 	std::shared_ptr< ServerHandler > m_retiringServerHandler;
 	std::vector< std::shared_ptr< ServerHandler > > m_retiredServerHandlers;
+	bool m_qmlConnectionHandoffPending    = false;
 	bool m_serverHandlerFinalizeScheduled = false;
 	bool m_serverHandlerPruneScheduled    = false;
 	int m_serverHandlerPruneAttempts      = 0;

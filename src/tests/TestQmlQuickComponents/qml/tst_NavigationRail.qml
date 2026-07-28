@@ -1314,6 +1314,41 @@ TestCase {
 		compare(direct.Accessible.name, "DIRECT MESSAGES")
 	}
 
+	function test_voice_selection_id_does_not_reveal_colliding_text_room() {
+		const rail = loader.item
+		const navigationList = findChild(rail, "navigationRooms")
+		verify(navigationList !== null)
+		navigationRows.insert(4, {
+			"stableId": "room-text-first", "scopeToken": "3:8", "title": "#first",
+			"subtitle": "Persistent text room", "kind": "text", "sectionKind": "text",
+			"selected": false, "depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+		navigationRows.insert(5, {
+			"stableId": "room-text-collision", "scopeToken": "3:2", "title": "#collision",
+			"subtitle": "Persistent text room", "kind": "text", "sectionKind": "text",
+			"selected": false, "depth": 0, "unreadCount": 0, "status": "",
+			"payload": { "rowKind": "room", "source": { "actions": [] } }
+		})
+		try {
+			rail.setSectionExpanded("text", false)
+			selection.selectedVoiceChannelId = 2
+			selection.scopeToken = "channel:2"
+			navigationList.forceLayout()
+			wait(0)
+			verify(rail.navigationIndexIsVisible(4))
+			verify(!rail.navigationIndexHasContent(4))
+			verify(!rail.navigationIndexIsVisible(5))
+			verify(!rail.navigationIndexHasContent(5))
+		} finally {
+			selection.selectedVoiceChannelId = undefined
+			selection.scopeToken = ""
+			rail.setSectionExpanded("text", true)
+			navigationRows.remove(5)
+			navigationRows.remove(4)
+		}
+	}
+
 	function test_tools_section_collapses_without_losing_selected_tool_context() {
 		const rail = loader.item
 		const navigationList = findChild(rail, "navigationRooms")

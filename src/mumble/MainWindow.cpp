@@ -25601,17 +25601,18 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	QVariantList textRooms;
 	QVariantList voiceRooms;
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	const Channel *joinedVoiceChannel = currentVoiceChannel();
+	const bool connected = !m_qmlConnectionHandoffPending && Global::get().uiSession != 0
+						   && Global::get().sh && Global::get().sh->isRunning();
+	const Channel *joinedVoiceChannel = connected ? currentVoiceChannel() : nullptr;
 	const Channel *participantVoiceChannel = nullptr;
-	if (!target.directMessage) {
+	if (connected && !target.directMessage) {
 		participantVoiceChannel =
 			target.valid && target.scope == MumbleProto::Channel && target.channel ? target.channel : joinedVoiceChannel;
 	}
 
 	QVariantMap appState;
-	const bool connected            = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
-	const ClientUser *selfUser      = ClientUser::get(Global::get().uiSession);
-	const Channel *selfVoiceChannel = currentVoiceChannel();
+	const ClientUser *selfUser      = connected ? ClientUser::get(Global::get().uiSession) : nullptr;
+	const Channel *selfVoiceChannel = connected ? currentVoiceChannel() : nullptr;
 	QString host;
 	QString username;
 	QString password;
@@ -25726,7 +25727,8 @@ QVariantMap MainWindow::buildQmlRoomState() {
 																	false, QStringLiteral("danger")));
 	selfMenu.insert(QStringLiteral("actions"), ModernShellMenuSerializer::normalize(selfMenuActions));
 	appState.insert(QStringLiteral("selfMenu"), selfMenu);
-	appState.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
+	appState.insert(QStringLiteral("directMessages"),
+					connected ? buildModernShellDirectMessagesState() : QVariantMap{});
 	patch.insert(QStringLiteral("app"), appState);
 
 	const auto selectedScope = [&target](const int scopeValue, const unsigned int scopeID) {
@@ -25770,13 +25772,13 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		textRooms.push_back(room);
 	};
 
-	if (canUseServerLog) {
+	if (connected && canUseServerLog) {
 		appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
 					   tr("Live Murmur server log and recent server-log history."), tr("Activity"),
 					   MumbleProto::Channel, false, QStringLiteral("tool"));
 	}
 
-	if (hasPersistentChatCapabilities()) {
+	if (connected && hasPersistentChatCapabilities()) {
 		QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
 		std::sort(textChannels.begin(), textChannels.end(),
 				  [](const PersistentTextChannel &lhs, const PersistentTextChannel &rhs) {
@@ -25853,7 +25855,7 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	}
 
 	QVariantList participants;
-	if (target.directMessage && target.user) {
+	if (connected && target.directMessage && target.user) {
 		if (selfUser) {
 			participants.push_back(buildQmlParticipantState(selfUser, nullptr, target.user, 40, true));
 		}
@@ -38170,6 +38172,11 @@ void MainWindow::connectToServer(const QString &host, const unsigned short port,
 															 password,
 															 serverName.trimmed(),
 															 desiredChannel };
+	// Channel IDs, text-channel IDs, and user session IDs are scoped to one
+	// server. Clear the QML models at the start of a direct handoff and keep
+	// queued snapshots from the retiring handler from repopulating them.
+	m_qmlConnectionHandoffPending = true;
+	clearQmlConnectionState();
 	// A deliberate handoff must not arm the automatic reconnect timer for the
 	// handler that is being replaced. The new attempt enables retries when it starts.
 	bRetryServer = false;
@@ -41355,6 +41362,7 @@ void MainWindow::scheduleWASAPIAudioReset(const int delayMs) {
 void MainWindow::serverConnected() {
 	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	m_reconnectSoundBlocker.reset();
+	m_qmlConnectionHandoffPending = false;
 	clearQmlConnectionState();
 	clearModernServerLogState();
 
