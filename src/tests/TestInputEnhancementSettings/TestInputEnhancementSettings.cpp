@@ -82,7 +82,7 @@ class TestInputEnhancementSettings : public QObject {
 
 private slots:
 	void newInstallDefaultsToOriginal();
-	void voiceActivationDefaultsMigrateAndSanitize();
+	void voiceActivationSettingsPreserveAndSanitize();
 	void migratesLegacyTuple_data();
 	void migratesLegacyTuple();
 	void roundTripsSchemaV3();
@@ -350,11 +350,11 @@ void TestInputEnhancementSettings::newInstallDefaultsToOriginal() {
 	QVERIFY(!settings.inputEnhancement.legacyOverride.has_value());
 }
 
-void TestInputEnhancementSettings::voiceActivationDefaultsMigrateAndSanitize() {
+void TestInputEnhancementSettings::voiceActivationSettingsPreserveAndSanitize() {
 	::Settings defaults;
-	QCOMPARE(defaults.vsVAD, ::Settings::Hybrid);
-	QVERIFY(qFuzzyCompare(defaults.fVADmin, 0.21f));
-	QVERIFY(qFuzzyCompare(defaults.fVADmax, 0.32f));
+	QCOMPARE(defaults.vsVAD, ::Settings::Amplitude);
+	QVERIFY(qFuzzyCompare(defaults.fVADmin, 0.80f));
+	QVERIFY(qFuzzyCompare(defaults.fVADmax, 0.98f));
 	QCOMPARE(defaults.inputGateMode, ::Settings::InputGateOff);
 	QCOMPARE(defaults.iVoiceHold, 40);
 
@@ -369,12 +369,12 @@ void TestInputEnhancementSettings::voiceActivationDefaultsMigrateAndSanitize() {
 			  { "voice_hold", 20 },
 		  } },
 	};
-	const ::Settings migrated = legacy.get< ::Settings >();
-	QCOMPARE(migrated.vsVAD, ::Settings::Hybrid);
-	QVERIFY(qFuzzyCompare(migrated.fVADmin, 0.21f));
-	QVERIFY(qFuzzyCompare(migrated.fVADmax, 0.32f));
-	QCOMPARE(migrated.inputGateMode, ::Settings::InputGateOff);
-	QCOMPARE(migrated.iVoiceHold, 40);
+	const ::Settings preservedLegacy = legacy.get< ::Settings >();
+	QCOMPARE(preservedLegacy.vsVAD, ::Settings::Amplitude);
+	QVERIFY(qFuzzyCompare(preservedLegacy.fVADmin, 0.80f));
+	QVERIFY(qFuzzyCompare(preservedLegacy.fVADmax, 0.98f));
+	QCOMPARE(preservedLegacy.inputGateMode, ::Settings::InputGateOff);
+	QCOMPARE(preservedLegacy.iVoiceHold, 20);
 
 	nlohmann::json custom = legacy;
 	custom["audio"]["vad_mode"]       = "SignalToNoise";
@@ -396,19 +396,43 @@ void TestInputEnhancementSettings::voiceActivationDefaultsMigrateAndSanitize() {
 	invalid["audio"]["input_gate_mode"] = "Unsupported";
 	invalid["audio"]["voice_hold"]      = 999;
 	const ::Settings sanitized          = invalid.get< ::Settings >();
-	QCOMPARE(sanitized.vsVAD, ::Settings::Hybrid);
-	QVERIFY(qFuzzyCompare(sanitized.fVADmin, 0.21f));
-	QVERIFY(qFuzzyCompare(sanitized.fVADmax, 0.32f));
+	QCOMPARE(sanitized.vsVAD, ::Settings::Amplitude);
+	QVERIFY(qFuzzyCompare(sanitized.fVADmin, 0.80f));
+	QVERIFY(qFuzzyCompare(sanitized.fVADmax, 0.98f));
 	QCOMPARE(sanitized.inputGateMode, ::Settings::InputGateOff);
 	QCOMPARE(sanitized.iVoiceHold, 40);
 
-	nlohmann::json reviewed = legacy;
-	reviewed["misc"]["modern_audio_setup_version"] = 1;
-	const ::Settings retained                       = reviewed.get< ::Settings >();
-	QCOMPARE(retained.vsVAD, ::Settings::Amplitude);
-	QVERIFY(qFuzzyCompare(retained.fVADmin, 0.80f));
-	QVERIFY(qFuzzyCompare(retained.fVADmax, 0.98f));
-	QCOMPARE(retained.iVoiceHold, 20);
+	nlohmann::json unsupportedDetector = custom;
+	unsupportedDetector["audio"]["vad_mode"] = "Unsupported";
+	const ::Settings detectorFallback        = unsupportedDetector.get< ::Settings >();
+	QCOMPARE(detectorFallback.vsVAD, ::Settings::Amplitude);
+	QVERIFY(qFuzzyCompare(detectorFallback.fVADmin, 0.80f));
+	QVERIFY(qFuzzyCompare(detectorFallback.fVADmax, 0.98f));
+
+	nlohmann::json build83Serialized = legacy;
+	build83Serialized["audio"].erase("vad_mode");
+	build83Serialized["audio"].erase("vad_min");
+	build83Serialized["audio"].erase("vad_max");
+	build83Serialized["audio"].erase("input_gate_mode");
+	build83Serialized["audio"].erase("voice_hold");
+	build83Serialized["misc"]["modern_audio_setup_version"] = 1;
+	const ::Settings retained = build83Serialized.get< ::Settings >();
+	QCOMPARE(retained.vsVAD, ::Settings::Hybrid);
+	QVERIFY(qFuzzyCompare(retained.fVADmin, 0.21f));
+	QVERIFY(qFuzzyCompare(retained.fVADmax, 0.32f));
+	QCOMPARE(retained.inputGateMode, ::Settings::InputGateOff);
+	QCOMPARE(retained.iVoiceHold, 40);
+
+	const nlohmann::json retainedSave = retained;
+	QCOMPARE(retainedSave.at("audio").at("vad_mode").get< std::string >(), std::string("Hybrid"));
+	QVERIFY(qFuzzyCompare(retainedSave.at("audio").at("vad_min").get< float >(), 0.21f));
+	QVERIFY(qFuzzyCompare(retainedSave.at("audio").at("vad_max").get< float >(), 0.32f));
+
+	build83Serialized["audio"]["vad_mode"] = "SignalToNoise";
+	const ::Settings partialBuild83        = build83Serialized.get< ::Settings >();
+	QCOMPARE(partialBuild83.vsVAD, ::Settings::SignalToNoise);
+	QVERIFY(qFuzzyCompare(partialBuild83.fVADmin, 0.21f));
+	QVERIFY(qFuzzyCompare(partialBuild83.fVADmax, 0.32f));
 }
 
 void TestInputEnhancementSettings::fixedProfileAutoAdaptationIsPersistedButRuntimeDormant() {

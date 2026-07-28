@@ -15,48 +15,87 @@
 #include <cmath>
 
 namespace {
-bool matchesLegacyVoiceActivationDefaults(const nlohmann::json &json) {
-	const nlohmann::json empty = nlohmann::json::object();
-	const nlohmann::json &misc =
-		json.contains("misc") && json.at("misc").is_object() ? json.at("misc") : empty;
-	if (misc.contains("modern_audio_setup_version")) {
-		try {
-			if (misc.at("modern_audio_setup_version").get< unsigned int >() > 0) {
-				return false;
-			}
-		} catch (...) {
-			// Treat a malformed revision as legacy only when the complete audio
-			// tuple below still matches the former defaults.
+void hydrateBuild83VoiceActivationDefaults(nlohmann::json &json) {
+	// Build 83 briefly used a microphone-specific calibrated profile as the
+	// product defaults. Those values were therefore omitted when that build
+	// saved a configuration. Revision 1 uniquely identifies such profiles, so
+	// restore only their missing fields before the neutral defaults take over.
+	if (!json.contains("misc") || !json.at("misc").is_object()
+		|| !json.at("misc").contains("modern_audio_setup_version")) {
+		return;
+	}
+
+	try {
+		if (json.at("misc").at("modern_audio_setup_version").get< unsigned int >() != 1) {
+			return;
+		}
+	} catch (...) {
+		return;
+	}
+
+	if (!json.contains("audio")) {
+		json["audio"] = nlohmann::json::object();
+	}
+	if (!json.at("audio").is_object()) {
+		return;
+	}
+
+	auto &audio = json["audio"];
+	if (!audio.contains("vad_mode")) {
+		audio["vad_mode"] = "Hybrid";
+	}
+	if (!audio.contains("vad_min")) {
+		audio["vad_min"] = 0.21;
+	}
+	if (!audio.contains("vad_max")) {
+		audio["vad_max"] = 0.32;
+	}
+	if (!audio.contains("input_gate_mode")) {
+		audio["input_gate_mode"] = "Off";
+	}
+	if (!audio.contains("voice_hold")) {
+		audio["voice_hold"] = 40;
+	}
+}
+
+bool hasInvalidVoiceActivationDetector(const nlohmann::json &json) {
+	if (!json.contains("audio")) {
+		return false;
+	}
+
+	const nlohmann::json &audio = json.at("audio");
+	if (!audio.is_object()) {
+		return true;
+	}
+
+	if (audio.contains("vad_mode")) {
+		if (!audio.at("vad_mode").is_string()) {
+			return true;
+		}
+
+		const std::string source = audio.at("vad_mode").get< std::string >();
+		if (source != "Amplitude" && source != "SignalToNoise" && source != "Hybrid") {
+			return true;
 		}
 	}
 
-	const nlohmann::json &audio =
-		json.contains("audio") && json.at("audio").is_object() ? json.at("audio") : empty;
-	const auto missingOrString = [&audio](const char *key, const char *legacyValue) {
+	const char *thresholdKeys[] = { "vad_min", "vad_max" };
+	for (const char *key : thresholdKeys) {
 		if (!audio.contains(key)) {
-			return true;
+			continue;
 		}
-		try {
-			return audio.at(key).get< std::string >() == legacyValue;
-		} catch (...) {
-			return false;
-		}
-	};
-	const auto missingOrNumber = [&audio](const char *key, const double legacyValue) {
-		if (!audio.contains(key)) {
-			return true;
-		}
+
 		try {
 			const double value = audio.at(key).get< double >();
-			return std::isfinite(value) && std::abs(value - legacyValue) <= 0.0001;
+			if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
+				return true;
+			}
 		} catch (...) {
-			return false;
+			return true;
 		}
-	};
+	}
 
-	return missingOrString("vad_mode", "Amplitude") && missingOrNumber("vad_min", 0.80)
-		   && missingOrNumber("vad_max", 0.98) && missingOrString("input_gate_mode", "Off")
-		   && missingOrNumber("voice_hold", 20.0);
+	return false;
 }
 
 void removeRetiredFrontendSettings(nlohmann::json &json) {
@@ -298,8 +337,8 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	nlohmann::json json = j;
 
 	migrateSettings(json, settingsVersion);
-	const bool replaceLegacyVoiceActivationDefaults = matchesLegacyVoiceActivationDefaults(json);
-
+	hydrateBuild83VoiceActivationDefaults(json);
+	const bool invalidVoiceActivationDetector = hasInvalidVoiceActivationDetector(json);
 #define PROCESS(category, key, variable) \
 	load(json, #category, SettingsKeys::key, settings.variable, settings.variable, true);
 
@@ -307,7 +346,12 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 
 #undef PROCESS
 
-	if (settings.normalizeVoiceActivationSettings(replaceLegacyVoiceActivationDefaults)) {
+	if (invalidVoiceActivationDetector) {
+		settings.vsVAD   = Settings::DEFAULT_VAD_SOURCE;
+		settings.fVADmin = Settings::DEFAULT_VAD_SILENCE_THRESHOLD;
+		settings.fVADmax = Settings::DEFAULT_VAD_SPEECH_THRESHOLD;
+	}
+	if (settings.normalizeVoiceActivationSettings()) {
 		qInfo("Normalized voice activation settings while loading the client configuration");
 	}
 

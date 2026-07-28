@@ -1027,7 +1027,7 @@ int main(int argc, char **argv) {
 
 	a.setQuitOnLastWindowClosed(false);
 
-	constexpr unsigned int currentModernAudioSetupVersion = 1;
+	constexpr unsigned int currentModernAudioSetupVersion = 2;
 	const bool showModernAudioSetup = !Global::get().s.audioWizardShown
 									  || Global::get().s.modernAudioSetupVersion < currentModernAudioSetupVersion;
 	Global::get().s.audioWizardShown         = true;

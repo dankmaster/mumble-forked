@@ -96,7 +96,7 @@ void Settings::normalizeModernOnlyFrontendState() {
 	searchDialogPosition = UNSPECIFIED_POSITION;
 }
 
-bool Settings::normalizeVoiceActivationSettings(const bool replaceLegacyDefaults) {
+bool Settings::normalizeVoiceActivationSettings() {
 	bool changed = false;
 	const auto replace = [&changed](auto &target, const auto value) {
 		if (target != value) {
@@ -105,30 +105,23 @@ bool Settings::normalizeVoiceActivationSettings(const bool replaceLegacyDefaults
 		}
 	};
 
-	if (replaceLegacyDefaults) {
-		replace(vsVAD, RECOMMENDED_VAD_SOURCE);
-		replace(fVADmin, RECOMMENDED_VAD_SILENCE_THRESHOLD);
-		replace(fVADmax, RECOMMENDED_VAD_SPEECH_THRESHOLD);
-		replace(inputGateMode, RECOMMENDED_INPUT_GATE_MODE);
-		replace(iVoiceHold, RECOMMENDED_VOICE_HOLD);
-	}
-
 	if (atTransmit < Continuous || atTransmit > PushToTalk) {
 		replace(atTransmit, VAD);
 	}
-	if (vsVAD < Amplitude || vsVAD > Hybrid) {
-		replace(vsVAD, RECOMMENDED_VAD_SOURCE);
-	}
 	if (inputGateMode < InputGateOff || inputGateMode > InputGateStrict) {
-		replace(inputGateMode, RECOMMENDED_INPUT_GATE_MODE);
+		replace(inputGateMode, DEFAULT_INPUT_GATE_MODE);
 	}
 
 	float silenceThreshold = fVADmin;
 	float speechThreshold  = fVADmax;
-	if (!std::isfinite(silenceThreshold) || !std::isfinite(speechThreshold) || silenceThreshold < 0.0f
-		|| silenceThreshold > 1.0f || speechThreshold < 0.0f || speechThreshold > 1.0f) {
-		silenceThreshold = RECOMMENDED_VAD_SILENCE_THRESHOLD;
-		speechThreshold  = RECOMMENDED_VAD_SPEECH_THRESHOLD;
+	const bool invalidDetector = vsVAD < Amplitude || vsVAD > Hybrid || !std::isfinite(silenceThreshold)
+								 || !std::isfinite(speechThreshold) || silenceThreshold < 0.0f
+								 || silenceThreshold > 1.0f || speechThreshold < 0.0f
+								 || speechThreshold > 1.0f;
+	if (invalidDetector) {
+		replace(vsVAD, DEFAULT_VAD_SOURCE);
+		silenceThreshold = DEFAULT_VAD_SILENCE_THRESHOLD;
+		speechThreshold  = DEFAULT_VAD_SPEECH_THRESHOLD;
 	} else {
 		if (speechThreshold < silenceThreshold) {
 			std::swap(silenceThreshold, speechThreshold);
@@ -146,7 +139,7 @@ bool Settings::normalizeVoiceActivationSettings(const bool replaceLegacyDefaults
 	replace(fVADmin, silenceThreshold);
 	replace(fVADmax, speechThreshold);
 	if (iVoiceHold < 5 || iVoiceHold > 80) {
-		replace(iVoiceHold, RECOMMENDED_VOICE_HOLD);
+		replace(iVoiceHold, DEFAULT_VOICE_HOLD);
 	}
 
 	return changed;
@@ -1085,9 +1078,7 @@ void Settings::legacyLoad(const QString &path) {
 		}
 	}
 
-	normalizeVoiceActivationSettings(
-		vsVAD == Amplitude && qAbs(fVADmin - 0.80f) <= 0.0001f && qAbs(fVADmax - 0.98f) <= 0.0001f
-		&& inputGateMode == InputGateOff && iVoiceHold == 20);
+	normalizeVoiceActivationSettings();
 }
 
 void Settings::migratePluginSettings(const MigratedPath &path) {
