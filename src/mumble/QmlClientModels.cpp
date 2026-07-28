@@ -1029,6 +1029,7 @@ namespace {
 		};
 		const auto appendInstagramMetadata = [&] {
 			appendUnsignedInteger(QStringLiteral("instagramMetadataVersion"), 1000);
+			appendUnsignedInteger(QStringLiteral("instagramMediaCount"), 16);
 			appendBoundedText(QStringLiteral("instagramMediaKind"), 64);
 			appendBoundedText(QStringLiteral("instagramDisplayName"), 256);
 			appendBoundedText(QStringLiteral("instagramHandle"), 128);

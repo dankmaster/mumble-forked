@@ -4847,7 +4847,8 @@ struct RichPreviewProviderInfo {
 };
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 9;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 10;
+constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
@@ -12385,6 +12386,195 @@ QString instagramJsonUserObject(const QString &html, const QString &ownerUserId,
 	return QString();
 }
 
+QString instagramShortcodeFromUrl(const QUrl &url) {
+	if (!isInstagramPreviewUrl(url)) {
+		return QString();
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int index = 0; index + 1 < segments.size(); ++index) {
+		const QString segment = segments.at(index).trimmed().toLower();
+		if (segment == QLatin1String("p") || segment == QLatin1String("reel")
+			|| segment == QLatin1String("reels") || segment == QLatin1String("tv")) {
+			static const QRegularExpression s_shortcode(QLatin1String("^[A-Za-z0-9_-]{5,64}$"));
+			const QString shortcode = segments.at(index + 1).trimmed();
+			return s_shortcode.match(shortcode).hasMatch() ? shortcode : QString();
+		}
+	}
+	return QString();
+}
+
+bool instagramJsonObjectHasMedia(const QJsonObject &object) {
+	return object.value(QStringLiteral("media_type")).isDouble()
+		|| object.value(QStringLiteral("carousel_media")).isArray()
+		|| object.value(QStringLiteral("image_versions2")).isObject()
+		|| object.value(QStringLiteral("video_versions")).isArray();
+}
+
+std::optional< QJsonObject > instagramMediaObjectInJson(const QJsonValue &value,
+													 const QString &shortcode,
+													 int depth, int &visited) {
+	if (depth > 48 || visited++ >= 20000) {
+		return std::nullopt;
+	}
+
+	if (value.isObject()) {
+		const QJsonObject object = value.toObject();
+		if (object.value(QStringLiteral("code")).toString() == shortcode) {
+			const QJsonObject ungated =
+				object.value(QStringLiteral("if_not_gated_logged_out")).toObject();
+			if (instagramJsonObjectHasMedia(ungated)) {
+				return ungated;
+			}
+			if (instagramJsonObjectHasMedia(object)) {
+				return object;
+			}
+		}
+		for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+			if (const auto result =
+					instagramMediaObjectInJson(it.value(), shortcode, depth + 1, visited)) {
+				return result;
+			}
+		}
+		return std::nullopt;
+	}
+
+	if (value.isArray()) {
+		for (const QJsonValue &item : value.toArray()) {
+			if (const auto result =
+					instagramMediaObjectInJson(item, shortcode, depth + 1, visited)) {
+				return result;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional< QJsonObject > instagramMediaObjectFromHtml(const QUrl &url, const QString &html) {
+	const QString shortcode = instagramShortcodeFromUrl(url);
+	if (shortcode.isEmpty() || html.isEmpty()) {
+		return std::nullopt;
+	}
+
+	static const QRegularExpression s_applicationJsonScript(
+		QLatin1String("<script\\b[^>]*\\btype\\s*=\\s*[\"']application/json[\"'][^>]*>([\\s\\S]*?)</script>"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator scripts = s_applicationJsonScript.globalMatch(html);
+	int parsedScripts = 0;
+	while (scripts.hasNext() && parsedScripts++ < 24) {
+		const QByteArray json = scripts.next().captured(1).trimmed().toUtf8();
+		if (json.isEmpty() || json.size() > 2 * 1024 * 1024) {
+			continue;
+		}
+		QJsonParseError error;
+		const QJsonDocument document = QJsonDocument::fromJson(json, &error);
+		if (error.error != QJsonParseError::NoError || document.isNull()) {
+			continue;
+		}
+		int visited = 0;
+		const QJsonValue root =
+			document.isObject() ? QJsonValue(document.object()) : QJsonValue(document.array());
+		if (const auto result = instagramMediaObjectInJson(root, shortcode, 0, visited)) {
+			return result;
+		}
+	}
+	return std::nullopt;
+}
+
+QString instagramSafeMediaUrl(const QString &rawUrl) {
+	const QUrl url(rawUrl.trimmed());
+	if (!url.isValid() || url.scheme().toLower() != QLatin1String("https")
+		|| !isSafePreviewTarget(url)) {
+		return QString();
+	}
+	return url.toString(QUrl::FullyEncoded);
+}
+
+QString instagramBestImageUrl(const QJsonObject &object) {
+	QString bestUrl;
+	qint64 bestArea = -1;
+	const QJsonArray candidates =
+		object.value(QStringLiteral("image_versions2")).toObject()
+			.value(QStringLiteral("candidates")).toArray();
+	for (const QJsonValue &value : candidates) {
+		const QJsonObject candidate = value.toObject();
+		const QString url = instagramSafeMediaUrl(candidate.value(QStringLiteral("url")).toString());
+		if (url.isEmpty()) {
+			continue;
+		}
+		const qint64 width = std::clamp< qint64 >(
+			static_cast< qint64 >(candidate.value(QStringLiteral("width")).toDouble()), 0, 16384);
+		const qint64 height = std::clamp< qint64 >(
+			static_cast< qint64 >(candidate.value(QStringLiteral("height")).toDouble()), 0, 16384);
+		const qint64 area = width * height;
+		// Chat needs a sharp preview, not the largest source Instagram happens
+		// to advertise. The full viewer can still open the source post.
+		if (width <= 2048 && height <= 2048 && area > bestArea) {
+			bestArea = area;
+			bestUrl  = url;
+		}
+	}
+	if (!bestUrl.isEmpty()) {
+		return bestUrl;
+	}
+	return instagramSafeMediaUrl(object.value(QStringLiteral("display_uri")).toString());
+}
+
+QString instagramBestVideoUrl(const QJsonObject &object) {
+	for (const QJsonValue &value : object.value(QStringLiteral("video_versions")).toArray()) {
+		const QString url =
+			instagramSafeMediaUrl(value.toObject().value(QStringLiteral("url")).toString());
+		if (!url.isEmpty()) {
+			return url;
+		}
+	}
+	return QString();
+}
+
+std::vector< MainWindow::PersistentChatPreviewMediaItem >
+instagramMediaItemsFromObject(const QJsonObject &object) {
+	std::vector< MainWindow::PersistentChatPreviewMediaItem > result;
+	QJsonArray sources = object.value(QStringLiteral("carousel_media")).toArray();
+	if (sources.isEmpty()) {
+		sources.push_back(object);
+	}
+
+	QSet< QString > seen;
+	for (const QJsonValue &value : sources) {
+		if (result.size() >= 16) {
+			break;
+		}
+		const QJsonObject media = value.toObject();
+		const QString imageUrl  = instagramBestImageUrl(media);
+		const bool isVideo = media.value(QStringLiteral("media_type")).toInt() == 2
+			|| media.value(QStringLiteral("video_versions")).isArray();
+		const QString mediaUrl = isVideo ? instagramBestVideoUrl(media) : imageUrl;
+		if (mediaUrl.isEmpty() || seen.contains(mediaUrl)) {
+			continue;
+		}
+		seen.insert(mediaUrl);
+		const QString accessibilityCaption =
+			trimmedPreviewText(media.value(QStringLiteral("accessibility_caption")).toString(), 512);
+		result.push_back(MainWindow::PersistentChatPreviewMediaItem {
+			mediaUrl,
+			isVideo ? QStringLiteral("video/mp4") : QStringLiteral("image/jpeg"),
+			isVideo ? QStringLiteral("video") : QStringLiteral("image"),
+			accessibilityCaption,
+			QString(),
+			isVideo ? imageUrl : QString(),
+			isVideo ? imageUrl : QString()
+		});
+	}
+	return result;
+}
+
+bool instagramMetadataIsFresh(const QVariantMap &metadata) {
+	const qint64 fetchedAt =
+		metadata.value(QStringLiteral("instagramMetadataFetchedAt")).toLongLong();
+	const qint64 age = QDateTime::currentSecsSinceEpoch() - fetchedAt;
+	return fetchedAt > 0 && age >= 0 && age <= INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS;
+}
+
 QVariantMap facebookPreviewMetadataFromMetaTags(const QHash< QString, QString > &metaTags) {
 	const QString title = metaTags.value(
 		QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"))).trimmed();
@@ -12490,6 +12680,7 @@ struct InstagramPreviewMetadata {
 	QString posterUrl;
 	QString avatarUrl;
 	QString ownerUserId;
+	std::vector< MainWindow::PersistentChatPreviewMediaItem > mediaItems;
 	std::optional< qlonglong > likeCount;
 	std::optional< qlonglong > commentCount;
 };
@@ -12574,6 +12765,16 @@ InstagramPreviewMetadata instagramPreviewMetadataFromMetaTags(const QUrl &url,
 		}
 	}
 
+	if (const auto mediaObject = instagramMediaObjectFromHtml(url, html)) {
+		metadata.mediaItems = instagramMediaItemsFromObject(*mediaObject);
+		if (mediaObject->value(QStringLiteral("carousel_media")).toArray().size() > 1) {
+			metadata.mediaKind = QStringLiteral("carousel");
+		}
+		if (metadata.posterUrl.isEmpty()) {
+			metadata.posterUrl = instagramBestImageUrl(*mediaObject);
+		}
+	}
+
 	metadata.displayName = trimmedPreviewText(metadata.displayName, 96);
 	metadata.caption     = trimmedPreviewText(metadata.caption, 900);
 	metadata.createdAt   = trimmedPreviewText(metadata.createdAt, 80);
@@ -12590,7 +12791,10 @@ void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, c
 	metadata.insert(QStringLiteral("provider"), QStringLiteral("instagram"));
 	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("instagram"));
 	metadata.insert(QStringLiteral("instagramMetadataVersion"), INSTAGRAM_PREVIEW_METADATA_VERSION);
+	metadata.insert(QStringLiteral("instagramMetadataFetchedAt"), QDateTime::currentSecsSinceEpoch());
 	metadata.insert(QStringLiteral("instagramMediaKind"), instagram.mediaKind);
+	metadata.insert(QStringLiteral("instagramMediaCount"),
+					static_cast< qulonglong >(instagram.mediaItems.size()));
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramDisplayName"), instagram.displayName);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramHandle"), instagram.handle);
 	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCaption"), instagram.caption);
@@ -12605,6 +12809,9 @@ void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, c
 		metadata.insert(QStringLiteral("instagramCommentCount"), *instagram.commentCount);
 	}
 	preview.metadata = metadata;
+	if (!instagram.mediaItems.empty()) {
+		preview.mediaItems = instagram.mediaItems;
+	}
 
 	const QString fallbackTitle = instagram.mediaKind == QLatin1String("reel") ? QObject::tr("Instagram reel")
 		: instagram.mediaKind == QLatin1String("tv") ? QObject::tr("Instagram video")
@@ -31196,7 +31403,7 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	const QString expectedPreviewSource = it->canonicalUrl;
 	if (it->metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
 			== INSTAGRAM_PREVIEW_METADATA_VERSION
-		&& !it->thumbnailImage.isNull()) {
+		&& !it->thumbnailImage.isNull() && instagramMetadataIsFresh(it->metadata)) {
 		return false;
 	}
 	if (m_pendingPersistentChatInstagramMetadataRequests.contains(previewKey)) {
@@ -31252,7 +31459,8 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 					previewIt->metadataFinished = true;
 					ensurePersistentChatPreviewSiteSnapshot(previewKey);
 					publishPersistentChatPreviewUpdate(previewKey);
-				});
+				},
+				PersistentChatPreviewHtmlScope::BoundedDocument);
 			return;
 		}
 
@@ -31265,6 +31473,7 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 		metadata.insert(QStringLiteral("provider"), QStringLiteral("instagram"));
 		metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("instagram"));
 		metadata.insert(QStringLiteral("instagramMetadataVersion"), INSTAGRAM_PREVIEW_METADATA_VERSION);
+		metadata.insert(QStringLiteral("instagramMetadataFetchedAt"), QDateTime::currentSecsSinceEpoch());
 		metadata.insert(QStringLiteral("instagramMediaKind"), instagramPreviewMediaKind(requestUrl));
 		previewIt->metadata = metadata;
 		if (previewIt->openLabel.trimmed().isEmpty()) {
@@ -31316,7 +31525,8 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 				|| (isInstagramPreviewUrl(cachedUrl)
 					&& (cached.metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
 							!= INSTAGRAM_PREVIEW_METADATA_VERSION
-						|| cached.thumbnailImage.isNull()))
+						|| cached.thumbnailImage.isNull()
+						|| !instagramMetadataIsFresh(cached.metadata)))
 				|| (isTwitchHost(cachedUrl.host())
 					&& cached.metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
 						   != TWITCH_PREVIEW_METADATA_VERSION)
@@ -35158,6 +35368,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		if (imgurId) {
 			preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("imgur"));
 			preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("imgur"));
+			if (imgurDescriptionIsBoilerplate(preview.description)) {
+				preview.description.clear();
+			}
 			const bool animated =
 				previewUrl.path().endsWith(QLatin1String(".gifv"), Qt::CaseInsensitive)
 				|| preview.title.contains(QLatin1String("GIF on Imgur"), Qt::CaseInsensitive);

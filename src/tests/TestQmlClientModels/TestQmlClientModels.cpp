@@ -3124,6 +3124,29 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 				 .value(QStringLiteral("mode")).toString(),
 			 QStringLiteral("native"));
 
+	const QString duplicateExternalImage =
+		QStringLiteral("https://pbs.twimg.com/media/same-source.jpg");
+	const QVariantMap deduplicatedMediaDocument = normalizedDocument({
+		{ QStringLiteral("url"), xSource },
+		{ QStringLiteral("host"), QStringLiteral("x.com") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/x-item?g=44") },
+				{ QStringLiteral("externalUrl"), duplicateExternalImage }
+			}
+		} },
+		{ QStringLiteral("mediaKind"), QStringLiteral("image") },
+		{ QStringLiteral("mediaMime"), QStringLiteral("image/jpeg") },
+		{ QStringLiteral("mediaUrl"), QStringLiteral("image://mumble/x-primary?g=45") },
+		{ QStringLiteral("mediaExternalUrl"), duplicateExternalImage },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("x") }
+		} }
+	});
+	QCOMPARE(deduplicatedMediaDocument.value(QStringLiteral("media")).toList().size(), 1);
+
 	const QString steamSource =
 		QStringLiteral("https://store.steampowered.com/app/730/CounterStrike_2/");
 	const QVariantMap steamDocument = normalizedDocument({

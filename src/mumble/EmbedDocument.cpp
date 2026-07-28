@@ -185,7 +185,7 @@ namespace {
 				return;
 			}
 			const QString identity = firstText(item,
-				{ QStringLiteral("url"), QStringLiteral("externalUrl"), QStringLiteral("posterUrl"),
+				{ QStringLiteral("externalUrl"), QStringLiteral("url"), QStringLiteral("posterUrl"),
 				  QStringLiteral("thumbnailUrl") });
 			if (identity.isEmpty() || identities.contains(identity)) {
 				return;
