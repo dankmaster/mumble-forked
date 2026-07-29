@@ -3477,6 +3477,7 @@ void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatOEmbedPreview(previewKey, previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatTenorMediaPreview(previewKey, previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatXPostPreview(previewKey, previewUrl)"));
+	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatFacebookMetadataPreview(previewKey, previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("imgurSingleMediaIdFromUrl(previewUrl)"));
 	QVERIFY(resolvedEmbedPath.contains("animated-gif-video-backed"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatPreviewPosterImage("));
@@ -3484,6 +3485,8 @@ void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
 	QVERIFY(source.contains("isFacebookReelPreviewUrl(previewPageUrl)"));
 	QVERIFY(source.contains("prepareSocialPreviewMetadataRequest(pageRequest)"));
 	QVERIFY(source.contains("facebookMetadataVersion"));
+	QVERIFY(source.contains("QStringLiteral(\"html:facebook\")"));
+	QVERIFY(source.contains("facebookPreviewMetadataFromMetaTags(parsed.metaTags)"));
 
 	const QString cachePath = QFINDTESTDATA("../../mumble/PersistentChatMediaCache.cpp");
 	QVERIFY2(!cachePath.isEmpty(), "PersistentChatMediaCache.cpp test data was not found");

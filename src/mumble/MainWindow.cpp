@@ -13403,6 +13403,7 @@ void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previ
 	for (const QString &invalidatedPreviewKey : std::as_const(invalidatedPreviewKeys)) {
 		m_persistentChatPreviews.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatInstagramMetadataRequests.remove(invalidatedPreviewKey);
+		m_pendingPersistentChatFacebookMetadataRequests.remove(invalidatedPreviewKey);
 		m_persistentChatQueuedPreviewRequestKeys.remove(invalidatedPreviewKey);
 		m_persistentChatQueuedPreviewRequests.removeAll(invalidatedPreviewKey);
 	}
@@ -13415,6 +13416,7 @@ void MainWindow::removePersistentChatPreview(const QString &previewKey) {
 	cancelPersistentChatPreviewNetworkRequests(previewKey);
 	m_persistentChatPreviews.remove(previewKey);
 	m_pendingPersistentChatInstagramMetadataRequests.remove(previewKey);
+	m_pendingPersistentChatFacebookMetadataRequests.remove(previewKey);
 	m_persistentChatQueuedPreviewRequestKeys.remove(previewKey);
 	m_persistentChatQueuedPreviewRequests.removeAll(previewKey);
 }
@@ -31564,6 +31566,122 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	return true;
 }
 
+bool MainWindow::requestPersistentChatFacebookMetadataPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isFacebookReelPreviewUrl(previewUrl) || !Global::get().nam) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return false;
+	}
+	if (it->metadata.value(QStringLiteral("facebookMetadataVersion")).toInt()
+		== FACEBOOK_PREVIEW_METADATA_VERSION) {
+		return false;
+	}
+	if (m_pendingPersistentChatFacebookMetadataRequests.contains(previewKey)) {
+		return true;
+	}
+
+	const QUrl requestUrl = previewUrl.adjusted(QUrl::RemoveQuery | QUrl::RemoveFragment);
+	if (!requestUrl.isValid() || !isSafePreviewTarget(requestUrl)) {
+		return false;
+	}
+	const QString expectedPreviewSource = it->canonicalUrl;
+	m_pendingPersistentChatFacebookMetadataRequests.insert(previewKey);
+
+	QNetworkRequest pageRequest(requestUrl);
+	prepareSocialPreviewMetadataRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
+	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
+	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(requestUrl), false);
+	connect(pageReply, &QNetworkReply::finished, this,
+			[this, pageReply, previewKey, requestUrl, expectedPreviewSource]() {
+		const QByteArray data       = pageReply->readAll();
+		const bool success          = pageReply->error() == QNetworkReply::NoError;
+		const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+		const bool allowPartialHtml = previewAbortReason(pageReply) == QLatin1String("too_large") && !data.isEmpty()
+									  && previewContentTypeLooksHtml(contentType);
+		pageReply->deleteLater();
+
+		if ((success || allowPartialHtml) && previewContentTypeLooksHtml(contentType)) {
+			const qint64 maxPageBytes = previewMaxPageBytesForUrl(requestUrl);
+			const QByteArray htmlBytes = data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+			parsePersistentChatPreviewHtmlAsync(
+				this, persistentChatPreviewWorkerGroup(previewKey), QStringLiteral("html:facebook"), htmlBytes,
+				contentType,
+				[](PersistentChatPreviewHtmlParseResult &parsed) {
+					parsed.title = parsed.metaTags.value(
+						QLatin1String("og:title"),
+						parsed.metaTags.value(QLatin1String("twitter:title")));
+					parsed.description = parsed.metaTags.value(
+						QLatin1String("og:description"),
+						parsed.metaTags.value(QLatin1String("twitter:description")));
+					parsed.siteName = QStringLiteral("Facebook");
+					parsed.imageUrlString = previewImageMetaTag(parsed.metaTags);
+					const QVariantMap facebookMetadata =
+						facebookPreviewMetadataFromMetaTags(parsed.metaTags);
+					for (auto metadataIt = facebookMetadata.cbegin();
+						 metadataIt != facebookMetadata.cend(); ++metadataIt) {
+						parsed.metadata.insert(metadataIt.key(), metadataIt.value());
+					}
+				},
+				[this, previewKey, requestUrl, expectedPreviewSource](
+					PersistentChatPreviewHtmlParseResult parsed) {
+					m_pendingPersistentChatFacebookMetadataRequests.remove(previewKey);
+					auto previewIt = m_persistentChatPreviews.find(previewKey);
+					if (previewIt == m_persistentChatPreviews.end()
+						|| previewIt->canonicalUrl != expectedPreviewSource) {
+						return;
+					}
+
+					for (auto metadataIt = parsed.metadata.cbegin();
+						 metadataIt != parsed.metadata.cend(); ++metadataIt) {
+						previewIt->metadata.insert(metadataIt.key(), metadataIt.value());
+					}
+					if (!parsed.title.trimmed().isEmpty()) {
+						previewIt->title = trimmedPreviewText(parsed.title, 512);
+					}
+					if (!parsed.description.trimmed().isEmpty()) {
+						previewIt->description = trimmedPreviewText(parsed.description, 1024);
+					}
+					previewIt->subtitle = tr("Facebook");
+					previewIt->openLabel = tr("Open on Facebook");
+					previewIt->metadataFinished = true;
+					previewIt->failed = false;
+					previewIt->siteSnapshotRequested = false;
+					previewIt->siteSnapshotFinished = true;
+
+					const QUrl posterUrl = requestUrl.resolved(QUrl(parsed.imageUrlString.trimmed()));
+					if (parsed.imageUrlString.trimmed().isEmpty()
+						|| !requestPersistentChatPreviewPosterImage(
+							previewKey, posterUrl, QStringLiteral("image/jpeg"))) {
+						previewIt->thumbnailFinished = true;
+					}
+					publishPersistentChatPreviewUpdate(previewKey);
+				},
+				PersistentChatPreviewHtmlScope::HeadOnly);
+			return;
+		}
+
+		m_pendingPersistentChatFacebookMetadataRequests.remove(previewKey);
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()
+			|| previewIt->canonicalUrl != expectedPreviewSource) {
+			return;
+		}
+		previewIt->metadata.insert(QStringLiteral("provider"), QStringLiteral("facebook"));
+		previewIt->metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("facebook"));
+		previewIt->metadataFinished = true;
+		previewIt->siteSnapshotRequested = false;
+		previewIt->siteSnapshotFinished = true;
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
 void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey) {
 	if (previewKey.isEmpty() || m_persistentChatPreviews.contains(previewKey)
 		|| m_persistentChatPreviewCacheReadsInFlight.contains(previewKey)
@@ -35546,6 +35664,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				QStringLiteral("image/jpeg"));
 		}
 		requestPersistentChatInstagramMetadataPreview(previewKey, previewUrl);
+		requestPersistentChatFacebookMetadataPreview(previewKey, previewUrl);
 		if (handledYahooFinanceQuotePreview) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
 		}
