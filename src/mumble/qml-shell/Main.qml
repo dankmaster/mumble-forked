@@ -1820,11 +1820,14 @@ ApplicationWindow {
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
+				// The top anchor is a transparent geometry guard while suspended rich
+				// rows wake incrementally. Do not report the visible timeline as busy
+				// for that background work; callers still verify exact originY and
+				// stable visible-row geometry independently.
 				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 					&& !timeline.scopeResetPending
 					&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
-					&& !timeline.topAnchorActive
 					&& !chatModel.prependPending
 			}
 		} catch (error) {
@@ -3032,7 +3035,7 @@ ApplicationWindow {
 					cacheBuffer: Math.max(480, Math.min(1200, height * 0.75))
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
-					property int richContentResumeGeneration: 0
+					property var richLoaderResumeQueue: []
 					onRichScrollInProgressChanged: {
 						chatModel.presentationBusy = richScrollInProgress
 						if (richScrollInProgress) {
@@ -3469,6 +3472,63 @@ ApplicationWindow {
 						richContentResumeTimer.restart()
 					}
 
+					function queueRichLoaderResumes() {
+						if (richScrollInProgress)
+							return
+						const candidates = []
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (!item || item.performanceTimelineDelegate !== true
+									|| item.accessibilityPooled === true
+									|| item.richLoaderSuspended !== true)
+								continue
+							const stableId = String(item.stableId || "")
+							if (stableId.length === 0)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							const visible = point.y + item.height > 0.5
+								&& point.y < height - 0.5
+							const distance = visible ? 0
+								: Math.min(Math.abs(point.y), Math.abs(point.y - height))
+							candidates.push({ "id": stableId, "visible": visible, "distance": distance })
+						}
+						candidates.sort(function(left, right) {
+							if (left.visible !== right.visible)
+								return left.visible ? -1 : 1
+							return left.distance - right.distance
+						})
+						richLoaderResumeQueue = candidates.map(function(candidate) {
+							return candidate.id
+						})
+						if (richLoaderResumeQueue.length > 0 && !richLoaderResumeTimer.running)
+							richLoaderResumeTimer.start()
+					}
+
+					function resumeNextRichLoader() {
+						if (richScrollInProgress) {
+							scheduleRichContentResume()
+							return
+						}
+						if (richLoaderResumeQueue.length === 0)
+							return
+						const queued = richLoaderResumeQueue.slice()
+						const stableId = String(queued.shift() || "")
+						richLoaderResumeQueue = queued
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (item && item.performanceTimelineDelegate === true
+									&& item.accessibilityPooled !== true
+									&& String(item.stableId || "") === stableId) {
+								item.resumeRichContentAfterScroll()
+								break
+							}
+						}
+						if (queued.length > 0)
+							richLoaderResumeTimer.start()
+					}
+
 					function queueVisibleDeferredMaterialization() {
 						if (richScrollInProgress || prependAnchorActive || scopePresentationPending)
 							return
@@ -3779,9 +3839,16 @@ ApplicationWindow {
 								return
 							if (!timeline.stickToBottom)
 								timeline.captureViewportAnchor()
-							++timeline.richContentResumeGeneration
+							timeline.queueRichLoaderResumes()
 							timeline.queueVisibleDeferredMaterialization()
 						}
+					}
+
+					Timer {
+						id: richLoaderResumeTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.resumeNextRichLoader()
 					}
 
 					Timer {
@@ -4199,8 +4266,6 @@ ApplicationWindow {
 							&& y + height >= timeline.contentY
 							&& y <= timeline.contentY + timeline.height
 						property bool richResourcesActive: false
-						readonly property int richContentResumeGeneration:
-							timeline.richContentResumeGeneration
 						function updateRichResourceActivity() {
 							if (accessibilityPooled) {
 								richResourceReleaseTimer.stop()
@@ -4298,7 +4363,6 @@ ApplicationWindow {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
-						onRichContentResumeGenerationChanged: resumeRichContentAfterScroll()
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
