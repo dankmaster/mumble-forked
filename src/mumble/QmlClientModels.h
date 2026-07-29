@@ -518,6 +518,7 @@ public:
 	QString currentMatchStableId() const;
 	bool prependPending() const;
 	bool presentationBusy() const;
+	bool deferredPresentationUpdatesPending() const;
 	void setPresentationBusy(bool busy);
 	ChatTimelinePresentationProxyModel *presentationModel();
 	ChatTimelinePresentationProxyModel *deferredPresentationModel();
@@ -534,6 +535,7 @@ signals:
 	void currentMatchChanged();
 	void prependPendingChanged();
 	void presentationBusyChanged();
+	void deferredPresentationUpdatesPendingChanged();
 
 private:
 	struct RichBodyParseRequest {

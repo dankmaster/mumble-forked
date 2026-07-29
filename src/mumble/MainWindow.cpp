@@ -14871,7 +14871,15 @@ void MainWindow::applyShellLayout() {
 			ClientSessionController *session = m_qmlShellHost->sessionController();
 			UiCommandController *commands = m_qmlShellHost->commandController();
 			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::presentationBusyChanged, this, [this]() {
-				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()) {
+				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()
+					&& !m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()) {
+					scheduleDeferredModernShellPreviewUpdateDrain();
+				}
+			});
+			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::deferredPresentationUpdatesPendingChanged,
+					this, [this]() {
+				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()
+					&& !m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()) {
 					scheduleDeferredModernShellPreviewUpdateDrain();
 				}
 			});
@@ -25301,7 +25309,8 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 
 void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty() || m_deferredModernShellPreviewUpdateDrainScheduled
-		|| (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy())) {
+		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
+							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
 	}
 
@@ -25314,7 +25323,8 @@ void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 
 void MainWindow::drainDeferredModernShellPreviewUpdates() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty()
-		|| (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy())) {
+		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
+							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
 	}
 

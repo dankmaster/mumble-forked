@@ -3400,7 +3400,9 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 			// per rendered frame. Keep the newest state per real message while a
 			// user scroll is active; applying dataChanged during ListView reuse is
 			// both invisible and disproportionately expensive.
+			const bool wasEmpty = m_deferredPresentationUpdates.isEmpty();
 			m_deferredPresentationUpdates.insert(id, message);
+			if (wasEmpty) emit deferredPresentationUpdatesPendingChanged();
 			return MessageMutation::Updated;
 		}
 		upsertRow(row);
@@ -3596,6 +3598,10 @@ bool ChatTimelineModel::presentationBusy() const {
 	return m_presentationBusy;
 }
 
+bool ChatTimelineModel::deferredPresentationUpdatesPending() const {
+	return !m_deferredPresentationUpdates.isEmpty();
+}
+
 void ChatTimelineModel::setPresentationBusy(bool busy) {
 	if (m_presentationBusy == busy) return;
 	m_presentationBusy = busy;
@@ -3618,6 +3624,7 @@ void ChatTimelineModel::drainDeferredPresentationUpdates() {
 	auto update = m_deferredPresentationUpdates.begin();
 	const QVariantMap message = update.value();
 	m_deferredPresentationUpdates.erase(update);
+	if (m_deferredPresentationUpdates.isEmpty()) emit deferredPresentationUpdatesPendingChanged();
 	applyMessage(message);
 	scheduleDeferredPresentationUpdateDrain();
 }
@@ -3641,7 +3648,9 @@ void ChatTimelineModel::cancelQueuedPrepend() {
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	cancelQueuedPrepend();
+	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
+	if (hadDeferredPresentationUpdates) emit deferredPresentationUpdatesPendingChanged();
 	QVariantList rows;
 	QList< RichBodyParseRequest > requests;
 	QSet< QString > retainedMessageIds;
@@ -3721,7 +3730,9 @@ bool ChatTimelineModel::hasUserHistory() const {
 void ChatTimelineModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
 	cancelQueuedPrepend();
+	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
+	if (hadDeferredPresentationUpdates) emit deferredPresentationUpdatesPendingChanged();
 	m_deferredRichBodyMessageIds.clear();
 	for (auto it = m_richBodyConsumers.begin(); it != m_richBodyConsumers.end(); ++it) it->clear();
 	m_richBodyConsumers.clear();

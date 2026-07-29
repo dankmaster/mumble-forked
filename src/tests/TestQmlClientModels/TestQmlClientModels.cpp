@@ -2015,8 +2015,10 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 
 	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
 	QSignalSpy busySpy(&model, &ChatTimelineModel::presentationBusyChanged);
+	QSignalSpy pendingSpy(&model, &ChatTimelineModel::deferredPresentationUpdatesPendingChanged);
 	model.setPresentationBusy(true);
 	QVERIFY(model.presentationBusy());
+	QVERIFY(!model.deferredPresentationUpdatesPending());
 
 	QVariantMap firstUpdate = initial;
 	firstUpdate.insert(QStringLiteral("preview"), QVariantMap {
@@ -2029,6 +2031,8 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 	finalUpdate.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
 	QCOMPARE(model.applyMessage(firstUpdate), ChatTimelineModel::MessageMutation::Updated);
 	QCOMPARE(model.applyMessage(finalUpdate), ChatTimelineModel::MessageMutation::Updated);
+	QVERIFY(model.deferredPresentationUpdatesPending());
+	QCOMPARE(pendingSpy.count(), 1);
 
 	QCOMPARE(changedSpy.count(), 0);
 	QCOMPARE(model.get(0).value(QStringLiteral("preview")).toMap()
@@ -2040,10 +2044,12 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 	QTRY_COMPARE_WITH_TIMEOUT(model.get(0).value(QStringLiteral("preview")).toMap()
 							 .value(QStringLiteral("title")).toString(),
 						 QStringLiteral("Ready preview"), 1000);
+	QVERIFY(!model.deferredPresentationUpdatesPending());
 	QCOMPARE(model.get(0).value(QStringLiteral("status")).toString(),
 			 QStringLiteral("delivered"));
 	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(busySpy.count(), 2);
+	QCOMPARE(pendingSpy.count(), 2);
 }
 
 void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
@@ -2072,6 +2078,8 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(providerWork > busyGuard);
 	QVERIFY(dtoEviction > busyGuard);
 	QVERIFY(publishBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.insert(previewKey)")));
+	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPendingChanged")));
+	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPending()")));
 
 	const qsizetype drainStart =
 		source.indexOf(QStringLiteral("void MainWindow::drainDeferredModernShellPreviewUpdates"));
