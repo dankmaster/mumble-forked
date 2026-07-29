@@ -2937,12 +2937,13 @@ ApplicationWindow {
 							timeline.scheduleRichContentResume()
 						}
 					}
-					// Rich cards can be taller than the viewport. Keep enough bounded
-					// layout-only delegates warm that an ordinary wheel step never has to
-					// construct the next gallery/player card on its presentation frame.
-					// Expensive media resources are independently idle-gated below, so
-					// this does not turn the complete history into a decoded-image cache.
-					cacheBuffer: Math.max(960, Math.min(2800, height * 2.5))
+					// Variable-height rich cards make ListView revise its content-height
+					// estimate when an unseen row is first constructed. Materialize a
+					// bounded history window up front so ordinary scrolling never pays
+					// that geometry cost or jumps when a tall card enters the cache.
+					// Media decode/playback is independently idle-gated below; this cache
+					// retains layout delegates, not every remote image or player.
+					cacheBuffer: Math.max(12000, Math.min(20000, height * 20))
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property int richContentResumeGeneration: 0

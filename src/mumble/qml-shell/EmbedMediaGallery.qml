@@ -86,7 +86,9 @@ ColumnLayout {
 			source: root.renderActive && !root.mediaRequiresReveal
 				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
 			asynchronous: true
-			cache: false
+			cache: true
+			sourceSize: Qt.size(Math.min(1280, width * Screen.devicePixelRatio),
+				Math.min(960, height * Screen.devicePixelRatio))
 			fillMode: Image.PreserveAspectFit
 			visible: status === Image.Ready
 		}

@@ -257,7 +257,7 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(960,\s*Math\.min\(2800,\s*height\s*\*\s*2\.5\)\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(12000,\s*Math\.min\(20000,\s*height\s*\*\s*20\)\)/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*richContentResumeGeneration/.test(mainSource))

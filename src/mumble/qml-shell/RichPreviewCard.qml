@@ -1315,7 +1315,9 @@ Rectangle {
 					&& !root.mediaRequiresReveal
 					? root.effectiveEmbedPosterSource : ""
 				asynchronous: true
-				cache: false
+				// The source size is bounded below. Let Qt reuse the decoded poster when
+				// virtualization temporarily suspends and resumes this card.
+				cache: true
 				sourceSize: Qt.size(Math.min(1280, root.inlineMediaStageWidth * Screen.devicePixelRatio),
 					Math.min(1280, root.inlineMediaViewportHeight * Screen.devicePixelRatio))
 				// Match the production preview treatment: the poster is a backdrop for
@@ -1728,7 +1730,7 @@ Rectangle {
                     anchors.fill: parent
 					source: root.renderActive && !root.mediaRequiresReveal ? root.imageSource : ""
                     asynchronous: true
-                    cache: false
+                    cache: true
                     sourceSize: Qt.size(Math.min(640, width * Screen.devicePixelRatio),
                                         Math.min(480, height * Screen.devicePixelRatio))
                     fillMode: Image.PreserveAspectCrop
@@ -2002,7 +2004,9 @@ Rectangle {
 					&& !root.currentMediaManagedAnimated
 					? root.imageSource : ""
                 asynchronous: true
-				cache: false
+				cache: true
+				sourceSize: Qt.size(Math.min(1280, width * Screen.devicePixelRatio),
+					Math.min(960, height * Screen.devicePixelRatio))
 				fillMode: Image.PreserveAspectCrop
 				visible: !root.inlinePlaybackActive && source.toString().length > 0 && status === Image.Ready
                 onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
