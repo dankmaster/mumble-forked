@@ -3491,6 +3491,11 @@ ApplicationWindow {
 							const point = item.mapToItem(timeline, 0, 0)
 							const visible = point.y + item.height > 0.5
 								&& point.y < height - 0.5
+							// Cache-buffer delegates retain their bounded placeholder
+							// geometry. Rebuilding provider trees that are still outside
+							// the viewport consumes UI frames without drawing anything.
+							if (!visible)
+								continue
 							const distance = visible ? 0
 								: Math.min(Math.abs(point.y), Math.abs(point.y - height))
 							candidates.push({ "id": stableId, "visible": visible, "distance": distance })

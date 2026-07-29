@@ -289,6 +289,7 @@ TestCase {
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*function\s+queueRichLoaderResumes\(\)[\s\S]*candidates\.sort[\s\S]*richLoaderResumeQueue/.test(mainSource))
+		verify(/const visible = point\.y \+ item\.height > 0\.5[\s\S]*if \(!visible\)\s*continue[\s\S]*candidates\.push/.test(mainSource))
 		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*resumeRichContentAfterScroll\(\)[\s\S]*finishRichContentRecoveryIfIdle\(\)[\s\S]*id:\s*richLoaderResumeTimer[\s\S]*interval:\s*16/.test(mainSource))
 		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]*Qt\.callLater[\s\S]*richLoaderResumeQueue\.length\s*>\s*0[\s\S]*deferredMaterializationQueue\.length\s*>\s*0[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		verify(/id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisibleDeferredMaterialization\(\)/.test(mainSource))
