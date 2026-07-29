@@ -4859,7 +4859,7 @@ struct RichPreviewProviderInfo {
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
 constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
-constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 1;
+constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
@@ -12665,7 +12665,8 @@ QVariantMap facebookPreviewMetadataFromMetaTags(const QHash< QString, QString > 
 	return metadata;
 }
 
-QVariantMap youtubeClipMetadataFromHtml(const QString &html) {
+QVariantMap youtubeClipMetadataFromHtml(const QString &html,
+										const QHash< QString, QString > &metaTags) {
 	QVariantMap metadata {
 		{ QStringLiteral("provider"), QStringLiteral("youtube") },
 		{ QStringLiteral("previewProvider"), QStringLiteral("youtube") },
@@ -12673,16 +12674,35 @@ QVariantMap youtubeClipMetadataFromHtml(const QString &html) {
 		{ QStringLiteral("youtubeContentKind"), QStringLiteral("clip") }
 	};
 
+	QString videoId;
+	const QString clipVideoUrl = previewMetaValue(
+		metaTags, QStringList { QStringLiteral("og:video:secure_url"),
+							   QStringLiteral("og:video:url"),
+							   QStringLiteral("og:video") });
+	if (!clipVideoUrl.isEmpty()) {
+		const std::optional< QString > metaVideoId = extractYouTubeVideoId(QUrl(clipVideoUrl));
+		if (metaVideoId) {
+			videoId = *metaVideoId;
+		}
+	}
+
+	static const QRegularExpression s_videoDetailsId(
+		QLatin1String("\"videoDetails\"\\s*:\\s*\\{[\\s\\S]{0,4096}?"
+					 "\"videoId\"\\s*:\\s*\"([A-Za-z0-9_-]{11})\""));
+	const QRegularExpressionMatch videoDetailsMatch = s_videoDetailsId.match(html);
+	if (videoId.isEmpty() && videoDetailsMatch.hasMatch()) {
+		videoId = videoDetailsMatch.captured(1);
+	}
+
 	static const QRegularExpression s_videoIdAttribute(
 		QLatin1String("\\bvideo-id\\s*=\\s*[\"']([A-Za-z0-9_-]{11})[\"']"),
 		QRegularExpression::CaseInsensitiveOption);
-	static const QRegularExpression s_videoIdJson(
-		QLatin1String("\"videoId\"\\s*:\\s*\"([A-Za-z0-9_-]{11})\""));
-	QRegularExpressionMatch videoIdMatch = s_videoIdAttribute.match(html);
-	if (!videoIdMatch.hasMatch()) {
-		videoIdMatch = s_videoIdJson.match(html);
+	if (videoId.isEmpty()) {
+		const QRegularExpressionMatch videoIdAttributeMatch = s_videoIdAttribute.match(html);
+		if (videoIdAttributeMatch.hasMatch()) {
+			videoId = videoIdAttributeMatch.captured(1);
+		}
 	}
-	const QString videoId = videoIdMatch.hasMatch() ? videoIdMatch.captured(1) : QString();
 	if (isValidYouTubeVideoId(videoId)) {
 		metadata.insert(QStringLiteral("youtubeResolvedVideoId"), videoId);
 	}
@@ -12713,12 +12733,15 @@ QVariantMap youtubeClipMetadataFromHtml(const QString &html) {
 		}
 	}
 
-	static const QRegularExpression s_author(
-		QLatin1String("\"ownerChannelName\"\\s*:\\s*\"([^\"\\\\]{1,256})\""));
-	const QRegularExpressionMatch authorMatch = s_author.match(html);
-	if (authorMatch.hasMatch()) {
-		metadata.insert(QStringLiteral("youtubeAuthor"),
-						trimmedPreviewText(authorMatch.captured(1), 256));
+	if (videoDetailsMatch.hasMatch() && videoDetailsMatch.captured(1) == videoId) {
+		const QString videoDetails = html.mid(videoDetailsMatch.capturedStart(), 32768);
+		static const QRegularExpression s_author(
+			QLatin1String("\"ownerChannelName\"\\s*:\\s*\"([^\"\\\\]{1,256})\""));
+		const QRegularExpressionMatch authorMatch = s_author.match(videoDetails);
+		if (authorMatch.hasMatch()) {
+			metadata.insert(QStringLiteral("youtubeAuthor"),
+							trimmedPreviewText(authorMatch.captured(1), 256));
+		}
 	}
 	return metadata;
 }
@@ -36569,7 +36592,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 						}
 					}
 					if (isYouTubeClipUrl(previewUrl)) {
-						const QVariantMap clipMetadata = youtubeClipMetadataFromHtml(parsed.html);
+						const QVariantMap clipMetadata =
+							youtubeClipMetadataFromHtml(parsed.html, parsed.metaTags);
 						for (auto it = clipMetadata.cbegin(); it != clipMetadata.cend(); ++it) {
 							parsed.metadata.insert(it.key(), it.value());
 						}

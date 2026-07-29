@@ -3857,7 +3857,7 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1")));
 	QVERIFY(source.contains(QStringLiteral(
-		"constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 1")));
+		"constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2")));
 	QVERIFY(source.contains(QStringLiteral(
 		"cached.metadata.value(QStringLiteral(\"oEmbedMetadataVersion\")).toInt()")));
 	QVERIFY(source.contains(QStringLiteral(
@@ -3922,6 +3922,20 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"youtubeClipOEmbedMetadataVersion")));
+	const qsizetype youtubeClipMetadataStart =
+		source.indexOf(QStringLiteral("QVariantMap youtubeClipMetadataFromHtml"));
+	const qsizetype youtubeClipMetadataEnd =
+		source.indexOf(QStringLiteral("struct InstagramPreviewMetadata"), youtubeClipMetadataStart);
+	QVERIFY(youtubeClipMetadataStart >= 0);
+	QVERIFY(youtubeClipMetadataEnd > youtubeClipMetadataStart);
+	const QString youtubeClipMetadata =
+		source.mid(youtubeClipMetadataStart, youtubeClipMetadataEnd - youtubeClipMetadataStart);
+	QVERIFY(youtubeClipMetadata.contains(QStringLiteral("\"og:video:secure_url\"")));
+	QVERIFY(youtubeClipMetadata.contains(QStringLiteral("s_videoDetailsId")));
+	QVERIFY(youtubeClipMetadata.contains(QStringLiteral("extractYouTubeVideoId(QUrl(clipVideoUrl))")));
+	QVERIFY(!youtubeClipMetadata.contains(QStringLiteral("s_videoIdJson")));
+	QVERIFY(source.contains(QStringLiteral(
+		"youtubeClipMetadataFromHtml(parsed.html, parsed.metaTags)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"https://www.youtube.com/watch?v=%1")));
 	QVERIFY(source.contains(QStringLiteral(
