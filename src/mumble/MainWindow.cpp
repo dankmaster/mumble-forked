@@ -35361,6 +35361,17 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		} else if (status == MumbleProto::ChatEmbedStatusFailed && preview.description.isEmpty()) {
 			preview.description = tr("Preview unavailable");
 		}
+		const bool failedMetadataHasProviderEmbed =
+			status == MumbleProto::ChatEmbedStatusFailed && previewEmbedTargetForUrl(previewUrl).has_value();
+		if (failedMetadataHasProviderEmbed) {
+			// The server only resolves descriptive metadata. A failed metadata fetch must not
+			// disable a separately supported first-party provider player (for example Facebook
+			// Reels), which can still load successfully in the client.
+			preview.failed = false;
+			if (previewDescriptionIsPlaceholder(preview.description)) {
+				preview.description.clear();
+			}
+		}
 
 		preview.metadata = previewMetadataWithSwedishData(preview.metadata, previewUrl, preview.title,
 														  preview.description);

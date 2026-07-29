@@ -3894,6 +3894,12 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral(
 		"if (hasStructuredFallback || hasProviderEmbed)")));
 	QVERIFY(source.contains(QStringLiteral(
+		"const bool failedMetadataHasProviderEmbed")));
+	QVERIFY(source.contains(QStringLiteral(
+		"status == MumbleProto::ChatEmbedStatusFailed && previewEmbedTargetForUrl(previewUrl).has_value()")));
+	QVERIFY(source.contains(QStringLiteral(
+		"if (failedMetadataHasProviderEmbed)")));
+	QVERIFY(source.contains(QStringLiteral(
 		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
 	QVERIFY(source.contains(QStringLiteral("redditPostOEmbedUrl(url)")));
 	QVERIFY(source.contains(QStringLiteral("redditPostEmbedUrl(previewUrl)")));
