@@ -1767,10 +1767,12 @@ ApplicationWindow {
 			const firstVisible = timeline.firstVisibleMessageDelegate()
 			const completedAt = timeline.scopePresentationCompletedAt > 0
 				? timeline.scopePresentationCompletedAt : Date.now()
+			const probeAnchor = timeline.historyLoadProbeAnchorState()
 			return {
 				"scopeToken": String(activeScope.scopeToken || ""),
 				"scopeLabel": String(activeScope.label || ""),
-				"count": timeline.count,
+				"count": chatModel.count,
+				"richPresentationCount": timeline.count,
 				"contentHeight": timeline.contentHeight,
 				"viewportHeight": timeline.height,
 				"originY": timeline.originY,
@@ -1779,6 +1781,9 @@ ApplicationWindow {
 				"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
 				"firstVisibleOffset": firstVisible
 					? Number(firstVisible.y - timeline.contentY) : 0,
+				"probeAnchorId": probeAnchor.id,
+				"probeAnchorOffset": probeAnchor.offset,
+				"probeAnchorVisible": probeAnchor.visible,
 				"presentationPending": timeline.scopePresentationPending,
 				"presentationFinalizing": timeline.scopePresentationFinalizing,
 				"scopeResetPending": timeline.scopeResetPending,
@@ -1829,11 +1834,15 @@ ApplicationWindow {
 		timeline.currentIndex = 0
 		timeline.forceLayout()
 		const firstVisible = timeline.firstVisibleMessageDelegate()
+		timeline.performanceHistoryProbeAnchorId = firstVisible
+			? String(firstVisible.stableId || "") : ""
 		return {
 			"prepared": firstVisible !== null,
-			"count": timeline.count,
+			"count": chatModel.count,
 			"contentY": timeline.contentY,
-			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : ""
+			"firstVisibleId": timeline.performanceHistoryProbeAnchorId,
+			"firstVisibleOffset": firstVisible
+				? Number(firstVisible.mapToItem(timeline, 0, 0).y) : 0
 		}
 	}
 
@@ -3024,6 +3033,7 @@ ApplicationWindow {
 					property real prependAnchorInsertedExtent: 0
 					property bool prependAnchorActive: false
 					property bool deferredPrependAnchorActive: false
+					property string performanceHistoryProbeAnchorId: ""
 					property bool prependMutationInProgress: false
 					property bool restoringPrependAnchor: false
 					property int prependAnchorRetries: 0
@@ -3116,6 +3126,7 @@ ApplicationWindow {
 						scopePresentationExposedTailTravel = 0
 						scopePresentationStartedAt = Date.now()
 						scopePresentationCompletedAt = 0
+						performanceHistoryProbeAnchorId = ""
 						scopeReuseResetActive = true
 						followTailAfterInsert = false
 						pendingTailInsertCount = 0
@@ -3353,6 +3364,21 @@ ApplicationWindow {
 						return candidate
 					}
 
+					function historyLoadProbeAnchorState() {
+						const stableId = performanceHistoryProbeAnchorId
+						if (stableId.length === 0)
+							return { "id": "", "offset": 0, "visible": false }
+						const row = chatModel.presentationModel.rowForStableId(stableId)
+						if (row < 0)
+							return { "id": stableId, "offset": 0, "visible": false }
+						const item = itemAtIndex(row)
+						if (!item)
+							return { "id": stableId, "offset": 0, "visible": false }
+						const point = item.mapToItem(timeline, 0, 0)
+						return { "id": stableId, "offset": point.y,
+							"visible": point.y + item.height > 0.5 && point.y < height - 0.5 }
+					}
+
 					function capturePrependAnchor() {
 						const item = firstVisibleMessageDelegate()
 						if (!item)
@@ -3500,9 +3526,10 @@ ApplicationWindow {
 					function extendDeferredPrependAnchorTarget(insertedCount) {
 						prependAnchorInsertedExtent +=
 							Math.max(0, insertedCount) * deferredMessageRowHeight
+						// InlineHeader grows into negative content coordinates. The existing
+						// rich rows keep their coordinates, so preserving the user's exact
+						// viewport means retaining contentY rather than adding the prefix height.
 						prependAnchorTargetY = prependAnchorContentY
-							+ Math.max(0, prependAnchorOffset)
-							+ prependAnchorInsertedExtent
 					}
 
 					function restoreDeferredPrependAnchor() {
@@ -3673,7 +3700,8 @@ ApplicationWindow {
 						// Preserve the pre-structural anchor through that transition, while
 						// ordinary wheel, drag and flick movement still cancels restoration.
 						if (!restoringPrependAnchor && !restoringBottom
-								&& !prependMutationInProgress) {
+								&& !prependMutationInProgress
+								&& !deferredPrependAnchorActive) {
 							stickToBottom = false
 							releasePrependAnchor()
 						}
