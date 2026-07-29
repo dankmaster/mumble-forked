@@ -3483,8 +3483,11 @@ ApplicationWindow {
 							if (!item || item.performanceTimelineDelegate !== true
 									|| item.accessibilityPooled === true)
 								continue
+							// Keep the outer card tree and its measured geometry alive. Only
+							// release posters, animations and provider players here; tearing
+							// down every Loader synchronously creates its own scroll-start
+							// hitch. Pooled/reused delegates still retire the complete tree.
 							item.richResourcesActive = false
-							item.richLoaderSuspended = true
 						}
 					}
 
@@ -3497,7 +3500,8 @@ ApplicationWindow {
 							const item = children[childIndex]
 							if (!item || item.performanceTimelineDelegate !== true
 									|| item.accessibilityPooled === true
-									|| item.richLoaderSuspended !== true)
+									|| (item.richLoaderSuspended !== true
+										&& item.richResourcesActive === true))
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length === 0)
