@@ -1742,11 +1742,16 @@ ApplicationWindow {
 		// Capture the exact visible row while lightweight scroll placeholders are
 		// still active. Rich cards may refine their estimated height once the
 		// scroll ends; the anchor keeps that refinement visually stationary.
-		if (performanceChatScrollFullRangeToStart
-				&& Math.abs(timeline.contentY - timeline.originY) <= 0.5)
-			timeline.beginTopAnchor()
-		else
-			timeline.captureViewportAnchor()
+		// Finalization can call this a second time after the frame-driven runner
+		// already stopped. Never replace a live top anchor with a transient
+		// pooled-delegate anchor during that idempotent cleanup.
+		if (!timeline.topAnchorActive) {
+			if (performanceChatScrollFullRangeToStart
+					&& Math.abs(timeline.contentY - timeline.originY) <= 0.5)
+				timeline.beginTopAnchor()
+			else
+				timeline.captureViewportAnchor()
+		}
 		performanceChatScrollRunning = false
 		performanceChatScrollFullRangeToStart = false
 	}
@@ -3456,7 +3461,6 @@ ApplicationWindow {
 						positionViewAtBeginning()
 						contentY = originY
 						restoringTopAnchor = false
-						topAnchorSettleTimer.restart()
 					}
 
 					function scheduleRichContentResume() {
@@ -3778,6 +3782,14 @@ ApplicationWindow {
 							++timeline.richContentResumeGeneration
 							timeline.queueVisibleDeferredMaterialization()
 						}
+					}
+
+					Timer {
+						id: topAnchorFrameTimer
+						interval: 16
+						repeat: true
+						running: timeline.topAnchorActive
+						onTriggered: timeline.restoreTopAnchor()
 					}
 
 					Timer {
@@ -4694,6 +4706,10 @@ ApplicationWindow {
 											? messageDelegate.attachmentPlaceholderHeight : 0
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+										if (timeline.topAnchorActive) {
+											topAnchorSettleTimer.restart()
+											Qt.callLater(function() { timeline.restoreTopAnchor() })
+										}
 										if (root.visualFixtureOverrideActive)
 											++root.performanceChatAttachmentLoadedCount
 									}
@@ -4742,6 +4758,10 @@ ApplicationWindow {
 									Layout.maximumWidth: Layout.preferredWidth
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+										if (timeline.topAnchorActive) {
+											topAnchorSettleTimer.restart()
+											Qt.callLater(function() { timeline.restoreTopAnchor() })
+										}
 										if (root.visualFixtureOverrideActive)
 											++root.performanceChatPreviewLoadedCount
 									}
