@@ -4976,6 +4976,10 @@ namespace {
 
 ModernUiAutomationServer::ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent)
 	: QObject(parent), m_mainWindow(mainWindow) {
+	m_chatPerformanceInputTimer.setInterval(8);
+	m_chatPerformanceInputTimer.setTimerType(Qt::PreciseTimer);
+	connect(&m_chatPerformanceInputTimer, &QTimer::timeout, this,
+			&ModernUiAutomationServer::advanceChatPerformanceWorkload);
 }
 
 ModernUiAutomationServer::~ModernUiAutomationServer() {
@@ -4993,7 +4997,7 @@ QVariantMap ModernUiAutomationServer::finalizeChatPerformanceWorkload(QmlShellHo
 		response.insert(QStringLiteral("restored"), true);
 		return response;
 	}
-	QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+	m_chatPerformanceInputTimer.stop();
 	m_chatPerformanceWorkload.running = false;
 	if (!host || !host->chatModel()) {
 		response.insert(QStringLiteral("ok"), false);
@@ -5024,7 +5028,7 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 	if (!m_chatPerformanceWorkload.active || !m_chatPerformanceWorkload.running || !m_mainWindow) return;
 	QmlShellHost *host = m_mainWindow->qmlShellHost();
 	if (!host || !host->window() || !host->performanceMonitor()) {
-		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceInputTimer.stop();
 		m_chatPerformanceWorkload.running = false;
 		m_chatPerformanceWorkload.failureReason =
 			tr("The Qt Quick chat performance host disappeared while scrolling.");
@@ -5033,16 +5037,15 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 
 	QmlPerformanceMonitor *monitor = host->performanceMonitor();
 	if (!m_chatPerformanceWorkload.primed) {
-		// Establish one presented-frame baseline before the first scroll input.
-		// Each following frame then retires exactly one input and schedules the
-		// next real ListView contentY mutation, independent of automation/TCP
-		// cadence and timer coalescing.
+		// Establish the presented-frame baseline before the first high-resolution
+		// input. Presentation remains owned by Qt's render loop rather than this
+		// gesture timer.
 		m_chatPerformanceWorkload.primed = true;
 		m_chatPerformanceWorkload.presentedFramesBeforeRun =
 			monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
 	}
 	if (m_chatPerformanceWorkload.stepCount >= m_chatPerformanceWorkload.targetSteps) {
-		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceInputTimer.stop();
 		m_chatPerformanceWorkload.running = false;
 		if (m_chatPerformanceWorkload.liveMode) {
 			m_chatPerformanceWorkload.failureReason =
@@ -5062,7 +5065,7 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 	if (!QMetaObject::invokeMethod(host->window(), "advancePerformanceChatScrollWorkload",
 			Q_RETURN_ARG(QVariant, advanced), Q_ARG(QVariant, nextStep),
 			Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps))) {
-		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceInputTimer.stop();
 		m_chatPerformanceWorkload.running = false;
 		m_chatPerformanceWorkload.failureReason =
 			tr("The Qt Quick root could not advance chat-scroll step %1.").arg(nextStep);
@@ -5073,13 +5076,13 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 		m_chatPerformanceWorkload.stepCount =
 			qMax(m_chatPerformanceWorkload.stepCount,
 				advancedState.value(QStringLiteral("completedSteps")).toInt());
-		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceInputTimer.stop();
 		m_chatPerformanceWorkload.running = false;
 		QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload");
 		return;
 	}
 	if (!advancedState.value(QStringLiteral("advanced")).toBool()) {
-		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceInputTimer.stop();
 		m_chatPerformanceWorkload.running = false;
 		m_chatPerformanceWorkload.failureReason =
 			tr("The Qt Quick root could not advance chat-scroll step %1.").arg(nextStep);
@@ -5596,11 +5599,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			m_chatPerformanceWorkload.primed = false;
 			m_chatPerformanceWorkload.running = true;
 			m_chatPerformanceWorkload.failureReason.clear();
-			m_chatPerformanceWorkload.frameConnection = QObject::connect(
-				host->window(), &QQuickWindow::frameSwapped, this,
-				[this]() { advanceChatPerformanceWorkload(); }, Qt::QueuedConnection);
-			// Prime one presentation. The frame-driven continuation applies one
-			// scroll input per subsequently requested scene-graph frame.
+			// Model a 120 Hz high-resolution wheel/trackpad stream on the GUI
+			// thread. The scene graph presents independently, which measures real
+			// frame cadence instead of a queued frameSwapped feedback bubble.
+			m_chatPerformanceInputTimer.start();
 			host->window()->update();
 			QVariantMap response = okResponse();
 			response.insert(QStringLiteral("running"), true);
@@ -5633,9 +5635,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			m_chatPerformanceWorkload.primed = false;
 			m_chatPerformanceWorkload.running = true;
 			m_chatPerformanceWorkload.failureReason.clear();
-			m_chatPerformanceWorkload.frameConnection = QObject::connect(
-				host->window(), &QQuickWindow::frameSwapped, this,
-				[this]() { advanceChatPerformanceWorkload(); }, Qt::QueuedConnection);
+			m_chatPerformanceInputTimer.start();
 			host->window()->update();
 			QVariantMap response = okResponse();
 			response.insert(QStringLiteral("running"), true);
