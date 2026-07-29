@@ -2,6 +2,7 @@ add_executable(TestQmlMediaProfileFactory
 	TestQmlMediaProfileFactory.cpp
 	../../mumble/adaptive-media-player.qrc
 	../../mumble/ClientActionRegistry.cpp
+	../../mumble/EmbedDocument.cpp
 	../../mumble/QmlClientModels.cpp
 	../../mumble/QmlMediaProfileFactory.cpp
 )
