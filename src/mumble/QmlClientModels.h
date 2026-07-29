@@ -492,6 +492,8 @@ class ChatTimelineModel final : public StableListModel {
 	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
 	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
 	Q_PROPERTY(bool prependPending READ prependPending NOTIFY prependPendingChanged)
+	Q_PROPERTY(bool presentationBusy READ presentationBusy WRITE setPresentationBusy
+				   NOTIFY presentationBusyChanged)
 	Q_PROPERTY(ChatTimelinePresentationProxyModel *presentationModel READ presentationModel CONSTANT)
 	Q_PROPERTY(ChatTimelinePresentationProxyModel *deferredPresentationModel READ deferredPresentationModel CONSTANT)
 public:
@@ -515,6 +517,8 @@ public:
 	int currentMatchRow() const;
 	QString currentMatchStableId() const;
 	bool prependPending() const;
+	bool presentationBusy() const;
+	void setPresentationBusy(bool busy);
 	ChatTimelinePresentationProxyModel *presentationModel();
 	ChatTimelinePresentationProxyModel *deferredPresentationModel();
 	Q_INVOKABLE bool materializeDeferredMessage(const QString &messageId);
@@ -529,6 +533,7 @@ signals:
 	void matchCountChanged();
 	void currentMatchChanged();
 	void prependPendingChanged();
+	void presentationBusyChanged();
 
 private:
 	struct RichBodyParseRequest {
@@ -558,6 +563,8 @@ private:
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
 	void cancelQueuedPrepend();
+	void scheduleDeferredPresentationUpdateDrain();
+	void drainDeferredPresentationUpdates();
 	bool searchActive() const;
 	bool rowMatchesQuery(const QVariantMap &row, const QString &normalizedQuery) const;
 	void refreshSearchState(bool preserveCurrentMatch = true);
@@ -582,6 +589,9 @@ private:
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
 	bool m_prependPending = false;
+	bool m_presentationBusy = false;
+	bool m_deferredPresentationUpdateDrainScheduled = false;
+	QHash< QString, QVariantMap > m_deferredPresentationUpdates;
 	ChatTimelinePresentationProxyModel m_presentationModel;
 	ChatTimelinePresentationProxyModel m_deferredPresentationModel;
 };

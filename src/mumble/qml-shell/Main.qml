@@ -3020,6 +3020,7 @@ ApplicationWindow {
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property int richContentResumeGeneration: 0
 					onRichScrollInProgressChanged: {
+						chatModel.presentationBusy = richScrollInProgress
 						if (richScrollInProgress) {
 							richContentResumeTimer.stop()
 							return
@@ -4592,6 +4593,7 @@ ApplicationWindow {
 								Loader {
 									id: messageAttachmentLoader
 									active: messageDelegate.hasAttachmentContent
+										&& messageDelegate.richResourcesActive
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
 									// Older history can insert many rich rows in one model
@@ -4626,6 +4628,7 @@ ApplicationWindow {
 								Loader {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
+										&& messageDelegate.richResourcesActive
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
 									// The large ListView cache keeps rich-card geometry warm for

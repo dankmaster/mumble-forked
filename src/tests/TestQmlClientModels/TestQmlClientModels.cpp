@@ -50,6 +50,7 @@ private slots:
 	void messageRolesExposeStructuredState();
 	void activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer();
 	void chatTimelineAppliesDirectIncrementalMessages();
+	void chatTimelineDefersPresentationUpdatesDuringScroll();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
@@ -1997,6 +1998,51 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QVERIFY(!model.removeMessage(QStringLiteral("missing")));
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
+	ChatTimelineModel model;
+	const QVariantMap initial {
+		{ QStringLiteral("messageId"), 41 },
+		{ QStringLiteral("actor"), QStringLiteral("Alice") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Initial") },
+		{ QStringLiteral("preview"), QVariantMap {
+			{ QStringLiteral("title"), QStringLiteral("Initial preview") }
+		} }
+	};
+	QCOMPARE(model.applyMessage(initial), ChatTimelineModel::MessageMutation::Inserted);
+
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy busySpy(&model, &ChatTimelineModel::presentationBusyChanged);
+	model.setPresentationBusy(true);
+	QVERIFY(model.presentationBusy());
+
+	QVariantMap firstUpdate = initial;
+	firstUpdate.insert(QStringLiteral("preview"), QVariantMap {
+		{ QStringLiteral("title"), QStringLiteral("Hydrating preview") }
+	});
+	QVariantMap finalUpdate = initial;
+	finalUpdate.insert(QStringLiteral("preview"), QVariantMap {
+		{ QStringLiteral("title"), QStringLiteral("Ready preview") }
+	});
+	finalUpdate.insert(QStringLiteral("deliveryState"), QStringLiteral("delivered"));
+	QCOMPARE(model.applyMessage(firstUpdate), ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(model.applyMessage(finalUpdate), ChatTimelineModel::MessageMutation::Updated);
+
+	QCOMPARE(changedSpy.count(), 0);
+	QCOMPARE(model.get(0).value(QStringLiteral("preview")).toMap()
+				 .value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Initial preview"));
+
+	model.setPresentationBusy(false);
+	QVERIFY(!model.presentationBusy());
+	QTRY_COMPARE_WITH_TIMEOUT(model.get(0).value(QStringLiteral("preview")).toMap()
+							 .value(QStringLiteral("title")).toString(),
+						 QStringLiteral("Ready preview"), 1000);
+	QCOMPARE(model.get(0).value(QStringLiteral("status")).toString(),
+			 QStringLiteral("delivered"));
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(busySpy.count(), 2);
 }
 
 void TestQmlClientModels::chatTimelineTracksUserHistory() {

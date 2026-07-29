@@ -3395,6 +3395,14 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 			if (!m_deferredRichBodyMessageIds.contains(id)) scheduleRichBodyParses(requests);
 			return MessageMutation::Unchanged;
 		}
+		if (m_presentationBusy) {
+			// Preview hydration and delivery metadata can produce several updates
+			// per rendered frame. Keep the newest state per real message while a
+			// user scroll is active; applying dataChanged during ListView reuse is
+			// both invisible and disproportionately expensive.
+			m_deferredPresentationUpdates.insert(id, message);
+			return MessageMutation::Updated;
+		}
 		upsertRow(row);
 		updateUserHistoryRow(id, row);
 		if (!m_deferredRichBodyMessageIds.contains(id)) scheduleRichBodyParses(requests);
@@ -3584,6 +3592,36 @@ bool ChatTimelineModel::prependPending() const {
 	return m_prependPending;
 }
 
+bool ChatTimelineModel::presentationBusy() const {
+	return m_presentationBusy;
+}
+
+void ChatTimelineModel::setPresentationBusy(bool busy) {
+	if (m_presentationBusy == busy) return;
+	m_presentationBusy = busy;
+	emit presentationBusyChanged();
+	if (!m_presentationBusy) scheduleDeferredPresentationUpdateDrain();
+}
+
+void ChatTimelineModel::scheduleDeferredPresentationUpdateDrain() {
+	if (m_presentationBusy || m_deferredPresentationUpdates.isEmpty()
+		|| m_deferredPresentationUpdateDrainScheduled) {
+		return;
+	}
+	m_deferredPresentationUpdateDrainScheduled = true;
+	QTimer::singleShot(16, this, &ChatTimelineModel::drainDeferredPresentationUpdates);
+}
+
+void ChatTimelineModel::drainDeferredPresentationUpdates() {
+	m_deferredPresentationUpdateDrainScheduled = false;
+	if (m_presentationBusy || m_deferredPresentationUpdates.isEmpty()) return;
+	auto update = m_deferredPresentationUpdates.begin();
+	const QVariantMap message = update.value();
+	m_deferredPresentationUpdates.erase(update);
+	applyMessage(message);
+	scheduleDeferredPresentationUpdateDrain();
+}
+
 ChatTimelinePresentationProxyModel *ChatTimelineModel::presentationModel() {
 	return &m_presentationModel;
 }
@@ -3603,6 +3641,7 @@ void ChatTimelineModel::cancelQueuedPrepend() {
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	cancelQueuedPrepend();
+	m_deferredPresentationUpdates.clear();
 	QVariantList rows;
 	QList< RichBodyParseRequest > requests;
 	QSet< QString > retainedMessageIds;
@@ -3682,6 +3721,7 @@ bool ChatTimelineModel::hasUserHistory() const {
 void ChatTimelineModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
 	cancelQueuedPrepend();
+	m_deferredPresentationUpdates.clear();
 	m_deferredRichBodyMessageIds.clear();
 	for (auto it = m_richBodyConsumers.begin(); it != m_richBodyConsumers.end(); ++it) it->clear();
 	m_richBodyConsumers.clear();
