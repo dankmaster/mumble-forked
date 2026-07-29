@@ -3037,9 +3037,11 @@ ApplicationWindow {
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property var richLoaderResumeQueue: []
 					onRichScrollInProgressChanged: {
-						chatModel.presentationBusy = richScrollInProgress
 						if (richScrollInProgress) {
+							chatModel.presentationBusy = true
 							richContentResumeTimer.stop()
+							richLoaderResumeTimer.stop()
+							deferredMaterializationTimer.stop()
 							return
 						}
 						scheduleRichContentResume()
@@ -3503,6 +3505,8 @@ ApplicationWindow {
 						})
 						if (richLoaderResumeQueue.length > 0 && !richLoaderResumeTimer.running)
 							richLoaderResumeTimer.start()
+						else
+							finishRichContentRecoveryIfIdle()
 					}
 
 					function resumeNextRichLoader() {
@@ -3510,8 +3514,10 @@ ApplicationWindow {
 							scheduleRichContentResume()
 							return
 						}
-						if (richLoaderResumeQueue.length === 0)
+						if (richLoaderResumeQueue.length === 0) {
+							finishRichContentRecoveryIfIdle()
 							return
+						}
 						const queued = richLoaderResumeQueue.slice()
 						const stableId = String(queued.shift() || "")
 						richLoaderResumeQueue = queued
@@ -3527,6 +3533,8 @@ ApplicationWindow {
 						}
 						if (queued.length > 0)
 							richLoaderResumeTimer.start()
+						else
+							finishRichContentRecoveryIfIdle()
 					}
 
 					function queueVisibleDeferredMaterialization() {
@@ -3568,6 +3576,8 @@ ApplicationWindow {
 						deferredMaterializationQueue = queued
 						if (queued.length > 0 && !deferredMaterializationTimer.running)
 							deferredMaterializationTimer.start()
+						else
+							finishRichContentRecoveryIfIdle()
 					}
 
 					function materializeNextDeferredRow() {
@@ -3575,14 +3585,34 @@ ApplicationWindow {
 							scheduleRichContentResume()
 							return
 						}
-						if (deferredMaterializationQueue.length === 0)
+						if (deferredMaterializationQueue.length === 0) {
+							finishRichContentRecoveryIfIdle()
 							return
+						}
 						const queued = deferredMaterializationQueue.slice()
 						const stableId = queued.shift()
 						deferredMaterializationQueue = queued
 						chatModel.materializeDeferredMessage(stableId)
 						if (queued.length > 0)
 							deferredMaterializationTimer.start()
+						else
+							finishRichContentRecoveryIfIdle()
+					}
+
+					function finishRichContentRecoveryIfIdle() {
+						if (richScrollInProgress)
+							return
+						if (richContentResumeTimer.running || richLoaderResumeTimer.running
+								|| deferredMaterializationTimer.running) {
+							Qt.callLater(function() {
+								timeline.finishRichContentRecoveryIfIdle()
+							})
+							return
+						}
+						if (richLoaderResumeQueue.length > 0
+								|| deferredMaterializationQueue.length > 0)
+							return
+						chatModel.presentationBusy = false
 					}
 
 					function restoreViewportAnchor() {
