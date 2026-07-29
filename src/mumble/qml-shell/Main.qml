@@ -3335,8 +3335,11 @@ ApplicationWindow {
 								candidateViewportY = point.y
 							}
 						}
-						for (let index = 0; index < deferredHistoryRepeater.count; ++index) {
-							const item = deferredHistoryRepeater.itemAt(index)
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						for (let index = 0;
+								deferredRepeater && index < deferredRepeater.count; ++index) {
+							const item = deferredRepeater.itemAt(index)
 							if (!item || !item.visible)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
@@ -3417,8 +3420,11 @@ ApplicationWindow {
 								queuedSet[stableId] = true
 							}
 						}
-						for (let childIndex = 0; childIndex < deferredHistoryRepeater.count; ++childIndex) {
-							const item = deferredHistoryRepeater.itemAt(childIndex)
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						for (let childIndex = 0;
+								deferredRepeater && childIndex < deferredRepeater.count; ++childIndex) {
+							const item = deferredRepeater.itemAt(childIndex)
 							if (!item || !item.visible)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
@@ -3908,6 +3914,7 @@ ApplicationWindow {
                     headerPositioning: ListView.InlineHeader
                     header: Column {
 						id: timelineHeader
+						property alias deferredRepeater: deferredHistoryRepeater
                         width: timeline.width
 						height: implicitHeight
 						spacing: 0
