@@ -2774,9 +2774,9 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceChatScrollRun")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceLiveChatScrollRun")));
 	QVERIFY(automationSource.contains(QStringLiteral("advanceChatPerformanceWorkload")));
-	QVERIFY(automationSource.contains(QStringLiteral("m_chatPerformanceInputTimer.setInterval(8)")));
-	QVERIFY(automationSource.contains(QStringLiteral("m_chatPerformanceInputTimer.setTimerType(Qt::PreciseTimer)")));
-	QVERIFY(automationSource.contains(QStringLiteral("m_chatPerformanceInputTimer.start()")));
+	QVERIFY(automationSource.contains(QStringLiteral("&QQuickWindow::afterAnimating")));
+	QVERIFY(automationSource.contains(QStringLiteral("m_chatPerformanceWorkload.animationConnection")));
+	QVERIFY(automationSource.contains(QStringLiteral("Qt::DirectConnection")));
 	QVERIFY(automationSource.contains(QStringLiteral("reachedTarget")));
 	QVERIFY(automationSource.contains(QStringLiteral("exhausted its safety frame budget")));
 	QVERIFY(automationSource.contains(QStringLiteral("chat-scroll:%1")));

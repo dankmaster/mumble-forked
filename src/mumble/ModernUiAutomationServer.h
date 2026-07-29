@@ -9,7 +9,6 @@
 #include <QtCore/QObject>
 #include <QtCore/QMetaObject>
 #include <QtCore/QString>
-#include <QtCore/QTimer>
 #include <QtCore/QVariantMap>
 #include <QtCore/QVariantList>
 
@@ -62,7 +61,6 @@ private:
 	QVariant m_automationDialogDraftValue;
 	bool m_automationDialogDraftActive = false;
 	qulonglong m_performanceInputSequence = 0;
-	QTimer m_chatPerformanceInputTimer;
 	struct ChatPerformanceWorkloadState {
 		bool active = false;
 		bool liveMode = false;
@@ -75,6 +73,7 @@ private:
 		int presentedFramesBeforeSeed = 0;
 		int presentedFramesBeforeRun = 0;
 		QString failureReason;
+		QMetaObject::Connection animationConnection;
 	} m_chatPerformanceWorkload;
 	struct TalkPerformanceWorkloadState {
 		bool active = false;
