@@ -2924,6 +2924,7 @@ ApplicationWindow {
 						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
 						onScrollingStarted: {
 							bottomFollowTimer.stop()
+							richContentResumeTimer.stop()
 							timeline.stickToBottom = false
 							timeline.releasePrependAnchor()
 							timeline.releaseViewportAnchor()
@@ -2933,15 +2934,25 @@ ApplicationWindow {
 							timeline.requestBottomFollow()
 							if (!timeline.stickToBottom)
 								timeline.captureViewportAnchor()
+							timeline.scheduleRichContentResume()
 						}
 					}
-					// Build a small amount of chat content outside the viewport while
-					// the chat surface is otherwise idle. Complex rich-message delegates
-					// should not have to be constructed on the first frame they scroll in.
-					// Keep one bounded viewport of delegates warm. This is enough to
-					// construct occasional rich rows outside the presentation-critical
-					// scroll frame without scaling cache memory with history length.
-					cacheBuffer: Math.max(256, Math.min(720, height))
+					// Rich cards can be taller than the viewport. Keep enough bounded
+					// layout-only delegates warm that an ordinary wheel step never has to
+					// construct the next gallery/player card on its presentation frame.
+					// Expensive media resources are independently idle-gated below, so
+					// this does not turn the complete history into a decoded-image cache.
+					cacheBuffer: Math.max(960, Math.min(2800, height * 2.5))
+					readonly property bool richScrollInProgress: moving || dragging || flicking
+						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
+					property int richContentResumeGeneration: 0
+					onRichScrollInProgressChanged: {
+						if (richScrollInProgress) {
+							richContentResumeTimer.stop()
+							return
+						}
+						scheduleRichContentResume()
+					}
 					property string prependAnchorId: ""
 					property real prependAnchorOffset: 0
 					property bool prependAnchorActive: false
@@ -3277,6 +3288,12 @@ ApplicationWindow {
 						viewportAnchorRetries = 0
 					}
 
+					function scheduleRichContentResume() {
+						if (richScrollInProgress)
+							return
+						richContentResumeTimer.restart()
+					}
+
 					function restoreViewportAnchor() {
 						if (!viewportAnchorActive || restoringViewportAnchor || stickToBottom
 								|| prependAnchorActive || scopePresentationPending
@@ -3412,6 +3429,7 @@ ApplicationWindow {
 					}
 					onMovementStarted: {
 						root.closeQuickReactions()
+						richContentResumeTimer.stop()
 						releaseViewportAnchor()
 						// QQuickListView reports its own insert displacement as movement.
 						// Preserve the pre-structural anchor through that transition, while
@@ -3428,6 +3446,20 @@ ApplicationWindow {
 							requestBottomFollow()
 							if (!stickToBottom)
 								captureViewportAnchor()
+							scheduleRichContentResume()
+						}
+					}
+
+					Timer {
+						id: richContentResumeTimer
+						interval: 0
+						repeat: false
+						onTriggered: {
+							if (timeline.richScrollInProgress)
+								return
+							if (!timeline.stickToBottom)
+								timeline.captureViewportAnchor()
+							++timeline.richContentResumeGeneration
 						}
 					}
 
@@ -3655,6 +3687,7 @@ ApplicationWindow {
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					|| timeline.scopePresentationPending
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
+					&& !timeline.richScrollInProgress
 						function openAutomationActions() {
 							openMessageActions()
 							return messageActions
@@ -3685,15 +3718,49 @@ ApplicationWindow {
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
 							|| bodyNeedsHydration
+						readonly property real hydrationWarmDistance: Math.min(timeline.cacheBuffer,
+							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
-							&& y + height >= timeline.contentY - timeline.height * 0.5
-							&& y <= timeline.contentY + timeline.height * 1.5
+							&& y + height >= timeline.contentY - hydrationWarmDistance
+							&& y <= timeline.contentY + timeline.height + hydrationWarmDistance
 						readonly property bool inVisibleViewport: !accessibilityPooled
 							&& y + height >= timeline.contentY
 							&& y <= timeline.contentY + timeline.height
+						property bool richResourcesActive: false
+						readonly property int richContentResumeGeneration:
+							timeline.richContentResumeGeneration
+						function updateRichResourceActivity() {
+							if (accessibilityPooled) {
+								richResourceReleaseTimer.stop()
+								richResourcesActive = false
+								return
+							}
+							if (inHydrationWindow) {
+								richResourceReleaseTimer.stop()
+								if (!timeline.richScrollInProgress)
+									richResourcesActive = true
+							} else if (!timeline.richScrollInProgress) {
+								richResourceReleaseTimer.restart()
+							}
+						}
 						function requestPreviewHydrationIfNeeded() {
-							if (backendContentNeedsHydration && inHydrationWindow)
+							if (backendContentNeedsHydration && inHydrationWindow
+									&& !timeline.richScrollInProgress)
 								root.queuePreviewHydration(stableId, inVisibleViewport)
+						}
+						function resumeRichContentAfterScroll() {
+							updateRichResourceActivity()
+							requestPreviewHydrationIfNeeded()
+						}
+						Timer {
+							id: richResourceReleaseTimer
+							interval: 900
+							repeat: false
+							onTriggered: {
+								if (!messageDelegate.inHydrationWindow
+										&& !timeline.richScrollInProgress)
+									messageDelegate.richResourcesActive = false
+							}
 						}
 						function primaryRichContentViewportBounds() {
 							let content = null
@@ -3731,6 +3798,7 @@ ApplicationWindow {
 								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
+							updateRichResourceActivity()
 						}
 						ListView.onReused: {
 							if (root.visualFixtureOverrideActive)
@@ -3739,18 +3807,23 @@ ApplicationWindow {
 							accessibilityPooled = false
 							if (messagePreviewLoader.item)
 								messagePreviewLoader.item.resetForReuse()
-							Qt.callLater(function() { messageDelegate.requestPreviewHydrationIfNeeded() })
+							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
 						}
 						onContentNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
-						onInHydrationWindowChanged: requestPreviewHydrationIfNeeded()
+						onInHydrationWindowChanged: {
+							updateRichResourceActivity()
+							requestPreviewHydrationIfNeeded()
+						}
+						onRichContentResumeGenerationChanged: resumeRichContentAfterScroll()
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
-							requestPreviewHydrationIfNeeded()
+							richResourcesActive = false
+							resumeRichContentAfterScroll()
 						}
 						Component.onCompleted: {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateCreatedCount
-							requestPreviewHydrationIfNeeded()
+							resumeRichContentAfterScroll()
 						}
 						// This technical delegate frame must remain ignored for its entire
 						// lifetime. Switching it between ignored and exposed while ListView
@@ -4062,7 +4135,7 @@ ApplicationWindow {
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
 									Layout.rightMargin: messageDelegate.compactActionTextInset
-									resourceActive: !messageDelegate.accessibilityPooled
+									resourceActive: messageDelegate.richResourcesActive
 									animationsEnabled: !root.visualFixtureOverrideActive
 									hoverEffectsEnabled: !root.visualFixtureOverrideActive
                                     textColor: Theme.textMain
@@ -4114,8 +4187,9 @@ ApplicationWindow {
 									sourceComponent: Component {
 										AttachmentGallery {
 											attachments: messageDelegate.attachments || []
-											resourceActive: !messageDelegate.accessibilityPooled
+											resourceActive: messageDelegate.richResourcesActive
 											animationsEnabled: !root.visualFixtureOverrideActive
+												&& !timeline.richScrollInProgress
 											onAttachmentRequested: attachment => root.requestAttachment(
 												attachment, messageDelegate.stableId)
 											onAttachmentDownloadRequested: attachment => root.downloadAttachment(attachment, false)
@@ -4151,11 +4225,13 @@ ApplicationWindow {
 									visualMediaFixtureMode: root.visualMediaFixtureMode
 									savedSizePreset: root.richPreviewSizePreset(messageDelegate.stableId)
 									animationsEnabled: !root.visualFixtureOverrideActive
+										&& !timeline.richScrollInProgress
 									hoverEffectsEnabled: !root.visualFixtureOverrideActive
+										&& !timeline.richScrollInProgress
 									previewIdentity: messageDelegate.stableId + "|" + String(messageDelegate.preview
 										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
 											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
-									renderActive: messageDelegate.inHydrationWindow && !messageDelegate.accessibilityPooled
+									renderActive: messageDelegate.richResourcesActive
 									watchTogetherAvailable: !mediaSession.sharedAvailable
                                     onExternalOpenRequested: url => Qt.openUrlExternally(url)
 									onImageOpenRequested: (source, title) => root.openManagedPreviewImage(

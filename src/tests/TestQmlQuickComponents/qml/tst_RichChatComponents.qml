@@ -2140,6 +2140,17 @@ TestCase {
 		verify(findChild(card, "embedDocumentMediaThumbnail_0") !== null)
 		verify(findChild(card, "embedDocumentMediaThumbnail_1") !== null)
 		verify(findChild(card, "embedDocumentMediaThumbnail_2") !== null)
+
+		const thumbnailImage = findChild(card, "embedDocumentMediaThumbnailImage_0")
+		verify(thumbnailImage !== null)
+		const stableHeight = card.implicitHeight
+		tryVerify(function() { return String(thumbnailImage.source).length > 0 })
+		compare(thumbnailImage.cache, true)
+		card.renderActive = false
+		tryCompare(thumbnailImage, "source", "")
+		compare(card.implicitHeight, stableHeight)
+		card.renderActive = true
+		tryVerify(function() { return String(thumbnailImage.source).length > 0 })
 	}
 
 	function test_typed_provider_gallery_keeps_height_and_thumbnails_when_playback_starts() {

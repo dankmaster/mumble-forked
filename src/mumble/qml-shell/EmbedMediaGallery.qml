@@ -307,9 +307,12 @@ ColumnLayout {
 
 					contentItem: Item {
 						Image {
+							objectName: "embedDocumentMediaThumbnailImage_" + thumbnailButton.index
 							anchors.fill: parent
 							anchors.margins: 2
 							source: {
+								if (!root.renderActive)
+									return ""
 								const kind = thumbnailButton.modelData.managedAnimated
 									? "animated-image" : String(thumbnailButton.modelData.kind || "")
 								if (kind === "image" || kind === "animated-image")
@@ -322,7 +325,12 @@ ColumnLayout {
 									|| thumbnailButton.modelData.thumbnail || "")
 							}
 							asynchronous: true
-							cache: false
+							// These are intentionally tiny. Caching the bounded decoded
+							// thumbnails prevents a multi-image card from decoding the same
+							// strip again after every ListView pool/reuse cycle.
+							cache: true
+							sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio),
+								Math.ceil(height * Screen.devicePixelRatio))
 							fillMode: Image.PreserveAspectCrop
 						}
 						ModernIcon {
