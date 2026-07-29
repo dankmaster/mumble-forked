@@ -25,6 +25,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -172,6 +173,23 @@ std::wstring quoteArgument(const std::wstring &argument) {
 	quoted.append(static_cast< std::size_t >(backslashes * 2), L'\\');
 	quoted.push_back(L'"');
 	return quoted;
+}
+
+std::wstring shellCompatiblePath(const std::wstring &path) {
+	constexpr std::wstring_view ExtendedUncPrefix = L"\\\\?\\UNC\\";
+	constexpr std::wstring_view ExtendedDosPrefix = L"\\\\?\\";
+	if (path.size() >= ExtendedUncPrefix.size()
+		&& std::equal(ExtendedUncPrefix.begin(), ExtendedUncPrefix.end(), path.begin(),
+					  [](const wchar_t lhs, const wchar_t rhs) {
+						  return std::towlower(lhs) == std::towlower(rhs);
+					  })) {
+		return L"\\\\" + path.substr(ExtendedUncPrefix.size());
+	}
+	if (path.size() >= ExtendedDosPrefix.size()
+		&& std::equal(ExtendedDosPrefix.begin(), ExtendedDosPrefix.end(), path.begin())) {
+		return path.substr(ExtendedDosPrefix.size());
+	}
+	return path;
 }
 
 bool fileExists(const std::wstring &path) {
@@ -366,12 +384,16 @@ void waitForParent(const Options &options) {
 }
 
 DWORD runInstaller(const Options &options) {
-	std::wstring parameters = L"/i " + quoteArgument(options.installerPath) + L" /norestart";
+	const std::wstring installerPath = shellCompatiblePath(options.installerPath);
+	if (installerPath != options.installerPath) {
+		appendLog(options, L"Normalized the verified MSI path for Windows Installer compatibility.");
+	}
+	std::wstring parameters = L"/i " + quoteArgument(installerPath) + L" /norestart";
 	if (options.passive) {
 		parameters += L" /passive";
 	}
 	if (!options.msiLogPath.empty()) {
-		parameters += L" /log " + quoteArgument(options.msiLogPath);
+		parameters += L" /log " + quoteArgument(shellCompatiblePath(options.msiLogPath));
 	}
 
 	std::wstring systemDirectory(MAX_PATH, L'\0');
@@ -2460,12 +2482,14 @@ RelaunchResult relaunchMumble(const Options &options) {
 		return result;
 	}
 
+	const std::wstring appPath = shellCompatiblePath(options.appPath);
+	const std::wstring workingDirectory = shellCompatiblePath(options.workingDirectory);
 	SHELLEXECUTEINFOW executeInfo{};
 	executeInfo.cbSize      = sizeof(executeInfo);
 	executeInfo.fMask       = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
 	executeInfo.lpVerb      = L"open";
-	executeInfo.lpFile      = options.appPath.c_str();
-	executeInfo.lpDirectory = options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str();
+	executeInfo.lpFile      = appPath.c_str();
+	executeInfo.lpDirectory = workingDirectory.empty() ? nullptr : workingDirectory.c_str();
 	executeInfo.nShow       = SW_SHOWNORMAL;
 
 	appendLog(options, L"Restarting Mumble.");
@@ -2514,7 +2538,10 @@ bool waitForUpdateHealth(const Options &options, HANDLE process, Mumble::UpdateH
 	return false;
 }
 
-DWORD runHealthQualifiedInstaller(const Options &options) {
+DWORD runHealthQualifiedInstaller(const Options &options, bool *clientRelaunchHandled = nullptr) {
+	if (clientRelaunchHandled) {
+		*clientRelaunchHandled = false;
+	}
 	if (options.recoveryInstallerPath.empty()) {
 		// Legacy manifests did not carry a known-good MSI. Preserve that path for
 		// backward compatibility, but protocol-v4 channel pointers always supply
@@ -2565,6 +2592,9 @@ DWORD runHealthQualifiedInstaller(const Options &options) {
 				 ? (restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error)
 				 : ERROR_RECOVERY_FAILURE;
 	}
+	if (clientRelaunchHandled) {
+		*clientRelaunchHandled = true;
+	}
 	const bool healthy = waitForUpdateHealth(options, restart.process, *pending);
 	if (healthy) {
 		CloseHandle(restart.process);
@@ -2587,6 +2617,9 @@ DWORD runHealthQualifiedInstaller(const Options &options) {
 	}
 	if (!restored.launched) {
 		return restored.error == 0 ? ERROR_PROCESS_ABORTED : restored.error;
+	}
+	if (clientRelaunchHandled) {
+		*clientRelaunchHandled = true;
 	}
 	appendLog(options, L"Known-good MSI was restored and restarted after failed health qualification.");
 	return ERROR_PROCESS_ABORTED;
@@ -4043,7 +4076,9 @@ DWORD runUpdate(const Options &requestedOptions) {
 	waitForParent(options);
 
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
-	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runHealthQualifiedInstaller(options);
+	bool installerManagedClientRelaunch = false;
+	DWORD updateExitCode = packageMode ? runPackageUpdate(options)
+									  : runHealthQualifiedInstaller(options, &installerManagedClientRelaunch);
 	bool installerRan    = !packageMode;
 	bool packageRestartAttempted = false;
 
@@ -4052,7 +4087,7 @@ DWORD runUpdate(const Options &requestedOptions) {
 		appendLog(options, L"Package update failed with code " + std::to_wstring(updateExitCode)
 							   + L"; running verified MSI fallback.");
 		postUiProgress(-1, true);
-		updateExitCode = runHealthQualifiedInstaller(options);
+		updateExitCode = runHealthQualifiedInstaller(options, &installerManagedClientRelaunch);
 		installerRan   = true;
 	} else if (packageMode && updateCancelled(updateExitCode)) {
 		appendLog(options, L"Package update was cancelled; MSI fallback will not run.");
@@ -4085,13 +4120,13 @@ DWORD runUpdate(const Options &requestedOptions) {
 		if (!restart.launched) {
 			updateExitCode = restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
 		}
-	} else if (packageMode && !options.noRelaunch && updateSucceeded(updateExitCode)) {
+	} else if (packageMode && !installerRan && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Package update completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);
 		packageRestartAttempted = true;
 		updateExitCode = restartPackageAndQualify(options);
-	} else if (packageMode && updateCancelled(updateExitCode) && !options.noRelaunch) {
+	} else if (packageMode && !installerRan && updateCancelled(updateExitCode) && !options.noRelaunch) {
 		appendLog(options, L"Update was cancelled; restarting Mumble without applying the MSI fallback.");
 		postUiProgress(100, false);
 		Sleep(800);
@@ -4101,6 +4136,29 @@ DWORD runUpdate(const Options &requestedOptions) {
 		}
 		if (!restart.launched) {
 			updateExitCode = restart.error == 0 ? ERROR_PROCESS_ABORTED : restart.error;
+		}
+	} else if (installerRan && !options.noRelaunch && !updateSucceeded(updateExitCode)
+			   && !installerManagedClientRelaunch) {
+		const std::filesystem::path statePath = Mumble::UpdateHealth::pendingStatePath(
+			packageWorkRoot(options), std::filesystem::path(options.appPath));
+		std::error_code stateError;
+		const bool stateExists = std::filesystem::exists(statePath, stateError);
+		if (!stateError && !stateExists && fileExists(options.appPath)) {
+			appendLog(options,
+					  L"Windows Installer did not complete; restarting the unchanged or restored Mumble client.");
+			postUiProgress(100, false);
+			Sleep(800);
+			RelaunchResult restart = relaunchMumble(options);
+			if (restart.process) {
+				CloseHandle(restart.process);
+			}
+			if (!restart.launched) {
+				appendLog(options, L"The existing Mumble client could not be restarted automatically.");
+			}
+		} else {
+			appendLog(options,
+					  L"Windows Installer did not complete and recovery is still pending; Mumble will not be "
+					  L"restarted into an uncertain installation.");
 		}
 	}
 

@@ -256,16 +256,19 @@ function Invoke-InstallerAdmission {
 		[string] $RecoveryInstallerSha256 = '',
 		[string] $CandidateExecutableSha256 = '',
 		[string] $AppPath,
-		[string] $UpdateRoot
+		[string] $UpdateRoot,
+		[switch] $AllowRelaunch
 	)
 	$arguments = @(
 		'--installer', $InstallerPath,
 		'--app', $AppPath,
 		'--working-dir', (Split-Path -Parent $AppPath),
 		'--updater-log', (Join-Path $UpdateRoot 'mumble-updater.log'),
-		'--no-ui',
-		'--no-relaunch'
+		'--no-ui'
 	)
+	if (-not $AllowRelaunch) {
+		$arguments += '--no-relaunch'
+	}
 	if (-not [string]::IsNullOrWhiteSpace($InstallerSha256)) {
 		$arguments += @('--installer-sha256', $InstallerSha256)
 	}
@@ -370,6 +373,40 @@ try {
 	}
 	$fakeInstallerSha = (Get-FileHash -LiteralPath $fakeInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
 	$candidateExecutableSha = (Get-FileHash -LiteralPath $appPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+	# Verified artifacts resolve to a \\?\ path while their file handle remains
+	# locked. Windows Installer only accepts the shell-compatible DOS form, and
+	# a failed fallback must reopen the unchanged client instead of stranding the
+	# user after Mumble has already closed.
+	$resumeProbeRoot = Join-Path $testRoot 'installer-failure-resume'
+	$resumeUpdateRoot = Join-Path $resumeProbeRoot 'Updates'
+	[System.IO.Directory]::CreateDirectory($resumeUpdateRoot) | Out-Null
+	$resumeMarker = Join-Path $resumeProbeRoot 'restarted.marker'
+	$resumeApp = Join-Path $resumeProbeRoot 'mumble-resume-probe.cmd'
+	Write-Utf8File -Path $resumeApp -Content (
+		"@echo off`r`n> `"$resumeMarker`" echo restarted`r`n"
+	)
+	$resumeExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller -InstallerSha256 $fakeInstallerSha `
+		-AppPath $resumeApp -UpdateRoot $resumeUpdateRoot -AllowRelaunch
+	if ($resumeExit -eq 0) {
+		throw 'The intentionally invalid MSI unexpectedly succeeded during fallback-resume coverage.'
+	}
+	$resumeDeadline = [Environment]::TickCount64 + 5000
+	while (-not (Test-Path -LiteralPath $resumeMarker -PathType Leaf) -and
+		[Environment]::TickCount64 -lt $resumeDeadline) {
+		Start-Sleep -Milliseconds 50
+	}
+	if (-not (Test-Path -LiteralPath $resumeMarker -PathType Leaf)) {
+		$resumeLog = Get-Content -LiteralPath (Join-Path $resumeUpdateRoot 'mumble-updater.log') -Raw `
+			-ErrorAction SilentlyContinue
+		throw "A failed MSI fallback did not restart the unchanged client.`n$resumeLog"
+	}
+	$resumeLog = Get-Content -LiteralPath (Join-Path $resumeUpdateRoot 'mumble-updater.log') -Raw
+	if ($resumeLog -notmatch 'Normalized the verified MSI path for Windows Installer compatibility' -or
+		$resumeLog -notmatch 'restarting the unchanged or restored Mumble client') {
+		throw "MSI path normalization or failed-fallback restart was not attested in the updater log.`n$resumeLog"
+	}
+
 	$missingRecoveryDigestExit = Invoke-InstallerAdmission -InstallerPath $fakeInstaller `
 		-InstallerSha256 $fakeInstallerSha -RecoveryInstallerPath $fakeRecoveryInstaller `
 		-AppPath $appPath -UpdateRoot $updateRoot
