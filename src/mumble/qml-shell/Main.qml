@@ -4021,9 +4021,17 @@ ApplicationWindow {
 							}
 						}
 						function onPrependPendingChanged() {
-							if (chatModel.prependPending
-									|| !timeline.deferredPrependAnchorActive)
+							if (chatModel.prependPending) {
+								// A page insert and late source-preview results can otherwise
+								// compete for the same GUI turn. Keep preview DTO changes in the
+								// model's bounded queue until the prepend anchor is stable.
+								chatModel.presentationBusy = true
 								return
+							}
+							if (!timeline.deferredPrependAnchorActive) {
+								timeline.scheduleRichContentResume()
+								return
+							}
 							// Deferred rows live in the lightweight inline header and never
 							// enter the warm rich ListView model. Preserve the original item by
 							// the exact fixed prefix extent, then release after one quiet turn.
