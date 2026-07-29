@@ -4861,6 +4861,7 @@ constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
 constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
 constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
+constexpr int FACEBOOK_PREVIEW_METADATA_VERSION = 1;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
@@ -10708,7 +10709,7 @@ constexpr int CHAT_EMBED_ASSIST_MAX_IN_FLIGHT          = 8;
 static const QByteArray s_previewBrowserUserAgent =
 	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
-static const QByteArray s_instagramPreviewMetadataUserAgent =
+static const QByteArray s_socialPreviewMetadataUserAgent =
 	QByteArrayLiteral("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)");
 static const QByteArray s_previewAcceptHeader =
 	QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/*,*/*;q=0.8");
@@ -11139,9 +11140,9 @@ void preparePreviewRequest(QNetworkRequest &request) {
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_previewAcceptLanguageHeader);
 }
 
-void prepareInstagramPreviewMetadataRequest(QNetworkRequest &request) {
+void prepareSocialPreviewMetadataRequest(QNetworkRequest &request) {
 	preparePreviewRequest(request);
-	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_instagramPreviewMetadataUserAgent);
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_socialPreviewMetadataUserAgent);
 }
 
 void preparePreviewImageRequest(QNetworkRequest &request) {
@@ -12637,7 +12638,8 @@ QVariantMap facebookPreviewMetadataFromMetaTags(const QHash< QString, QString > 
 		{ QStringLiteral("provider"), QStringLiteral("facebook") },
 		{ QStringLiteral("previewProvider"), QStringLiteral("facebook") },
 		{ QStringLiteral("previewKind"), QStringLiteral("video") },
-		{ QStringLiteral("facebookMediaKind"), QStringLiteral("reel") }
+		{ QStringLiteral("facebookMediaKind"), QStringLiteral("reel") },
+		{ QStringLiteral("facebookMetadataVersion"), FACEBOOK_PREVIEW_METADATA_VERSION }
 	};
 	insertPreviewMetadataValue(metadata, QStringLiteral("facebookCaption"),
 							   trimmedPreviewText(caption, 1024));
@@ -31492,7 +31494,7 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 		return false;
 	}
 	QNetworkRequest pageRequest(requestUrl);
-	prepareInstagramPreviewMetadataRequest(pageRequest);
+	prepareSocialPreviewMetadataRequest(pageRequest);
 	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
 	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
 	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
@@ -31608,10 +31610,13 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 							!= INSTAGRAM_PREVIEW_METADATA_VERSION
 						|| cached.thumbnailImage.isNull()
 						|| !instagramMetadataIsFresh(cached.metadata)))
+				|| (isFacebookReelPreviewUrl(cachedUrl)
+					&& cached.metadata.value(QStringLiteral("facebookMetadataVersion")).toInt()
+						   != FACEBOOK_PREVIEW_METADATA_VERSION)
 				|| (isTwitchHost(cachedUrl.host())
 					&& cached.metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
 						   != TWITCH_PREVIEW_METADATA_VERSION)
-				|| ((isInstagramVideoPreviewUrl(cachedUrl) || isFacebookReelPreviewUrl(cachedUrl))
+				|| (isInstagramVideoPreviewUrl(cachedUrl)
 					&& cached.mediaDataUrl.trimmed().isEmpty())
 				|| ((isInstagramPreviewUrl(cachedUrl) || isFacebookPreviewUrl(cachedUrl))
 					&& isTransientRemotePreviewMediaDataUrl(cached.mediaDataUrl));
@@ -31856,7 +31861,7 @@ void MainWindow::requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, in
 
 	QNetworkRequest request(url);
 	if (isInstagramPreviewUrl(url)) {
-		prepareInstagramPreviewMetadataRequest(request);
+		prepareSocialPreviewMetadataRequest(request);
 	} else {
 		preparePreviewRequest(request);
 	}
@@ -36489,8 +36494,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	const QString expectedPagePreviewSource = pagePreviewIt->canonicalUrl;
 	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
 	QNetworkRequest pageRequest(previewPageUrl);
-	if (isInstagramPreviewUrl(previewPageUrl)) {
-		prepareInstagramPreviewMetadataRequest(pageRequest);
+	if (isInstagramPreviewUrl(previewPageUrl) || isFacebookReelPreviewUrl(previewPageUrl)) {
+		prepareSocialPreviewMetadataRequest(pageRequest);
 	} else {
 		preparePreviewRequest(pageRequest);
 	}

@@ -1872,7 +1872,9 @@ TestCase {
 							"authorName": "Source",
 							"authorHandle": "@source",
 							"text": "The parent post",
-							"url": "https://x.com/source/status/2058970000000000000"
+							"url": "https://x.com/source/status/2058970000000000000",
+							"replyCount": 295,
+							"likeCount": 35151
 						},
 						{
 							"role": "quote",
@@ -1910,6 +1912,11 @@ TestCase {
 		compare(details.visible, false)
 		verify(findChild(card, "embedThreadContextItem_0") !== null)
 		verify(findChild(card, "embedThreadContextItem_1") !== null)
+		const parentMetrics = findChild(card, "embedThreadContextMetrics_0")
+		verify(parentMetrics !== null && parentMetrics.visible)
+		verify(parentMetrics.text.indexOf("295 replies") >= 0)
+		verify(parentMetrics.text.indexOf("35") >= 0)
+		verify(parentMetrics.text.indexOf("151 likes") >= 0)
 		compare(findChild(card, "embedThreadContextUrl_0").text,
 			"https://x.com/source/status/2058970000000000000")
 

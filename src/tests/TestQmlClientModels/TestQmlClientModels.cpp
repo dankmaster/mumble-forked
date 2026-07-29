@@ -3080,7 +3080,9 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 					  QStringLiteral("https://x.com/source/status/2058970000000000000") },
 					{ QStringLiteral("displayName"), QStringLiteral("Source") },
 					{ QStringLiteral("handle"), QStringLiteral("@source") },
-					{ QStringLiteral("text"), QStringLiteral("The parent post") }
+					{ QStringLiteral("text"), QStringLiteral("The parent post") },
+					{ QStringLiteral("replyCount"), 295 },
+					{ QStringLiteral("likeCount"), 35151 }
 				}
 			} },
 			{ QStringLiteral("xQuotedPost"), QVariantMap {
@@ -3112,6 +3114,8 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			 QStringLiteral("reply-context"));
 	QCOMPARE(xThread.first().toMap().value(QStringLiteral("url")).toString(),
 			 QStringLiteral("https://x.com/source/status/2058970000000000000"));
+	QCOMPARE(xThread.first().toMap().value(QStringLiteral("replyCount")).toInt(), 295);
+	QCOMPARE(xThread.first().toMap().value(QStringLiteral("likeCount")).toInt(), 35151);
 	QCOMPARE(xThread.last().toMap().value(QStringLiteral("role")).toString(), QStringLiteral("quote"));
 	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().size(), 3);
 	QCOMPARE(xDocument.value(QStringLiteral("media")).toList().first().toMap()
@@ -3146,6 +3150,26 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 		} }
 	});
 	QCOMPARE(deduplicatedMediaDocument.value(QStringLiteral("media")).toList().size(), 1);
+
+	const QVariantMap replyOnlyDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://x.com/reply/status/2058995581549244892") },
+		{ QStringLiteral("host"), QStringLiteral("x.com") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("x") },
+			{ QStringLiteral("xReplyContext"), QVariantList {
+				QVariantMap {
+					{ QStringLiteral("id"), QStringLiteral("2058971862265151767") },
+					{ QStringLiteral("text"), QStringLiteral("The real parent") }
+				}
+			} }
+		} }
+	});
+	const QVariantList replyOnlyThread =
+		replyOnlyDocument.value(QStringLiteral("thread")).toMap()
+			.value(QStringLiteral("items")).toList();
+	QCOMPARE(replyOnlyThread.size(), 1);
+	QCOMPARE(replyOnlyThread.first().toMap().value(QStringLiteral("role")).toString(),
+			 QStringLiteral("reply-context"));
 
 	const QString steamSource =
 		QStringLiteral("https://store.steampowered.com/app/730/CounterStrike_2/");
@@ -3457,6 +3481,9 @@ void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
 	QVERIFY(resolvedEmbedPath.contains("animated-gif-video-backed"));
 	QVERIFY(resolvedEmbedPath.contains("requestPersistentChatPreviewPosterImage("));
 	QVERIFY(resolvedEmbedPath.contains("!handledTenorMedia && !handledXPost"));
+	QVERIFY(source.contains("isFacebookReelPreviewUrl(previewPageUrl)"));
+	QVERIFY(source.contains("prepareSocialPreviewMetadataRequest(pageRequest)"));
+	QVERIFY(source.contains("facebookMetadataVersion"));
 
 	const QString cachePath = QFINDTESTDATA("../../mumble/PersistentChatMediaCache.cpp");
 	QVERIFY2(!cachePath.isEmpty(), "PersistentChatMediaCache.cpp test data was not found");

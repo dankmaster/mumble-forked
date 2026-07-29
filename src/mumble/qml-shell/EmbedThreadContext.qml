@@ -101,6 +101,17 @@ ColumnLayout {
 					elide: Text.ElideRight
 				}
 
+				Label {
+					objectName: "embedThreadContextMetrics_" + contextCard.index
+					Layout.fillWidth: true
+					visible: contextCard.metricLine().length > 0
+					text: contextCard.metricLine()
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					elide: Text.ElideRight
+				}
+
 				Button {
 					id: contextUrlButton
 					objectName: "embedThreadContextUrl_" + contextCard.index
@@ -143,7 +154,25 @@ ColumnLayout {
 					return value.length > 0
 				}).join(" · ")
 			}
+
+			function metricLine() {
+				const metrics = []
+				if (modelData.replyCount !== undefined && modelData.replyCount !== null)
+					metrics.push(qsTr("%1 replies").arg(root.formatCount(modelData.replyCount)))
+				if (modelData.repostCount !== undefined && modelData.repostCount !== null)
+					metrics.push(qsTr("%1 reposts").arg(root.formatCount(modelData.repostCount)))
+				if (modelData.likeCount !== undefined && modelData.likeCount !== null)
+					metrics.push(qsTr("%1 likes").arg(root.formatCount(modelData.likeCount)))
+				if (modelData.viewCount !== undefined && modelData.viewCount !== null)
+					metrics.push(qsTr("%1 views").arg(root.formatCount(modelData.viewCount)))
+				return metrics.join(" · ")
+			}
 		}
+	}
+
+	function formatCount(value) {
+		const number = Number(value)
+		return isNaN(number) ? String(value || "") : number.toLocaleString(Qt.locale(), "f", 0)
 	}
 
 	function displayDate(value) {

@@ -304,7 +304,6 @@ namespace {
 
 	QVariantMap threadItem(const QVariantMap &source, const QString &role) {
 		QVariantMap item {
-			{ QStringLiteral("role"), role },
 			{ QStringLiteral("id"), firstText(source,
 				{ QStringLiteral("id"), QStringLiteral("postId") }, 128) },
 			{ QStringLiteral("url"), firstText(source,
@@ -319,6 +318,14 @@ namespace {
 				{ QStringLiteral("createdAt"), QStringLiteral("publishedAt") }, 128) },
 			{ QStringLiteral("verified"), source.value(QStringLiteral("verified")).toBool() }
 		};
+		for (const QString &countKey :
+			 { QStringLiteral("replyCount"), QStringLiteral("likeCount"),
+			   QStringLiteral("repostCount"), QStringLiteral("viewCount") }) {
+			if (source.contains(countKey) && source.value(countKey).isValid()
+				&& !source.value(countKey).isNull()) {
+				item.insert(countKey, source.value(countKey));
+			}
+		}
 		for (auto it = item.begin(); it != item.end();) {
 			if (it.value().metaType().id() == QMetaType::QString && it.value().toString().isEmpty()) {
 				it = item.erase(it);
@@ -328,6 +335,10 @@ namespace {
 				++it;
 			}
 		}
+		if (item.isEmpty()) {
+			return {};
+		}
+		item.insert(QStringLiteral("role"), role);
 		return item;
 	}
 
