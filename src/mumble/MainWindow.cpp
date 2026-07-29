@@ -4774,6 +4774,16 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 		siteLabel     = QObject::tr("SoundCloud");
 		fallbackTitle = QObject::tr("SoundCloud track");
 		openLabel     = QObject::tr("Open on SoundCloud");
+	} else if (youtubePreviewTargetFromUrl(url)) {
+		endpoint = QUrl(QStringLiteral("https://www.youtube.com/oembed"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		endpoint.setQuery(query);
+		providerKey   = QStringLiteral("youtube");
+		siteLabel     = QObject::tr("YouTube");
+		fallbackTitle = QObject::tr("YouTube video");
+		openLabel     = QObject::tr("Open on YouTube");
 	} else if (redditPostIdFromUrl(url)) {
 		endpoint      = redditPostOEmbedUrl(url);
 		providerKey   = QStringLiteral("reddit");
@@ -4849,6 +4859,7 @@ struct RichPreviewProviderInfo {
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
 constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
+constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 1;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
@@ -9864,7 +9875,10 @@ QUrl redditPrimaryMediaUrlFromEmbedHtml(const QString &html) {
 									.value(QStringLiteral("url"))
 									.toString());
 	const QUrl mediaUrl(mediaUrlString);
-	return isTrustedRemotePlayableMediaUrl(mediaUrl, QString()) ? mediaUrl : QUrl();
+	const bool trustedStaticImage =
+		isSafePreviewTarget(mediaUrl) && mediaUrl.scheme().toLower() == QLatin1String("https")
+		&& isKnownRemotePlayableMediaHost(mediaUrl.host()) && isDirectImageUrl(mediaUrl);
+	return trustedStaticImage || isTrustedRemotePlayableMediaUrl(mediaUrl, QString()) ? mediaUrl : QUrl();
 }
 
 QUrl redditVideoMetadataUrl(const QString &videoId) {
@@ -31553,6 +31567,9 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 				|| (previewOEmbedTargetForUrl(cachedUrl)
 					&& cached.metadata.value(QStringLiteral("oEmbedMetadataVersion")).toInt()
 						   != OEMBED_PREVIEW_METADATA_VERSION)
+				|| (isYouTubeClipUrl(cachedUrl)
+					&& cached.metadata.value(QStringLiteral("youtubeClipOEmbedMetadataVersion")).toInt()
+						   != YOUTUBE_CLIP_OEMBED_METADATA_VERSION)
 				|| (richPreviewProviderForUrl(cachedUrl)
 					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
 							!= RICH_PREVIEW_METADATA_VERSION
@@ -34234,6 +34251,12 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					target->socialPost && !isRedditPost ? xPostTextFromOEmbedHtml(html) : QString();
 				previewIt->metadata.insert(
 					QStringLiteral("oEmbedMetadataVersion"), OEMBED_PREVIEW_METADATA_VERSION);
+				if (target->providerKey == QLatin1String("youtube")
+					&& isYouTubeClipUrl(QUrl(previewIt->canonicalUrl))) {
+					previewIt->metadata.insert(
+						QStringLiteral("youtubeClipOEmbedMetadataVersion"),
+						YOUTUBE_CLIP_OEMBED_METADATA_VERSION);
+				}
 				const bool animatedImageProvider =
 					target->providerKey == QLatin1String("giphy")
 					|| target->providerKey == QLatin1String("tenor");
@@ -34262,6 +34285,9 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				}
 				previewIt->title = resolvedTitle;
 				if (!author.isEmpty()) {
+					if (target->providerKey == QLatin1String("youtube")) {
+						previewIt->metadata.insert(QStringLiteral("youtubeAuthor"), author);
+					}
 					if (isRedditPost) {
 						static const QRegularExpression s_redditSubredditPattern(
 							QLatin1String(R"(href=["']https://www\.reddit\.com/r/([^/"']+)/?["'])"),
@@ -35566,6 +35592,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					const QJsonObject object = document.object();
 					const QString title      = object.value(QLatin1String("title")).toString().trimmed();
 					const QString author     = object.value(QLatin1String("author_name")).toString().trimmed();
+					it->metadata.insert(
+						QStringLiteral("oEmbedMetadataVersion"), OEMBED_PREVIEW_METADATA_VERSION);
 					it->title                = title.isEmpty()
 												   ? (youtubeIsShort ? tr("YouTube Short")
 													  : youtubeIsLive ? tr("YouTube live video")
@@ -36587,6 +36615,14 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->description      = parsed.description;
 			for (auto metadataIt = parsed.metadata.cbegin(); metadataIt != parsed.metadata.cend(); ++metadataIt) {
 				it->metadata.insert(metadataIt.key(), metadataIt.value());
+			}
+			const QString resolvedYouTubeClipVideoId =
+				it->metadata.value(QStringLiteral("youtubeResolvedVideoId")).toString().trimmed();
+			if (isYouTubeClipUrl(previewUrl) && isValidYouTubeVideoId(resolvedYouTubeClipVideoId)) {
+				requestPersistentChatOEmbedPreview(
+					previewKey,
+					QUrl(QStringLiteral("https://www.youtube.com/watch?v=%1")
+							 .arg(resolvedYouTubeClipVideoId)));
 			}
 			if (richPreviewProviderForUrl(previewUrl)) {
 				if (richPreviewClientHydrationComplete(previewUrl, it->metadata)) {

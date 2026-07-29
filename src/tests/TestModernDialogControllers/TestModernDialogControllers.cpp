@@ -3857,7 +3857,11 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1")));
 	QVERIFY(source.contains(QStringLiteral(
+		"constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 1")));
+	QVERIFY(source.contains(QStringLiteral(
 		"cached.metadata.value(QStringLiteral(\"oEmbedMetadataVersion\")).toInt()")));
+	QVERIFY(source.contains(QStringLiteral(
+		"cached.metadata.value(QStringLiteral(\"youtubeClipOEmbedMetadataVersion\")).toInt()")));
 	QVERIFY(source.contains(QStringLiteral(
 		"const bool handledOEmbed = requestPersistentChatOEmbedPreview(previewKey, previewUrl)")));
 	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
@@ -3912,8 +3916,14 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("redditPosterUrlFromEmbedHtml(html)")));
 	QVERIFY(source.contains(QStringLiteral("redditPrimaryMediaUrlFromEmbedHtml(html)")));
 	QVERIFY(source.contains(QStringLiteral("<shreddit-screenview-data")));
+	QVERIFY(source.contains(QStringLiteral("trustedStaticImage")));
+	QVERIFY(source.contains(QStringLiteral("isDirectImageUrl(mediaUrl)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"youtubeClipOEmbedMetadataVersion")));
+	QVERIFY(source.contains(QStringLiteral(
+		"https://www.youtube.com/watch?v=%1")));
 	QVERIFY(source.contains(QStringLiteral(
 		"https://www.youtube-nocookie.com/embed/%1")));
 	QVERIFY(source.contains(QStringLiteral(
