@@ -1760,51 +1760,56 @@ ApplicationWindow {
 	}
 
 	function timelinePresentationState() {
-		const minimumY = timeline.originY
-		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
-		const firstVisible = timeline.firstVisibleMessageDelegate()
-		const completedAt = timeline.scopePresentationCompletedAt > 0
-			? timeline.scopePresentationCompletedAt : Date.now()
-		return {
-			"scopeToken": String(activeScope.scopeToken || ""),
-			"scopeLabel": String(activeScope.label || ""),
-			"count": timeline.count,
-			"contentHeight": timeline.contentHeight,
-			"viewportHeight": timeline.height,
-			"originY": timeline.originY,
-			"contentY": timeline.contentY,
-			"maximumY": maximumY,
-			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
-			"firstVisibleOffset": firstVisible
-				? Number(firstVisible.y - timeline.contentY) : 0,
-			"presentationPending": timeline.scopePresentationPending,
-			"presentationFinalizing": timeline.scopePresentationFinalizing,
-			"scopeResetPending": timeline.scopeResetPending,
-			"presentationFastPath": timeline.scopePresentationFastPath,
-			"observationActive": timeline.scopePresentationObservationActive,
-			"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
-			"generation": timeline.scopePresentationGeneration,
-			"mutationCount": timeline.scopePresentationMutationCount,
-			"tailCorrectionCount": timeline.scopePresentationTailCorrectionCount,
-			"exposedHeightChangeCount": timeline.scopePresentationExposedHeightChangeCount,
-			"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
-			"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
-			"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
-			"prependAnchorActive": timeline.prependAnchorActive,
-			"prependAnchorId": timeline.prependAnchorId,
-			"prependAnchorOffset": timeline.prependAnchorOffset,
-			"prependAnchorTargetY": timeline.prependAnchorTargetY,
-			"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
-			"prependQueuePending": chatModel.prependPending,
-			"deferredPrependRichCount":
-				Object.keys(timeline.deferredPrependRichIds || ({})).length,
-			"durationMs": timeline.scopePresentationStartedAt > 0
-				? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
-			"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
-				&& !timeline.scopeResetPending
-				&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
-				&& !timeline.restoringBottom && !timeline.prependAnchorActive
-				&& !chatModel.prependPending
+		try {
+			const minimumY = timeline.originY
+			const maximumY = Math.max(minimumY,
+				timeline.originY + timeline.contentHeight - timeline.height)
+			const firstVisible = timeline.firstVisibleMessageDelegate()
+			const completedAt = timeline.scopePresentationCompletedAt > 0
+				? timeline.scopePresentationCompletedAt : Date.now()
+			return {
+				"scopeToken": String(activeScope.scopeToken || ""),
+				"scopeLabel": String(activeScope.label || ""),
+				"count": timeline.count,
+				"contentHeight": timeline.contentHeight,
+				"viewportHeight": timeline.height,
+				"originY": timeline.originY,
+				"contentY": timeline.contentY,
+				"maximumY": maximumY,
+				"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
+				"firstVisibleOffset": firstVisible
+					? Number(firstVisible.y - timeline.contentY) : 0,
+				"presentationPending": timeline.scopePresentationPending,
+				"presentationFinalizing": timeline.scopePresentationFinalizing,
+				"scopeResetPending": timeline.scopeResetPending,
+				"presentationFastPath": timeline.scopePresentationFastPath,
+				"observationActive": timeline.scopePresentationObservationActive,
+				"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
+				"generation": timeline.scopePresentationGeneration,
+				"mutationCount": timeline.scopePresentationMutationCount,
+				"tailCorrectionCount": timeline.scopePresentationTailCorrectionCount,
+				"exposedHeightChangeCount": timeline.scopePresentationExposedHeightChangeCount,
+				"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
+				"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
+				"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
+				"prependAnchorActive": timeline.prependAnchorActive,
+				"prependAnchorId": timeline.prependAnchorId,
+				"prependAnchorOffset": timeline.prependAnchorOffset,
+				"prependAnchorTargetY": timeline.prependAnchorTargetY,
+				"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
+				"prependQueuePending": chatModel.prependPending,
+				"deferredPrependRichCount":
+					Object.keys(timeline.deferredPrependRichIds || ({})).length,
+				"durationMs": timeline.scopePresentationStartedAt > 0
+					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
+				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
+					&& !timeline.scopeResetPending
+					&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
+					&& !timeline.restoringBottom && !timeline.prependAnchorActive
+					&& !chatModel.prependPending
+			}
+		} catch (error) {
+			return { "error": String(error), "settled": false }
 		}
 	}
 
