@@ -744,6 +744,8 @@ public:
 														 const QString &scopeToken);
 	void flushQmlRoomStateUpdates();
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message);
+	void scheduleDeferredModernShellChatMessageDrain();
+	void drainDeferredModernShellChatMessages();
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishPersistentChatInlineDataImageProviderUpdate(const QString &token);
 	void openPersistentChatAttachment(unsigned int assetID, const QString &fileName);
@@ -1206,6 +1208,8 @@ protected:
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;
+	QHash< QString, MumbleProto::ChatMessage > m_deferredModernShellChatMessages;
+	bool m_deferredModernShellChatMessageDrainScheduled = false;
 	QSet< QString > m_deferredModernShellPreviewUpdateKeys;
 	bool m_deferredModernShellPreviewUpdateDrainScheduled = false;
 	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;

@@ -2090,6 +2090,9 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	const QString drainBody = source.mid(drainStart, nextFunction - drainStart);
 	QVERIFY(drainBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.erase(it)")));
 	QCOMPARE(drainBody.count(QStringLiteral("publishModernShellPreviewUpdateForKey(previewKey)")), 1);
+	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellChatMessages.insert")));
+	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
+	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
 	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
 }
 

@@ -14873,14 +14873,20 @@ void MainWindow::applyShellLayout() {
 			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::presentationBusyChanged, this, [this]() {
 				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()
 					&& !m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()) {
-					scheduleDeferredModernShellPreviewUpdateDrain();
+					scheduleDeferredModernShellChatMessageDrain();
+					if (m_deferredModernShellChatMessages.isEmpty()) {
+						scheduleDeferredModernShellPreviewUpdateDrain();
+					}
 				}
 			});
 			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::deferredPresentationUpdatesPendingChanged,
 					this, [this]() {
 				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()
 					&& !m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()) {
-					scheduleDeferredModernShellPreviewUpdateDrain();
+					scheduleDeferredModernShellChatMessageDrain();
+					if (m_deferredModernShellChatMessages.isEmpty()) {
+						scheduleDeferredModernShellPreviewUpdateDrain();
+					}
 				}
 			});
 			connect(session, &ClientSessionController::collapsedNavigationSectionsChanged, this, [session]() {
@@ -25255,6 +25261,7 @@ void MainWindow::clearModernShellMessageDtoCache(const char *reason) {
 	const int previousSize = m_modernShellMessageDtoCache.size();
 	m_modernShellMessageDtoCache.clear();
 	m_modernShellMessageDtoCacheKeysByMessage.clear();
+	m_deferredModernShellChatMessages.clear();
 	m_persistentChatPreviewKeyCache.clear();
 	mumble::chatperf::recordValue("modern.message_dto_cache.clear", previousSize);
 	appendModernShellConnectTrace(QStringLiteral("modern message dto cache clear reason=%1 size=%2 context=%3")
@@ -25309,6 +25316,7 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 
 void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty() || m_deferredModernShellPreviewUpdateDrainScheduled
+		|| !m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
@@ -25323,6 +25331,7 @@ void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 
 void MainWindow::drainDeferredModernShellPreviewUpdates() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty()
+		|| !m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
@@ -27173,7 +27182,12 @@ void MainWindow::flushQmlRoomStateUpdates() {
 
 void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) {
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	if (target.serverLog || target.directMessage) {
+	if (target.serverLog || target.directMessage || !m_qmlShellHost) {
+		return;
+	}
+	if (m_qmlShellHost->chatModel()->presentationBusy()) {
+		m_deferredModernShellChatMessages.insert(persistentChatMessageIdentityKey(message), message);
+		mumble::chatperf::recordValue("qml.chat.dto_build.deferred_source", 1);
 		return;
 	}
 
@@ -27185,7 +27199,6 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) 
 	const bool canDeleteMessages  = canDeletePersistentChatMessages(target, true);
 	const QVariantMap state =
 		buildModernShellCachedMessageState(message, target, canReply, canReact, canDeleteMessages);
-	if (!m_qmlShellHost) return;
 	const ChatTimelineModel::MessageMutation mutation = m_qmlShellHost->chatModel()->applyMessage(state);
 	if (mutation == ChatTimelineModel::MessageMutation::Inserted)
 		mumble::chatperf::recordValue("qml.chat.append.direct", 1);
@@ -27193,6 +27206,39 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) 
 		mumble::chatperf::recordValue("qml.chat.update.direct", 1);
 	else if (mutation == ChatTimelineModel::MessageMutation::Unchanged)
 		mumble::chatperf::recordValue("qml.chat.unchanged.direct", 1);
+}
+
+void MainWindow::scheduleDeferredModernShellChatMessageDrain() {
+	if (m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
+		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
+							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
+		return;
+	}
+
+	m_deferredModernShellChatMessageDrainScheduled = true;
+	QTimer::singleShot(16, this, [this]() {
+		m_deferredModernShellChatMessageDrainScheduled = false;
+		drainDeferredModernShellChatMessages();
+	});
+}
+
+void MainWindow::drainDeferredModernShellChatMessages() {
+	if (m_deferredModernShellChatMessages.isEmpty()
+		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
+							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
+		return;
+	}
+
+	auto it = m_deferredModernShellChatMessages.begin();
+	const MumbleProto::ChatMessage message = it.value();
+	m_deferredModernShellChatMessages.erase(it);
+	mumble::chatperf::recordValue("qml.chat.dto_build.deferred_source.drain", 1);
+	publishQmlChatMessage(message);
+	if (m_deferredModernShellChatMessages.isEmpty()) {
+		scheduleDeferredModernShellPreviewUpdateDrain();
+	} else {
+		scheduleDeferredModernShellChatMessageDrain();
+	}
 }
 
 void MainWindow::publishQmlActiveScopeState() {
