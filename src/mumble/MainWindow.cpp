@@ -4502,6 +4502,7 @@ QString steamPlatformText(const QJsonObject &platforms) {
 }
 
 bool isSafePreviewTarget(const QUrl &url);
+bool isTrustedRemotePlayableMediaUrl(const QUrl &url, const QString &suggestedMime);
 
 QString steamMovieMediaUrl(const QJsonObject &movie, QString *mime, QString *streamKind) {
 	const auto setKind = [mime, streamKind](const QString &mimeValue, const QString &kindValue) {
@@ -4847,6 +4848,7 @@ struct RichPreviewProviderInfo {
 };
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
+constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
@@ -9836,6 +9838,33 @@ QUrl redditPosterUrlFromEmbedHtml(const QString &html) {
 			   && isSafePreviewTarget(posterUrl)
 		? posterUrl
 		: QUrl();
+}
+
+QUrl redditPrimaryMediaUrlFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_screenviewDataPattern(
+		QLatin1String(R"(<shreddit-screenview-data\b[^>]*\bdata=(["'])([\s\S]*?)\1)"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_screenviewDataPattern.match(html);
+	if (!match.hasMatch()) {
+		return {};
+	}
+
+	const QString decodedJson =
+		QTextDocumentFragment::fromHtml(match.captured(2)).toPlainText().trimmed();
+	QJsonParseError error;
+	const QJsonDocument document = QJsonDocument::fromJson(decodedJson.toUtf8(), &error);
+	if (error.error != QJsonParseError::NoError || !document.isObject()) {
+		return {};
+	}
+
+	const QString mediaUrlString =
+		normalizedJsonUrlString(document.object()
+									.value(QStringLiteral("post"))
+									.toObject()
+									.value(QStringLiteral("url"))
+									.toString());
+	const QUrl mediaUrl(mediaUrlString);
+	return isTrustedRemotePlayableMediaUrl(mediaUrl, QString()) ? mediaUrl : QUrl();
 }
 
 QUrl redditVideoMetadataUrl(const QString &videoId) {
@@ -31521,6 +31550,9 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 			PersistentChatMediaCache::PreviewEntry cached = std::move(completed->value());
 			const QUrl cachedUrl(cached.canonicalUrl);
 			const bool invalid = isGameStorePreviewUrl(cachedUrl)
+				|| (previewOEmbedTargetForUrl(cachedUrl)
+					&& cached.metadata.value(QStringLiteral("oEmbedMetadataVersion")).toInt()
+						   != OEMBED_PREVIEW_METADATA_VERSION)
 				|| (richPreviewProviderForUrl(cachedUrl)
 					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
 							!= RICH_PREVIEW_METADATA_VERSION
@@ -34200,6 +34232,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 				const QString html       = object.value(QStringLiteral("html")).toString();
 				const QString postText =
 					target->socialPost && !isRedditPost ? xPostTextFromOEmbedHtml(html) : QString();
+				previewIt->metadata.insert(
+					QStringLiteral("oEmbedMetadataVersion"), OEMBED_PREVIEW_METADATA_VERSION);
 				const bool animatedImageProvider =
 					target->providerKey == QLatin1String("giphy")
 					|| target->providerKey == QLatin1String("tenor");
@@ -34246,11 +34280,12 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 						previewIt->subtitle =
 							target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
 					}
-					previewIt->description = target->socialPost ? target->siteLabel : QString();
+					previewIt->description =
+						target->socialPost && !isRedditPost ? target->siteLabel : QString();
 				} else {
 					previewIt->subtitle = provider.isEmpty() ? target->siteLabel : provider;
 					if (target->socialPost) {
-						previewIt->description = target->siteLabel;
+						previewIt->description = isRedditPost ? QString() : target->siteLabel;
 					}
 				}
 				if (target->providerKey == QLatin1String("tenor")) {
@@ -34484,6 +34519,7 @@ bool MainWindow::requestPersistentChatRedditPostPreview(const QString &previewKe
 				const QString html = success ? QString::fromUtf8(data) : QString();
 				const QString videoId = redditVideoIdFromEmbedHtml(html);
 				const QUrl posterUrl = redditPosterUrlFromEmbedHtml(html);
+				const QUrl primaryMediaUrl = redditPrimaryMediaUrlFromEmbedHtml(html);
 				QVariantMap resolvedMetadata = previewIt->metadata;
 				if (success && !html.isEmpty()) {
 					resolvedMetadata.insert(QStringLiteral("richPreviewClientHydrationVersion"),
@@ -34501,6 +34537,12 @@ bool MainWindow::requestPersistentChatRedditPostPreview(const QString &previewKe
 											embedUrl.toString(QUrl::FullyEncoded));
 				}
 				previewIt->metadata = resolvedMetadata;
+				if (videoId.isEmpty() && primaryMediaUrl.isValid()) {
+					applyPersistentChatRemotePlayableMedia(
+						*previewIt, primaryMediaUrl,
+						playableMediaMimeForUrl(primaryMediaUrl, QStringLiteral("image/jpeg")),
+						QStringLiteral("image"), QStringLiteral("image-card"));
+				}
 				if (!videoId.isEmpty()) {
 					if (requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)) {
 						publishPersistentChatPreviewUpdate(previewKey);
@@ -35441,10 +35483,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
 		const bool handledYahooFinanceQuotePreview = applyYahooFinanceQuotePreviewFallback(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
-		const bool tenorPreview =
-			hostEqualsOrEndsWith(normalizedPreviewHost(previewUrl.host()), QStringLiteral("tenor.com"));
-		const bool handledAnimatedOEmbed =
-			(giphyMedia || tenorPreview) && requestPersistentChatOEmbedPreview(previewKey, previewUrl);
+		const bool handledOEmbed = requestPersistentChatOEmbedPreview(previewKey, previewUrl);
 		const bool handledTenorMedia = requestPersistentChatTenorMediaPreview(previewKey, previewUrl);
 		const bool handledXPost = requestPersistentChatXPostPreview(previewKey, previewUrl);
 		if (imgurId && preview.mediaKind == QLatin1String("video")) {
@@ -35462,7 +35501,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		if (preview.previewAssetID > 0 && !handledRedditVideoPreview) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
-			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview && !handledAnimatedOEmbed
+			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview && !handledOEmbed
 				&& !handledTenorMedia && !handledXPost) {
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 			}

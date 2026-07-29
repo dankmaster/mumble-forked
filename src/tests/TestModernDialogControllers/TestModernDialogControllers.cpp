@@ -3855,6 +3855,11 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1")));
+	QVERIFY(source.contains(QStringLiteral(
+		"cached.metadata.value(QStringLiteral(\"oEmbedMetadataVersion\")).toInt()")));
+	QVERIFY(source.contains(QStringLiteral(
+		"const bool handledOEmbed = requestPersistentChatOEmbedPreview(previewKey, previewUrl)")));
 	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
 	QVERIFY(source.contains(QStringLiteral("data-old-hires")));
 	QVERIFY(source.contains(QStringLiteral("data-a-dynamic-image")));
@@ -3905,6 +3910,8 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("redditPostEmbedUrl(previewUrl)")));
 	QVERIFY(source.contains(QStringLiteral("redditVideoIdFromEmbedHtml(html)")));
 	QVERIFY(source.contains(QStringLiteral("redditPosterUrlFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral("redditPrimaryMediaUrlFromEmbedHtml(html)")));
+	QVERIFY(source.contains(QStringLiteral("<shreddit-screenview-data")));
 	QVERIFY(source.contains(QStringLiteral(
 		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
 	QVERIFY(source.contains(QStringLiteral(
