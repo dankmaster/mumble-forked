@@ -3051,6 +3051,8 @@ ApplicationWindow {
 					property bool viewportAnchorActive: false
 					property bool restoringViewportAnchor: false
 					property int viewportAnchorRetries: 0
+					property bool topAnchorActive: false
+					property bool restoringTopAnchor: false
 					property bool stickToBottom: true
 					property bool followTailAfterInsert: false
 					property int pendingTailInsertCount: 0
@@ -3407,6 +3409,14 @@ ApplicationWindow {
 						if (stickToBottom || prependAnchorActive || scopePresentationPending
 								|| moving || dragging || flicking)
 							return false
+						if (Math.abs(contentY - originY) <= 0.5) {
+							releaseViewportAnchor()
+							topAnchorActive = true
+							topAnchorSettleTimer.restart()
+							return true
+						}
+						topAnchorActive = false
+						topAnchorSettleTimer.stop()
 						const item = firstVisibleMessageDelegate()
 						if (!item)
 							return false
@@ -3423,6 +3433,17 @@ ApplicationWindow {
 						viewportAnchorActive = false
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
+					}
+
+					function restoreTopAnchor() {
+						if (!topAnchorActive || restoringTopAnchor || moving || dragging || flicking)
+							return
+						restoringTopAnchor = true
+						forceLayout()
+						positionViewAtBeginning()
+						contentY = originY
+						restoringTopAnchor = false
+						topAnchorSettleTimer.restart()
 					}
 
 					function scheduleRichContentResume() {
@@ -3675,6 +3696,10 @@ ApplicationWindow {
 						}
 						if (scopePresentationObservationActive)
 							++scopePresentationExposedHeightChangeCount
+						if (topAnchorActive) {
+							Qt.callLater(function() { timeline.restoreTopAnchor() })
+							return
+						}
 						if (prependAnchorActive) {
 							// Pure older-history rows have a fixed technical height until
 							// they approach the viewport. Preserve their exact displacement
@@ -3701,6 +3726,10 @@ ApplicationWindow {
 						root.closeQuickReactions()
 						richContentResumeTimer.stop()
 						releaseViewportAnchor()
+						if (!restoringTopAnchor) {
+							topAnchorActive = false
+							topAnchorSettleTimer.stop()
+						}
 						// QQuickListView reports its own insert displacement as movement.
 						// Preserve the pre-structural anchor through that transition, while
 						// ordinary wheel, drag and flick movement still cancels restoration.
@@ -3737,6 +3766,13 @@ ApplicationWindow {
 							++timeline.richContentResumeGeneration
 							timeline.queueVisibleDeferredMaterialization()
 						}
+					}
+
+					Timer {
+						id: topAnchorSettleTimer
+						interval: 180
+						repeat: false
+						onTriggered: timeline.topAnchorActive = false
 					}
 
 					Timer {
