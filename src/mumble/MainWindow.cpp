@@ -13806,6 +13806,37 @@ QNetworkReply *MainWindow::startPersistentChatPreviewPost(const QNetworkRequest 
 
 void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previewKey) {
 	cancelPersistentChatVideoPosters(previewKey);
+	const auto previewHasCancelableAsyncWork = [](const PersistentChatPreview &preview) {
+		if (preview.remoteMediaRequested || preview.siteSnapshotRequested
+			|| !preview.thumbnailRequestSource.isEmpty()
+			|| (preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished)) {
+			return true;
+		}
+		for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+			if (item.imageProviderRequested && !item.imageProviderFinished) {
+				return true;
+			}
+		}
+		for (auto it = preview.metadataImages.cbegin(); it != preview.metadataImages.cend(); ++it) {
+			if (it->requested && !it->finished) {
+				return true;
+			}
+		}
+		return false;
+	};
+	QSet< QString > invalidatedPreviewKeys;
+	if (previewKey.isEmpty()) {
+		for (auto it = m_persistentChatPreviews.cbegin(); it != m_persistentChatPreviews.cend(); ++it) {
+			if (previewHasCancelableAsyncWork(it.value())) {
+				invalidatedPreviewKeys.insert(it.key());
+			}
+		}
+	} else {
+		const auto it = m_persistentChatPreviews.constFind(previewKey);
+		if (it != m_persistentChatPreviews.cend() && previewHasCancelableAsyncWork(it.value())) {
+			invalidatedPreviewKeys.insert(previewKey);
+		}
+	}
 	if (previewKey.isEmpty()) {
 		persistentChatPreviewWorkerQueue().cancelGroupsWithPrefix(this, QStringLiteral("preview:"));
 		persistentChatPreviewWorkerQueue().cancelGroupsWithPrefix(this, QStringLiteral("preview-cache-read:"));
@@ -13817,7 +13848,6 @@ void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previ
 		m_persistentChatPreviewCacheReadsInFlight.remove(previewKey);
 	}
 
-	QSet< QString > invalidatedPreviewKeys;
 	const QList< QNetworkReply * > replies = m_persistentChatPreviewNetworkReplies.keys();
 	for (QNetworkReply *reply : replies) {
 		if (!reply) {

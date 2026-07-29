@@ -3854,6 +3854,11 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
+	QVERIFY(source.contains(QStringLiteral("previewHasCancelableAsyncWork")));
+	QVERIFY(source.contains(QStringLiteral("preview.remoteMediaRequested || preview.siteSnapshotRequested")));
+	QVERIFY(source.contains(QStringLiteral("item.imageProviderRequested && !item.imageProviderFinished")));
+	QVERIFY(source.contains(QStringLiteral("it->requested && !it->finished")));
+	QVERIFY(source.contains(QStringLiteral("invalidatedPreviewKeys.insert(it.key())")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 15")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1")));
 	QVERIFY(source.contains(QStringLiteral(
