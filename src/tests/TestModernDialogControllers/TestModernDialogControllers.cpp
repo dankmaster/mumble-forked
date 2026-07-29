@@ -3890,6 +3890,10 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral(
 		"if (hasEmbedTarget) {\n\t\t\tpreviewIt->failed = false;")));
 	QVERIFY(source.contains(QStringLiteral(
+		"const bool hasProviderEmbed = previewEmbedTargetForUrl(previewUrl).has_value()")));
+	QVERIFY(source.contains(QStringLiteral(
+		"if (hasStructuredFallback || hasProviderEmbed)")));
+	QVERIFY(source.contains(QStringLiteral(
 		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
 	QVERIFY(source.contains(QStringLiteral("redditPostOEmbedUrl(url)")));
 	QVERIFY(source.contains(QStringLiteral("redditPostEmbedUrl(previewUrl)")));

@@ -36423,7 +36423,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					|| it->metadata.contains(QStringLiteral("vehicleTitle"))
 					|| it->metadata.contains(QStringLiteral("listingTitle"))
 					|| it->metadata.contains(QStringLiteral("articleTitle"));
-				if (hasStructuredFallback) {
+				const bool hasProviderEmbed = previewEmbedTargetForUrl(previewUrl).has_value();
+				if (hasStructuredFallback || hasProviderEmbed) {
 					if (previewDescriptionIsPlaceholder(it->description)) {
 						it->description.clear();
 					}
