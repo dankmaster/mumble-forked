@@ -3880,7 +3880,15 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("instagramPosterUrl")));
 	QVERIFY(source.contains(QStringLiteral("requestPersistentChatPreviewPosterImage(")));
 	QVERIFY(source.contains(QStringLiteral(
+		"constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11")));
+	QVERIFY(source.contains(QStringLiteral("scannedScripts++ < 64")));
+	QVERIFY(source.contains(QStringLiteral("!json.contains(shortcodeUtf8)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"parsedCandidateBytes + json.size() > 4 * 1024 * 1024")));
+	QVERIFY(source.contains(QStringLiteral(
 		"providerMetadata.insert(QStringLiteral(\"previewProvider\"), target->providerKey)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"if (hasEmbedTarget) {\n\t\t\tpreviewIt->failed = false;")));
 	QVERIFY(source.contains(QStringLiteral(
 		"success && !target->socialPost && previewDescriptionIsPlaceholder(previewIt->description)")));
 	QVERIFY(source.contains(QStringLiteral("redditPostOEmbedUrl(url)")));

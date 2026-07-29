@@ -4847,7 +4847,7 @@ struct RichPreviewProviderInfo {
 };
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 10;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
@@ -12460,12 +12460,21 @@ std::optional< QJsonObject > instagramMediaObjectFromHtml(const QUrl &url, const
 		QLatin1String("<script\\b[^>]*\\btype\\s*=\\s*[\"']application/json[\"'][^>]*>([\\s\\S]*?)</script>"),
 		QRegularExpression::CaseInsensitiveOption);
 	QRegularExpressionMatchIterator scripts = s_applicationJsonScript.globalMatch(html);
-	int parsedScripts = 0;
-	while (scripts.hasNext() && parsedScripts++ < 24) {
+	const QByteArray shortcodeUtf8 = shortcode.toUtf8();
+	int scannedScripts = 0;
+	qint64 parsedCandidateBytes = 0;
+	// Instagram currently places the ungated post payload around script 24-25,
+	// after many small boot/config scripts. Scan the bounded document without
+	// parsing unrelated JSON; keep both the tag count and candidate bytes
+	// capped so future page growth cannot turn hydration into unbounded work.
+	while (scripts.hasNext() && scannedScripts++ < 64) {
 		const QByteArray json = scripts.next().captured(1).trimmed().toUtf8();
-		if (json.isEmpty() || json.size() > 2 * 1024 * 1024) {
+		if (json.isEmpty() || !json.contains(shortcodeUtf8)
+			|| json.size() > 2 * 1024 * 1024
+			|| parsedCandidateBytes + json.size() > 4 * 1024 * 1024) {
 			continue;
 		}
+		parsedCandidateBytes += json.size();
 		QJsonParseError error;
 		const QJsonDocument document = QJsonDocument::fromJson(json, &error);
 		if (error.error != QJsonParseError::NoError || document.isNull()) {
@@ -34327,6 +34336,12 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 			if (!hasEmbedTarget && !isRedditPost && previewIt->mediaDataUrl.isEmpty()) {
 				previewIt->failed = true;
 			}
+		}
+		// Provider-owned players remain a useful, honest fallback when their
+		// optional oEmbed metadata endpoint rejects anonymous clients. Do not let
+		// an earlier server-side preview failure suppress the real embed surface.
+		if (hasEmbedTarget) {
+			previewIt->failed = false;
 		}
 		if (!thumbnailRequested) {
 			previewIt->thumbnailFinished = true;
