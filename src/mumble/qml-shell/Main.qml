@@ -3042,6 +3042,7 @@ ApplicationWindow {
 							richContentResumeTimer.stop()
 							richLoaderResumeTimer.stop()
 							deferredMaterializationTimer.stop()
+							suspendRichContentForScroll()
 							return
 						}
 						scheduleRichContentResume()
@@ -3472,6 +3473,19 @@ ApplicationWindow {
 						if (richScrollInProgress)
 							return
 						richContentResumeTimer.restart()
+					}
+
+					function suspendRichContentForScroll() {
+						richLoaderResumeQueue = []
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (!item || item.performanceTimelineDelegate !== true
+									|| item.accessibilityPooled === true)
+								continue
+							item.richResourcesActive = false
+							item.richLoaderSuspended = true
+						}
 					}
 
 					function queueRichLoaderResumes() {
