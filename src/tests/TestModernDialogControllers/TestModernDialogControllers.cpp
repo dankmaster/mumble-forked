@@ -3854,7 +3854,7 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(!source.contains(QStringLiteral(
 		"metadata.insert(QStringLiteral(\"steamMediaItems\"), mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("cancelPersistentChatPreviewNetworkRequests")));
-	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 14")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int RICH_PREVIEW_METADATA_VERSION = 15")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1")));
 	QVERIFY(source.contains(QStringLiteral(
 		"constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2")));
@@ -3865,6 +3865,8 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral(
 		"const bool handledOEmbed = requestPersistentChatOEmbedPreview(previewKey, previewUrl)")));
 	QVERIFY(source.contains(QStringLiteral("QVariantList amazonProductImageItemsFromHtml")));
+	QVERIFY(source.contains(QStringLiteral("bool isAmazonProductImageUrl")));
+	QVERIFY(source.contains(QStringLiteral("hostEqualsOrEndsWith(host, QStringLiteral(\"media-amazon.com\"))")));
 	QVERIFY(source.contains(QStringLiteral("data-old-hires")));
 	QVERIFY(source.contains(QStringLiteral("data-a-dynamic-image")));
 	QVERIFY(source.contains(QStringLiteral(
@@ -3920,6 +3922,10 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(source.contains(QStringLiteral("isDirectImageUrl(mediaUrl)")));
 	QVERIFY(source.contains(QStringLiteral(
 		"requestPersistentChatRedditDashManifestPreview(previewKey, videoId, failureText)")));
+	QVERIFY(source.contains(QStringLiteral(
+		"applyPersistentChatRemotePlayableMedia(\n\t\t\t\t\t\t\t\t  *previewIt, dashManifestUrl, QStringLiteral(\"application/dash+xml\")")));
+	QVERIFY(source.contains(QStringLiteral(
+		"previewIt->mediaAudioDataUrl.clear()")));
 	QVERIFY(source.contains(QStringLiteral(
 		"youtubeClipOEmbedMetadataVersion")));
 	const qsizetype youtubeClipMetadataStart =

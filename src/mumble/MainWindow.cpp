@@ -4857,7 +4857,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 15;
 constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
 constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
@@ -4898,7 +4898,9 @@ bool isRemotePlayableMediaMime(const QString &mime) {
 	return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/mp4")
 		   || normalized == QLatin1String("video/webm") || normalized == QLatin1String("image/jpeg")
 		   || normalized == QLatin1String("image/jpg") || normalized == QLatin1String("image/png")
-		   || normalized == QLatin1String("image/webp");
+		   || normalized == QLatin1String("image/webp")
+		   || normalized == QLatin1String("application/vnd.apple.mpegurl")
+		   || normalized == QLatin1String("application/dash+xml");
 }
 
 bool isRemotePlayableAudioMime(const QString &mime) {
@@ -4935,6 +4937,12 @@ QString playableMediaMimeForUrl(const QUrl &url, const QString &suggestedMime = 
 	}
 	if (path.endsWith(QLatin1String(".webm"))) {
 		return QStringLiteral("video/webm");
+	}
+	if (path.endsWith(QLatin1String(".m3u8"))) {
+		return QStringLiteral("application/vnd.apple.mpegurl");
+	}
+	if (path.endsWith(QLatin1String(".mpd"))) {
+		return QStringLiteral("application/dash+xml");
 	}
 	return QString();
 }
@@ -8563,6 +8571,23 @@ QString amazonProductImageIdentity(const QUrl &url) {
 	return url.host().toLower() + QLatin1Char('|') + path;
 }
 
+bool isAmazonProductImageUrl(const QUrl &url) {
+	if (!isSafePreviewTarget(url) || url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0) {
+		return false;
+	}
+
+	const QString host = normalizedPreviewHost(url.host());
+	const QString path = url.path().toLower();
+	const bool imagePath = path.endsWith(QLatin1String(".jpg")) || path.endsWith(QLatin1String(".jpeg"))
+						   || path.endsWith(QLatin1String(".png")) || path.endsWith(QLatin1String(".webp"))
+						   || path.endsWith(QLatin1String(".gif"));
+	const bool amazonImageHost =
+		hostEqualsOrEndsWith(host, QStringLiteral("media-amazon.com"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("ssl-images-amazon.com"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("images-amazon.com"));
+	return imagePath && amazonImageHost;
+}
+
 int amazonProductImageResolutionScore(const QUrl &url) {
 	const QString path = url.path();
 	const qsizetype transformStart = path.indexOf(QLatin1String("._"));
@@ -8591,7 +8616,7 @@ QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString 
 			rawUrl.prepend(QStringLiteral("https:"));
 		}
 		const QUrl imageUrl = baseUrl.resolved(QUrl(rawUrl));
-		if (!isSafePreviewTarget(imageUrl)) {
+		if (!isAmazonProductImageUrl(imageUrl)) {
 			return;
 		}
 		const QString identity = amazonProductImageIdentity(imageUrl);
@@ -8628,7 +8653,7 @@ QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString 
 		while (imageUrls.hasNext()) {
 			const QString candidate = decodedPreviewText(imageUrls.next().captured(0)).trimmed();
 			const QUrl candidateUrl = baseUrl.resolved(QUrl(candidate));
-			if (!isSafePreviewTarget(candidateUrl)) {
+			if (!isAmazonProductImageUrl(candidateUrl)) {
 				continue;
 			}
 			const QString identity = amazonProductImageIdentity(candidateUrl);
@@ -9006,12 +9031,34 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		QVariantList productImages;
 		QSet< QString > seenProductImages;
 		if (amazonProduct) {
-			appendPreviewImageItems(productImages, seenProductImages, url,
-									amazonProductImageItemsFromHtml(url, html));
-		}
-		appendPreviewImageItems(productImages, seenProductImages, url, productData.images);
-		if (!productImage.isEmpty()) {
-			appendPreviewImageItem(productImages, seenProductImages, url, productImage);
+			const auto appendVerifiedAmazonImages =
+				[&productImages, &seenProductImages, &url](const QVariantList &sourceItems) {
+					for (const QVariant &value : sourceItems) {
+						const QVariantMap image = value.toMap();
+						const QUrl imageUrl = url.resolved(QUrl(image.value(QStringLiteral("url")).toString()));
+						if (!isAmazonProductImageUrl(imageUrl)) {
+							continue;
+						}
+						appendPreviewImageItem(productImages, seenProductImages, url,
+											   imageUrl.toString(QUrl::FullyEncoded),
+											   image.value(QStringLiteral("mime")).toString(),
+											   image.value(QStringLiteral("title")).toString(),
+											   image.value(QStringLiteral("thumbnail")).toString(),
+											   image.value(QStringLiteral("poster")).toString());
+					}
+				};
+			appendVerifiedAmazonImages(amazonProductImageItemsFromHtml(url, html));
+			appendVerifiedAmazonImages(productData.images);
+			if (!productImage.isEmpty()) {
+				appendVerifiedAmazonImages(
+					{ QVariantMap { { QStringLiteral("url"), productImage },
+									{ QStringLiteral("mime"), QStringLiteral("image/jpeg") } } });
+			}
+		} else {
+			appendPreviewImageItems(productImages, seenProductImages, url, productData.images);
+			if (!productImage.isEmpty()) {
+				appendPreviewImageItem(productImages, seenProductImages, url, productImage);
+			}
 		}
 		if (!productImages.isEmpty()) {
 			metadata.insert(QStringLiteral("productImages"), productImages);
@@ -32727,10 +32774,12 @@ bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &p
 	if (mime.isEmpty()) {
 		return false;
 	}
+	const bool adaptiveManifest = mime == QLatin1String("application/vnd.apple.mpegurl")
+								  || mime == QLatin1String("application/dash+xml");
 
 	preview.mediaDataUrl      = normalizedMediaUrl.toString(QUrl::FullyEncoded);
 	preview.mediaMime         = mime;
-	preview.mediaKind         = mime.startsWith(QLatin1String("video/"))
+	preview.mediaKind         = mime.startsWith(QLatin1String("video/")) || adaptiveManifest
 									? QStringLiteral("video")
 									: (mime == QLatin1String("image/gif") ? QStringLiteral("gif")
 																		   : QStringLiteral("image"));
@@ -32749,7 +32798,7 @@ bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &p
 		if (resolvedPresentation.isEmpty()) {
 			resolvedPresentation = QStringLiteral("animated-image");
 		}
-	} else if (mime.startsWith(QLatin1String("video/"))) {
+	} else if (mime.startsWith(QLatin1String("video/")) || adaptiveManifest) {
 		if (resolvedContentBranch.isEmpty()) {
 			resolvedContentBranch = QStringLiteral("video");
 		}
@@ -35293,9 +35342,18 @@ bool MainWindow::requestPersistentChatRedditDashManifestPreview(const QString &p
 				bool applied = false;
 				if (success && !data.isEmpty()) {
 					const RedditDashMediaUrls media = redditDashMediaUrlsFromManifest(data, dashManifestUrl);
-					applied = applyPersistentChatRemotePlayableMedia(*previewIt, media.video.url, media.video.mime);
+					// Keep Reddit's video and audio in one adaptive playback graph.
+					// Two independent WebEngine media elements can both report
+					// "playing" while Chromium still blocks or drifts the hidden
+					// audio element. Shaka consumes the same verified manifest and
+					// selects its video and audio representations atomically.
+					applied = !media.video.url.isEmpty()
+							  && applyPersistentChatRemotePlayableMedia(
+								  *previewIt, dashManifestUrl, QStringLiteral("application/dash+xml"),
+								  QStringLiteral("video"), QStringLiteral("video-player"));
 					if (applied) {
-						applyPersistentChatRemoteAudioMedia(*previewIt, media.audio.url, media.audio.mime);
+						previewIt->mediaAudioDataUrl.clear();
+						previewIt->mediaAudioMime.clear();
 					}
 				}
 
@@ -35742,14 +35800,16 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 				const QUrl dashManifestUrl   = redditDashManifestUrl(video);
 				const QUrl previewImageUrl   = QUrl(redditPreviewImageUrl(post));
 				const bool animatedImage     = video.value(QStringLiteral("is_gif")).toBool(false);
-				applied                      = applyPersistentChatRemotePlayableMedia(*previewIt, remoteMediaUrl,
-																				   QStringLiteral("video/mp4"),
-																				   animatedImage
-																					   ? QStringLiteral("animated-gif-video-backed")
-																					   : QStringLiteral("video"),
-																				   animatedImage
-																					   ? QStringLiteral("animated-image")
-																					   : QStringLiteral("video-player"));
+				applied = !animatedImage && dashManifestUrl.isValid()
+							? applyPersistentChatRemotePlayableMedia(
+								  *previewIt, dashManifestUrl, QStringLiteral("application/dash+xml"),
+								  QStringLiteral("video"), QStringLiteral("video-player"))
+							: applyPersistentChatRemotePlayableMedia(
+								  *previewIt, remoteMediaUrl, QStringLiteral("video/mp4"),
+								  animatedImage ? QStringLiteral("animated-gif-video-backed")
+												: QStringLiteral("video"),
+								  animatedImage ? QStringLiteral("animated-image")
+												: QStringLiteral("video-player"));
 				const QString title          = post.value(QStringLiteral("title")).toString().trimmed();
 				const QString subreddit      = post.value(QStringLiteral("subreddit_name_prefixed")).toString().trimmed();
 				const QString postPermalink  = post.value(QStringLiteral("permalink")).toString().trimmed();
@@ -35766,8 +35826,9 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 					previewIt->description =
 						animatedImage ? tr("Animated image preview") : tr("Video preview");
 				}
-				if (applied && !animatedImage && dashManifestUrl.isValid()) {
-					requestPersistentChatRedditVideoAudioPreview(previewKey, dashManifestUrl);
+				if (applied && !animatedImage) {
+					previewIt->mediaAudioDataUrl.clear();
+					previewIt->mediaAudioMime.clear();
 				}
 				if (applied && previewIt->thumbnailImage.isNull() && previewImageUrl.isValid()
 					&& isSafePreviewTarget(previewImageUrl)) {
@@ -39754,6 +39815,14 @@ void MainWindow::finishServerHandlerRecreation() {
 	pruneRetiredServerHandlers();
 
 	if (m_pendingServerConnection) {
+		// The retiring thread can finish before its queued disconnected() slot
+		// reaches the UI thread. Clear the server-scoped object registries here,
+		// after that thread has stopped and before the replacement starts, so
+		// identical channel/session IDs on the next server cannot retain users
+		// from the previous server. A later stale disconnect is ignored below.
+		Global::get().channelListenerManager->clear();
+		pmModel->removeAll();
+		Global::get().uiSession = 0;
 		installPendingServerConnection();
 	} else {
 		qaServerDisconnect->setEnabled(false);
@@ -42820,6 +42889,13 @@ void MainWindow::scheduleWASAPIAudioReset(const int delayMs) {
  * connection to the server is established but before the server Sync is complete.
  */
 void MainWindow::serverConnected() {
+	if (const auto *emittingHandler = qobject_cast< ServerHandler * >(sender())) {
+		const ServerHandlerPtr currentHandler = Global::get().serverHandlerSnapshot();
+		if (!currentHandler || currentHandler.get() != emittingHandler) {
+			appendModernShellConnectTrace(QStringLiteral("Ignored stale serverConnected callback"));
+			return;
+		}
+	}
 	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	m_reconnectSoundBlocker.reset();
 	m_qmlConnectionHandoffPending = false;
@@ -42992,6 +43068,13 @@ void MainWindow::serverConnected() {
 }
 
 void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString reason) {
+	if (const auto *emittingHandler = qobject_cast< ServerHandler * >(sender())) {
+		const ServerHandlerPtr currentHandler = Global::get().serverHandlerSnapshot();
+		if (!currentHandler || currentHandler.get() != emittingHandler) {
+			appendModernShellConnectTrace(QStringLiteral("Ignored stale serverDisconnected callback"));
+			return;
+		}
+	}
 	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 	const ServerTlsDetails tlsDetails = serverHandler ? serverHandler->tlsDetailsSnapshot() : ServerTlsDetails{};
 	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();

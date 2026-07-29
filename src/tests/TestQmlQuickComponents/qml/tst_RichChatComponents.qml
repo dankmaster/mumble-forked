@@ -1380,6 +1380,47 @@ TestCase {
 		compare(findChild(card, "previewInlineMediaLoader").active, false)
 	}
 
+	function test_virtualized_provider_player_keeps_identical_height_when_loader_unloads() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready", "title": "Stable Spotify card",
+			"url": "https://open.spotify.com/album/2dFcS2u5YoUj4WmUkZ1oW6",
+			"embedUrl": "https://open.spotify.com/embed/album/2dFcS2u5YoUj4WmUkZ1oW6",
+			"embedKind": "spotify", "embedAspect": "audio",
+			"thumbnailUrl": "image://mumble/spotify-stable-poster",
+			"metadata": { "provider": "spotify" }
+		}
+		card.previewIdentity = "message:spotify-stable-virtualization"
+		card.mediaSessionId = "message:spotify-stable-virtualization"
+		card.visualMediaFixtureMode = "active"
+		card.mediaProfileFactory = mediaRuntime
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "spotify"
+		inlineSession.url = card.preview.embedUrl
+		inlineSession.detached = false
+		inlineSession.active = true
+		mediaRuntime.runtimeReady = true
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		tryCompare(loader, "active", true)
+		tryVerify(function() { return loader.item !== null })
+		const activeHeight = card.implicitHeight
+		const activePanelHeight = card.embedPanelHeight
+
+		card.renderActive = false
+		tryCompare(loader, "active", false)
+		tryCompare(loader, "item", null)
+		compare(card.embedPanelHeight, activePanelHeight)
+		compare(card.implicitHeight, activeHeight)
+
+		card.renderActive = true
+		tryCompare(loader, "active", true)
+		tryVerify(function() { return loader.item !== null })
+		compare(card.embedPanelHeight, activePanelHeight)
+		compare(card.implicitHeight, activeHeight)
+	}
+
 	function test_inline_runtime_preparation_is_native_visible_and_defers_webengine_component() {
 		const card = previewLoader.item
 		card.preview = {

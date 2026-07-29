@@ -2893,6 +2893,7 @@ ApplicationWindow {
 					reuseItems: !scopeReuseResetActive
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
+						id: timelineScrollBar
 						objectName: "chatTimelineScrollBar"
 						// This fixture verifies production history anchoring, not
 						// subpixel scrollbar rounding. Keep that unrelated Qt
@@ -2906,9 +2907,12 @@ ApplicationWindow {
 								bottomFollowTimer.stop()
 								timeline.stickToBottom = false
 								timeline.releasePrependAnchor()
+								timeline.releaseViewportAnchor()
 							} else {
 								timeline.stickToBottom = timeline.isNearBottom()
 								timeline.requestBottomFollow()
+								if (!timeline.stickToBottom)
+									timeline.captureViewportAnchor()
 							}
 						}
 					}
@@ -2922,10 +2926,13 @@ ApplicationWindow {
 							bottomFollowTimer.stop()
 							timeline.stickToBottom = false
 							timeline.releasePrependAnchor()
+							timeline.releaseViewportAnchor()
 						}
 						onScrollingEnded: {
 							timeline.stickToBottom = timeline.isNearBottom()
 							timeline.requestBottomFollow()
+							if (!timeline.stickToBottom)
+								timeline.captureViewportAnchor()
 						}
 					}
 					// Build a small amount of chat content outside the viewport while
@@ -2942,6 +2949,11 @@ ApplicationWindow {
 					property bool restoringPrependAnchor: false
 					property int prependAnchorRetries: 0
 					property int prependAnchorCorrectionFrames: 0
+					property string viewportAnchorId: ""
+					property real viewportAnchorOffset: 0
+					property bool viewportAnchorActive: false
+					property bool restoringViewportAnchor: false
+					property int viewportAnchorRetries: 0
 					property bool stickToBottom: true
 					property bool followTailAfterInsert: false
 					property int pendingTailInsertCount: 0
@@ -2992,6 +3004,7 @@ ApplicationWindow {
 
 					function beginScopeChange() {
 						releasePrependAnchor()
+						releaseViewportAnchor()
 						bottomFollowTimer.stop()
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
@@ -3242,6 +3255,57 @@ ApplicationWindow {
 						return true
 					}
 
+					function captureViewportAnchor() {
+						if (stickToBottom || prependAnchorActive || scopePresentationPending
+								|| moving || dragging || flicking)
+							return false
+						const item = firstVisibleMessageDelegate()
+						if (!item)
+							return false
+						viewportAnchorId = String(item.stableId || "")
+						if (viewportAnchorId.length === 0)
+							return false
+						viewportAnchorOffset = item.y - contentY
+						viewportAnchorRetries = 0
+						viewportAnchorActive = true
+						return true
+					}
+
+					function releaseViewportAnchor() {
+						viewportAnchorActive = false
+						viewportAnchorId = ""
+						viewportAnchorRetries = 0
+					}
+
+					function restoreViewportAnchor() {
+						if (!viewportAnchorActive || restoringViewportAnchor || stickToBottom
+								|| prependAnchorActive || scopePresentationPending
+								|| moving || dragging || flicking)
+							return
+						const row = chatModel.rowForStableId(viewportAnchorId)
+						if (row < 0) {
+							releaseViewportAnchor()
+							return
+						}
+						const item = itemAtIndex(row)
+						if (!item) {
+							if (++viewportAnchorRetries <= 4)
+								Qt.callLater(function() { timeline.restoreViewportAnchor() })
+							else
+								releaseViewportAnchor()
+							return
+						}
+						restoringViewportAnchor = true
+						const minimumY = originY
+						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						const desiredY = Math.max(minimumY,
+							Math.min(maximumY, item.y - viewportAnchorOffset))
+						if (Math.abs(contentY - desiredY) > 0.5)
+							contentY = desiredY
+						restoringViewportAnchor = false
+						viewportAnchorRetries = 0
+					}
+
 					function releasePrependAnchor() {
 						prependAnchorSettleTimer.stop()
 						prependMutationInProgress = false
@@ -3340,11 +3404,15 @@ ApplicationWindow {
 						else if (scopeResetPending && !restoringBottom) {
 							positionTailImmediately()
 							requestBottomFollow()
-						} else if (!restoringBottom)
+						} else if (viewportAnchorActive && !restoringViewportAnchor
+								&& !restoringBottom && !moving)
+							Qt.callLater(function() { timeline.restoreViewportAnchor() })
+						else if (!restoringBottom)
 							requestBottomFollow()
 					}
 					onMovementStarted: {
 						root.closeQuickReactions()
+						releaseViewportAnchor()
 						// QQuickListView reports its own insert displacement as movement.
 						// Preserve the pre-structural anchor through that transition, while
 						// ordinary wheel, drag and flick movement still cancels restoration.
@@ -3358,6 +3426,8 @@ ApplicationWindow {
 						if (!restoringBottom) {
 							stickToBottom = isNearBottom()
 							requestBottomFollow()
+							if (!stickToBottom)
+								captureViewportAnchor()
 						}
 					}
 

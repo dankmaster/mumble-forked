@@ -145,6 +145,14 @@ TestCase {
 		verify(/objectName:\s*"chatTimelineScrollBar"[\s\S]*visible:\s*root\.visualFixtureSurfaceVariant\s*!==\s*"chat-history-prepend-anchor"[\s\S]*Accessible\.ignored:\s*!visible/.test(mainSource))
 	}
 
+	function test_delayed_rich_card_height_changes_preserve_the_visible_message() {
+		verify(/property string viewportAnchorId:\s*""[\s\S]*property bool viewportAnchorActive:\s*false/.test(mainSource))
+		verify(/function\s+captureViewportAnchor\(\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.y\s*-\s*contentY/.test(mainSource))
+		verify(/function\s+restoreViewportAnchor\(\)[\s\S]*rowForStableId\(viewportAnchorId\)[\s\S]*item\.y\s*-\s*viewportAnchorOffset[\s\S]*contentY\s*=\s*desiredY/.test(mainSource))
+		verify(/onContentHeightChanged:[\s\S]*viewportAnchorActive[\s\S]*Qt\.callLater\(function\(\)\s*\{\s*timeline\.restoreViewportAnchor\(\)/.test(mainSource))
+		verify(/onMovementStarted:[\s\S]*releaseViewportAnchor\(\)[\s\S]*onMovementEnded:[\s\S]*!stickToBottom[\s\S]*captureViewportAnchor\(\)/.test(mainSource))
+	}
+
 	function test_compact_message_actions_reserve_current_row_width() {
 		verify(/readonly property int compactActionButtonCount:[\s\S]{0,420}readonly property real compactActionTextInset:/.test(mainSource))
 		compare((mainSource.match(/Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/g) || []).length, 2)

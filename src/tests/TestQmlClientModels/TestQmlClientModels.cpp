@@ -634,6 +634,35 @@ void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
 		connectedMethod.indexOf(QStringLiteral("clearQmlConnectionState()"));
 	QVERIFY(releaseHandoff >= 0);
 	QVERIFY(resetNewConnection > releaseHandoff);
+
+	const QString recreationMethod =
+		methodBody(QStringLiteral("void MainWindow::finishServerHandlerRecreation()"),
+				   QStringLiteral("void MainWindow::installPendingServerConnection()"));
+	QVERIFY(!recreationMethod.isEmpty());
+	const qsizetype retiringThreadStopped =
+		recreationMethod.indexOf(QStringLiteral("m_retiringServerHandler->isRunning()"));
+	const qsizetype clearListeners =
+		recreationMethod.indexOf(QStringLiteral("channelListenerManager->clear()"));
+	const qsizetype clearNativeModel =
+		recreationMethod.indexOf(QStringLiteral("pmModel->removeAll()"));
+	const qsizetype installReplacement =
+		recreationMethod.indexOf(QStringLiteral("installPendingServerConnection()"));
+	QVERIFY(retiringThreadStopped >= 0);
+	QVERIFY(clearListeners > retiringThreadStopped);
+	QVERIFY(clearNativeModel > clearListeners);
+	QVERIFY(installReplacement > clearNativeModel);
+
+	QVERIFY(connectedMethod.contains(QStringLiteral("qobject_cast< ServerHandler * >(sender())")));
+	QVERIFY(connectedMethod.contains(QStringLiteral("Ignored stale serverConnected callback")));
+
+	const QString disconnectedMethod =
+		methodBody(QStringLiteral("void MainWindow::serverDisconnected("),
+				   QStringLiteral("void MainWindow::resolverError("));
+	QVERIFY(!disconnectedMethod.isEmpty());
+	QVERIFY(disconnectedMethod.contains(QStringLiteral("qobject_cast< ServerHandler * >(sender())")));
+	QVERIFY(disconnectedMethod.contains(QStringLiteral("Ignored stale serverDisconnected callback")));
+	QVERIFY(disconnectedMethod.indexOf(QStringLiteral("Ignored stale serverDisconnected callback"))
+			< disconnectedMethod.indexOf(QStringLiteral("pmModel->removeAll()")));
 }
 
 void TestQmlClientModels::roomRowsExposeActionsOnlySource() {

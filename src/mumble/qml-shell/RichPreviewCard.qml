@@ -265,8 +265,7 @@ Rectangle {
 		: typedDocumentUsesGallery ? stableInlinePanelHeight
 		: inlinePlaybackActive
 			? providerPostPresentation ? inlineMediaViewportHeight
-				: Math.max(inlineMediaViewportHeight + inlineControlsEstimate,
-					inlineMediaLoader.item ? inlineMediaLoader.item.implicitHeight : 0)
+				: stableInlinePanelHeight
 			: inlineMediaViewportHeight
 	readonly property bool currentMediaManagedAnimated: currentMediaKind === "image"
 		&& !!currentMedia.managedAnimated && /^file:\/\//i.test(imageSource)
