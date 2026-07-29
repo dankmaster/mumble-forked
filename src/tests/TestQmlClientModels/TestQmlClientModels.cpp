@@ -3258,6 +3258,84 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			 QStringLiteral("social"));
 	QCOMPARE(instagramDocument.value(QStringLiteral("media")).toList().size(), 1);
 
+	const QVariantMap instagramReelDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.instagram.com/reel/DYytTnMowNK/") },
+		{ QStringLiteral("host"), QStringLiteral("www.instagram.com") },
+		{ QStringLiteral("embedKind"), QStringLiteral("instagram") },
+		{ QStringLiteral("embedUrl"),
+		  QStringLiteral("https://www.instagram.com/reel/DYytTnMowNK/embed/") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("video") },
+				{ QStringLiteral("mime"), QStringLiteral("video/mp4") },
+				{ QStringLiteral("url"),
+				  QStringLiteral("https://scontent.cdninstagram.com/reel-source.mp4") },
+				{ QStringLiteral("poster"),
+				  QStringLiteral("image://mumble/instagram-reel-poster?g=62") }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("instagram") },
+			{ QStringLiteral("instagramMediaKind"), QStringLiteral("reel") },
+			{ QStringLiteral("instagramDisplayName"), QStringLiteral("Maskinen") },
+			{ QStringLiteral("instagramHandle"), QStringLiteral("@theunrealmaskinen") },
+			{ QStringLiteral("instagramCaption"),
+			  QStringLiteral("Nästa vecka kör vi på Trädgården i Stockholm.") }
+		} }
+	});
+	QCOMPARE(instagramReelDocument.value(QStringLiteral("media")).toList().first().toMap()
+				 .value(QStringLiteral("directPlayable")).toBool(),
+			 true);
+	QCOMPARE(instagramReelDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("native"));
+
+	const QVariantMap tiktokDocument = normalizedDocument({
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.tiktok.com/@imee_2001/video/7611978857305984274") },
+		{ QStringLiteral("host"), QStringLiteral("www.tiktok.com") },
+		{ QStringLiteral("embedKind"), QStringLiteral("tiktok") },
+		{ QStringLiteral("embedUrl"),
+		  QStringLiteral("https://www.tiktok.com/player/v1/7611978857305984274") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("video") },
+				{ QStringLiteral("mime"), QStringLiteral("video/mp4") },
+				{ QStringLiteral("url"),
+				  QStringLiteral("https://v16-webapp-prime.tiktok.com/video/tos/example.mp4") },
+				{ QStringLiteral("poster"),
+				  QStringLiteral("image://mumble/tiktok-poster?g=63") }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("tiktok") },
+			{ QStringLiteral("tiktokMediaKind"), QStringLiteral("video") },
+			{ QStringLiteral("tiktokDisplayName"), QStringLiteral("IMEE") },
+			{ QStringLiteral("tiktokHandle"), QStringLiteral("@imee_2001") },
+			{ QStringLiteral("tiktokCaption"), QStringLiteral("Penta VS Logan Paul") },
+			{ QStringLiteral("tiktokLikeCount"), 2050 },
+			{ QStringLiteral("tiktokCommentCount"), 51 },
+			{ QStringLiteral("tiktokShareCount"), 88 },
+			{ QStringLiteral("tiktokViewCount"), 158600 },
+			{ QStringLiteral("tiktokSaveCount"), 100 }
+		} }
+	});
+	QVERIFY(tiktokDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(tiktokDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(),
+			 QStringLiteral("tiktok"));
+	QCOMPARE(tiktokDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("type")).toString(),
+			 QStringLiteral("social-post"));
+	QCOMPARE(tiktokDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("author")).toMap()
+				 .value(QStringLiteral("handle")).toString(),
+			 QStringLiteral("@imee_2001"));
+	QCOMPARE(tiktokDocument.value(QStringLiteral("facts")).toList().size(), 5);
+	QCOMPARE(tiktokDocument.value(QStringLiteral("playback")).toMap()
+				 .value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("native"));
+
 	const QVariantMap facebookDocument = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://www.facebook.com/reel/1327313299204519") },
 		{ QStringLiteral("host"), QStringLiteral("www.facebook.com") },
@@ -3343,6 +3421,53 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			 QStringLiteral("MSI RTX 4070 Ti SUPER 16G VENTUS 2X OC"));
 	QCOMPARE(blocketDocument.value(QStringLiteral("media")).toList().size(), 3);
 	QCOMPARE(blocketDocument.value(QStringLiteral("facts")).toList().size(), 3);
+
+	const QVariantMap amazonDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.amazon.se/gp/aw/d/B07WKKS4HB") },
+		{ QStringLiteral("host"), QStringLiteral("www.amazon.se") },
+		{ QStringLiteral("title"), QStringLiteral("Stale page title") },
+		{ QStringLiteral("description"), QStringLiteral("Stale page description") },
+		{ QStringLiteral("mediaItems"), QVariantList {
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/amazon-one?g=91") }
+			},
+			QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/jpeg") },
+				{ QStringLiteral("url"), QStringLiteral("image://mumble/amazon-two?g=92") }
+			}
+		} },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("amazon") },
+			{ QStringLiteral("previewKind"), QStringLiteral("product") },
+			{ QStringLiteral("productTitle"), QStringLiteral("DOQAUS Meat Thermometer") },
+			{ QStringLiteral("productDescription"), QStringLiteral("Fast and accurate thermometer.") },
+			{ QStringLiteral("productPrice"), QStringLiteral("139,99 kr") },
+			{ QStringLiteral("productDelivery"), QStringLiteral("FREE delivery Thursday, 6 August") },
+			{ QStringLiteral("productAvailability"), QStringLiteral("In stock") },
+			{ QStringLiteral("productBrand"), QStringLiteral("DOQAUS") },
+			{ QStringLiteral("productRating"), QStringLiteral("4,4/5") },
+			{ QStringLiteral("productReviewCount"), QStringLiteral("57 326") }
+		} }
+	});
+	QVERIFY(amazonDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(amazonDocument.value(QStringLiteral("provider")).toMap()
+				 .value(QStringLiteral("id")).toString(), QStringLiteral("amazon"));
+	QCOMPARE(amazonDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("title")).toString(),
+			 QStringLiteral("DOQAUS Meat Thermometer"));
+	QCOMPARE(amazonDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("description")).toString(),
+			 QStringLiteral("Fast and accurate thermometer."));
+	QCOMPARE(amazonDocument.value(QStringLiteral("media")).toList().size(), 2);
+	const QVariantList amazonFacts = amazonDocument.value(QStringLiteral("facts")).toList();
+	QCOMPARE(amazonFacts.size(), 6);
+	QCOMPARE(amazonFacts.first().toMap().value(QStringLiteral("value")).toString(),
+			 QStringLiteral("139,99 kr"));
+	QCOMPARE(amazonFacts.at(1).toMap().value(QStringLiteral("value")).toString(),
+			 QStringLiteral("FREE delivery Thursday, 6 August"));
 
 	const QVariantMap flashbackDocument = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://www.flashback.org/t3731783") },
@@ -3487,6 +3612,18 @@ void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {
 	QVERIFY(source.contains("facebookMetadataVersion"));
 	QVERIFY(source.contains("QStringLiteral(\"html:facebook\")"));
 	QVERIFY(source.contains("facebookPreviewMetadataFromMetaTags(parsed.metaTags)"));
+	const qsizetype tiktokStart =
+		source.indexOf("bool MainWindow::requestPersistentChatTikTokMetadataPreview");
+	const qsizetype tiktokEnd =
+		source.indexOf("bool MainWindow::requestPersistentChatFacebookMetadataPreview", tiktokStart);
+	QVERIFY(tiktokStart >= 0);
+	QVERIFY(tiktokEnd > tiktokStart);
+	const QByteArray tiktokMetadataPath = source.mid(tiktokStart, tiktokEnd - tiktokStart);
+	QVERIFY(tiktokMetadataPath.contains("preparePreviewRequest(pageRequest)"));
+	QVERIFY(!tiktokMetadataPath.contains("prepareSocialPreviewMetadataRequest(pageRequest)"));
+	QVERIFY(source.contains("QStringLiteral(\"/gp/aw/d/%1\")"));
+	QVERIFY(source.contains("amazonProductImageIdentity"));
+	QVERIFY(source.contains("amazonProductImageResolutionScore"));
 
 	const QString cachePath = QFINDTESTDATA("../../mumble/PersistentChatMediaCache.cpp");
 	QVERIFY2(!cachePath.isEmpty(), "PersistentChatMediaCache.cpp test data was not found");

@@ -59,6 +59,9 @@ namespace {
 		if (host.endsWith(QLatin1String("instagram.com")) || host == QLatin1String("instagr.am")) {
 			return QStringLiteral("instagram");
 		}
+		if (host.endsWith(QLatin1String("tiktok.com"))) {
+			return QStringLiteral("tiktok");
+		}
 		if (host.endsWith(QLatin1String("facebook.com")) || host == QLatin1String("fb.watch")) {
 			return QStringLiteral("facebook");
 		}
@@ -108,6 +111,7 @@ namespace {
 			{ QStringLiteral("youtube"), QStringLiteral("YouTube") },
 			{ QStringLiteral("steam"), QStringLiteral("Steam") },
 			{ QStringLiteral("instagram"), QStringLiteral("Instagram") },
+			{ QStringLiteral("tiktok"), QStringLiteral("TikTok") },
 			{ QStringLiteral("facebook"), QStringLiteral("Facebook") },
 			{ QStringLiteral("x"), QStringLiteral("X") },
 			{ QStringLiteral("flashback"), QStringLiteral("Flashback") },
@@ -150,20 +154,24 @@ namespace {
 		if (kind.isEmpty()) {
 			return {};
 		}
+		const QString mediaUrl = boundedText(item.value(QStringLiteral("url")), 4096);
+		const bool directPlayable = item.contains(QStringLiteral("directPlayable"))
+			? item.value(QStringLiteral("directPlayable")).toBool()
+			: !mediaUrl.isEmpty();
 		QVariantMap result {
 			{ QStringLiteral("id"), QStringLiteral("media:%1").arg(index) },
 			{ QStringLiteral("kind"), kind },
 			{ QStringLiteral("mime"), boundedText(item.value(QStringLiteral("mime")), 128) },
 			{ QStringLiteral("title"), boundedText(item.value(QStringLiteral("title")), 512) },
 			{ QStringLiteral("description"), boundedText(item.value(QStringLiteral("description")), 2048) },
-			{ QStringLiteral("url"), boundedText(item.value(QStringLiteral("url")), 4096) },
+			{ QStringLiteral("url"), mediaUrl },
 			{ QStringLiteral("externalUrl"), boundedText(item.value(QStringLiteral("externalUrl")), 4096) },
 			{ QStringLiteral("thumbnailUrl"), boundedText(item.value(QStringLiteral("thumbnail")), 4096) },
 			{ QStringLiteral("posterUrl"), boundedText(item.value(QStringLiteral("poster")), 4096) },
 			{ QStringLiteral("streamKind"), boundedText(item.value(QStringLiteral("streamKind")), 32) },
 			{ QStringLiteral("contentBranch"), boundedText(item.value(QStringLiteral("contentBranch")), 64) },
 			{ QStringLiteral("presentation"), boundedText(item.value(QStringLiteral("mediaPresentation")), 64) },
-			{ QStringLiteral("directPlayable"), item.value(QStringLiteral("directPlayable")).toBool() },
+			{ QStringLiteral("directPlayable"), directPlayable },
 			{ QStringLiteral("managedAnimated"), item.value(QStringLiteral("managedAnimated")).toBool() }
 		};
 		for (auto it = result.begin(); it != result.end();) {
@@ -234,6 +242,7 @@ namespace {
 			return QStringLiteral("marketplace-listing");
 		}
 		if (provider == QLatin1String("x") || provider == QLatin1String("instagram")
+			|| provider == QLatin1String("tiktok")
 			|| provider == QLatin1String("facebook")) {
 			return QStringLiteral("social-post");
 		}
@@ -275,6 +284,13 @@ namespace {
 						  firstText(metadata, { QStringLiteral("instagramHandle") }, 128));
 			result.insert(QStringLiteral("avatarUrl"),
 						  firstText(metadata, { QStringLiteral("instagramAvatarUrl") }, 4096));
+		} else if (provider == QLatin1String("tiktok")) {
+			result.insert(QStringLiteral("name"),
+						  firstText(metadata, { QStringLiteral("tiktokDisplayName") }, 256));
+			result.insert(QStringLiteral("handle"),
+						  firstText(metadata, { QStringLiteral("tiktokHandle") }, 128));
+			result.insert(QStringLiteral("avatarUrl"),
+						  firstText(metadata, { QStringLiteral("tiktokAvatarUrl") }, 4096));
 		} else if (provider == QLatin1String("flashback")) {
 			result.insert(QStringLiteral("name"),
 						  firstText(metadata, { QStringLiteral("forumPostAuthor") }, 256));
@@ -419,11 +435,35 @@ namespace {
 					   metadata.value(QStringLiteral("instagramLikeCount")));
 			appendFact(result, QStringLiteral("comments"), QStringLiteral("Comments"),
 					   metadata.value(QStringLiteral("instagramCommentCount")));
+		} else if (provider == QLatin1String("tiktok")) {
+			appendFact(result, QStringLiteral("likes"), QStringLiteral("Likes"),
+					   metadata.value(QStringLiteral("tiktokLikeCount")));
+			appendFact(result, QStringLiteral("comments"), QStringLiteral("Comments"),
+					   metadata.value(QStringLiteral("tiktokCommentCount")));
+			appendFact(result, QStringLiteral("shares"), QStringLiteral("Shares"),
+					   metadata.value(QStringLiteral("tiktokShareCount")));
+			appendFact(result, QStringLiteral("views"), QStringLiteral("Views"),
+					   metadata.value(QStringLiteral("tiktokViewCount")));
+			appendFact(result, QStringLiteral("saves"), QStringLiteral("Saves"),
+					   metadata.value(QStringLiteral("tiktokSaveCount")));
 		} else if (provider == QLatin1String("facebook")) {
 			appendFact(result, QStringLiteral("views"), QStringLiteral("Views"),
 					   metadata.value(QStringLiteral("facebookViews")));
 			appendFact(result, QStringLiteral("reactions"), QStringLiteral("Reactions"),
 					   metadata.value(QStringLiteral("facebookReactions")));
+		} else if (provider == QLatin1String("amazon")) {
+			appendFact(result, QStringLiteral("price"), QStringLiteral("Price"),
+					   metadata.value(QStringLiteral("productPrice")));
+			appendFact(result, QStringLiteral("delivery"), QStringLiteral("Earliest delivery"),
+					   metadata.value(QStringLiteral("productDelivery")));
+			appendFact(result, QStringLiteral("availability"), QStringLiteral("Availability"),
+					   metadata.value(QStringLiteral("productAvailability")));
+			appendFact(result, QStringLiteral("brand"), QStringLiteral("Brand"),
+					   metadata.value(QStringLiteral("productBrand")));
+			appendFact(result, QStringLiteral("rating"), QStringLiteral("Rating"),
+					   metadata.value(QStringLiteral("productRating")));
+			appendFact(result, QStringLiteral("reviews"), QStringLiteral("Reviews"),
+					   metadata.value(QStringLiteral("productReviewCount")));
 		} else if (provider == QLatin1String("blocket")) {
 			appendFact(result, QStringLiteral("price"), QStringLiteral("Price"),
 					   metadata.value(QStringLiteral("listingPrice")));
@@ -512,6 +552,7 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	const QString presentation = presentationFor(type);
 	const bool commonPresentation = provider == QLatin1String("youtube")
 		|| provider == QLatin1String("steam") || provider == QLatin1String("instagram")
+		|| provider == QLatin1String("tiktok")
 		|| provider == QLatin1String("facebook") || provider == QLatin1String("x")
 		|| provider == QLatin1String("flashback") || provider == QLatin1String("blocket")
 		|| provider == QLatin1String("giphy") || provider == QLatin1String("tenor")
@@ -535,6 +576,12 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 			description = caption;
 		}
 		title.clear();
+	} else if (provider == QLatin1String("tiktok")) {
+		const QString caption = firstText(metadata, { QStringLiteral("tiktokCaption") }, 4096);
+		if (!caption.isEmpty()) {
+			description = caption;
+		}
+		title.clear();
 	} else if (provider == QLatin1String("x")) {
 		description = title;
 		title.clear();
@@ -550,6 +597,9 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	} else if (provider == QLatin1String("blocket")) {
 		title = firstText(metadata, { QStringLiteral("listingTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("listingDescription") }, 4096);
+	} else if (provider == QLatin1String("amazon")) {
+		title = firstText(metadata, { QStringLiteral("productTitle") }, 512);
+		description = firstText(metadata, { QStringLiteral("productDescription") }, 4096);
 	} else if (type == QLatin1String("article")) {
 		title = firstText(metadata, { QStringLiteral("articleTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("articleDescription") }, 4096);
@@ -563,6 +613,8 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 			? firstText(metadata, { QStringLiteral("xCreatedAt") }, 128)
 		: provider == QLatin1String("instagram")
 			? firstText(metadata, { QStringLiteral("instagramCreatedAt") }, 128)
+		: provider == QLatin1String("tiktok")
+			? firstText(metadata, { QStringLiteral("tiktokCreatedAt") }, 128)
 		: provider == QLatin1String("flashback")
 			? firstText(metadata, { QStringLiteral("forumPostTime") }, 128)
 		: type == QLatin1String("article")
@@ -588,24 +640,30 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	QString playbackMode = QStringLiteral("none");
 	const QString instagramKind =
 		firstText(metadata, { QStringLiteral("instagramMediaKind") }, 32).toLower();
+	const QString tiktokKind =
+		firstText(metadata, { QStringLiteral("tiktokMediaKind") }, 32).toLower();
 	const bool providerPlaybackAllowed =
 		type != QLatin1String("social-post")
 		|| provider == QLatin1String("facebook")
 		|| (provider == QLatin1String("instagram")
-			&& (instagramKind == QLatin1String("reel") || instagramKind == QLatin1String("tv")));
-	if (!embedUrl.isEmpty() && providerPlaybackAllowed) {
-		playbackMode = QStringLiteral("provider");
-	} else {
-		for (const QVariant &entry : media) {
-			const QVariantMap item = entry.toMap();
-			if (item.value(QStringLiteral("directPlayable")).toBool()
-				&& (item.value(QStringLiteral("kind")) == QLatin1String("video")
-					|| item.value(QStringLiteral("kind")) == QLatin1String("audio")
-					|| item.value(QStringLiteral("kind")) == QLatin1String("animated-image"))) {
-				playbackMode = QStringLiteral("native");
-				break;
-			}
+			&& (instagramKind == QLatin1String("reel") || instagramKind == QLatin1String("tv")))
+		|| (provider == QLatin1String("tiktok") && tiktokKind != QLatin1String("photo"));
+	// Prefer an already validated, bounded direct stream. Provider players stay
+	// available as a fallback for sources such as YouTube where no honest raw
+	// media URL is available.
+	for (const QVariant &entry : media) {
+		const QVariantMap item = entry.toMap();
+		if (item.value(QStringLiteral("directPlayable")).toBool()
+			&& (item.value(QStringLiteral("kind")) == QLatin1String("video")
+				|| item.value(QStringLiteral("kind")) == QLatin1String("audio")
+				|| item.value(QStringLiteral("kind")) == QLatin1String("animated-image"))) {
+			playbackMode = QStringLiteral("native");
+			break;
 		}
+	}
+	if (playbackMode == QLatin1String("none") && !embedUrl.isEmpty()
+		&& providerPlaybackAllowed) {
+		playbackMode = QStringLiteral("provider");
 	}
 
 	QVariantMap document {

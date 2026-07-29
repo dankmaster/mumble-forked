@@ -1846,6 +1846,7 @@ TestCase {
 	function test_typed_embed_document_keeps_full_source_and_reply_context_visible() {
 		const card = previewLoader.item
 		const sourceUrl = "https://x.com/historyinmemes/status/2058971862265151767"
+			+ "?utm_source=mumble-rich-preview&utm_campaign=full-source-url-remains-visible"
 		card.preview = {
 			"state": "ready",
 			"title": "The current post",
@@ -1907,6 +1908,12 @@ TestCase {
 		compare(sourceLabel.text, sourceUrl)
 		compare(sourceLabel.elide, Text.ElideNone)
 		compare(sourceLink.Accessible.description, sourceUrl)
+		const sourcePosition = sourceLink.mapToItem(card, 0, 0)
+		verify(sourcePosition.x >= -0.5)
+		verify(sourcePosition.x + sourceLink.width <= card.width + 0.5,
+			"source link escaped card: x=" + sourcePosition.x
+				+ " width=" + sourceLink.width + " card=" + card.width)
+		verify(sourceLabel.width <= sourceLink.width)
 		verify(body !== null && body.visible)
 		compare(genericHeader.visible, false)
 		compare(details.visible, false)
@@ -2000,9 +2007,18 @@ TestCase {
 		compare(details.visible, false)
 		const first = findChild(card, "embedDocumentMediaThumbnail_0")
 		const second = findChild(card, "embedDocumentMediaThumbnail_1")
-		verify(first !== null && second !== null)
+		const previous = findChild(card, "embedDocumentPreviousMediaButton")
+		const next = findChild(card, "embedDocumentNextMediaButton")
+		verify(first !== null && second !== null && previous !== null && next !== null)
+		verify(previous.visible && next.visible)
+		compare(previous.Accessible.name, "Previous media")
+		compare(next.Accessible.name, "Next media")
 		compare(card.selectedMediaIndex, 0)
-		second.clicked()
+		next.clicked()
+		compare(card.selectedMediaIndex, 1)
+		previous.clicked()
+		compare(card.selectedMediaIndex, 0)
+		previous.clicked()
 		compare(card.selectedMediaIndex, 1)
 		gallery.mediaRequested(1)
 		compare(imageOpenSpy.count, 1)

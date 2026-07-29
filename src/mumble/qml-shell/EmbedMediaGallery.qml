@@ -44,6 +44,16 @@ ColumnLayout {
 	signal mediaRequested(int index)
 	signal revealRequested()
 
+	function previousMedia() {
+		if (mediaItems.length > 1)
+			selectionRequested((selectedIndex + mediaItems.length - 1) % mediaItems.length)
+	}
+
+	function nextMedia() {
+		if (mediaItems.length > 1)
+			selectionRequested((selectedIndex + 1) % mediaItems.length)
+	}
+
 	visible: mediaItems.length > 0
 	spacing: Theme.space2
 
@@ -188,6 +198,39 @@ ColumnLayout {
 				return qsTr("Open %1").arg(title)
 			}
 			onClicked: root.mediaRequested(root.selectedIndex)
+		}
+
+		ModernIconButton {
+			objectName: "embedDocumentPreviousMediaButton"
+			anchors.left: parent.left
+			anchors.leftMargin: Theme.space2
+			anchors.verticalCenter: parent.verticalCenter
+			z: 4
+			visible: root.mediaItems.length > 1 && !root.mediaRequiresReveal
+			overlay: true
+			iconName: "previous"
+			Accessible.name: qsTr("Previous media")
+			Accessible.description: qsTr("Show media %1 of %2")
+				.arg((root.selectedIndex + root.mediaItems.length - 1)
+					% root.mediaItems.length + 1)
+				.arg(root.mediaItems.length)
+			onClicked: root.previousMedia()
+		}
+
+		ModernIconButton {
+			objectName: "embedDocumentNextMediaButton"
+			anchors.right: parent.right
+			anchors.rightMargin: Theme.space2
+			anchors.verticalCenter: parent.verticalCenter
+			z: 4
+			visible: root.mediaItems.length > 1 && !root.mediaRequiresReveal
+			overlay: true
+			iconName: "next"
+			Accessible.name: qsTr("Next media")
+			Accessible.description: qsTr("Show media %1 of %2")
+				.arg((root.selectedIndex + 1) % root.mediaItems.length + 1)
+				.arg(root.mediaItems.length)
+			onClicked: root.nextMedia()
 		}
 
 		Rectangle {

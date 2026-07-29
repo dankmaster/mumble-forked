@@ -571,6 +571,7 @@ public:
 	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
 	bool requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatInstagramMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatTikTokMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatFacebookMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
 	void requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
@@ -1114,6 +1115,7 @@ protected:
 	QSet< QString > m_persistentChatQueuedInlineDataImageWarmupKeys;
 	quint64 m_persistentChatInlineDataImageWarmupGeneration = 1;
 	QSet< QString > m_pendingPersistentChatInstagramMetadataRequests;
+	QSet< QString > m_pendingPersistentChatTikTokMetadataRequests;
 	QSet< QString > m_pendingPersistentChatFacebookMetadataRequests;
 	std::optional< MumbleProto::ChatMessage > m_pendingPersistentChatReply;
 	QTimer *m_modernShellSyncTimer                = nullptr;

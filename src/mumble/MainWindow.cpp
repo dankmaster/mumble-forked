@@ -4861,8 +4861,10 @@ constexpr int RICH_PREVIEW_METADATA_VERSION = 14;
 constexpr int OEMBED_PREVIEW_METADATA_VERSION = 1;
 constexpr int YOUTUBE_CLIP_OEMBED_METADATA_VERSION = 2;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 11;
+constexpr int TIKTOK_PREVIEW_METADATA_VERSION = 1;
 constexpr int FACEBOOK_PREVIEW_METADATA_VERSION = 1;
 constexpr qint64 INSTAGRAM_PREVIEW_METADATA_TTL_SECONDS = 6 * 60 * 60;
+constexpr qint64 TIKTOK_PREVIEW_METADATA_TTL_SECONDS = 30 * 60;
 constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
@@ -5001,6 +5003,10 @@ bool isKnownRemotePlayableMediaHost(QString host) {
 		   || hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tiktokcdn.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tiktokcdn-eu.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tiktokv.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"));
 }
@@ -8548,16 +8554,63 @@ QString amazonProductImageFromHtml(const QString &html) {
 	return image;
 }
 
+QString amazonProductImageIdentity(const QUrl &url) {
+	QString path = url.path().toLower();
+	const qsizetype transformStart = path.indexOf(QLatin1String("._"));
+	if (transformStart > 0) {
+		path.truncate(transformStart);
+	}
+	return url.host().toLower() + QLatin1Char('|') + path;
+}
+
+int amazonProductImageResolutionScore(const QUrl &url) {
+	const QString path = url.path();
+	const qsizetype transformStart = path.indexOf(QLatin1String("._"));
+	if (transformStart < 0) {
+		return 0;
+	}
+
+	int score = 0;
+	static const QRegularExpression s_dimensionPattern(QLatin1String("\\d{2,5}"));
+	QRegularExpressionMatchIterator dimensions =
+		s_dimensionPattern.globalMatch(path.mid(transformStart + 2));
+	while (dimensions.hasNext()) {
+		score = qMax(score, dimensions.next().captured(0).toInt());
+	}
+	return score;
+}
+
 QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString &html) {
 	QVariantList images;
 	QSet< QString > seenImages;
+	QSet< QString > seenProductImages;
+	const auto appendAmazonImage = [&](QString rawUrl) {
+		rawUrl = decodedPreviewText(rawUrl).trimmed();
+		rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+		if (rawUrl.startsWith(QLatin1String("//"))) {
+			rawUrl.prepend(QStringLiteral("https:"));
+		}
+		const QUrl imageUrl = baseUrl.resolved(QUrl(rawUrl));
+		if (!isSafePreviewTarget(imageUrl)) {
+			return;
+		}
+		const QString identity = amazonProductImageIdentity(imageUrl);
+		if (identity.isEmpty() || seenProductImages.contains(identity)) {
+			return;
+		}
+		const qsizetype previousSize = images.size();
+		appendPreviewImageItem(images, seenImages, baseUrl, imageUrl.toString(QUrl::FullyEncoded));
+		if (images.size() > previousSize) {
+			seenProductImages.insert(identity);
+		}
+	};
 
 	static const QRegularExpression s_oldHiresPattern(
 		QLatin1String("\\bdata-old-hires\\s*=\\s*(['\"])(.*?)\\1"),
 		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
 	QRegularExpressionMatchIterator oldHiresMatches = s_oldHiresPattern.globalMatch(html);
 	while (oldHiresMatches.hasNext() && images.size() < 16) {
-		appendPreviewImageItem(images, seenImages, baseUrl, oldHiresMatches.next().captured(2));
+		appendAmazonImage(oldHiresMatches.next().captured(2));
 	}
 
 	static const QRegularExpression s_dynamicImagesAttributePattern(
@@ -8566,17 +8619,37 @@ QVariantList amazonProductImageItemsFromHtml(const QUrl &baseUrl, const QString 
 	static const QRegularExpression s_dynamicImageUrlPattern(
 		QLatin1String("https?://[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp)(?:\\?[^\"'<>\\\\\\s]*)?"),
 		QRegularExpression::CaseInsensitiveOption);
+	QHash< QString, QPair< int, QString > > bestDynamicImages;
+	QStringList dynamicImageOrder;
 	QRegularExpressionMatchIterator dynamicAttributes = s_dynamicImagesAttributePattern.globalMatch(html);
-	while (dynamicAttributes.hasNext() && images.size() < 16) {
+	while (dynamicAttributes.hasNext()) {
 		const QString dynamicImages = decodedPreviewText(dynamicAttributes.next().captured(2));
 		QRegularExpressionMatchIterator imageUrls = s_dynamicImageUrlPattern.globalMatch(dynamicImages);
-		while (imageUrls.hasNext() && images.size() < 16) {
-			appendPreviewImageItem(images, seenImages, baseUrl, imageUrls.next().captured(0));
+		while (imageUrls.hasNext()) {
+			const QString candidate = decodedPreviewText(imageUrls.next().captured(0)).trimmed();
+			const QUrl candidateUrl = baseUrl.resolved(QUrl(candidate));
+			if (!isSafePreviewTarget(candidateUrl)) {
+				continue;
+			}
+			const QString identity = amazonProductImageIdentity(candidateUrl);
+			const int score = amazonProductImageResolutionScore(candidateUrl);
+			if (!bestDynamicImages.contains(identity)) {
+				dynamicImageOrder.push_back(identity);
+				bestDynamicImages.insert(identity, qMakePair(score, candidate));
+			} else if (score > bestDynamicImages.value(identity).first) {
+				bestDynamicImages[identity] = qMakePair(score, candidate);
+			}
 		}
+	}
+	for (const QString &identity : dynamicImageOrder) {
+		if (images.size() >= 16) {
+			break;
+		}
+		appendAmazonImage(bestDynamicImages.value(identity).second);
 	}
 
 	if (images.isEmpty()) {
-		appendPreviewImageItem(images, seenImages, baseUrl, amazonProductImageFromHtml(html));
+		appendAmazonImage(amazonProductImageFromHtml(html));
 	}
 	return images;
 }
@@ -9211,7 +9284,11 @@ QUrl richPreviewClientPageUrl(const QUrl &url) {
 	QUrl pageUrl = flashbackPreviewPageUrl(url);
 	if (const std::optional< QString > productId = amazonProductIdFromUrl(url); productId) {
 		pageUrl.setScheme(QStringLiteral("https"));
-		pageUrl.setPath(QStringLiteral("/dp/%1").arg(*productId));
+		// Amazon's compact product route is materially more reliable for an
+		// unauthenticated preview client than the canonical desktop /dp route.
+		// It still returns the real title, price, delivery data and image
+		// gallery without carrying the sender's tracking query.
+		pageUrl.setPath(QStringLiteral("/gp/aw/d/%1").arg(*productId));
 		pageUrl.setQuery(QString());
 		pageUrl.setFragment(QString());
 	}
@@ -11155,6 +11232,12 @@ QByteArray previewMediaRefererForUrl(const QUrl &url) {
 	if (hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))) {
 		return QByteArrayLiteral("https://www.instagram.com/");
 	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("tiktokcdn.com"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("tiktokcdn-eu.com"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("tiktokv.com"))) {
+		return QByteArrayLiteral("https://www.tiktok.com/");
+	}
 	if (hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
 		|| hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"))) {
 		return QByteArrayLiteral("https://www.facebook.com/");
@@ -11240,7 +11323,7 @@ bool isYouTubeClipUrl(const QUrl &url);
 
 qint64 previewMaxPageBytesForUrl(const QUrl &url) {
 	if (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url) || isAmazonPreviewUrl(url)
-		|| isYouTubeClipUrl(url)) {
+		|| isYouTubeClipUrl(url) || tiktokPostTargetFromUrl(url).has_value()) {
 		return 2 * 1024 * 1024;
 	}
 	return PREVIEW_MAX_PAGE_BYTES;
@@ -12916,6 +12999,313 @@ void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, c
 	preview.failed      = false;
 }
 
+QString tiktokSafePreviewUrl(const QString &rawUrl, const bool requireKnownMediaHost = false) {
+	const QUrl url(rawUrl.trimmed());
+	if (!url.isValid() || url.scheme().toLower() != QLatin1String("https")
+		|| !isSafePreviewTarget(url)
+		|| (requireKnownMediaHost && !isKnownRemotePlayableMediaHost(url.host()))) {
+		return QString();
+	}
+	return url.toString(QUrl::FullyEncoded);
+}
+
+QString tiktokUrlFromJsonValue(const QJsonValue &value, const bool requireKnownMediaHost,
+							   const int depth = 0) {
+	if (depth > 3) {
+		return QString();
+	}
+	if (value.isString()) {
+		return tiktokSafePreviewUrl(value.toString(), requireKnownMediaHost);
+	}
+	if (value.isArray()) {
+		for (const QJsonValue &entry : value.toArray()) {
+			const QString url = tiktokUrlFromJsonValue(entry, requireKnownMediaHost, depth + 1);
+			if (!url.isEmpty()) {
+				return url;
+			}
+		}
+		return QString();
+	}
+	if (!value.isObject()) {
+		return QString();
+	}
+
+	const QJsonObject object = value.toObject();
+	for (const QString &key : {
+			 QStringLiteral("UrlList"), QStringLiteral("urlList"), QStringLiteral("url_list"),
+			 QStringLiteral("url"), QStringLiteral("URL") }) {
+		const QString url = tiktokUrlFromJsonValue(object.value(key), requireKnownMediaHost, depth + 1);
+		if (!url.isEmpty()) {
+			return url;
+		}
+	}
+	return QString();
+}
+
+QString tiktokJsonId(const QJsonValue &value) {
+	if (value.isString()) {
+		return value.toString().trimmed();
+	}
+	if (value.isDouble()) {
+		return QString::number(value.toDouble(), 'f', 0);
+	}
+	return QString();
+}
+
+std::optional< qlonglong > tiktokJsonCount(const QJsonValue &value) {
+	bool ok = false;
+	qlonglong result = 0;
+	if (value.isString()) {
+		result = value.toString().trimmed().toLongLong(&ok);
+	} else if (value.isDouble() && std::isfinite(value.toDouble())
+			   && value.toDouble() >= 0.0
+			   && value.toDouble() <= static_cast< double >(std::numeric_limits< qlonglong >::max())) {
+		result = static_cast< qlonglong >(value.toDouble());
+		ok     = true;
+	}
+	return ok && result >= 0 ? std::optional< qlonglong >(result) : std::nullopt;
+}
+
+std::optional< QJsonObject > tiktokPostObjectInJson(const QJsonValue &value,
+													const QString &postId,
+													const int depth,
+													int &visited) {
+	if (depth > 18 || ++visited > 25000) {
+		return std::nullopt;
+	}
+	if (value.isObject()) {
+		const QJsonObject object = value.toObject();
+		if (tiktokJsonId(object.value(QStringLiteral("id"))) == postId
+			&& object.value(QStringLiteral("author")).isObject()
+			&& (object.value(QStringLiteral("video")).isObject()
+				|| object.value(QStringLiteral("imagePost")).isObject())) {
+			return object;
+		}
+		for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+			if (const auto result = tiktokPostObjectInJson(it.value(), postId, depth + 1, visited)) {
+				return result;
+			}
+		}
+		return std::nullopt;
+	}
+	if (value.isArray()) {
+		for (const QJsonValue &entry : value.toArray()) {
+			if (const auto result = tiktokPostObjectInJson(entry, postId, depth + 1, visited)) {
+				return result;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional< QJsonObject > tiktokPostObjectFromHtml(const QUrl &url, const QString &html) {
+	const std::optional< TikTokPostTarget > target = tiktokPostTargetFromUrl(url);
+	if (!target || html.isEmpty()) {
+		return std::nullopt;
+	}
+
+	static const QRegularExpression s_applicationJsonScript(
+		QLatin1String("<script\\b[^>]*\\btype\\s*=\\s*[\"']application/json[\"'][^>]*>([\\s\\S]*?)</script>"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator scripts = s_applicationJsonScript.globalMatch(html);
+	const QByteArray postIdUtf8 = target->id.toUtf8();
+	int scannedScripts = 0;
+	qint64 parsedCandidateBytes = 0;
+	while (scripts.hasNext() && scannedScripts++ < 64) {
+		const QByteArray json = scripts.next().captured(1).trimmed().toUtf8();
+		if (json.isEmpty() || !json.contains(postIdUtf8)
+			|| json.size() > 2 * 1024 * 1024
+			|| parsedCandidateBytes + json.size() > 4 * 1024 * 1024) {
+			continue;
+		}
+		parsedCandidateBytes += json.size();
+		QJsonParseError error;
+		const QJsonDocument document = QJsonDocument::fromJson(json, &error);
+		if (error.error != QJsonParseError::NoError || document.isNull()) {
+			continue;
+		}
+
+		const QJsonValue root =
+			document.isObject() ? QJsonValue(document.object()) : QJsonValue(document.array());
+		int visited = 0;
+		if (const auto result = tiktokPostObjectInJson(root, target->id, 0, visited)) {
+			return result;
+		}
+	}
+	return std::nullopt;
+}
+
+struct TikTokPreviewMetadata {
+	QString displayName;
+	QString handle;
+	QString caption;
+	QString createdAt;
+	QString mediaKind;
+	QString posterUrl;
+	QString avatarUrl;
+	std::vector< MainWindow::PersistentChatPreviewMediaItem > mediaItems;
+	std::optional< qlonglong > likeCount;
+	std::optional< qlonglong > commentCount;
+	std::optional< qlonglong > shareCount;
+	std::optional< qlonglong > viewCount;
+	std::optional< qlonglong > saveCount;
+};
+
+TikTokPreviewMetadata tiktokPreviewMetadataFromHtml(const QUrl &url, const QString &html) {
+	TikTokPreviewMetadata metadata;
+	const std::optional< TikTokPostTarget > target = tiktokPostTargetFromUrl(url);
+	metadata.mediaKind = target ? target->kind : QStringLiteral("video");
+	const std::optional< QJsonObject > item = tiktokPostObjectFromHtml(url, html);
+	if (!item) {
+		return metadata;
+	}
+
+	metadata.caption = trimmedPreviewText(item->value(QStringLiteral("desc")).toString(), 900);
+	const QJsonObject author = item->value(QStringLiteral("author")).toObject();
+	metadata.displayName =
+		trimmedPreviewText(author.value(QStringLiteral("nickname")).toString(), 96);
+	const QString uniqueId =
+		trimmedPreviewText(author.value(QStringLiteral("uniqueId")).toString(), 96);
+	if (!uniqueId.isEmpty()) {
+		metadata.handle = uniqueId.startsWith(QLatin1Char('@'))
+			? uniqueId : QStringLiteral("@") + uniqueId;
+	}
+	metadata.avatarUrl = tiktokUrlFromJsonValue(
+		author.value(QStringLiteral("avatarLarger")), false);
+	if (metadata.avatarUrl.isEmpty()) {
+		metadata.avatarUrl = tiktokUrlFromJsonValue(
+			author.value(QStringLiteral("avatarMedium")), false);
+	}
+
+	const std::optional< qlonglong > createdAt =
+		tiktokJsonCount(item->value(QStringLiteral("createTime")));
+	if (createdAt && *createdAt > 0) {
+		metadata.createdAt =
+			QDateTime::fromSecsSinceEpoch(*createdAt, QTimeZone::utc()).toString(Qt::ISODate);
+	}
+
+	const QJsonObject stats = item->value(QStringLiteral("stats")).toObject();
+	metadata.likeCount    = tiktokJsonCount(stats.value(QStringLiteral("diggCount")));
+	metadata.commentCount = tiktokJsonCount(stats.value(QStringLiteral("commentCount")));
+	metadata.shareCount   = tiktokJsonCount(stats.value(QStringLiteral("shareCount")));
+	metadata.viewCount    = tiktokJsonCount(stats.value(QStringLiteral("playCount")));
+	metadata.saveCount    = tiktokJsonCount(stats.value(QStringLiteral("collectCount")));
+
+	const QJsonObject imagePost = item->value(QStringLiteral("imagePost")).toObject();
+	const QJsonArray images      = imagePost.value(QStringLiteral("images")).toArray();
+	QSet< QString > seenMedia;
+	for (const QJsonValue &entry : images) {
+		if (metadata.mediaItems.size() >= 16) {
+			break;
+		}
+		const QJsonObject image = entry.toObject();
+		QString imageUrl = tiktokUrlFromJsonValue(
+			image.value(QStringLiteral("displayImage")), false);
+		if (imageUrl.isEmpty()) {
+			imageUrl = tiktokUrlFromJsonValue(image.value(QStringLiteral("ownerWatermarkImage")), false);
+		}
+		const QString thumbnail = tiktokUrlFromJsonValue(
+			image.value(QStringLiteral("thumbnail")), false);
+		if (imageUrl.isEmpty() || seenMedia.contains(imageUrl)) {
+			continue;
+		}
+		seenMedia.insert(imageUrl);
+		metadata.mediaItems.push_back(MainWindow::PersistentChatPreviewMediaItem {
+			imageUrl,
+			QStringLiteral("image/jpeg"),
+			QStringLiteral("image"),
+			metadata.caption,
+			QString(),
+			thumbnail,
+			QString()
+		});
+	}
+	if (!metadata.mediaItems.empty()) {
+		metadata.mediaKind = metadata.mediaItems.size() > 1
+			? QStringLiteral("carousel") : QStringLiteral("photo");
+		metadata.posterUrl = !metadata.mediaItems.front().thumbnail.isEmpty()
+			? metadata.mediaItems.front().thumbnail : metadata.mediaItems.front().url;
+		return metadata;
+	}
+
+	const QJsonObject video = item->value(QStringLiteral("video")).toObject();
+	const QString videoUrl = tiktokUrlFromJsonValue(
+		video.value(QStringLiteral("playAddr")), true);
+	metadata.posterUrl = tiktokUrlFromJsonValue(
+		video.value(QStringLiteral("originCover")), false);
+	if (metadata.posterUrl.isEmpty()) {
+		metadata.posterUrl = tiktokUrlFromJsonValue(
+			video.value(QStringLiteral("cover")), false);
+	}
+	if (!videoUrl.isEmpty()) {
+		metadata.mediaKind = QStringLiteral("video");
+		metadata.mediaItems.push_back(MainWindow::PersistentChatPreviewMediaItem {
+			videoUrl,
+			QStringLiteral("video/mp4"),
+			QStringLiteral("video"),
+			metadata.caption,
+			QString(),
+			metadata.posterUrl,
+			metadata.posterUrl
+		});
+	}
+	return metadata;
+}
+
+bool tiktokMetadataIsFresh(const QVariantMap &metadata) {
+	const qint64 fetchedAt = metadata.value(QStringLiteral("tiktokMetadataFetchedAt")).toLongLong();
+	const qint64 age = QDateTime::currentSecsSinceEpoch() - fetchedAt;
+	return fetchedAt > 0 && age >= 0 && age <= TIKTOK_PREVIEW_METADATA_TTL_SECONDS;
+}
+
+void applyTikTokPreviewMetadata(MainWindow::PersistentChatPreview &preview, const QUrl &url,
+								const TikTokPreviewMetadata &tiktok) {
+	if (!tiktokPostTargetFromUrl(url)) {
+		return;
+	}
+
+	QVariantMap metadata = preview.metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("tiktok"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("tiktok"));
+	metadata.insert(QStringLiteral("tiktokMetadataVersion"), TIKTOK_PREVIEW_METADATA_VERSION);
+	metadata.insert(QStringLiteral("tiktokMetadataFetchedAt"), QDateTime::currentSecsSinceEpoch());
+	metadata.insert(QStringLiteral("tiktokMediaKind"), tiktok.mediaKind);
+	metadata.insert(QStringLiteral("tiktokMediaCount"),
+					static_cast< qulonglong >(tiktok.mediaItems.size()));
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokDisplayName"), tiktok.displayName);
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokHandle"), tiktok.handle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokCaption"), tiktok.caption);
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokCreatedAt"), tiktok.createdAt);
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokPosterUrl"), tiktok.posterUrl);
+	insertPreviewMetadataValue(metadata, QStringLiteral("tiktokAvatarUrl"), tiktok.avatarUrl);
+	if (tiktok.likeCount) metadata.insert(QStringLiteral("tiktokLikeCount"), *tiktok.likeCount);
+	if (tiktok.commentCount) metadata.insert(QStringLiteral("tiktokCommentCount"), *tiktok.commentCount);
+	if (tiktok.shareCount) metadata.insert(QStringLiteral("tiktokShareCount"), *tiktok.shareCount);
+	if (tiktok.viewCount) metadata.insert(QStringLiteral("tiktokViewCount"), *tiktok.viewCount);
+	if (tiktok.saveCount) metadata.insert(QStringLiteral("tiktokSaveCount"), *tiktok.saveCount);
+	if (tiktok.mediaKind == QLatin1String("photo")
+		|| tiktok.mediaKind == QLatin1String("carousel")) {
+		metadata.insert(QStringLiteral("contentBranch"), QStringLiteral("photo-carousel"));
+		metadata.insert(QStringLiteral("mediaPresentation"), QStringLiteral("image-card"));
+	}
+	preview.metadata = metadata;
+	if (!tiktok.mediaItems.empty()) {
+		preview.mediaItems = tiktok.mediaItems;
+	}
+
+	if (!tiktok.caption.isEmpty()) {
+		preview.title = tiktok.caption.size() <= 280
+			? tiktok.caption : tiktok.caption.left(279).trimmed() + QChar(0x2026);
+	} else if (!tiktok.handle.isEmpty()) {
+		preview.title = QObject::tr("Post by %1").arg(tiktok.handle);
+	}
+	preview.subtitle = !tiktok.displayName.isEmpty() ? tiktok.displayName
+		: !tiktok.handle.isEmpty() ? tiktok.handle : QObject::tr("TikTok");
+	preview.description = tiktok.caption;
+	preview.openLabel   = QObject::tr("Open on TikTok");
+	preview.failed      = false;
+}
+
 struct PersistentChatPreviewHtmlParseResult {
 	QString html;
 	QHash< QString, QString > metaTags;
@@ -12927,6 +13317,7 @@ struct PersistentChatPreviewHtmlParseResult {
 	QVariantMap metadata;
 	std::optional< PersistentChatPreviewPlayableMediaMeta > playableMediaMeta;
 	std::optional< InstagramPreviewMetadata > instagramMetadata;
+	std::optional< TikTokPreviewMetadata > tiktokMetadata;
 };
 
 PersistentChatPreviewHtmlParseResult parsePersistentChatPreviewHtml(
@@ -13403,6 +13794,7 @@ void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previ
 	for (const QString &invalidatedPreviewKey : std::as_const(invalidatedPreviewKeys)) {
 		m_persistentChatPreviews.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatInstagramMetadataRequests.remove(invalidatedPreviewKey);
+		m_pendingPersistentChatTikTokMetadataRequests.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatFacebookMetadataRequests.remove(invalidatedPreviewKey);
 		m_persistentChatQueuedPreviewRequestKeys.remove(invalidatedPreviewKey);
 		m_persistentChatQueuedPreviewRequests.removeAll(invalidatedPreviewKey);
@@ -13416,6 +13808,7 @@ void MainWindow::removePersistentChatPreview(const QString &previewKey) {
 	cancelPersistentChatPreviewNetworkRequests(previewKey);
 	m_persistentChatPreviews.remove(previewKey);
 	m_pendingPersistentChatInstagramMetadataRequests.remove(previewKey);
+	m_pendingPersistentChatTikTokMetadataRequests.remove(previewKey);
 	m_pendingPersistentChatFacebookMetadataRequests.remove(previewKey);
 	m_persistentChatQueuedPreviewRequestKeys.remove(previewKey);
 	m_persistentChatQueuedPreviewRequests.removeAll(previewKey);
@@ -24961,6 +25354,7 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 			 QStringLiteral("forumFirstPostAuthorAvatarUrl"),
 			 QStringLiteral("xAvatarUrl"),
 			 QStringLiteral("instagramAvatarUrl"),
+			 QStringLiteral("tiktokAvatarUrl"),
 			 QStringLiteral("githubOwnerAvatarUrl"),
 			 QStringLiteral("steamHeaderImage"),
 			 QStringLiteral("steamCapsuleImage") }) {
@@ -31566,6 +31960,98 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 	return true;
 }
 
+bool MainWindow::requestPersistentChatTikTokMetadataPreview(const QString &previewKey, const QUrl &previewUrl) {
+	const std::optional< TikTokPostTarget > target = tiktokPostTargetFromUrl(previewUrl);
+	if (previewKey.isEmpty() || !target || !Global::get().nam) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return false;
+	}
+	const QString expectedPreviewSource = it->canonicalUrl;
+	if (it->metadata.value(QStringLiteral("tiktokMetadataVersion")).toInt()
+			== TIKTOK_PREVIEW_METADATA_VERSION
+		&& !it->mediaItems.empty() && tiktokMetadataIsFresh(it->metadata)) {
+		return false;
+	}
+	if (m_pendingPersistentChatTikTokMetadataRequests.contains(previewKey)) {
+		return true;
+	}
+
+	QUrl requestUrl = previewUrl.adjusted(QUrl::RemoveQuery | QUrl::RemoveFragment);
+	requestUrl.setScheme(QStringLiteral("https"));
+	if (!requestUrl.isValid() || !isSafePreviewTarget(requestUrl)) {
+		return false;
+	}
+
+	m_pendingPersistentChatTikTokMetadataRequests.insert(previewKey);
+	QNetworkRequest pageRequest(requestUrl);
+	preparePreviewRequest(pageRequest);
+	pageRequest.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+	pageRequest.setRawHeader(QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache"));
+	QNetworkReply *pageReply = startPersistentChatPreviewGet(pageRequest, previewKey);
+	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(requestUrl), false);
+	const QString targetKind = target->kind;
+	connect(pageReply, &QNetworkReply::finished, this,
+			[this, pageReply, previewKey, requestUrl, expectedPreviewSource, targetKind]() {
+		const QByteArray data       = pageReply->readAll();
+		const bool success          = pageReply->error() == QNetworkReply::NoError;
+		const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+		const bool allowPartialHtml = previewAbortReason(pageReply) == QLatin1String("too_large")
+			&& !data.isEmpty() && previewContentTypeLooksHtml(contentType);
+		pageReply->deleteLater();
+
+		if ((success || allowPartialHtml) && previewContentTypeLooksHtml(contentType)) {
+			const qint64 maxPageBytes = previewMaxPageBytesForUrl(requestUrl);
+			const QByteArray htmlBytes = data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+			parsePersistentChatPreviewHtmlAsync(
+				this, persistentChatPreviewWorkerGroup(previewKey), QStringLiteral("html:tiktok"),
+				htmlBytes, contentType,
+				[requestUrl](PersistentChatPreviewHtmlParseResult &parsed) {
+					parsed.tiktokMetadata = tiktokPreviewMetadataFromHtml(requestUrl, parsed.html);
+				},
+				[this, previewKey, requestUrl, expectedPreviewSource](PersistentChatPreviewHtmlParseResult parsed) {
+					m_pendingPersistentChatTikTokMetadataRequests.remove(previewKey);
+					auto previewIt = m_persistentChatPreviews.find(previewKey);
+					if (previewIt == m_persistentChatPreviews.end()
+						|| previewIt->canonicalUrl != expectedPreviewSource) {
+						return;
+					}
+					if (parsed.tiktokMetadata) {
+						applyTikTokPreviewMetadata(*previewIt, requestUrl, *parsed.tiktokMetadata);
+					}
+					previewIt->metadataFinished = true;
+					ensurePersistentChatPreviewSiteSnapshot(previewKey);
+					publishPersistentChatPreviewUpdate(previewKey);
+				},
+				PersistentChatPreviewHtmlScope::BoundedDocument);
+			return;
+		}
+
+		m_pendingPersistentChatTikTokMetadataRequests.remove(previewKey);
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()
+			|| previewIt->canonicalUrl != expectedPreviewSource) {
+			return;
+		}
+		QVariantMap metadata = previewIt->metadata;
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("tiktok"));
+		metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("tiktok"));
+		metadata.insert(QStringLiteral("tiktokMetadataVersion"), TIKTOK_PREVIEW_METADATA_VERSION);
+		metadata.insert(QStringLiteral("tiktokMetadataFetchedAt"), QDateTime::currentSecsSinceEpoch());
+		metadata.insert(QStringLiteral("tiktokMediaKind"), targetKind);
+		previewIt->metadata = metadata;
+		previewIt->metadataFinished = true;
+		previewIt->failed = false;
+		ensurePersistentChatPreviewSiteSnapshot(previewKey);
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
 bool MainWindow::requestPersistentChatFacebookMetadataPreview(const QString &previewKey, const QUrl &previewUrl) {
 	if (previewKey.isEmpty() || !isFacebookReelPreviewUrl(previewUrl) || !Global::get().nam) {
 		return false;
@@ -32377,6 +32863,7 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 			 QStringLiteral("forumFirstPostAuthorAvatarUrl"),
 			 QStringLiteral("xAvatarUrl"),
 			 QStringLiteral("instagramAvatarUrl"),
+			 QStringLiteral("tiktokAvatarUrl"),
 			 QStringLiteral("githubOwnerAvatarUrl"),
 			 QStringLiteral("steamHeaderImage"),
 			 QStringLiteral("steamCapsuleImage") }) {
@@ -35664,6 +36151,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				QStringLiteral("image/jpeg"));
 		}
 		requestPersistentChatInstagramMetadataPreview(previewKey, previewUrl);
+		requestPersistentChatTikTokMetadataPreview(previewKey, previewUrl);
 		requestPersistentChatFacebookMetadataPreview(previewKey, previewUrl);
 		if (handledYahooFinanceQuotePreview) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
@@ -36428,17 +36916,26 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	}
 
 	if (!isImagePreview && isTikTokPhotoPostUrl(previewUrl)) {
-		preview.title       = provider ? provider->fallbackTitle : tr("TikTok photo post");
-		preview.description = tr("Photo post");
+		preview.title       = tr("Fetching TikTok photo post");
+		preview.description.clear();
 		preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("tiktok"));
 		preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("tiktok"));
+		preview.metadata.insert(QStringLiteral("tiktokMediaKind"), QStringLiteral("photo"));
 		preview.metadata.insert(QStringLiteral("contentBranch"), QStringLiteral("photo-carousel"));
 		preview.metadata.insert(QStringLiteral("mediaPresentation"), QStringLiteral("provider-post-card"));
-		preview.metadataFinished  = true;
+		preview.metadataFinished  = false;
 		preview.thumbnailFinished = true;
 		preview.failed            = false;
 		m_persistentChatPreviews.insert(previewKey, preview);
-		storePersistentChatPreviewDiskCache(previewKey);
+		if (!requestPersistentChatTikTokMetadataPreview(previewKey, previewUrl)) {
+			auto previewIt = m_persistentChatPreviews.find(previewKey);
+			if (previewIt != m_persistentChatPreviews.end()) {
+				previewIt->metadataFinished = true;
+				previewIt->title = provider ? provider->fallbackTitle : tr("TikTok photo post");
+				previewIt->description = tr("Open the original post to view its media.");
+				storePersistentChatPreviewDiskCache(previewKey);
+			}
+		}
 		renderIfVisible();
 		return;
 	}
@@ -36601,7 +37098,13 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		}
 	}
 
+	const bool handledTikTokMetadata =
+		requestPersistentChatTikTokMetadataPreview(previewKey, previewUrl);
 	if (requestPersistentChatOEmbedPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
+	if (handledTikTokMetadata) {
 		renderIfVisible();
 		return;
 	}

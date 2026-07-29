@@ -16,9 +16,13 @@ Button {
 	visible: sourceUrl.length > 0
 	focusPolicy: Qt.StrongFocus
 	hoverEnabled: true
-	implicitWidth: sourceLayout.implicitWidth + Theme.space3 * 2
+	// A full source URL must remain readable, but its intrinsic width must not
+	// be allowed to widen the owning card. The parent layout supplies the real
+	// width and the URL grows vertically inside that bound.
+	implicitWidth: Math.min(520, sourceLayout.implicitWidth + Theme.space3 * 2)
 	implicitHeight: Math.max(Theme.controlHeight,
 		sourceLayout.implicitHeight + Theme.space2 * 2)
+	clip: true
 	Accessible.role: Accessible.Link
 	Accessible.name: providerLabel.length > 0
 		? qsTr("Open source on %1").arg(providerLabel) : qsTr("Open source")
@@ -34,6 +38,7 @@ Button {
 
 	contentItem: RowLayout {
 		id: sourceLayout
+		width: root.availableWidth
 		spacing: Theme.space2
 
 		ModernIcon {
@@ -47,6 +52,7 @@ Button {
 
 		ColumnLayout {
 			Layout.fillWidth: true
+			Layout.minimumWidth: 0
 			spacing: 0
 
 			Label {
