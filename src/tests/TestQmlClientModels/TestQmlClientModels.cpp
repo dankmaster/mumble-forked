@@ -2063,21 +2063,23 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	const qsizetype publishStart =
 		source.indexOf(QStringLiteral("void MainWindow::publishModernShellPreviewUpdateForKey"));
 	const qsizetype publishEnd =
-		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"),
-					   publishStart);
+		source.indexOf(QStringLiteral("void MainWindow::applyModernShellPreviewUpdateForKey"), publishStart);
 	QVERIFY(publishStart >= 0);
 	QVERIFY(publishEnd > publishStart);
 
 	const QString publishBody = source.mid(publishStart, publishEnd - publishStart);
-	const qsizetype busyGuard = publishBody.indexOf(QStringLiteral("presentationBusy()"));
-	const qsizetype providerWork =
-		publishBody.indexOf(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)"));
-	const qsizetype dtoEviction =
-		publishBody.indexOf(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)"));
-	QVERIFY(busyGuard >= 0);
-	QVERIFY(providerWork > busyGuard);
-	QVERIFY(dtoEviction > busyGuard);
 	QVERIFY(publishBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.insert(previewKey)")));
+	QVERIFY(publishBody.contains(QStringLiteral("presentationBusy()")));
+	QVERIFY(publishBody.contains(QStringLiteral("scheduleDeferredModernShellPreviewUpdateDrain()")));
+	QVERIFY(!publishBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(!publishBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
+	const qsizetype applyStart = publishEnd;
+	const qsizetype applyEnd =
+		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"), applyStart);
+	QVERIFY(applyEnd > applyStart);
+	const QString applyBody = source.mid(applyStart, applyEnd - applyStart);
+	QVERIFY(applyBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(applyBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPendingChanged")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPending()")));
 
@@ -2089,7 +2091,7 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(nextFunction > drainStart);
 	const QString drainBody = source.mid(drainStart, nextFunction - drainStart);
 	QVERIFY(drainBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.erase(it)")));
-	QCOMPARE(drainBody.count(QStringLiteral("publishModernShellPreviewUpdateForKey(previewKey)")), 1);
+	QCOMPARE(drainBody.count(QStringLiteral("applyModernShellPreviewUpdateForKey(previewKey)")), 1);
 	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellChatMessages.insert")));
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));

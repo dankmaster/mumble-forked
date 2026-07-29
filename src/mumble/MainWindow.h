@@ -764,6 +764,7 @@ public:
 	void clearModernShellMessageDtoCache(const char *reason);
 	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
 	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
+	void applyModernShellPreviewUpdateForKey(const QString &previewKey);
 	void scheduleDeferredModernShellPreviewUpdateDrain();
 	void drainDeferredModernShellPreviewUpdates();
 	QString modernShellAvatarDataUrlForTextureHash(const QByteArray &textureHash, int avatarSize);

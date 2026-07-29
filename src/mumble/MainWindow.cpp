@@ -25287,11 +25287,16 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 	if (previewKey.isEmpty()) {
 		return;
 	}
+	m_deferredModernShellPreviewUpdateKeys.insert(previewKey);
 	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
-		m_deferredModernShellPreviewUpdateKeys.insert(previewKey);
 		mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source", 1);
-		return;
+	} else {
+		mumble::chatperf::recordValue("qml.chat.preview_update.coalesced_source", 1);
 	}
+	scheduleDeferredModernShellPreviewUpdateDrain();
+}
+
+void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) {
 	ensurePersistentChatPreviewImageProviders(previewKey);
 
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
@@ -25341,7 +25346,7 @@ void MainWindow::drainDeferredModernShellPreviewUpdates() {
 	const QString previewKey = *it;
 	m_deferredModernShellPreviewUpdateKeys.erase(it);
 	mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source.drain", 1);
-	publishModernShellPreviewUpdateForKey(previewKey);
+	applyModernShellPreviewUpdateForKey(previewKey);
 	scheduleDeferredModernShellPreviewUpdateDrain();
 }
 
