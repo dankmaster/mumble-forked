@@ -12,6 +12,11 @@
 
 class PersistentChatStore {
 public:
+	struct MergeMessagesResult {
+		bool changed                    = false;
+		qsizetype prependedMessageCount = 0;
+	};
+
 	struct ScopeState {
 		PersistentChatScopeStateSnapshot snapshot;
 		bool initialRequestInFlight          = false;
@@ -33,6 +38,8 @@ public:
 										   unsigned int lastReadMessageID);
 	static void sortMessages(QVector< MumbleProto::ChatMessage > &messages);
 	static bool mergeMessage(QVector< MumbleProto::ChatMessage > &messages, const MumbleProto::ChatMessage &message);
+	static MergeMessagesResult mergeMessages(QVector< MumbleProto::ChatMessage > &messages,
+											 const QVector< MumbleProto::ChatMessage > &incomingMessages);
 	static unsigned int oldestMessageID(const QVector< MumbleProto::ChatMessage > &messages);
 
 private:

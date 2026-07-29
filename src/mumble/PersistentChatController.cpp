@@ -268,7 +268,6 @@ bool PersistentChatController::applyReactionState(const MumbleProto::ChatReactio
 void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response) {
 	const PersistentChatScopeKey key = scopeKeyFromHistory(response);
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-	const bool loadingOlder           = state.olderRequestInFlight;
 	state.initialRequestInFlight      = false;
 	state.olderRequestInFlight        = false;
 	state.snapshot.loadingState       = PersistentChatLoadingState::Idle;
@@ -280,17 +279,17 @@ void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHist
 		state.snapshot.lastReadMessageId = response.last_read_message_id();
 	}
 
-	if (!loadingOlder && !state.snapshot.messages.isEmpty()) {
-		for (int i = 0; i < response.messages_size(); ++i) {
-			PersistentChatStore::mergeMessage(state.snapshot.messages, response.messages(i));
-		}
-	} else {
-		if (!loadingOlder) {
-			state.snapshot.messages.clear();
-		}
-		for (int i = 0; i < response.messages_size(); ++i) {
-			PersistentChatStore::mergeMessage(state.snapshot.messages, response.messages(i));
-		}
+	QVector< MumbleProto::ChatMessage > incomingMessages;
+	incomingMessages.reserve(response.messages_size());
+	for (const MumbleProto::ChatMessage &message : response.messages()) {
+		incomingMessages.push_back(message);
+	}
+
+	const PersistentChatStore::MergeMessagesResult mergeResult =
+		PersistentChatStore::mergeMessages(state.snapshot.messages, incomingMessages);
+	state.snapshot.prependedMessageCount = mergeResult.prependedMessageCount;
+	if (mergeResult.changed) {
+		++state.snapshot.messagesRevision;
 	}
 
 	state.snapshot.oldestLoadedMessageId =
@@ -308,6 +307,8 @@ void PersistentChatController::handleMessage(const MumbleProto::ChatMessage &mes
 	const PersistentChatScopeKey key = scopeKeyFromMessage(message);
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
 	const bool inserted = PersistentChatStore::mergeMessage(state.snapshot.messages, message);
+	state.snapshot.prependedMessageCount = 0;
+	++state.snapshot.messagesRevision;
 	state.snapshot.oldestLoadedMessageId = PersistentChatStore::oldestMessageID(state.snapshot.messages);
 	setUnreadFromMessages(state);
 

@@ -23,6 +23,8 @@ private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
 	void largeSynchronizationsStayResetFree();
+	void chatTimelineDirectPrependDoesNotTouchExistingRows();
+	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
 	void connectionHandoffBlocksRetiringServerSnapshots();
@@ -423,6 +425,14 @@ void TestQmlClientModels::largeSynchronizationsStayResetFree() {
 	QCOMPARE(model.rowForStableId(QStringLiteral("message:0")), 128);
 	QCOMPARE(model.rowForStableId(QStringLiteral("older:127")), 127);
 	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(changedSpy.constFirst().at(0).value< QModelIndex >().row(), 128);
+	QCOMPARE(changedSpy.constFirst().at(1).value< QModelIndex >().row(), 128);
+	const QList< int > prependBoundaryRoles =
+		changedSpy.constFirst().at(2).value< QList< int > >();
+	QVERIFY(prependBoundaryRoles.contains(StableListModel::PayloadRole));
+	QVERIFY(prependBoundaryRoles.contains(StableListModel::ModelStartsGroupRole));
+	changedSpy.clear();
 
 	QVariantMap changed = prepended.at(5128).toMap();
 	changed.insert(QStringLiteral("plainText"), QStringLiteral("Updated body"));
@@ -457,6 +467,115 @@ void TestQmlClientModels::largeSynchronizationsStayResetFree() {
 	model.clear();
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::chatTimelineDirectPrependDoesNotTouchExistingRows() {
+	ChatTimelineModel model;
+	QVariantList existingMessages;
+	existingMessages.reserve(10000);
+	for (int row = 0; row < 10000; ++row) {
+		existingMessages.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("existing:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Existing %1").arg(row) }
+		});
+	}
+	model.replaceMessages(existingMessages);
+
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy prependSpy(&model, &StableListModel::rowsAboutToBePrepended);
+	QVariantList olderMessages;
+	olderMessages.reserve(128);
+	for (int row = 0; row < 128; ++row) {
+		QVariantMap olderMessage {
+			{ QStringLiteral("messageKey"), QStringLiteral("older-direct:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Older direct %1").arg(row) }
+		};
+		if (row == 0) {
+			olderMessage.insert(QStringLiteral("bodyHtml"),
+								QStringLiteral("<b>Older direct 0</b>"));
+		}
+		olderMessages.push_back(olderMessage);
+	}
+
+	QCOMPARE(model.prependMessages(olderMessages), 128);
+	QCOMPARE(model.rowCount(), 10128);
+	QCOMPARE(prependSpy.count(), 1);
+	QCOMPARE(prependSpy.constFirst().constFirst().toInt(), 128);
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(insertSpy.constFirst().at(1).toInt(), 0);
+	QCOMPARE(insertSpy.constFirst().at(2).toInt(), 127);
+	QCOMPARE(changedSpy.count(), 0);
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.rowForStableId(QStringLiteral("older-direct:127")), 127);
+	QCOMPARE(model.rowForStableId(QStringLiteral("existing:0")), 128);
+	QCOMPARE(model.get(128).value(QStringLiteral("subtitle")).toString(), QStringLiteral("Existing 0"));
+	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
+	QVERIFY(model.materializeDeferredMessage(QStringLiteral("older-direct:0")));
+	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
+	QVERIFY(!model.materializeDeferredMessage(QStringLiteral("older-direct:0")));
+	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
+				.value(QStringLiteral("bodyHydrationPending")).toBool());
+	QVERIFY(model.requestBodyHydration(QStringLiteral("older-direct:0")));
+	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
+								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+	QVERIFY(!model.requestBodyHydration(QStringLiteral("older-direct:0")));
+}
+
+void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
+	ChatTimelineModel model;
+	model.replaceMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("current:0") },
+		{ QStringLiteral("plainText"), QStringLiteral("Current") }
+	} });
+
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy pendingSpy(&model, &ChatTimelineModel::prependPendingChanged);
+	QVariantList olderMessages;
+	for (int row = 0; row < 13; ++row) {
+		QVariantMap olderMessage {
+			{ QStringLiteral("messageKey"), QStringLiteral("older-queued:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Older queued %1").arg(row) }
+		};
+		if (row == 0) {
+			olderMessage.insert(QStringLiteral("bodyHtml"),
+								QStringLiteral("<b>Older queued 0</b>"));
+		}
+		olderMessages.push_back(olderMessage);
+	}
+
+	QCOMPARE(model.enqueuePrependMessages(olderMessages), 13);
+	QVERIFY(model.prependPending());
+	QTRY_COMPARE_WITH_TIMEOUT(model.rowCount(), 14, 2000);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 2000);
+	QCOMPARE(pendingSpy.count(), 2);
+	QCOMPARE(insertSpy.count(), 13);
+	for (const QList< QVariant > &arguments : insertSpy) {
+		QCOMPARE(arguments.at(1).toInt(), 0);
+		QCOMPARE(arguments.at(2).toInt(), 0);
+	}
+	QCOMPARE(resetSpy.count(), 0);
+	for (int row = 0; row < 13; ++row) {
+		QCOMPARE(model.get(row).value(QStringLiteral("id")).toString(),
+				 QStringLiteral("older-queued:%1").arg(row));
+	}
+	QCOMPARE(model.get(13).value(QStringLiteral("id")).toString(), QStringLiteral("current:0"));
+	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
+	const auto deferredRole = model.roleNames().key(QByteArrayLiteral("deferredPresentation"), -1);
+	QVERIFY(deferredRole >= 0);
+	QVERIFY(model.data(model.index(0, 0), deferredRole).toBool());
+	const auto startsGroupRole = model.roleNames().key(QByteArrayLiteral("modelStartsGroup"), -1);
+	QVERIFY(startsGroupRole >= 0);
+	QVERIFY(model.data(model.index(0, 0), startsGroupRole).toBool());
+	QVERIFY(!model.data(model.index(1, 0), startsGroupRole).toBool());
+	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
+				.value(QStringLiteral("bodyHydrationPending")).toBool());
+	QVERIFY(model.requestBodyHydration(QStringLiteral("older-queued:0")));
+	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
+								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+	QVERIFY(!model.requestBodyHydration(QStringLiteral("older-queued:0")));
 }
 
 void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {

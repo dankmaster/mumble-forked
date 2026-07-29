@@ -63,6 +63,7 @@ private:
 	qulonglong m_performanceInputSequence = 0;
 	struct ChatPerformanceWorkloadState {
 		bool active = false;
+		bool liveMode = false;
 		bool previousFixtureOverride = false;
 		QVariantList liveMessages;
 		bool running = false;

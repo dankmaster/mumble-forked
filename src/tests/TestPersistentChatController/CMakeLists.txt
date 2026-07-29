@@ -15,3 +15,5 @@ set_target_properties(TestPersistentChatController PROPERTIES AUTOMOC ON)
 target_link_libraries(TestPersistentChatController PRIVATE shared Qt6::Test)
 
 add_test(NAME TestPersistentChatController COMMAND $<TARGET_FILE:TestPersistentChatController>)
+
+configure_client_test_runtime(TestPersistentChatController TestPersistentChatController)

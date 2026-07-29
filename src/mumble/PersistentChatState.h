@@ -43,6 +43,11 @@ struct PersistentChatScopeKey {
 struct PersistentChatScopeStateSnapshot {
 	PersistentChatScopeKey key;
 	QVector< MumbleProto::ChatMessage > messages;
+	// Changes only when the message collection changes. Loading/read-state
+	// transitions deliberately keep the same revision so the frontend can
+	// update its chrome without rebuilding an unchanged timeline.
+	quint64 messagesRevision                = 0;
+	qsizetype prependedMessageCount         = 0;
 	bool initialLoaded                    = false;
 	bool hasOlder                         = false;
 	unsigned int oldestLoadedMessageId    = 0;

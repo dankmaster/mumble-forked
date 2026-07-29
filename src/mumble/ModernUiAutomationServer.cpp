@@ -5004,6 +5004,12 @@ QVariantMap ModernUiAutomationServer::finalizeChatPerformanceWorkload(QmlShellHo
 	if (host->window()) {
 		QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload");
 	}
+	if (m_chatPerformanceWorkload.liveMode) {
+		response.insert(QStringLiteral("restored"), true);
+		response.insert(QStringLiteral("restoredMessageCount"), host->chatModel()->rowCount());
+		m_chatPerformanceWorkload = {};
+		return response;
+	}
 	host->setVisualFixtureMutationActive(true);
 	host->chatModel()->replaceMessages(m_chatPerformanceWorkload.liveMessages);
 	host->setVisualFixtureMutationActive(false);
@@ -5038,6 +5044,11 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 	if (m_chatPerformanceWorkload.stepCount >= m_chatPerformanceWorkload.targetSteps) {
 		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
 		m_chatPerformanceWorkload.running = false;
+		if (m_chatPerformanceWorkload.liveMode) {
+			m_chatPerformanceWorkload.failureReason =
+				tr("The live chat scroll exhausted its safety frame budget before reaching the oldest loaded message.");
+			return;
+		}
 		if (!QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload")) {
 			m_chatPerformanceWorkload.failureReason =
 				tr("The Qt Quick root could not finish the chat-scroll workload.");
@@ -5050,8 +5061,24 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 	QVariant advanced;
 	if (!QMetaObject::invokeMethod(host->window(), "advancePerformanceChatScrollWorkload",
 			Q_RETURN_ARG(QVariant, advanced), Q_ARG(QVariant, nextStep),
-			Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps))
-		|| !advanced.toMap().value(QStringLiteral("advanced")).toBool()) {
+			Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps))) {
+		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceWorkload.running = false;
+		m_chatPerformanceWorkload.failureReason =
+			tr("The Qt Quick root could not advance chat-scroll step %1.").arg(nextStep);
+		return;
+	}
+	const QVariantMap advancedState = advanced.toMap();
+	if (advancedState.value(QStringLiteral("reachedTarget")).toBool()) {
+		m_chatPerformanceWorkload.stepCount =
+			qMax(m_chatPerformanceWorkload.stepCount,
+				advancedState.value(QStringLiteral("completedSteps")).toInt());
+		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
+		m_chatPerformanceWorkload.running = false;
+		QMetaObject::invokeMethod(host->window(), "completePerformanceChatScrollWorkload");
+		return;
+	}
+	if (!advancedState.value(QStringLiteral("advanced")).toBool()) {
 		QObject::disconnect(m_chatPerformanceWorkload.frameConnection);
 		m_chatPerformanceWorkload.running = false;
 		m_chatPerformanceWorkload.failureReason =
@@ -5580,6 +5607,41 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			response.insert(QStringLiteral("targetSteps"), m_chatPerformanceWorkload.targetSteps);
 			response.insert(QStringLiteral("scroll"), startedState);
 			return response;
+		} else if (command == QLatin1String("qmlPerformanceLiveChatScrollRun")) {
+			if (m_chatPerformanceWorkload.active)
+				return errorResponse(tr("A chat performance workload is already active."));
+			if (m_talkPerformanceWorkload.active)
+				return errorResponse(tr("A talk-state performance fixture is already active."));
+			m_chatPerformanceWorkload.active = true;
+			m_chatPerformanceWorkload.liveMode = true;
+			m_chatPerformanceWorkload.targetSteps =
+				qBound(1, request.value(QStringLiteral("stepCount"), 240).toInt(), 1000);
+			QVariant started;
+			if (!QMetaObject::invokeMethod(host->window(), "preparePerformanceChatScrollWorkload",
+					Q_RETURN_ARG(QVariant, started),
+					Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps),
+					Q_ARG(QVariant, true))) {
+				m_chatPerformanceWorkload = {};
+				return errorResponse(tr("The Qt Quick root does not expose the live chat-scroll workload."));
+			}
+			const QVariantMap startedState = started.toMap();
+			if (!startedState.value(QStringLiteral("started")).toBool()) {
+				m_chatPerformanceWorkload = {};
+				return errorResponse(startedState.value(QStringLiteral("reason"),
+					tr("The live chat timeline is not scrollable.")).toString());
+			}
+			m_chatPerformanceWorkload.primed = false;
+			m_chatPerformanceWorkload.running = true;
+			m_chatPerformanceWorkload.failureReason.clear();
+			m_chatPerformanceWorkload.frameConnection = QObject::connect(
+				host->window(), &QQuickWindow::frameSwapped, this,
+				[this]() { advanceChatPerformanceWorkload(); }, Qt::QueuedConnection);
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("running"), true);
+			response.insert(QStringLiteral("targetSteps"), m_chatPerformanceWorkload.targetSteps);
+			response.insert(QStringLiteral("scroll"), startedState);
+			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatScrollStatus")) {
 			if (!m_chatPerformanceWorkload.active)
 				return errorResponse(tr("No chat performance fixture is active."));
@@ -6090,6 +6152,34 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("timeline"), qmlState.toMap());
+		return response;
+	}
+
+	if (command == QLatin1String("qmlPrepareHistoryLoadPerformanceProbe")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariant qmlState;
+		if (!QMetaObject::invokeMethod(host->window(), "prepareHistoryLoadPerformanceProbe",
+				Q_RETURN_ARG(QVariant, qmlState))) {
+			return errorResponse(tr("The chat history-load performance probe is unavailable."));
+		}
+		const QVariantMap probe = qmlState.toMap();
+		if (!probe.value(QStringLiteral("prepared")).toBool()) {
+			return errorResponse(probe.value(QStringLiteral("reason"),
+				tr("The chat history-load performance probe could not be prepared.")).toString());
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("probe"), probe);
+		return response;
+	}
+
+	if (command == QLatin1String("qmlRequestOlderMessages")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		host->commandController()->requestOlderMessages();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("requested"), true);
+		response.insert(QStringLiteral("messageCount"), host->chatModel()->rowCount());
 		return response;
 	}
 

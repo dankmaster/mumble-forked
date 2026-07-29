@@ -40,6 +40,7 @@
 #include <memory>
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <span>
 #include <stack>
@@ -722,7 +723,8 @@ public:
 											 ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
 	QVariantList buildModernShellMessageStates(
 		const PersistentChatTarget &target, std::size_t beginIndex = 0,
-		ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
+		ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full,
+		std::size_t endIndex = std::numeric_limits< std::size_t >::max());
 	QVariantMap buildModernShellVoiceRoomScreenShareState(const Channel *channel) const;
 	QVariantMap buildQmlActiveScopeState(const PersistentChatTarget &target);
 	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target);
@@ -1102,6 +1104,7 @@ protected:
 	unsigned int m_visiblePersistentChatScopeID           = 0;
 	unsigned int m_visiblePersistentChatLastReadMessageID = 0;
 	unsigned int m_visiblePersistentChatOldestMessageID   = 0;
+	quint64 m_visiblePersistentChatMessagesRevision      = 0;
 	bool m_visiblePersistentChatHasMore                   = false;
 	PersistentChatLoadingState m_visiblePersistentChatLoadingState = PersistentChatLoadingState::Idle;
 	bool m_persistentChatLoadingOlder                     = false;

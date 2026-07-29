@@ -2772,12 +2772,26 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(automationSource.contains(QStringLiteral("&QQuickWindow::frameSwapped")));
 	QVERIFY(automationSource.contains(QStringLiteral("advanceTalkPerformanceWorkload")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceChatScrollRun")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceLiveChatScrollRun")));
 	QVERIFY(automationSource.contains(QStringLiteral("advanceChatPerformanceWorkload")));
+	QVERIFY(automationSource.contains(QStringLiteral("reachedTarget")));
+	QVERIFY(automationSource.contains(QStringLiteral("exhausted its safety frame budget")));
 	QVERIFY(automationSource.contains(QStringLiteral("chat-scroll:%1")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("function performanceChatFixtureState()")));
-	QVERIFY(mainQmlSource.contains(QStringLiteral("function preparePerformanceChatScrollWorkload(stepCount)")));
+	QVERIFY(mainQmlSource.contains(
+		QStringLiteral("function preparePerformanceChatScrollWorkload(stepCount, fullRangeToStart)")));
+	QVERIFY(mainQmlSource.contains(QStringLiteral("performanceChatScrollTargetY = minimumY")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("function advancePerformanceChatScrollWorkload(step, totalSteps)")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("timeline.contentY = performanceChatScrollStartY")));
+	const qsizetype historyProbeStart =
+		mainQmlSource.indexOf(QStringLiteral("function prepareHistoryLoadPerformanceProbe()"));
+	const qsizetype historyProbeEnd =
+		mainQmlSource.indexOf(QStringLiteral("function performanceChatScrollState()"), historyProbeStart);
+	QVERIFY(historyProbeStart >= 0);
+	QVERIFY(historyProbeEnd > historyProbeStart);
+	const QString historyProbeBody = mainQmlSource.mid(historyProbeStart, historyProbeEnd - historyProbeStart);
+	QVERIFY(historyProbeBody.contains(QStringLiteral("timeline.contentY - timeline.originY")));
+	QVERIFY(!historyProbeBody.contains(QStringLiteral("positionViewAtIndex")));
 	QVERIFY(!mainQmlSource.contains(QStringLiteral("id: timelineScrollWorkload")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("\"firstVisibleId\"")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("\"settled\"")));
@@ -3766,9 +3780,24 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 	QVERIFY(mainWindowSource.contains(QStringLiteral("%1:inline:pending")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("modern.message_dto_cache.full_first_paint_hit")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("knownEstimatedBytes")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("snapshot.messagesRevision == previousMessagesRevision")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("snapshot.prependedMessageCount")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("qml.chat.snapshot_unchanged.skipped")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("chat.publish.snapshot.prepend.build")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("chatModel()->enqueuePrependMessages(prependedMessages)")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("qml.chat.snapshot_prepend.queued")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("qml.chat.snapshot_prepend.fallback")));
 
 	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlRequestOlderMessages")));
+	QVERIFY(automationSource.contains(QStringLiteral("requestOlderMessages()")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlPrepareHistoryLoadPerformanceProbe")));
+	const QString historyProbeQml =
+		readTestSource(QFINDTESTDATA("../../mumble/qml-shell/Main.qml"));
+	QVERIFY(historyProbeQml.contains(QStringLiteral("prepareHistoryLoadPerformanceProbe")));
+	QVERIFY(historyProbeQml.contains(QStringLiteral("timeline.contentY - timeline.originY")));
+	QVERIFY(!historyProbeQml.contains(QStringLiteral("positionViewAtIndex(0, ListView.Beginning)")));
 }
 
 void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCancelable() {

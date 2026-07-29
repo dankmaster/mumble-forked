@@ -215,9 +215,20 @@ TestCase {
 		verify(/id:\s*scopePresentationFinalizeQuietTimer[\s\S]*interval:\s*120[\s\S]*completeScopePresentationFinalization\(false\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
-		verify(/delegate:\s*ChatMessageFrame[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
+		verify(/delegate:\s*DelegateChooser[\s\S]*ChatMessageFrame\s*\{[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled":[\s\S]*!timeline\.scopeResetPending/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
+		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
+		verify(/function\s+queueVisibleDeferredMaterialization\(\)[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
+		verify(/function\s+materializeNextDeferredRow\(\)[\s\S]*chatModel\.materializeDeferredMessage\(stableId\)[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
+		const deferredStart = mainSource.indexOf("id: deferredMessageDelegate")
+		const deferredEnd = mainSource.indexOf("DelegateChoice {", deferredStart + 1)
+		verify(deferredStart >= 0 && deferredEnd > deferredStart)
+		const deferredDelegateSource = mainSource.slice(deferredStart, deferredEnd)
+		verify(/required property string stableId[\s\S]*contentNeedsHydration:\s*true/.test(deferredDelegateSource))
+		verify(!/\bLoader\s*\{/.test(deferredDelegateSource))
+		verify(!/\bConnections\s*\{/.test(deferredDelegateSource))
 	}
 
 	function test_activity_is_a_read_only_log_surface_without_conversation_loading_chrome() {
@@ -226,7 +237,10 @@ TestCase {
 		verify(/id:\s*composerSurface[\s\S]*visible:\s*!activeScope\.activity[\s\S]*Layout\.preferredHeight:\s*visible\s*\?/.test(mainSource))
 		verify(/id:\s*activityLogColumnHeader[\s\S]{0,2400}visible:\s*activeScope\.activity[\s\S]{0,1200}qsTr\("TIME"\)[\s\S]{0,800}qsTr\("EVENT"\)[\s\S]{0,1200}qsTr\("LIVE"\)/.test(mainSource))
 		verify(/id:\s*timeline[\s\S]{0,500}Accessible\.name:\s*activeScope\.activity\s*\?\s*qsTr\("Activity log"\)/.test(mainSource))
-		verify(/delegate:\s*ChatMessageFrame\s*\{[\s\S]{0,400}logEntry:\s*activeScope\.activity[\s\S]{0,160}logAlternating:\s*logEntry\s*&&\s*index\s*%\s*2\s*===\s*1/.test(mainSource))
+		verify(/function\s+stableAlternatingRow\(stableId\)[\s\S]*parity\s*\^=\s*value\.charCodeAt\(index\)\s*&\s*1[\s\S]*return\s+parity\s*===\s*1/.test(mainSource))
+		verify(/ChatMessageFrame\s*\{[\s\S]{0,400}logEntry:\s*activeScope\.activity[\s\S]{0,200}logAlternating:\s*logEntry\s*&&\s*root\.stableAlternatingRow\(stableId\)/.test(mainSource))
+		verify(!/id:\s*messageDelegate[\s\S]{0,360}required property int index/.test(mainSource))
+		verify(/toggleQuickReactions\(messageDelegate\.stableId,[\s\S]{0,120}chatModel\.rowForStableId\(messageDelegate\.stableId\)/.test(mainSource))
 		verify(/id:\s*activityLogRow[\s\S]{0,300}visible:\s*messageDelegate\.logEntry[\s\S]{0,1000}objectName:\s*"activityLogTimestamp"[\s\S]{0,1400}objectName:\s*"activityLogGutter"[\s\S]{0,1600}objectName:\s*"activityLogEvent"/.test(mainSource))
 		verify(/id:\s*messageRow[\s\S]{0,180}visible:\s*!messageDelegate\.logEntry/.test(mainSource))
 	}
@@ -249,15 +263,26 @@ TestCase {
 	}
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {
-		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount\)[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
+		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
+		verify(/fullRangeToStart\s*===\s*true[\s\S]{0,280}performanceChatScrollTargetY\s*=\s*minimumY/.test(mainSource))
+		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*Math\.max\(currentOriginY,\s*previousY\s*-\s*wheelStep\)[\s\S]*reachedTarget/.test(mainSource))
 		verify(/const travelDistance\s*=\s*Math\.min\(maximumY - minimumY,\s*requestedSteps \* 16\)[\s\S]*performanceChatScrollStartY - travelDistance/.test(mainSource))
 		verify(/function\s+advancePerformanceChatScrollWorkload\(step,\s*totalSteps\)[\s\S]*timeline\.contentY\s*=\s*performanceChatScrollStartY/.test(mainSource))
 		verify(/requestedSteps\s*\*\s*2/.test(mainSource))
 		verify(!/id:\s*timelineScrollWorkload/.test(mainSource))
 	}
 
+	function test_history_load_probe_requires_a_complete_real_scroll_to_the_origin() {
+		const probeMatch = /function\s+prepareHistoryLoadPerformanceProbe\(\)\s*\{([\s\S]*?)\n\t\}/.exec(mainSource)
+		verify(probeMatch !== null)
+		const probeSource = probeMatch[1]
+		verify(/Math\.abs\(timeline\.contentY\s*-\s*timeline\.originY\)\s*>\s*0\.5/.test(probeSource))
+		verify(/has not been scrolled completely to the start/.test(probeSource))
+		verify(!/positionViewAtIndex/.test(probeSource))
+	}
+
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(12000,\s*Math\.min\(20000,\s*height\s*\*\s*20\)\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(960,\s*Math\.min\(2800,\s*height\s*\*\s*2\.5\)\)/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*richContentResumeGeneration/.test(mainSource))
@@ -265,7 +290,16 @@ TestCase {
 		verify(/function\s+requestPreviewHydrationIfNeeded\(\)[\s\S]*inHydrationWindow[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*forceLayout\(\)/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
-		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
+		verify(/function\s+deferPrependedRichRows\(first,\s*last\)[\s\S]*deferred\[stableId\]\s*=\s*true[\s\S]*deferredPrependRichIds\s*=\s*deferred/.test(mainSource))
+		verify(/function\s+onRowsAboutToBePrepended\(count\)[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
+		verify(!/prependCacheConstrained/.test(mainSource))
+		verify(/function\s+prependRichContentActive\(stableId,\s*rowVisible\)[\s\S]*rowVisible\s*&&\s*!richScrollInProgress/.test(mainSource))
+		verify(/function\s+markPrependRichRowMaterialized\(stableId\)[\s\S]*delete\s+deferred\[key\][\s\S]*deferredPrependRichIds\s*=\s*deferred/.test(mainSource))
+		verify(/function\s+onRowsInserted\(parentIndex,\s*first,\s*last\)[\s\S]*extendDeferredPrependAnchorTarget\(last\s*-\s*first\s*\+\s*1\)[\s\S]*Qt\.callLater[\s\S]*restoreDeferredPrependAnchor\(\)/.test(mainSource))
+		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent\s*&&\s*timeline\.prependRichContentActive\([\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent\s*&&\s*timeline\.prependRichContentActive\(/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*timeline\.prependRichRowDeferred\(messageDelegate\.stableId\)[\s\S]*timeline\.prependAnchorActive\s*\|\|\s*!messageDelegate\.inVisibleViewport/.test(mainSource))
+		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*timeline\.prependRichRowDeferred\(messageDelegate\.stableId\)[\s\S]*timeline\.prependAnchorActive\s*\|\|\s*!messageDelegate\.inVisibleViewport/.test(mainSource))
 		verify(!/RichPreviewCard\s*\{\s*id:\s*messagePreviewCard/.test(mainSource))
 	}
 

@@ -5,6 +5,8 @@
 
 #include "PersistentChatStore.h"
 
+#include <QSet>
+
 #include <algorithm>
 
 namespace {
@@ -118,6 +120,84 @@ bool PersistentChatStore::mergeMessage(QVector< MumbleProto::ChatMessage > &mess
 	messages.push_back(message);
 	sortMessages(messages);
 	return true;
+}
+
+PersistentChatStore::MergeMessagesResult PersistentChatStore::mergeMessages(
+	QVector< MumbleProto::ChatMessage > &messages, const QVector< MumbleProto::ChatMessage > &incomingMessages) {
+	MergeMessagesResult result;
+	if (incomingMessages.isEmpty()) {
+		return result;
+	}
+
+	const auto identity = [](const MumbleProto::ChatMessage &message) {
+		return (static_cast< quint64 >(message.thread_id()) << 32U)
+			| static_cast< quint64 >(message.message_id());
+	};
+
+	QHash< quint64, int > rowByIdentity;
+	rowByIdentity.reserve(messages.size() + incomingMessages.size());
+	for (int row = 0; row < messages.size(); ++row) {
+		rowByIdentity.insert(identity(messages.at(row)), row);
+	}
+
+	QSet< int > removedRows;
+	QSet< quint64 > insertedIdentities;
+	bool existingRowsChanged = false;
+	for (const MumbleProto::ChatMessage &message : incomingMessages) {
+		const quint64 messageIdentity = identity(message);
+		const int existingRow         = rowByIdentity.value(messageIdentity, -1);
+		if (existingRow >= 0) {
+			if (chatMessageDeleted(message)) {
+				result.changed = true;
+				existingRowsChanged = true;
+				removedRows.insert(existingRow);
+				rowByIdentity.remove(messageIdentity);
+			} else if (messages.at(existingRow).SerializeAsString() != message.SerializeAsString()) {
+				result.changed = true;
+				existingRowsChanged = true;
+				messages[existingRow] = message;
+			}
+			continue;
+		}
+
+		if (chatMessageDeleted(message)) {
+			continue;
+		}
+
+		result.changed = true;
+		const int appendedRow = messages.size();
+		messages.push_back(message);
+		rowByIdentity.insert(messageIdentity, appendedRow);
+		insertedIdentities.insert(messageIdentity);
+	}
+
+	if (!removedRows.isEmpty()) {
+		QVector< MumbleProto::ChatMessage > retainedMessages;
+		retainedMessages.reserve(messages.size() - removedRows.size());
+		for (int row = 0; row < messages.size(); ++row) {
+			if (!removedRows.contains(row)) {
+				retainedMessages.push_back(std::move(messages[row]));
+			}
+		}
+		messages.swap(retainedMessages);
+	}
+
+	if (result.changed) {
+		sortMessages(messages);
+	}
+
+	if (!existingRowsChanged && removedRows.isEmpty() && !insertedIdentities.isEmpty()) {
+		const qsizetype insertedCount = insertedIdentities.size();
+		bool allInsertedRowsArePrefix = insertedCount <= messages.size();
+		for (qsizetype row = 0; allInsertedRowsArePrefix && row < messages.size(); ++row) {
+			const bool isInserted = insertedIdentities.contains(identity(messages.at(row)));
+			allInsertedRowsArePrefix = row < insertedCount ? isInserted : !isInserted;
+		}
+		if (allInsertedRowsArePrefix) {
+			result.prependedMessageCount = insertedCount;
+		}
+	}
+	return result;
 }
 
 unsigned int PersistentChatStore::oldestMessageID(const QVector< MumbleProto::ChatMessage > &messages) {

@@ -184,6 +184,7 @@ private slots:
 	void liveMessagesDoNotSatisfyInitialHistoryLoad();
 	void keepsInactivePendingHistoryForCache();
 	void mergesOlderHistoryAndReadState();
+	void olderHistoryUsesStableRevisionAndBulkOrdering();
 	void appliesEmbedUpdatesToCachedMessages();
 	void preservesReplyMetadataFromHistory();
 	void appliesReactionUpdatesToCachedMessages();
@@ -444,6 +445,57 @@ void TestPersistentChatController::mergesOlderHistoryAndReadState() {
 	QCOMPARE(snapshot.oldestLoadedMessageId, 10U);
 	QCOMPARE(snapshot.hasOlder, false);
 	QCOMPARE(snapshot.unreadCount, 0);
+}
+
+void TestPersistentChatController::olderHistoryUsesStableRevisionAndBulkOrdering() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 88), false);
+
+	MumbleProto::ChatHistoryResponse initial;
+	initial.set_scope(MumbleProto::TextChannel);
+	initial.set_scope_id(88);
+	initial.set_last_read_message_id(1024);
+	initial.set_oldest_message_id(513);
+	initial.set_has_older(true);
+	for (unsigned int messageID = 513; messageID <= 1024; ++messageID) {
+		*initial.add_messages() =
+			makeMessage(messageID, messageID * 10, MumbleProto::TextChannel, 88);
+	}
+	gateway.handleIncomingHistory(initial);
+
+	const PersistentChatScopeStateSnapshot loaded = controller.activeSnapshot();
+	QCOMPARE(loaded.messages.size(), 512);
+	QCOMPARE(loaded.messagesRevision, quint64(1));
+	QVERIFY(controller.requestOlderForActiveScope());
+	const PersistentChatScopeStateSnapshot loading = controller.activeSnapshot();
+	QCOMPARE(loading.messagesRevision, loaded.messagesRevision);
+	QCOMPARE(loading.messages.size(), loaded.messages.size());
+	QCOMPARE(loading.loadingState, PersistentChatLoadingState::Older);
+
+	MumbleProto::ChatHistoryResponse older;
+	older.set_scope(MumbleProto::TextChannel);
+	older.set_scope_id(88);
+	older.set_last_read_message_id(1024);
+	older.set_oldest_message_id(1);
+	older.set_has_older(false);
+	for (unsigned int messageID = 1; messageID <= 512; ++messageID) {
+		*older.add_messages() =
+			makeMessage(messageID, messageID * 10, MumbleProto::TextChannel, 88);
+	}
+	gateway.handleIncomingHistory(older);
+
+	const PersistentChatScopeStateSnapshot merged = controller.activeSnapshot();
+	QCOMPARE(merged.messagesRevision, loaded.messagesRevision + 1);
+	QCOMPARE(merged.prependedMessageCount, qsizetype(512));
+	QCOMPARE(merged.messages.size(), 1024);
+	QCOMPARE(merged.messages.constFirst().message_id(), 1U);
+	QCOMPARE(merged.messages.constLast().message_id(), 1024U);
+	QCOMPARE(merged.loadingState, PersistentChatLoadingState::Idle);
+	resetGatewayRequestState();
 }
 
 void TestPersistentChatController::appliesEmbedUpdatesToCachedMessages() {

@@ -352,7 +352,10 @@ public:
 		VisibleRole,
 		AttachmentsRole,
 		SourceRole,
-		SectionKindRole
+		SectionKindRole,
+		DeferredPresentationRole,
+		ModelStartsGroupRole,
+		DateBoundaryRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -377,6 +380,7 @@ signals:
 
 protected:
 	int indexOf(const QString &stableId) const;
+	int prependRows(const QVariantList &rows);
 	// Model-owned asynchronous work may complete while an external fixture
 	// override is active. The caller must already have validated the row identity
 	// and generation; frontend/controller writes must continue through upsertRow().
@@ -467,6 +471,7 @@ class ChatTimelineModel final : public StableListModel {
 	Q_PROPERTY(int currentMatchIndex READ currentMatchIndex NOTIFY currentMatchChanged)
 	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
 	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
+	Q_PROPERTY(bool prependPending READ prependPending NOTIFY prependPendingChanged)
 public:
 	enum class MessageMutation { Ignored, Inserted, Updated, Unchanged };
 	explicit ChatTimelineModel(QObject *parent = nullptr);
@@ -475,6 +480,8 @@ public:
 	bool upsertMessage(const QVariantMap &message);
 	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
+	int prependMessages(const QVariantList &messages);
+	int enqueuePrependMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
 	QVariantList messages() const;
 	void clear();
@@ -485,6 +492,9 @@ public:
 	int currentMatchIndex() const;
 	int currentMatchRow() const;
 	QString currentMatchStableId() const;
+	bool prependPending() const;
+	Q_INVOKABLE bool materializeDeferredMessage(const QString &messageId);
+	Q_INVOKABLE bool requestBodyHydration(const QString &messageId);
 	Q_INVOKABLE bool nextMatch();
 	Q_INVOKABLE bool previousMatch();
 	Q_INVOKABLE void clearSearch();
@@ -494,6 +504,7 @@ signals:
 	void queryChanged();
 	void matchCountChanged();
 	void currentMatchChanged();
+	void prependPendingChanged();
 
 private:
 	struct RichBodyParseRequest {
@@ -513,6 +524,7 @@ private:
 	};
 
 	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
+	static void decoratePresentationRow(QVariantMap &row, const QVariantMap &previousRow);
 	static bool isUserHistoryRow(const QVariantMap &row);
 	void updateUserHistoryRow(const QString &messageId, const QVariantMap &row);
 	void forgetRichBodyMessage(const QString &messageId);
@@ -521,6 +533,8 @@ private:
 	void launchRichBodyParseBatch();
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
+	void prependQueuedChunk();
+	void cancelQueuedPrepend();
 	bool searchActive() const;
 	bool rowMatchesQuery(const QVariantMap &row, const QString &normalizedQuery) const;
 	void refreshSearchState(bool preserveCurrentMatch = true);
@@ -535,6 +549,7 @@ private:
 	QList< QByteArray > m_deferredRichBodyOrder;
 	QSet< QByteArray > m_deferredRichBodyKeys;
 	QSet< QString > m_userHistoryMessageIds;
+	QSet< QString > m_deferredRichBodyMessageIds;
 	std::deque< ReadyRichBody > m_readyRichBodies;
 	QString m_query;
 	QStringList m_searchMatchIds;
@@ -543,6 +558,8 @@ private:
 	int m_currentMatchRow = -1;
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
+	QVariantList m_queuedPrependRows;
+	bool m_prependPending = false;
 };
 
 class DirectMessageSummaryModel final : public StableListModel {

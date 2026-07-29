@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt.labs.qmlmodels
 import Mumble.Theme 1.0
 
 ApplicationWindow {
@@ -80,6 +81,7 @@ ApplicationWindow {
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
 	property bool performanceChatScrollRunning: false
+	property bool performanceChatScrollFullRangeToStart: false
 	property int performanceChatScrollCompletedSteps: 0
 	property int performanceChatScrollTargetSteps: 0
 	property int performanceChatDelegateCreatedCount: 0
@@ -359,41 +361,13 @@ ApplicationWindow {
 
 	Component.onCompleted: Qt.callLater(function() { root.maybeMarkMotdSeen() })
 
-	function messageStartsGroup(row, source, title) {
-		if (row <= 0 || !source || source.system)
-			return true
-		const previous = chatModel.get(row - 1)
-		const previousSource = previous && previous.source ? previous.source : ({})
-		if (previousSource.system)
-			return true
-		const actorKey = String(source.actorKey || title || "")
-		const previousActorKey = String(previousSource.actorKey || (previous ? previous.title : "") || "")
-		if (actorKey !== previousActorKey || !!source.own !== !!previousSource.own)
-			return true
-		const createdAt = Number(source.createdAtMs || 0)
-		const previousCreatedAt = Number(previousSource.createdAtMs || 0)
-		return createdAt > 0 && previousCreatedAt > 0 && createdAt - previousCreatedAt > 300000
-	}
-
-	function messageDateSeparator(row, source) {
+	function messageDateLabel(source) {
 		const createdAt = Number(source && source.createdAtMs ? source.createdAtMs : 0)
 		if (createdAt <= 0)
 			return ""
 		const current = new Date(createdAt)
 		if (isNaN(current.getTime()))
 			return ""
-		if (row > 0) {
-			const previous = chatModel.get(row - 1)
-			const previousSource = previous && previous.source ? previous.source : ({})
-			const previousAt = Number(previousSource.createdAtMs || 0)
-			if (previousAt > 0) {
-				const previousDate = new Date(previousAt)
-				if (current.getFullYear() === previousDate.getFullYear()
-						&& current.getMonth() === previousDate.getMonth()
-						&& current.getDate() === previousDate.getDate())
-					return ""
-			}
-		}
 		const today = new Date()
 		if (current.getFullYear() === today.getFullYear()
 				&& current.getMonth() === today.getMonth()
@@ -405,6 +379,14 @@ ApplicationWindow {
 				&& current.getDate() === yesterday.getDate())
 			return qsTr("YESTERDAY")
 		return Qt.formatDate(current, Locale.LongFormat).toUpperCase()
+	}
+
+	function stableAlternatingRow(stableId) {
+		const value = String(stableId || "")
+		let parity = 0
+		for (let index = 0; index < value.length; ++index)
+			parity ^= value.charCodeAt(index) & 1
+		return parity === 1
 	}
 
 	function estimatedMessageTextWidth(segments, replyActor, replySnippet) {
@@ -855,6 +837,10 @@ ApplicationWindow {
     }
 
     function flushPreviewHydrationQueue() {
+		if (timeline && (timeline.prependAnchorActive || chatModel.prependPending)) {
+			previewHydrationTimer.restart()
+			return
+		}
         const keys = Object.keys(pendingPreviewHydrationIds)
         if (keys.length === 0)
             return
@@ -1665,7 +1651,7 @@ ApplicationWindow {
 		})
     }
 
-	function preparePerformanceChatScrollWorkload(stepCount) {
+	function preparePerformanceChatScrollWorkload(stepCount, fullRangeToStart) {
 		const minimumY = timeline.originY
 		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
 		const requestedSteps = Math.max(1, Math.floor(Number(stepCount) || 0))
@@ -1675,21 +1661,24 @@ ApplicationWindow {
 			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
 		performanceChatScrollStartY = timeline.contentY
-		// Model a sustained wheel/trackpad gesture, not a teleport through the
-		// entire history. Traversing thousands of pixels per frame measures cold
-		// delegate construction rather than steady-state chat scrolling and can
-		// leave Windows presentation-throttled between mutations. Sixteen logical
-		// pixels per presented input mirrors a sustained high-resolution wheel or
-		// trackpad gesture; the 40-step release workload still crosses enough rows
-		// to exercise the bounded delegate cache and reuse path.
-		const travelDistance = Math.min(maximumY - minimumY, requestedSteps * 16)
-		performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8
-			? Math.max(minimumY, performanceChatScrollStartY - travelDistance)
-			: Math.min(maximumY, performanceChatScrollStartY + travelDistance)
+		if (fullRangeToStart === true) {
+			// The release gate starts from the real tail and traverses every loaded
+			// message before it measures the first older-page request.
+			performanceChatScrollTargetY = minimumY
+		} else {
+			// Model a sustained wheel/trackpad gesture, not a teleport through the
+			// entire history. Sixteen logical pixels per presented input mirrors a
+			// high-resolution wheel or trackpad gesture for the synthetic fixture.
+			const travelDistance = Math.min(maximumY - minimumY, requestedSteps * 16)
+			performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8
+				? Math.max(minimumY, performanceChatScrollStartY - travelDistance)
+				: Math.min(maximumY, performanceChatScrollStartY + travelDistance)
+		}
 		bottomFollowTimer.stop()
 		performanceChatScrollDiagnosticsBefore = timelineDelegateDiagnostics()
 		performanceChatScrollCompletedSteps = 0
 		performanceChatScrollTargetSteps = requestedSteps
+		performanceChatScrollFullRangeToStart = fullRangeToStart === true
 		performanceChatScrollRunning = true
 		return { "started": true, "beforeY": performanceChatScrollStartY,
 			"targetY": performanceChatScrollTargetY, "count": timeline.count,
@@ -1703,6 +1692,25 @@ ApplicationWindow {
 				|| nextStep !== performanceChatScrollCompletedSteps + 1
 				|| nextStep > performanceChatScrollTargetSteps) {
 			return { "advanced": false, "currentY": timeline.contentY,
+				"completedSteps": performanceChatScrollCompletedSteps }
+		}
+		if (performanceChatScrollFullRangeToStart) {
+			const previousY = timeline.contentY
+			const currentOriginY = timeline.originY
+			performanceChatScrollTargetY = currentOriginY
+			if (Math.abs(previousY - currentOriginY) <= 0.5)
+				return { "advanced": false, "reachedTarget": true,
+					"currentY": timeline.contentY,
+					"completedSteps": performanceChatScrollCompletedSteps }
+			// Advance one presented high-resolution wheel step at a time. Re-read
+			// originY every frame because delegate estimates can refine the ListView
+			// origin while the complete real history is traversed.
+			const wheelStep = Math.max(80, Math.min(112, timeline.height * 0.14))
+			timeline.contentY = Math.max(currentOriginY, previousY - wheelStep)
+			performanceChatScrollCompletedSteps = nextStep
+			return { "advanced": Math.abs(timeline.contentY - previousY) > 0.01,
+				"reachedTarget": Math.abs(timeline.contentY - timeline.originY) <= 0.5,
+				"currentY": timeline.contentY,
 				"completedSteps": performanceChatScrollCompletedSteps }
 		}
 		const progress = nextStep / performanceChatScrollTargetSteps
@@ -1720,6 +1728,7 @@ ApplicationWindow {
 
 	function completePerformanceChatScrollWorkload() {
 		performanceChatScrollRunning = false
+		performanceChatScrollFullRangeToStart = false
 	}
 
 	function performanceChatFixtureState() {
@@ -1750,9 +1759,12 @@ ApplicationWindow {
 			"count": timeline.count,
 			"contentHeight": timeline.contentHeight,
 			"viewportHeight": timeline.height,
+			"originY": timeline.originY,
 			"contentY": timeline.contentY,
 			"maximumY": maximumY,
 			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
+			"firstVisibleOffset": firstVisible
+				? Number(firstVisible.y - timeline.contentY) : 0,
 			"presentationPending": timeline.scopePresentationPending,
 			"presentationFinalizing": timeline.scopePresentationFinalizing,
 			"scopeResetPending": timeline.scopeResetPending,
@@ -1766,12 +1778,45 @@ ApplicationWindow {
 			"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
 			"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
 			"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
+			"prependAnchorActive": timeline.prependAnchorActive,
+			"prependAnchorId": timeline.prependAnchorId,
+			"prependAnchorOffset": timeline.prependAnchorOffset,
+			"prependAnchorTargetY": timeline.prependAnchorTargetY,
+			"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
+			"prependQueuePending": chatModel.prependPending,
+			"deferredPrependRichCount":
+				Object.keys(timeline.deferredPrependRichIds || ({})).length,
 			"durationMs": timeline.scopePresentationStartedAt > 0
 				? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
 			"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 				&& !timeline.scopeResetPending
 				&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
 				&& !timeline.restoringBottom && !timeline.prependAnchorActive
+				&& !chatModel.prependPending
+		}
+	}
+
+	function prepareHistoryLoadPerformanceProbe() {
+		if (timeline.count <= 0)
+			return { "prepared": false, "reason": "The active timeline is empty." }
+		if (Math.abs(timeline.contentY - timeline.originY) > 0.5)
+			return { "prepared": false,
+				"reason": "The active timeline has not been scrolled completely to the start." }
+		timeline.releasePrependAnchor()
+		timeline.releaseViewportAnchor()
+		bottomFollowTimer.stop()
+		timeline.followTailAfterInsert = false
+		timeline.pendingTailInsertCount = 0
+		timeline.pendingTailMessageCount = 0
+		timeline.stickToBottom = false
+		timeline.currentIndex = 0
+		timeline.forceLayout()
+		const firstVisible = timeline.firstVisibleMessageDelegate()
+		return {
+			"prepared": firstVisible !== null,
+			"count": timeline.count,
+			"contentY": timeline.contentY,
+			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : ""
 		}
 	}
 
@@ -2937,13 +2982,12 @@ ApplicationWindow {
 							timeline.scheduleRichContentResume()
 						}
 					}
-					// Variable-height rich cards make ListView revise its content-height
-					// estimate when an unseen row is first constructed. Materialize a
-					// bounded history window up front so ordinary scrolling never pays
-					// that geometry cost or jumps when a tall card enters the cache.
-					// Media decode/playback is independently idle-gated below; this cache
-					// retains layout delegates, not every remote image or player.
-					cacheBuffer: Math.max(12000, Math.min(20000, height * 20))
+					// Keep a bounded geometry window warm. Posters and gallery images have
+					// their own decoded caches; retaining 12-20k pixels of complete rich
+					// delegate trees makes every prepend reindex and relayout far too much
+					// QML state on the UI thread. Two and a half viewports still prebuilds
+					// the next tall card before an ordinary wheel gesture reaches it.
+					cacheBuffer: Math.max(960, Math.min(2800, height * 2.5))
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property int richContentResumeGeneration: 0
@@ -2956,11 +3000,18 @@ ApplicationWindow {
 					}
 					property string prependAnchorId: ""
 					property real prependAnchorOffset: 0
+					property real prependAnchorContentY: 0
+					property real prependAnchorTargetY: 0
+					property real prependAnchorInsertedExtent: 0
 					property bool prependAnchorActive: false
+					property bool deferredPrependAnchorActive: false
 					property bool prependMutationInProgress: false
 					property bool restoringPrependAnchor: false
 					property int prependAnchorRetries: 0
 					property int prependAnchorCorrectionFrames: 0
+					property var deferredPrependRichIds: ({})
+					property var deferredMaterializationQueue: []
+					readonly property real deferredMessageRowHeight: 58
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -3016,6 +3067,7 @@ ApplicationWindow {
 
 					function beginScopeChange() {
 						releasePrependAnchor()
+						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
 						bottomFollowTimer.stop()
 						scopePresentationFastPathTimer.stop()
@@ -3260,8 +3312,12 @@ ApplicationWindow {
 						if (prependAnchorId.length === 0)
 							return false
 						prependAnchorOffset = item.y - contentY
+						prependAnchorContentY = contentY
+						prependAnchorTargetY = contentY
+						prependAnchorInsertedExtent = 0
 						prependAnchorRetries = 0
 						prependAnchorCorrectionFrames = 0
+						deferredPrependAnchorActive = false
 						prependAnchorActive = true
 						stickToBottom = false
 						return true
@@ -3293,6 +3349,46 @@ ApplicationWindow {
 						if (richScrollInProgress)
 							return
 						richContentResumeTimer.restart()
+					}
+
+					function queueVisibleDeferredMaterialization() {
+						if (richScrollInProgress || prependAnchorActive || scopePresentationPending)
+							return
+						const queued = deferredMaterializationQueue.slice()
+						const queuedSet = ({})
+						for (let queuedIndex = 0; queuedIndex < queued.length; ++queuedIndex)
+							queuedSet[queued[queuedIndex]] = true
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (!item || item.contentNeedsHydration !== true || !item.visible
+									|| item.y + item.height <= contentY + 0.5
+									|| item.y >= contentY + height - 0.5)
+								continue
+							const stableId = String(item.stableId || "")
+							if (stableId.length > 0 && queuedSet[stableId] !== true) {
+								queued.push(stableId)
+								queuedSet[stableId] = true
+							}
+						}
+						deferredMaterializationQueue = queued
+						if (queued.length > 0 && !deferredMaterializationTimer.running)
+							deferredMaterializationTimer.start()
+					}
+
+					function materializeNextDeferredRow() {
+						if (richScrollInProgress || prependAnchorActive || scopePresentationPending) {
+							scheduleRichContentResume()
+							return
+						}
+						if (deferredMaterializationQueue.length === 0)
+							return
+						const queued = deferredMaterializationQueue.slice()
+						const stableId = queued.shift()
+						deferredMaterializationQueue = queued
+						chatModel.materializeDeferredMessage(stableId)
+						if (queued.length > 0)
+							deferredMaterializationTimer.start()
 					}
 
 					function restoreViewportAnchor() {
@@ -3328,9 +3424,74 @@ ApplicationWindow {
 						prependAnchorSettleTimer.stop()
 						prependMutationInProgress = false
 						prependAnchorActive = false
+						deferredPrependAnchorActive = false
 						prependAnchorId = ""
 						prependAnchorRetries = 0
 						prependAnchorCorrectionFrames = 0
+						prependAnchorInsertedExtent = 0
+						scheduleRichContentResume()
+					}
+
+					function extendDeferredPrependAnchorTarget(insertedCount) {
+						prependAnchorInsertedExtent +=
+							Math.max(0, insertedCount) * deferredMessageRowHeight
+						prependAnchorTargetY = prependAnchorContentY
+							+ Math.max(0, prependAnchorOffset)
+							+ prependAnchorInsertedExtent
+					}
+
+					function restoreDeferredPrependAnchor() {
+						if (!prependAnchorActive || !deferredPrependAnchorActive
+								|| restoringPrependAnchor)
+							return
+						restoringPrependAnchor = true
+						const minimumY = originY
+						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						const desiredY = Math.max(minimumY,
+							Math.min(maximumY, prependAnchorTargetY))
+						if (Math.abs(contentY - desiredY) > 0.5)
+							contentY = desiredY
+						restoringPrependAnchor = false
+						if (!chatModel.prependPending && !prependAnchorSettleTimer.running)
+							prependAnchorSettleTimer.start()
+					}
+
+					function deferPrependedRichRows(first, last) {
+						const deferred = Object.assign({}, deferredPrependRichIds || ({}))
+						for (let rowIndex = Math.max(0, first);
+								rowIndex <= Math.min(last, chatModel.count - 1); ++rowIndex) {
+							const row = chatModel.get(rowIndex) || ({})
+							const preview = row.preview || ({})
+							const attachments = row.attachments || []
+							if (Object.keys(preview).length === 0 && attachments.length === 0)
+								continue
+							const stableId = String(row.id || "")
+							if (stableId.length > 0)
+								deferred[stableId] = true
+						}
+						deferredPrependRichIds = deferred
+					}
+
+					function clearDeferredPrependRichRows() {
+						deferredPrependRichIds = ({})
+					}
+
+					function prependRichRowDeferred(stableId) {
+						return deferredPrependRichIds[String(stableId || "")] === true
+					}
+
+					function prependRichContentActive(stableId, rowVisible) {
+						return !prependRichRowDeferred(stableId)
+							|| (rowVisible && !richScrollInProgress)
+					}
+
+					function markPrependRichRowMaterialized(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0 || !prependRichRowDeferred(key))
+							return
+						const deferred = Object.assign({}, deferredPrependRichIds || ({}))
+						delete deferred[key]
+						deferredPrependRichIds = deferred
 					}
 
 					function restorePrependAnchor() {
@@ -3417,9 +3578,20 @@ ApplicationWindow {
 						}
 						if (scopePresentationObservationActive)
 							++scopePresentationExposedHeightChangeCount
-						if (prependAnchorActive && !restoringPrependAnchor)
-							Qt.callLater(function() { timeline.restorePrependAnchor() })
-						else if (scopeResetPending && !restoringBottom) {
+						if (prependAnchorActive) {
+							// Pure older-history rows have a fixed technical height until
+							// they approach the viewport. Preserve their exact displacement
+							// numerically; itemAtIndex() would synchronously materialize the
+							// newly prepended page.
+							if (deferredPrependAnchorActive)
+								Qt.callLater(function() {
+									timeline.restoreDeferredPrependAnchor()
+								})
+							else if (!restoringPrependAnchor)
+								Qt.callLater(function() { timeline.restorePrependAnchor() })
+							return
+						}
+						if (scopeResetPending && !restoringBottom) {
 							positionTailImmediately()
 							requestBottomFollow()
 						} else if (viewportAnchorActive && !restoringViewportAnchor
@@ -3461,12 +3633,20 @@ ApplicationWindow {
 							if (!timeline.stickToBottom)
 								timeline.captureViewportAnchor()
 							++timeline.richContentResumeGeneration
+							timeline.queueVisibleDeferredMaterialization()
 						}
 					}
 
 					Timer {
+						id: deferredMaterializationTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.materializeNextDeferredRow()
+					}
+
+					Timer {
 						id: prependAnchorSettleTimer
-						interval: 1500
+						interval: timeline.deferredPrependAnchorActive ? 180 : 1500
 						repeat: false
 						onTriggered: timeline.releasePrependAnchor()
 					}
@@ -3545,9 +3725,24 @@ ApplicationWindow {
 					Connections {
 						target: chatModel
 						function onRowsAboutToBePrepended(count) {
-							if (count > 0 && !timeline.scopeResetPending && !timeline.stickToBottom
-									&& !timeline.prependAnchorActive)
+							if (count <= 0)
+								return
+							if (!timeline.scopeResetPending && !timeline.stickToBottom
+									&& !timeline.prependAnchorActive) {
 								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
+								timeline.deferredPrependAnchorActive =
+									timeline.prependMutationInProgress
+							}
+						}
+						function onPrependPendingChanged() {
+							if (chatModel.prependPending
+									|| !timeline.deferredPrependAnchorActive)
+								return
+							// All technical rows now exist and the original visible item
+							// remained instantiated throughout the sliced mutation. One final
+							// identity correction is therefore O(1), not a page materialization.
+							timeline.deferredPrependAnchorActive = false
+							timeline.restorePrependAnchor()
 						}
 						function onRowsAboutToChange(first, last) {
 							if (!timeline.scopeResetPending && !timeline.stickToBottom
@@ -3556,8 +3751,8 @@ ApplicationWindow {
 						}
 						function onDataChanged(topLeft, bottomRight, roles) {
 							if (timeline.prependAnchorActive)
-								Qt.callLater(function() { timeline.restorePrependAnchor() })
-							else if (timeline.scopePresentationPending)
+								return
+							if (timeline.scopePresentationPending)
 								timeline.noteScopePresentationMutation()
 							else
 								timeline.requestBottomFollow()
@@ -3573,6 +3768,8 @@ ApplicationWindow {
 								// row insertion. Keep that first geometry snapshot; recapturing
 								// here can observe ListView's transitional one-row offset.
 								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
+								timeline.deferredPrependAnchorActive =
+									timeline.prependMutationInProgress
 							} else if (first >= timeline.count) {
 								timeline.followTailAfterInsert = timeline.count === 0
 									|| (timeline.stickToBottom && timeline.isNearBottom())
@@ -3581,13 +3778,16 @@ ApplicationWindow {
 							}
 						}
 						function onRowsInserted(parentIndex, first, last) {
-							if (first === 0 && timeline.prependAnchorActive)
+							if (first === 0)
+								timeline.deferPrependedRichRows(first, last)
+							if (first === 0 && timeline.prependAnchorActive) {
+								timeline.extendDeferredPrependAnchorTarget(last - first + 1)
 								Qt.callLater(function() {
+									timeline.prependAnchorCorrectionFrames = 0
+									timeline.restoreDeferredPrependAnchor()
 									timeline.prependMutationInProgress = false
-									timeline.prependAnchorCorrectionFrames = 12
-									timeline.restorePrependAnchor()
 								})
-							else if (timeline.followTailAfterInsert) {
+							} else if (timeline.followTailAfterInsert) {
 								timeline.stickToBottom = true
 								// Scope replacement happens before the next scene render. Position
 								// the newly inserted tail synchronously so an old scroll offset is
@@ -3610,6 +3810,7 @@ ApplicationWindow {
 						}
 						function onModelReset() {
 							timeline.releasePrependAnchor()
+							timeline.clearDeferredPrependRichRows()
 							timeline.pendingTailInsertCount = 0
 							timeline.pendingTailMessageCount = 0
 							timeline.stickToBottom = true
@@ -3668,13 +3869,32 @@ ApplicationWindow {
 						width: timeline.width
 						height: activeScope.activity ? Theme.space3 : root.timelineVerticalMargin
 					}
-			delegate: ChatMessageFrame {
+					delegate: DelegateChooser {
+						role: "deferredPresentation"
+						DelegateChoice {
+							roleValue: true
+							Item {
+								id: deferredMessageDelegate
+								required property string stableId
+								readonly property bool performanceTimelineDelegate: true
+								readonly property bool contentNeedsHydration: true
+								width: timeline.width
+								implicitHeight: timeline.deferredMessageRowHeight
+								height: implicitHeight
+								Accessible.ignored: true
+
+								function primaryRichContentViewportBounds() {
+									return null
+								}
+							}
+						}
+						DelegateChoice {
+							ChatMessageFrame {
 						id: messageDelegate
 						opacity: timeline.scopePresentationPending ? 0 : 1
 						readonly property bool performanceTimelineDelegate: true
 						logEntry: activeScope.activity
-						logAlternating: logEntry && index % 2 === 1
-				required property int index
+						logAlternating: logEntry && root.stableAlternatingRow(stableId)
 				// Ordinary rows enter UIA only when fully contained so cached actor/header
 				// nodes cannot leak across the clip. A legitimate rich card may be taller
 				// than the viewport; it can never satisfy full containment, so expose that
@@ -3746,8 +3966,16 @@ ApplicationWindow {
 						}
 						function requestPreviewHydrationIfNeeded() {
 							if (backendContentNeedsHydration && inHydrationWindow
-									&& !timeline.richScrollInProgress)
+									&& !timeline.richScrollInProgress
+									&& !timeline.prependAnchorActive
+									&& !chatModel.prependPending)
 								root.queuePreviewHydration(stableId, inVisibleViewport)
+							if (bodyNeedsHydration && inHydrationWindow
+									&& !timeline.richScrollInProgress
+									&& !timeline.prependAnchorActive
+									&& timeline.prependRichContentActive(stableId,
+										inVisibleViewport))
+								chatModel.requestBodyHydration(stableId)
 						}
 						function resumeRichContentAfterScroll() {
 							updateRichResourceActivity()
@@ -3841,8 +4069,10 @@ ApplicationWindow {
                         required property var reactions
                         required property var bodySegments
                         required property var preview
-                        required property var attachments
+						required property var attachments
                         required property var source
+						required property bool modelStartsGroup
+						required property bool dateBoundary
                         required property bool deleted
                         required property bool canReply
 						required property bool canReact
@@ -3851,8 +4081,8 @@ ApplicationWindow {
 							&& stableId === String(chatModel.currentMatchStableId || "")
 						systemMessage: logEntry || !!source.system
 							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
-						startsGroup: root.messageStartsGroup(index, source, title)
-						dateSeparatorLabel: root.messageDateSeparator(index, source)
+						startsGroup: modelStartsGroup
+						dateSeparatorLabel: dateBoundary ? root.messageDateLabel(source) : ""
 						bodyImplicitHeight: logEntry
 							? activityLogRow.implicitHeight : messageRow.implicitHeight
 						// Flickable margins do not constrain a vertical ListView delegate's
@@ -4129,9 +4359,10 @@ ApplicationWindow {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
-										&& !root.messageBodyIsPreviewSourceOnly(
-											messageDelegate.bodySegments || [],
-											messageDelegate.preview || ({}))
+										&& (!root.messageBodyIsPreviewSourceOnly(
+												messageDelegate.bodySegments || [],
+												messageDelegate.preview || ({}))
+											|| messagePreviewLoader.status !== Loader.Ready)
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
@@ -4180,11 +4411,22 @@ ApplicationWindow {
 								Loader {
 									id: messageAttachmentLoader
 									active: messageDelegate.hasAttachmentContent
+										&& timeline.prependRichContentActive(
+											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+									// Older history can insert many rich rows in one model
+									// mutation. Incubate off-screen galleries over subsequent
+									// frames instead of constructing the entire cache window on
+									// the GUI thread in the insertion turn.
+									asynchronous: timeline.prependRichRowDeferred(messageDelegate.stableId)
+										|| timeline.prependAnchorActive || !messageDelegate.inVisibleViewport
 									visible: active
 									Layout.fillWidth: true
 									Layout.preferredHeight: active && item ? item.implicitHeight : 0
-									onLoaded: if (root.visualFixtureOverrideActive)
-										++root.performanceChatAttachmentLoadedCount
+									onLoaded: {
+										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+										if (root.visualFixtureOverrideActive)
+											++root.performanceChatAttachmentLoadedCount
+									}
 									sourceComponent: Component {
 										AttachmentGallery {
 											attachments: messageDelegate.attachments || []
@@ -4204,6 +4446,14 @@ ApplicationWindow {
 								Loader {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
+										&& timeline.prependRichContentActive(
+											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+									// The large ListView cache keeps rich-card geometry warm for
+									// smooth scrolling. Asynchronous incubation preserves that
+									// benefit without letting a page of newly prepended embeds
+									// monopolize one UI frame.
+									asynchronous: timeline.prependRichRowDeferred(messageDelegate.stableId)
+										|| timeline.prependAnchorActive || !messageDelegate.inVisibleViewport
 									visible: active
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
@@ -4215,8 +4465,11 @@ ApplicationWindow {
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, parent.width))
 									Layout.maximumWidth: Layout.preferredWidth
-									onLoaded: if (root.visualFixtureOverrideActive)
-										++root.performanceChatPreviewLoadedCount
+									onLoaded: {
+										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+										if (root.visualFixtureOverrideActive)
+											++root.performanceChatPreviewLoadedCount
+									}
 									sourceComponent: Component {
 										RichPreviewCard {
                                     preview: messageDelegate.preview || ({})
@@ -4438,7 +4691,8 @@ ApplicationWindow {
 												ToolTip.visible: hovered
 												ToolTip.text: text
 												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
-													messageDelegate.index, messageReactButton,
+													chatModel.rowForStableId(messageDelegate.stableId),
+													messageReactButton,
 													messageDelegate.reactions || [])
 											}
 											ModernIconButton {
@@ -4551,7 +4805,8 @@ ApplicationWindow {
 											ToolTip.visible: hovered
 											ToolTip.text: text
 											onClicked: root.toggleQuickReactions(messageDelegate.stableId,
-												messageDelegate.index, compactMessageReactButton,
+												chatModel.rowForStableId(messageDelegate.stableId),
+												compactMessageReactButton,
 												messageDelegate.reactions || [])
 										}
 										ModernIconButton {
@@ -4577,6 +4832,8 @@ ApplicationWindow {
 								}
 								}
                         }
+							}
+						}
                     }
 					}
 					Rectangle {

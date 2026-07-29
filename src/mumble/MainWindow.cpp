@@ -25614,7 +25614,8 @@ QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::Ch
 }
 
 QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex,
-													   const ModernShellMessageBuildMode buildMode) {
+													   const ModernShellMessageBuildMode buildMode,
+													   std::size_t endIndex) {
 	QElapsedTimer timer;
 	timer.start();
 	QVariantList messages;
@@ -25631,7 +25632,8 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 	const bool canDeleteMessages = canDeletePersistentChatMessages(target, true);
 	const std::size_t messageCount = m_persistentChatMessages.size();
 	beginIndex = std::min(beginIndex, messageCount);
-	for (std::size_t i = beginIndex; i < messageCount; ++i) {
+	endIndex   = std::min(endIndex, messageCount);
+	for (std::size_t i = beginIndex; i < endIndex; ++i) {
 		if (m_persistentChatMessages[i].has_deleted_at() && m_persistentChatMessages[i].deleted_at() > 0) {
 			continue;
 		}
@@ -25639,11 +25641,12 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 		messages.push_back(buildModernShellCachedMessageState(m_persistentChatMessages[i], target, canReply, canReact,
 															  canDeleteMessages, buildMode));
 	}
-	appendModernShellConnectTrace(QStringLiteral("buildModernShellMessageStates scope=%1 id=%2 count=%3 begin=%4 mode=%5 ms=%6")
+	appendModernShellConnectTrace(QStringLiteral("buildModernShellMessageStates scope=%1 id=%2 count=%3 begin=%4 end=%5 mode=%6 ms=%7")
 									  .arg(static_cast< int >(target.scope))
 									  .arg(target.scopeID)
 									  .arg(messages.size())
 									  .arg(static_cast< qulonglong >(beginIndex))
+									  .arg(static_cast< qulonglong >(endIndex))
 									  .arg(buildMode == ModernShellMessageBuildMode::FastFirstPaint
 											   ? QStringLiteral("fast")
 											   : QStringLiteral("full"))
@@ -30205,10 +30208,30 @@ void MainWindow::publishPersistentChatSnapshot() {
 		m_persistentChatMessages.empty() ? 0 : m_persistentChatMessages.back().message_id();
 	const unsigned int previousTailThreadID =
 		m_persistentChatMessages.empty() ? 0 : m_persistentChatMessages.back().thread_id();
+	const quint64 previousMessagesRevision = m_visiblePersistentChatMessagesRevision;
 	const bool switchingScope =
 		previousScope.has_value() != snapshot.key.valid
 		|| (previousScope.has_value()
 			&& (!snapshot.key.valid || !snapshot.key.matches(*previousScope, previousScopeID)));
+	const std::size_t snapshotMessageCount = static_cast< std::size_t >(snapshot.messages.size());
+	const std::size_t reportedPrependCount = snapshot.prependedMessageCount > 0
+												? static_cast< std::size_t >(snapshot.prependedMessageCount)
+												: 0;
+	const std::size_t prependedMessageCount =
+		!switchingScope && previousMessageCount > 0 && snapshotMessageCount > previousMessageCount
+			&& reportedPrependCount == snapshotMessageCount - previousMessageCount
+			? reportedPrependCount
+			: 0;
+	if (!switchingScope && snapshot.messagesRevision == previousMessagesRevision) {
+		m_visiblePersistentChatLastReadMessageID = snapshot.lastReadMessageId;
+		m_visiblePersistentChatOldestMessageID   = snapshot.oldestLoadedMessageId;
+		m_visiblePersistentChatHasMore           = snapshot.hasOlder;
+		m_visiblePersistentChatLoadingState      = snapshot.loadingState;
+		m_persistentChatLoadingOlder             = snapshot.loadingState == PersistentChatLoadingState::Older;
+		publishQmlActiveScopeState();
+		mumble::chatperf::recordValue("qml.chat.snapshot_unchanged.skipped", 1);
+		return;
+	}
 	if (switchingScope) {
 		const qsizetype pendingAttachmentHydrations = m_persistentChatPendingAttachmentHydrations.size();
 		m_persistentChatPendingAttachmentHydrations.clear();
@@ -30296,6 +30319,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 	}
 	m_visiblePersistentChatLastReadMessageID = snapshot.lastReadMessageId;
 	m_visiblePersistentChatOldestMessageID   = snapshot.oldestLoadedMessageId;
+	m_visiblePersistentChatMessagesRevision  = snapshot.messagesRevision;
 	m_visiblePersistentChatHasMore           = snapshot.hasOlder;
 	m_visiblePersistentChatLoadingState      = snapshot.loadingState;
 	m_persistentChatLoadingOlder             = snapshot.loadingState == PersistentChatLoadingState::Older;
@@ -30305,6 +30329,21 @@ void MainWindow::publishPersistentChatSnapshot() {
 	if (!targetUsesPersistentHistory) return;
 
 	const std::size_t messageCount = m_persistentChatMessages.size();
+	if (prependedMessageCount > 0) {
+		QVariantList prependedMessages;
+		{
+			mumble::chatperf::ScopedDuration buildTrace("chat.publish.snapshot.prepend.build");
+			prependedMessages = buildModernShellMessageStates(
+				target, 0, ModernShellMessageBuildMode::FastFirstPaint, prependedMessageCount);
+		}
+		const int expectedPrependCount = prependedMessages.size();
+		const int prepended = m_qmlShellHost->chatModel()->enqueuePrependMessages(prependedMessages);
+		if (prepended == expectedPrependCount) {
+			mumble::chatperf::recordValue("qml.chat.snapshot_prepend.queued", prepended);
+			return;
+		}
+		mumble::chatperf::recordValue("qml.chat.snapshot_prepend.fallback", expectedPrependCount);
+	}
 	const bool appendedAtTail =
 		!switchingScope && messageCount > previousMessageCount
 		&& (previousMessageCount == 0
