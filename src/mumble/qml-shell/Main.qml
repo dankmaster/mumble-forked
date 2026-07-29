@@ -1742,7 +1742,11 @@ ApplicationWindow {
 		// Capture the exact visible row while lightweight scroll placeholders are
 		// still active. Rich cards may refine their estimated height once the
 		// scroll ends; the anchor keeps that refinement visually stationary.
-		timeline.captureViewportAnchor()
+		if (performanceChatScrollFullRangeToStart
+				&& Math.abs(timeline.contentY - timeline.originY) <= 0.5)
+			timeline.beginTopAnchor()
+		else
+			timeline.captureViewportAnchor()
 		performanceChatScrollRunning = false
 		performanceChatScrollFullRangeToStart = false
 	}
@@ -1815,6 +1819,7 @@ ApplicationWindow {
 					&& !timeline.scopeResetPending
 					&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
+					&& !timeline.topAnchorActive
 					&& !chatModel.prependPending
 			}
 		} catch (error) {
@@ -3410,13 +3415,10 @@ ApplicationWindow {
 								|| moving || dragging || flicking)
 							return false
 						if (Math.abs(contentY - originY) <= 0.5) {
-							releaseViewportAnchor()
-							topAnchorActive = true
-							topAnchorSettleTimer.restart()
+							beginTopAnchor()
 							return true
 						}
-						topAnchorActive = false
-						topAnchorSettleTimer.stop()
+						releaseTopAnchor()
 						const item = firstVisibleMessageDelegate()
 						if (!item)
 							return false
@@ -3433,6 +3435,17 @@ ApplicationWindow {
 						viewportAnchorActive = false
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
+					}
+
+					function beginTopAnchor() {
+						releaseViewportAnchor()
+						topAnchorActive = true
+						topAnchorSettleTimer.restart()
+					}
+
+					function releaseTopAnchor() {
+						topAnchorActive = false
+						topAnchorSettleTimer.stop()
 					}
 
 					function restoreTopAnchor() {
@@ -3727,8 +3740,7 @@ ApplicationWindow {
 						richContentResumeTimer.stop()
 						releaseViewportAnchor()
 						if (!restoringTopAnchor) {
-							topAnchorActive = false
-							topAnchorSettleTimer.stop()
+							releaseTopAnchor()
 						}
 						// QQuickListView reports its own insert displacement as movement.
 						// Preserve the pre-structural anchor through that transition, while
