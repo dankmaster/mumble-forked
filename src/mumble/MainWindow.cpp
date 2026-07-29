@@ -14870,6 +14870,11 @@ void MainWindow::applyShellLayout() {
 			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
 			ClientSessionController *session = m_qmlShellHost->sessionController();
 			UiCommandController *commands = m_qmlShellHost->commandController();
+			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::presentationBusyChanged, this, [this]() {
+				if (m_qmlShellHost && !m_qmlShellHost->chatModel()->presentationBusy()) {
+					scheduleDeferredModernShellPreviewUpdateDrain();
+				}
+			});
 			connect(session, &ClientSessionController::collapsedNavigationSectionsChanged, this, [session]() {
 				const QStringList collapsedSections = session->collapsedNavigationSections();
 				if (Global::get().s.qslModernShellCollapsedNavigationSections == collapsedSections) return;
@@ -25267,6 +25272,11 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 	if (previewKey.isEmpty()) {
 		return;
 	}
+	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
+		m_deferredModernShellPreviewUpdateKeys.insert(previewKey);
+		mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source", 1);
+		return;
+	}
 	ensurePersistentChatPreviewImageProviders(previewKey);
 
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
@@ -25287,6 +25297,33 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 			publishQmlDirectMessageEntryUpdate(conversation.peerSession, entry);
 		}
 	}
+}
+
+void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
+	if (m_deferredModernShellPreviewUpdateKeys.isEmpty() || m_deferredModernShellPreviewUpdateDrainScheduled
+		|| (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy())) {
+		return;
+	}
+
+	m_deferredModernShellPreviewUpdateDrainScheduled = true;
+	QTimer::singleShot(16, this, [this]() {
+		m_deferredModernShellPreviewUpdateDrainScheduled = false;
+		drainDeferredModernShellPreviewUpdates();
+	});
+}
+
+void MainWindow::drainDeferredModernShellPreviewUpdates() {
+	if (m_deferredModernShellPreviewUpdateKeys.isEmpty()
+		|| (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy())) {
+		return;
+	}
+
+	auto it = m_deferredModernShellPreviewUpdateKeys.begin();
+	const QString previewKey = *it;
+	m_deferredModernShellPreviewUpdateKeys.erase(it);
+	mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source.drain", 1);
+	publishModernShellPreviewUpdateForKey(previewKey);
+	scheduleDeferredModernShellPreviewUpdateDrain();
 }
 
 void MainWindow::publishPersistentChatInlineDataImageUpdate(const QString &token) {

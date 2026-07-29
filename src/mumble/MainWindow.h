@@ -762,6 +762,8 @@ public:
 	void clearModernShellMessageDtoCache(const char *reason);
 	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
 	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
+	void scheduleDeferredModernShellPreviewUpdateDrain();
+	void drainDeferredModernShellPreviewUpdates();
 	QString modernShellAvatarDataUrlForTextureHash(const QByteArray &textureHash, int avatarSize);
 	QString modernShellActorAvatarDataUrl(const MumbleProto::ChatMessage &message, const QString &actorIdentityKey,
 										 const ClientUser *messageUser, int avatarSize);
@@ -1204,6 +1206,8 @@ protected:
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;
+	QSet< QString > m_deferredModernShellPreviewUpdateKeys;
+	bool m_deferredModernShellPreviewUpdateDrainScheduled = false;
 	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;

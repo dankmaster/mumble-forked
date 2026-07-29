@@ -51,6 +51,7 @@ private slots:
 	void activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineDefersPresentationUpdatesDuringScroll();
+	void mainWindowDefersPreviewDtoBuildsDuringScroll();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
@@ -2043,6 +2044,45 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 			 QStringLiteral("delivered"));
 	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(busySpy.count(), 2);
+}
+
+void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+
+	const qsizetype publishStart =
+		source.indexOf(QStringLiteral("void MainWindow::publishModernShellPreviewUpdateForKey"));
+	const qsizetype publishEnd =
+		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"),
+					   publishStart);
+	QVERIFY(publishStart >= 0);
+	QVERIFY(publishEnd > publishStart);
+
+	const QString publishBody = source.mid(publishStart, publishEnd - publishStart);
+	const qsizetype busyGuard = publishBody.indexOf(QStringLiteral("presentationBusy()"));
+	const qsizetype providerWork =
+		publishBody.indexOf(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)"));
+	const qsizetype dtoEviction =
+		publishBody.indexOf(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)"));
+	QVERIFY(busyGuard >= 0);
+	QVERIFY(providerWork > busyGuard);
+	QVERIFY(dtoEviction > busyGuard);
+	QVERIFY(publishBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.insert(previewKey)")));
+
+	const qsizetype drainStart =
+		source.indexOf(QStringLiteral("void MainWindow::drainDeferredModernShellPreviewUpdates"));
+	const qsizetype nextFunction =
+		source.indexOf(QStringLiteral("void MainWindow::publishPersistentChatInlineDataImageUpdate"), drainStart);
+	QVERIFY(drainStart >= 0);
+	QVERIFY(nextFunction > drainStart);
+	const QString drainBody = source.mid(drainStart, nextFunction - drainStart);
+	QVERIFY(drainBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.erase(it)")));
+	QCOMPARE(drainBody.count(QStringLiteral("publishModernShellPreviewUpdateForKey(previewKey)")), 1);
+	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
 }
 
 void TestQmlClientModels::chatTimelineTracksUserHistory() {
