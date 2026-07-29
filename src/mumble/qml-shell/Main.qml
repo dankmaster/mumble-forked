@@ -4635,7 +4635,11 @@ ApplicationWindow {
 									// frames instead of constructing the entire cache window on
 									// the GUI thread in the insertion turn.
 									asynchronous: true
-									visible: active
+									// Remain layout-visible while the rich tree is suspended.
+									// Otherwise Qt Layout drops the placeholder height, every rich
+									// row collapses during scroll, and the timeline expands again
+									// when the loaders wake.
+									visible: messageDelegate.hasAttachmentContent
 									Layout.fillWidth: true
 									Layout.preferredHeight: active && item ? item.implicitHeight
 										: messageDelegate.hasAttachmentContent
@@ -4672,7 +4676,10 @@ ApplicationWindow {
 									// benefit without letting a page of newly prepended embeds
 									// monopolize one UI frame.
 									asynchronous: true
-									visible: active
+									// Only the provider tree is inactive during scroll. Preserve
+									// the lightweight row estimate in Layout so pooled delegates
+									// cannot move the viewport when rich content resumes.
+									visible: messageDelegate.hasPreviewContent
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
 									// pooled delegate drops rich content. Bind the layout height to

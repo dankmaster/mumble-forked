@@ -306,6 +306,8 @@ TestCase {
 		verify(/previewPlaceholderHeight[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*Layout\.preferredHeight:[\s\S]*previewPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
+		verify(/id:\s*messagePreviewLoader[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*Layout\.preferredHeight:[\s\S]*previewPlaceholderHeight/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(!/RichPreviewCard\s*\{\s*id:\s*messagePreviewCard/.test(mainSource))
