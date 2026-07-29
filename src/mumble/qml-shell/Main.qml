@@ -1739,6 +1739,10 @@ ApplicationWindow {
 	}
 
 	function completePerformanceChatScrollWorkload() {
+		// Capture the exact visible row while lightweight scroll placeholders are
+		// still active. Rich cards may refine their estimated height once the
+		// scroll ends; the anchor keeps that refinement visually stationary.
+		timeline.captureViewportAnchor()
 		performanceChatScrollRunning = false
 		performanceChatScrollFullRangeToStart = false
 	}
@@ -4121,6 +4125,11 @@ ApplicationWindow {
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
 							|| bodyNeedsHydration
+						// A pooled rich-card tree is expensive to retarget while a
+						// variable-height ListView is moving. Retire it outside the
+						// viewport, keep a provider-aware geometry estimate, and wake
+						// only the settled visible rows after scrolling ends.
+						property bool richLoaderSuspended: false
 						readonly property real hydrationWarmDistance: Math.min(timeline.cacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
@@ -4160,6 +4169,8 @@ ApplicationWindow {
 								chatModel.requestBodyHydration(stableId)
 						}
 						function resumeRichContentAfterScroll() {
+							if (!timeline.richScrollInProgress)
+								richLoaderSuspended = false
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
@@ -4209,6 +4220,7 @@ ApplicationWindow {
 								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
+							richLoaderSuspended = true
 							updateRichResourceActivity()
 						}
 						ListView.onReused: {
@@ -4216,6 +4228,7 @@ ApplicationWindow {
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
+							richLoaderSuspended = timeline.richScrollInProgress
 							if (messagePreviewLoader.item)
 								messagePreviewLoader.item.resetForReuse()
 							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
@@ -4234,6 +4247,7 @@ ApplicationWindow {
 						Component.onCompleted: {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateCreatedCount
+							richLoaderSuspended = timeline.richScrollInProgress
 							resumeRichContentAfterScroll()
 						}
 						// This technical delegate frame must remain ignored for its entire
@@ -4305,6 +4319,26 @@ ApplicationWindow {
 							? messagePreviewLoader.item.targetCardWidth
 							: preview && preview.previewSize === "compact" ? 460
 							: preview && preview.previewSize === "large" ? 720 : 580
+						readonly property real previewPlaceholderWidth: Math.min(previewTargetWidth,
+							Math.max(220, laneAvailableWidth - richContentChromeWidth))
+						readonly property string previewPlaceholderAspect:
+							String(preview ? (preview.embedAspect || "") : "").toLowerCase()
+						readonly property bool previewPlaceholderHasMedia: !!preview
+							&& ((preview.mediaItems || []).length > 0
+								|| String(preview.embedKind || "").length > 0
+								|| String(preview.thumbnailUrl || preview.posterUrl || "").length > 0)
+						readonly property real previewPlaceholderMediaHeight:
+							previewPlaceholderAspect === "short"
+								? Math.min(520, previewPlaceholderWidth * 16 / 9)
+							: previewPlaceholderAspect === "square" ? previewPlaceholderWidth
+							: previewPlaceholderAspect === "compact-audio" ? 166
+							: previewPlaceholderAspect === "audio" ? 300
+							: previewPlaceholderHasMedia
+								? Math.min(420, previewPlaceholderWidth * 9 / 16) : 0
+						readonly property real previewPlaceholderHeight:
+							previewPlaceholderHasMedia
+								? previewPlaceholderMediaHeight + 132 : 176
+						readonly property real attachmentPlaceholderHeight: 320
 						// Reactions are compact metadata and wrap naturally in their Flow. Treating
 						// one reaction like a media card makes an otherwise short message expand
 						// across the complete conversation lane.
@@ -4593,6 +4627,7 @@ ApplicationWindow {
 								Loader {
 									id: messageAttachmentLoader
 									active: messageDelegate.hasAttachmentContent
+										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
 									// Older history can insert many rich rows in one model
@@ -4602,7 +4637,9 @@ ApplicationWindow {
 									asynchronous: true
 									visible: active
 									Layout.fillWidth: true
-									Layout.preferredHeight: active && item ? item.implicitHeight : 0
+									Layout.preferredHeight: active && item ? item.implicitHeight
+										: messageDelegate.hasAttachmentContent
+											? messageDelegate.attachmentPlaceholderHeight : 0
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
 										if (root.visualFixtureOverrideActive)
@@ -4627,6 +4664,7 @@ ApplicationWindow {
 								Loader {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
+										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
 									// The large ListView cache keeps rich-card geometry warm for
@@ -4640,7 +4678,9 @@ ApplicationWindow {
 									// pooled delegate drops rich content. Bind the layout height to
 									// active content explicitly so a plain reused message cannot keep
 									// a stale card-sized gap.
-									Layout.preferredHeight: active && item ? item.implicitHeight : 0
+									Layout.preferredHeight: active && item ? item.implicitHeight
+										: messageDelegate.hasPreviewContent
+											? messageDelegate.previewPlaceholderHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, parent.width))
