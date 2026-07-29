@@ -3051,7 +3051,59 @@ void NavigationRailModel::synchronizeAllRows() {
 	synchronizeRows(rows);
 }
 
-ChatTimelineModel::ChatTimelineModel(QObject *parent) : StableListModel(parent) {}
+ChatTimelinePresentationProxyModel::ChatTimelinePresentationProxyModel(
+	const bool deferredPresentation, QObject *parent)
+	: QSortFilterProxyModel(parent), m_deferredPresentation(deferredPresentation) {
+	setDynamicSortFilter(true);
+	const auto notifyCount = [this]() { emit countChanged(); };
+	connect(this, &QAbstractItemModel::rowsInserted, this, notifyCount);
+	connect(this, &QAbstractItemModel::rowsRemoved, this, notifyCount);
+	connect(this, &QAbstractItemModel::modelReset, this, notifyCount);
+}
+
+int ChatTimelinePresentationProxyModel::count() const {
+	return rowCount();
+}
+
+QVariantMap ChatTimelinePresentationProxyModel::get(const int row) const {
+	if (row < 0 || row >= rowCount()) {
+		return {};
+	}
+	return data(index(row, 0), StableListModel::PayloadRole).toMap();
+}
+
+int ChatTimelinePresentationProxyModel::rowForStableId(const QString &stableId) const {
+	const auto *timeline = qobject_cast< const ChatTimelineModel * >(sourceModel());
+	if (!timeline) {
+		return -1;
+	}
+	const int sourceRow = timeline->rowForStableId(stableId.trimmed());
+	if (sourceRow < 0) {
+		return -1;
+	}
+	const QModelIndex proxyIndex = mapFromSource(timeline->index(sourceRow, 0));
+	return proxyIndex.isValid() ? proxyIndex.row() : -1;
+}
+
+bool ChatTimelinePresentationProxyModel::filterAcceptsRow(
+	const int sourceRow, const QModelIndex &sourceParent) const {
+	if (!sourceModel()) {
+		return false;
+	}
+	const QModelIndex sourceIndex = sourceModel()->index(sourceRow, 0, sourceParent);
+	if (!sourceIndex.isValid()) {
+		return false;
+	}
+	return sourceModel()->data(sourceIndex, StableListModel::DeferredPresentationRole).toBool()
+		== m_deferredPresentation;
+}
+
+ChatTimelineModel::ChatTimelineModel(QObject *parent)
+	: StableListModel(parent), m_presentationModel(false, this),
+	  m_deferredPresentationModel(true, this) {
+	m_presentationModel.setSourceModel(this);
+	m_deferredPresentationModel.setSourceModel(this);
+}
 
 QString ChatTimelineModel::query() const { return m_query; }
 
@@ -3349,22 +3401,6 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 		if (searchActive()) refreshSearchState(true);
 		return MessageMutation::Updated;
 	}
-	for (qsizetype queuedIndex = 0; queuedIndex < m_queuedPrependRows.size(); ++queuedIndex) {
-		const QVariantMap queuedRow = m_queuedPrependRows.at(queuedIndex).toMap();
-		if (queuedRow.value(QStringLiteral("id")).toString() != id) {
-			continue;
-		}
-		if (queuedRow == row) {
-			return MessageMutation::Unchanged;
-		}
-		row.insert(QStringLiteral("deferredPresentation"), true);
-		row.insert(QStringLiteral("modelStartsGroup"),
-			queuedRow.value(QStringLiteral("modelStartsGroup"), true));
-		row.insert(QStringLiteral("dateBoundary"),
-			queuedRow.value(QStringLiteral("dateBoundary"), true));
-		m_queuedPrependRows[queuedIndex] = row;
-		return MessageMutation::Updated;
-	}
 	decoratePresentationRow(row, rowCount() > 0 ? get(rowCount() - 1) : QVariantMap {});
 	upsertRow(row);
 	updateUserHistoryRow(id, row);
@@ -3515,63 +3551,48 @@ int ChatTimelineModel::enqueuePrependMessages(const QVariantList &messages) {
 		return 0;
 	}
 
-	m_queuedPrependRows = rows;
 	for (const RichBodyParseRequest &request : requests) {
 		m_deferredRichBodyMessageIds.insert(request.messageId);
 	}
 	m_prependPending = true;
 	emit prependPendingChanged();
-	QTimer::singleShot(0, this, &ChatTimelineModel::prependQueuedChunk);
-	return rows.size();
+	const int prepended = prependRows(rows);
+	if (prepended != rows.size()) {
+		cancelQueuedPrepend();
+		return 0;
+	}
+
+	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
+	for (const QVariant &entry : rows) {
+		const QVariantMap row = entry.toMap();
+		if (isUserHistoryRow(row)) {
+			m_userHistoryMessageIds.insert(row.value(QStringLiteral("id")).toString());
+		}
+	}
+	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) {
+		emit hasUserHistoryChanged();
+	}
+	m_prependPending = false;
+	emit prependPendingChanged();
+	if (searchActive()) {
+		refreshSearchState(true);
+	}
+	return prepended;
 }
 
 bool ChatTimelineModel::prependPending() const {
 	return m_prependPending;
 }
 
-void ChatTimelineModel::prependQueuedChunk() {
-	if (!m_prependPending || m_queuedPrependRows.isEmpty()) {
-		return;
-	}
+ChatTimelinePresentationProxyModel *ChatTimelineModel::presentationModel() {
+	return &m_presentationModel;
+}
 
-	// Insert from newest to oldest so repeatedly prepending one row preserves
-	// the source order. A whole page in one beginInsertRows call forces Qt Quick
-	// to reindex and relayout every warm rich delegate in one UI-thread turn.
-	const QVariant row = m_queuedPrependRows.takeLast();
-	const QVariantList chunk { row };
-	if (prependRows(chunk) != 1) {
-		cancelQueuedPrepend();
-		return;
-	}
-
-	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
-	const QVariantMap insertedRow = row.toMap();
-	if (isUserHistoryRow(insertedRow)) {
-		m_userHistoryMessageIds.insert(
-			insertedRow.value(QStringLiteral("id")).toString());
-	}
-	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) {
-		emit hasUserHistoryChanged();
-	}
-
-	if (!m_queuedPrependRows.isEmpty()) {
-		QTimer::singleShot(16, this, &ChatTimelineModel::prependQueuedChunk);
-		return;
-	}
-
-	m_prependPending = false;
-	emit prependPendingChanged();
-	if (searchActive()) {
-		refreshSearchState(true);
-	}
+ChatTimelinePresentationProxyModel *ChatTimelineModel::deferredPresentationModel() {
+	return &m_deferredPresentationModel;
 }
 
 void ChatTimelineModel::cancelQueuedPrepend() {
-	for (const QVariant &entry : m_queuedPrependRows) {
-		m_deferredRichBodyMessageIds.remove(
-			entry.toMap().value(QStringLiteral("id")).toString());
-	}
-	m_queuedPrependRows.clear();
 	if (!m_prependPending) {
 		return;
 	}
@@ -3582,20 +3603,26 @@ void ChatTimelineModel::cancelQueuedPrepend() {
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	cancelQueuedPrepend();
-	m_deferredRichBodyMessageIds.clear();
 	QVariantList rows;
 	QList< RichBodyParseRequest > requests;
 	QSet< QString > retainedMessageIds;
 	QSet< QString > userHistoryMessageIds;
+	QSet< QString > retainedDeferredMessageIds;
 	QVariantMap previousRow;
 	rows.reserve(messages.size());
 	for (const QVariant &entry : messages) {
 		QVariantMap row = messageRow(entry.toMap(), &requests);
 		if (!row.isEmpty()) {
+			const QString id = row.value(QStringLiteral("id")).toString();
+			const int existingRow = indexOf(id);
+			if (existingRow >= 0
+				&& get(existingRow).value(QStringLiteral("deferredPresentation")).toBool()) {
+				row.insert(QStringLiteral("deferredPresentation"), true);
+				retainedDeferredMessageIds.insert(id);
+			}
 			decoratePresentationRow(row, previousRow);
 			previousRow = row;
 			rows.push_back(row);
-			const QString id = row.value(QStringLiteral("id")).toString();
 			retainedMessageIds.insert(id);
 			if (isUserHistoryRow(row))
 				userHistoryMessageIds.insert(id);
@@ -3627,9 +3654,17 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	}
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	synchronizeRows(rows);
+	m_deferredRichBodyMessageIds = retainedDeferredMessageIds;
 	m_userHistoryMessageIds = std::move(userHistoryMessageIds);
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
-	scheduleRichBodyParses(requests);
+	QList< RichBodyParseRequest > immediateRequests;
+	immediateRequests.reserve(requests.size());
+	for (const RichBodyParseRequest &request : requests) {
+		if (!retainedDeferredMessageIds.contains(request.messageId)) {
+			immediateRequests.push_back(request);
+		}
+	}
+	scheduleRichBodyParses(immediateRequests);
 	if (searchActive()) refreshSearchState(true);
 }
 

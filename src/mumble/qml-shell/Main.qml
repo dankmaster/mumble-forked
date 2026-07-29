@@ -7,6 +7,10 @@ import Mumble.Theme 1.0
 ApplicationWindow {
 	id: root
 	onClosing: close => close.accepted = false
+	onActiveChanged: {
+		if (active)
+			timeline.markVisibleScopeReadIfEligible()
+	}
     property var attachmentViewerPayload: null
 	property var attachmentViewerHydrationModel: null
     property var pendingPreviewHydrationIds: ({})
@@ -1066,16 +1070,24 @@ ApplicationWindow {
 	function revealConversationSearchMatch(row, stableId) {
 		if (!root.conversationSearchOpen || row < 0 || String(stableId || "").length === 0)
 			return
+		const presentationRow = chatModel.presentationModel.rowForStableId(String(stableId || ""))
+		if (presentationRow < 0) {
+			if (chatModel.materializeDeferredMessage(String(stableId || "")))
+				Qt.callLater(function() {
+					root.revealConversationSearchMatch(row, stableId)
+				})
+			return
+		}
 		timeline.releasePrependAnchor()
 		timeline.stickToBottom = false
-		timeline.currentIndex = row
-		timeline.positionViewAtIndex(row, ListView.Center)
+		timeline.currentIndex = presentationRow
+		timeline.positionViewAtIndex(presentationRow, ListView.Center)
 	}
 
 	function positionVisualFixtureTimelineAt(stableId) {
 		if (!root.visualFixtureOverrideActive)
 			return false
-		const row = chatModel.rowForStableId(String(stableId || ""))
+		const row = chatModel.presentationModel.rowForStableId(String(stableId || ""))
 		if (row < 0)
 			return false
 		timeline.releasePrependAnchor()
@@ -1931,6 +1943,10 @@ ApplicationWindow {
 		}
 		function onLoadingChanged() {
 			timeline.scheduleScopePresentationFastPath()
+		}
+		function onUnreadCountChanged() {
+			if (Number(activeScope.unreadCount || 0) > 0)
+				Qt.callLater(function() { timeline.markVisibleScopeReadIfEligible() })
 		}
     }
 
@@ -2913,7 +2929,7 @@ ApplicationWindow {
 					objectName: "chatTimeline"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    model: chatModel
+                    model: chatModel.presentationModel
                     clip: true
 					interactive: !scopePresentationPending
 					Accessible.role: Accessible.List
@@ -2982,12 +2998,10 @@ ApplicationWindow {
 							timeline.scheduleRichContentResume()
 						}
 					}
-					// Keep a bounded geometry window warm. Posters and gallery images have
-					// their own decoded caches; retaining 12-20k pixels of complete rich
-					// delegate trees makes every prepend reindex and relayout far too much
-					// QML state on the UI thread. Two and a half viewports still prebuilds
-					// the next tall card before an ordinary wheel gesture reaches it.
-					cacheBuffer: Math.max(960, Math.min(2800, height * 2.5))
+					// Keep less than one extra viewport of delegates warm. Rich preview
+					// loaders incubate asynchronously, so a multi-viewport cache only makes
+					// scope entry and history insertion construct invisible card trees.
+					cacheBuffer: Math.max(480, Math.min(1200, height * 0.75))
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property int richContentResumeGeneration: 0
@@ -3056,6 +3070,14 @@ ApplicationWindow {
 							return true
 						const maximumY = Math.max(originY, originY + contentHeight - height)
 						return maximumY - contentY <= bottomFollowThreshold
+					}
+
+					function markVisibleScopeReadIfEligible() {
+						if (!root.active || scopePresentationPending || activeScope.activity
+								|| Number(activeScope.unreadCount || 0) <= 0 || !isNearBottom())
+							return false
+						uiCommands.markActiveScopeRead()
+						return true
 					}
 
 					function requestBottomFollow() {
@@ -3169,6 +3191,7 @@ ApplicationWindow {
 						scopePresentationObservationActive = count > 0
 						if (scopePresentationObservationActive)
 							scopePresentationObservationTimer.restart()
+						markVisibleScopeReadIfEligible()
 						return true
 					}
 
@@ -3255,6 +3278,7 @@ ApplicationWindow {
 							timeline.scopePresentationFinalizing = false
 							timeline.scopePresentationObservationActive = true
 							scopePresentationObservationTimer.restart()
+							timeline.markVisibleScopeReadIfEligible()
 						})
 					}
 
@@ -3292,14 +3316,31 @@ ApplicationWindow {
 					function firstVisibleMessageDelegate() {
 						const children = contentItem ? contentItem.children : []
 						let candidate = null
+						let candidateViewportY = Number.POSITIVE_INFINITY
 						for (let index = 0; index < children.length; ++index) {
 							const item = children[index]
 							if (!item || item.stableId === undefined || !item.visible
-									|| item.accessibilityPooled === true
-									|| item.y + item.height <= contentY + 0.5)
+									|| item.accessibilityPooled === true)
 								continue
-							if (!candidate || item.y < candidate.y)
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5)
+								continue
+							if (!candidate || point.y < candidateViewportY) {
 								candidate = item
+								candidateViewportY = point.y
+							}
+						}
+						for (let index = 0; index < deferredHistoryRepeater.count; ++index) {
+							const item = deferredHistoryRepeater.itemAt(index)
+							if (!item || !item.visible)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5)
+								continue
+							if (!candidate || point.y < candidateViewportY) {
+								candidate = item
+								candidateViewportY = point.y
+							}
 						}
 						return candidate
 					}
@@ -3311,7 +3352,7 @@ ApplicationWindow {
 						prependAnchorId = String(item.stableId || "")
 						if (prependAnchorId.length === 0)
 							return false
-						prependAnchorOffset = item.y - contentY
+						prependAnchorOffset = item.mapToItem(timeline, 0, 0).y
 						prependAnchorContentY = contentY
 						prependAnchorTargetY = contentY
 						prependAnchorInsertedExtent = 0
@@ -3333,7 +3374,7 @@ ApplicationWindow {
 						viewportAnchorId = String(item.stableId || "")
 						if (viewportAnchorId.length === 0)
 							return false
-						viewportAnchorOffset = item.y - contentY
+						viewportAnchorOffset = item.mapToItem(timeline, 0, 0).y
 						viewportAnchorRetries = 0
 						viewportAnchorActive = true
 						return true
@@ -3371,6 +3412,19 @@ ApplicationWindow {
 								queuedSet[stableId] = true
 							}
 						}
+						for (let childIndex = 0; childIndex < deferredHistoryRepeater.count; ++childIndex) {
+							const item = deferredHistoryRepeater.itemAt(childIndex)
+							if (!item || !item.visible)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
+								continue
+							const stableId = String(item.stableId || "")
+							if (stableId.length > 0 && queuedSet[stableId] !== true) {
+								queued.push(stableId)
+								queuedSet[stableId] = true
+							}
+						}
 						deferredMaterializationQueue = queued
 						if (queued.length > 0 && !deferredMaterializationTimer.running)
 							deferredMaterializationTimer.start()
@@ -3396,7 +3450,7 @@ ApplicationWindow {
 								|| prependAnchorActive || scopePresentationPending
 								|| moving || dragging || flicking)
 							return
-						const row = chatModel.rowForStableId(viewportAnchorId)
+						const row = chatModel.presentationModel.rowForStableId(viewportAnchorId)
 						if (row < 0) {
 							releaseViewportAnchor()
 							return
@@ -3497,7 +3551,7 @@ ApplicationWindow {
 					function restorePrependAnchor() {
 						if (!prependAnchorActive || restoringPrependAnchor)
 							return
-						const row = chatModel.rowForStableId(prependAnchorId)
+						const row = chatModel.presentationModel.rowForStableId(prependAnchorId)
 						if (row < 0) {
 							releasePrependAnchor()
 							return
@@ -3620,6 +3674,10 @@ ApplicationWindow {
 							if (!stickToBottom)
 								captureViewportAnchor()
 							scheduleRichContentResume()
+							if (stickToBottom)
+								Qt.callLater(function() {
+									timeline.markVisibleScopeReadIfEligible()
+								})
 						}
 					}
 
@@ -3718,6 +3776,8 @@ ApplicationWindow {
 								timeline.scopeResetPending = false
 								if (timeline.stickToBottom && !timeline.isNearBottom())
 									timeline.requestBottomFollow()
+								else
+									timeline.markVisibleScopeReadIfEligible()
 							})
 						}
 					}
@@ -3738,11 +3798,10 @@ ApplicationWindow {
 							if (chatModel.prependPending
 									|| !timeline.deferredPrependAnchorActive)
 								return
-							// All technical rows now exist and the original visible item
-							// remained instantiated throughout the sliced mutation. One final
-							// identity correction is therefore O(1), not a page materialization.
-							timeline.deferredPrependAnchorActive = false
-							timeline.restorePrependAnchor()
+							// Deferred rows live in the lightweight inline header and never
+							// enter the warm rich ListView model. Preserve the original item by
+							// the exact fixed prefix extent, then release after one quiet turn.
+							timeline.restoreDeferredPrependAnchor()
 						}
 						function onRowsAboutToChange(first, last) {
 							if (!timeline.scopeResetPending && !timeline.stickToBottom
@@ -3840,25 +3899,107 @@ ApplicationWindow {
 								root.openChatBackgroundMenu(
 									timeline.mapToItem(null, point.position.x, point.position.y))
 						}
-					}
+                    }
                     headerPositioning: ListView.InlineHeader
-                    header: Item {
+                    header: Column {
+						id: timelineHeader
                         width: timeline.width
-                        height: (activeScope.canLoadOlder || activeScope.loadingState === "older") ? 48 : 0
+						height: implicitHeight
+						spacing: 0
                         visible: height > 0
 						opacity: timeline.scopePresentationPending ? 0 : 1
-                        ModernButton {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.top: parent.top
-                            anchors.topMargin: 4
-                            enabled: activeScope.canLoadOlder && activeScope.loadingState !== "older"
-                            text: activeScope.loadingState === "older"
-                                  ? qsTr("Loading older messages…")
-                                  : qsTr("Load older messages")
-                            Accessible.name: text
-                            Accessible.description: qsTr("Load messages sent before the currently visible history")
-                            onClicked: uiCommands.requestOlderMessages()
-                        }
+						Item {
+							width: timelineHeader.width
+							height: (activeScope.canLoadOlder
+								|| activeScope.loadingState === "older") ? 48 : 0
+							visible: height > 0
+							ModernButton {
+								anchors.horizontalCenter: parent.horizontalCenter
+								anchors.top: parent.top
+								anchors.topMargin: 4
+								enabled: activeScope.canLoadOlder
+									&& activeScope.loadingState !== "older"
+								text: activeScope.loadingState === "older"
+									  ? qsTr("Loading older messages…")
+									  : qsTr("Load older messages")
+								Accessible.name: text
+								Accessible.description: qsTr(
+									"Load messages sent before the currently visible history")
+								onClicked: uiCommands.requestOlderMessages()
+							}
+						}
+						Repeater {
+							id: deferredHistoryRepeater
+							model: chatModel.deferredPresentationModel
+							delegate: Item {
+								id: deferredHistoryRow
+								required property string stableId
+								required property string title
+								required property string subtitle
+								required property string timestamp
+								required property var source
+								readonly property bool deferredPrefixItem: true
+								readonly property bool contentNeedsHydration: true
+								width: timelineHeader.width
+								height: timeline.deferredMessageRowHeight
+								Accessible.role: Accessible.ListItem
+								Accessible.name: title.length > 0
+									? qsTr("%1: %2").arg(title).arg(deferredBody.text)
+									: deferredBody.text
+
+								Rectangle {
+									anchors.fill: parent
+									anchors.leftMargin: Theme.space3
+									anchors.rightMargin: Theme.space3
+									anchors.topMargin: 2
+									anchors.bottomMargin: 2
+									radius: Theme.radiusSmall
+									color: Theme.surfaceRaised
+									border.width: 1
+									border.color: Theme.divider
+								}
+								ColumnLayout {
+									anchors.fill: parent
+									anchors.leftMargin: Theme.space5
+									anchors.rightMargin: Theme.space5
+									anchors.topMargin: Theme.space2
+									anchors.bottomMargin: Theme.space2
+									spacing: 1
+									RowLayout {
+										Layout.fillWidth: true
+										spacing: Theme.space2
+										Label {
+											Layout.fillWidth: true
+											textFormat: Text.PlainText
+											text: deferredHistoryRow.title
+											color: Theme.textStrong
+											font.pixelSize: Theme.fontCaption
+											font.weight: Font.DemiBold
+											elide: Text.ElideRight
+										}
+										Label {
+											textFormat: Text.PlainText
+											text: deferredHistoryRow.timestamp
+											color: Theme.textMuted
+											font.pixelSize: Theme.fontCaption
+											visible: text.length > 0
+										}
+									}
+									Label {
+										id: deferredBody
+										Layout.fillWidth: true
+										textFormat: Text.PlainText
+										text: String(deferredHistoryRow.source.plainText
+											|| deferredHistoryRow.source.bodyText
+											|| deferredHistoryRow.subtitle || "")
+										color: Theme.textMain
+										font.pixelSize: Theme.fontBody
+										elide: Text.ElideRight
+										maximumLineCount: 1
+									}
+								}
+							}
+						}
                     }
 					// Flickable margins live outside contentHeight, and ListView's
 					// positionViewAtEnd() does not include bottomMargin. Keep the
@@ -4417,8 +4558,7 @@ ApplicationWindow {
 									// mutation. Incubate off-screen galleries over subsequent
 									// frames instead of constructing the entire cache window on
 									// the GUI thread in the insertion turn.
-									asynchronous: timeline.prependRichRowDeferred(messageDelegate.stableId)
-										|| timeline.prependAnchorActive || !messageDelegate.inVisibleViewport
+									asynchronous: true
 									visible: active
 									Layout.fillWidth: true
 									Layout.preferredHeight: active && item ? item.implicitHeight : 0
@@ -4452,8 +4592,7 @@ ApplicationWindow {
 									// smooth scrolling. Asynchronous incubation preserves that
 									// benefit without letting a page of newly prepended embeds
 									// monopolize one UI frame.
-									asynchronous: timeline.prependRichRowDeferred(messageDelegate.stableId)
-										|| timeline.prependAnchorActive || !messageDelegate.inVisibleViewport
+									asynchronous: true
 									visible: active
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
@@ -4691,7 +4830,8 @@ ApplicationWindow {
 												ToolTip.visible: hovered
 												ToolTip.text: text
 												onClicked: root.toggleQuickReactions(messageDelegate.stableId,
-													chatModel.rowForStableId(messageDelegate.stableId),
+													chatModel.presentationModel.rowForStableId(
+														messageDelegate.stableId),
 													messageReactButton,
 													messageDelegate.reactions || [])
 											}
@@ -4804,8 +4944,9 @@ ApplicationWindow {
 											Accessible.name: text
 											ToolTip.visible: hovered
 											ToolTip.text: text
-											onClicked: root.toggleQuickReactions(messageDelegate.stableId,
-												chatModel.rowForStableId(messageDelegate.stableId),
+										onClicked: root.toggleQuickReactions(messageDelegate.stableId,
+											chatModel.presentationModel.rowForStableId(
+												messageDelegate.stableId),
 												compactMessageReactButton,
 												messageDelegate.reactions || [])
 										}

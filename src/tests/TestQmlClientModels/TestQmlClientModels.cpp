@@ -547,16 +547,18 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	}
 
 	QCOMPARE(model.enqueuePrependMessages(olderMessages), 13);
-	QVERIFY(model.prependPending());
-	QTRY_COMPARE_WITH_TIMEOUT(model.rowCount(), 14, 2000);
-	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 2000);
+	QCOMPARE(model.rowCount(), 14);
+	QVERIFY(!model.prependPending());
 	QCOMPARE(pendingSpy.count(), 2);
-	QCOMPARE(insertSpy.count(), 13);
-	for (const QList< QVariant > &arguments : insertSpy) {
-		QCOMPARE(arguments.at(1).toInt(), 0);
-		QCOMPARE(arguments.at(2).toInt(), 0);
-	}
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(insertSpy.constFirst().at(1).toInt(), 0);
+	QCOMPARE(insertSpy.constFirst().at(2).toInt(), 12);
 	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.presentationModel()->rowCount(), 1);
+	QCOMPARE(model.deferredPresentationModel()->rowCount(), 13);
+	QCOMPARE(model.presentationModel()->rowForStableId(QStringLiteral("current:0")), 0);
+	QCOMPARE(model.deferredPresentationModel()->rowForStableId(
+				 QStringLiteral("older-queued:0")), 0);
 	for (int row = 0; row < 13; ++row) {
 		QCOMPARE(model.get(row).value(QStringLiteral("id")).toString(),
 				 QStringLiteral("older-queued:%1").arg(row));
@@ -566,6 +568,12 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	const auto deferredRole = model.roleNames().key(QByteArrayLiteral("deferredPresentation"), -1);
 	QVERIFY(deferredRole >= 0);
 	QVERIFY(model.data(model.index(0, 0), deferredRole).toBool());
+	QVERIFY(model.materializeDeferredMessage(QStringLiteral("older-queued:12")));
+	QCOMPARE(model.presentationModel()->rowCount(), 2);
+	QCOMPARE(model.deferredPresentationModel()->rowCount(), 12);
+	QCOMPARE(model.presentationModel()->rowForStableId(
+				 QStringLiteral("older-queued:12")), 0);
+	QCOMPARE(model.presentationModel()->rowForStableId(QStringLiteral("current:0")), 1);
 	const auto startsGroupRole = model.roleNames().key(QByteArrayLiteral("modelStartsGroup"), -1);
 	QVERIFY(startsGroupRole >= 0);
 	QVERIFY(model.data(model.index(0, 0), startsGroupRole).toBool());

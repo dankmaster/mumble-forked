@@ -147,8 +147,8 @@ TestCase {
 
 	function test_delayed_rich_card_height_changes_preserve_the_visible_message() {
 		verify(/property string viewportAnchorId:\s*""[\s\S]*property bool viewportAnchorActive:\s*false/.test(mainSource))
-		verify(/function\s+captureViewportAnchor\(\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.y\s*-\s*contentY/.test(mainSource))
-		verify(/function\s+restoreViewportAnchor\(\)[\s\S]*rowForStableId\(viewportAnchorId\)[\s\S]*item\.y\s*-\s*viewportAnchorOffset[\s\S]*contentY\s*=\s*desiredY/.test(mainSource))
+		verify(/function\s+captureViewportAnchor\(\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y/.test(mainSource))
+		verify(/function\s+restoreViewportAnchor\(\)[\s\S]*presentationModel\.rowForStableId\(viewportAnchorId\)[\s\S]*item\.y\s*-\s*viewportAnchorOffset[\s\S]*contentY\s*=\s*desiredY/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*viewportAnchorActive[\s\S]*Qt\.callLater\(function\(\)\s*\{\s*timeline\.restoreViewportAnchor\(\)/.test(mainSource))
 		verify(/onMovementStarted:[\s\S]*releaseViewportAnchor\(\)[\s\S]*onMovementEnded:[\s\S]*!stickToBottom[\s\S]*captureViewportAnchor\(\)/.test(mainSource))
 	}
@@ -240,7 +240,7 @@ TestCase {
 		verify(/function\s+stableAlternatingRow\(stableId\)[\s\S]*parity\s*\^=\s*value\.charCodeAt\(index\)\s*&\s*1[\s\S]*return\s+parity\s*===\s*1/.test(mainSource))
 		verify(/ChatMessageFrame\s*\{[\s\S]{0,400}logEntry:\s*activeScope\.activity[\s\S]{0,200}logAlternating:\s*logEntry\s*&&\s*root\.stableAlternatingRow\(stableId\)/.test(mainSource))
 		verify(!/id:\s*messageDelegate[\s\S]{0,360}required property int index/.test(mainSource))
-		verify(/toggleQuickReactions\(messageDelegate\.stableId,[\s\S]{0,120}chatModel\.rowForStableId\(messageDelegate\.stableId\)/.test(mainSource))
+		verify(/toggleQuickReactions\(messageDelegate\.stableId,[\s\S]{0,180}chatModel\.presentationModel\.rowForStableId\([\s\S]{0,80}messageDelegate\.stableId\)/.test(mainSource))
 		verify(/id:\s*activityLogRow[\s\S]{0,300}visible:\s*messageDelegate\.logEntry[\s\S]{0,1000}objectName:\s*"activityLogTimestamp"[\s\S]{0,1400}objectName:\s*"activityLogGutter"[\s\S]{0,1600}objectName:\s*"activityLogEvent"/.test(mainSource))
 		verify(/id:\s*messageRow[\s\S]{0,180}visible:\s*!messageDelegate\.logEntry/.test(mainSource))
 	}
@@ -282,7 +282,8 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(960,\s*Math\.min\(2800,\s*height\s*\*\s*2\.5\)\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(480,\s*Math\.min\(1200,\s*height\s*\*\s*0\.75\)\)/.test(mainSource))
+		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*richContentResumeGeneration/.test(mainSource))
@@ -298,9 +299,16 @@ TestCase {
 		verify(/function\s+onRowsInserted\(parentIndex,\s*first,\s*last\)[\s\S]*extendDeferredPrependAnchorTarget\(last\s*-\s*first\s*\+\s*1\)[\s\S]*Qt\.callLater[\s\S]*restoreDeferredPrependAnchor\(\)/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent\s*&&\s*timeline\.prependRichContentActive\([\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent\s*&&\s*timeline\.prependRichContentActive\(/.test(mainSource))
-		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*timeline\.prependRichRowDeferred\(messageDelegate\.stableId\)[\s\S]*timeline\.prependAnchorActive\s*\|\|\s*!messageDelegate\.inVisibleViewport/.test(mainSource))
-		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*timeline\.prependRichRowDeferred\(messageDelegate\.stableId\)[\s\S]*timeline\.prependAnchorActive\s*\|\|\s*!messageDelegate\.inVisibleViewport/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
+		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(!/RichPreviewCard\s*\{\s*id:\s*messagePreviewCard/.test(mainSource))
+	}
+
+	function test_visible_tail_marks_the_active_scope_read_without_clearing_scrolled_history() {
+		verify(/function\s+markVisibleScopeReadIfEligible\(\)[\s\S]*!root\.active[\s\S]*scopePresentationPending[\s\S]*unreadCount[\s\S]*!isNearBottom\(\)[\s\S]*uiCommands\.markActiveScopeRead\(\)/.test(mainSource))
+		verify(/onUnreadCountChanged\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
+		verify(/onMovementEnded:[\s\S]*stickToBottom\s*=\s*isNearBottom\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
+		verify(/onActiveChanged:[\s\S]*timeline\.markVisibleScopeReadIfEligible\(\)/.test(mainSource))
 	}
 
 	function test_chat_scroll_reports_delegate_materialization_diagnostics() {

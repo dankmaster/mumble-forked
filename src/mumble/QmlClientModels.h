@@ -463,6 +463,26 @@ private:
 	QSet< QString > m_collapsedRoomScopes;
 };
 
+class ChatTimelinePresentationProxyModel final : public QSortFilterProxyModel {
+	Q_OBJECT
+	Q_PROPERTY(int count READ count NOTIFY countChanged)
+
+public:
+	explicit ChatTimelinePresentationProxyModel(bool deferredPresentation, QObject *parent = nullptr);
+	int count() const;
+	Q_INVOKABLE QVariantMap get(int row) const;
+	Q_INVOKABLE int rowForStableId(const QString &stableId) const;
+
+signals:
+	void countChanged();
+
+protected:
+	bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
+
+private:
+	bool m_deferredPresentation = false;
+};
+
 class ChatTimelineModel final : public StableListModel {
 	Q_OBJECT
 	Q_PROPERTY(bool hasUserHistory READ hasUserHistory NOTIFY hasUserHistoryChanged)
@@ -472,6 +492,8 @@ class ChatTimelineModel final : public StableListModel {
 	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
 	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
 	Q_PROPERTY(bool prependPending READ prependPending NOTIFY prependPendingChanged)
+	Q_PROPERTY(ChatTimelinePresentationProxyModel *presentationModel READ presentationModel CONSTANT)
+	Q_PROPERTY(ChatTimelinePresentationProxyModel *deferredPresentationModel READ deferredPresentationModel CONSTANT)
 public:
 	enum class MessageMutation { Ignored, Inserted, Updated, Unchanged };
 	explicit ChatTimelineModel(QObject *parent = nullptr);
@@ -493,6 +515,8 @@ public:
 	int currentMatchRow() const;
 	QString currentMatchStableId() const;
 	bool prependPending() const;
+	ChatTimelinePresentationProxyModel *presentationModel();
+	ChatTimelinePresentationProxyModel *deferredPresentationModel();
 	Q_INVOKABLE bool materializeDeferredMessage(const QString &messageId);
 	Q_INVOKABLE bool requestBodyHydration(const QString &messageId);
 	Q_INVOKABLE bool nextMatch();
@@ -533,7 +557,6 @@ private:
 	void launchRichBodyParseBatch();
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
-	void prependQueuedChunk();
 	void cancelQueuedPrepend();
 	bool searchActive() const;
 	bool rowMatchesQuery(const QVariantMap &row, const QString &normalizedQuery) const;
@@ -558,8 +581,9 @@ private:
 	int m_currentMatchRow = -1;
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
-	QVariantList m_queuedPrependRows;
 	bool m_prependPending = false;
+	ChatTimelinePresentationProxyModel m_presentationModel;
+	ChatTimelinePresentationProxyModel m_deferredPresentationModel;
 };
 
 class DirectMessageSummaryModel final : public StableListModel {
