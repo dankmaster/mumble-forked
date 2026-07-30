@@ -1520,11 +1520,15 @@ namespace {
 			// the cached preview handoff cannot add the observed final 18 px after
 			// the cold scope has already been exposed.
 			if (!hasMedia) return 266;
-			if (aspect == QLatin1String("short")) return 724;
-			if (aspect == QLatin1String("square")) return 664;
+			// Real PROD rows include the complete message/provider chrome around
+			// the media surface. Reserve the measured final geometry rather than
+			// the poster-only fixture height: otherwise the first hydrated
+			// Instagram post grows by up to 174 px after a full scroll.
+			if (aspect == QLatin1String("short")) return 727;
+			if (aspect == QLatin1String("square")) return 838;
 			if (aspect == QLatin1String("compact-audio")) return 370;
 			if (aspect == QLatin1String("audio")) return 504;
-			return 530;
+			return 548;
 		}
 		if (!attachments.isEmpty()) return 392;
 		if (bodyHydrationPending) return 180;
@@ -3901,16 +3905,13 @@ void ChatTimelineModel::drainQueuedPrepend() {
 		return;
 	}
 
-	// Prepend newest chunks first so every later chunk lands in front of it and
-	// the final source ordering remains identical to the server page.
-	// Two variable-height rows fit comfortably inside the 50 ms GUI heartbeat
-	// budget on cold rich histories. Four can force ListView to polish multiple
-	// complete message frames together, while the extra drain turns still keep a
-	// ten-message older-history page inside the 300 ms response gate.
-	constexpr qsizetype PrependRowsPerFrame = 2;
-	const qsizetype chunkSize = std::min(PrependRowsPerFrame, m_pendingPrependRows.size());
-	const qsizetype chunkStart = m_pendingPrependRows.size() - chunkSize;
-	const QVariantList chunk = m_pendingPrependRows.mid(chunkStart, chunkSize);
+	// Every queued prefix row is still a childless deferred presentation. Insert
+	// that lightweight page as one contiguous model transaction so both proxy
+	// models and QML perform one anchor/layout pass. Splitting a real 20-row PROD
+	// page into ten inserts made the same header geometry polish ten times and
+	// produced repeated 55-72 ms heartbeat gaps.
+	const QVariantList chunk = m_pendingPrependRows;
+	const qsizetype chunkSize = chunk.size();
 	int prepended = 0;
 	{
 		mumble::chatperf::ScopedDuration trace("qml.chat.prepend_drain");
@@ -3921,7 +3922,7 @@ void ChatTimelineModel::drainQueuedPrepend() {
 		cancelQueuedPrepend();
 		return;
 	}
-	m_pendingPrependRows.remove(chunkStart, chunkSize);
+	m_pendingPrependRows.clear();
 	if (m_pendingPrependRows.isEmpty()) {
 		m_prependPending = false;
 		emit prependPendingChanged();

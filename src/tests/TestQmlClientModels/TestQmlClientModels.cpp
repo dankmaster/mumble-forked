@@ -583,6 +583,11 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		{ QStringLiteral("url"), QStringLiteral("https://example.test/article") },
 		{ QStringLiteral("title"), QStringLiteral("Article") }
 	};
+	const QVariantMap squarePreview {
+		{ QStringLiteral("embedKind"), QStringLiteral("instagram") },
+		{ QStringLiteral("embedAspect"), QStringLiteral("square") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("https://example.com/poster-square.jpg") }
+	};
 	QCOMPARE(estimateModel.appendMessages(
 				 { QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
@@ -594,22 +599,29 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:metadata-only") },
 					 { QStringLiteral("plainText"), QStringLiteral("Metadata") },
-					 { QStringLiteral("preview"), metadataOnlyPreview } } },
+					 { QStringLiteral("preview"), metadataOnlyPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:square") },
+					 { QStringLiteral("plainText"), QStringLiteral("Square") },
+					 { QStringLiteral("preview"), squarePreview } } },
 				 true),
-			 3);
+			 4);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
-			 530);
+			 548);
 	QCOMPARE(estimateModel.get(1).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 70);
 	const auto estimateRole =
 		estimateModel.roleNames().key(QByteArrayLiteral("deferredPresentationHeight"), -1);
 	QVERIFY(estimateRole >= 0);
-	QCOMPARE(estimateModel.data(estimateModel.index(0, 0), estimateRole).toInt(), 530);
+	QCOMPARE(estimateModel.data(estimateModel.index(0, 0), estimateRole).toInt(), 548);
 	QCOMPARE(estimateModel.get(2).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 266);
+	QCOMPARE(estimateModel.get(3).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 838);
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
@@ -721,11 +733,10 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 5000);
 	QCOMPARE(model.rowCount(), 14);
 	QCOMPARE(pendingSpy.count(), 2);
-	QCOMPARE(insertSpy.count(), 7);
+	QCOMPARE(insertSpy.count(), 1);
 	for (const QList< QVariant > &arguments : insertSpy) {
 		QCOMPARE(arguments.at(1).toInt(), 0);
-		QVERIFY(arguments.at(2).toInt() >= arguments.at(1).toInt());
-		QVERIFY(arguments.at(2).toInt() - arguments.at(1).toInt() < 2);
+		QCOMPARE(arguments.at(2).toInt(), 12);
 	}
 	QCOMPARE(resetSpy.count(), 0);
 	QCOMPARE(model.presentationModel()->rowCount(), 1);
