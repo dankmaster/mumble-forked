@@ -30556,10 +30556,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// prefix through the bounded prepend queue. Otherwise the initial
 		// history response bypasses the windowed scope path below and forces
 		// ListView to construct every rich row in one GUI turn.
-		// One complete row keeps first paint below a GUI heartbeat even when it is
-		// a rich attachment. The remaining prefix already uses the bounded
-		// lightweight queue and catches up before the scope reports settled.
-		constexpr qsizetype ColdHistoryFirstPaintRows = 1;
+		constexpr qsizetype ColdHistoryFirstPaintRows = 3;
 		if (previousMessageCount == 0 && appendedMessages.size() > ColdHistoryFirstPaintRows) {
 			const qsizetype prefixSize = appendedMessages.size() - ColdHistoryFirstPaintRows;
 			const QVariantList firstPaintTail = appendedMessages.mid(prefixSize);
@@ -30596,7 +30593,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// immediately, then admit the older prefix through the existing bounded
 		// four-rows-per-frame prepend queue. The scope remains complete before it
 		// reports settled, while the user gets a responsive first frame.
-		constexpr qsizetype ScopeFirstPaintRows = 1;
+		constexpr qsizetype ScopeFirstPaintRows = 3;
 		if (switchingScope && messages.size() > ScopeFirstPaintRows) {
 			const qsizetype prefixSize = messages.size() - ScopeFirstPaintRows;
 			const QVariantList firstPaintTail = messages.mid(prefixSize);
