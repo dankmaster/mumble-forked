@@ -1725,9 +1725,14 @@ ApplicationWindow {
 			const wheelStep = Math.max(80, Math.min(112, timeline.height * 0.14))
 			timeline.contentY = Math.max(currentOriginY, previousY - wheelStep)
 			performanceChatScrollCompletedSteps = nextStep
+			const firstVisible = timeline.firstVisibleMessageDelegate()
 			return { "advanced": Math.abs(timeline.contentY - previousY) > 0.01,
 				"reachedTarget": Math.abs(timeline.contentY - timeline.originY) <= 0.5,
 				"currentY": timeline.contentY,
+				"firstVisibleStableId": firstVisible ? String(firstVisible.stableId || "") : "",
+				"firstVisibleHasPreview": firstVisible ? firstVisible.hasPreviewContent === true : false,
+				"firstVisibleHasAttachment": firstVisible
+					? firstVisible.hasAttachmentContent === true : false,
 				"completedSteps": performanceChatScrollCompletedSteps }
 		}
 		const progress = nextStep / performanceChatScrollTargetSteps

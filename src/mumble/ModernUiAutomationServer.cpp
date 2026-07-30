@@ -5068,6 +5068,18 @@ void ModernUiAutomationServer::advanceChatPerformanceWorkload() {
 		return;
 	}
 	const QVariantMap advancedState = advanced.toMap();
+	if (m_chatPerformanceWorkload.liveMode
+			&& (nextStep == 1 || nextStep % 4 == 0
+				|| advancedState.value(QStringLiteral("reachedTarget")).toBool())) {
+		mumble::chatperf::recordNote(
+			"qml.chat.scroll.step",
+			QStringLiteral("step=%1 y=%2 id=%3 preview=%4 attachment=%5")
+				.arg(nextStep)
+				.arg(advancedState.value(QStringLiteral("currentY")).toDouble(), 0, 'f', 1)
+				.arg(advancedState.value(QStringLiteral("firstVisibleStableId")).toString())
+				.arg(advancedState.value(QStringLiteral("firstVisibleHasPreview")).toBool() ? 1 : 0)
+				.arg(advancedState.value(QStringLiteral("firstVisibleHasAttachment")).toBool() ? 1 : 0));
+	}
 	if (advancedState.value(QStringLiteral("reachedTarget")).toBool()) {
 		m_chatPerformanceWorkload.stepCount =
 			qMax(m_chatPerformanceWorkload.stepCount,
