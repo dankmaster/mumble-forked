@@ -1933,6 +1933,15 @@ ApplicationWindow {
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
 				"richLoaderResumeQueueCount": timeline.richLoaderResumeQueue.length,
 				"richLoaderResumeActiveId": timeline.richLoaderResumeActiveId,
+				"deferredMaterializationQueueCount":
+					timeline.deferredMaterializationQueue.length,
+				"deferredMaterializationRunning": deferredMaterializationTimer.running,
+				"coldMaterializationDelayRunning":
+					coldScopeMaterializationDelayTimer.running,
+				"presentationFinalizeQuietRunning":
+					scopePresentationFinalizeQuietTimer.running,
+				"presentationFinalizeDeadlineRunning":
+					scopePresentationFinalizeDeadlineTimer.running,
 				"visiblePresentationCount": visiblePresentation.visibleCount,
 				"visibleReadyPresentationCount": visiblePresentation.readyCount,
 				"visibleFullMessageCount": visiblePresentation.fullMessageCount,
