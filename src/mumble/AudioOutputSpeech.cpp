@@ -14,12 +14,16 @@
 #include "Global.h"
 
 #include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QThread>
+#include <QtCore/QThreadPool>
 
 #include <opus.h>
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 std::mutex AudioOutputSpeech::s_audioCachesMutex;
 std::vector< AudioOutputCache > AudioOutputSpeech::s_audioCaches(100);
@@ -27,6 +31,23 @@ std::vector< AudioOutputCache > AudioOutputSpeech::s_audioCaches(100);
 namespace {
 	constexpr unsigned int REMOTE_SPEECH_CLEANUP_MAX_MONO_SAMPLES = (SAMPLE_RATE * 120) / 1000;
 	constexpr float REMOTE_SPEECH_CLEANUP_STEREO_EPSILON    = 1.0e-4f;
+	constexpr auto REMOTE_SPEECH_CLEANUP_STARTUP_GRACE = std::chrono::seconds(3);
+	const auto g_remoteSpeechCleanupEarliestInitialization =
+		std::chrono::steady_clock::now() + REMOTE_SPEECH_CLEANUP_STARTUP_GRACE;
+
+	QThreadPool &remoteSpeechCleanupPreparationPool() {
+		// Process-lifetime by design. Destroying a QThreadPool waits for active
+		// work, while an utterance can disappear before its delayed model
+		// preparation completes during shutdown.
+		static QThreadPool *pool = []() {
+			auto *created = new QThreadPool;
+			created->setMaxThreadCount(1);
+			created->setExpiryTimeout(-1);
+			created->setThreadPriority(QThread::LowestPriority);
+			return created;
+		}();
+		return *pool;
+	}
 
 	Mumble::SpeechCleanup::Selection currentRemoteSpeechCleanupSelection() {
 		return Mumble::SpeechCleanup::normalizeSelection({
@@ -128,8 +149,9 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 	// Remote cleanup is an utterance-scoped processor. Settings and the per-user
 	// enable decision are snapshotted here, and changes made while somebody is
 	// speaking deliberately take effect on their next utterance. Neural model
-	// creation can consume a complete UI heartbeat even from the network dispatch
-	// thread, so prepare it on the general worker pool. Audio passes through
+	// creation can consume a complete UI heartbeat even from a worker when its
+	// DLL/model load competes with QML startup. Serialize it on a low-priority
+	// pool and keep it outside the first-paint grace period. Audio passes through
 	// unchanged until the mixer adopts the completed processor.
 	m_remoteSpeechCleanupSelection = currentRemoteSpeechCleanupSelection();
 	m_remoteSpeechCleanupRequested = user && user->isRemoteSpeechCleanupEnabled();
@@ -138,7 +160,9 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 	if (m_remoteSpeechCleanupRequested) {
 		const Mumble::SpeechCleanup::Selection selection = m_remoteSpeechCleanupSelection;
 		m_remoteSpeechCleanupPreparation = QtConcurrent::run(
+			&remoteSpeechCleanupPreparationPool(),
 			[selection]() -> std::unique_ptr< SpeechCleanupProcessor > {
+				std::this_thread::sleep_until(g_remoteSpeechCleanupEarliestInitialization);
 				try {
 					return createSpeechCleanupProcessor(selection);
 				} catch (...) {
