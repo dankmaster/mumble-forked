@@ -3695,7 +3695,7 @@ ApplicationWindow {
 								resumed = true
 								if (item.messageRowReady === true)
 									Qt.callLater(function() {
-										timeline.completeRichLoaderResume(stableId)
+										item.completeRichLoaderResumeWhenReady()
 									})
 								break
 							}
@@ -4608,6 +4608,7 @@ ApplicationWindow {
 						// window stays a lightweight geometry shell until scrolling stops,
 						// avoiding full message-tree allocation and GC on the input frame.
 						property bool messageRowMaterialized: false
+						property bool richResourceActivationQueued: false
 						readonly property bool previewPresentationReady: !hasPreviewContent
 							|| previewNeedsHydration
 							|| (messageRowLoader.item && messageRowLoader.item.previewLoader
@@ -4621,6 +4622,13 @@ ApplicationWindow {
 									&& previewPresentationReady))
 						function completeRichLoaderResumeWhenReady() {
 							if (!messageRowReady)
+								return
+							if (hasPreviewContent && !previewNeedsHydration
+									&& !richResourcesActive) {
+								scheduleRichResourceActivation()
+								return
+							}
+							if (richResourceActivationSettleTimer.running)
 								return
 							const rowId = stableId
 							Qt.callLater(function() {
@@ -4638,8 +4646,22 @@ ApplicationWindow {
 							&& y + height >= timeline.contentY
 							&& y <= timeline.contentY + timeline.height
 						property bool richResourcesActive: false
+						function scheduleRichResourceActivation() {
+							if (richResourcesActive || richResourceActivationQueued
+									|| accessibilityPooled || !inHydrationWindow
+									|| timeline.richScrollInProgress
+									|| (timeline.scopePresentationPending
+										&& !timeline.scopePresentationFinalizing)
+									|| !messageRowReady)
+								return
+							richResourceActivationQueued = true
+							richResourceActivationTimer.restart()
+						}
 						function updateRichResourceActivity() {
 							if (accessibilityPooled) {
+								richResourceActivationTimer.stop()
+								richResourceActivationSettleTimer.stop()
+								richResourceActivationQueued = false
 								richResourceReleaseTimer.stop()
 								richResourcesActive = false
 								return
@@ -4650,10 +4672,35 @@ ApplicationWindow {
 										&& (!timeline.scopePresentationPending
 											|| (timeline.scopePresentationFinalizing
 												&& !richLoaderSuspended)))
-									richResourcesActive = true
+									scheduleRichResourceActivation()
 							} else if (!timeline.richScrollInProgress) {
 								richResourceReleaseTimer.restart()
 							}
+						}
+						Timer {
+							id: richResourceActivationTimer
+							interval: 16
+							repeat: false
+							onTriggered: {
+								messageDelegate.richResourceActivationQueued = false
+								if (messageDelegate.accessibilityPooled
+										|| timeline.richScrollInProgress
+										|| !messageDelegate.inHydrationWindow
+										|| (timeline.scopePresentationPending
+											&& !timeline.scopePresentationFinalizing)
+										|| !messageDelegate.messageRowReady)
+									return
+								messageDelegate.richResourcesActive = true
+								// Give asynchronous image/provider bindings their own polish
+								// window before admitting the next complete rich-card tree.
+								richResourceActivationSettleTimer.restart()
+							}
+						}
+						Timer {
+							id: richResourceActivationSettleTimer
+							interval: 48
+							repeat: false
+							onTriggered: messageDelegate.completeRichLoaderResumeWhenReady()
 						}
 						function requestPreviewHydrationIfNeeded(allowDuringFinalization) {
 							const pendingAllowed = allowDuringFinalization === true
@@ -4746,6 +4793,9 @@ ApplicationWindow {
 							accessibilityPooled = true
 							richLoaderSuspended = true
 							messageRowMaterialized = false
+							richResourceActivationTimer.stop()
+							richResourceActivationSettleTimer.stop()
+							richResourceActivationQueued = false
 							backendHydrationRequested = false
 							updateRichResourceActivity()
 						}
@@ -4769,6 +4819,9 @@ ApplicationWindow {
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
+							richResourceActivationTimer.stop()
+							richResourceActivationSettleTimer.stop()
+							richResourceActivationQueued = false
 							backendHydrationRequested = false
 							resumeRichContentAfterScroll()
 						}
