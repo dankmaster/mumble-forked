@@ -326,7 +326,7 @@ TestCase {
 		verify(/function\s+resumeRichContentAfterScroll\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richLoaderSuspended\s*=\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(\)[\s\S]*inHydrationWindow[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*forceLayout\(\)/.test(mainSource))
-		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.renderedAttachments\.length\s*>\s*0[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
 		verify(/function\s+deferPrependedRichRows\(first,\s*last\)[\s\S]*deferred\[stableId\]\s*=\s*true[\s\S]*deferredPrependRichIds\s*=\s*deferred/.test(mainSource))
 		verify(/function\s+onPrependPendingChanged\(\)[\s\S]*if\s*\(chatModel\.prependPending\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*if\s*\(!timeline\.deferredPrependAnchorActive\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToBePrepended\(count\)[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
