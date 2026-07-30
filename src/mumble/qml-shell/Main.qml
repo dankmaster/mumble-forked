@@ -3724,6 +3724,7 @@ ApplicationWindow {
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
 								"title": String(item.title || ""),
+								"subtitle": String(item.subtitle || ""),
 								"height": Number(item.height || 0),
 								"estimatedHeight": Number(item.deferredPresentationHeight || 0),
 								"loadedImplicitHeight": item.item
@@ -3733,7 +3734,13 @@ ApplicationWindow {
 								"messageReady": item.messageRowReady === true,
 								"previewAspect": String(preview.embedAspect || ""),
 								"previewSize": String(preview.previewSize || ""),
-								"previewProvider": String(preview.provider || preview.siteName || "")
+								"previewProvider": String(preview.provider || preview.previewProvider
+									|| preview.providerName || preview.siteName || ""),
+								"previewKind": String(preview.previewKind || preview.embedKind || ""),
+								"previewState": String(preview.state || ""),
+								"previewTitle": String(preview.title || ""),
+								"previewUrl": String(preview.url || preview.sourceUrl || ""),
+								"previewKeyCount": Object.keys(preview).length
 							})
 							if (item.lightweightDeferredPresentation === true) {
 								if (String(item.presentationSummary || "").trim().length > 0) {
