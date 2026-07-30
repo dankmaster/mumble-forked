@@ -16,6 +16,10 @@ ApplicationWindow {
     property var pendingPreviewHydrationIds: ({})
 	property var richPreviewSizePresets: ({})
     property bool pendingPreviewHydrationHighPriority: false
+	// A cold scope can expose several cached provider previews at once. Keep their
+	// dispatch paced until the complete initial queue drains, even if the hidden
+	// presentation gate finishes before the last per-frame request.
+	property bool coldPreviewHydrationPacingActive: false
     visible: false
     width: 1280
     height: 820
@@ -832,6 +836,7 @@ ApplicationWindow {
     function clearPreviewHydrationQueue() {
         pendingPreviewHydrationIds = ({})
         pendingPreviewHydrationHighPriority = false
+		coldPreviewHydrationPacingActive = false
         previewHydrationTimer.stop()
     }
 
@@ -857,15 +862,26 @@ ApplicationWindow {
 			previewHydrationTimer.restart()
 			return
 		}
+		if (coldPreviewHydrationPacingActive && timeline
+				&& (timeline.richLoaderResumeTimer.running
+					|| timeline.richLoaderResumeQueue.length > 0)) {
+			// Do not let two independent per-frame queues converge on the same GUI
+			// turn. Finish the lightweight row shells before cached preview results
+			// begin instantiating their provider trees.
+			previewHydrationTimer.restart()
+			return
+		}
         const keys = Object.keys(pendingPreviewHydrationIds)
-        if (keys.length === 0)
+        if (keys.length === 0) {
+			coldPreviewHydrationPacingActive = false
             return
+		}
         const batch = []
 		// Cold scope reveal is especially sensitive to several cached provider
 		// results instantiating rich trees in the same GUI turn. Admit one visible
-		// warm-up request per frame while the hidden finalization gate owns geometry;
+		// warm-up request per frame until the complete initial queue is drained;
 		// steady-state hydration keeps the wider throughput-oriented batch.
-		const maxBatch = timeline && timeline.scopePresentationFinalizing ? 1 : 32
+		const maxBatch = coldPreviewHydrationPacingActive ? 1 : 32
         for (let index = 0; index < keys.length && batch.length < maxBatch; ++index) {
             const key = keys[index]
             batch.push(pendingPreviewHydrationIds[key])
@@ -876,6 +892,8 @@ ApplicationWindow {
         uiCommands.requestPreviewHydration(String(activeScope.scopeToken || ""), batch, highPriority)
         if (Object.keys(pendingPreviewHydrationIds).length > 0)
             previewHydrationTimer.start()
+		else
+			coldPreviewHydrationPacingActive = false
     }
 
 	function normalizedMenuVariant(value) {
@@ -3370,6 +3388,7 @@ ApplicationWindow {
 						// Start cached/backend preview hydration while the timeline is still
 						// hidden. Its height refinements then restart the final quiet window
 						// instead of making the newly exposed tail chase changing geometry.
+						root.coldPreviewHydrationPacingActive = true
 						queueVisiblePreviewHydration(true)
 						scopePresentationFinalizeQuietTimer.start()
 						scopePresentationFinalizeDeadlineTimer.start()
@@ -3979,6 +3998,23 @@ ApplicationWindow {
 						}
 						if (scopePresentationObservationActive)
 							++scopePresentationExposedHeightChangeCount
+						if (scopePresentationObservationActive && stickToBottom
+								&& !dragging && !flicking) {
+							// A late provider/card refinement is layout movement, not user
+							// navigation. Keep the freshly opened conversation pinned to its
+							// current tail in the same turn so ListView cannot reinterpret the
+							// automatic displacement as an upward scroll.
+							restoringBottom = true
+							const maximumY = Math.max(originY,
+								originY + contentHeight - height)
+							setTailContentY(maximumY)
+							Qt.callLater(function() {
+								timeline.containTailMessageWhenPossible()
+								timeline.restoringBottom = false
+								timeline.markVisibleScopeReadIfEligible()
+							})
+							return
+						}
 						if (topAnchorActive) {
 							Qt.callLater(function() { timeline.restoreTopAnchor() })
 							return
@@ -4009,6 +4045,11 @@ ApplicationWindow {
 						root.closeQuickReactions()
 						richContentResumeTimer.stop()
 						releaseViewportAnchor()
+						if (scopePresentationObservationActive && stickToBottom
+								&& !dragging && !flicking) {
+							requestBottomFollow()
+							return
+						}
 						if (!restoringTopAnchor) {
 							releaseTopAnchor()
 						}
