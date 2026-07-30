@@ -3537,13 +3537,10 @@ ApplicationWindow {
 							// existing one-at-a-time recovery queue before declaring ready.
 							queueRichLoaderResumes()
 							const diagnostics = visiblePresentationDiagnostics()
-							const materializationPending =
-								deferredMaterializationTimer.running
-								|| deferredMaterializationQueue.length > 0
-								|| (count > 0 && (diagnostics.visibleCount === 0
-									|| diagnostics.deferredSummaryCount > 0
-									|| diagnostics.blankCount > 0))
-							if (materializationPending) {
+							// Offscreen/stale source rows may remain in the paced queue after
+							// the real viewport is complete. They are background work and must
+							// not keep the hidden loading surface up until its deadline.
+							if (!visiblePresentationReady(diagnostics)) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
@@ -3564,10 +3561,18 @@ ApplicationWindow {
 							timeline.restoringBottom = true
 							timeline.containTailMessageWhenPossible()
 							timeline.restoringBottom = false
-							if (!forcedByDeadline
-									&& mutationCount !== timeline.scopePresentationMutationCount) {
-								scopePresentationFinalizeQuietTimer.restart()
-								return
+							if (!forcedByDeadline) {
+								timeline.forceLayout()
+								const settledDiagnostics =
+									timeline.visiblePresentationDiagnostics()
+								if (mutationCount !== timeline.scopePresentationMutationCount
+										|| !timeline.visiblePresentationReady(
+											settledDiagnostics)) {
+									timeline.queueVisibleDeferredMaterialization(true)
+									timeline.queueRichLoaderResumes()
+									scopePresentationFinalizeQuietTimer.restart()
+									return
+								}
 							}
 							scopePresentationFinalizeDeadlineTimer.stop()
 							timeline.scopePresentationForcedByDeadline =
@@ -3710,6 +3715,16 @@ ApplicationWindow {
 								deferredRepeater && index < deferredRepeater.count; ++index)
 							record(deferredRepeater.itemAt(index))
 						return diagnostics
+					}
+
+					function visiblePresentationReady(diagnostics) {
+						if (count === 0)
+							return true
+						return diagnostics.visibleCount > 0
+							&& diagnostics.readyCount === diagnostics.visibleCount
+							&& diagnostics.fullMessageCount === diagnostics.visibleCount
+							&& diagnostics.deferredSummaryCount === 0
+							&& diagnostics.blankCount === 0
 					}
 
 					function historyLoadProbeAnchorState() {

@@ -244,7 +244,8 @@ TestCase {
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.lightweightDeferredPresentation\s*!==\s*true[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
 		verify(/coldScopeMaterializationDelayMs:\s*0[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*deferredMaterializationTimer\.running[\s\S]*deferredSummaryCount\s*>\s*0[\s\S]*blankCount\s*>\s*0[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*visiblePresentationReady\(diagnostics\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+visiblePresentationReady\(diagnostics\)[\s\S]*visibleCount\s*>\s*0[\s\S]*readyCount\s*===\s*diagnostics\.visibleCount[\s\S]*fullMessageCount\s*===\s*diagnostics\.visibleCount[\s\S]*deferredSummaryCount\s*===\s*0[\s\S]*blankCount\s*===\s*0/.test(mainSource))
 		const continueStart = mainSource.indexOf("function continueScopePresentationFinalization")
 		const continueEnd = mainSource.indexOf("function completeScopePresentationFinalization", continueStart)
 		verify(continueStart >= 0 && continueEnd > continueStart)
@@ -255,7 +256,7 @@ TestCase {
 		const finalizeStart = mainSource.indexOf("function completeScopePresentationFinalization")
 		const finalizeEnd = mainSource.indexOf("const generation =", finalizeStart)
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
-		verify(/deferredMaterializationTimer\.running/.test(
+		verify(!/deferredMaterializationTimer\.running|deferredMaterializationQueue\.length/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")
