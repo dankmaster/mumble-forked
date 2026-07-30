@@ -3375,6 +3375,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")).toBool() },
 			 { QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")).toBool() },
 			 { QStringLiteral("deferredPresentation"), false },
+			 { QStringLiteral("deferredPresentationInline"), false },
 			 { QStringLiteral("modelStartsGroup"), true },
 			 { QStringLiteral("dateBoundary"), true },
 			 { QStringLiteral("bodyHydrationPending"), bodyHydrationPending },
@@ -3478,7 +3479,8 @@ bool ChatTimelineModel::removeMessage(const QString &messageId) {
 	return true;
 }
 
-int ChatTimelineModel::appendMessages(const QVariantList &messages) {
+int ChatTimelineModel::appendMessages(
+	const QVariantList &messages, const bool inlineDeferredPresentation) {
 	int applied = 0;
 	bool searchStateMayHaveChanged = false;
 	QList< RichBodyParseRequest > requests;
@@ -3500,17 +3502,28 @@ int ChatTimelineModel::appendMessages(const QVariantList &messages) {
 		} else {
 			decoratePresentationRow(row, previousRow);
 			previousRow = row;
+			if (inlineDeferredPresentation) {
+				row.insert(QStringLiteral("deferredPresentation"), true);
+				row.insert(QStringLiteral("deferredPresentationInline"), true);
+			}
 		}
 		upsertRow(row);
 		updateUserHistoryRow(id, row);
 		searchStateMayHaveChanged = true;
 	}
-	scheduleRichBodyParses(requests);
+	if (inlineDeferredPresentation) {
+		for (const RichBodyParseRequest &request : requests) {
+			m_deferredRichBodyMessageIds.insert(request.messageId);
+		}
+	} else {
+		scheduleRichBodyParses(requests);
+	}
 	if (searchActive() && searchStateMayHaveChanged) refreshSearchState(true);
 	return applied;
 }
 
-int ChatTimelineModel::enqueueAppendMessages(const QVariantList &messages) {
+int ChatTimelineModel::enqueueAppendMessages(
+	const QVariantList &messages, const bool inlineDeferredPresentation) {
 	if (!acceptsFrontendStateMutation(this) || messages.isEmpty() || m_appendPending) {
 		return 0;
 	}
@@ -3543,6 +3556,7 @@ int ChatTimelineModel::enqueueAppendMessages(const QVariantList &messages) {
 	++m_appendGeneration;
 	m_pendingAppendMessages = acceptedMessages;
 	m_appendNeedsPrependQuietInterval = m_prependPending;
+	m_appendInlineDeferredPresentation = inlineDeferredPresentation;
 	m_appendPending = true;
 	emit appendPendingChanged();
 	scheduleQueuedAppendDrain();
@@ -3719,6 +3733,7 @@ void ChatTimelineModel::cancelQueuedAppend() {
 	m_pendingAppendMessages.clear();
 	m_appendDrainScheduled = false;
 	m_appendNeedsPrependQuietInterval = false;
+	m_appendInlineDeferredPresentation = false;
 	if (!m_appendPending) {
 		return;
 	}
@@ -3759,6 +3774,7 @@ void ChatTimelineModel::drainQueuedAppend() {
 	}
 	if (m_pendingAppendMessages.isEmpty()) {
 		m_appendPending = false;
+		m_appendInlineDeferredPresentation = false;
 		emit appendPendingChanged();
 		return;
 	}
@@ -3777,12 +3793,13 @@ void ChatTimelineModel::drainQueuedAppend() {
 			.arg(attachments.size())
 			.arg(messageMap.value(QStringLiteral("bodySegments")).toList().size())
 			.arg(m_pendingAppendMessages.size()));
-	if (appendMessages(QVariantList { message }) != 1) {
+	if (appendMessages(QVariantList { message }, m_appendInlineDeferredPresentation) != 1) {
 		cancelQueuedAppend();
 		return;
 	}
 	if (m_pendingAppendMessages.isEmpty()) {
 		m_appendPending = false;
+		m_appendInlineDeferredPresentation = false;
 		emit appendPendingChanged();
 		return;
 	}

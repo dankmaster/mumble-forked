@@ -588,6 +588,17 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
 	QCOMPARE(resetSpy.count(), 0);
 
+	ChatTimelineModel coldModel;
+	QCOMPARE(coldModel.enqueueAppendMessages(messages, true), 3);
+	QTRY_VERIFY_WITH_TIMEOUT(!coldModel.appendPending(), 5000);
+	QCOMPARE(coldModel.rowCount(), 3);
+	QCOMPARE(coldModel.presentationModel()->rowCount(), 3);
+	QCOMPARE(coldModel.deferredPresentationModel()->rowCount(), 0);
+	for (int row = 0; row < coldModel.rowCount(); ++row) {
+		QVERIFY(coldModel.get(row).value(QStringLiteral("deferredPresentation")).toBool());
+		QVERIFY(coldModel.get(row).value(QStringLiteral("deferredPresentationInline")).toBool());
+	}
+
 	QCOMPARE(model.enqueueAppendMessages(messages), 0);
 	model.replaceMessages({ QVariantMap {
 		{ QStringLiteral("messageKey"), QStringLiteral("replacement:0") },
@@ -2236,17 +2247,17 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ModernShellMessageBuildMode::Full")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("previousMessageCount == 0 && !appendedMessages.isEmpty()")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("prependMessages(appendedMessages, true)")));
 	QVERIFY(snapshotApplyBody.contains(
-		QStringLiteral("qml.chat.snapshot_append.deferred_first_paint")));
+		QStringLiteral("enqueueAppendMessages(appendedMessages, true)")));
+	QVERIFY(snapshotApplyBody.contains(
+		QStringLiteral("qml.chat.snapshot_append.deferred_first_paint_queued")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("qml.chat.snapshot_append.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && !messages.isEmpty()")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("prependMessages(messages, true)")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueueAppendMessages(messages, true)")));
 	QVERIFY(snapshotApplyBody.contains(
-		QStringLiteral("qml.chat.scope_sync.deferred_first_paint")));
+		QStringLiteral("qml.chat.scope_sync.deferred_first_paint_queued")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.deferred_fallback")));
-	QVERIFY(!snapshotApplyBody.contains(QStringLiteral("enqueueAppendMessages(firstPaintTail)")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode)")));
 }

@@ -506,8 +506,8 @@ public:
 	MessageMutation applyMessage(const QVariantMap &message);
 	bool upsertMessage(const QVariantMap &message);
 	bool removeMessage(const QString &messageId);
-	int appendMessages(const QVariantList &messages);
-	int enqueueAppendMessages(const QVariantList &messages);
+	int appendMessages(const QVariantList &messages, bool inlineDeferredPresentation = false);
+	int enqueueAppendMessages(const QVariantList &messages, bool inlineDeferredPresentation = false);
 	int prependMessages(const QVariantList &messages, bool inlineDeferredPresentation = false);
 	int enqueuePrependMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
@@ -604,6 +604,7 @@ private:
 	bool m_appendPending = false;
 	bool m_appendDrainScheduled = false;
 	bool m_appendNeedsPrependQuietInterval = false;
+	bool m_appendInlineDeferredPresentation = false;
 	qulonglong m_appendGeneration = 0;
 	QVariantList m_pendingAppendMessages;
 	bool m_prependPending = false;

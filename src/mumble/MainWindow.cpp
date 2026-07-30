@@ -30551,17 +30551,16 @@ void MainWindow::publishPersistentChatSnapshot() {
 		const QVariantList appendedMessages =
 			buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode);
 		// A cold persistent-history response normally follows the empty scope
-		// snapshot as one tail append. Keep its complete real data in the model,
-		// but initially expose every row through the fixed-height deferred proxy.
-		// QML then materializes the visible tail one row per presentation frame
-		// behind the stable loading surface. Even a single attachment-heavy row
-		// must not monopolize the first interactive heartbeat.
+		// snapshot as one tail append. Admit its complete real rows one at a time
+		// as fixed-height placeholders, then let QML materialize the visible tail
+		// one row per presentation frame. This prevents both model insertion and
+		// attachment/provider construction from monopolizing a GUI heartbeat.
 		if (previousMessageCount == 0 && !appendedMessages.isEmpty()) {
 			const int deferred =
-				m_qmlShellHost->chatModel()->prependMessages(appendedMessages, true);
+				m_qmlShellHost->chatModel()->enqueueAppendMessages(appendedMessages, true);
 			if (deferred == appendedMessages.size()) {
 				mumble::chatperf::recordValue(
-					"qml.chat.snapshot_append.deferred_first_paint", deferred);
+					"qml.chat.snapshot_append.deferred_first_paint_queued", deferred);
 				return;
 			}
 			m_qmlShellHost->chatModel()->replaceMessages(appendedMessages);
@@ -30589,10 +30588,11 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// turn and gives the hidden finalization gate one bounded row per frame.
 		if (switchingScope && !messages.isEmpty()) {
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages, true);
+			const int deferred =
+				m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
 			if (deferred == messages.size()) {
 				mumble::chatperf::recordValue(
-					"qml.chat.scope_sync.deferred_first_paint", deferred);
+					"qml.chat.scope_sync.deferred_first_paint_queued", deferred);
 			} else {
 				m_qmlShellHost->chatModel()->replaceMessages(messages);
 				mumble::chatperf::recordValue(
