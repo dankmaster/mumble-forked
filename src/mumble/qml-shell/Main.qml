@@ -4342,17 +4342,11 @@ ApplicationWindow {
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
 							|| bodyNeedsHydration
-						// Keep a pooled rich-card tree on its last immutable render
-						// snapshot. Retargeting its many bindings or destroying it while
-						// ListView is moving both cost a UI frame. Reused rows show the
-						// new model's provider-aware placeholder until the settled,
-						// visible row is rebound by the staggered recovery queue.
+						// A pooled rich-card tree is expensive to retarget while a
+						// variable-height ListView is moving. Retire it outside the
+						// viewport, keep a provider-aware geometry estimate, and wake
+						// only the settled visible rows after scrolling ends.
 						property bool richLoaderSuspended: false
-						property string renderedRichStableId: ""
-						property var renderedPreview: ({})
-						property var renderedAttachments: []
-						readonly property bool renderedRichMatchesCurrent:
-							renderedRichStableId === stableId
 						readonly property real hydrationWarmDistance: Math.min(timeline.cacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
@@ -4389,19 +4383,9 @@ ApplicationWindow {
 										inVisibleViewport))
 								chatModel.requestBodyHydration(stableId)
 						}
-						function syncRenderedRichContent() {
-							if (timeline.richScrollInProgress || accessibilityPooled)
-								return false
-							renderedPreview = preview || ({})
-							renderedAttachments = attachments || []
-							renderedRichStableId = stableId
-							return true
-						}
 						function resumeRichContentAfterScroll() {
-							if (!timeline.richScrollInProgress) {
+							if (!timeline.richScrollInProgress)
 								richLoaderSuspended = false
-								syncRenderedRichContent()
-							}
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
@@ -4451,6 +4435,7 @@ ApplicationWindow {
 								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
+							richLoaderSuspended = true
 							updateRichResourceActivity()
 						}
 						ListView.onReused: {
@@ -4458,13 +4443,12 @@ ApplicationWindow {
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
-							if (!timeline.richScrollInProgress && messagePreviewLoader.item)
+							richLoaderSuspended = timeline.richScrollInProgress
+							if (messagePreviewLoader.item)
 								messagePreviewLoader.item.resetForReuse()
 							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
 						}
 						onContentNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
-						onPreviewChanged: syncRenderedRichContent()
-						onAttachmentsChanged: syncRenderedRichContent()
 						onInHydrationWindowChanged: {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
@@ -4477,6 +4461,7 @@ ApplicationWindow {
 						Component.onCompleted: {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateCreatedCount
+							richLoaderSuspended = timeline.richScrollInProgress
 							resumeRichContentAfterScroll()
 						}
 						// This technical delegate frame must remain ignored for its entire
@@ -4855,7 +4840,7 @@ ApplicationWindow {
                                 }
 								Loader {
 									id: messageAttachmentLoader
-									active: messageDelegate.renderedAttachments.length > 0
+									active: messageDelegate.hasAttachmentContent
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
@@ -4869,10 +4854,8 @@ ApplicationWindow {
 									// row collapses during scroll, and the timeline expands again
 									// when the loaders wake.
 									visible: messageDelegate.hasAttachmentContent
-										&& messageDelegate.renderedRichMatchesCurrent
 									Layout.fillWidth: true
-									Layout.preferredHeight: active && item
-										&& messageDelegate.renderedRichMatchesCurrent ? item.implicitHeight
+									Layout.preferredHeight: active && item ? item.implicitHeight
 										: messageDelegate.hasAttachmentContent
 											? messageDelegate.attachmentPlaceholderHeight : 0
 									onLoaded: {
@@ -4886,7 +4869,7 @@ ApplicationWindow {
 									}
 									sourceComponent: Component {
 										AttachmentGallery {
-											attachments: messageDelegate.renderedAttachments
+											attachments: messageDelegate.attachments || []
 											resourceActive: messageDelegate.richResourcesActive
 											animationsEnabled: !root.visualFixtureOverrideActive
 												&& !timeline.richScrollInProgress
@@ -4902,7 +4885,7 @@ ApplicationWindow {
                                 }
 								Loader {
 									id: messagePreviewLoader
-									active: Object.keys(messageDelegate.renderedPreview).length > 0
+									active: messageDelegate.hasPreviewContent
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
@@ -4915,14 +4898,12 @@ ApplicationWindow {
 									// the lightweight row estimate in Layout so pooled delegates
 									// cannot move the viewport when rich content resumes.
 									visible: messageDelegate.hasPreviewContent
-										&& messageDelegate.renderedRichMatchesCurrent
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
 									// pooled delegate drops rich content. Bind the layout height to
 									// active content explicitly so a plain reused message cannot keep
 									// a stale card-sized gap.
-									Layout.preferredHeight: active && item
-										&& messageDelegate.renderedRichMatchesCurrent ? item.implicitHeight
+									Layout.preferredHeight: active && item ? item.implicitHeight
 										: messageDelegate.hasPreviewContent
 											? messageDelegate.previewPlaceholderHeight : 0
 									Layout.alignment: Qt.AlignLeft
@@ -4940,7 +4921,7 @@ ApplicationWindow {
 									}
 									sourceComponent: Component {
 										RichPreviewCard {
-                                    preview: messageDelegate.renderedPreview
+                                    preview: messageDelegate.preview || ({})
 									mediaSessionController: mediaSession
 									mediaProfileFactory: mediaProfiles
 									mediaSessionId: messageDelegate.stableId
