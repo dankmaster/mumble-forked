@@ -30357,19 +30357,8 @@ void MainWindow::initializePersistentChatBackend() {
 	m_persistentChatController = new PersistentChatController(this);
 	m_persistentChatController->setGateway(m_persistentChatGateway);
 
-	m_persistentChatSnapshotPublishTimer = new QTimer(this);
-	m_persistentChatSnapshotPublishTimer->setSingleShot(true);
-	m_persistentChatSnapshotPublishTimer->setInterval(50);
-	connect(m_persistentChatSnapshotPublishTimer, &QTimer::timeout, this,
-			&MainWindow::publishPersistentChatSnapshot);
 	connect(m_persistentChatController, &PersistentChatController::activeSnapshotChanged, this,
-			[this]() {
-				// Startup restore, explicit navigation, and history replies are
-				// independent event streams. Coalesce a short burst before any
-				// snapshot reaches QML so a restored room that is immediately
-				// replaced never constructs and then tears down its rich rows.
-				m_persistentChatSnapshotPublishTimer->start();
-			});
+			&MainWindow::publishPersistentChatSnapshot);
 	connect(m_persistentChatController, &PersistentChatController::unreadStateChanged, this,
 			[this]() { scheduleQmlRoomStateUpdate(); });
 	connect(m_persistentChatController, &PersistentChatController::activeReadStateChanged, this,
@@ -31598,6 +31587,17 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 	}
 	if (scope != MumbleProto::TextChannel && scope != MumbleProto::Channel) {
 		return false;
+	}
+
+	const bool replacingVisibleScope =
+		m_visiblePersistentChatScope
+		&& (*m_visiblePersistentChatScope != scope || m_visiblePersistentChatScopeID != scopeID);
+	if (replacingVisibleScope && m_qmlShellHost && m_qmlShellHost->chatModel()) {
+		// Selection is authoritative before the controller's next snapshot.
+		// Remove the retiring room synchronously so its deferred rich rows cannot
+		// keep materializing while the newly selected room is loading.
+		m_qmlShellHost->chatModel()->replaceMessages({});
+		mumble::chatperf::recordValue("qml.chat.scope_navigation.retiring_rows_cleared", 1);
 	}
 
 	const bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;

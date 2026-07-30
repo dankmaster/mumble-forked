@@ -2181,8 +2181,17 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
 	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
-	QVERIFY(source.contains(QStringLiteral("m_persistentChatSnapshotPublishTimer->setInterval(50)")));
-	QVERIFY(source.contains(QStringLiteral("m_persistentChatSnapshotPublishTimer->start()")));
+	const qsizetype navigateStart =
+		source.indexOf(QStringLiteral("bool MainWindow::navigateToPersistentChatScope"));
+	const qsizetype navigateEnd =
+		source.indexOf(QStringLiteral("bool MainWindow::hasPersistentChatCapabilities"), navigateStart);
+	QVERIFY(navigateStart >= 0);
+	QVERIFY(navigateEnd > navigateStart);
+	const QString navigateBody = source.mid(navigateStart, navigateEnd - navigateStart);
+	QVERIFY(navigateBody.contains(QStringLiteral("replacingVisibleScope")));
+	QVERIFY(navigateBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("qml.chat.scope_navigation.retiring_rows_cleared")));
 
 	const qsizetype snapshotApplyStart =
 		source.indexOf(QStringLiteral("const bool appendedAtTail ="));

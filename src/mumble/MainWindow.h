@@ -1022,7 +1022,6 @@ protected:
 	qt_unique_ptr< ListenerVolumeController > m_listenerVolumeController;
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
-	QTimer *m_persistentChatSnapshotPublishTimer                   = nullptr;
 	QString m_persistentChatWelcomeText;
 	QString m_modernPersistentChatWelcomeHtml;
 	QStringList m_modernPersistentChatWelcomeImageUrls;
