@@ -3921,6 +3921,7 @@ ApplicationWindow {
 							const item = children[childIndex]
 							if (item && item.performanceTimelineDelegate === true
 									&& item.accessibilityPooled !== true
+									&& item.lightweightDeferredPresentation !== true
 									&& item.inVisibleViewport === true)
 								item.requestPreviewHydrationIfNeeded(pendingAllowed)
 						}
