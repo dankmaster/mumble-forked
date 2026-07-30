@@ -241,21 +241,23 @@ TestCase {
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*visibleBlankPresentationCount[\s\S]*"settled":[\s\S]*visiblePresentation\.visibleCount\s*>\s*0[\s\S]*visiblePresentation\.blankCount\s*===\s*0/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
-		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
-		verify(/coldScopeMaterializationDelayMs:\s*350[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.lightweightDeferredPresentation\s*!==\s*true[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
+		verify(/coldScopeMaterializationDelayMs:\s*0[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldMaterializationPending[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*deferredMaterializationTimer\.running[\s\S]*deferredSummaryCount\s*>\s*0[\s\S]*blankCount\s*>\s*0[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
 		const continueStart = mainSource.indexOf("function continueScopePresentationFinalization")
 		const continueEnd = mainSource.indexOf("function completeScopePresentationFinalization", continueStart)
 		verify(continueStart >= 0 && continueEnd > continueStart)
-		verify(!/queueRichLoaderResumes|queueVisibleDeferredMaterialization|queueVisiblePreviewHydration/.test(
+		verify(/queueVisibleDeferredMaterialization\(true\)/.test(
+			mainSource.slice(continueStart, continueEnd)))
+		verify(!/queueRichLoaderResumes|queueVisiblePreviewHydration/.test(
 			mainSource.slice(continueStart, continueEnd)))
 		const finalizeStart = mainSource.indexOf("function completeScopePresentationFinalization")
 		const finalizeEnd = mainSource.indexOf("const generation =", finalizeStart)
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
-		verify(!/deferredMaterializationTimer\.running/.test(
+		verify(/deferredMaterializationTimer\.running/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
-		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
+		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")
 		const rowsInsertedEnd = mainSource.indexOf("function onModelReset", rowsInsertedStart)
 		verify(rowsInsertedStart >= 0 && rowsInsertedEnd > rowsInsertedStart)

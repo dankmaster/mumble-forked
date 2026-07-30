@@ -3254,11 +3254,10 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
-					// Give an auto-restored scope one short supersede window before
-					// constructing provider/image trees. Direct navigation commonly
-					// follows the restored snapshot by a few hundred milliseconds; the
-					// fixed-height source rows remain complete and stable meanwhile.
-					readonly property int coldScopeMaterializationDelayMs: 350
+					// The queued tail itself is the supersede window: no full row is
+					// admitted until the final append has completed. Yield one event turn
+					// here, but do not add a fixed delay to every cold room entry.
+					readonly property int coldScopeMaterializationDelayMs: 0
 					// Admit one fixed-height source row per frame. The complete current
 					// PROD page still settles within the one-second entry gate, while no
 					// frame has to construct several attachment/provider trees at once.
@@ -3495,10 +3494,11 @@ ApplicationWindow {
 						restoringBottom = true
 						containTailMessageWhenPossible()
 						restoringBottom = false
-						// Reveal the stable lightweight rows first. Provider, attachment and
-						// complete message trees enter their existing per-frame queues after
-						// presentation, so a rich tail cannot hold the whole conversation
-						// behind an invisible asynchronous Loader/polish chain.
+						// Admit only the rows intersecting the real viewport, one per
+						// frame. Keep the presentation surface pending until those rows
+						// have real delegate content, so "ready" can never expose a blank
+						// timeline or a fixed-height summary that immediately jumps.
+						queueVisibleDeferredMaterialization(true)
 						scopePresentationFinalizeQuietTimer.start()
 						scopePresentationFinalizeDeadlineTimer.start()
 					}
@@ -3506,16 +3506,24 @@ ApplicationWindow {
 					function completeScopePresentationFinalization(forcedByDeadline) {
 						if (!scopePresentationPending || !scopePresentationFinalizing)
 							return
-						// The ordinary quiet timer can expire while the cold-scope
-						// admission delay is still active. Keep the cheap deferred rows
-						// behind the loading surface until that delay has elapsed, but do
-						// not wait for the complete frame-paced materialization queue:
-						// subsequent row geometry already restarts this quiet timer.
-						const coldMaterializationPending =
-							coldScopeMaterializationDelayTimer.running
-						if (!forcedByDeadline && coldMaterializationPending) {
-							scopePresentationFinalizeQuietTimer.restart()
-							return
+						if (!forcedByDeadline) {
+							if (coldScopeMaterializationDelayTimer.running) {
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
+							forceLayout()
+							queueVisibleDeferredMaterialization(true)
+							const diagnostics = visiblePresentationDiagnostics()
+							const materializationPending =
+								deferredMaterializationTimer.running
+								|| deferredMaterializationQueue.length > 0
+								|| (count > 0 && (diagnostics.visibleCount === 0
+									|| diagnostics.deferredSummaryCount > 0
+									|| diagnostics.blankCount > 0))
+							if (materializationPending) {
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
 						}
 						const generation = scopePresentationGeneration
 						const mutationCount = scopePresentationMutationCount
@@ -3917,7 +3925,8 @@ ApplicationWindow {
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
-							if (!item || item.contentNeedsHydration !== true || !item.visible
+							if (!item || item.lightweightDeferredPresentation !== true
+									|| item.contentNeedsHydration !== true || !item.visible
 									|| item.y + item.height <= contentY + 0.5
 									|| item.y >= contentY + height - 0.5)
 								continue
@@ -4314,9 +4323,7 @@ ApplicationWindow {
 						onTriggered: {
 							if (timeline.scopePresentationPending
 									&& timeline.scopePresentationFinalizing) {
-								// The supersede window has elapsed. Let the final quiet
-								// interval reveal the fixed rows; rich admission starts only
-								// after the visible presentation handoff.
+								timeline.queueVisibleDeferredMaterialization(true)
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
