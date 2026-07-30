@@ -6132,14 +6132,45 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("windowExposed"), host->window()->isExposed());
 		response.insert(QStringLiteral("windowVisibility"), static_cast< int >(host->window()->visibility()));
 		response.insert(QStringLiteral("connected"), host->sessionController()->connected());
+		response.insert(QStringLiteral("serverTitle"), host->sessionController()->serverName());
+		response.insert(QStringLiteral("selfName"), host->sessionController()->selfName());
 #ifdef Q_OS_WIN
 		response.insert(QStringLiteral("d3dVBlankThreadDisabled"),
 			qEnvironmentVariableIntValue("QT_D3D_NO_VBLANK_THREAD") != 0);
 #endif
 		response.insert(QStringLiteral("activeScopeToken"), host->activeScopeController()->scopeToken());
+		response.insert(QStringLiteral("activeScopeCanLoadOlder"),
+			host->activeScopeController()->canLoadOlder());
+		response.insert(QStringLiteral("activeScopeLoadingState"),
+			host->activeScopeController()->loadingState());
 		response.insert(QStringLiteral("roomCount"), host->roomModel()->rowCount());
 		response.insert(QStringLiteral("participantCount"), host->participantModel()->rowCount());
 		response.insert(QStringLiteral("messageCount"), host->chatModel()->rowCount());
+		QVariantList scopeCatalog;
+		int navigationUnreadCount = 0;
+		for (int row = 0; row < host->roomModel()->rowCount(); ++row) {
+			const QVariantMap modelRow = host->roomModel()->get(row);
+			const QString token = modelRow.value(QStringLiteral("scopeToken")).toString();
+			const int unreadCount = modelRow.value(QStringLiteral("unreadCount")).toInt();
+			scopeCatalog.push_back(QVariantMap {
+				{ QStringLiteral("token"), token },
+				{ QStringLiteral("label"), modelRow.value(QStringLiteral("title")) },
+				{ QStringLiteral("pathLabel"), modelRow.value(QStringLiteral("pathLabel")) },
+				{ QStringLiteral("kind"), modelRow.value(QStringLiteral("kind")) },
+				{ QStringLiteral("unreadCount"), unreadCount }
+			});
+			if (token == host->activeScopeController()->scopeToken()) {
+				navigationUnreadCount = unreadCount;
+			}
+		}
+		response.insert(QStringLiteral("scopeCatalog"), scopeCatalog);
+		response.insert(QStringLiteral("navigationUnreadCount"), navigationUnreadCount);
+		int controllerUnreadCount = 0;
+		if (m_mainWindow->m_persistentChatController) {
+			controllerUnreadCount =
+				m_mainWindow->m_persistentChatController->activeSnapshot().unreadCount;
+		}
+		response.insert(QStringLiteral("controllerUnreadCount"), controllerUnreadCount);
 		response.insert(QStringLiteral("dialogOpen"), host->dialogController()->open());
 		response.insert(QStringLiteral("pttPressed"), host->commandController()->pttPressed());
 		response.insert(QStringLiteral("pttToolVisible"), host->pttToolVisible());

@@ -3290,6 +3290,15 @@ void TestModernDialogControllers::mediaAutomationReadinessStateIsTyped() {
 	const QString commandBody = automationSource.mid(commandStart, commandEnd - commandStart);
 	QVERIFY(commandBody.contains(QStringLiteral("\"mediaActive\"")));
 	QVERIFY(commandBody.contains(QStringLiteral("\"media\"), automationMediaLifecycleState(host)")));
+	for (const QString &field : { QStringLiteral("serverTitle"), QStringLiteral("selfName"),
+			 QStringLiteral("activeScopeCanLoadOlder"),
+			 QStringLiteral("activeScopeLoadingState"), QStringLiteral("scopeCatalog"),
+			 QStringLiteral("navigationUnreadCount"), QStringLiteral("controllerUnreadCount") }) {
+		QVERIFY2(commandBody.contains(QStringLiteral("\"%1\"").arg(field)),
+			qPrintable(QStringLiteral("Missing lightweight readiness field: %1").arg(field)));
+	}
+	QVERIFY(commandBody.contains(QStringLiteral("host->roomModel()->get(row)")));
+	QVERIFY(commandBody.contains(QStringLiteral("activeSnapshot().unreadCount")));
 }
 
 void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers() {
