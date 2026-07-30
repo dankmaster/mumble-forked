@@ -115,9 +115,11 @@ TestCase {
 	}
 
 	function test_window_edge_stonks_tickers_span_both_conversation_and_profile_columns() {
-		verify(/RowLayout\s*\{[\s\S]{0,180}anchors\.fill:\s*parent[\s\S]{0,180}anchors\.topMargin:\s*windowTopStonksTicker\.height[\s\S]{0,100}anchors\.bottomMargin:\s*bottomStonksTicker\.height/.test(mainSource))
-		verify(/id:\s*windowTopStonksTicker[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.top:\s*parent\.top/.test(mainSource))
-		verify(/id:\s*bottomStonksTicker[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.bottom:\s*parent\.bottom/.test(mainSource))
+		verify(/RowLayout\s*\{[\s\S]{0,180}anchors\.fill:\s*parent[\s\S]{0,180}anchors\.topMargin:\s*windowTopStonksTickerLoader\.height[\s\S]{0,120}anchors\.bottomMargin:\s*bottomStonksTickerLoader\.height/.test(mainSource))
+		verify(/id:\s*windowTopStonksTickerLoader[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.top:\s*parent\.top/.test(mainSource))
+		verify(/id:\s*bottomStonksTickerLoader[\s\S]{0,240}anchors\.left:\s*parent\.left[\s\S]{0,120}anchors\.right:\s*parent\.right[\s\S]{0,120}anchors\.bottom:\s*parent\.bottom/.test(mainSource))
+		verify(/anchors\.bottomMargin:\s*composerSurface\.height\s*\+\s*bottomStonksTickerLoader\.height\s*\+\s*22/.test(mainSource))
+		verify(/anchors\.bottomMargin:\s*Theme\.space4\s*\+\s*bottomStonksTickerLoader\.height/.test(mainSource))
 		verify(/id:\s*topStonksTicker[\s\S]{0,220}Layout\.fillWidth:\s*true[\s\S]{0,260}root\.stonksTickerPlacement === "top"/.test(mainSource))
 		verify(/id:\s*aboveComposerStonksTicker[\s\S]{0,320}root\.stonksTickerPlacement === "aboveComposer"/.test(mainSource))
 	}
@@ -310,6 +312,10 @@ TestCase {
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/id:\s*richScrollRetentionRampTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*true[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\([\s\S]*richScrollRetentionRampStep[\s\S]*stop\(\)/.test(mainSource))
 		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))
+		verify(/id:\s*deferredHistoryRow[\s\S]{0,900}summaryText:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]{0,260}join\("  ·  "\)[\s\S]{0,700}text:\s*deferredHistoryRow\.summaryText/.test(mainSource))
+		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
+		verify(!/id:\s*deferredHistoryRow[\s\S]{0,1600}ColumnLayout\s*\{/.test(mainSource))
+		verify(/performanceChatScrollFullRangeToStart[\s\S]*const wheelStep\s*=\s*Math\.max\(16,\s*Math\.min\(32,\s*timeline\.height \* 0\.04\)\)/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*suspendRichContentForScroll\(\)/.test(mainSource))

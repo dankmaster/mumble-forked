@@ -1763,7 +1763,10 @@ ApplicationWindow {
 			// Advance one presented high-resolution wheel step at a time. Re-read
 			// originY every frame because delegate estimates can refine the ListView
 			// origin while the complete real history is traversed.
-			const wheelStep = Math.max(80, Math.min(112, timeline.height * 0.14))
+			// Use high-resolution trackpad-sized motion for the release workload.
+			// Short real histories must still produce enough presented samples to
+			// make p95/p99 meaningful instead of crossing the range in 2-3 jumps.
+			const wheelStep = Math.max(16, Math.min(32, timeline.height * 0.04))
 			timeline.contentY = Math.max(currentOriginY, previousY - wheelStep)
 			performanceChatScrollCompletedSteps = nextStep
 			const firstVisible = timeline.firstVisibleMessageDelegate()
@@ -2516,7 +2519,7 @@ ApplicationWindow {
 		anchors.bottom: parent.bottom
 		// Keep transient feedback clear of the composer even while replies,
 		// attachments, autocomplete, or multiline input expand it.
-		anchors.bottomMargin: composerSurface.height + bottomStonksTicker.height + 22
+		anchors.bottomMargin: composerSurface.height + bottomStonksTickerLoader.height + 22
 		width: Math.min(implicitWidth, Math.max(1, parent.width - Theme.space4 * 2))
 		maximumWidth: Math.min(680, Math.max(280, parent.width - Theme.space4 * 2))
 		controller: toastState
@@ -2544,8 +2547,8 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-			anchors.topMargin: windowTopStonksTicker.height
-			anchors.bottomMargin: bottomStonksTicker.height
+			anchors.topMargin: windowTopStonksTickerLoader.height
+			anchors.bottomMargin: bottomStonksTickerLoader.height
             spacing: 0
 			layoutDirection: Theme.railSide === "left" ? Qt.RightToLeft : Qt.LeftToRight
 
@@ -4450,72 +4453,42 @@ ApplicationWindow {
 						Repeater {
 							id: deferredHistoryRepeater
 							model: chatModel.deferredPresentationModel
-							delegate: Item {
+							delegate: Rectangle {
 								id: deferredHistoryRow
 								required property string stableId
 								required property string title
 								required property string subtitle
 								required property string timestamp
-								required property var source
 								readonly property bool deferredPrefixItem: true
 								readonly property bool contentNeedsHydration: true
+								// Do not bind the full source payload here. Older rows can
+								// contain large inline-image or provider maps; copying those
+								// into every lightweight Repeater delegate defeats the cold
+								// first-paint path before the rich row is even visible.
+								readonly property string summaryText: [title, subtitle, timestamp]
+									.filter(function(part) {
+										return String(part || "").length > 0
+									}).join("  ·  ")
 								width: timelineHeader.width
 								height: timeline.deferredMessageRowHeight
+								radius: Theme.innerRadius
+								color: Theme.surfaceRaised
+								border.width: 1
+								border.color: Theme.divider
 								Accessible.role: Accessible.ListItem
-								Accessible.name: title.length > 0
-									? qsTr("%1: %2").arg(title).arg(deferredBody.text)
-									: deferredBody.text
+								Accessible.name: summaryText
 
-								Rectangle {
+								Label {
 									anchors.fill: parent
 									anchors.leftMargin: Theme.space3
 									anchors.rightMargin: Theme.space3
-									anchors.topMargin: 2
-									anchors.bottomMargin: 2
-									radius: Theme.radiusSmall
-									color: Theme.surfaceRaised
-									border.width: 1
-									border.color: Theme.divider
-								}
-								ColumnLayout {
-									anchors.fill: parent
-									anchors.leftMargin: Theme.space5
-									anchors.rightMargin: Theme.space5
-									anchors.topMargin: Theme.space2
-									anchors.bottomMargin: Theme.space2
-									spacing: 1
-									RowLayout {
-										Layout.fillWidth: true
-										spacing: Theme.space2
-										Label {
-											Layout.fillWidth: true
-											textFormat: Text.PlainText
-											text: deferredHistoryRow.title
-											color: Theme.textStrong
-											font.pixelSize: Theme.fontCaption
-											font.weight: Font.DemiBold
-											elide: Text.ElideRight
-										}
-										Label {
-											textFormat: Text.PlainText
-											text: deferredHistoryRow.timestamp
-											color: Theme.textMuted
-											font.pixelSize: Theme.fontCaption
-											visible: text.length > 0
-										}
-									}
-									Label {
-										id: deferredBody
-										Layout.fillWidth: true
-										textFormat: Text.PlainText
-										text: String(deferredHistoryRow.source.plainText
-											|| deferredHistoryRow.source.bodyText
-											|| deferredHistoryRow.subtitle || "")
-										color: Theme.textMain
-										font.pixelSize: Theme.fontBody
-										elide: Text.ElideRight
-										maximumLineCount: 1
-									}
+									verticalAlignment: Text.AlignVCenter
+									textFormat: Text.PlainText
+									text: deferredHistoryRow.summaryText
+									color: Theme.textMain
+									font.pixelSize: Theme.fontBody
+									elide: Text.ElideRight
+									maximumLineCount: 1
 								}
 							}
 						}
@@ -6536,7 +6509,7 @@ ApplicationWindow {
 			anchors.rightMargin: Theme.space4 + (desktopNavigationRail.visible
 				&& Theme.railSide !== "left" ? desktopNavigationRail.width : 0)
 			anchors.bottom: parent.bottom
-			anchors.bottomMargin: Theme.space4 + bottomStonksTicker.height
+			anchors.bottomMargin: Theme.space4 + bottomStonksTickerLoader.height
 			active: directMessages && directMessages.trayOpen
 			visible: active && status === Loader.Ready
 			z: 40

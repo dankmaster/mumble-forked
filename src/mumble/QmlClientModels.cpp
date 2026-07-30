@@ -3816,7 +3816,13 @@ void ChatTimelineModel::drainQueuedPrepend() {
 	const qsizetype chunkSize = std::min(PrependRowsPerFrame, m_pendingPrependRows.size());
 	const qsizetype chunkStart = m_pendingPrependRows.size() - chunkSize;
 	const QVariantList chunk = m_pendingPrependRows.mid(chunkStart, chunkSize);
-	if (prependRows(chunk) != chunkSize) {
+	int prepended = 0;
+	{
+		mumble::chatperf::ScopedDuration trace("qml.chat.prepend_drain");
+		prepended = prependRows(chunk);
+	}
+	mumble::chatperf::recordValue("qml.chat.prepend_drain.rows", chunkSize);
+	if (prepended != chunkSize) {
 		cancelQueuedPrepend();
 		return;
 	}
