@@ -236,7 +236,10 @@ AbstractButton {
 
 		RowLayout {
 			objectName: "stonksLeadingContent"
-			Layout.leftMargin: root.docked ? Theme.space5 : Theme.space2
+			// The docked strip is already clipped by productSurface's shell inset.
+			// Use the same inner gutter at both ends; adding the desktop header
+			// margin here made the ticker look shifted relative to its own divider.
+			Layout.leftMargin: Theme.space2
 			spacing: Theme.space1
 			ModernIcon {
 				name: "activity"
@@ -499,7 +502,7 @@ AbstractButton {
 
 		ModernIcon {
 			objectName: "stonksTrailingAction"
-			Layout.rightMargin: root.docked ? Theme.space4 : Theme.space2
+			Layout.rightMargin: Theme.space2
 			name: "next"
 			size: 14
 			color: Theme.textMuted

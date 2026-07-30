@@ -239,8 +239,8 @@ TestCase {
 		const trailing = findChild(header, "stonksTrailingAction")
 		verify(leading !== null)
 		verify(trailing !== null)
-		compare(leading.Layout.leftMargin, Theme.space5)
-		compare(trailing.Layout.rightMargin, Theme.space4)
+		compare(leading.Layout.leftMargin, Theme.space2)
+		compare(trailing.Layout.rightMargin, Theme.space2)
 
 		header.dockedDividerEdge = "top"
 		tryCompare(divider, "y", 0)

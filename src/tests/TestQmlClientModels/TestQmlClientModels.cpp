@@ -544,6 +544,18 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QSignalSpy insertedSpy(model.presentationModel(), &QAbstractItemModel::rowsInserted);
 	QSignalSpy removedSpy(model.presentationModel(), &QAbstractItemModel::rowsRemoved);
 	QSignalSpy resetSpy(model.presentationModel(), &QAbstractItemModel::modelReset);
+	QVariantMap updatedMessage {
+		{ QStringLiteral("messageKey"), QStringLiteral("cold:1") },
+		{ QStringLiteral("plainText"), QStringLiteral("Cold one updated") }
+	};
+	QCOMPARE(model.applyMessage(updatedMessage), ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(model.presentationModel()->rowCount(), 2);
+	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
+	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
+	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentationInline")).toBool());
+	QCOMPARE(insertedSpy.count(), 0);
+	QCOMPARE(removedSpy.count(), 0);
+	QCOMPARE(resetSpy.count(), 0);
 	QVERIFY(model.materializeDeferredMessage(QStringLiteral("cold:1")));
 	QCOMPARE(model.presentationModel()->rowCount(), 2);
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);

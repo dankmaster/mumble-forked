@@ -3427,6 +3427,13 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 		const QVariantMap current = get(rowIndex);
 		if (current.value(QStringLiteral("deferredPresentation")).toBool()) {
 			row.insert(QStringLiteral("deferredPresentation"), true);
+			// A provider/attachment update can arrive while the cold row is still
+			// represented by its real-data lightweight delegate. Preserve that
+			// inline lane until QML explicitly materializes the row; otherwise a
+			// sparse backend update silently moves it out of the ListView and into
+			// the older-history header model.
+			row.insert(QStringLiteral("deferredPresentationInline"),
+				current.value(QStringLiteral("deferredPresentationInline")).toBool());
 		}
 		row.insert(QStringLiteral("modelStartsGroup"),
 			current.value(QStringLiteral("modelStartsGroup"), true));

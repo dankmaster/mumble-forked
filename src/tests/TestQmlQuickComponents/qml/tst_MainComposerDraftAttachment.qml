@@ -230,14 +230,15 @@ TestCase {
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*DelegateChooser[\s\S]*id:\s*asyncMessageDelegate[\s\S]*required property bool deferredPresentation[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1[\s\S]*asynchronous:\s*true[\s\S]*active:\s*!deferredPresentation[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*ChatMessageFrame\s*\{/.test(mainSource))
-		verify(!/role:\s*"deferredPresentation"[\s\S]{0,240}roleValue:\s*true/.test(mainSource))
+		verify(/role:\s*"deferredPresentation"[\s\S]{0,180}roleValue:\s*true[\s\S]*id:\s*deferredInlineMessageDelegate[\s\S]*performanceTimelineDelegate:\s*true[\s\S]*lightweightDeferredPresentation:\s*true[\s\S]*contentNeedsHydration:\s*true[\s\S]*presentationSummary:\s*\[title,\s*subtitle,\s*timestamp\]/.test(mainSource))
+		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*text:\s*deferredInlineMessageDelegate\.title[\s\S]*text:\s*deferredInlineMessageDelegate\.subtitle[\s\S]*text:\s*deferredInlineMessageDelegate\.timestamp/.test(mainSource))
 		verify(/id:\s*chatMessageFrameWarmupLoader[\s\S]*active:\s*true[\s\S]*asynchronous:\s*false[\s\S]*visible:\s*false[\s\S]*stableId:\s*"__shell_warmup__"[\s\S]*accessibilityBarrierEnabled:\s*false/.test(mainSource))
 		verify(!/id:\s*chatMessageFrameWarmupLoader[\s\S]{0,360}active\s*=\s*false/.test(mainSource))
 		verify(/id:\s*chatMessageDelegateWarmupModel[\s\S]*"stableId":\s*"__delegate_warmup__"[\s\S]*"preview":\s*\(\{\}\)[\s\S]*"attachments":\s*\[\][\s\S]*id:\s*chatMessageDelegateWarmupList[\s\S]*visible:\s*false[\s\S]*model:\s*chatMessageDelegateWarmupModel[\s\S]*delegate:\s*timeline\.delegate[\s\S]*Accessible\.ignored:\s*true/.test(mainSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*height:\s*item\s*\?\s*item\.implicitHeight[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(mainSource))
 		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
-		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled":[\s\S]*!timeline\.scopeResetPending/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*visibleBlankPresentationCount[\s\S]*"settled":[\s\S]*visiblePresentation\.visibleCount\s*>\s*0[\s\S]*visiblePresentation\.blankCount\s*===\s*0/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
@@ -420,7 +421,8 @@ TestCase {
 	}
 
 	function test_chat_scroll_reports_delegate_materialization_diagnostics() {
-		verify(/function\s+timelineDelegateDiagnostics\(\)[\s\S]*"materialized"[\s\S]*"previewItems"[\s\S]*"attachmentItems"[\s\S]*"pooledEvents"[\s\S]*"reusedEvents"/.test(mainSource))
+		verify(/function\s+visiblePresentationDiagnostics\(\)[\s\S]*visibleCount[\s\S]*readyCount[\s\S]*fullMessageCount[\s\S]*deferredSummaryCount[\s\S]*blankCount/.test(mainSource))
+		verify(/function\s+timelineDelegateDiagnostics\(\)[\s\S]*"materialized"[\s\S]*"previewItems"[\s\S]*"attachmentItems"[\s\S]*"pooledEvents"[\s\S]*"reusedEvents"[\s\S]*"visibleFullMessageCount"[\s\S]*"visibleBlankPresentationCount"/.test(mainSource))
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*"delegateDiagnostics":\s*timelineDelegateDiagnostics\(\)/.test(mainSource))
 		verify(/function\s+performanceChatScrollState\(\)[\s\S]*"delegateDiagnosticsDelta"[\s\S]*"previewsLoaded"[\s\S]*"attachmentsLoaded"/.test(mainSource))
 	}

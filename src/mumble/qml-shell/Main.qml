@@ -1867,6 +1867,7 @@ ApplicationWindow {
 			const maximumY = Math.max(minimumY,
 				timeline.originY + timeline.contentHeight - timeline.height)
 			const firstVisible = timeline.firstVisibleMessageDelegate()
+			const visiblePresentation = timeline.visiblePresentationDiagnostics()
 			const completedAt = timeline.scopePresentationCompletedAt > 0
 				? timeline.scopePresentationCompletedAt : Date.now()
 			const probeAnchor = timeline.historyLoadProbeAnchorState()
@@ -1908,6 +1909,11 @@ ApplicationWindow {
 				"appendQueuePending": chatModel.appendPending,
 				"deferredPrependRichCount":
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
+				"visiblePresentationCount": visiblePresentation.visibleCount,
+				"visibleReadyPresentationCount": visiblePresentation.readyCount,
+				"visibleFullMessageCount": visiblePresentation.fullMessageCount,
+				"visibleDeferredSummaryCount": visiblePresentation.deferredSummaryCount,
+				"visibleBlankPresentationCount": visiblePresentation.blankCount,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
 				// The top anchor is a transparent geometry guard while suspended rich
@@ -1920,6 +1926,9 @@ ApplicationWindow {
 					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
 					&& !chatModel.appendPending && !chatModel.prependPending
+					&& (chatModel.count === 0
+						|| (visiblePresentation.visibleCount > 0
+							&& visiblePresentation.blankCount === 0))
 			}
 		} catch (error) {
 			return { "error": String(error), "settled": false }
@@ -1984,6 +1993,7 @@ ApplicationWindow {
 
 	function timelineDelegateDiagnostics() {
 		const children = timeline && timeline.contentItem ? timeline.contentItem.children : []
+		const visiblePresentation = timeline.visiblePresentationDiagnostics()
 		let materialized = 0
 		let pooled = 0
 		let active = 0
@@ -2019,7 +2029,12 @@ ApplicationWindow {
 			"pooledEvents": performanceChatDelegatePooledCount,
 			"reusedEvents": performanceChatDelegateReusedCount,
 			"previewsLoaded": performanceChatPreviewLoadedCount,
-			"attachmentsLoaded": performanceChatAttachmentLoadedCount
+			"attachmentsLoaded": performanceChatAttachmentLoadedCount,
+			"visiblePresentationCount": visiblePresentation.visibleCount,
+			"visibleReadyPresentationCount": visiblePresentation.readyCount,
+			"visibleFullMessageCount": visiblePresentation.fullMessageCount,
+			"visibleDeferredSummaryCount": visiblePresentation.deferredSummaryCount,
+			"visibleBlankPresentationCount": visiblePresentation.blankCount
 		}
 	}
 
@@ -3580,6 +3595,52 @@ ApplicationWindow {
 						return candidate
 					}
 
+					function visiblePresentationDiagnostics() {
+						const diagnostics = {
+							"visibleCount": 0,
+							"readyCount": 0,
+							"fullMessageCount": 0,
+							"deferredSummaryCount": 0,
+							"blankCount": 0
+						}
+
+						function record(item) {
+							if (!item || item.performanceTimelineDelegate !== true
+									|| !item.visible || item.accessibilityPooled === true)
+								return
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
+								return
+							++diagnostics.visibleCount
+							if (item.lightweightDeferredPresentation === true) {
+								if (String(item.presentationSummary || "").trim().length > 0) {
+									++diagnostics.deferredSummaryCount
+									++diagnostics.readyCount
+								} else {
+									++diagnostics.blankCount
+								}
+								return
+							}
+							if (item.messageRowReady === true) {
+								++diagnostics.fullMessageCount
+								++diagnostics.readyCount
+							} else {
+								++diagnostics.blankCount
+							}
+						}
+
+						const children = contentItem ? contentItem.children : []
+						for (let index = 0; index < children.length; ++index)
+							record(children[index])
+
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						for (let index = 0;
+								deferredRepeater && index < deferredRepeater.count; ++index)
+							record(deferredRepeater.itemAt(index))
+						return diagnostics
+					}
+
 					function historyLoadProbeAnchorState() {
 						const stableId = performanceHistoryProbeAnchorId
 						if (stableId.length === 0)
@@ -3686,7 +3747,8 @@ ApplicationWindow {
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
 							if (!item || item.performanceTimelineDelegate !== true
-									|| item.accessibilityPooled === true)
+									|| item.accessibilityPooled === true
+									|| item.lightweightDeferredPresentation === true)
 								continue
 							// Keep the outer card tree and its measured geometry alive. Only
 							// release posters, animations and provider players here; tearing
@@ -3705,6 +3767,7 @@ ApplicationWindow {
 							const item = children[childIndex]
 							if (!item || item.performanceTimelineDelegate !== true
 									|| item.accessibilityPooled === true
+									|| item.lightweightDeferredPresentation === true
 									|| (item.richLoaderSuspended !== true
 										&& item.richResourcesActive === true))
 								continue
@@ -4557,6 +4620,8 @@ ApplicationWindow {
 								required property string subtitle
 								required property string timestamp
 								readonly property bool deferredPrefixItem: true
+								readonly property bool performanceTimelineDelegate: true
+								readonly property bool lightweightDeferredPresentation: true
 								readonly property bool contentNeedsHydration: true
 								// Do not bind the full source payload here. Older rows can
 								// contain large inline-image or provider maps; copying those
@@ -4566,6 +4631,9 @@ ApplicationWindow {
 									.filter(function(part) {
 										return String(part || "").length > 0
 									}).join("  ·  ")
+								readonly property string presentationSummary: summaryText
+								readonly property bool messageRowReady: false
+								property bool accessibilityPooled: false
 								width: timelineHeader.width
 								height: timeline.deferredMessageRowHeight
 								radius: Theme.innerRadius
@@ -4602,6 +4670,74 @@ ApplicationWindow {
 					delegate: DelegateChooser {
 						role: "deferredPresentation"
 						DelegateChoice {
+							roleValue: true
+							Rectangle {
+								id: deferredInlineMessageDelegate
+								required property string stableId
+								required property string title
+								required property string subtitle
+								required property string timestamp
+								property bool accessibilityPooled: false
+								readonly property bool performanceTimelineDelegate: true
+								readonly property bool lightweightDeferredPresentation: true
+								readonly property bool contentNeedsHydration: true
+								readonly property bool messageRowReady: false
+								readonly property string presentationSummary: [title, subtitle, timestamp]
+									.filter(function(part) {
+										return String(part || "").trim().length > 0
+									}).join("  ·  ")
+								readonly property bool inVisibleViewport: !accessibilityPooled
+									&& y + height >= timeline.contentY
+									&& y <= timeline.contentY + timeline.height
+								width: timeline.width
+								height: timeline.deferredMessageRowHeight
+								radius: Theme.innerRadius
+								color: Theme.surfaceRaised
+								border.width: 1
+								border.color: Theme.divider
+								opacity: timeline.scopePresentationPending ? 0 : 1
+								Accessible.role: Accessible.ListItem
+								Accessible.name: presentationSummary
+
+								ListView.onPooled: accessibilityPooled = true
+								ListView.onReused: accessibilityPooled = false
+
+								RowLayout {
+									anchors.fill: parent
+									anchors.leftMargin: Theme.space3
+									anchors.rightMargin: Theme.space3
+									spacing: Theme.space2
+
+									Label {
+										Layout.maximumWidth: Math.max(80,
+											deferredInlineMessageDelegate.width * 0.24)
+										textFormat: Text.PlainText
+										text: deferredInlineMessageDelegate.title
+										color: Theme.textStrong
+										font.pixelSize: Theme.fontLabel
+										font.weight: Font.DemiBold
+										elide: Text.ElideRight
+									}
+									Label {
+										Layout.fillWidth: true
+										textFormat: Text.PlainText
+										text: deferredInlineMessageDelegate.subtitle
+										color: Theme.textMain
+										font.pixelSize: Theme.fontBody
+										elide: Text.ElideRight
+										maximumLineCount: 1
+									}
+									Label {
+										visible: text.length > 0
+										textFormat: Text.PlainText
+										text: deferredInlineMessageDelegate.timestamp
+										color: Theme.textMuted
+										font.pixelSize: Theme.fontCaption
+									}
+								}
+							}
+						}
+						DelegateChoice {
 							Loader {
 								id: asyncMessageDelegate
 								required property string stableId
@@ -4630,6 +4766,8 @@ ApplicationWindow {
 								property bool resumeRequested: false
 								property bool resumeDuringFinalization: false
 								readonly property bool performanceTimelineDelegate: true
+								readonly property bool lightweightDeferredPresentation: false
+								readonly property string presentationSummary: ""
 								readonly property bool contentNeedsHydration: item
 									? item.contentNeedsHydration : true
 								readonly property bool richLoaderSuspended: item
