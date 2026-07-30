@@ -31040,31 +31040,53 @@ QmlSelectionState *MainWindow::qmlSelectionState() const {
 void MainWindow::applyQmlRoomState(const QVariantMap &state) {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
 
-	m_qmlShellHost->activeScopeController()->applyState(
-		buildQmlActiveScopeState(currentPersistentChatTarget()));
+	mumble::chatperf::ScopedDuration trace("qml.rooms.apply");
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.active_scope");
+		m_qmlShellHost->activeScopeController()->applyState(
+			buildQmlActiveScopeState(currentPersistentChatTarget()));
+	}
 	const QVariantList voiceRooms = state.value(QStringLiteral("voiceRooms")).toList();
 	const QVariantList textRooms = state.value(QStringLiteral("textRooms")).toList();
-	m_qmlShellHost->roomModel()->replaceRoomStates(voiceRooms, textRooms);
-	m_qmlShellHost->navigationModel()->replaceRoomStates(voiceRooms, textRooms);
-	m_qmlShellHost->participantModel()->replaceParticipantStates(
-		state.value(QStringLiteral("participants")).toList());
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.room_model");
+		m_qmlShellHost->roomModel()->replaceRoomStates(voiceRooms, textRooms);
+	}
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.navigation_model");
+		m_qmlShellHost->navigationModel()->replaceRoomStates(voiceRooms, textRooms);
+	}
+	const QVariantList participantStates = state.value(QStringLiteral("participants")).toList();
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.participant_model");
+		m_qmlShellHost->participantModel()->replaceParticipantStates(participantStates);
+	}
 	QStringList autocompleteParticipants;
-	for (const QVariant &entry : state.value(QStringLiteral("participants")).toList()) {
+	for (const QVariant &entry : participantStates) {
 		const QVariantMap participant = entry.toMap();
 		const QString name = participant.value(QStringLiteral("title"), participant.value(QStringLiteral("name")))
 							 .toString().trimmed();
 		if (!name.isEmpty() && !autocompleteParticipants.contains(name, Qt::CaseInsensitive))
 			autocompleteParticipants.push_back(name);
 	}
-	m_qmlShellHost->composerController()->setAutocompleteSources(
-		autocompleteParticipants,
-		{ QStringLiteral("help"), QStringLiteral("mute"), QStringLiteral("deafen"), QStringLiteral("join") });
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.autocomplete");
+		m_qmlShellHost->composerController()->setAutocompleteSources(
+			autocompleteParticipants,
+			{ QStringLiteral("help"), QStringLiteral("mute"), QStringLiteral("deafen"), QStringLiteral("join") });
+	}
 
 	const QVariantMap app = state.value(QStringLiteral("app")).toMap();
 	if (app.isEmpty()) return;
-	applyQmlDirectMessagesState(app.value(QStringLiteral("directMessages")).toMap());
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.direct_messages");
+		applyQmlDirectMessagesState(app.value(QStringLiteral("directMessages")).toMap());
+	}
 	ClientSessionController *session = m_qmlShellHost->sessionController();
-	session->applyState(app);
+	{
+		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.session");
+		session->applyState(app);
+	}
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
 	session->setConnected(connected);
 	if (connected) {
@@ -31118,6 +31140,7 @@ void MainWindow::syncQmlShellState() {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
 		return;
 	}
+	mumble::chatperf::ScopedDuration trace("qml.full_bootstrap.duration");
 	if (mumble::chatperf::fullBootstrapMonitor().recordBootstrap()) {
 		mumble::chatperf::recordValue("qml.full_bootstrap.steady_state_violation", 1);
 		qWarning("QML full bootstrap requested during steady state");

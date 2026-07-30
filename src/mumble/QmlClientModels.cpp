@@ -3,6 +3,7 @@
 
 #include "QmlClientModels.h"
 
+#include "ChatPerfTrace.h"
 #include "ClientActionRegistry.h"
 #include "EmbedDocument.h"
 
@@ -1837,50 +1838,71 @@ void ClientSessionController::setMotdLastSeenSignature(const QString &value) {
 }
 
 void ClientSessionController::applyState(const QVariantMap &state) {
-	if (state.contains(QStringLiteral("serverName"))) setServerName(state.value(QStringLiteral("serverName")).toString());
-	if (state.contains(QStringLiteral("serverMonogram")))
-		setServerMonogram(state.value(QStringLiteral("serverMonogram")).toString());
-	if (state.contains(QStringLiteral("serverImageUrl")))
-		setServerImageUrl(state.value(QStringLiteral("serverImageUrl")).toString());
-	if (state.contains(QStringLiteral("connectionLabel")))
-		setConnectionLabel(state.value(QStringLiteral("connectionLabel")).toString());
-	if (state.contains(QStringLiteral("selfStatusLabel")))
-		setSelfStatusLabel(state.value(QStringLiteral("selfStatusLabel")).toString());
-	if (state.contains(QStringLiteral("connectionState")))
-		setConnectionState(state.value(QStringLiteral("connectionState")).toString());
-	if (state.contains(QStringLiteral("connectionTone")))
-		setConnectionTone(state.value(QStringLiteral("connectionTone")).toString());
-	if (state.contains(QStringLiteral("connectionTooltip")))
-		setConnectionDetail(state.value(QStringLiteral("connectionTooltip")).toString());
-	if (state.contains(QStringLiteral("connectionRetryRemainingMs")))
-		setConnectionRetryRemainingMs(state.value(QStringLiteral("connectionRetryRemainingMs")).toInt());
-	else if (connectionState() != QLatin1String("retrying"))
-		setConnectionRetryRemainingMs(0);
-	if (state.contains(QStringLiteral("canConnect"))) setCanConnect(state.value(QStringLiteral("canConnect")).toBool());
-	if (state.contains(QStringLiteral("canCancelConnection")))
-		setCanCancel(state.value(QStringLiteral("canCancelConnection")).toBool());
-	else if (state.contains(QStringLiteral("canDisconnect")))
-		setCanCancel(state.value(QStringLiteral("canDisconnect")).toBool());
-	if (state.contains(QStringLiteral("selfName"))) setSelfName(state.value(QStringLiteral("selfName")).toString());
-	if (state.contains(QStringLiteral("selfMuted"))) setSelfMuted(state.value(QStringLiteral("selfMuted")).toBool());
-	if (state.contains(QStringLiteral("selfDeafened")))
-		setSelfDeafened(state.value(QStringLiteral("selfDeafened")).toBool());
-	if (state.contains(QStringLiteral("menus"))) setAppMenus(state.value(QStringLiteral("menus")).toList());
-	if (state.contains(QStringLiteral("selfMenu"))) setSelfMenu(state.value(QStringLiteral("selfMenu")).toMap());
-	if (state.contains(QStringLiteral("updateBanner")))
-		setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
-	if (state.contains(QStringLiteral("stonks"))) setStonks(state.value(QStringLiteral("stonks")).toMap());
-	if (state.contains(QStringLiteral("collapsedNavigationSections")))
-		setCollapsedNavigationSections(state.value(QStringLiteral("collapsedNavigationSections")).toStringList());
-	if (state.contains(QStringLiteral("motdHtml"))) setMotdHtml(state.value(QStringLiteral("motdHtml")).toString());
-	if (state.contains(QStringLiteral("motdSummary")))
-		setMotdSummary(state.value(QStringLiteral("motdSummary")).toString());
-	if (state.contains(QStringLiteral("motdExpanded")))
-		setMotdExpanded(state.value(QStringLiteral("motdExpanded")).toBool());
-	if (state.contains(QStringLiteral("motdDismissedSignature")))
-		setMotdDismissedSignature(state.value(QStringLiteral("motdDismissedSignature")).toString());
-	if (state.contains(QStringLiteral("motdLastSeenSignature")))
-		setMotdLastSeenSignature(state.value(QStringLiteral("motdLastSeenSignature")).toString());
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.identity");
+		if (state.contains(QStringLiteral("serverName")))
+			setServerName(state.value(QStringLiteral("serverName")).toString());
+		if (state.contains(QStringLiteral("serverMonogram")))
+			setServerMonogram(state.value(QStringLiteral("serverMonogram")).toString());
+		if (state.contains(QStringLiteral("serverImageUrl")))
+			setServerImageUrl(state.value(QStringLiteral("serverImageUrl")).toString());
+	}
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.connection");
+		if (state.contains(QStringLiteral("connectionLabel")))
+			setConnectionLabel(state.value(QStringLiteral("connectionLabel")).toString());
+		if (state.contains(QStringLiteral("selfStatusLabel")))
+			setSelfStatusLabel(state.value(QStringLiteral("selfStatusLabel")).toString());
+		if (state.contains(QStringLiteral("connectionState")))
+			setConnectionState(state.value(QStringLiteral("connectionState")).toString());
+		if (state.contains(QStringLiteral("connectionTone")))
+			setConnectionTone(state.value(QStringLiteral("connectionTone")).toString());
+		if (state.contains(QStringLiteral("connectionTooltip")))
+			setConnectionDetail(state.value(QStringLiteral("connectionTooltip")).toString());
+		if (state.contains(QStringLiteral("connectionRetryRemainingMs")))
+			setConnectionRetryRemainingMs(state.value(QStringLiteral("connectionRetryRemainingMs")).toInt());
+		else if (connectionState() != QLatin1String("retrying"))
+			setConnectionRetryRemainingMs(0);
+		if (state.contains(QStringLiteral("canConnect")))
+			setCanConnect(state.value(QStringLiteral("canConnect")).toBool());
+		if (state.contains(QStringLiteral("canCancelConnection")))
+			setCanCancel(state.value(QStringLiteral("canCancelConnection")).toBool());
+		else if (state.contains(QStringLiteral("canDisconnect")))
+			setCanCancel(state.value(QStringLiteral("canDisconnect")).toBool());
+	}
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.self");
+		if (state.contains(QStringLiteral("selfName"))) setSelfName(state.value(QStringLiteral("selfName")).toString());
+		if (state.contains(QStringLiteral("selfMuted")))
+			setSelfMuted(state.value(QStringLiteral("selfMuted")).toBool());
+		if (state.contains(QStringLiteral("selfDeafened")))
+			setSelfDeafened(state.value(QStringLiteral("selfDeafened")).toBool());
+	}
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.menus");
+		if (state.contains(QStringLiteral("menus"))) setAppMenus(state.value(QStringLiteral("menus")).toList());
+		if (state.contains(QStringLiteral("selfMenu"))) setSelfMenu(state.value(QStringLiteral("selfMenu")).toMap());
+	}
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.global");
+		if (state.contains(QStringLiteral("updateBanner")))
+			setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
+		if (state.contains(QStringLiteral("stonks"))) setStonks(state.value(QStringLiteral("stonks")).toMap());
+		if (state.contains(QStringLiteral("collapsedNavigationSections")))
+			setCollapsedNavigationSections(state.value(QStringLiteral("collapsedNavigationSections")).toStringList());
+	}
+	{
+		mumble::chatperf::ScopedDuration trace("qml.session.apply.motd");
+		if (state.contains(QStringLiteral("motdHtml"))) setMotdHtml(state.value(QStringLiteral("motdHtml")).toString());
+		if (state.contains(QStringLiteral("motdSummary")))
+			setMotdSummary(state.value(QStringLiteral("motdSummary")).toString());
+		if (state.contains(QStringLiteral("motdExpanded")))
+			setMotdExpanded(state.value(QStringLiteral("motdExpanded")).toBool());
+		if (state.contains(QStringLiteral("motdDismissedSignature")))
+			setMotdDismissedSignature(state.value(QStringLiteral("motdDismissedSignature")).toString());
+		if (state.contains(QStringLiteral("motdLastSeenSignature")))
+			setMotdLastSeenSignature(state.value(QStringLiteral("motdLastSeenSignature")).toString());
+	}
 }
 
 void ClientSessionController::recomputeMotdDerivedState() {
