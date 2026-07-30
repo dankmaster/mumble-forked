@@ -4626,7 +4626,10 @@ ApplicationWindow {
 								richResourcesActive = false
 								return
 							}
-							if (inHydrationWindow) {
+							// Diagnostic isolation: keep provider/image resources dormant while
+							// measuring whether the remaining cold-entry heartbeat gaps come
+							// from delegate construction or resource activation.
+							if (inHydrationWindow && false) {
 								richResourceReleaseTimer.stop()
 								if (!timeline.richScrollInProgress
 										&& (!timeline.scopePresentationPending
