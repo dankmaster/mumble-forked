@@ -3186,7 +3186,7 @@ ApplicationWindow {
 					// constructing provider/image trees. Direct navigation commonly
 					// follows the restored snapshot by a few hundred milliseconds; the
 					// fixed-height source rows remain complete and stable meanwhile.
-					readonly property int coldScopeMaterializationDelayMs: 320
+					readonly property int coldScopeMaterializationDelayMs: 600
 					// Three fixed-height source rows per frame keep the cold-entry queue
 					// below the one-second gate without recreating the multi-loader burst
 					// that made rich histories hitch. Preview/provider trees remain on
@@ -3441,6 +3441,18 @@ ApplicationWindow {
 					function completeScopePresentationFinalization(forcedByDeadline) {
 						if (!scopePresentationPending || !scopePresentationFinalizing)
 							return
+						// The ordinary quiet timer can expire while the cold-scope
+						// admission delay or its bounded materialization queue is still
+						// active. Keep that geometry behind the loading surface unless
+						// the existing hard deadline explicitly releases it.
+						const coldMaterializationPending =
+							coldScopeMaterializationDelayTimer.running
+							|| deferredMaterializationTimer.running
+							|| deferredMaterializationQueue.length > 0
+						if (!forcedByDeadline && coldMaterializationPending) {
+							scopePresentationFinalizeQuietTimer.restart()
+							return
+						}
 						const generation = scopePresentationGeneration
 						const mutationCount = scopePresentationMutationCount
 						scopePresentationFinalizeQuietTimer.stop()
@@ -4163,7 +4175,15 @@ ApplicationWindow {
 						id: coldScopeMaterializationDelayTimer
 						interval: timeline.coldScopeMaterializationDelayMs
 						repeat: false
-						onTriggered: timeline.scheduleRichContentResume()
+						onTriggered: {
+							if (timeline.scopePresentationPending
+									&& timeline.scopePresentationFinalizing) {
+								timeline.queueVisibleDeferredMaterialization(true)
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
+							timeline.scheduleRichContentResume()
+						}
 					}
 
 					Timer {
