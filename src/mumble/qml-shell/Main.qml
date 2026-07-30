@@ -175,6 +175,35 @@ ApplicationWindow {
 	property var automationMenuFocusItem: null
 	property bool visualFixtureOverrideActive: false
 	property string visualFixtureSurfaceVariant: "none"
+	// The first ChatMessageFrame type construction otherwise lands after the
+	// connected window is already interactive and can consume an entire GUI
+	// heartbeat. Build one geometry-only frame while the shell is still hidden,
+	// then release it before any conversation data is presented.
+	Loader {
+		id: chatMessageFrameWarmupLoader
+		objectName: "chatMessageFrameWarmupLoader"
+		active: true
+		asynchronous: false
+		visible: false
+		width: 1
+		height: 1
+		onLoaded: Qt.callLater(function() {
+			chatMessageFrameWarmupLoader.active = false
+		})
+		sourceComponent: Component {
+			ChatMessageFrame {
+				stableId: "__shell_warmup__"
+				startsGroup: true
+				own: false
+				systemMessage: false
+				laneAvailableWidth: 1
+				accessibilityPooled: true
+				accessibilityViewportVisible: false
+				accessibilityBarrierEnabled: false
+				hoverEffectsEnabled: false
+			}
+		}
+	}
 	Component {
 		id: composerTextCursorDelegate
 		// Preserve real keyboard focus in visual fixtures while keeping the
