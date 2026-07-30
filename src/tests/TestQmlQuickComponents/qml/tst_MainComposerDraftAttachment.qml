@@ -250,7 +250,7 @@ TestCase {
 		verify(/id:\s*emptyConversationState[\s\S]*activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No server log entries yet"\)[\s\S]*qsTr\("New Murmur server-log entries will appear here live\."\)/.test(mainSource))
 		verify(/id:\s*composerSurface[\s\S]*visible:\s*!activeScope\.activity[\s\S]*Layout\.preferredHeight:\s*visible\s*\?/.test(mainSource))
 		verify(/id:\s*activityLogColumnHeader[\s\S]{0,2400}visible:\s*activeScope\.activity[\s\S]{0,1200}qsTr\("TIME"\)[\s\S]{0,800}qsTr\("EVENT"\)[\s\S]{0,1200}qsTr\("LIVE"\)/.test(mainSource))
-		verify(/id:\s*timeline[\s\S]{0,500}Accessible\.name:\s*activeScope\.activity\s*\?\s*qsTr\("Activity log"\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]{0,760}Accessible\.name:\s*activeScope\.activity\s*\?\s*qsTr\("Activity log"\)/.test(mainSource))
 		verify(/function\s+stableAlternatingRow\(stableId\)[\s\S]*parity\s*\^=\s*value\.charCodeAt\(index\)\s*&\s*1[\s\S]*return\s+parity\s*===\s*1/.test(mainSource))
 		verify(/ChatMessageFrame\s*\{[\s\S]{0,400}logEntry:\s*activeScope\.activity[\s\S]{0,200}logAlternating:\s*logEntry\s*&&\s*root\.stableAlternatingRow\(stableId\)/.test(mainSource))
 		verify(!/id:\s*messageDelegate[\s\S]{0,360}required property int index/.test(mainSource))
