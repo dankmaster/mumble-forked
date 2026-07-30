@@ -3452,16 +3452,10 @@ ApplicationWindow {
 						restoringBottom = true
 						containTailMessageWhenPossible()
 						restoringBottom = false
-						// Materialize at most one visible rich message tree per frame while
-						// final geometry is still hidden. This reuses the scroll-recovery
-						// queue instead of letting every cold-scope Loader incubate together.
-						queueRichLoaderResumes()
-						queueVisibleDeferredMaterialization(true)
-						// Start cached/backend preview hydration while the timeline is still
-						// hidden. Its height refinements then restart the final quiet window
-						// instead of making the newly exposed tail chase changing geometry.
-						root.coldPreviewHydrationPacingActive = true
-						queueVisiblePreviewHydration(true)
+						// Reveal the stable lightweight rows first. Provider, attachment and
+						// complete message trees enter their existing per-frame queues after
+						// presentation, so a rich tail cannot hold the whole conversation
+						// behind an invisible asynchronous Loader/polish chain.
 						scopePresentationFinalizeQuietTimer.start()
 						scopePresentationFinalizeDeadlineTimer.start()
 					}
@@ -3510,6 +3504,7 @@ ApplicationWindow {
 							timeline.scopePresentationFinalizing = false
 							timeline.scopePresentationObservationActive = true
 							scopePresentationObservationTimer.restart()
+							root.coldPreviewHydrationPacingActive = true
 							timeline.scheduleRichContentResume()
 							Qt.callLater(function() {
 								if (generation === timeline.scopePresentationGeneration)
@@ -4205,7 +4200,9 @@ ApplicationWindow {
 						onTriggered: {
 							if (timeline.scopePresentationPending
 									&& timeline.scopePresentationFinalizing) {
-								timeline.queueVisibleDeferredMaterialization(true)
+								// The supersede window has elapsed. Let the final quiet
+								// interval reveal the fixed rows; rich admission starts only
+								// after the visible presentation handoff.
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
@@ -4459,8 +4456,6 @@ ApplicationWindow {
 							}
 						}
 						function onRowsInserted(parentIndex, first, last) {
-							if (timeline.scopeResetPending)
-								coldScopeMaterializationDelayTimer.restart()
 							if (first === 0)
 								timeline.deferPrependedRichRows(first, last)
 							if (first === 0 && timeline.prependAnchorActive) {

@@ -244,12 +244,22 @@ TestCase {
 		verify(/coldScopeMaterializationDelayMs:\s*350[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldMaterializationPending[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		const continueStart = mainSource.indexOf("function continueScopePresentationFinalization")
+		const continueEnd = mainSource.indexOf("function completeScopePresentationFinalization", continueStart)
+		verify(continueStart >= 0 && continueEnd > continueStart)
+		verify(!/queueRichLoaderResumes|queueVisibleDeferredMaterialization|queueVisiblePreviewHydration/.test(
+			mainSource.slice(continueStart, continueEnd)))
 		const finalizeStart = mainSource.indexOf("function completeScopePresentationFinalization")
 		const finalizeEnd = mainSource.indexOf("const generation =", finalizeStart)
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
 		verify(!/deferredMaterializationTimer\.running/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
-		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
+		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
+		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")
+		const rowsInsertedEnd = mainSource.indexOf("function onModelReset", rowsInsertedStart)
+		verify(rowsInsertedStart >= 0 && rowsInsertedEnd > rowsInsertedStart)
+		verify(!/coldScopeMaterializationDelayTimer\.(?:start|restart)\(\)/.test(
+			mainSource.slice(rowsInsertedStart, rowsInsertedEnd)))
 		verify(/deferredMaterializationsPerFrame:\s*1[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*chatModel\.materializeDeferredMessage\(queued\.shift\(\)\)[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*deferredMaterializationTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
 		const deferredStart = mainSource.indexOf("id: deferredHistoryRow")
 		const deferredEnd = mainSource.indexOf("DelegateChoice {", deferredStart + 1)
