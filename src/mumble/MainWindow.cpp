@@ -30561,7 +30561,12 @@ void MainWindow::publishPersistentChatSnapshot() {
 			const qsizetype prefixSize = appendedMessages.size() - ColdHistoryFirstPaintRows;
 			const QVariantList firstPaintTail = appendedMessages.mid(prefixSize);
 			const QVariantList deferredPrefix = appendedMessages.mid(0, prefixSize);
-			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
+			// These rows are lightweight fixed-height placeholders. Insert the
+			// complete cold prefix in one model transaction so the inline header
+			// performs one polish pass instead of relaying out after every queued
+			// chunk. Explicit older-page requests keep using the frame-bounded
+			// prepend queue and its viewport-anchor protection.
+			const int queued = m_qmlShellHost->chatModel()->prependMessages(deferredPrefix);
 			const int appended = m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
 			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
 				mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_prefix", queued);
@@ -30599,7 +30604,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 			const QVariantList firstPaintTail = messages.mid(prefixSize);
 			const QVariantList deferredPrefix = messages.mid(0, prefixSize);
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
+			const int queued = m_qmlShellHost->chatModel()->prependMessages(deferredPrefix);
 			const int appended =
 				m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
 			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {

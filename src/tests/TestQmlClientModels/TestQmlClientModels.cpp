@@ -2201,7 +2201,8 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ScopeFirstPaintRows = 3")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueueAppendMessages(firstPaintTail)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && messages.size() > ScopeFirstPaintRows")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueuePrependMessages(deferredPrefix)")));
+	QCOMPARE(snapshotApplyBody.count(QStringLiteral("prependMessages(deferredPrefix)")), 2);
+	QVERIFY(!snapshotApplyBody.contains(QStringLiteral("enqueuePrependMessages(deferredPrefix)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.windowed_prefix")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.windowed_fallback")));
 	QVERIFY(snapshotApplyBody.contains(
