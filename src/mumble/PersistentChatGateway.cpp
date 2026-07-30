@@ -8,7 +8,9 @@
 #include "ServerHandler.h"
 
 namespace {
-constexpr unsigned int INITIAL_HISTORY_PAGE_SIZE = 20;
+// Keep the first visible tail small enough to become interactive in one frame-paced
+// admission window. Older history remains available through the larger page below.
+constexpr unsigned int INITIAL_HISTORY_PAGE_SIZE = 10;
 constexpr unsigned int WARMUP_HISTORY_PAGE_SIZE  = 20;
 constexpr unsigned int OLDER_HISTORY_PAGE_SIZE   = 20;
 }

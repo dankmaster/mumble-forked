@@ -30588,11 +30588,10 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// turn and gives the hidden finalization gate one bounded row per frame.
 		if (switchingScope && !messages.isEmpty()) {
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int deferred =
-				m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
+			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages, true);
 			if (deferred == messages.size()) {
 				mumble::chatperf::recordValue(
-					"qml.chat.scope_sync.deferred_first_paint_queued", deferred);
+					"qml.chat.scope_sync.deferred_first_paint", deferred);
 			} else {
 				m_qmlShellHost->chatModel()->replaceMessages(messages);
 				mumble::chatperf::recordValue(

@@ -2254,9 +2254,9 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("qml.chat.snapshot_append.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && !messages.isEmpty()")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueueAppendMessages(messages, true)")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("prependMessages(messages, true)")));
 	QVERIFY(snapshotApplyBody.contains(
-		QStringLiteral("qml.chat.scope_sync.deferred_first_paint_queued")));
+		QStringLiteral("qml.chat.scope_sync.deferred_first_paint")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode)")));
