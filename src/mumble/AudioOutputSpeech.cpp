@@ -17,6 +17,13 @@
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
 
+#ifdef Q_OS_WIN
+#	ifndef NOMINMAX
+#		define NOMINMAX
+#	endif
+#	include <windows.h>
+#endif
+
 #include <opus.h>
 
 #include <algorithm>
@@ -34,6 +41,28 @@ namespace {
 	constexpr auto REMOTE_SPEECH_CLEANUP_STARTUP_GRACE = std::chrono::seconds(3);
 	const auto g_remoteSpeechCleanupEarliestInitialization =
 		std::chrono::steady_clock::now() + REMOTE_SPEECH_CLEANUP_STARTUP_GRACE;
+
+	class RemoteSpeechCleanupBackgroundMode {
+	public:
+		RemoteSpeechCleanupBackgroundMode() {
+#ifdef Q_OS_WIN
+			m_active = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
+#endif
+		}
+
+		~RemoteSpeechCleanupBackgroundMode() {
+#ifdef Q_OS_WIN
+			if (m_active) {
+				(void) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+			}
+#endif
+		}
+
+	private:
+#ifdef Q_OS_WIN
+		bool m_active = false;
+#endif
+	};
 
 	QThreadPool &remoteSpeechCleanupPreparationPool() {
 		// Process-lifetime by design. Destroying a QThreadPool waits for active
@@ -162,6 +191,11 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 		m_remoteSpeechCleanupPreparation = QtConcurrent::run(
 			&remoteSpeechCleanupPreparationPool(),
 			[selection]() -> std::unique_ptr< SpeechCleanupProcessor > {
+				// Windows' background mode lowers CPU, memory, and I/O resource
+				// scheduling together. QThread::LowestPriority alone only
+				// lowers CPU scheduling, so DLL/model paging could still steal
+				// a complete QML heartbeat during cold room entry.
+				RemoteSpeechCleanupBackgroundMode backgroundMode;
 				std::this_thread::sleep_until(g_remoteSpeechCleanupEarliestInitialization);
 				try {
 					return createSpeechCleanupProcessor(selection);
