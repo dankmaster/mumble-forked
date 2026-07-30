@@ -3186,12 +3186,11 @@ ApplicationWindow {
 					// constructing provider/image trees. Direct navigation commonly
 					// follows the restored snapshot by a few hundred milliseconds; the
 					// fixed-height source rows remain complete and stable meanwhile.
-					readonly property int coldScopeMaterializationDelayMs: 600
-					// Three fixed-height source rows per frame keep the cold-entry queue
-					// below the one-second gate without recreating the multi-loader burst
-					// that made rich histories hitch. Preview/provider trees remain on
-					// their independently paced one-at-a-time resume queue.
-					readonly property int deferredMaterializationsPerFrame: 3
+					readonly property int coldScopeMaterializationDelayMs: 500
+					// Admit one fixed-height source row per frame. The complete current
+					// PROD page still settles within the one-second entry gate, while no
+					// frame has to construct several attachment/provider trees at once.
+					readonly property int deferredMaterializationsPerFrame: 1
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -3448,7 +3447,6 @@ ApplicationWindow {
 						const coldMaterializationPending =
 							coldScopeMaterializationDelayTimer.running
 							|| deferredMaterializationTimer.running
-							|| deferredMaterializationQueue.length > 0
 						if (!forcedByDeadline && coldMaterializationPending) {
 							scopePresentationFinalizeQuietTimer.restart()
 							return
@@ -4432,6 +4430,8 @@ ApplicationWindow {
 							}
 						}
 						function onRowsInserted(parentIndex, first, last) {
+							if (timeline.scopeResetPending)
+								coldScopeMaterializationDelayTimer.restart()
 							if (first === 0)
 								timeline.deferPrependedRichRows(first, last)
 							if (first === 0 && timeline.prependAnchorActive) {
