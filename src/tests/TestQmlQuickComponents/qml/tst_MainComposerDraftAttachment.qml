@@ -282,6 +282,7 @@ TestCase {
 		verify(/Math\.abs\(timeline\.contentY\s*-\s*timeline\.originY\)\s*>\s*0\.5/.test(probeSource))
 		verify(/has not been scrolled completely to the start/.test(probeSource))
 		verify(!/positionViewAtIndex/.test(probeSource))
+		verify(!/currentIndex\s*=/.test(probeSource))
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {

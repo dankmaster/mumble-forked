@@ -1848,7 +1848,6 @@ ApplicationWindow {
 		timeline.pendingTailInsertCount = 0
 		timeline.pendingTailMessageCount = 0
 		timeline.stickToBottom = false
-		timeline.currentIndex = 0
 		timeline.forceLayout()
 		const firstVisible = timeline.firstVisibleMessageDelegate()
 		timeline.performanceHistoryProbeAnchorId = firstVisible
