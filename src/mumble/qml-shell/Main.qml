@@ -4786,7 +4786,8 @@ ApplicationWindow {
 						startsGroup: modelStartsGroup
 						dateSeparatorLabel: dateBoundary ? root.messageDateLabel(source) : ""
 						bodyImplicitHeight: logEntry
-							? activityLogRow.implicitHeight
+							? (activityLogRowLoader.item
+								? activityLogRowLoader.item.implicitHeight : 0)
 							: messageRowLoader.item
 								? messageRowLoader.item.implicitHeight
 								: lightweightMessageRowHeight
@@ -4893,72 +4894,79 @@ ApplicationWindow {
 							acceptedButtons: Qt.RightButton
 							onTapped: messageDelegate.openMessageActions()
 						}
-						RowLayout {
-							id: activityLogRow
+						Loader {
+							id: activityLogRowLoader
 							anchors.fill: parent
-							visible: messageDelegate.logEntry
-							spacing: Theme.space2
+							active: messageDelegate.logEntry
+							asynchronous: true
+							sourceComponent: Component {
+								RowLayout {
+									id: activityLogRow
+									anchors.fill: parent
+									spacing: Theme.space2
 
-							Label {
-								id: activityLogTimestamp
-								objectName: "activityLogTimestamp"
-								Layout.preferredWidth: root.activityLogTimeColumnWidth
-								Layout.alignment: Qt.AlignTop
-								Layout.topMargin: 1
-								textFormat: Text.PlainText
-								text: timestamp
-								color: Theme.textMuted
-								font.family: Qt.platform.os === "windows" ? "Consolas" : "monospace"
-								font.pixelSize: Theme.fontCaption
-								font.weight: Font.Medium
-								horizontalAlignment: Text.AlignRight
-								Accessible.name: qsTr("Time %1").arg(text)
-								Accessible.ignored: root.backgroundAccessibilitySuppressed
-									|| !messageDelegate.itemContainedInViewport(activityLogTimestamp)
-							}
-							Item {
-								id: activityLogGutter
-								objectName: "activityLogGutter"
-								Layout.preferredWidth: root.activityLogGutterWidth
-								Layout.fillHeight: true
-								Accessible.ignored: true
+									Label {
+										id: activityLogTimestamp
+										objectName: "activityLogTimestamp"
+										Layout.preferredWidth: root.activityLogTimeColumnWidth
+										Layout.alignment: Qt.AlignTop
+										Layout.topMargin: 1
+										textFormat: Text.PlainText
+										text: timestamp
+										color: Theme.textMuted
+										font.family: Qt.platform.os === "windows" ? "Consolas" : "monospace"
+										font.pixelSize: Theme.fontCaption
+										font.weight: Font.Medium
+										horizontalAlignment: Text.AlignRight
+										Accessible.name: qsTr("Time %1").arg(text)
+										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| !messageDelegate.itemContainedInViewport(activityLogTimestamp)
+									}
+									Item {
+										id: activityLogGutter
+										objectName: "activityLogGutter"
+										Layout.preferredWidth: root.activityLogGutterWidth
+										Layout.fillHeight: true
+										Accessible.ignored: true
 
-								Rectangle {
-									anchors.horizontalCenter: parent.horizontalCenter
-									anchors.top: parent.top
-									anchors.bottom: parent.bottom
-									width: 1
-									color: Theme.divider
-									Accessible.ignored: true
+										Rectangle {
+											anchors.horizontalCenter: parent.horizontalCenter
+											anchors.top: parent.top
+											anchors.bottom: parent.bottom
+											width: 1
+											color: Theme.divider
+											Accessible.ignored: true
+										}
+										Rectangle {
+											objectName: "activityLogMarker"
+											anchors.horizontalCenter: parent.horizontalCenter
+											anchors.top: parent.top
+											anchors.topMargin: 5
+											width: 7
+											height: 7
+											radius: width / 2
+											color: Theme.accent
+											border.color: Theme.withAlpha(Theme.textStrong, 0.18)
+											border.width: 1
+											Accessible.ignored: true
+										}
+									}
+									RichMessageBody {
+										id: activityLogBody
+										objectName: "activityLogEvent"
+										Layout.fillWidth: true
+										Layout.alignment: Qt.AlignTop
+										accessibilitySuppressed: root.backgroundAccessibilitySuppressed
+											|| !messageDelegate.itemContainedInViewport(activityLogBody)
+										segments: messageDelegate.bodySegments || []
+										resourceActive: !messageDelegate.accessibilityPooled
+										animationsEnabled: !root.visualFixtureOverrideActive
+										hoverEffectsEnabled: !root.visualFixtureOverrideActive
+										textColor: Theme.textMain
+										pixelSize: Theme.fontBody
+										onLinkRequested: link => Qt.openUrlExternally(link)
+									}
 								}
-								Rectangle {
-									objectName: "activityLogMarker"
-									anchors.horizontalCenter: parent.horizontalCenter
-									anchors.top: parent.top
-									anchors.topMargin: 5
-									width: 7
-									height: 7
-									radius: width / 2
-									color: Theme.accent
-									border.color: Theme.withAlpha(Theme.textStrong, 0.18)
-									border.width: 1
-									Accessible.ignored: true
-								}
-							}
-							RichMessageBody {
-								id: activityLogBody
-								objectName: "activityLogEvent"
-								Layout.fillWidth: true
-								Layout.alignment: Qt.AlignTop
-								accessibilitySuppressed: root.backgroundAccessibilitySuppressed
-									|| !messageDelegate.itemContainedInViewport(activityLogBody)
-								segments: messageDelegate.bodySegments || []
-								resourceActive: !messageDelegate.accessibilityPooled
-								animationsEnabled: !root.visualFixtureOverrideActive
-								hoverEffectsEnabled: !root.visualFixtureOverrideActive
-								textColor: Theme.textMain
-								pixelSize: Theme.fontBody
-								onLinkRequested: link => Qt.openUrlExternally(link)
 							}
 						}
 						Loader {
