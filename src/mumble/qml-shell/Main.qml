@@ -863,6 +863,7 @@ ApplicationWindow {
 			return
 		}
 		if (coldPreviewHydrationPacingActive && timeline
+				&& timeline.richLoaderResumeTimer
 				&& (timeline.richLoaderResumeTimer.running
 					|| timeline.richLoaderResumeQueue.length > 0
 					|| timeline.richLoaderResumeActiveId.length > 0)) {
@@ -3385,7 +3386,6 @@ ApplicationWindow {
 						// hidden. Creating the replacement pool can refine rich-row geometry, so
 						// give it its own bounded quiet window before exposing the timeline.
 						scopeReuseResetActive = false
-						forceLayout()
 						positionTailImmediately()
 						restoringBottom = true
 						containTailMessageWhenPossible()
@@ -3409,7 +3409,6 @@ ApplicationWindow {
 						const generation = scopePresentationGeneration
 						const mutationCount = scopePresentationMutationCount
 						scopePresentationFinalizeQuietTimer.stop()
-						forceLayout()
 						positionTailImmediately()
 						restoringBottom = true
 						containTailMessageWhenPossible()
@@ -3419,7 +3418,6 @@ ApplicationWindow {
 									|| !timeline.scopePresentationPending
 									|| !timeline.scopePresentationFinalizing)
 								return
-							timeline.forceLayout()
 							timeline.positionTailImmediately()
 							timeline.restoringBottom = true
 							timeline.containTailMessageWhenPossible()
@@ -4371,7 +4369,9 @@ ApplicationWindow {
 								timeline.pendingTailMessageCount += timeline.pendingTailInsertCount
 							if (timeline.scopeReuseResetActive)
 								Qt.callLater(function() {
-									timeline.forceLayout()
+									// The ListView's ordinary polish pass already owns delegate
+									// creation and geometry after the insert. A synchronous second
+									// layout blocks the GUI heartbeat on rich conversations.
 									timeline.scopeReuseResetActive = false
 								})
 							if (timeline.scopePresentationPending)
@@ -4968,7 +4968,7 @@ ApplicationWindow {
 								&& messageDelegate.messageRowMaterialized
 							asynchronous: true
 							visible: active
-									onLoaded: {
+							onLoaded: {
 										messageDelegate.messageRowMaterialized = true
 										timeline.completeRichLoaderResume(messageDelegate.stableId)
 										if (timeline.topAnchorActive) {
