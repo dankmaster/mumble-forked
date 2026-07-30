@@ -24,17 +24,18 @@ Item {
 	// Modal parents keep the product surface visible behind drawers/dialogs, but
 	// their promoted semantic children must leave the accessibility tree.
 	property bool accessibilitySuppressed: false
-    readonly property string plainText: root.plainTextForSegments(root.segments)
-    readonly property string renderedHtml: root.htmlForSegments(root.segments)
-	readonly property var renderBlocks: root.blocksForSegments(root.segments)
+	readonly property var normalizedSegments: root.normalizedModelList(root.segments)
+    readonly property string plainText: root.plainTextForSegments(root.normalizedSegments)
+    readonly property string renderedHtml: root.htmlForSegments(root.normalizedSegments)
+	readonly property var renderBlocks: root.blocksForSegments(root.normalizedSegments)
 	readonly property bool hasImages: root.renderBlocks.some(function(block) {
 		return block.kind === "image"
 	})
-	readonly property bool plainTextOnly: !root.hasImages && !(root.segments || []).some(function(segment) {
+	readonly property bool plainTextOnly: !root.hasImages && !root.normalizedSegments.some(function(segment) {
 		return !!segment && (!!segment.bold || !!segment.italic || !!segment.strike
 			|| !!segment.code || root.safeExternalUrl(segment.href).length > 0)
 	})
-	readonly property var keyboardLinkEntries: root.linkEntriesForSegments(root.segments)
+	readonly property var keyboardLinkEntries: root.linkEntriesForSegments(root.normalizedSegments)
 	readonly property var keyboardLinks: root.urlsForLinkEntries(root.keyboardLinkEntries)
 	readonly property var currentKeyboardLinkEntry: keyboardLinkEntries.length > 0
 		? keyboardLinkEntries[Math.max(0, Math.min(keyboardLinkIndex, keyboardLinkEntries.length - 1))]
@@ -129,6 +130,27 @@ Item {
 		return entries.length > 1
 			? selection + " " + qsTr("Press Enter to open it. Use Left and Right to choose a link.")
 			: selection + " " + qsTr("Press Enter to open it.")
+	}
+
+	function normalizedModelList(value) {
+		if (Array.isArray(value))
+			return value
+		if (value && value.count !== undefined && typeof value.get === "function") {
+			const result = []
+			for (let index = 0; index < value.count; ++index)
+				result.push(value.get(index))
+			return result
+		}
+		if (value && typeof value !== "string") {
+			try {
+				const result = Array.from(value)
+				if (result.length > 0 || Number(value.length) === 0)
+					return result
+			} catch (error) {
+				// Some QML model wrappers reject generic sequence conversion.
+			}
+		}
+		return []
 	}
 
 	function plainTextForSegments(values) {

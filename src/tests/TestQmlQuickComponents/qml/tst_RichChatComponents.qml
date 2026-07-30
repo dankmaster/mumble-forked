@@ -11,6 +11,10 @@ TestCase {
     width: 720
     height: 620
 
+	ListModel {
+		id: modelBackedSegments
+	}
+
     Loader {
         id: bodyLoader
         width: parent.width
@@ -233,6 +237,7 @@ TestCase {
 		sizePresetSpy.clear()
 		watchTogetherSpy.clear()
 		linkSpy.clear()
+		modelBackedSegments.clear()
 		bodyLoader.item.segments = [
 			{ "text": "<img src=x onerror=alert(1)>" },
 			{ "text": " bad", "href": "javascript:alert(2)" },
@@ -324,6 +329,26 @@ TestCase {
 		compare(linkSpy.count, 1)
 		compare(linkSpy.signalArguments[0][0], "https://example.com/path?q=1")
     }
+
+	function test_message_body_normalizes_qml_model_backed_segments() {
+		const body = bodyLoader.item
+		modelBackedSegments.append({
+			"text": "Model-backed ",
+			"bold": true
+		})
+		modelBackedSegments.append({
+			"text": "message",
+			"href": "https://example.com/model-backed"
+		})
+
+		body.segments = modelBackedSegments
+		tryCompare(body, "plainText", "Model-backed message")
+		compare(body.normalizedSegments.length, 2)
+		compare(body.plainTextOnly, false)
+		compare(body.keyboardLinks.length, 1)
+		compare(body.keyboardLinks[0], "https://example.com/model-backed")
+		verify(body.renderedHtml.indexOf("<b>Model-backed </b>") >= 0)
+	}
 
 	function test_multiple_text_links_keep_one_visible_named_keyboard_target() {
 		const body = bodyLoader.item

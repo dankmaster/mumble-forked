@@ -271,6 +271,14 @@ TestCase {
 		verify(!/\bConnections\s*\{/.test(deferredDelegateSource))
 	}
 
+	function test_chat_normalizes_qabstractitemmodel_list_roles_before_rendering() {
+		verify(/function\s+normalizedModelList\(value\)[\s\S]*Array\.isArray\(value\)[\s\S]*value\.count\s*!==\s*undefined[\s\S]*typeof value\.get\s*===\s*"function"[\s\S]*result\.push\(value\.get\(index\)\)/.test(mainSource))
+		verify(/property var reactions:\s*root\.normalizedModelList\(asyncMessageDelegate\.reactions\)/.test(mainSource))
+		verify(/property var bodySegments:\s*root\.normalizedModelList\(asyncMessageDelegate\.bodySegments\)/.test(mainSource))
+		verify(/property var attachments:\s*root\.normalizedModelList\(asyncMessageDelegate\.attachments\)/.test(mainSource))
+		verify(/readonly property bool attachmentNeedsHydration:\s*\(attachments\s*\|\|\s*\[\]\)\.some/.test(mainSource))
+	}
+
 	function test_activity_is_a_read_only_log_surface_without_conversation_loading_chrome() {
 		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*if\s*\(activeScope\.activity\)[\s\S]*return\s+true/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No server log entries yet"\)[\s\S]*qsTr\("New Murmur server-log entries will appear here live\."\)/.test(mainSource))

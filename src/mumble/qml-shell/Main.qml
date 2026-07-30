@@ -436,9 +436,31 @@ ApplicationWindow {
 		return parity === 1
 	}
 
+	function normalizedModelList(value) {
+		if (Array.isArray(value))
+			return value
+		if (value && value.count !== undefined && typeof value.get === "function") {
+			const result = []
+			for (let index = 0; index < value.count; ++index)
+				result.push(value.get(index))
+			return result
+		}
+		if (value && typeof value !== "string") {
+			try {
+				const result = Array.from(value)
+				if (result.length > 0 || Number(value.length) === 0)
+					return result
+			} catch (error) {
+				// QML model wrappers are not required to implement generic
+				// JavaScript sequence conversion. The empty fallback is safe.
+			}
+		}
+		return []
+	}
+
 	function estimatedMessageTextWidth(segments, replyActor, replySnippet) {
 		let longestLine = 0
-		for (const segment of (segments || [])) {
+		for (const segment of normalizedModelList(segments)) {
 			const text = String(segment && segment.text !== undefined ? segment.text : "")
 			for (const line of text.split(/\r\n|\r|\n/))
 				longestLine = Math.max(longestLine, line.length)
@@ -451,7 +473,7 @@ ApplicationWindow {
 	}
 
 	function messageContainsInlineImage(segments) {
-		for (const segment of (segments || [])) {
+		for (const segment of normalizedModelList(segments)) {
 			if (segment && String(segment.kind || "").toLowerCase() === "image")
 				return true
 		}
@@ -476,7 +498,7 @@ ApplicationWindow {
 
 		let text = ""
 		let linkUrl = ""
-		for (const segment of (segments || [])) {
+		for (const segment of normalizedModelList(segments)) {
 			if (!segment || segment.text === undefined)
 				return false
 			text += String(segment.text)
@@ -494,7 +516,7 @@ ApplicationWindow {
 	}
 
 	function preferredAttachmentMessageWidth(attachments, ownOrSystem) {
-		const values = attachments || []
+		const values = normalizedModelList(attachments)
 		if (values.length <= 0)
 			return 0
 		if (values.length > 1)
@@ -5140,11 +5162,15 @@ ApplicationWindow {
 						property string timestamp: asyncMessageDelegate.timestamp
 						property string replyActor: asyncMessageDelegate.replyActor
 						property string replySnippet: asyncMessageDelegate.replySnippet
-						property var reactions: asyncMessageDelegate.reactions
-						property var bodySegments: asyncMessageDelegate.bodySegments
+						// QAbstractItemModel list roles arrive in QML as
+						// QQmlListModel wrappers, not JavaScript arrays. Normalize
+						// once at the message boundary so every downstream
+						// component can safely iterate and use Array helpers.
+						property var reactions: root.normalizedModelList(asyncMessageDelegate.reactions)
+						property var bodySegments: root.normalizedModelList(asyncMessageDelegate.bodySegments)
 						property bool bodyHydrationPending: asyncMessageDelegate.bodyHydrationPending
 						property var preview: asyncMessageDelegate.preview
-						property var attachments: asyncMessageDelegate.attachments
+						property var attachments: root.normalizedModelList(asyncMessageDelegate.attachments)
 						property var source: asyncMessageDelegate.source
 						property bool modelStartsGroup: asyncMessageDelegate.modelStartsGroup
 						property bool dateBoundary: asyncMessageDelegate.dateBoundary
