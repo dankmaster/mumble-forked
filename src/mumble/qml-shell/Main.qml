@@ -177,8 +177,9 @@ ApplicationWindow {
 	property string visualFixtureSurfaceVariant: "none"
 	// The first ChatMessageFrame type construction otherwise lands after the
 	// connected window is already interactive and can consume an entire GUI
-	// heartbeat. Build one geometry-only frame while the shell is still hidden,
-	// then release it before any conversation data is presented.
+	// heartbeat. Retain one invisible geometry-only frame for the shell lifetime
+	// so the first real row does not have to rebuild the platform accessibility
+	// and binding metadata after the startup object has already been collected.
 	Loader {
 		id: chatMessageFrameWarmupLoader
 		objectName: "chatMessageFrameWarmupLoader"
@@ -187,9 +188,6 @@ ApplicationWindow {
 		visible: false
 		width: 1
 		height: 1
-		onLoaded: Qt.callLater(function() {
-			chatMessageFrameWarmupLoader.active = false
-		})
 		sourceComponent: Component {
 			ChatMessageFrame {
 				stableId: "__shell_warmup__"
@@ -6648,6 +6646,7 @@ ApplicationWindow {
 					scopeLabel: activeScope.label
 					narrowLayout: root.narrowShell
 					docked: true
+					dockedDividerEdge: "bottom"
 					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
 				}
 			}
@@ -6674,6 +6673,7 @@ ApplicationWindow {
 					scopeLabel: activeScope.label
 					narrowLayout: root.narrowShell
 					docked: true
+					dockedDividerEdge: "top"
 					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
 				}
 			}

@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
 	id: testCase
@@ -215,6 +217,31 @@ TestCase {
 		header.stonks = refreshedState
 		wait(80)
 		verify(track.x < beforeRefreshX - 1)
+	}
+
+	function test_docked_strip_uses_shell_margins_and_one_content_divider() {
+		const header = loader.item
+		header.docked = true
+		header.dockedDividerEdge = "bottom"
+		header.stonks = populatedState()
+		header.tickerBannerEnabled = true
+		tryCompare(header, "visible", true)
+
+		const divider = findChild(header, "stonksDockedDivider")
+		verify(divider !== null)
+		compare(divider.visible, true)
+		compare(divider.x, 0)
+		compare(divider.width, header.width)
+		compare(divider.y + divider.height, header.height)
+		const leading = findChild(header, "stonksLeadingContent")
+		const trailing = findChild(header, "stonksTrailingAction")
+		verify(leading !== null)
+		verify(trailing !== null)
+		compare(leading.Layout.leftMargin, Theme.space5)
+		compare(trailing.Layout.rightMargin, Theme.space4)
+
+		header.dockedDividerEdge = "top"
+		tryCompare(divider, "y", 0)
 	}
 
 	function test_only_the_active_ticker_orientation_is_materialized() {

@@ -13,6 +13,10 @@ AbstractButton {
 	property string scopeLabel: ""
 	property bool narrowLayout: false
 	property bool docked: false
+	// Docked strips share the shell's outer edge. Paint only the divider facing
+	// the content instead of placing a second full rectangle border on top of
+	// the shell border.
+	property string dockedDividerEdge: "bottom"
 	property bool tickerBannerEnabled: false
 	property string tickerDirection: "left"
 	property string tickerSpeed: "normal"
@@ -193,21 +197,46 @@ AbstractButton {
 		event.accepted = true
 	}
 
-	background: Rectangle {
-		radius: root.docked ? 0 : Theme.innerRadius
-		color: root.down || root.hovered ? Theme.surfaceHover : Theme.strip
-		border.color: root.visualFocus ? Theme.focus
-			: root.errorText.length > 0 ? Theme.danger : Theme.surfaceBorder
-		border.width: root.visualFocus ? Theme.focusRingWidth : 1
-		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
-		Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
+	background: Item {
+		Rectangle {
+			id: tickerBackground
+			anchors.fill: parent
+			radius: root.docked ? 0 : Theme.innerRadius
+			color: root.down || root.hovered ? Theme.surfaceHover : Theme.strip
+			border.color: root.visualFocus ? Theme.focus
+				: root.errorText.length > 0 ? Theme.danger : Theme.surfaceBorder
+			border.width: root.docked ? 0
+				: root.visualFocus ? Theme.focusRingWidth : 1
+			Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+			Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
+		}
+		Rectangle {
+			id: dockedDivider
+			objectName: "stonksDockedDivider"
+			visible: root.docked
+			x: 0
+			y: root.dockedDividerEdge === "top" ? 0 : parent.height - height
+			width: parent.width
+			height: root.visualFocus ? Theme.focusRingWidth : 1
+			color: root.visualFocus ? Theme.focus
+				: root.errorText.length > 0 ? Theme.danger : Theme.surfaceBorder
+		}
+		Rectangle {
+			visible: root.docked && root.visualFocus
+			anchors.fill: parent
+			anchors.margins: 1
+			color: "transparent"
+			border.color: Theme.focus
+			border.width: Theme.focusRingWidth
+		}
 	}
 
 	contentItem: RowLayout {
 		spacing: Theme.space2
 
 		RowLayout {
-			Layout.leftMargin: Theme.space2
+			objectName: "stonksLeadingContent"
+			Layout.leftMargin: root.docked ? Theme.space5 : Theme.space2
 			spacing: Theme.space1
 			ModernIcon {
 				name: "activity"
@@ -469,7 +498,8 @@ AbstractButton {
 		}
 
 		ModernIcon {
-			Layout.rightMargin: Theme.space2
+			objectName: "stonksTrailingAction"
+			Layout.rightMargin: root.docked ? Theme.space4 : Theme.space2
 			name: "next"
 			size: 14
 			color: Theme.textMuted
