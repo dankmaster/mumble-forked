@@ -3512,7 +3512,21 @@ ApplicationWindow {
 								return
 							}
 							forceLayout()
+							// Re-evaluate the tail after each paced source-row promotion.
+							// Replacing a 58 px summary with a rich card can move the
+							// maximum by thousands of pixels; without this correction the
+							// hidden ListView keeps materializing the obsolete top viewport
+							// until the deadline releases a visibly blank conversation.
+							positionTailImmediately()
+							restoringBottom = true
+							containTailMessageWhenPossible()
+							restoringBottom = false
 							queueVisibleDeferredMaterialization(true)
+							// Source materialization activates the asynchronous outer
+							// delegate, but its message tree still enters as a geometry
+							// shell. Promote only the newly visible shells through the
+							// existing one-at-a-time recovery queue before declaring ready.
+							queueRichLoaderResumes()
 							const diagnostics = visiblePresentationDiagnostics()
 							const materializationPending =
 								deferredMaterializationTimer.running
