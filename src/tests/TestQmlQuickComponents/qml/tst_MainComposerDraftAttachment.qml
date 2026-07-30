@@ -270,6 +270,7 @@ TestCase {
 		verify(/function\s+scheduleScopePresentationFastPath\(\)[\s\S]*scopePresentationFastPathTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+rowNeedsDeferredPresentation\(row\)[\s\S]*bodyHydrationPending[\s\S]*Object\.keys\(preview\)[\s\S]*attachments\.length/.test(mainSource))
 		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*activeScope\.loading[\s\S]*count\s*===\s*0[\s\S]*return\s+true[\s\S]*contentHeight\s*>\s*height\s*\+\s*0\.5[\s\S]*itemAtIndex\(0\)[\s\S]*itemAtIndex\(count\s*-\s*1\)/.test(mainSource))
+		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*rowNeedsDeferredPresentation\(chatModel\.get\(index\)\)[\s\S]*return\s+false[\s\S]*forceLayout\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationFastPath\s*=\s*true[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
 		verify(/id:\s*scopePresentationFastPathTimer[\s\S]*interval:\s*0[\s\S]*completeScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/function\s+onLoadingChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))

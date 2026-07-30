@@ -3313,6 +3313,15 @@ ApplicationWindow {
 							return true
 						if (height <= 1)
 							return false
+						// Reject rich, hydrating rows from the lightweight path before
+						// forceLayout(). A cold attachment-heavy room can otherwise make
+						// that synchronous probe construct and polish the entire visible
+						// delegate tree on one GUI heartbeat merely to discover that the
+						// fast path was never eligible.
+						for (let index = 0; index < count; ++index) {
+							if (rowNeedsDeferredPresentation(chatModel.get(index)))
+								return false
+						}
 						forceLayout()
 						if (contentHeight > height + 0.5 || pendingScopeHydrationCount() > 0)
 							return false
@@ -3321,10 +3330,6 @@ ApplicationWindow {
 						// the stabilization gate even if their current height estimate is small.
 						if (!itemAtIndex(0) || !itemAtIndex(count - 1))
 							return false
-						for (let index = 0; index < count; ++index) {
-							if (rowNeedsDeferredPresentation(chatModel.get(index)))
-								return false
-						}
 						return true
 					}
 
