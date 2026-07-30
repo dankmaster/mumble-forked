@@ -28,6 +28,13 @@
 
 #include <QtCore/QDateTime>
 
+#ifdef Q_OS_WIN
+#	ifndef NOMINMAX
+#		define NOMINMAX
+#	endif
+#	include <windows.h>
+#endif
+
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
 // Preserve the production encoder source verbatim while allowing the explicit
 // E2E build to attest the exact PCM and payload bytes at the libopus boundary.
@@ -48,6 +55,28 @@ static short clampFloatSample(float v) {
 	return static_cast< short >(std::clamp(v, static_cast< float >(std::numeric_limits< short >::min()),
 										   static_cast< float >(std::numeric_limits< short >::max())));
 }
+
+class AudioInputInitializationBackgroundMode final {
+public:
+	AudioInputInitializationBackgroundMode() {
+#ifdef Q_OS_WIN
+		m_active = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
+#endif
+	}
+
+	~AudioInputInitializationBackgroundMode() {
+#ifdef Q_OS_WIN
+		if (m_active) {
+			(void) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+		}
+#endif
+	}
+
+private:
+#ifdef Q_OS_WIN
+	bool m_active = false;
+#endif
+};
 
 static Mumble::InputEnhancement::CpuClass currentInputEnhancementCpuClass(
 	const Mumble::InputEnhancement::Profile profile = Mumble::InputEnhancement::Profile::Original) {
@@ -499,7 +528,6 @@ AudioInput::AudioInput()
 
 	opus_encoder_ctl(opusState, OPUS_SET_VBR(0)); // CBR
 
-	initializeInputEnhancement();
 	m_inputEnhancementProbationServiceTimer.setInterval(250);
 	connect(&m_inputEnhancementProbationServiceTimer, &QTimer::timeout, this, [this]() {
 		const Mumble::InputEnhancement::ProbationSettingsResult result = serviceInputEnhancementProbation();
@@ -515,7 +543,6 @@ AudioInput::AudioInput()
 			qInfo("AudioInput: Input enhancement probation completed successfully");
 		}
 	});
-	m_inputEnhancementProbationServiceTimer.start();
 	qWarning("AudioInput: %d bits/s, %d hz, %d sample", iAudioQuality, iSampleRate, iFrameSize);
 	iEchoFreq = iMicFreq = iSampleRate;
 
@@ -1029,10 +1056,24 @@ void AudioInput::initializeMixer() {
 	int err;
 
 	// AudioInput instances are constructed on the GUI thread before their
-	// backend worker starts. Creating WebRTC's AudioProcessing graph there can
-	// block the first QML heartbeat for a complete frame budget. The mixer is
-	// initialized on the backend worker before the first capture callback, so
-	// prepare the same graph here without delaying window or scope readiness.
+	// backend worker starts. Creating either the selected neural input pipeline
+	// or WebRTC's AudioProcessing graph there can block cold QML startup for
+	// hundreds of milliseconds. The mixer is initialized on the backend worker
+	// before the first capture callback, so prepare both there in Windows'
+	// background-resource mode without delaying window or scope readiness.
+	AudioInputInitializationBackgroundMode backgroundMode;
+	if (!m_inputEnhancementInitialized) {
+		initializeInputEnhancement();
+		m_inputEnhancementInitialized = true;
+		QMetaObject::invokeMethod(
+			this,
+			[this]() {
+				if (!m_inputEnhancementProbationServiceTimer.isActive()) {
+					m_inputEnhancementProbationServiceTimer.start();
+				}
+			},
+			Qt::QueuedConnection);
+	}
 	if (!m_webrtcEchoCanceller) {
 		m_webrtcEchoCanceller = std::make_unique< WebRTCAudioEchoCanceller >(iSampleRate, iFrameSize);
 	}

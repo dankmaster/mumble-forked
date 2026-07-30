@@ -251,6 +251,7 @@ private:
 	Mumble::SpeechCleanup::Selection m_speechCleanupSelection = {};
 	Mumble::SpeechCleanup::TransmitDrain m_speechCleanupTransmitDrain;
 	std::unique_ptr< WebRTCAudioEchoCanceller > m_webrtcEchoCanceller;
+	bool m_inputEnhancementInitialized = false;
 	bool selectCodec();
 	void initializeInputEnhancement();
 	void initializeInputEnhancementProbation(
