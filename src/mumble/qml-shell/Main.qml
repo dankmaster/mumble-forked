@@ -3575,6 +3575,14 @@ ApplicationWindow {
 								}
 							}
 							scopePresentationFinalizeDeadlineTimer.stop()
+							// The visible viewport has passed the settled full-row gate.
+							// Retire the last frame-paced source candidate before revealing
+							// it: that candidate was selected against an older height map and
+							// can now be completely offscreen. Let the next real scroll build
+							// a fresh viewport queue instead of mutating hidden geometry after
+							// the loading surface has gone away.
+							deferredMaterializationTimer.stop()
+							timeline.deferredMaterializationQueue = []
 							timeline.scopePresentationForcedByDeadline =
 								timeline.scopePresentationForcedByDeadline || !!forcedByDeadline
 							timeline.scopeResetPending = false
@@ -3855,9 +3863,7 @@ ApplicationWindow {
 									|| item.accessibilityPooled === true
 									|| item.lightweightDeferredPresentation === true
 									|| (item.richLoaderSuspended !== true
-										&& item.messageRowReady === true
-										&& (item.richResourcesRequired !== true
-											|| item.richResourcesActive === true)))
+										&& item.messageRowReady === true))
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length === 0)
@@ -3960,7 +3966,7 @@ ApplicationWindow {
 						// expand enough to move a previously queued summary completely
 						// offscreen before its 16 ms turn; retaining that stale id would
 						// mutate hidden geometry after the conversation has been revealed.
-						const queued = []
+						const candidates = []
 						const queuedSet = ({})
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
@@ -3972,7 +3978,8 @@ ApplicationWindow {
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								queued.push(stableId)
+								const point = item.mapToItem(timeline, 0, 0)
+								candidates.push({ "id": stableId, "viewportY": point.y })
 								queuedSet[stableId] = true
 							}
 						}
@@ -3998,15 +4005,59 @@ ApplicationWindow {
 							const item = deferredRepeater.itemAt(childIndex)
 							const stableId = item ? String(item.stableId || "") : ""
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								queued.push(stableId)
+								const point = item.mapToItem(timeline, 0, 0)
+								candidates.push({ "id": stableId, "viewportY": point.y })
 								queuedSet[stableId] = true
 							}
 						}
+						// Cold scopes and prepend headers are both anchored from their
+						// newest/bottom edge. Promote that edge first, then rebuild after
+						// ListView polishes the resulting real height. This prevents the
+						// initial all-summary viewport from admitting an entire rich page
+						// that becomes offscreen as soon as its first cards expand.
+						candidates.sort(function(left, right) {
+							return right.viewportY - left.viewportY
+						})
+						const queued = candidates.map(function(candidate) {
+							return candidate.id
+						})
 						deferredMaterializationQueue = queued
 						if (queued.length > 0 && !deferredMaterializationTimer.running)
 							deferredMaterializationTimer.start()
 						else
 							finishRichContentRecoveryIfIdle()
+					}
+
+					function deferredPresentationStillEligible(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0)
+							return false
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (!item || item.lightweightDeferredPresentation !== true
+									|| String(item.stableId || "") !== key || !item.visible)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							return point.y + item.height > 0.5
+								&& point.y < height - 0.5
+						}
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						let requestedItem = null
+						let headerVisible = false
+						for (let childIndex = 0;
+								deferredRepeater && childIndex < deferredRepeater.count; ++childIndex) {
+							const item = deferredRepeater.itemAt(childIndex)
+							if (!item || !item.visible)
+								continue
+							if (String(item.stableId || "") === key)
+								requestedItem = item
+							const point = item.mapToItem(timeline, 0, 0)
+							headerVisible = headerVisible
+								|| (point.y + item.height > 0.5 && point.y < height - 0.5)
+						}
+						return requestedItem !== null && headerVisible
 					}
 
 					function queueVisiblePreviewHydration(allowDuringFinalization) {
@@ -4044,26 +4095,35 @@ ApplicationWindow {
 						let materialized = 0
 						while (queued.length > 0
 								&& materialized < deferredMaterializationsPerFrame) {
-							chatModel.materializeDeferredMessage(queued.shift())
-							++materialized
+							const stableId = String(queued.shift() || "")
+							if (!deferredPresentationStillEligible(stableId))
+								continue
+							if (chatModel.materializeDeferredMessage(stableId))
+								++materialized
 						}
-						deferredMaterializationQueue = queued
+						// Never carry candidates across a geometry-changing promotion.
+						// The post-polish pass below computes the next viewport from scratch.
+						deferredMaterializationQueue = []
 						if (topAnchorActive) {
 							topAnchorSettleTimer.restart()
 							topAnchorFrameTimer.restart()
 						}
-						if (queued.length > 0)
-							deferredMaterializationTimer.start()
-						else {
-							// Materializing a fixed-height header row changes which
-							// deferred row intersects the viewport. Discover that next
-							// row after the proxy models and ListView have polished,
-							// keeping the work bounded to one real row per frame.
-							Qt.callLater(function() {
-								timeline.queueVisibleDeferredMaterialization(
-									timeline.scopePresentationFinalizing)
-							})
-						}
+						const finalizationGeneration = scopePresentationFinalizing
+							? scopePresentationGeneration : -1
+						// Materializing a fixed-height row changes which deferred row
+						// intersects the viewport. Discover that next row only after the
+						// proxy models and ListView have polished. A finalization callback
+						// is generation-bound so it cannot wake stale work after reveal.
+						Qt.callLater(function() {
+							if (finalizationGeneration >= 0
+									&& (timeline.scopePresentationGeneration
+										!== finalizationGeneration
+										|| !timeline.scopePresentationPending
+										|| !timeline.scopePresentationFinalizing))
+								return
+							timeline.queueVisibleDeferredMaterialization(
+								timeline.scopePresentationFinalizing)
+						})
 					}
 
 					function finishRichContentRecoveryIfIdle() {
@@ -4498,7 +4558,11 @@ ApplicationWindow {
 
 					Timer {
 						id: scopePresentationFinalizeQuietTimer
-						interval: 120
+						// Rich rows already expose Ready only after their own 48 ms
+						// materialization settle. One matching quiet interval plus the
+						// final callLater verification is sufficient and keeps real cold
+						// room entry inside the one-second product gate.
+						interval: 48
 						repeat: false
 						onTriggered: timeline.completeScopePresentationFinalization(false)
 					}
@@ -5050,12 +5114,12 @@ ApplicationWindow {
 							if (!messageRowReady)
 								return
 							if (hasPreviewContent && !previewNeedsHydration
-									&& !richResourcesActive) {
+									&& !richResourcesActive)
 								scheduleRichResourceActivation()
-								return
-							}
-							if (richResourceActivationSettleTimer.running)
-								return
+							// The complete message/card tree now owns its final layout
+							// geometry. Do not serialize the next visible outer row behind
+							// poster/player activation: those bounded resources already use
+							// their own per-row 16 ms admission and 48 ms settle timers.
 							const rowId = stableId
 							Qt.callLater(function() {
 								if (rowId === messageDelegate.stableId
