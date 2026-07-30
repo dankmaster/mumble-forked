@@ -3987,10 +3987,11 @@ void ChatTimelineModel::scheduleRichBodyDrain() {
 	if (m_richBodyDrainScheduled || m_readyRichBodies.empty()) return;
 	m_richBodyDrainScheduled = true;
 	// Parsing stays off the GUI thread, but each accepted result can rebuild a
-	// variable-height rich-text delegate. A queued self-call can drain repeatedly
-	// before the scene graph or heartbeat gets a turn, so pace those final model
-	// writes at one result per display frame.
-	QTimer::singleShot(16, this, &ChatTimelineModel::drainRichBodyResults);
+	// variable-height rich-text delegate. Merely waiting one nominal 16 ms frame
+	// still lets several writes overtake the deferred ListView polish on Windows.
+	// Leave a complete heartbeat/render window between results so one row settles
+	// before the next row can invalidate the variable-height timeline.
+	QTimer::singleShot(50, this, &ChatTimelineModel::drainRichBodyResults);
 }
 
 void ChatTimelineModel::drainRichBodyResults() {

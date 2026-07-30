@@ -2634,7 +2634,7 @@ void TestQmlClientModels::chatTimelineDrainsBoundedRichTextBacklog() {
 	const QString scheduleBody = source.mid(scheduleStart, scheduleEnd - scheduleStart);
 	const QString drainBody = source.mid(scheduleEnd, drainEnd - scheduleEnd);
 	QVERIFY(scheduleBody.contains(
-		QStringLiteral("QTimer::singleShot(16, this, &ChatTimelineModel::drainRichBodyResults)")));
+		QStringLiteral("QTimer::singleShot(50, this, &ChatTimelineModel::drainRichBodyResults)")));
 	QVERIFY(!scheduleBody.contains(
 		QStringLiteral("QMetaObject::invokeMethod(this, &ChatTimelineModel::drainRichBodyResults")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int MaxRichBodiesPerBatch = 1")));
@@ -2661,7 +2661,9 @@ void TestQmlClientModels::chatTimelineDrainsBoundedRichTextBacklog() {
 		}
 		return true;
 	};
-	QTRY_VERIFY_WITH_TIMEOUT(fullyHydrated(), 20000);
+	// The production pacing deliberately leaves 50 ms for QML polish between
+	// bodies. Keep this worst-case 540-row contract above its 27 s lower bound.
+	QTRY_VERIFY_WITH_TIMEOUT(fullyHydrated(), 35000);
 }
 
 void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
