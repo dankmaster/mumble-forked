@@ -235,7 +235,7 @@ TestCase {
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
-		verify(/deferredMaterializationsPerFrame:\s*2[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*chatModel\.materializeDeferredMessage\(queued\.shift\(\)\)[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*deferredMaterializationTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
+		verify(/deferredMaterializationsPerFrame:\s*4[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*chatModel\.materializeDeferredMessage\(queued\.shift\(\)\)[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*deferredMaterializationTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
 		const deferredStart = mainSource.indexOf("id: deferredMessageDelegate")
 		const deferredEnd = mainSource.indexOf("DelegateChoice {", deferredStart + 1)
 		verify(deferredStart >= 0 && deferredEnd > deferredStart)
