@@ -4607,23 +4607,6 @@ ApplicationWindow {
 					delegate: DelegateChooser {
 						role: "deferredPresentation"
 						DelegateChoice {
-							roleValue: true
-							Item {
-								id: deferredMessageDelegate
-								required property string stableId
-								readonly property bool performanceTimelineDelegate: true
-								readonly property bool contentNeedsHydration: true
-								width: timeline.width
-								implicitHeight: timeline.deferredMessageRowHeight
-								height: implicitHeight
-								Accessible.ignored: true
-
-								function primaryRichContentViewportBounds() {
-									return null
-								}
-							}
-						}
-						DelegateChoice {
 							Loader {
 								id: asyncMessageDelegate
 								required property string stableId
