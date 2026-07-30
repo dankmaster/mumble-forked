@@ -5006,9 +5006,14 @@ ApplicationWindow {
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
 								width: timeline.width
-								height: item ? item.implicitHeight
-									: Math.max(timeline.deferredMessageRowHeight,
-										deferredPresentationHeight)
+								// Incubation and provider-resource activation can briefly
+								// report a smaller implicitHeight than the lightweight row
+								// that ListView already positioned. Never surrender that
+								// provider-aware reservation: real content may grow beyond
+								// it, but cannot collapse the viewport during Loader handoff.
+								height: Math.max(timeline.deferredMessageRowHeight,
+									deferredPresentationHeight,
+									item ? item.implicitHeight : 0)
 								opacity: timeline.scopePresentationPending ? 0 : 1
 								asynchronous: true
 								// A cold row stays as a fixed-height placeholder until the
