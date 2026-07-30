@@ -517,11 +517,10 @@ void TestQmlClientModels::chatTimelineDirectPrependDoesNotTouchExistingRows() {
 	QVERIFY(model.materializeDeferredMessage(QStringLiteral("older-direct:0")));
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
 	QVERIFY(!model.materializeDeferredMessage(QStringLiteral("older-direct:0")));
-	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
-				.value(QStringLiteral("bodyHydrationPending")).toBool());
+	QVERIFY(model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool());
 	QVERIFY(model.requestBodyHydration(QStringLiteral("older-direct:0")));
-	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
-								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		!model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
 	QVERIFY(!model.requestBodyHydration(QStringLiteral("older-direct:0")));
 }
 
@@ -585,11 +584,10 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	QVERIFY(startsGroupRole >= 0);
 	QVERIFY(model.data(model.index(0, 0), startsGroupRole).toBool());
 	QVERIFY(!model.data(model.index(1, 0), startsGroupRole).toBool());
-	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
-				.value(QStringLiteral("bodyHydrationPending")).toBool());
+	QVERIFY(model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool());
 	QVERIFY(model.requestBodyHydration(QStringLiteral("older-queued:0")));
-	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
-								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		!model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
 	QVERIFY(!model.requestBodyHydration(QStringLiteral("older-queued:0")));
 }
 
@@ -2503,8 +2501,7 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 	// Rich HTML parsing is deliberately kept off the UI thread. The synchronous
 	// insertion exposes safe plain text until the bounded worker result arrives.
 	QCOMPARE(model.get(0).value(QStringLiteral("bodySegments")).toList().size(), 1);
-	QVERIFY(model.get(0).value(QStringLiteral("source")).toMap()
-				.value(QStringLiteral("bodyHydrationPending")).toBool());
+	QVERIFY(model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool());
 	const auto hasParsedFormatting = [&model] {
 		const QVariantList current = model.get(0).value(QStringLiteral("bodySegments")).toList();
 		for (const QVariant &entry : current) {
@@ -2517,9 +2514,20 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 		return false;
 	};
 	QTRY_VERIFY_WITH_TIMEOUT(hasParsedFormatting(), 5000);
-	QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("source")).toMap()
-								.value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		!model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
 	QVERIFY(!changedSpy.isEmpty());
+	const int sourceRole = model.roleNames().key(QByteArrayLiteral("source"), -1);
+	const int bodySegmentsRole = model.roleNames().key(QByteArrayLiteral("bodySegments"), -1);
+	const int hydrationRole =
+		model.roleNames().key(QByteArrayLiteral("bodyHydrationPending"), -1);
+	QVERIFY(sourceRole >= 0);
+	QVERIFY(bodySegmentsRole >= 0);
+	QVERIFY(hydrationRole >= 0);
+	const QList< int > hydrationRoles = qvariant_cast< QList< int > >(changedSpy.constLast().at(2));
+	QVERIFY(hydrationRoles.contains(bodySegmentsRole));
+	QVERIFY(hydrationRoles.contains(hydrationRole));
+	QVERIFY(!hydrationRoles.contains(sourceRole));
 	const QVariantList segments = model.get(0).value(QStringLiteral("bodySegments")).toList();
 	QVERIFY(!segments.isEmpty());
 	QString renderedText;

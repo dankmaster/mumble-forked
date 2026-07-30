@@ -3276,8 +3276,7 @@ ApplicationWindow {
 					function rowNeedsDeferredPresentation(row) {
 						if (!row)
 							return false
-						const source = row.source || ({})
-						if (source.bodyHydrationPending === true)
+						if (row.bodyHydrationPending === true)
 							return true
 						const preview = row.preview || ({})
 						if (Object.keys(preview).length > 0)
@@ -4547,7 +4546,7 @@ ApplicationWindow {
 						readonly property bool attachmentNeedsHydration: (attachments || []).some(function(attachment) {
 							return !!attachment && String(attachment.state || "").toLowerCase() === "loading"
 						})
-						readonly property bool bodyNeedsHydration: !!source.bodyHydrationPending
+						readonly property bool bodyNeedsHydration: bodyHydrationPending
 						readonly property bool backendContentNeedsHydration: previewNeedsHydration
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
@@ -4731,6 +4730,7 @@ ApplicationWindow {
                         required property string replySnippet
                         required property var reactions
                         required property var bodySegments
+						required property bool bodyHydrationPending
                         required property var preview
 						required property var attachments
                         required property var source

@@ -2100,6 +2100,7 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case DeferredPresentationRole: return row.value(QStringLiteral("deferredPresentation"));
 		case ModelStartsGroupRole: return row.value(QStringLiteral("modelStartsGroup"), true);
 		case DateBoundaryRole: return row.value(QStringLiteral("dateBoundary"), true);
+		case BodyHydrationPendingRole: return row.value(QStringLiteral("bodyHydrationPending"));
 		default: return {};
 	}
 }
@@ -2119,7 +2120,8 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { SourceRole, "source" }, { SectionKindRole, "sectionKind" },
 			 { DeferredPresentationRole, "deferredPresentation" },
 			 { ModelStartsGroupRole, "modelStartsGroup" },
-			 { DateBoundaryRole, "dateBoundary" } };
+			 { DateBoundaryRole, "dateBoundary" },
+			 { BodyHydrationPendingRole, "bodyHydrationPending" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -2137,7 +2139,7 @@ int StableListModel::indexOf(const QString &stableId) const {
 QList< int > StableListModel::changedRoles(const QVariantMap &before, const QVariantMap &after) {
 	if (before == after) return {};
 	QList< int > roles { PayloadRole };
-	for (int role = StableIdRole; role <= DateBoundaryRole; ++role) {
+	for (int role = StableIdRole; role <= BodyHydrationPendingRole; ++role) {
 		if (role != PayloadRole && valueForRole(before, role) != valueForRole(after, role)) roles.push_back(role);
 	}
 	return roles;
@@ -3343,8 +3345,6 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	// SourceRole doubled dormant-card memory before playback was ever activated.
 	source.remove(QStringLiteral("preview"));
 	source.remove(QStringLiteral("previewStub"));
-	if (bodyHydrationPending) source.insert(QStringLiteral("bodyHydrationPending"), true);
-	else source.remove(QStringLiteral("bodyHydrationPending"));
 
 	return { { QStringLiteral("id"), messageId },
 			 { QStringLiteral("title"), message.value(QStringLiteral("actor"),
@@ -3371,6 +3371,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("deferredPresentation"), false },
 			 { QStringLiteral("modelStartsGroup"), true },
 			 { QStringLiteral("dateBoundary"), true },
+			 { QStringLiteral("bodyHydrationPending"), bodyHydrationPending },
 			 { QStringLiteral("source"), source } };
 }
 
@@ -4002,16 +4003,16 @@ void ChatTimelineModel::drainRichBodyResults() {
 		const int rowIndex = indexOf(ready.messageId);
 		if (rowIndex < 0) continue;
 		QVariantMap row = get(rowIndex);
-		QVariantMap source = row.value(QStringLiteral("source")).toMap();
 		const bool segmentsChanged = row.value(QStringLiteral("bodySegments")).toList() != ready.segments;
-		const bool hydrationPending = source.value(QStringLiteral("bodyHydrationPending")).toBool();
+		const bool hydrationPending =
+			row.value(QStringLiteral("bodyHydrationPending")).toBool();
 		if (!segmentsChanged && !hydrationPending) continue;
 		if (segmentsChanged) row.insert(QStringLiteral("bodySegments"), ready.segments);
-		source.remove(QStringLiteral("bodyHydrationPending"));
-		row.insert(QStringLiteral("source"), source);
+		row.insert(QStringLiteral("bodyHydrationPending"), false);
 		// The parser result is owned by this model and is accepted only after both
 		// the stable message id and expected cache key still match. It must be able
 		// to land while the visual-fixture override rejects unrelated live writes.
+		mumble::chatperf::ScopedDuration trace("qml.chat.rich_body.apply");
 		upsertRowFromInternalResult(row);
 	}
 	if (!m_readyRichBodies.empty()) scheduleRichBodyDrain();

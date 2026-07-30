@@ -355,7 +355,8 @@ public:
 		SectionKindRole,
 		DeferredPresentationRole,
 		ModelStartsGroupRole,
-		DateBoundaryRole
+		DateBoundaryRole,
+		BodyHydrationPendingRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
