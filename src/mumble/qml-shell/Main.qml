@@ -1951,6 +1951,7 @@ ApplicationWindow {
 				"visibleRowMaterializedCount": visiblePresentation.rowMaterializedCount,
 				"visibleRowLoaderReadyCount": visiblePresentation.rowLoaderReadyCount,
 				"visiblePreviewReadyCount": visiblePresentation.previewReadyCount,
+				"visibleRows": visiblePresentation.rows,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
 				// The top anchor is a transparent geometry guard while suspended rich
@@ -3707,7 +3708,8 @@ ApplicationWindow {
 							"outerLoaderReadyCount": 0,
 							"rowMaterializedCount": 0,
 							"rowLoaderReadyCount": 0,
-							"previewReadyCount": 0
+							"previewReadyCount": 0,
+							"rows": []
 						}
 
 						function record(item) {
@@ -3718,6 +3720,21 @@ ApplicationWindow {
 							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
 								return
 							++diagnostics.visibleCount
+							const preview = item.preview || ({})
+							diagnostics.rows.push({
+								"id": String(item.stableId || ""),
+								"title": String(item.title || ""),
+								"height": Number(item.height || 0),
+								"estimatedHeight": Number(item.deferredPresentationHeight || 0),
+								"loadedImplicitHeight": item.item
+									? Number(item.item.implicitHeight || 0) : 0,
+								"lightweight": item.lightweightDeferredPresentation === true,
+								"outerReady": item.status === Loader.Ready,
+								"messageReady": item.messageRowReady === true,
+								"previewAspect": String(preview.embedAspect || ""),
+								"previewSize": String(preview.previewSize || ""),
+								"previewProvider": String(preview.provider || preview.siteName || "")
+							})
 							if (item.lightweightDeferredPresentation === true) {
 								if (String(item.presentationSummary || "").trim().length > 0) {
 									++diagnostics.deferredSummaryCount
