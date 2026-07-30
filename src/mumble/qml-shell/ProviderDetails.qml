@@ -1462,7 +1462,10 @@ FocusScope {
 		property bool presentationSettled: false
 		anchors.left: parent.left
 		anchors.right: parent.right
-		active: root.visible
+		// Incubate only once details first become visible. Retain the completed
+		// presentation across transient metadata states so a late provider update
+		// cannot tear down and rebuild the same tree (or change card geometry).
+		active: root.visible || detailsLoader.item !== null
 		asynchronous: true
 		onActiveChanged: {
 			presentationSettled = false
