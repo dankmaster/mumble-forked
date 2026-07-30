@@ -3240,6 +3240,8 @@ ApplicationWindow {
 							richLoaderResumeTimer.stop()
 							richLoaderResumeActiveId = ""
 							deferredMaterializationTimer.stop()
+							deferredMaterializationQueue = []
+							deferredMaterializationActiveId = ""
 							suspendRichContentForScroll()
 							return
 						}
@@ -3262,6 +3264,10 @@ ApplicationWindow {
 					property int prependAnchorCorrectionFrames: 0
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
+					// Source promotion and asynchronous row construction are one
+					// transaction. Do not admit another fixed-height summary until the
+					// previous rich row owns its final visible geometry.
+					property string deferredMaterializationActiveId: ""
 					readonly property real deferredMessageRowHeight: 58
 					// The queued tail itself is the supersede window: no full row is
 					// admitted until the final append has completed. Yield one event turn
@@ -3349,6 +3355,7 @@ ApplicationWindow {
 						richLoaderResumeActiveId = ""
 						deferredMaterializationTimer.stop()
 						deferredMaterializationQueue = []
+						deferredMaterializationActiveId = ""
 						coldScopeMaterializationDelayTimer.restart()
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
@@ -3583,6 +3590,7 @@ ApplicationWindow {
 							// the loading surface has gone away.
 							deferredMaterializationTimer.stop()
 							timeline.deferredMaterializationQueue = []
+							timeline.deferredMaterializationActiveId = ""
 							timeline.scopePresentationForcedByDeadline =
 								timeline.scopePresentationForcedByDeadline || !!forcedByDeadline
 							timeline.scopeResetPending = false
@@ -3960,6 +3968,7 @@ ApplicationWindow {
 						if (richScrollInProgress
 								|| coldScopeMaterializationDelayTimer.running
 								|| prependAnchorActive
+								|| deferredMaterializationActiveId.length > 0
 								|| (scopePresentationPending && !pendingAllowed))
 							return
 						// Rebuild from the current viewport on every pass. A rich row can
@@ -4098,8 +4107,11 @@ ApplicationWindow {
 							const stableId = String(queued.shift() || "")
 							if (!deferredPresentationStillEligible(stableId))
 								continue
+							deferredMaterializationActiveId = stableId
 							if (chatModel.materializeDeferredMessage(stableId))
 								++materialized
+							else
+								deferredMaterializationActiveId = ""
 						}
 						// Never carry candidates across a geometry-changing promotion.
 						// The post-polish pass below computes the next viewport from scratch.
@@ -4111,15 +4123,36 @@ ApplicationWindow {
 						const finalizationGeneration = scopePresentationFinalizing
 							? scopePresentationGeneration : -1
 						// Materializing a fixed-height row changes which deferred row
-						// intersects the viewport. Discover that next row only after the
-						// proxy models and ListView have polished. A finalization callback
-						// is generation-bound so it cannot wake stale work after reveal.
+						// intersects the viewport. Wake its asynchronous outer/message
+						// loaders now, but keep source admission locked until that row
+						// reports its real geometry through completeDeferredMaterialization().
 						Qt.callLater(function() {
 							if (finalizationGeneration >= 0
 									&& (timeline.scopePresentationGeneration
 										!== finalizationGeneration
 										|| !timeline.scopePresentationPending
 										|| !timeline.scopePresentationFinalizing))
+								return
+							if (timeline.scopePresentationFinalizing)
+								timeline.positionTailImmediately()
+							timeline.queueRichLoaderResumes()
+						})
+					}
+
+					function completeDeferredMaterialization(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0 || key !== deferredMaterializationActiveId)
+							return
+						deferredMaterializationActiveId = ""
+						if (scopePresentationFinalizing && stickToBottom) {
+							positionTailImmediately()
+							restoringBottom = true
+							containTailMessageWhenPossible()
+							restoringBottom = false
+						}
+						const generation = scopePresentationGeneration
+						Qt.callLater(function() {
+							if (generation !== timeline.scopePresentationGeneration)
 								return
 							timeline.queueVisibleDeferredMaterialization(
 								timeline.scopePresentationFinalizing)
@@ -4333,6 +4366,13 @@ ApplicationWindow {
 					onContentHeightChanged: {
 						if (scopePresentationPending) {
 							noteScopePresentationMutation()
+							// Keep the hidden cold transaction anchored to its real tail
+							// while the single admitted row replaces its 58 px estimate.
+							// Otherwise the obsolete top viewport admits the whole page
+							// before the first rich row has finished polishing.
+							if (scopePresentationFinalizing && stickToBottom
+									&& !restoringBottom)
+								positionTailImmediately()
 							return
 						}
 						if (scopePresentationObservationActive)
@@ -5113,6 +5153,7 @@ ApplicationWindow {
 						function completeRichLoaderResumeWhenReady() {
 							if (!messageRowReady)
 								return
+							timeline.completeDeferredMaterialization(stableId)
 							if (hasPreviewContent && !previewNeedsHydration
 									&& !richResourcesActive)
 								scheduleRichResourceActivation()
