@@ -516,8 +516,6 @@ AudioInput::AudioInput()
 		}
 	});
 	m_inputEnhancementProbationServiceTimer.start();
-	m_webrtcEchoCanceller = std::make_unique< WebRTCAudioEchoCanceller >(iSampleRate, iFrameSize);
-
 	qWarning("AudioInput: %d bits/s, %d hz, %d sample", iAudioQuality, iSampleRate, iFrameSize);
 	iEchoFreq = iMicFreq = iSampleRate;
 
@@ -1029,6 +1027,15 @@ AudioInput::inMixerFunc AudioInput::chooseMixer(const unsigned int nchan, Sample
 
 void AudioInput::initializeMixer() {
 	int err;
+
+	// AudioInput instances are constructed on the GUI thread before their
+	// backend worker starts. Creating WebRTC's AudioProcessing graph there can
+	// block the first QML heartbeat for a complete frame budget. The mixer is
+	// initialized on the backend worker before the first capture callback, so
+	// prepare the same graph here without delaying window or scope readiness.
+	if (!m_webrtcEchoCanceller) {
+		m_webrtcEchoCanceller = std::make_unique< WebRTCAudioEchoCanceller >(iSampleRate, iFrameSize);
+	}
 
 	if (srsMic)
 		speex_resampler_destroy(srsMic);
