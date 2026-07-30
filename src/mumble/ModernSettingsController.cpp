@@ -3557,6 +3557,13 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	refreshModernThemeCatalog();
 	forceModernLayout();
 	setActivePage(pageName);
+	if (m_activePage == QLatin1String("audioInput") && Global::get().inputEnhancementPackageVerifier) {
+		// The real Quality/Voice Focus capability probe initializes a neural
+		// model and processes a synthetic corpus. It is relevant only while the
+		// user is reviewing input-enhancement choices, so do not spend that
+		// memory/I/O budget during every ordinary reconnect and cold chat load.
+		Global::get().inputEnhancementPackageVerifier->startManualProfileCpuClassProbe();
+	}
 }
 
 void ModernSettingsController::setStonksContext(const QVariantMap &stonksContext) {

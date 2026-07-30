@@ -880,8 +880,6 @@ int main(int argc, char **argv) {
 		qInfo("Verified signed input enhancement package catalog %s",
 			  qUtf8Printable(Global::get().inputEnhancementPackageVerifier->catalogRevision()));
 	}
-	Global::get().inputEnhancementPackageVerifier->startManualProfileCpuClassProbe();
-
 	Mumble::InputEnhancement::InputEnhancementPolicyController::Configuration policyConfiguration;
 	policyConfiguration.cacheRoot =
 		QDir(Global::get().qdBasePath.filePath(QStringLiteral("input-enhancement-policy")));
