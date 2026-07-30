@@ -3802,6 +3802,18 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 		"if (!fastFirstPaint || m_persistentChatPreviews.contains(*previewKey))")));
 	QVERIFY(!messageStateBody.contains(QStringLiteral(
 		"restorePersistentChatPreviewDiskCache(*previewKey)")));
+	const qsizetype hydrationFlushStart = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::flushModernShellPreviewHydrationQueue()"));
+	const qsizetype hydrationFlushEnd = mainWindowSource.indexOf(
+		QStringLiteral("QVariantMap MainWindow::modernTrayMenuUiTweaks() const"),
+		hydrationFlushStart);
+	QVERIFY(hydrationFlushStart >= 0);
+	QVERIFY(hydrationFlushEnd > hydrationFlushStart);
+	const QString hydrationFlushBody =
+		mainWindowSource.mid(hydrationFlushStart, hydrationFlushEnd - hydrationFlushStart);
+	QVERIFY(hydrationFlushBody.contains(QStringLiteral("chatModel()->presentationBusy()")));
+	QVERIFY(hydrationFlushBody.contains(QStringLiteral(
+		"m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90)")));
 
 	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));

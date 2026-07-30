@@ -25865,6 +25865,13 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 		return;
 	}
 
+	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
+		if (m_modernShellPreviewHydrationTimer) {
+			m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
+		}
+		return;
+	}
+
 	const int budget = m_modernShellPreviewHydrationLinkDense ? 1 : 2;
 	int processed    = 0;
 	while (!m_modernShellPreviewHydrationQueue.isEmpty() && processed < budget) {

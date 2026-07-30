@@ -3047,12 +3047,16 @@ ApplicationWindow {
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
 							chatModel.presentationBusy = true
+							previewHydrationTimer.stop()
 							richContentResumeTimer.stop()
 							richLoaderResumeTimer.stop()
 							deferredMaterializationTimer.stop()
 							suspendRichContentForScroll()
 							return
 						}
+						if (Object.keys(root.pendingPreviewHydrationIds).length > 0
+								&& !previewHydrationTimer.running)
+							previewHydrationTimer.start()
 						scheduleRichContentResume()
 					}
 					property string prependAnchorId: ""

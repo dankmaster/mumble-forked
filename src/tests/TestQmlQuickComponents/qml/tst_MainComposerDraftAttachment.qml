@@ -297,6 +297,7 @@ TestCase {
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*suspendRichContentForScroll\(\)/.test(mainSource))
+		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*previewHydrationTimer\.stop\(\)[\s\S]*Object\.keys\(root\.pendingPreviewHydrationIds\)\.length\s*>\s*0[\s\S]*previewHydrationTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+suspendRichContentForScroll\(\)[\s\S]*richLoaderResumeQueue\s*=\s*\[\][\s\S]*item\.richResourcesActive\s*=\s*false[\s\S]*item\.inVisibleViewport\s*===\s*true[\s\S]*item\.richLoaderSuspended\s*=\s*true/.test(mainSource))
 		verify(/item\.richLoaderSuspended\s*!==\s*true[\s\S]*item\.richResourcesActive\s*===\s*true/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*function\s+queueRichLoaderResumes\(\)[\s\S]*candidates\.sort[\s\S]*richLoaderResumeQueue/.test(mainSource))
