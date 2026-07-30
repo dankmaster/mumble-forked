@@ -4521,8 +4521,16 @@ ApplicationWindow {
 								chatModel.requestBodyHydration(stableId)
 						}
 						function resumeRichContentAfterScroll() {
-							if (!timeline.richScrollInProgress)
+							if (!timeline.richScrollInProgress) {
 								richLoaderSuspended = false
+								// Delegates discovered by the retention window stay as
+								// geometry-only shells while the gesture is active. Let the
+								// ordered resume queue promote one visible message tree per
+								// frame instead of allowing every visible Loader binding to
+								// activate together on the first idle polish pass.
+								if (!logEntry && inVisibleViewport)
+									messageRowMaterialized = true
+							}
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
@@ -4819,9 +4827,7 @@ ApplicationWindow {
 							id: messageRowLoader
 							anchors.fill: parent
 							active: !messageDelegate.logEntry
-								&& (messageDelegate.messageRowMaterialized
-									|| (!timeline.richScrollInProgress
-										&& messageDelegate.inVisibleViewport))
+								&& messageDelegate.messageRowMaterialized
 							asynchronous: true
 							visible: active
 									onLoaded: {

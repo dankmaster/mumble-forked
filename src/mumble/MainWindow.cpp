@@ -17601,6 +17601,50 @@ namespace {
 		return state;
 	}
 
+	QVariantMap modernShellStonksPresentationState(const QVariantMap &completeState,
+												   const bool includeRoomDashboard) {
+		QVariantMap state = includeRoomDashboard && !completeState.isEmpty()
+								? completeState
+								: stonksHeaderState();
+		const QVariantMap currentHeader = stonksHeaderState();
+		const bool automationHeader =
+			completeState.value(QStringLiteral("automationHeaderVisible"), false).toBool();
+		for (auto it = currentHeader.cbegin(); it != currentHeader.cend(); ++it) {
+			if (!automationHeader || !completeState.contains(it.key())) {
+				state.insert(it.key(), it.value());
+			} else {
+				state.insert(it.key(), completeState.value(it.key()));
+			}
+		}
+		if (completeState.isEmpty() || includeRoomDashboard) {
+			return state;
+		}
+
+		// The shell mounts four ticker placements even though only one is visible.
+		// Keep portfolio revisions, valuation history, leaderboard rows and dialog
+		// data out of their always-live binding graph. The complete state remains
+		// owned by MainWindow and is exposed when the actual Stonks room or dialog
+		// is opened.
+		static const QStringList tickerKeys {
+			QStringLiteral("loading"),
+			QStringLiteral("error"),
+			QStringLiteral("status"),
+			QStringLiteral("automationHeaderVisible"),
+			QStringLiteral("disableTickerAnimation"),
+			QStringLiteral("feedPreferences"),
+			QStringLiteral("pinnedTickers"),
+			QStringLiteral("personalTickers"),
+			QStringLiteral("popularTickers"),
+			QStringLiteral("tickerQuotes")
+		};
+		for (const QString &key : tickerKeys) {
+			if (completeState.contains(key)) {
+				state.insert(key, completeState.value(key));
+			}
+		}
+		return state;
+	}
+
 	QStringList stonksTickerSymbols(const QVariantMap &state) {
 		const QVariantMap preferences = state.value(QStringLiteral("feedPreferences")).toMap();
 		QStringList symbols;
@@ -26769,17 +26813,18 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
-	QVariantMap stonksState = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
-	const QVariantMap currentStonksHeader = stonksHeaderState();
-	const bool automationStonksHeader =
-		stonksState.value(QStringLiteral("automationHeaderVisible"), false).toBool();
-	for (auto it = currentStonksHeader.cbegin(); it != currentStonksHeader.cend(); ++it) {
-		if (automationStonksHeader && stonksState.contains(it.key())) {
-			continue;
-		}
-		stonksState.insert(it.key(), it.value());
+	bool activeStonksRoom = false;
+	if (m_persistentChatSelectedScopeValue.has_value()
+		&& *m_persistentChatSelectedScopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+		const auto textChannelIt = m_persistentTextChannels.constFind(m_persistentChatSelectedScopeID);
+		activeStonksRoom =
+			(Global::get().uiStonksTextChannelID > 0
+			 && m_persistentChatSelectedScopeID == Global::get().uiStonksTextChannelID)
+			|| (textChannelIt != m_persistentTextChannels.cend()
+				&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks"));
 	}
-	appState.insert(QStringLiteral("stonks"), stonksState);
+	appState.insert(QStringLiteral("stonks"),
+					modernShellStonksPresentationState(m_stonksState, activeStonksRoom));
 	appState.insert(QStringLiteral("collapsedNavigationSections"),
 					Global::get().s.qslModernShellCollapsedNavigationSections);
 	const QVariantMap motdViewState = modernMotdServerViewState();

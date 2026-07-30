@@ -1380,6 +1380,13 @@ void TestQmlClientModels::stonksRequiresNegotiatedRootAclPermission() {
 	QVERIFY(!headerState.isEmpty());
 	QVERIFY(headerState.contains(QStringLiteral("\"accessSupported\"")));
 	QVERIFY(headerState.contains(QStringLiteral("\"allowed\"")));
+	const QString presentationState = methodBody(
+		QStringLiteral("QVariantMap modernShellStonksPresentationState"),
+		QStringLiteral("QStringList stonksTickerSymbols"));
+	QVERIFY(!presentationState.isEmpty());
+	QVERIFY(presentationState.contains(QStringLiteral("includeRoomDashboard")));
+	QVERIFY(presentationState.contains(QStringLiteral("\"tickerQuotes\"")));
+	QVERIFY(!presentationState.contains(QStringLiteral("\"valuationPoints\"")));
 
 	const QString permissionUpdate = methodBody(
 		QStringLiteral("void MainWindow::handleStonksPermissionUpdate()"),
@@ -1396,6 +1403,8 @@ void TestQmlClientModels::stonksRequiresNegotiatedRootAclPermission() {
 	QVERIFY(roomState.contains(QStringLiteral("canUseStonks")));
 	QVERIFY(roomState.contains(QStringLiteral("modernShellStonksAllowed()")));
 	QVERIFY(roomState.contains(QStringLiteral("if (stonksRoom && !canUseStonks)")));
+	QVERIFY(roomState.contains(QStringLiteral("activeStonksRoom")));
+	QVERIFY(roomState.contains(QStringLiteral("modernShellStonksPresentationState")));
 
 	const QString actions = methodBody(
 		QStringLiteral("bool MainWindow::handleModernShellAppActionPayload"),
