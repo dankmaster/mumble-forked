@@ -3981,12 +3981,16 @@ void ChatTimelineModel::launchRichBodyParseBatch() {
 void ChatTimelineModel::scheduleRichBodyDrain() {
 	if (m_richBodyDrainScheduled || m_readyRichBodies.empty()) return;
 	m_richBodyDrainScheduled = true;
-	QMetaObject::invokeMethod(this, &ChatTimelineModel::drainRichBodyResults, Qt::QueuedConnection);
+	// Parsing stays off the GUI thread, but each accepted result can rebuild a
+	// variable-height rich-text delegate. A queued self-call can drain repeatedly
+	// before the scene graph or heartbeat gets a turn, so pace those final model
+	// writes at one result per display frame.
+	QTimer::singleShot(16, this, &ChatTimelineModel::drainRichBodyResults);
 }
 
 void ChatTimelineModel::drainRichBodyResults() {
 	m_richBodyDrainScheduled = false;
-	constexpr int MaxResultsPerTurn = 32;
+	constexpr int MaxResultsPerTurn = 1;
 	for (int applied = 0; applied < MaxResultsPerTurn && !m_readyRichBodies.empty(); ++applied) {
 		ReadyRichBody ready = std::move(m_readyRichBodies.front());
 		m_readyRichBodies.pop_front();

@@ -2609,6 +2609,28 @@ void TestQmlClientModels::chatTimelineCompletesOwnedRichParseUnderVisualOverride
 }
 
 void TestQmlClientModels::chatTimelineDrainsBoundedRichTextBacklog() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/QmlClientModels.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "QmlClientModels.cpp test data was not found");
+
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const qsizetype scheduleStart =
+		source.indexOf(QStringLiteral("void ChatTimelineModel::scheduleRichBodyDrain()"));
+	const qsizetype scheduleEnd =
+		source.indexOf(QStringLiteral("void ChatTimelineModel::drainRichBodyResults()"), scheduleStart);
+	const qsizetype drainEnd = source.indexOf(QStringLiteral("\nnamespace {"), scheduleEnd);
+	QVERIFY(scheduleStart >= 0);
+	QVERIFY(scheduleEnd > scheduleStart);
+	QVERIFY(drainEnd > scheduleEnd);
+	const QString scheduleBody = source.mid(scheduleStart, scheduleEnd - scheduleStart);
+	const QString drainBody = source.mid(scheduleEnd, drainEnd - scheduleEnd);
+	QVERIFY(scheduleBody.contains(
+		QStringLiteral("QTimer::singleShot(16, this, &ChatTimelineModel::drainRichBodyResults)")));
+	QVERIFY(!scheduleBody.contains(
+		QStringLiteral("QMetaObject::invokeMethod(this, &ChatTimelineModel::drainRichBodyResults")));
+	QVERIFY(drainBody.contains(QStringLiteral("constexpr int MaxResultsPerTurn = 1")));
+
 	ChatTimelineModel model;
 	QVariantList messages;
 	messages.reserve(540);
