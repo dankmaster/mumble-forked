@@ -623,11 +623,11 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 5000);
 	QCOMPARE(model.rowCount(), 14);
 	QCOMPARE(pendingSpy.count(), 2);
-	QCOMPARE(insertSpy.count(), 4);
+	QCOMPARE(insertSpy.count(), 7);
 	for (const QList< QVariant > &arguments : insertSpy) {
 		QCOMPARE(arguments.at(1).toInt(), 0);
 		QVERIFY(arguments.at(2).toInt() >= arguments.at(1).toInt());
-		QVERIFY(arguments.at(2).toInt() - arguments.at(1).toInt() < 4);
+		QVERIFY(arguments.at(2).toInt() - arguments.at(1).toInt() < 2);
 	}
 	QCOMPARE(resetSpy.count(), 0);
 	QCOMPARE(model.presentationModel()->rowCount(), 1);
