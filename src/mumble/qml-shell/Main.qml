@@ -3240,6 +3240,12 @@ ApplicationWindow {
 						richScrollRetentionRampTimer.stop()
 						richScrollRetentionBuffer = 0
 						richScrollRetentionTarget = 0
+						// A provider/image result from the retiring scope may arrive
+						// between the selection change and the replacement snapshot.
+						// Keep those DTO updates in the existing bounded source queue
+						// until the new scope is stable; otherwise QML can polish a rich
+						// card that is immediately removed in the same cold-entry window.
+						chatModel.presentationBusy = true
 						releasePrependAnchor()
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
@@ -3351,6 +3357,7 @@ ApplicationWindow {
 						scopePresentationObservationActive = count > 0
 						if (scopePresentationObservationActive)
 							scopePresentationObservationTimer.restart()
+						chatModel.presentationBusy = false
 						markVisibleScopeReadIfEligible()
 						return true
 					}
@@ -3444,6 +3451,7 @@ ApplicationWindow {
 							timeline.scopePresentationFinalizing = false
 							timeline.scopePresentationObservationActive = true
 							scopePresentationObservationTimer.restart()
+							timeline.scheduleRichContentResume()
 							Qt.callLater(function() {
 								if (generation === timeline.scopePresentationGeneration)
 									timeline.queueVisiblePreviewHydration()
@@ -3831,6 +3839,8 @@ ApplicationWindow {
 
 					function finishRichContentRecoveryIfIdle() {
 						if (richScrollInProgress)
+							return
+						if (scopePresentationPending)
 							return
 						if (richContentResumeTimer.running || richLoaderResumeTimer.running
 								|| deferredMaterializationTimer.running
