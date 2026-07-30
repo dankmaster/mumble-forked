@@ -119,6 +119,9 @@ TestCase {
 		const header = loader.item
 		header.tickerDirection = "left"
 		header.tickerSpeed = "fast"
+		tryVerify(function() {
+			return findChild(header, "stonksTickerHorizontalTrack") !== null
+		})
 		const track = findChild(header, "stonksTickerHorizontalTrack")
 		const animation = findChild(header, "stonksTickerHorizontalAnimation")
 		verify(track !== null && animation !== null)
@@ -143,6 +146,9 @@ TestCase {
 		loader.width = 620
 
 		const viewport = findChild(header, "stonksTickerViewport")
+		tryVerify(function() {
+			return findChild(header, "stonksTickerHorizontalTrack") !== null
+		})
 		const track = findChild(header, "stonksTickerHorizontalTrack")
 		const animation = findChild(header, "stonksTickerHorizontalAnimation")
 		verify(viewport !== null && track !== null && animation !== null)
@@ -167,6 +173,9 @@ TestCase {
 		header.tickerDirection = "up"
 
 		const viewport = findChild(header, "stonksTickerViewport")
+		tryVerify(function() {
+			return findChild(header, "stonksTickerVerticalTrack") !== null
+		})
 		const track = findChild(header, "stonksTickerVerticalTrack")
 		const animation = findChild(header, "stonksTickerVerticalAnimation")
 		verify(viewport !== null && track !== null && animation !== null)
@@ -180,6 +189,9 @@ TestCase {
 		const header = loader.item
 		header.tickerDirection = "left"
 		header.tickerSpeed = "fast"
+		tryVerify(function() {
+			return findChild(header, "stonksTickerHorizontalTrack") !== null
+		})
 		const track = findChild(header, "stonksTickerHorizontalTrack")
 		const animation = findChild(header, "stonksTickerHorizontalAnimation")
 		verify(track !== null && animation !== null)
@@ -190,6 +202,21 @@ TestCase {
 		header.stonks = refreshedState
 		wait(80)
 		verify(track.x < beforeRefreshX - 1)
+	}
+
+	function test_only_the_active_ticker_orientation_is_materialized() {
+		const header = loader.item
+		header.tickerDirection = "left"
+		tryVerify(function() {
+			return findChild(header, "stonksTickerHorizontalTrack") !== null
+		})
+		compare(findChild(header, "stonksTickerVerticalTrack"), null)
+
+		header.tickerDirection = "up"
+		tryVerify(function() {
+			return findChild(header, "stonksTickerVerticalTrack") !== null
+		})
+		compare(findChild(header, "stonksTickerHorizontalTrack"), null)
 	}
 
 	function test_pointer_focus_does_not_leave_ticker_paused() {

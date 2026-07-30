@@ -277,64 +277,79 @@ AbstractButton {
 				clip: true
 				visible: !root.loading && root.errorText.length === 0
 
-				Row {
-					id: horizontalTrack
-					objectName: "stonksTickerHorizontalTrack"
-					readonly property real sequenceTravel: horizontalPrimary.width + spacing
-					readonly property int requiredCopyCount: sequenceTravel > 0
-						? Math.max(2, Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
-						: 2
+				Loader {
+					id: horizontalTrackLoader
 					anchors.verticalCenter: parent.verticalCenter
-					spacing: Theme.space4
-					visible: root.horizontalMovement
-
-					Row {
-						id: horizontalPrimary
-						spacing: Theme.space4
-						Repeater {
-							model: root.tickerRows
-							delegate: tickerDelegate
-						}
-					}
-					Repeater {
-						model: horizontalTrack.requiredCopyCount - 1
-						delegate: Row {
+					active: root.horizontalMovement && tickerViewport.visible
+					asynchronous: true
+					sourceComponent: Component {
+						Row {
+							objectName: "stonksTickerHorizontalTrack"
+							readonly property real sequenceTravel: horizontalPrimary.width + spacing
+							readonly property int requiredCopyCount: sequenceTravel > 0
+								? Math.max(2,
+									Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
+								: 2
 							spacing: Theme.space4
+
+							Row {
+								id: horizontalPrimary
+								spacing: Theme.space4
+								Repeater {
+									model: root.tickerRows
+									delegate: tickerDelegate
+								}
+							}
 							Repeater {
-								model: root.tickerRows
-								delegate: tickerDelegate
+								model: parent.requiredCopyCount - 1
+								delegate: Row {
+									spacing: Theme.space4
+									Repeater {
+										model: root.tickerRows
+										delegate: tickerDelegate
+									}
+								}
 							}
 						}
 					}
 				}
 
-				Column {
-					id: verticalTrack
-					objectName: "stonksTickerVerticalTrack"
-					readonly property real sequenceTravel: verticalPrimary.height + spacing
-					readonly property int requiredCopyCount: sequenceTravel > 0
-						? Math.max(2, Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
-						: 2
-					width: parent.width
-					spacing: Theme.space2
-					visible: !root.horizontalMovement
-					Column {
-						id: verticalPrimary
-						width: parent.width
-						spacing: Theme.space2
-						Repeater {
-							model: root.tickerRows
-							delegate: tickerDelegate
-						}
-					}
-					Repeater {
-						model: verticalTrack.requiredCopyCount - 1
-						delegate: Column {
-							width: verticalTrack.width
+				Loader {
+					id: verticalTrackLoader
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.verticalCenter: parent.verticalCenter
+					active: !root.horizontalMovement && tickerViewport.visible
+					asynchronous: true
+					sourceComponent: Component {
+						Column {
+							objectName: "stonksTickerVerticalTrack"
+							readonly property real sequenceTravel: verticalPrimary.height + spacing
+							readonly property int requiredCopyCount: sequenceTravel > 0
+								? Math.max(2,
+									Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
+								: 2
+							width: parent.width
 							spacing: Theme.space2
+							Column {
+								id: verticalPrimary
+								width: parent.width
+								spacing: Theme.space2
+								Repeater {
+									model: root.tickerRows
+									delegate: tickerDelegate
+								}
+							}
 							Repeater {
-								model: root.tickerRows
-								delegate: tickerDelegate
+								model: parent.requiredCopyCount - 1
+								delegate: Column {
+									width: verticalTrackLoader.width
+									spacing: Theme.space2
+									Repeater {
+										model: root.tickerRows
+										delegate: tickerDelegate
+									}
+								}
 							}
 						}
 					}
@@ -343,23 +358,23 @@ AbstractButton {
 				NumberAnimation {
 					id: horizontalAnimation
 					objectName: "stonksTickerHorizontalAnimation"
-					target: horizontalTrack
+					target: horizontalTrackLoader.item
 					property: "x"
-					readonly property real travel: horizontalTrack.sequenceTravel
+					readonly property real travel: target ? target.sequenceTravel : 0
 					from: root.tickerDirection === "right" ? -travel : 0
 					to: root.tickerDirection === "right" ? 0 : -travel
 					duration: root.animationDuration(travel)
 					easing.type: Easing.Linear
 					loops: Animation.Infinite
 					onTravelChanged: {
-						if (travel > 0 && horizontalTrack.x === 0)
+						if (travel > 0 && target && target.x === 0)
 							root.restartTickerAnimation()
 					}
 					running: root.visible && root.horizontalMovement && root.movementShouldRun
 						&& tickerViewport.visible && travel > 0
 					onRunningChanged: {
-						if (!running)
-							horizontalTrack.x = 0
+						if (!running && target)
+							target.x = 0
 						else
 							root.updateTickerPause()
 					}
@@ -368,23 +383,23 @@ AbstractButton {
 				NumberAnimation {
 					id: verticalAnimation
 					objectName: "stonksTickerVerticalAnimation"
-					target: verticalTrack
+					target: verticalTrackLoader.item
 					property: "y"
-					readonly property real travel: verticalTrack.sequenceTravel
+					readonly property real travel: target ? target.sequenceTravel : 0
 					from: root.tickerDirection === "down" ? -travel : 0
 					to: root.tickerDirection === "down" ? 0 : -travel
 					duration: root.animationDuration(travel)
 					easing.type: Easing.Linear
 					loops: Animation.Infinite
 					onTravelChanged: {
-						if (travel > 0 && verticalTrack.y === 0)
+						if (travel > 0 && target && target.y === 0)
 							root.restartTickerAnimation()
 					}
 					running: root.visible && !root.horizontalMovement && root.movementShouldRun
 						&& tickerViewport.visible && travel > 0
 					onRunningChanged: {
-						if (!running)
-							verticalTrack.y = 0
+						if (!running && target)
+							target.y = 0
 						else
 							root.updateTickerPause()
 					}
