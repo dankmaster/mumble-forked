@@ -3790,6 +3790,18 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 	QVERIFY(mainWindowSource.contains(QStringLiteral("chatModel()->enqueuePrependMessages(prependedMessages)")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("qml.chat.snapshot_prepend.queued")));
 	QVERIFY(mainWindowSource.contains(QStringLiteral("qml.chat.snapshot_prepend.fallback")));
+	const qsizetype messageStateStart = mainWindowSource.indexOf(
+		QStringLiteral("QVariantMap MainWindow::buildModernShellMessageState"));
+	const qsizetype messageStateEnd = mainWindowSource.indexOf(
+		QStringLiteral("void MainWindow::clearModernShellMessageDtoCache"), messageStateStart);
+	QVERIFY(messageStateStart >= 0);
+	QVERIFY(messageStateEnd > messageStateStart);
+	const QString messageStateBody =
+		mainWindowSource.mid(messageStateStart, messageStateEnd - messageStateStart);
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"if (!fastFirstPaint || m_persistentChatPreviews.contains(*previewKey))")));
+	QVERIFY(!messageStateBody.contains(QStringLiteral(
+		"restorePersistentChatPreviewDiskCache(*previewKey)")));
 
 	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));

@@ -25183,9 +25183,6 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 
 	if (!deletedMessage) {
 		if (previewKey) {
-			if (fastFirstPaint && !m_persistentChatPreviews.contains(*previewKey)) {
-				restorePersistentChatPreviewDiskCache(*previewKey);
-			}
 			if (!fastFirstPaint || m_persistentChatPreviews.contains(*previewKey)) {
 				ensurePersistentChatPreview(*previewKey);
 				ensurePersistentChatPreviewImageProviders(*previewKey);
