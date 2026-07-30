@@ -30551,32 +30551,22 @@ void MainWindow::publishPersistentChatSnapshot() {
 		const QVariantList appendedMessages =
 			buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode);
 		// A cold persistent-history response normally follows the empty scope
-		// snapshot as one tail append. Treat that first batch like a scope
-		// replacement: expose its newest rows immediately and admit the older
-		// prefix through the bounded prepend queue. Otherwise the initial
-		// history response bypasses the windowed scope path below and forces
-		// ListView to construct every rich row in one GUI turn.
-		constexpr qsizetype ColdHistoryFirstPaintRows = 3;
-		if (previousMessageCount == 0 && appendedMessages.size() > ColdHistoryFirstPaintRows) {
-			const qsizetype prefixSize = appendedMessages.size() - ColdHistoryFirstPaintRows;
-			const QVariantList firstPaintTail = appendedMessages.mid(prefixSize);
-			const QVariantList deferredPrefix = appendedMessages.mid(0, prefixSize);
-			// These rows are lightweight fixed-height placeholders. Insert the
-			// complete cold prefix in one model transaction so the inline header
-			// performs one polish pass instead of relaying out after every queued
-			// chunk. Explicit older-page requests keep using the frame-bounded
-			// prepend queue and its viewport-anchor protection.
-			const int queued = m_qmlShellHost->chatModel()->prependMessages(deferredPrefix);
-			const int appended = m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
-			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
-				mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_prefix", queued);
+		// snapshot as one tail append. Keep its complete real data in the model,
+		// but initially expose every row through the fixed-height deferred proxy.
+		// QML then materializes the visible tail one row per presentation frame
+		// behind the stable loading surface. Even a single attachment-heavy row
+		// must not monopolize the first interactive heartbeat.
+		if (previousMessageCount == 0 && !appendedMessages.isEmpty()) {
+			const int deferred =
+				m_qmlShellHost->chatModel()->prependMessages(appendedMessages);
+			if (deferred == appendedMessages.size()) {
+				mumble::chatperf::recordValue(
+					"qml.chat.snapshot_append.deferred_first_paint", deferred);
 				return;
 			}
-			// Both mutations are stable-ID based. Replacing with the complete
-			// authoritative snapshot safely cancels a partial queue before the
-			// ordinary fallback path can expose incomplete history.
 			m_qmlShellHost->chatModel()->replaceMessages(appendedMessages);
-			mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_fallback", 1);
+			mumble::chatperf::recordValue(
+				"qml.chat.snapshot_append.deferred_fallback", 1);
 			return;
 		}
 		const int appended = m_qmlShellHost->chatModel()->appendMessages(appendedMessages);
@@ -30593,25 +30583,20 @@ void MainWindow::publishPersistentChatSnapshot() {
 	}
 	{
 		mumble::chatperf::ScopedDuration applyTrace("chat.publish.snapshot.apply");
-		// A cold scope can contain enough rich rows to make ListView construct a
-		// full viewport and its cache in one GUI turn. Expose the newest tail
-		// immediately, then admit the older prefix through the existing bounded
-		// four-rows-per-frame prepend queue. The scope remains complete before it
-		// reports settled, while the user gets a responsive first frame.
-		constexpr qsizetype ScopeFirstPaintRows = 3;
-		if (switchingScope && messages.size() > ScopeFirstPaintRows) {
-			const qsizetype prefixSize = messages.size() - ScopeFirstPaintRows;
-			const QVariantList firstPaintTail = messages.mid(prefixSize);
-			const QVariantList deferredPrefix = messages.mid(0, prefixSize);
+		// A cold scope keeps the complete authoritative snapshot while QML admits
+		// only the real rows intersecting the tail. This avoids constructing even
+		// the newest provider/attachment delegates in the synchronous scope-sync
+		// turn and gives the hidden finalization gate one bounded row per frame.
+		if (switchingScope && !messages.isEmpty()) {
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int queued = m_qmlShellHost->chatModel()->prependMessages(deferredPrefix);
-			const int appended =
-				m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
-			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
-				mumble::chatperf::recordValue("qml.chat.scope_sync.windowed_prefix", queued);
+			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages);
+			if (deferred == messages.size()) {
+				mumble::chatperf::recordValue(
+					"qml.chat.scope_sync.deferred_first_paint", deferred);
 			} else {
 				m_qmlShellHost->chatModel()->replaceMessages(messages);
-				mumble::chatperf::recordValue("qml.chat.scope_sync.windowed_fallback", 1);
+				mumble::chatperf::recordValue(
+					"qml.chat.scope_sync.deferred_fallback", 1);
 			}
 		} else {
 			m_qmlShellHost->chatModel()->replaceMessages(messages);

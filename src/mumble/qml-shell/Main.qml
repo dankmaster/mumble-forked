@@ -3047,6 +3047,10 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: chatModel.presentationModel
+					// The auto-connected scope can already be populated before the
+					// activeScope signal connection exists. Start the same bounded
+					// presentation transaction for that initial scope explicitly.
+					Component.onCompleted: beginScopeChange()
                     clip: true
 					interactive: !scopePresentationPending
 					Accessible.role: Accessible.List
@@ -3178,7 +3182,7 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
-					readonly property int deferredMaterializationsPerFrame: 6
+					readonly property int deferredMaterializationsPerFrame: 1
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -3309,8 +3313,10 @@ ApplicationWindow {
 						// not need the rich-message hydration gate used by conversations.
 						if (activeScope.activity)
 							return true
-						if (count === 0)
+						if (chatModel.count === 0)
 							return true
+						if (count === 0)
+							return false
 						if (height <= 1)
 							return false
 						// Reject rich, hydrating rows from the lightweight path before
@@ -3341,7 +3347,6 @@ ApplicationWindow {
 						scopePresentationDeadlineTimer.stop()
 						scopePresentationFinalizeQuietTimer.stop()
 						scopePresentationFinalizeDeadlineTimer.stop()
-						scopeReuseResetActive = false
 						forceLayout()
 						if (count > 0) {
 							positionTailImmediately()
@@ -3409,6 +3414,7 @@ ApplicationWindow {
 						// final geometry is still hidden. This reuses the scroll-recovery
 						// queue instead of letting every cold-scope Loader incubate together.
 						queueRichLoaderResumes()
+						queueVisibleDeferredMaterialization(true)
 						// Start cached/backend preview hydration while the timeline is still
 						// hidden. Its height refinements then restart the final quiet window
 						// instead of making the newly exposed tail chase changing geometry.
@@ -3734,8 +3740,11 @@ ApplicationWindow {
 							finishRichContentRecoveryIfIdle()
 					}
 
-					function queueVisibleDeferredMaterialization() {
-						if (richScrollInProgress || prependAnchorActive || scopePresentationPending)
+					function queueVisibleDeferredMaterialization(allowDuringFinalization) {
+						const pendingAllowed = allowDuringFinalization === true
+							&& scopePresentationFinalizing
+						if (richScrollInProgress || prependAnchorActive
+								|| (scopePresentationPending && !pendingAllowed))
 							return
 						const queued = deferredMaterializationQueue.slice()
 						const queuedSet = ({})
@@ -3804,7 +3813,10 @@ ApplicationWindow {
 					}
 
 					function materializeNextDeferredRow() {
-						if (richScrollInProgress || prependAnchorActive || scopePresentationPending) {
+						const pendingAllowed = scopePresentationPending
+							&& scopePresentationFinalizing
+						if (richScrollInProgress || prependAnchorActive
+								|| (scopePresentationPending && !pendingAllowed)) {
 							scheduleRichContentResume()
 							return
 						}
@@ -3832,7 +3844,8 @@ ApplicationWindow {
 							// row after the proxy models and ListView have polished,
 							// keeping the work bounded to one real row per frame.
 							Qt.callLater(function() {
-								timeline.queueVisibleDeferredMaterialization()
+								timeline.queueVisibleDeferredMaterialization(
+									timeline.scopePresentationFinalizing)
 							})
 						}
 					}
@@ -5359,7 +5372,7 @@ ApplicationWindow {
 										? messageDelegate.previewPlaceholderHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
-										Math.max(1, parent.width))
+										Math.max(1, messageDelegate.previewPlaceholderWidth))
 									Layout.maximumWidth: Layout.preferredWidth
 									sourceComponent: Component {
 										Rectangle {
@@ -5435,7 +5448,7 @@ ApplicationWindow {
 											? messageDelegate.previewPlaceholderHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
-										Math.max(1, parent.width))
+										Math.max(1, messageDelegate.previewPlaceholderWidth))
 									Layout.maximumWidth: Layout.preferredWidth
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
