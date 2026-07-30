@@ -2629,6 +2629,7 @@ void TestQmlClientModels::chatTimelineDrainsBoundedRichTextBacklog() {
 		QStringLiteral("QTimer::singleShot(16, this, &ChatTimelineModel::drainRichBodyResults)")));
 	QVERIFY(!scheduleBody.contains(
 		QStringLiteral("QMetaObject::invokeMethod(this, &ChatTimelineModel::drainRichBodyResults")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int MaxRichBodiesPerBatch = 1")));
 	QVERIFY(drainBody.contains(QStringLiteral("constexpr int MaxResultsPerTurn = 1")));
 
 	ChatTimelineModel model;

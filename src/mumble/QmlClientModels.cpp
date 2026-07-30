@@ -3931,7 +3931,10 @@ void ChatTimelineModel::refillDeferredRichBodyParses() {
 void ChatTimelineModel::launchRichBodyParseBatch() {
 	refillDeferredRichBodyParses();
 	if (m_richBodyWorkerActive || m_pendingRichBodyOrder.isEmpty()) return;
-	constexpr int MaxRichBodiesPerBatch = 32;
+	// QTextDocument parsing is off-thread, but it still shares Qt font/text
+	// infrastructure with the scene graph. Yield back to the GUI between rich
+	// bodies instead of holding those shared resources for a whole burst.
+	constexpr int MaxRichBodiesPerBatch = 1;
 	QList< RichBodyParseRequest > pending;
 	pending.reserve(std::min< qsizetype >(MaxRichBodiesPerBatch, m_pendingRichBodyOrder.size()));
 	while (pending.size() < MaxRichBodiesPerBatch && !m_pendingRichBodyOrder.isEmpty()) {
@@ -3966,6 +3969,7 @@ void ChatTimelineModel::launchRichBodyParseBatch() {
 		QList< ParsedRichBody > parsedBodies;
 		parsedBodies.reserve(pending.size());
 		for (const RichBodyParseRequest &request : pending) {
+			mumble::chatperf::ScopedDuration trace("qml.chat.rich_body.parse");
 			QVariantList segments;
 			try {
 				segments = structuredMessageBody(request.bodyHtml, request.bodyText, request.cacheKey);
