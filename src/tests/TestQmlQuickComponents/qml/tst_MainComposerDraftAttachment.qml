@@ -293,7 +293,9 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(480,\s*Math\.min\(1200,\s*height\s*\*\s*0\.75\)\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
+		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0/.test(mainSource))
 		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
@@ -315,6 +317,7 @@ TestCase {
 		verify(/function\s+captureViewportAnchor\(\)[\s\S]*Math\.abs\(contentY\s*-\s*originY\)\s*<=\s*0\.5[\s\S]*beginTopAnchor\(\)[\s\S]*function\s+beginTopAnchor\(\)[\s\S]*topAnchorActive\s*=\s*true[\s\S]*function\s+restoreTopAnchor\(\)[\s\S]*positionViewAtBeginning\(\)[\s\S]*contentY\s*=\s*originY/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*topAnchorActive[\s\S]*restoreTopAnchor\(\)[\s\S]*id:\s*topAnchorFrameTimer[\s\S]*interval:\s*16[\s\S]*running:\s*timeline\.topAnchorActive[\s\S]*id:\s*topAnchorSettleTimer[\s\S]*interval:\s*180/.test(mainSource))
 		verify(/property bool richResourcesActive:\s*false[\s\S]*function\s+updateRichResourceActivity\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richResourcesActive\s*=\s*true/.test(mainSource))
+		verify(/hydrationWarmDistance:\s*Math\.min\(timeline\.baseCacheBuffer,[\s\S]*timeline\.height\s*\*\s*1\.5\)/.test(mainSource))
 		verify(/property bool richLoaderSuspended:\s*false[\s\S]*ListView\.onPooled:[\s\S]*richLoaderSuspended\s*=\s*true[\s\S]*ListView\.onReused:[\s\S]*richLoaderSuspended\s*=\s*timeline\.richScrollInProgress/.test(mainSource))
 		verify(/function\s+resumeRichContentAfterScroll\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richLoaderSuspended\s*=\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(\)[\s\S]*inHydrationWindow[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration/.test(mainSource))

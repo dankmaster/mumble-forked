@@ -3050,12 +3050,23 @@ ApplicationWindow {
 					// Keep less than one extra viewport of delegates warm. Rich preview
 					// loaders incubate asynchronously, so a multi-viewport cache only makes
 					// scope entry and history insertion construct invisible card trees.
-					cacheBuffer: Math.max(480, Math.min(1200, height * 0.75))
+					readonly property real baseCacheBuffer:
+						Math.max(480, Math.min(1200, height * 0.75))
+					// Once a real gesture begins, retain the bounded loaded page behind
+					// it. New delegates remain lightweight scroll placeholders, while the
+					// already visible rich trees never enter the reuse pool mid-gesture.
+					// Reset this scope-local retention on navigation rather than growing
+					// it with every older-history page.
+					property real richScrollRetentionBuffer: 0
+					readonly property real maximumRichScrollRetentionBuffer: 18000
+					cacheBuffer: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property var richLoaderResumeQueue: []
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
+							richScrollRetentionBuffer = Math.min(maximumRichScrollRetentionBuffer,
+								Math.max(richScrollRetentionBuffer, contentHeight + height))
 							chatModel.presentationBusy = true
 							previewHydrationTimer.stop()
 							richContentResumeTimer.stop()
@@ -3148,6 +3159,7 @@ ApplicationWindow {
 					}
 
 					function beginScopeChange() {
+						richScrollRetentionBuffer = 0
 						releasePrependAnchor()
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
@@ -4347,7 +4359,7 @@ ApplicationWindow {
 						// viewport, keep a provider-aware geometry estimate, and wake
 						// only the settled visible rows after scrolling ends.
 						property bool richLoaderSuspended: false
-						readonly property real hydrationWarmDistance: Math.min(timeline.cacheBuffer,
+						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
 							&& y + height >= timeline.contentY - hydrationWarmDistance
