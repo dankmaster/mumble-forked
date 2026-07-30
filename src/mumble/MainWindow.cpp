@@ -25236,7 +25236,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				}
 			}
 		}
-		if (previewKey && fastFirstPaint && !messageState.contains(QStringLiteral("preview"))) {
+		if (previewKey && !messageState.contains(QStringLiteral("preview"))) {
 			const auto previewUrlStringFromKey = [](const QString &key) {
 				const auto decodedPayload = [&key](const QString &prefix) {
 					return QUrl::fromPercentEncoding(key.mid(prefix.size()).toUtf8());
@@ -25266,10 +25266,11 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 							   previewUrl.isValid() ? previewDisplayHost(previewUrl) : tr("Link preview"));
 			previewStub.insert(QStringLiteral("singleUrl"), persistentChatSourceTextIsSinglePreviewableUrl(bodyText));
 			previewStub.insert(QStringLiteral("loadingLabel"), tr("Load preview"));
-			// Reserve the provider's final media geometry during fast first paint.
-			// Without this hint an embed starts as a compact link row, then grows by
-			// hundreds of pixels when hydration adds its player metadata. A timeline
-			// pinned to the tail must then visibly jump to compensate.
+			// Cache reads and authoritative embed-state updates are asynchronous. A
+			// full DTO can therefore be rebuilt while its preview object is briefly
+			// unavailable. Keep the same real URL-backed loading contract instead of
+			// deleting the card for one frame and collapsing the timeline. The same
+			// stub also reserves the provider's final geometry during first paint.
 			if (const std::optional< PersistentChatPreviewEmbedTarget > embedTarget =
 					previewEmbedTargetForUrl(previewUrl);
 				embedTarget) {

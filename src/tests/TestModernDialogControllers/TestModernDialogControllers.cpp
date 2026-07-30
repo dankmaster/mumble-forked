@@ -3821,6 +3821,10 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 		mainWindowSource.mid(messageStateStart, messageStateEnd - messageStateStart);
 	QVERIFY(messageStateBody.contains(QStringLiteral(
 		"if (!fastFirstPaint || m_persistentChatPreviews.contains(*previewKey))")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"if (previewKey && !messageState.contains(QStringLiteral(\"preview\")))")));
+	QVERIFY(!messageStateBody.contains(QStringLiteral(
+		"if (previewKey && fastFirstPaint && !messageState.contains(QStringLiteral(\"preview\")))")));
 	QVERIFY(!messageStateBody.contains(QStringLiteral(
 		"restorePersistentChatPreviewDiskCache(*previewKey)")));
 	const qsizetype hydrationFlushStart = mainWindowSource.indexOf(
