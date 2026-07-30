@@ -5187,6 +5187,7 @@ ApplicationWindow {
 								Loader {
 									id: messageAttachmentLoader
 									active: messageDelegate.hasAttachmentContent
+										&& !messageDelegate.attachmentNeedsHydration
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
@@ -5230,6 +5231,49 @@ ApplicationWindow {
 										}
 									}
                                 }
+								Rectangle {
+									id: messageAttachmentHydrationPlaceholder
+									objectName: "messageAttachmentHydrationPlaceholder"
+									Layout.fillWidth: true
+									Layout.preferredHeight: messageDelegate.attachmentPlaceholderHeight
+									visible: messageDelegate.hasAttachmentContent
+										&& messageDelegate.attachmentNeedsHydration
+									radius: Theme.innerRadius
+									color: Theme.strip
+									border.color: Theme.divider
+									border.width: 1
+									clip: true
+									Accessible.role: Accessible.StaticText
+									Accessible.name: qsTr("Loading image attachment")
+
+									Column {
+										anchors.centerIn: parent
+										spacing: Theme.space2
+
+										Rectangle {
+											anchors.horizontalCenter: parent.horizontalCenter
+											width: 34
+											height: 34
+											radius: Theme.innerRadius
+											color: Theme.panel
+
+											ModernIcon {
+												anchors.centerIn: parent
+												name: "attach"
+												size: 18
+												color: Theme.textMuted
+											}
+										}
+
+										Label {
+											anchors.horizontalCenter: parent.horizontalCenter
+											textFormat: Text.PlainText
+											text: qsTr("Loading image preview")
+											color: Theme.textMuted
+											font.pixelSize: Theme.fontLabel
+										}
+									}
+								}
 								Loader {
 									id: messagePreviewHydrationPlaceholderLoader
 									active: messageDelegate.hasPreviewContent

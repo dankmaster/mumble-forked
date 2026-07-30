@@ -212,19 +212,45 @@ Item {
 										Math.min(768, height * Screen.devicePixelRatio))
 					fillMode: Image.PreserveAspectFit
 					smooth: true
-					mipmap: true
+					// Chat thumbnails are already decoded at the requested bounded
+					// size. Generating another mip chain at texture upload made the
+					// first visible legacy image monopolize a GUI frame.
+					mipmap: false
                     onStatusChanged: if (status === Image.Error && source.toString().length > 0)
                                          root.attachmentRefreshRequested()
                 }
 
-				ModernBusyIndicator {
+				Item {
 					objectName: "attachmentBusyIndicator_" + attachmentTile.stableId
                     anchors.centerIn: parent
-					running: attachmentTile.previewLoading
+					readonly property bool running: attachmentTile.previewLoading
 						|| (attachmentTile.imageAttachment && attachmentImage.status === Image.Loading)
-					animated: root.animationsEnabled
+					implicitWidth: loadingIndicatorRow.implicitWidth
+					implicitHeight: loadingIndicatorRow.implicitHeight
+					width: implicitWidth
+					height: implicitHeight
                     visible: running
 					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
+
+					Row {
+						id: loadingIndicatorRow
+						spacing: Theme.space2
+
+						Rectangle {
+							anchors.verticalCenter: parent.verticalCenter
+							width: 8
+							height: 8
+							radius: 4
+							color: Theme.accent
+						}
+
+						Label {
+							textFormat: Text.PlainText
+							text: qsTr("Loading preview")
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontLabel
+						}
+					}
                 }
 
 				ColumnLayout {
