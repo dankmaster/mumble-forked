@@ -25284,6 +25284,35 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 	if (previewKey.isEmpty()) {
 		return;
 	}
+	// Provider hydration often completes in many small stages (metadata,
+	// thumbnail, poster, gallery images, paired audio). Publishing every
+	// intermediate state makes QML repeatedly rebuild the same variable-height
+	// rich card and can monopolize the GUI thread during cold channel entry.
+	// Start the bounded image-provider work here, then expose one stable DTO once
+	// the currently known pipeline has quiesced. Every completion path calls this
+	// function again, so the final stage always schedules the visible update.
+	ensurePersistentChatPreviewImageProviders(previewKey);
+	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
+	if (previewIt != m_persistentChatPreviews.cend()) {
+		const PersistentChatPreview &preview = previewIt.value();
+		bool pipelinePending = !preview.metadataFinished || !preview.thumbnailFinished
+			|| (preview.siteSnapshotRequested && !preview.siteSnapshotFinished)
+			|| (preview.remoteMediaRequested && !preview.remoteMediaFinished)
+			|| !preview.thumbnailRequestSource.isEmpty()
+			|| (preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished);
+		for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+			pipelinePending = pipelinePending
+				|| (item.imageProviderRequested && !item.imageProviderFinished);
+		}
+		for (auto managedIt = preview.metadataImages.cbegin();
+			 managedIt != preview.metadataImages.cend(); ++managedIt) {
+			pipelinePending = pipelinePending || (managedIt->requested && !managedIt->finished);
+		}
+		if (pipelinePending) {
+			mumble::chatperf::recordValue("qml.chat.preview_update.pipeline_coalesced", 1);
+			return;
+		}
+	}
 	m_deferredModernShellPreviewUpdateKeys.insert(previewKey);
 	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
 		mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source", 1);
@@ -25294,8 +25323,6 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 }
 
 void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) {
-	ensurePersistentChatPreviewImageProviders(previewKey);
-
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
 		if (!messagePreviewKey || *messagePreviewKey != previewKey) {
@@ -30452,7 +30479,41 @@ void MainWindow::publishPersistentChatSnapshot() {
 			|| (m_persistentChatMessages[previousMessageCount - 1].message_id() == previousTailMessageID
 				&& m_persistentChatMessages[previousMessageCount - 1].thread_id() == previousTailThreadID));
 	if (appendedAtTail) {
-		const QVariantList appendedMessages = buildModernShellMessageStates(target, previousMessageCount);
+		const std::size_t appendedMessageCount = messageCount - previousMessageCount;
+		// History commonly arrives as one tail batch after an empty/loading
+		// snapshot. Keep that batch on the lightweight first-paint path; building
+		// every provider DTO here starts all disk/network hydration and repeatedly
+		// relays out the visible timeline before QML has exposed the scope. A
+		// single newly delivered live message can still take the complete path.
+		const ModernShellMessageBuildMode appendedBuildMode =
+			appendedMessageCount > 1 ? ModernShellMessageBuildMode::FastFirstPaint
+									 : ModernShellMessageBuildMode::Full;
+		const QVariantList appendedMessages =
+			buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode);
+		// A cold persistent-history response normally follows the empty scope
+		// snapshot as one tail append. Treat that first batch like a scope
+		// replacement: expose its newest rows immediately and admit the older
+		// prefix through the bounded prepend queue. Otherwise the initial
+		// history response bypasses the windowed scope path below and forces
+		// ListView to construct every rich row in one GUI turn.
+		constexpr qsizetype ColdHistoryFirstPaintRows = 3;
+		if (previousMessageCount == 0 && appendedMessages.size() > ColdHistoryFirstPaintRows) {
+			const qsizetype prefixSize = appendedMessages.size() - ColdHistoryFirstPaintRows;
+			const QVariantList firstPaintTail = appendedMessages.mid(prefixSize);
+			const QVariantList deferredPrefix = appendedMessages.mid(0, prefixSize);
+			const int appended = m_qmlShellHost->chatModel()->appendMessages(firstPaintTail);
+			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
+			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
+				mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_prefix", queued);
+				return;
+			}
+			// Both mutations are stable-ID based. Replacing with the complete
+			// authoritative snapshot safely cancels a partial queue before the
+			// ordinary fallback path can expose incomplete history.
+			m_qmlShellHost->chatModel()->replaceMessages(appendedMessages);
+			mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_fallback", 1);
+			return;
+		}
 		const int appended = m_qmlShellHost->chatModel()->appendMessages(appendedMessages);
 		mumble::chatperf::recordValue("qml.chat.snapshot_append.direct", appended);
 		return;
@@ -30467,7 +30528,27 @@ void MainWindow::publishPersistentChatSnapshot() {
 	}
 	{
 		mumble::chatperf::ScopedDuration applyTrace("chat.publish.snapshot.apply");
-		m_qmlShellHost->chatModel()->replaceMessages(messages);
+		// A cold scope can contain enough rich rows to make ListView construct a
+		// full viewport and its cache in one GUI turn. Expose the newest tail
+		// immediately, then admit the older prefix through the existing bounded
+		// four-rows-per-frame prepend queue. The scope remains complete before it
+		// reports settled, while the user gets a responsive first frame.
+		constexpr qsizetype ScopeFirstPaintRows = 3;
+		if (switchingScope && messages.size() > ScopeFirstPaintRows) {
+			const qsizetype prefixSize = messages.size() - ScopeFirstPaintRows;
+			const QVariantList firstPaintTail = messages.mid(prefixSize);
+			const QVariantList deferredPrefix = messages.mid(0, prefixSize);
+			m_qmlShellHost->chatModel()->replaceMessages(firstPaintTail);
+			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
+			if (queued == deferredPrefix.size()) {
+				mumble::chatperf::recordValue("qml.chat.scope_sync.windowed_prefix", queued);
+			} else {
+				m_qmlShellHost->chatModel()->replaceMessages(messages);
+				mumble::chatperf::recordValue("qml.chat.scope_sync.windowed_fallback", 1);
+			}
+		} else {
+			m_qmlShellHost->chatModel()->replaceMessages(messages);
+		}
 	}
 	mumble::chatperf::recordValue(switchingScope ? "qml.chat.scope_sync.direct" : "qml.chat.snapshot_sync.direct", 1);
 }

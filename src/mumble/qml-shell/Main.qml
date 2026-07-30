@@ -1692,6 +1692,9 @@ ApplicationWindow {
 				: Math.min(maximumY, performanceChatScrollStartY + travelDistance)
 		}
 		bottomFollowTimer.stop()
+		timeline.stickToBottom = false
+		timeline.releaseViewportAnchor()
+		timeline.releaseTopAnchor()
 		performanceChatScrollDiagnosticsBefore = timelineDelegateDiagnostics()
 		performanceChatScrollCompletedSteps = 0
 		performanceChatScrollTargetSteps = requestedSteps
@@ -1764,6 +1767,12 @@ ApplicationWindow {
 		}
 		performanceChatScrollRunning = false
 		performanceChatScrollFullRangeToStart = false
+		// A programmatic workload has no pointer/flick movementEnded signal.
+		// Wake only after the scrolling bindings have observed the stopped
+		// state, then restore visible rich rows through the paced queues.
+		Qt.callLater(function() {
+			timeline.scheduleRichContentResume()
+		})
 	}
 
 	function performanceChatFixtureState() {
@@ -1834,9 +1843,10 @@ ApplicationWindow {
 				// rows wake incrementally. Do not report the visible timeline as busy
 				// for that background work; callers still verify exact originY and
 				// stable visible-row geometry independently.
+				// Observation only records late exposed corrections. It must not
+				// make an already visible and interactive scope report unready.
 				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
-					&& !timeline.scopeResetPending
-					&& !timeline.scopePresentationObservationActive && !bottomFollowTimer.running
+					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
 					&& !chatModel.prependPending
 			}
@@ -3104,6 +3114,7 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
+					readonly property int deferredMaterializationsPerFrame: 6
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -3305,10 +3316,6 @@ ApplicationWindow {
 					function finishScopePresentation(forcedByDeadline) {
 						if (!scopePresentationPending || scopePresentationFinalizing)
 							return
-						if (!forcedByDeadline && pendingScopeHydrationCount() > 0) {
-							scopePresentationQuietTimer.restart()
-							return
-						}
 						scopePresentationFinalizing = true
 						scopePresentationForcedByDeadline = !!forcedByDeadline
 						scopePresentationFastPathTimer.stop()
@@ -3362,6 +3369,10 @@ ApplicationWindow {
 							timeline.scopePresentationFinalizing = false
 							timeline.scopePresentationObservationActive = true
 							scopePresentationObservationTimer.restart()
+							Qt.callLater(function() {
+								if (generation === timeline.scopePresentationGeneration)
+									timeline.queueVisiblePreviewHydration()
+							})
 							timeline.markVisibleScopeReadIfEligible()
 						})
 					}
@@ -3454,6 +3465,12 @@ ApplicationWindow {
 						prependAnchorId = String(item.stableId || "")
 						if (prependAnchorId.length === 0)
 							return false
+						// Holding the absolute top is correct while the existing loaded
+						// range recovers after a scroll. Once older rows are requested,
+						// however, originY moves to the newly inserted prefix. Hand off
+						// exclusively to the stable-message prepend anchor so that the
+						// row the user was reading remains at the same viewport offset.
+						releaseTopAnchor()
 						prependAnchorOffset = item.mapToItem(timeline, 0, 0).y
 						prependAnchorContentY = contentY
 						prependAnchorTargetY = contentY
@@ -3496,6 +3513,7 @@ ApplicationWindow {
 					function beginTopAnchor() {
 						releaseViewportAnchor()
 						topAnchorActive = true
+						topAnchorFrameTimer.restart()
 						topAnchorSettleTimer.restart()
 					}
 
@@ -3508,8 +3526,6 @@ ApplicationWindow {
 						if (!topAnchorActive || restoringTopAnchor || moving || dragging || flicking)
 							return
 						restoringTopAnchor = true
-						forceLayout()
-						positionViewAtBeginning()
 						contentY = originY
 						restoringTopAnchor = false
 					}
@@ -3627,6 +3643,7 @@ ApplicationWindow {
 						}
 						const deferredRepeater = headerItem
 							? headerItem.deferredRepeater : null
+						let deferredHeaderVisible = false
 						for (let childIndex = 0;
 								deferredRepeater && childIndex < deferredRepeater.count; ++childIndex) {
 							const item = deferredRepeater.itemAt(childIndex)
@@ -3635,7 +3652,16 @@ ApplicationWindow {
 							const point = item.mapToItem(timeline, 0, 0)
 							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
 								continue
-							const stableId = String(item.stableId || "")
+							deferredHeaderVisible = true
+							break
+						}
+						// Once the inline deferred header reaches the viewport, restore
+						// its source rows newest-to-oldest. This preserves chronological
+						// order while each row crosses into the real ListView proxy.
+						for (let childIndex = deferredHeaderVisible && deferredRepeater
+								? deferredRepeater.count - 1 : -1; childIndex >= 0; --childIndex) {
+							const item = deferredRepeater.itemAt(childIndex)
+							const stableId = item ? String(item.stableId || "") : ""
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
 								queued.push(stableId)
 								queuedSet[stableId] = true
@@ -3648,6 +3674,19 @@ ApplicationWindow {
 							finishRichContentRecoveryIfIdle()
 					}
 
+					function queueVisiblePreviewHydration() {
+						if (richScrollInProgress || prependAnchorActive || scopePresentationPending)
+							return
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (item && item.performanceTimelineDelegate === true
+									&& item.accessibilityPooled !== true
+									&& item.inVisibleViewport === true)
+								item.requestPreviewHydrationIfNeeded()
+						}
+					}
+
 					function materializeNextDeferredRow() {
 						if (richScrollInProgress || prependAnchorActive || scopePresentationPending) {
 							scheduleRichContentResume()
@@ -3658,13 +3697,28 @@ ApplicationWindow {
 							return
 						}
 						const queued = deferredMaterializationQueue.slice()
-						const stableId = queued.shift()
+						let materialized = 0
+						while (queued.length > 0
+								&& materialized < deferredMaterializationsPerFrame) {
+							chatModel.materializeDeferredMessage(queued.shift())
+							++materialized
+						}
 						deferredMaterializationQueue = queued
-						chatModel.materializeDeferredMessage(stableId)
+						if (topAnchorActive) {
+							topAnchorSettleTimer.restart()
+							topAnchorFrameTimer.restart()
+						}
 						if (queued.length > 0)
 							deferredMaterializationTimer.start()
-						else
-							finishRichContentRecoveryIfIdle()
+						else {
+							// Materializing a fixed-height header row changes which
+							// deferred row intersects the viewport. Discover that next
+							// row after the proxy models and ListView have polished,
+							// keeping the work bounded to one real row per frame.
+							Qt.callLater(function() {
+								timeline.queueVisibleDeferredMaterialization()
+							})
+						}
 					}
 
 					function finishRichContentRecoveryIfIdle() {
@@ -3680,6 +3734,10 @@ ApplicationWindow {
 						if (richLoaderResumeQueue.length > 0
 								|| deferredMaterializationQueue.length > 0)
 							return
+						if (topAnchorActive) {
+							restoreTopAnchor()
+							topAnchorSettleTimer.restart()
+						}
 						chatModel.presentationBusy = false
 					}
 
@@ -3737,16 +3795,11 @@ ApplicationWindow {
 						if (!prependAnchorActive || !deferredPrependAnchorActive
 								|| restoringPrependAnchor)
 							return
-						restoringPrependAnchor = true
-						const minimumY = originY
-						const maximumY = Math.max(minimumY, originY + contentHeight - height)
-						const desiredY = Math.max(minimumY,
-							Math.min(maximumY, prependAnchorTargetY))
-						if (Math.abs(contentY - desiredY) > 0.5)
-							contentY = desiredY
-						restoringPrependAnchor = false
-						if (!chatModel.prependPending && !prependAnchorSettleTimer.running)
-							prependAnchorSettleTimer.start()
+						// The technical prefix starts with a fixed estimate, but each row
+						// can become a differently sized text, gallery, or media card as
+						// it approaches the viewport. Preserve the stable message itself,
+						// not the temporary prefix height, through every refinement.
+						restorePrependAnchor()
 					}
 
 					function deferPrependedRichRows(first, last) {
@@ -3756,7 +3809,9 @@ ApplicationWindow {
 							const row = chatModel.get(rowIndex) || ({})
 							const preview = row.preview || ({})
 							const attachments = row.attachments || []
-							if (Object.keys(preview).length === 0 && attachments.length === 0)
+							if (row.deferredPresentation !== true
+									|| (Object.keys(preview).length === 0
+										&& attachments.length === 0))
 								continue
 							const stableId = String(row.id || "")
 							if (stableId.length > 0)
@@ -3970,8 +4025,7 @@ ApplicationWindow {
 					Timer {
 						id: topAnchorFrameTimer
 						interval: 16
-						repeat: true
-						running: timeline.topAnchorActive
+						repeat: false
 						onTriggered: timeline.restoreTopAnchor()
 					}
 
@@ -3979,7 +4033,21 @@ ApplicationWindow {
 						id: topAnchorSettleTimer
 						interval: 180
 						repeat: false
-						onTriggered: timeline.topAnchorActive = false
+						onTriggered: {
+							const recoveryPending = chatModel.presentationBusy
+								|| timeline.richContentResumeTimer.running
+								|| timeline.richLoaderResumeTimer.running
+								|| timeline.deferredMaterializationTimer.running
+								|| timeline.richLoaderResumeQueue.length > 0
+								|| timeline.deferredMaterializationQueue.length > 0
+								|| timeline.pendingScopeHydrationCount() > 0
+							if (recoveryPending) {
+								timeline.restoreTopAnchor()
+								restart()
+							} else {
+								timeline.topAnchorActive = false
+							}
+						}
 					}
 
 					Timer {
@@ -3991,9 +4059,27 @@ ApplicationWindow {
 
 					Timer {
 						id: prependAnchorSettleTimer
-						interval: timeline.deferredPrependAnchorActive ? 180 : 1500
+						interval: 180
 						repeat: false
-						onTriggered: timeline.releasePrependAnchor()
+						onTriggered: {
+							const recoveryPending = chatModel.prependPending
+								|| chatModel.presentationBusy
+								|| timeline.richContentResumeTimer.running
+								|| timeline.richLoaderResumeTimer.running
+								|| timeline.deferredMaterializationTimer.running
+								|| timeline.richLoaderResumeQueue.length > 0
+								|| timeline.deferredMaterializationQueue.length > 0
+								|| timeline.pendingScopeHydrationCount() > 0
+							if (recoveryPending) {
+								if (timeline.deferredPrependAnchorActive)
+									timeline.restoreDeferredPrependAnchor()
+								else
+									timeline.restorePrependAnchor()
+								restart()
+							} else {
+								timeline.releasePrependAnchor()
+							}
+						}
 					}
 
 					Timer {
@@ -4099,7 +4185,9 @@ ApplicationWindow {
 							timeline.restoreDeferredPrependAnchor()
 						}
 						function onRowsAboutToChange(first, last) {
-							if (!timeline.scopeResetPending && !timeline.stickToBottom
+							if (!chatModel.presentationBusy
+									&& !timeline.topAnchorActive
+									&& !timeline.scopeResetPending && !timeline.stickToBottom
 									&& !timeline.prependAnchorActive)
 								timeline.capturePrependAnchor()
 						}
@@ -4374,6 +4462,11 @@ ApplicationWindow {
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
 							|| bodyNeedsHydration
+						// One backend request starts the complete async preview/attachment
+						// pipeline. Model updates can keep the row in "loading" for several
+						// provider stages, so do not enqueue the same message again while
+						// that pipeline is already in flight.
+						property bool backendHydrationRequested: false
 						// A pooled rich-card tree is expensive to retarget while a
 						// variable-height ListView is moving. Retire it outside the
 						// viewport, keep a provider-aware geometry estimate, and wake
@@ -4408,11 +4501,14 @@ ApplicationWindow {
 							}
 						}
 						function requestPreviewHydrationIfNeeded() {
-							if (backendContentNeedsHydration && inHydrationWindow
+							if (backendContentNeedsHydration && !backendHydrationRequested
+									&& inVisibleViewport
+									&& !timeline.scopePresentationPending
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
-									&& !chatModel.prependPending)
-								root.queuePreviewHydration(stableId, inVisibleViewport)
+									&& !chatModel.prependPending
+									&& root.queuePreviewHydration(stableId, inVisibleViewport))
+								backendHydrationRequested = true
 							if (bodyNeedsHydration && inHydrationWindow
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
@@ -4479,6 +4575,7 @@ ApplicationWindow {
 							accessibilityPooled = true
 							richLoaderSuspended = true
 							messageRowMaterialized = false
+							backendHydrationRequested = false
 							updateRichResourceActivity()
 						}
 						ListView.onReused: {
@@ -4500,6 +4597,7 @@ ApplicationWindow {
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
+							backendHydrationRequested = false
 							resumeRichContentAfterScroll()
 						}
 						Component.onCompleted: {
@@ -4719,15 +4817,16 @@ ApplicationWindow {
 							active: !messageDelegate.logEntry
 								&& (messageDelegate.messageRowMaterialized
 									|| (!timeline.richScrollInProgress
-										&& messageDelegate.inHydrationWindow))
+										&& messageDelegate.inVisibleViewport))
 							asynchronous: true
 							visible: active
-							onLoaded: {
-								messageDelegate.messageRowMaterialized = true
-								if (timeline.topAnchorActive) {
-									topAnchorSettleTimer.restart()
-									Qt.callLater(function() { timeline.restoreTopAnchor() })
-								}
+									onLoaded: {
+										messageDelegate.messageRowMaterialized = true
+										if (timeline.topAnchorActive) {
+											topAnchorSettleTimer.restart()
+											topAnchorFrameTimer.restart()
+											Qt.callLater(function() { timeline.restoreTopAnchor() })
+										}
 							}
 							sourceComponent: Component {
 								RowLayout {
@@ -4956,6 +5055,7 @@ ApplicationWindow {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
+											topAnchorFrameTimer.restart()
 											Qt.callLater(function() { timeline.restoreTopAnchor() })
 										}
 										if (root.visualFixtureOverrideActive)
@@ -4978,8 +5078,72 @@ ApplicationWindow {
 									}
                                 }
 								Loader {
+									id: messagePreviewHydrationPlaceholderLoader
+									active: messageDelegate.hasPreviewContent
+										&& messageDelegate.previewNeedsHydration
+										&& !messageDelegate.richLoaderSuspended
+										&& timeline.prependRichContentActive(
+											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+									visible: messageDelegate.hasPreviewContent
+										&& messageDelegate.previewNeedsHydration
+									Layout.fillWidth: false
+									Layout.preferredHeight: visible
+										? messageDelegate.previewPlaceholderHeight : 0
+									Layout.alignment: Qt.AlignLeft
+									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
+										Math.max(1, parent.width))
+									Layout.maximumWidth: Layout.preferredWidth
+									sourceComponent: Component {
+										Rectangle {
+											objectName: "previewHydrationPlaceholder"
+											implicitWidth: messagePreviewHydrationPlaceholderLoader.Layout.preferredWidth
+											implicitHeight: messageDelegate.previewPlaceholderHeight
+											radius: Theme.radiusMedium
+											color: Theme.surfaceRaised
+											border.color: Theme.divider
+											border.width: 1
+											clip: true
+											Accessible.role: Accessible.StaticText
+											Accessible.name: qsTr("Loading link preview for %1").arg(
+												String(messageDelegate.preview.host
+													|| messageDelegate.preview.url || qsTr("link")))
+
+											Column {
+												anchors.left: parent.left
+												anchors.right: parent.right
+												anchors.top: parent.top
+												anchors.margins: Theme.space3
+												spacing: Theme.space1
+
+												Label {
+													width: parent.width
+													textFormat: Text.PlainText
+													text: String(messageDelegate.preview.host
+														|| messageDelegate.preview.providerName
+														|| qsTr("Link preview"))
+													color: Theme.textStrong
+													font.pixelSize: Theme.fontBody
+													font.weight: Font.DemiBold
+													elide: Text.ElideRight
+												}
+
+												Label {
+													width: parent.width
+													textFormat: Text.PlainText
+													text: String(messageDelegate.preview.loadingLabel
+														|| qsTr("Loading preview"))
+													color: Theme.textMuted
+													font.pixelSize: Theme.fontCaption
+													elide: Text.ElideRight
+												}
+											}
+										}
+									}
+								}
+								Loader {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
+										&& !messageDelegate.previewNeedsHydration
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId, messageDelegate.inVisibleViewport)
@@ -4992,6 +5156,7 @@ ApplicationWindow {
 									// the lightweight row estimate in Layout so pooled delegates
 									// cannot move the viewport when rich content resumes.
 									visible: messageDelegate.hasPreviewContent
+										&& !messageDelegate.previewNeedsHydration
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
 									// pooled delegate drops rich content. Bind the layout height to
@@ -5008,6 +5173,7 @@ ApplicationWindow {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
+											topAnchorFrameTimer.restart()
 											Qt.callLater(function() { timeline.restoreTopAnchor() })
 										}
 										if (root.visualFixtureOverrideActive)

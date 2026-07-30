@@ -2076,14 +2076,17 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(publishBody.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.insert(previewKey)")));
 	QVERIFY(publishBody.contains(QStringLiteral("presentationBusy()")));
 	QVERIFY(publishBody.contains(QStringLiteral("scheduleDeferredModernShellPreviewUpdateDrain()")));
-	QVERIFY(!publishBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(publishBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(publishBody.contains(QStringLiteral("qml.chat.preview_update.pipeline_coalesced")));
+	QVERIFY(publishBody.contains(QStringLiteral("item.imageProviderRequested && !item.imageProviderFinished")));
+	QVERIFY(publishBody.contains(QStringLiteral("managedIt->requested && !managedIt->finished")));
 	QVERIFY(!publishBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
 	const qsizetype applyStart = publishEnd;
 	const qsizetype applyEnd =
 		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"), applyStart);
 	QVERIFY(applyEnd > applyStart);
 	const QString applyBody = source.mid(applyStart, applyEnd - applyStart);
-	QVERIFY(applyBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(!applyBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
 	QVERIFY(applyBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPendingChanged")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPending()")));
@@ -2101,6 +2104,30 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
 	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
+
+	const qsizetype snapshotApplyStart =
+		source.indexOf(QStringLiteral("const bool appendedAtTail ="));
+	const qsizetype snapshotApplyEnd =
+		source.indexOf(QStringLiteral("void MainWindow::syncPersistentChatGatewayHandler"), snapshotApplyStart);
+	QVERIFY(snapshotApplyStart >= 0);
+	QVERIFY(snapshotApplyEnd > snapshotApplyStart);
+	const QString snapshotApplyBody =
+		source.mid(snapshotApplyStart, snapshotApplyEnd - snapshotApplyStart);
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("appendedMessageCount > 1")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ModernShellMessageBuildMode::FastFirstPaint")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ModernShellMessageBuildMode::Full")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ColdHistoryFirstPaintRows = 3")));
+	QVERIFY(snapshotApplyBody.contains(
+		QStringLiteral("previousMessageCount == 0 && appendedMessages.size() > ColdHistoryFirstPaintRows")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.snapshot_append.windowed_prefix")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.snapshot_append.windowed_fallback")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ScopeFirstPaintRows = 3")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && messages.size() > ScopeFirstPaintRows")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueuePrependMessages(deferredPrefix)")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.windowed_prefix")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.windowed_fallback")));
+	QVERIFY(snapshotApplyBody.contains(
+		QStringLiteral("buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode)")));
 }
 
 void TestQmlClientModels::chatTimelineTracksUserHistory() {
