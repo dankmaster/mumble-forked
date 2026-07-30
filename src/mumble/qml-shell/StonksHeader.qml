@@ -290,7 +290,32 @@ AbstractButton {
 								? Math.max(2,
 									Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
 								: 2
+							property int materializedCopyCount: 1
+							property int materializationGeneration: 0
 							spacing: Theme.space4
+
+							function materializeNextCopy(generation) {
+								if (materializedCopyCount >= requiredCopyCount)
+									return
+								Qt.callLater(function() {
+									if (!horizontalTrackLoader.active
+											|| generation !== materializationGeneration
+											|| materializedCopyCount >= requiredCopyCount)
+										return
+									++materializedCopyCount
+									materializeNextCopy(generation)
+								})
+							}
+
+							function scheduleMaterialization() {
+								const generation = ++materializationGeneration
+								if (materializedCopyCount > requiredCopyCount)
+									materializedCopyCount = requiredCopyCount
+								materializeNextCopy(generation)
+							}
+
+							onRequiredCopyCountChanged: scheduleMaterialization()
+							Component.onCompleted: scheduleMaterialization()
 
 							Row {
 								id: horizontalPrimary
@@ -301,7 +326,7 @@ AbstractButton {
 								}
 							}
 							Repeater {
-								model: parent.requiredCopyCount - 1
+								model: Math.max(0, parent.materializedCopyCount - 1)
 								delegate: Row {
 									spacing: Theme.space4
 									Repeater {
@@ -329,8 +354,34 @@ AbstractButton {
 								? Math.max(2,
 									Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
 								: 2
+							property int materializedCopyCount: 1
+							property int materializationGeneration: 0
 							width: parent.width
 							spacing: Theme.space2
+
+							function materializeNextCopy(generation) {
+								if (materializedCopyCount >= requiredCopyCount)
+									return
+								Qt.callLater(function() {
+									if (!verticalTrackLoader.active
+											|| generation !== materializationGeneration
+											|| materializedCopyCount >= requiredCopyCount)
+										return
+									++materializedCopyCount
+									materializeNextCopy(generation)
+								})
+							}
+
+							function scheduleMaterialization() {
+								const generation = ++materializationGeneration
+								if (materializedCopyCount > requiredCopyCount)
+									materializedCopyCount = requiredCopyCount
+								materializeNextCopy(generation)
+							}
+
+							onRequiredCopyCountChanged: scheduleMaterialization()
+							Component.onCompleted: scheduleMaterialization()
+
 							Column {
 								id: verticalPrimary
 								width: parent.width
@@ -341,7 +392,7 @@ AbstractButton {
 								}
 							}
 							Repeater {
-								model: parent.requiredCopyCount - 1
+								model: Math.max(0, parent.materializedCopyCount - 1)
 								delegate: Column {
 									width: verticalTrackLoader.width
 									spacing: Theme.space2

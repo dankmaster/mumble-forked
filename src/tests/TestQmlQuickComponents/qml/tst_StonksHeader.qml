@@ -126,6 +126,7 @@ TestCase {
 		const animation = findChild(header, "stonksTickerHorizontalAnimation")
 		verify(track !== null && animation !== null)
 		tryVerify(function() { return animation.travel > 0 })
+		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 		tryVerify(function() { return track.x < -1 })
 		const firstX = track.x
 		wait(120)
@@ -153,6 +154,7 @@ TestCase {
 		const animation = findChild(header, "stonksTickerHorizontalAnimation")
 		verify(viewport !== null && track !== null && animation !== null)
 		tryVerify(function() { return animation.travel > 0 && track.requiredCopyCount > 2 })
+		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 
 		// The strip must remain wider than the viewport by one complete sequence.
 		// That makes the next copy enter before the current loop wraps, even for a
@@ -180,6 +182,7 @@ TestCase {
 		const animation = findChild(header, "stonksTickerVerticalAnimation")
 		verify(viewport !== null && track !== null && animation !== null)
 		tryVerify(function() { return animation.travel > 0 && track.requiredCopyCount > 2 })
+		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 		verify(track.height >= viewport.height + animation.travel)
 		tryVerify(function() { return track.y < -1 })
 		verify(track.height + track.y >= viewport.height)
