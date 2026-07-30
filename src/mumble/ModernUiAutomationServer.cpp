@@ -6122,6 +6122,59 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlChatReadinessState")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("connected"), host->sessionController()->connected());
+		response.insert(QStringLiteral("serverTitle"), host->sessionController()->serverName());
+		response.insert(QStringLiteral("selfName"), host->sessionController()->selfName());
+		response.insert(QStringLiteral("activeScopeToken"), host->activeScopeController()->scopeToken());
+		response.insert(QStringLiteral("activeScopeCanLoadOlder"),
+			host->activeScopeController()->canLoadOlder());
+		response.insert(QStringLiteral("activeScopeLoadingState"),
+			host->activeScopeController()->loadingState());
+		response.insert(QStringLiteral("messageCount"), host->chatModel()->rowCount());
+
+		const bool includeScopeCatalog = request.value(QStringLiteral("includeScopeCatalog")).toBool();
+		const bool includeUnread = request.value(QStringLiteral("includeUnread")).toBool();
+		if (includeScopeCatalog || includeUnread) {
+			QVariantList scopeCatalog;
+			int navigationUnreadCount = 0;
+			const QString activeScopeToken = host->activeScopeController()->scopeToken();
+			for (int row = 0; row < host->roomModel()->rowCount(); ++row) {
+				const QVariantMap modelRow = host->roomModel()->get(row);
+				const QString token = modelRow.value(QStringLiteral("scopeToken")).toString();
+				const int unreadCount = modelRow.value(QStringLiteral("unreadCount")).toInt();
+				if (includeScopeCatalog) {
+					scopeCatalog.push_back(QVariantMap {
+						{ QStringLiteral("token"), token },
+						{ QStringLiteral("label"), modelRow.value(QStringLiteral("title")) },
+						{ QStringLiteral("pathLabel"), modelRow.value(QStringLiteral("pathLabel")) },
+						{ QStringLiteral("kind"), modelRow.value(QStringLiteral("kind")) },
+						{ QStringLiteral("unreadCount"), unreadCount }
+					});
+				}
+				if (includeUnread && token == activeScopeToken) {
+					navigationUnreadCount = unreadCount;
+				}
+			}
+			if (includeScopeCatalog) {
+				response.insert(QStringLiteral("scopeCatalog"), scopeCatalog);
+			}
+			if (includeUnread) {
+				response.insert(QStringLiteral("navigationUnreadCount"), navigationUnreadCount);
+				int controllerUnreadCount = 0;
+				if (m_mainWindow->m_persistentChatController) {
+					controllerUnreadCount =
+						m_mainWindow->m_persistentChatController->activeSnapshot().unreadCount;
+				}
+				response.insert(QStringLiteral("controllerUnreadCount"), controllerUnreadCount);
+			}
+		}
+		return response;
+	}
+
 	if (command == QLatin1String("qmlReadinessState")) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));

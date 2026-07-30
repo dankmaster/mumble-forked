@@ -3290,15 +3290,27 @@ void TestModernDialogControllers::mediaAutomationReadinessStateIsTyped() {
 	const QString commandBody = automationSource.mid(commandStart, commandEnd - commandStart);
 	QVERIFY(commandBody.contains(QStringLiteral("\"mediaActive\"")));
 	QVERIFY(commandBody.contains(QStringLiteral("\"media\"), automationMediaLifecycleState(host)")));
+	const qsizetype chatCommandStart =
+		automationSource.indexOf(QStringLiteral("command == QLatin1String(\"qmlChatReadinessState\")"));
+	QVERIFY(chatCommandStart >= 0);
+	const qsizetype chatCommandEnd =
+		automationSource.indexOf(QStringLiteral("command == QLatin1String(\"qmlReadinessState\")"),
+			chatCommandStart);
+	QVERIFY(chatCommandEnd > chatCommandStart);
+	const QString chatCommandBody =
+		automationSource.mid(chatCommandStart, chatCommandEnd - chatCommandStart);
 	for (const QString &field : { QStringLiteral("serverTitle"), QStringLiteral("selfName"),
 			 QStringLiteral("activeScopeCanLoadOlder"),
 			 QStringLiteral("activeScopeLoadingState"), QStringLiteral("scopeCatalog"),
 			 QStringLiteral("navigationUnreadCount"), QStringLiteral("controllerUnreadCount") }) {
-		QVERIFY2(commandBody.contains(QStringLiteral("\"%1\"").arg(field)),
+		QVERIFY2(chatCommandBody.contains(QStringLiteral("\"%1\"").arg(field)),
 			qPrintable(QStringLiteral("Missing lightweight readiness field: %1").arg(field)));
 	}
-	QVERIFY(commandBody.contains(QStringLiteral("host->roomModel()->get(row)")));
-	QVERIFY(commandBody.contains(QStringLiteral("activeSnapshot().unreadCount")));
+	QVERIFY(chatCommandBody.contains(QStringLiteral("includeScopeCatalog")));
+	QVERIFY(chatCommandBody.contains(QStringLiteral("includeUnread")));
+	QVERIFY(chatCommandBody.contains(QStringLiteral("host->roomModel()->get(row)")));
+	QVERIFY(chatCommandBody.contains(QStringLiteral("activeSnapshot().unreadCount")));
+	QVERIFY(!chatCommandBody.contains(QStringLiteral("automationMediaLifecycleState")));
 }
 
 void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers() {
