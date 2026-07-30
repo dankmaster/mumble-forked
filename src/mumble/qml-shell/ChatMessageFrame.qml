@@ -25,6 +25,10 @@ Item {
 	// subtree here would collapse its implicit height and break prepend anchoring.
 	property bool accessibilityViewportVisible: true
 	property bool accessibilitySuppressed: false
+	// Geometry-only timeline rows do not have a promoted semantic subtree yet.
+	// Their direct Accessible.ignored bindings are enough for first paint; delay
+	// recursive binding allocation until asynchronous row content is ready.
+	property bool accessibilityBarrierEnabled: true
 	// Visual fixtures must remain stable while the automation layer traverses
 	// accessibility bounds. That traversal can move the native pointer over a
 	// message between captures, so allow fixture hosts to suppress hover-only
@@ -290,7 +294,8 @@ Item {
 	ModalAccessibilityBarrier {
 		id: messageAccessibilityBarrier
 		objectName: "chatMessageAccessibilityBarrier"
-		active: root.accessibilitySuppressed || !root.accessibilitySubtreeActive
+		active: root.accessibilityBarrierEnabled
+			&& (root.accessibilitySuppressed || !root.accessibilitySubtreeActive)
 		// QQuickItemView may re-enable the delegate frame's private accessibility
 		// bit while materializing or reusing a row, even though its public
 		// Accessible.ignored binding remains true. Own the complete delegate while

@@ -95,6 +95,28 @@ TestCase {
 		tryCompare(semanticText.Accessible, "ignored", false)
 	}
 
+	function test_geometry_only_row_defers_recursive_accessibility_barrier() {
+		const item = timeline.itemAtIndex(0)
+		verify(item !== null)
+		const semanticText = findChild(item, "chatTestSemanticText")
+		const barrier = findChild(item, "chatMessageAccessibilityBarrier")
+		verify(semanticText !== null && barrier !== null)
+
+		item.accessibilityBarrierEnabled = false
+		item.accessibilitySuppressed = true
+		tryCompare(barrier, "active", false)
+		// Promoted content does not exist in the production geometry shell. This
+		// fixture keeps one child to prove that enabling the barrier later still
+		// applies and restores the complete recursive contract.
+		item.accessibilityBarrierEnabled = true
+		tryCompare(barrier, "active", true)
+		tryCompare(semanticText.Accessible, "ignored", true)
+
+		item.accessibilitySuppressed = false
+		tryCompare(barrier, "active", false)
+		tryCompare(semanticText.Accessible, "ignored", false)
+	}
+
 	function test_promoted_message_owners_bind_modal_suppression_directly() {
 		directRows.setProperty(0, "separatorLabel", "Today")
 		timeline.forceLayout()

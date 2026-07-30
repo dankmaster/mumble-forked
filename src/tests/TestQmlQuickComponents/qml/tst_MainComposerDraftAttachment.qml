@@ -230,6 +230,7 @@ TestCase {
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*DelegateChooser[\s\S]*ChatMessageFrame\s*\{[\s\S]*opacity:\s*timeline\.scopePresentationPending\s*\?\s*0\s*:\s*1/.test(mainSource))
+		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*"settled":[\s\S]*!timeline\.scopeResetPending/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))

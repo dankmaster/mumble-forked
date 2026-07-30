@@ -4613,6 +4613,7 @@ ApplicationWindow {
 						&& y + height <= timeline.contentY + timeline.height + 0.5
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					|| timeline.scopePresentationPending
+				accessibilityBarrierEnabled: logEntry || messageRowReady
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 					&& !timeline.richScrollInProgress
 						function openAutomationActions() {
