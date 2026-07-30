@@ -237,7 +237,12 @@ TestCase {
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
 		verify(/coldScopeMaterializationDelayMs:\s*500[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldMaterializationPending[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*deferredMaterializationTimer\.running[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldMaterializationPending[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		const finalizeStart = mainSource.indexOf("function completeScopePresentationFinalization")
+		const finalizeEnd = mainSource.indexOf("const generation =", finalizeStart)
+		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
+		verify(!/deferredMaterializationTimer\.running/.test(
+			mainSource.slice(finalizeStart, finalizeEnd)))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/deferredMaterializationsPerFrame:\s*1[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*chatModel\.materializeDeferredMessage\(queued\.shift\(\)\)[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*deferredMaterializationTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
 		const deferredStart = mainSource.indexOf("id: deferredMessageDelegate")

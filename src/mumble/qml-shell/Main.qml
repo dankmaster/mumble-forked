@@ -3441,12 +3441,12 @@ ApplicationWindow {
 						if (!scopePresentationPending || !scopePresentationFinalizing)
 							return
 						// The ordinary quiet timer can expire while the cold-scope
-						// admission delay or its bounded materialization queue is still
-						// active. Keep that geometry behind the loading surface unless
-						// the existing hard deadline explicitly releases it.
+						// admission delay is still active. Keep the cheap deferred rows
+						// behind the loading surface until that delay has elapsed, but do
+						// not wait for the complete frame-paced materialization queue:
+						// subsequent row geometry already restarts this quiet timer.
 						const coldMaterializationPending =
 							coldScopeMaterializationDelayTimer.running
-							|| deferredMaterializationTimer.running
 						if (!forcedByDeadline && coldMaterializationPending) {
 							scopePresentationFinalizeQuietTimer.restart()
 							return
