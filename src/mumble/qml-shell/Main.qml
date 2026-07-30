@@ -864,7 +864,8 @@ ApplicationWindow {
 		}
 		if (coldPreviewHydrationPacingActive && timeline
 				&& (timeline.richLoaderResumeTimer.running
-					|| timeline.richLoaderResumeQueue.length > 0)) {
+					|| timeline.richLoaderResumeQueue.length > 0
+					|| timeline.richLoaderResumeActiveId.length > 0)) {
 			// Do not let two independent per-frame queues converge on the same GUI
 			// turn. Finish the lightweight row shells before cached preview results
 			// begin instantiating their provider trees.
@@ -3130,6 +3131,11 @@ ApplicationWindow {
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property var richLoaderResumeQueue: []
+					// Asynchronous Loader incubation can span several polish turns. Do
+					// not activate another complete message tree until the previous one
+					// reports Ready (or Error), otherwise their final polish work can
+					// converge into one long GUI heartbeat gap.
+					property string richLoaderResumeActiveId: ""
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
 							richScrollRetentionTarget = Math.min(maximumRichScrollRetentionBuffer,
@@ -3141,6 +3147,7 @@ ApplicationWindow {
 							previewHydrationTimer.stop()
 							richContentResumeTimer.stop()
 							richLoaderResumeTimer.stop()
+							richLoaderResumeActiveId = ""
 							deferredMaterializationTimer.stop()
 							suspendRichContentForScroll()
 							return
@@ -3237,6 +3244,9 @@ ApplicationWindow {
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
 						bottomFollowTimer.stop()
+						richLoaderResumeTimer.stop()
+						richLoaderResumeQueue = []
+						richLoaderResumeActiveId = ""
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
@@ -3602,6 +3612,7 @@ ApplicationWindow {
 
 					function suspendRichContentForScroll() {
 						richLoaderResumeQueue = []
+						richLoaderResumeActiveId = ""
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
@@ -3662,6 +3673,8 @@ ApplicationWindow {
 							scheduleRichContentResume()
 							return
 						}
+						if (richLoaderResumeActiveId.length > 0)
+							return
 						if (richLoaderResumeQueue.length === 0) {
 							finishRichContentRecoveryIfIdle()
 							return
@@ -3670,17 +3683,38 @@ ApplicationWindow {
 						const stableId = String(queued.shift() || "")
 						richLoaderResumeQueue = queued
 						const children = contentItem ? contentItem.children : []
+						let resumed = false
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
 							if (item && item.performanceTimelineDelegate === true
 									&& item.accessibilityPooled !== true
 									&& String(item.stableId || "") === stableId) {
+								richLoaderResumeActiveId = stableId
 								item.resumeRichContentAfterScroll(
 									timeline.scopePresentationFinalizing)
+								resumed = true
+								if (item.messageRowReady === true)
+									Qt.callLater(function() {
+										timeline.completeRichLoaderResume(stableId)
+									})
 								break
 							}
 						}
-						if (queued.length > 0)
+						if (!resumed && queued.length > 0)
+							richLoaderResumeTimer.start()
+						else if (!resumed)
+							finishRichContentRecoveryIfIdle()
+					}
+
+					function completeRichLoaderResume(stableId) {
+						if (String(stableId || "") !== richLoaderResumeActiveId)
+							return
+						richLoaderResumeActiveId = ""
+						if (richScrollInProgress) {
+							scheduleRichContentResume()
+							return
+						}
+						if (richLoaderResumeQueue.length > 0)
 							richLoaderResumeTimer.start()
 						else
 							finishRichContentRecoveryIfIdle()
@@ -3793,7 +3827,8 @@ ApplicationWindow {
 						if (richScrollInProgress)
 							return
 						if (richContentResumeTimer.running || richLoaderResumeTimer.running
-								|| deferredMaterializationTimer.running) {
+								|| deferredMaterializationTimer.running
+								|| richLoaderResumeActiveId.length > 0) {
 							Qt.callLater(function() {
 								timeline.finishRichContentRecoveryIfIdle()
 							})
@@ -4129,6 +4164,7 @@ ApplicationWindow {
 								|| timeline.richLoaderResumeTimer.running
 								|| timeline.deferredMaterializationTimer.running
 								|| timeline.richLoaderResumeQueue.length > 0
+								|| timeline.richLoaderResumeActiveId.length > 0
 								|| timeline.deferredMaterializationQueue.length > 0
 								|| timeline.pendingScopeHydrationCount() > 0
 							if (recoveryPending) {
@@ -4566,6 +4602,9 @@ ApplicationWindow {
 						// window stays a lightweight geometry shell until scrolling stops,
 						// avoiding full message-tree allocation and GC on the input frame.
 						property bool messageRowMaterialized: false
+						readonly property bool messageRowReady: messageRowMaterialized
+							&& (messageRowLoader.status === Loader.Ready
+								|| messageRowLoader.status === Loader.Error)
 						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
@@ -4931,11 +4970,16 @@ ApplicationWindow {
 							visible: active
 									onLoaded: {
 										messageDelegate.messageRowMaterialized = true
+										timeline.completeRichLoaderResume(messageDelegate.stableId)
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
 											topAnchorFrameTimer.restart()
 											Qt.callLater(function() { timeline.restoreTopAnchor() })
 										}
+							}
+							onStatusChanged: {
+								if (status === Loader.Error)
+									timeline.completeRichLoaderResume(messageDelegate.stableId)
 							}
 							sourceComponent: Component {
 								RowLayout {
