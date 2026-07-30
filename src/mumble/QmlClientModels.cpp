@@ -3764,7 +3764,7 @@ void ChatTimelineModel::drainQueuedAppend() {
 	const QVariantList attachments = messageMap.value(QStringLiteral("attachments")).toList();
 	mumble::chatperf::recordNote("qml.chat.append_drain",
 		QStringLiteral("id=%1 preview=%2 attachments=%3 body_segments=%4 remaining=%5")
-			.arg(messageMap.value(QStringLiteral("stableId")).toString())
+			.arg(messageMap.value(QStringLiteral("id")).toString())
 			.arg(preview.isEmpty() ? 0 : 1)
 			.arg(attachments.size())
 			.arg(messageMap.value(QStringLiteral("bodySegments")).toList().size())
@@ -3822,7 +3822,11 @@ void ChatTimelineModel::drainQueuedPrepend() {
 
 	// Prepend newest chunks first so every later chunk lands in front of it and
 	// the final source ordering remains identical to the server page.
-	constexpr qsizetype PrependRowsPerFrame = 4;
+	// Two variable-height rows fit comfortably inside the 50 ms GUI heartbeat
+	// budget on cold rich histories. Four can force ListView to polish multiple
+	// complete message frames together, while the extra drain turns still keep a
+	// ten-message older-history page inside the 300 ms response gate.
+	constexpr qsizetype PrependRowsPerFrame = 2;
 	const qsizetype chunkSize = std::min(PrependRowsPerFrame, m_pendingPrependRows.size());
 	const qsizetype chunkStart = m_pendingPrependRows.size() - chunkSize;
 	const QVariantList chunk = m_pendingPrependRows.mid(chunkStart, chunkSize);
