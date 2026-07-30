@@ -3358,6 +3358,10 @@ ApplicationWindow {
 						restoringBottom = true
 						containTailMessageWhenPossible()
 						restoringBottom = false
+						// Start cached/backend preview hydration while the timeline is still
+						// hidden. Its height refinements then restart the final quiet window
+						// instead of making the newly exposed tail chase changing geometry.
+						queueVisiblePreviewHydration(true)
 						scopePresentationFinalizeQuietTimer.start()
 						scopePresentationFinalizeDeadlineTimer.start()
 					}
@@ -3707,8 +3711,11 @@ ApplicationWindow {
 							finishRichContentRecoveryIfIdle()
 					}
 
-					function queueVisiblePreviewHydration() {
-						if (richScrollInProgress || prependAnchorActive || scopePresentationPending)
+					function queueVisiblePreviewHydration(allowDuringFinalization) {
+						const pendingAllowed = allowDuringFinalization === true
+							&& scopePresentationFinalizing
+						if (richScrollInProgress || prependAnchorActive
+								|| (scopePresentationPending && !pendingAllowed))
 							return
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
@@ -3716,7 +3723,7 @@ ApplicationWindow {
 							if (item && item.performanceTimelineDelegate === true
 									&& item.accessibilityPooled !== true
 									&& item.inVisibleViewport === true)
-								item.requestPreviewHydrationIfNeeded()
+								item.requestPreviewHydrationIfNeeded(pendingAllowed)
 						}
 					}
 
@@ -4532,10 +4539,12 @@ ApplicationWindow {
 								richResourceReleaseTimer.restart()
 							}
 						}
-						function requestPreviewHydrationIfNeeded() {
+						function requestPreviewHydrationIfNeeded(allowDuringFinalization) {
+							const pendingAllowed = allowDuringFinalization === true
+								&& timeline.scopePresentationFinalizing
 							if (backendContentNeedsHydration && !backendHydrationRequested
 									&& inVisibleViewport
-									&& !timeline.scopePresentationPending
+									&& (!timeline.scopePresentationPending || pendingAllowed)
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
 									&& !chatModel.prependPending
