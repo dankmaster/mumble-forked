@@ -19,6 +19,13 @@
 #include <QScopeGuard>
 #include <QSet>
 
+#ifdef Q_OS_WIN
+#	ifndef NOMINMAX
+#		define NOMINMAX
+#	endif
+#	include <windows.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -27,6 +34,28 @@
 
 namespace Mumble::InputEnhancement {
 namespace {
+	class CapabilityProbeBackgroundMode final {
+	public:
+		CapabilityProbeBackgroundMode() {
+#ifdef Q_OS_WIN
+			m_active = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
+#endif
+		}
+
+		~CapabilityProbeBackgroundMode() {
+#ifdef Q_OS_WIN
+			if (m_active) {
+				(void) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+			}
+#endif
+		}
+
+	private:
+#ifdef Q_OS_WIN
+		bool m_active = false;
+#endif
+	};
+
 	std::optional< QByteArray > readBounded(const QString &path, qsizetype maximumBytes, qsizetype exactBytes = -1) {
 		QFile file(path);
 		if (!file.open(QIODevice::ReadOnly)) {
@@ -842,6 +871,9 @@ void InputEnhancementPackageVerifier::startManualProfileCpuClassProbe() {
 		return;
 	}
 	m_manualProfileProbeFuture = std::async(std::launch::async, [this]() {
+		// This is an advisory startup benchmark, not an audio callback. Keep its
+		// DLL/model paging and synthetic frame work below interactive QML work.
+		CapabilityProbeBackgroundMode backgroundMode;
 		std::ignore = manualProfileCpuClass();
 	});
 }

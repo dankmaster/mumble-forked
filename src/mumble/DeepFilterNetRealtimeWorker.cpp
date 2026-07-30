@@ -5,6 +5,13 @@
 
 #include "DeepFilterNetRealtimeWorker.h"
 
+#ifdef Q_OS_WIN
+#	ifndef NOMINMAX
+#		define NOMINMAX
+#	endif
+#	include <windows.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -199,6 +206,9 @@ unsigned int DeepFilterNetRealtimeWorker::schedulingSlackFrames() const noexcept
 
 void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 	std::uint64_t nextSequence = 0;
+#ifdef Q_OS_WIN
+	bool offlineBackgroundMode = false;
+#endif
 	while (!m_stopRequested.load(std::memory_order_acquire)) {
 		if (m_failureStatus.load(std::memory_order_acquire) != statusOk) {
 			const unsigned int observedGeneration = m_workGeneration.load(std::memory_order_acquire);
@@ -226,6 +236,17 @@ void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 			continue;
 		}
 
+		// Offline qualification and calibration are allowed to wait for each
+		// frame. Run those workers in Windows background-resource mode so their
+		// CPU, model paging, and memory traffic cannot steal a GUI heartbeat.
+		// Realtime workers never set m_offlineWaitEnabled before inference and
+		// therefore retain the established scheduling priority.
+#ifdef Q_OS_WIN
+		if (!offlineBackgroundMode && m_offlineWaitEnabled.load(std::memory_order_acquire)) {
+			offlineBackgroundMode =
+				SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
+		}
+#endif
 		const auto processingStartedAt  = std::chrono::steady_clock::now();
 		const int status                = m_process(m_context, slot.input.data(), slot.output.data());
 		const auto processingFinishedAt = std::chrono::steady_clock::now();
@@ -244,6 +265,11 @@ void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 		m_completedFrames.fetch_add(1, std::memory_order_release);
 		notifyOfflineWaitersFromWorker();
 	}
+#ifdef Q_OS_WIN
+	if (offlineBackgroundMode) {
+		(void) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+	}
+#endif
 }
 
 void DeepFilterNetRealtimeWorker::latchFailure(int status) noexcept {
