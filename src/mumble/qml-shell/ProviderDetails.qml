@@ -189,6 +189,8 @@ FocusScope {
 	]), 1024) || safeText(previewDescription, 1024) || qsTr("Search")
 	readonly property var googleTabs: [qsTr("All"), qsTr("Images"), qsTr("News"),
 		qsTr("Videos"), qsTr("Shopping")]
+	readonly property bool presentationReady: !detailsLoader.active
+		|| detailsLoader.status === Loader.Error || detailsLoader.presentationSettled
 
 	signal externalOpenRequested(string url)
 	signal steamMediaSelectionRequested(int index)
@@ -1457,10 +1459,17 @@ FocusScope {
 	// available immediately to RichPreviewCard.
 	Loader {
 		id: detailsLoader
+		property bool presentationSettled: false
 		anchors.left: parent.left
 		anchors.right: parent.right
 		active: root.visible
 		asynchronous: true
+		onActiveChanged: {
+			presentationSettled = false
+			if (!active)
+				detailsSettleTimer.stop()
+		}
+		onLoaded: detailsSettleTimer.restart()
 
 		sourceComponent: Component {
 			ColumnLayout {
@@ -4322,5 +4331,12 @@ FocusScope {
 		}
 			}
 		}
+	}
+
+	Timer {
+		id: detailsSettleTimer
+		interval: 16
+		repeat: false
+		onTriggered: detailsLoader.presentationSettled = true
 	}
 }

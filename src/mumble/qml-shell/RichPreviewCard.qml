@@ -30,6 +30,8 @@ Rectangle {
 	property bool renderActive: true
 	property bool animationsEnabled: true
 	property bool hoverEffectsEnabled: true
+	readonly property bool materializationSettled: !providerDetails.visible
+		|| providerDetails.presentationReady
 	readonly property int animationDuration: animationsEnabled ? Theme.motionFast : 0
 	readonly property bool effectiveHovered: hoverEffectsEnabled && cardHover.hovered
 	property bool userExpanded: false

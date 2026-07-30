@@ -4608,9 +4608,27 @@ ApplicationWindow {
 						// window stays a lightweight geometry shell until scrolling stops,
 						// avoiding full message-tree allocation and GC on the input frame.
 						property bool messageRowMaterialized: false
+						readonly property bool previewPresentationReady: !hasPreviewContent
+							|| previewNeedsHydration
+							|| (messageRowLoader.item && messageRowLoader.item.previewLoader
+								&& (messageRowLoader.item.previewLoader.status === Loader.Error
+									|| (messageRowLoader.item.previewLoader.status === Loader.Ready
+										&& messageRowLoader.item.previewLoader.item
+										&& messageRowLoader.item.previewLoader.item.materializationSettled)))
 						readonly property bool messageRowReady: messageRowMaterialized
-							&& (messageRowLoader.status === Loader.Ready
-								|| messageRowLoader.status === Loader.Error)
+							&& (messageRowLoader.status === Loader.Error
+								|| (messageRowLoader.status === Loader.Ready
+									&& previewPresentationReady))
+						function completeRichLoaderResumeWhenReady() {
+							if (!messageRowReady)
+								return
+							const rowId = stableId
+							Qt.callLater(function() {
+								if (rowId === messageDelegate.stableId
+										&& messageDelegate.messageRowReady)
+									timeline.completeRichLoaderResume(rowId)
+							})
+						}
 						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
@@ -4984,7 +5002,7 @@ ApplicationWindow {
 							visible: active
 							onLoaded: {
 										messageDelegate.messageRowMaterialized = true
-										timeline.completeRichLoaderResume(messageDelegate.stableId)
+										messageDelegate.completeRichLoaderResumeWhenReady()
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
 											topAnchorFrameTimer.restart()
@@ -5382,6 +5400,7 @@ ApplicationWindow {
 									Layout.maximumWidth: Layout.preferredWidth
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+										messageDelegate.completeRichLoaderResumeWhenReady()
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
 											topAnchorFrameTimer.restart()
@@ -5488,6 +5507,14 @@ ApplicationWindow {
 										}
 									}
                                 }
+								Connections {
+									target: messagePreviewLoader.item
+									enabled: !!target
+									ignoreUnknownSignals: true
+									function onMaterializationSettledChanged() {
+										messageDelegate.completeRichLoaderResumeWhenReady()
+									}
+								}
 								RowLayout {
 									id: messageFooter
 									objectName: "chatMessageFooter"
