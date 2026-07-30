@@ -3363,6 +3363,10 @@ ApplicationWindow {
 						restoringBottom = true
 						containTailMessageWhenPossible()
 						restoringBottom = false
+						// Materialize at most one visible rich message tree per frame while
+						// final geometry is still hidden. This reuses the scroll-recovery
+						// queue instead of letting every cold-scope Loader incubate together.
+						queueRichLoaderResumes()
 						// Start cached/backend preview hydration while the timeline is still
 						// hidden. Its height refinements then restart the final quiet window
 						// instead of making the newly exposed tail chase changing geometry.
@@ -3653,7 +3657,8 @@ ApplicationWindow {
 							if (item && item.performanceTimelineDelegate === true
 									&& item.accessibilityPooled !== true
 									&& String(item.stableId || "") === stableId) {
-								item.resumeRichContentAfterScroll()
+								item.resumeRichContentAfterScroll(
+									timeline.scopePresentationFinalizing)
 								break
 							}
 						}
@@ -4538,7 +4543,10 @@ ApplicationWindow {
 							}
 							if (inHydrationWindow) {
 								richResourceReleaseTimer.stop()
-								if (!timeline.richScrollInProgress)
+								if (!timeline.richScrollInProgress
+										&& (!timeline.scopePresentationPending
+											|| (timeline.scopePresentationFinalizing
+												&& !richLoaderSuspended)))
 									richResourcesActive = true
 							} else if (!timeline.richScrollInProgress) {
 								richResourceReleaseTimer.restart()
@@ -4562,8 +4570,14 @@ ApplicationWindow {
 										inVisibleViewport))
 								chatModel.requestBodyHydration(stableId)
 						}
-						function resumeRichContentAfterScroll() {
+						function resumeRichContentAfterScroll(allowDuringFinalization) {
+							const pendingAllowed = allowDuringFinalization === true
+								&& timeline.scopePresentationFinalizing
 							if (!timeline.richScrollInProgress) {
+								if (timeline.scopePresentationPending && !pendingAllowed) {
+									updateRichResourceActivity()
+									return
+								}
 								richLoaderSuspended = false
 								// Delegates discovered by the retention window stay as
 								// geometry-only shells while the gesture is active. Let the
@@ -4638,6 +4652,7 @@ ApplicationWindow {
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
 							richLoaderSuspended = timeline.richScrollInProgress
+								|| timeline.scopePresentationPending
 							const row = messageRowLoader.item
 							if (row && row.previewLoader && row.previewLoader.item)
 								row.previewLoader.item.resetForReuse()
@@ -4658,6 +4673,7 @@ ApplicationWindow {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateCreatedCount
 							richLoaderSuspended = timeline.richScrollInProgress
+								|| timeline.scopePresentationPending
 							resumeRichContentAfterScroll()
 						}
 						// This technical delegate frame must remain ignored for its entire
