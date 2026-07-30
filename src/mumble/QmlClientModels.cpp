@@ -3426,14 +3426,15 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 	if (rowIndex >= 0) {
 		const QVariantMap current = get(rowIndex);
 		if (current.value(QStringLiteral("deferredPresentation")).toBool()) {
-			row.insert(QStringLiteral("deferredPresentation"), true);
-			// A provider/attachment update can arrive while the cold row is still
-			// represented by its real-data lightweight delegate. Preserve that
-			// inline lane until QML explicitly materializes the row; otherwise a
-			// sparse backend update silently moves it out of the ListView and into
-			// the older-history header model.
-			row.insert(QStringLiteral("deferredPresentationInline"),
-				current.value(QStringLiteral("deferredPresentationInline")).toBool());
+			// Provider, attachment and delivery updates for a cold/offscreen row
+			// must not emit dataChanged and rebuild an invisible QML delegate.
+			// Retain only the newest real DTO and consume it when QML admits the
+			// row into the materialized viewport.
+			const QVariantMap retained =
+				m_deferredRowUpdates.value(id, current.value(QStringLiteral("source")).toMap());
+			if (retained == message) return MessageMutation::Unchanged;
+			m_deferredRowUpdates.insert(id, message);
+			return MessageMutation::Updated;
 		}
 		row.insert(QStringLiteral("modelStartsGroup"),
 			current.value(QStringLiteral("modelStartsGroup"), true));
@@ -3476,6 +3477,7 @@ bool ChatTimelineModel::removeMessage(const QString &messageId) {
 	const QString id = messageId.trimmed();
 	if (id.isEmpty()) return false;
 	if (indexOf(id) < 0) return false;
+	m_deferredRowUpdates.remove(id);
 	m_deferredRichBodyMessageIds.remove(id);
 	forgetRichBodyMessage(id);
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
@@ -3890,6 +3892,7 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
+	m_deferredRowUpdates.clear();
 	if (hadDeferredPresentationUpdates) emit deferredPresentationUpdatesPendingChanged();
 	QVariantList rows;
 	QList< RichBodyParseRequest > requests;
@@ -3973,6 +3976,7 @@ void ChatTimelineModel::clear() {
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
+	m_deferredRowUpdates.clear();
 	if (hadDeferredPresentationUpdates) emit deferredPresentationUpdatesPendingChanged();
 	m_deferredRichBodyMessageIds.clear();
 	for (auto it = m_richBodyConsumers.begin(); it != m_richBodyConsumers.end(); ++it) it->clear();
@@ -4009,9 +4013,26 @@ bool ChatTimelineModel::materializeDeferredMessage(const QString &messageId) {
 	if (rowIndex < 0) return false;
 	QVariantMap row = get(rowIndex);
 	if (!row.value(QStringLiteral("deferredPresentation")).toBool()) return false;
+	if (const auto update = m_deferredRowUpdates.find(id); update != m_deferredRowUpdates.end()) {
+		QList< RichBodyParseRequest > requests;
+		QVariantMap updatedRow = messageRow(update.value(), &requests);
+		m_deferredRowUpdates.erase(update);
+		if (!updatedRow.isEmpty()) {
+			updatedRow.insert(QStringLiteral("modelStartsGroup"),
+				row.value(QStringLiteral("modelStartsGroup"), true));
+			updatedRow.insert(QStringLiteral("dateBoundary"),
+				row.value(QStringLiteral("dateBoundary"), true));
+			row = std::move(updatedRow);
+			for (const RichBodyParseRequest &request : requests) {
+				m_deferredRichBodyMessageIds.insert(request.messageId);
+			}
+		}
+	}
 	row.insert(QStringLiteral("deferredPresentation"), false);
 	row.insert(QStringLiteral("deferredPresentationInline"), false);
 	upsertRowFromInternalResult(row);
+	updateUserHistoryRow(id, row);
+	if (searchActive()) refreshSearchState(true);
 	return true;
 }
 

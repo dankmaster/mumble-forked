@@ -308,6 +308,7 @@ TestCase {
 		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*rowNeedsDeferredPresentation\(chatModel\.get\(index\)\)[\s\S]*return\s+false[\s\S]*forceLayout\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationFastPath\s*=\s*true[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
 		verify(/id:\s*scopePresentationFastPathTimer[\s\S]*interval:\s*0[\s\S]*completeScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/function\s+onAppendPendingChanged\(\)[\s\S]*!chatModel\.appendPending[\s\S]*scheduleScopePresentationFastPath\(\)[\s\S]*timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*!activeScope\.loading[\s\S]*timeline\.finishScopePresentation\(false\)/.test(mainSource))
 		verify(/function\s+onLoadingChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/function\s+onCountChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/"presentationFastPath":\s*timeline\.scopePresentationFastPath/.test(mainSource))

@@ -614,6 +614,10 @@ private:
 	bool m_presentationBusy = false;
 	bool m_deferredPresentationUpdateDrainScheduled = false;
 	QHash< QString, QVariantMap > m_deferredPresentationUpdates;
+	// Source updates for a fixed-height deferred row are not presentation work
+	// until that row approaches the viewport. Retain only the newest complete
+	// message DTO and fold it into the single materialization mutation.
+	QHash< QString, QVariantMap > m_deferredRowUpdates;
 	ChatTimelinePresentationProxyModel m_presentationModel;
 	ChatTimelinePresentationProxyModel m_deferredPresentationModel;
 };

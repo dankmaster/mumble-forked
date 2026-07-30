@@ -4531,8 +4531,17 @@ ApplicationWindow {
 							timeline.restoreDeferredPrependAnchor()
 						}
 						function onAppendPendingChanged() {
-							if (!chatModel.appendPending)
+							if (!chatModel.appendPending) {
 								timeline.scheduleScopePresentationFastPath()
+								// The final appendPending=false transition is the
+								// authoritative quiet boundary for the frame-paced cold
+								// tail. Keep the existing frame-separated finalization,
+								// but do not add another unconditional quiet interval.
+								if (timeline.scopePresentationPending
+										&& !timeline.scopePresentationFinalizing
+										&& !activeScope.loading && timeline.count > 0)
+									timeline.finishScopePresentation(false)
+							}
 						}
 						function onRowsAboutToChange(first, last) {
 							if (!chatModel.presentationBusy

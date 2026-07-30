@@ -544,6 +544,7 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QSignalSpy insertedSpy(model.presentationModel(), &QAbstractItemModel::rowsInserted);
 	QSignalSpy removedSpy(model.presentationModel(), &QAbstractItemModel::rowsRemoved);
 	QSignalSpy resetSpy(model.presentationModel(), &QAbstractItemModel::modelReset);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
 	QVariantMap updatedMessage {
 		{ QStringLiteral("messageKey"), QStringLiteral("cold:1") },
 		{ QStringLiteral("plainText"), QStringLiteral("Cold one updated") }
@@ -556,6 +557,9 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(insertedSpy.count(), 0);
 	QCOMPARE(removedSpy.count(), 0);
 	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(changedSpy.count(), 0);
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("Cold one"));
 	QVERIFY(model.materializeDeferredMessage(QStringLiteral("cold:1")));
 	QCOMPARE(model.presentationModel()->rowCount(), 2);
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
@@ -563,8 +567,11 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(insertedSpy.count(), 0);
 	QCOMPARE(removedSpy.count(), 0);
 	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(changedSpy.count(), 1);
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentationInline")).toBool());
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("Cold one updated"));
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
