@@ -342,7 +342,7 @@ TestCase {
 		verify(/property bool messageRowMaterialized:\s*false[\s\S]*ListView\.onPooled:[\s\S]*messageRowMaterialized\s*=\s*false/.test(mainSource))
 		verify(/id:\s*messageRowLoader[\s\S]*active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*asynchronous:\s*true[\s\S]*onLoaded:[\s\S]*messageDelegate\.messageRowMaterialized\s*=\s*true/.test(mainSource))
 		verify(/readonly property bool messageRowReady:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*Loader\.Error/.test(mainSource))
-		verify(/id:\s*messageRowLoader[\s\S]*onLoaded:[\s\S]*timeline\.completeRichLoaderResume\(messageDelegate\.stableId\)[\s\S]*onStatusChanged:[\s\S]*status\s*===\s*Loader\.Error/.test(mainSource))
+		verify(/id:\s*messageRowLoader[\s\S]*onLoaded:[\s\S]*messageDelegate\.completeRichLoaderResumeWhenReady\(\)[\s\S]*onStatusChanged:[\s\S]*status\s*===\s*Loader\.Error/.test(mainSource))
 		verify(/lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\?\s*previewPlaceholderHeight\s*\+\s*72[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*\+\s*72/.test(mainSource))
 		verify(/function\s+resumeRichContentAfterScroll\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationPending\s*&&\s*!pendingAllowed[\s\S]*richLoaderSuspended\s*=\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*!backendHydrationRequested[\s\S]*inVisibleViewport[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))

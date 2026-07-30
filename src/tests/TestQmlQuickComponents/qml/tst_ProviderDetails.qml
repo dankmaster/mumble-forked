@@ -25,6 +25,7 @@ TestCase {
 
 	function details() {
 		tryVerify(function() { return detailsLoader.item !== null })
+		tryVerify(function() { return detailsLoader.item.presentationReady })
 		return detailsLoader.item
 	}
 

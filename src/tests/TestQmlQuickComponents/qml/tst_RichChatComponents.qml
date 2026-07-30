@@ -1789,6 +1789,7 @@ TestCase {
 
 		const details = findChild(card, "providerDetails")
 		verify(details !== null)
+		tryVerify(function() { return details.presentationReady })
 		compare(details.providerToken, "instagram")
 		compare(details.presentation, "identity")
 		verify(!card.inlineProviderOwnsDetails)
