@@ -1766,7 +1766,7 @@ ApplicationWindow {
 			// Use high-resolution trackpad-sized motion for the release workload.
 			// Short real histories must still produce enough presented samples to
 			// make p95/p99 meaningful instead of crossing the range in 2-3 jumps.
-			const wheelStep = Math.max(16, Math.min(32, timeline.height * 0.04))
+			const wheelStep = Math.max(8, Math.min(16, timeline.height * 0.02))
 			timeline.contentY = Math.max(currentOriginY, previousY - wheelStep)
 			performanceChatScrollCompletedSteps = nextStep
 			const firstVisible = timeline.firstVisibleMessageDelegate()
@@ -3256,6 +3256,7 @@ ApplicationWindow {
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
+						scopePresentationFinalizeStartTimer.stop()
 						scopePresentationFinalizeQuietTimer.stop()
 						scopePresentationFinalizeDeadlineTimer.stop()
 						scopePresentationObservationTimer.stop()
@@ -3396,6 +3397,15 @@ ApplicationWindow {
 						// hidden. Creating the replacement pool can refine rich-row geometry, so
 						// give it its own bounded quiet window before exposing the timeline.
 						scopeReuseResetActive = false
+						// Re-enabling reuse can schedule its own ListView polish. Keep that
+						// turn separate from tail containment, rich-loader admission, and
+						// preview hydration so none converge into one long heartbeat.
+						scopePresentationFinalizeStartTimer.restart()
+					}
+
+					function continueScopePresentationFinalization() {
+						if (!scopePresentationPending || !scopePresentationFinalizing)
+							return
 						positionTailImmediately()
 						restoringBottom = true
 						containTailMessageWhenPossible()
@@ -4234,6 +4244,13 @@ ApplicationWindow {
 						interval: 2000
 						repeat: false
 						onTriggered: timeline.finishScopePresentation(true)
+					}
+
+					Timer {
+						id: scopePresentationFinalizeStartTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.continueScopePresentationFinalization()
 					}
 
 					Timer {
