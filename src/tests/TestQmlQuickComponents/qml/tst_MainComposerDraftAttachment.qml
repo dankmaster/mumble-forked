@@ -362,8 +362,9 @@ TestCase {
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*previewHydrationTimer\.stop\(\)[\s\S]*Object\.keys\(root\.pendingPreviewHydrationIds\)\.length\s*>\s*0[\s\S]*previewHydrationTimer\.start\(\)/.test(mainSource))
 		const suspendMatch = /function\s+suspendRichContentForScroll\(\)\s*\{([\s\S]*?)\n\t\t\t\t\t\}/.exec(mainSource)
 		verify(suspendMatch !== null)
-		verify(/richLoaderResumeQueue\s*=\s*\[\][\s\S]*item\.richResourcesActive\s*=\s*false/.test(suspendMatch[1]))
+		verify(/richLoaderResumeQueue\s*=\s*\[\][\s\S]*item\.suspendRichResourcesForScroll\(\)/.test(suspendMatch[1]))
 		verify(!/item\.richLoaderSuspended\s*=\s*true/.test(suspendMatch[1]))
+		verify(!/item\.richResourcesActive\s*=/.test(suspendMatch[1]))
 		verify(/item\.richLoaderSuspended\s*!==\s*true[\s\S]*item\.richResourcesActive\s*===\s*true/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*function\s+queueRichLoaderResumes\(\)[\s\S]*candidates\.sort[\s\S]*richLoaderResumeQueue/.test(mainSource))
 		verify(/const visible = point\.y \+ item\.height > 0\.5[\s\S]*if \(!visible\)\s*continue[\s\S]*candidates\.push/.test(mainSource))
@@ -384,6 +385,11 @@ TestCase {
 		verify(!/function\s+restoreTopAnchor\(\)[\s\S]{0,240}forceLayout\(\)/.test(mainSource))
 		verify(/property bool richResourcesActive:\s*false[\s\S]*function\s+updateRichResourceActivity\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richResourcesActive\s*=\s*true/.test(mainSource))
 		verify(/hydrationWarmDistance:\s*Math\.min\(timeline\.baseCacheBuffer,[\s\S]*timeline\.height\s*\*\s*1\.5\)/.test(mainSource))
+		verify(/property bool inHydrationWindow:[\s\S]*asyncMessageDelegate\.y\s*\+\s*asyncMessageDelegate\.height[\s\S]*timeline\.contentY\s*-\s*hydrationWarmDistance/.test(mainSource))
+		verify(/property bool inVisibleViewport:\s*asyncMessageDelegate\.inVisibleViewport/.test(mainSource))
+		verify(!/property bool inVisibleViewport:[\s\S]{0,120}\by\s*\+\s*height\s*>=\s*timeline\.contentY/.test(mainSource.slice(
+			mainSource.indexOf("id: messageDelegate"), mainSource.indexOf("id: messageRowLoader"))))
+		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*richResourceActivationTimer\.stop\(\)[\s\S]*richResourceActivationSettleTimer\.stop\(\)[\s\S]*richResourcesActive\s*=\s*false/.test(mainSource))
 		verify(/property bool richLoaderSuspended:\s*false[\s\S]*function\s+handleListViewPooled\(\)[\s\S]*richLoaderSuspended\s*=\s*true[\s\S]*function\s+handleListViewReused\(\)[\s\S]*richLoaderSuspended\s*=\s*timeline\.richScrollInProgress[\s\S]*timeline\.scopePresentationPending/.test(mainSource))
 		verify(/property bool messageRowMaterialized:\s*false[\s\S]*function\s+handleListViewPooled\(\)[\s\S]*messageRowMaterialized\s*=\s*false/.test(mainSource))
 		verify(/id:\s*messageRowLoader[\s\S]*active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*asynchronous:\s*true[\s\S]*onLoaded:[\s\S]*messageDelegate\.messageRowMaterialized\s*=\s*true/.test(mainSource))
@@ -429,7 +435,8 @@ TestCase {
 	}
 
 	function test_chat_scroll_reports_delegate_materialization_diagnostics() {
-		verify(/function\s+visiblePresentationDiagnostics\(\)[\s\S]*visibleCount[\s\S]*readyCount[\s\S]*fullMessageCount[\s\S]*deferredSummaryCount[\s\S]*blankCount/.test(mainSource))
+		verify(/function\s+visiblePresentationDiagnostics\(\)[\s\S]*visibleCount[\s\S]*readyCount[\s\S]*fullMessageCount[\s\S]*deferredSummaryCount[\s\S]*blankCount[\s\S]*outerLoaderReadyCount[\s\S]*rowMaterializedCount[\s\S]*rowLoaderReadyCount[\s\S]*previewReadyCount/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"richLoaderResumeQueueCount"[\s\S]*"richLoaderResumeActiveId"[\s\S]*"visibleOuterLoaderReadyCount"[\s\S]*"visibleRowMaterializedCount"[\s\S]*"visibleRowLoaderReadyCount"[\s\S]*"visiblePreviewReadyCount"/.test(mainSource))
 		verify(/function\s+timelineDelegateDiagnostics\(\)[\s\S]*"materialized"[\s\S]*"previewItems"[\s\S]*"attachmentItems"[\s\S]*"pooledEvents"[\s\S]*"reusedEvents"[\s\S]*"visibleFullMessageCount"[\s\S]*"visibleBlankPresentationCount"/.test(mainSource))
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*"delegateDiagnostics":\s*timelineDelegateDiagnostics\(\)/.test(mainSource))
 		verify(/function\s+performanceChatScrollState\(\)[\s\S]*"delegateDiagnosticsDelta"[\s\S]*"previewsLoaded"[\s\S]*"attachmentsLoaded"/.test(mainSource))

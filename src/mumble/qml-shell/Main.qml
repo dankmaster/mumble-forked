@@ -1931,11 +1931,17 @@ ApplicationWindow {
 				"appendQueuePending": chatModel.appendPending,
 				"deferredPrependRichCount":
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
+				"richLoaderResumeQueueCount": timeline.richLoaderResumeQueue.length,
+				"richLoaderResumeActiveId": timeline.richLoaderResumeActiveId,
 				"visiblePresentationCount": visiblePresentation.visibleCount,
 				"visibleReadyPresentationCount": visiblePresentation.readyCount,
 				"visibleFullMessageCount": visiblePresentation.fullMessageCount,
 				"visibleDeferredSummaryCount": visiblePresentation.deferredSummaryCount,
 				"visibleBlankPresentationCount": visiblePresentation.blankCount,
+				"visibleOuterLoaderReadyCount": visiblePresentation.outerLoaderReadyCount,
+				"visibleRowMaterializedCount": visiblePresentation.rowMaterializedCount,
+				"visibleRowLoaderReadyCount": visiblePresentation.rowLoaderReadyCount,
+				"visiblePreviewReadyCount": visiblePresentation.previewReadyCount,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
 				// The top anchor is a transparent geometry guard while suspended rich
@@ -3623,7 +3629,11 @@ ApplicationWindow {
 							"readyCount": 0,
 							"fullMessageCount": 0,
 							"deferredSummaryCount": 0,
-							"blankCount": 0
+							"blankCount": 0,
+							"outerLoaderReadyCount": 0,
+							"rowMaterializedCount": 0,
+							"rowLoaderReadyCount": 0,
+							"previewReadyCount": 0
 						}
 
 						function record(item) {
@@ -3643,6 +3653,14 @@ ApplicationWindow {
 								}
 								return
 							}
+							if (item.status === Loader.Ready)
+								++diagnostics.outerLoaderReadyCount
+							if (item.messageRowMaterialized === true)
+								++diagnostics.rowMaterializedCount
+							if (item.messageContentLoaderReady === true)
+								++diagnostics.rowLoaderReadyCount
+							if (item.previewPresentationReady === true)
+								++diagnostics.previewReadyCount
 							if (item.messageRowReady === true) {
 								++diagnostics.fullMessageCount
 								++diagnostics.readyCount
@@ -3776,7 +3794,7 @@ ApplicationWindow {
 							// release posters, animations and provider players here; tearing
 							// down every Loader synchronously creates its own scroll-start
 							// hitch. Pooled/reused delegates still retire the complete tree.
-							item.richResourcesActive = false
+							item.suspendRichResourcesForScroll()
 						}
 					}
 
@@ -4799,6 +4817,12 @@ ApplicationWindow {
 									? item.richResourcesActive : false
 								readonly property bool messageRowReady: item
 									? item.messageRowReady : false
+								readonly property bool messageRowMaterialized: item
+									? item.messageRowMaterialized : false
+								readonly property bool messageContentLoaderReady: item
+									? item.messageContentLoaderReady : false
+								readonly property bool previewPresentationReady: item
+									? item.previewPresentationReady : false
 								readonly property bool inVisibleViewport: !accessibilityPooled
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
@@ -4842,6 +4866,10 @@ ApplicationWindow {
 								function completeRichLoaderResumeWhenReady() {
 									if (item)
 										item.completeRichLoaderResumeWhenReady()
+								}
+								function suspendRichResourcesForScroll() {
+									if (item)
+										item.suspendRichResourcesForScroll()
 								}
 
 								ListView.onPooled: {
@@ -4938,6 +4966,14 @@ ApplicationWindow {
 							&& (messageRowLoader.status === Loader.Error
 								|| (messageRowLoader.status === Loader.Ready
 									&& previewPresentationReady))
+						readonly property bool messageContentLoaderReady:
+							messageRowLoader.status === Loader.Ready
+						function suspendRichResourcesForScroll() {
+							richResourceActivationTimer.stop()
+							richResourceActivationSettleTimer.stop()
+							richResourceActivationQueued = false
+							richResourcesActive = false
+						}
 						function completeRichLoaderResumeWhenReady() {
 							if (!messageRowReady)
 								return
@@ -4958,11 +4994,15 @@ ApplicationWindow {
 						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
-							&& y + height >= timeline.contentY - hydrationWarmDistance
-							&& y <= timeline.contentY + timeline.height + hydrationWarmDistance
-						readonly property bool inVisibleViewport: !accessibilityPooled
-							&& y + height >= timeline.contentY
-							&& y <= timeline.contentY + timeline.height
+							&& asyncMessageDelegate.y + asyncMessageDelegate.height
+								>= timeline.contentY - hydrationWarmDistance
+							&& asyncMessageDelegate.y <= timeline.contentY + timeline.height
+								+ hydrationWarmDistance
+						// ChatMessageFrame is nested inside the asynchronous delegate
+						// Loader, so its own y is always zero. The ListView-space outer
+						// delegate owns viewport membership.
+						readonly property bool inVisibleViewport:
+							asyncMessageDelegate.inVisibleViewport
 						property bool richResourcesActive: false
 						function scheduleRichResourceActivation() {
 							if (richResourcesActive || richResourceActivationQueued
