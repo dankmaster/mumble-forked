@@ -250,7 +250,7 @@ TestCase {
 			mainSource.slice(finalizeStart, finalizeEnd)))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/deferredMaterializationsPerFrame:\s*1[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*chatModel\.materializeDeferredMessage\(queued\.shift\(\)\)[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*deferredMaterializationTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
-		const deferredStart = mainSource.indexOf("id: deferredMessageDelegate")
+		const deferredStart = mainSource.indexOf("id: deferredHistoryRow")
 		const deferredEnd = mainSource.indexOf("DelegateChoice {", deferredStart + 1)
 		verify(deferredStart >= 0 && deferredEnd > deferredStart)
 		const deferredDelegateSource = mainSource.slice(deferredStart, deferredEnd)
