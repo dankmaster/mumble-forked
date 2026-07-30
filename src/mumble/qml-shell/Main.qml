@@ -3480,6 +3480,11 @@ ApplicationWindow {
 						deferredPrependAnchorActive = false
 						prependAnchorActive = true
 						stickToBottom = false
+						// A non-structural data change can preserve an anchor without
+						// changing contentHeight. Arm the quiet release here as well as
+						// from restorePrependAnchor() so that such an anchor cannot stay
+						// active forever and block deferred hydration.
+						prependAnchorSettleTimer.restart()
 						return true
 					}
 
@@ -4062,15 +4067,14 @@ ApplicationWindow {
 						interval: 180
 						repeat: false
 						onTriggered: {
-							const recoveryPending = chatModel.prependPending
-								|| chatModel.presentationBusy
-								|| timeline.richContentResumeTimer.running
-								|| timeline.richLoaderResumeTimer.running
-								|| timeline.deferredMaterializationTimer.running
-								|| timeline.richLoaderResumeQueue.length > 0
-								|| timeline.deferredMaterializationQueue.length > 0
-								|| timeline.pendingScopeHydrationCount() > 0
-							if (recoveryPending) {
+							// The anchor owns only the structural prepend/correction
+							// window. Rich recovery and preview hydration are deliberately
+							// gated while it is active, so waiting for those queues here
+							// creates a circular wait after a data-only row change.
+							const correctionPending = chatModel.prependPending
+								|| timeline.prependMutationInProgress
+								|| timeline.prependAnchorCorrectionFrames > 0
+							if (correctionPending) {
 								if (timeline.deferredPrependAnchorActive)
 									timeline.restoreDeferredPrependAnchor()
 								else
