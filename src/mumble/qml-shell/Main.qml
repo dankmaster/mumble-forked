@@ -3058,6 +3058,8 @@ ApplicationWindow {
 					// Reset this scope-local retention on navigation rather than growing
 					// it with every older-history page.
 					property real richScrollRetentionBuffer: 0
+					property real richScrollRetentionTarget: 0
+					readonly property real richScrollRetentionRampStep: 224
 					readonly property real maximumRichScrollRetentionBuffer: 18000
 					cacheBuffer: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
 					readonly property bool richScrollInProgress: moving || dragging || flicking
@@ -3065,8 +3067,11 @@ ApplicationWindow {
 					property var richLoaderResumeQueue: []
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
-							richScrollRetentionBuffer = Math.min(maximumRichScrollRetentionBuffer,
-								Math.max(richScrollRetentionBuffer, contentHeight + height))
+							richScrollRetentionTarget = Math.min(maximumRichScrollRetentionBuffer,
+								Math.max(richScrollRetentionTarget, contentHeight + height))
+							if (richScrollRetentionBuffer < richScrollRetentionTarget
+									&& !richScrollRetentionRampTimer.running)
+								richScrollRetentionRampTimer.start()
 							chatModel.presentationBusy = true
 							previewHydrationTimer.stop()
 							richContentResumeTimer.stop()
@@ -3159,7 +3164,9 @@ ApplicationWindow {
 					}
 
 					function beginScopeChange() {
+						richScrollRetentionRampTimer.stop()
 						richScrollRetentionBuffer = 0
+						richScrollRetentionTarget = 0
 						releasePrependAnchor()
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
@@ -3939,6 +3946,21 @@ ApplicationWindow {
 						interval: 16
 						repeat: false
 						onTriggered: timeline.resumeNextRichLoader()
+					}
+
+					Timer {
+						id: richScrollRetentionRampTimer
+						interval: 16
+						repeat: true
+						onTriggered: {
+							timeline.richScrollRetentionBuffer = Math.min(
+								timeline.richScrollRetentionTarget,
+								timeline.richScrollRetentionBuffer
+									+ timeline.richScrollRetentionRampStep)
+							if (timeline.richScrollRetentionBuffer
+									>= timeline.richScrollRetentionTarget)
+								stop()
+						}
 					}
 
 					Timer {
