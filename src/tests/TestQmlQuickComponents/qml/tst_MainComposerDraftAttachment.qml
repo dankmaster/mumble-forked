@@ -336,7 +336,7 @@ TestCase {
 		verify(/id:\s*deferredHistoryRow[\s\S]{0,900}summaryText:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]{0,260}join\("  ·  "\)[\s\S]{0,700}text:\s*deferredHistoryRow\.summaryText/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,1600}ColumnLayout\s*\{/.test(mainSource))
-		verify(/performanceChatScrollFullRangeToStart[\s\S]*const wheelStep\s*=\s*Math\.max\(8,\s*Math\.min\(16,\s*timeline\.height \* 0\.02\)\)/.test(mainSource))
+		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*const wheelStep\s*=\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*suspendRichContentForScroll\(\)/.test(mainSource))

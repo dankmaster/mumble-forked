@@ -1790,10 +1790,12 @@ ApplicationWindow {
 			// Advance one presented high-resolution wheel step at a time. Re-read
 			// originY every frame because delegate estimates can refine the ListView
 			// origin while the complete real history is traversed.
-			// Use high-resolution trackpad-sized motion for the release workload.
-			// Short real histories must still produce enough presented samples to
-			// make p95/p99 meaningful instead of crossing the range in 2-3 jumps.
-			const wheelStep = Math.max(8, Math.min(16, timeline.height * 0.02))
+			// Match the real smooth-wheel handler while retaining one mutation per
+			// presented frame. Re-reading originY above keeps the target adaptive
+			// as variable-height rich delegates refine the live ListView geometry;
+			// the old 8-16 px probe could spend its complete safety budget merely
+			// chasing those refinements in an embed-heavy room.
+			const wheelStep = Math.max(80, Math.min(112, timeline.height * 0.14))
 			timeline.contentY = Math.max(currentOriginY, previousY - wheelStep)
 			performanceChatScrollCompletedSteps = nextStep
 			const firstVisible = timeline.firstVisibleMessageDelegate()
