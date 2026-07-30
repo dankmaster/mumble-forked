@@ -271,6 +271,7 @@ TestCase {
 		verify(/const travelDistance\s*=\s*Math\.min\(maximumY - minimumY,\s*requestedSteps \* 16\)[\s\S]*performanceChatScrollStartY - travelDistance/.test(mainSource))
 		verify(/function\s+advancePerformanceChatScrollWorkload\(step,\s*totalSteps\)[\s\S]*timeline\.contentY\s*=\s*performanceChatScrollStartY/.test(mainSource))
 		verify(/requestedSteps\s*\*\s*2/.test(mainSource))
+		verify(/const liveRangeUnavailable\s*=\s*fullRangeToStart\s*===\s*true[\s\S]*timeline\.count\s*<\s*2[\s\S]*loadedTravel\s*<\s*8[\s\S]*const fixtureRangeUnavailable\s*=\s*fullRangeToStart\s*!==\s*true[\s\S]*timeline\.count\s*<\s*20/.test(mainSource))
 		verify(/function\s+completePerformanceChatScrollWorkload\(\)[\s\S]*timeline\.captureViewportAnchor\(\)[\s\S]*performanceChatScrollRunning\s*=\s*false/.test(mainSource))
 		verify(!/id:\s*timelineScrollWorkload/.test(mainSource))
 	}

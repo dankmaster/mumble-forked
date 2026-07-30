@@ -1669,7 +1669,12 @@ ApplicationWindow {
 		const requestedSteps = Math.max(1, Math.floor(Number(stepCount) || 0))
 		// Each step must move the real ListView by at least two logical pixels so
 		// the scene-graph cannot legitimately coalesce it into a no-op frame.
-		if (timeline.count < 20 || maximumY - minimumY < requestedSteps * 2)
+		const loadedTravel = maximumY - minimumY
+		const liveRangeUnavailable = fullRangeToStart === true
+			&& (timeline.count < 2 || loadedTravel < 8)
+		const fixtureRangeUnavailable = fullRangeToStart !== true
+			&& (timeline.count < 20 || loadedTravel < requestedSteps * 2)
+		if (liveRangeUnavailable || fixtureRangeUnavailable)
 			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
 		performanceChatScrollStartY = timeline.contentY
