@@ -3536,6 +3536,7 @@ int ChatTimelineModel::enqueueAppendMessages(const QVariantList &messages) {
 
 	++m_appendGeneration;
 	m_pendingAppendMessages = acceptedMessages;
+	m_appendNeedsPrependQuietInterval = m_prependPending;
 	m_appendPending = true;
 	emit appendPendingChanged();
 	scheduleQueuedAppendDrain();
@@ -3709,6 +3710,7 @@ void ChatTimelineModel::cancelQueuedAppend() {
 	++m_appendGeneration;
 	m_pendingAppendMessages.clear();
 	m_appendDrainScheduled = false;
+	m_appendNeedsPrependQuietInterval = false;
 	if (!m_appendPending) {
 		return;
 	}
@@ -3733,6 +3735,18 @@ void ChatTimelineModel::scheduleQueuedAppendDrain() {
 
 void ChatTimelineModel::drainQueuedAppend() {
 	if (!m_appendPending) {
+		return;
+	}
+	if (m_prependPending) {
+		m_appendNeedsPrependQuietInterval = true;
+		scheduleQueuedAppendDrain();
+		return;
+	}
+	if (m_appendNeedsPrependQuietInterval) {
+		// Keep the final deferred-prefix insertion and the first complete rich
+		// delegate out of the same GUI turn.
+		m_appendNeedsPrependQuietInterval = false;
+		scheduleQueuedAppendDrain();
 		return;
 	}
 	if (m_pendingAppendMessages.isEmpty()) {

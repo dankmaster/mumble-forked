@@ -602,6 +602,7 @@ private:
 	bool m_richBodyDrainScheduled = false;
 	bool m_appendPending = false;
 	bool m_appendDrainScheduled = false;
+	bool m_appendNeedsPrependQuietInterval = false;
 	qulonglong m_appendGeneration = 0;
 	QVariantList m_pendingAppendMessages;
 	bool m_prependPending = false;

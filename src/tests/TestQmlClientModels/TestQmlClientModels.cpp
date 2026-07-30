@@ -569,6 +569,29 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 	QCOMPARE(model.rowCount(), 1);
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(),
 			 QStringLiteral("replacement:0"));
+
+	model.clear();
+	insertSpy.clear();
+	const QVariantList prefix {
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("prefix:0") },
+					  { QStringLiteral("plainText"), QStringLiteral("Prefix 0") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("prefix:1") },
+					  { QStringLiteral("plainText"), QStringLiteral("Prefix 1") } }
+	};
+	QCOMPARE(model.enqueuePrependMessages(prefix), 2);
+	QCOMPARE(model.enqueueAppendMessages(messages), 3);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending() && !model.appendPending(), 5000);
+	QCOMPARE(insertSpy.count(), 4);
+	QCOMPARE(insertSpy.at(0).at(1).toInt(), 0);
+	QCOMPARE(insertSpy.at(0).at(2).toInt(), 1);
+	for (int row = 0; row < 3; ++row) {
+		QCOMPARE(insertSpy.at(row + 1).at(1).toInt(), row + 2);
+		QCOMPARE(insertSpy.at(row + 1).at(2).toInt(), row + 2);
+	}
+	QCOMPARE(model.rowCount(), 5);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("prefix:0"));
+	QCOMPARE(model.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("prefix:1"));
+	QCOMPARE(model.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("tail:0"));
 }
 
 void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {

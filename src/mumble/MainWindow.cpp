@@ -30561,8 +30561,8 @@ void MainWindow::publishPersistentChatSnapshot() {
 			const qsizetype prefixSize = appendedMessages.size() - ColdHistoryFirstPaintRows;
 			const QVariantList firstPaintTail = appendedMessages.mid(prefixSize);
 			const QVariantList deferredPrefix = appendedMessages.mid(0, prefixSize);
-			const int appended = m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
 			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
+			const int appended = m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
 			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
 				mumble::chatperf::recordValue("qml.chat.snapshot_append.windowed_prefix", queued);
 				return;
@@ -30599,9 +30599,9 @@ void MainWindow::publishPersistentChatSnapshot() {
 			const QVariantList firstPaintTail = messages.mid(prefixSize);
 			const QVariantList deferredPrefix = messages.mid(0, prefixSize);
 			m_qmlShellHost->chatModel()->replaceMessages({});
+			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
 			const int appended =
 				m_qmlShellHost->chatModel()->enqueueAppendMessages(firstPaintTail);
-			const int queued = m_qmlShellHost->chatModel()->enqueuePrependMessages(deferredPrefix);
 			if (appended == firstPaintTail.size() && queued == deferredPrefix.size()) {
 				mumble::chatperf::recordValue("qml.chat.scope_sync.windowed_prefix", queued);
 			} else {
