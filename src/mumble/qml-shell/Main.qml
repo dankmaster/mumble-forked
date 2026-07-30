@@ -3257,10 +3257,14 @@ ApplicationWindow {
 						releasePrependAnchor()
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
+						releaseTopAnchor()
 						bottomFollowTimer.stop()
+						richContentResumeTimer.stop()
 						richLoaderResumeTimer.stop()
 						richLoaderResumeQueue = []
 						richLoaderResumeActiveId = ""
+						deferredMaterializationTimer.stop()
+						deferredMaterializationQueue = []
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()

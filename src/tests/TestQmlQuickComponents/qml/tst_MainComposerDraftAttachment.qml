@@ -313,6 +313,7 @@ TestCase {
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]{0,520}chatModel\.presentationBusy\s*=\s*true/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*richContentResumeTimer\.stop\(\)[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*richLoaderResumeQueue\s*=\s*\[\][\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\]/.test(mainSource))
 		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]{0,220}if\s*\(scopePresentationPending\)[\s\S]{0,80}return/.test(mainSource))
 		verify(/id:\s*richScrollRetentionRampTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*true[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\([\s\S]*richScrollRetentionRampStep[\s\S]*stop\(\)/.test(mainSource))
