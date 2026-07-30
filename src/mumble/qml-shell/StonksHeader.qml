@@ -291,31 +291,36 @@ AbstractButton {
 									Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
 								: 2
 							property int materializedCopyCount: 1
-							property int materializationGeneration: 0
 							spacing: Theme.space4
 
-							function materializeNextCopy(generation) {
-								if (materializedCopyCount >= requiredCopyCount)
-									return
-								Qt.callLater(function() {
-									if (!horizontalTrackLoader.active
-											|| generation !== materializationGeneration
-											|| materializedCopyCount >= requiredCopyCount)
-										return
-									++materializedCopyCount
-									materializeNextCopy(generation)
-								})
-							}
-
 							function scheduleMaterialization() {
-								const generation = ++materializationGeneration
 								if (materializedCopyCount > requiredCopyCount)
 									materializedCopyCount = requiredCopyCount
-								materializeNextCopy(generation)
+								if (horizontalTrackLoader.active
+										&& materializedCopyCount < requiredCopyCount)
+									horizontalMaterializationTimer.restart()
+								else
+									horizontalMaterializationTimer.stop()
 							}
 
 							onRequiredCopyCountChanged: scheduleMaterialization()
 							Component.onCompleted: scheduleMaterialization()
+
+							Timer {
+								id: horizontalMaterializationTimer
+								interval: 16
+								repeat: true
+								onTriggered: {
+									if (!horizontalTrackLoader.active
+											|| parent.materializedCopyCount >= parent.requiredCopyCount) {
+										stop()
+										return
+									}
+									++parent.materializedCopyCount
+									if (parent.materializedCopyCount >= parent.requiredCopyCount)
+										stop()
+								}
+							}
 
 							Row {
 								id: horizontalPrimary
@@ -355,32 +360,37 @@ AbstractButton {
 									Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
 								: 2
 							property int materializedCopyCount: 1
-							property int materializationGeneration: 0
 							width: parent.width
 							spacing: Theme.space2
 
-							function materializeNextCopy(generation) {
-								if (materializedCopyCount >= requiredCopyCount)
-									return
-								Qt.callLater(function() {
-									if (!verticalTrackLoader.active
-											|| generation !== materializationGeneration
-											|| materializedCopyCount >= requiredCopyCount)
-										return
-									++materializedCopyCount
-									materializeNextCopy(generation)
-								})
-							}
-
 							function scheduleMaterialization() {
-								const generation = ++materializationGeneration
 								if (materializedCopyCount > requiredCopyCount)
 									materializedCopyCount = requiredCopyCount
-								materializeNextCopy(generation)
+								if (verticalTrackLoader.active
+										&& materializedCopyCount < requiredCopyCount)
+									verticalMaterializationTimer.restart()
+								else
+									verticalMaterializationTimer.stop()
 							}
 
 							onRequiredCopyCountChanged: scheduleMaterialization()
 							Component.onCompleted: scheduleMaterialization()
+
+							Timer {
+								id: verticalMaterializationTimer
+								interval: 16
+								repeat: true
+								onTriggered: {
+									if (!verticalTrackLoader.active
+											|| parent.materializedCopyCount >= parent.requiredCopyCount) {
+										stop()
+										return
+									}
+									++parent.materializedCopyCount
+									if (parent.materializedCopyCount >= parent.requiredCopyCount)
+										stop()
+								}
+							}
 
 							Column {
 								id: verticalPrimary

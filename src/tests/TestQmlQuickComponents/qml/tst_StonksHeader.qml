@@ -133,8 +133,14 @@ TestCase {
 		const secondX = track.x
 		wait(120)
 		const thirdX = track.x
-		verify(secondX < firstX - 1)
-		verify(thirdX < secondX - 1)
+		const firstAdvance = secondX <= firstX
+			? firstX - secondX
+			: firstX + animation.travel - secondX
+		const secondAdvance = thirdX <= secondX
+			? secondX - thirdX
+			: secondX + animation.travel - thirdX
+		verify(firstAdvance > 1)
+		verify(secondAdvance > 1)
 	}
 
 	function test_short_horizontal_feed_repeats_before_the_viewport_can_empty() {
@@ -159,7 +165,9 @@ TestCase {
 		// The strip must remain wider than the viewport by one complete sequence.
 		// That makes the next copy enter before the current loop wraps, even for a
 		// single-symbol feed on a wide window.
-		verify(track.width >= viewport.width + animation.travel)
+		tryVerify(function() {
+			return track.width >= viewport.width + animation.travel
+		})
 		// Starting a zero-distance animation before layout used to consume the
 		// minimum-duration cycle and make the populated ticker appear to hesitate.
 		tryVerify(function() { return track.x < -1 }, 900)
@@ -183,7 +191,9 @@ TestCase {
 		verify(viewport !== null && track !== null && animation !== null)
 		tryVerify(function() { return animation.travel > 0 && track.requiredCopyCount > 2 })
 		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
-		verify(track.height >= viewport.height + animation.travel)
+		tryVerify(function() {
+			return track.height >= viewport.height + animation.travel
+		})
 		tryVerify(function() { return track.y < -1 })
 		verify(track.height + track.y >= viewport.height)
 	}
