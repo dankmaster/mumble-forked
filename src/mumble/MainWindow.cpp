@@ -27205,7 +27205,17 @@ void MainWindow::flushQmlRoomStateUpdates() {
 
 	m_qmlRoomStateDirty = false;
 	const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
-	const QVariantMap roomState = buildQmlRoomState();
+	QVariantMap roomState = buildQmlRoomState();
+	// Room, participant, unread and history changes are frequent. They must not
+	// replay the application menus, Stonks ticker or other session-global state:
+	// those signals rebuild sizeable QML trees and can block the render loop even
+	// though none of their values belong to the room update. Direct messages are
+	// still part of navigation state, so preserve that narrow sub-patch.
+	const QVariantMap fullAppState = roomState.value(QStringLiteral("app")).toMap();
+	QVariantMap navigationAppState;
+	navigationAppState.insert(QStringLiteral("directMessages"),
+							  fullAppState.value(QStringLiteral("directMessages")).toMap());
+	roomState.insert(QStringLiteral("app"), navigationAppState);
 	applyQmlRoomState(roomState);
 	mumble::chatperf::recordValue("qml.rooms.flush.direct", 1);
 	appendModernShellConnectTrace(QStringLiteral("flushQmlRoomStateUpdates applied rooms text=%1 voice=%2 "
@@ -27297,7 +27307,12 @@ void MainWindow::scheduleQmlRoomStateUpdate() {
 
 	if (!m_qmlRoomStateFlushTimer) {
 		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
-		const QVariantMap roomState = buildQmlRoomState();
+		QVariantMap roomState = buildQmlRoomState();
+		const QVariantMap fullAppState = roomState.value(QStringLiteral("app")).toMap();
+		QVariantMap navigationAppState;
+		navigationAppState.insert(QStringLiteral("directMessages"),
+								  fullAppState.value(QStringLiteral("directMessages")).toMap());
+		roomState.insert(QStringLiteral("app"), navigationAppState);
 		appendModernShellConnectTrace(
 			QStringLiteral("scheduleQmlRoomStateUpdate built text=%1 voice=%2 participants=%3 ms=%4")
 				.arg(roomState.value(QStringLiteral("textRooms")).toList().size())

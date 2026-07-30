@@ -23,6 +23,7 @@ ModernMenu {
 	property var generatedEntries: []
 	property bool componentCompleted: false
 	property bool reconcilePending: false
+	property bool entriesDirty: true
 	// The root menu resolves this composite component once and passes the same
 	// compiled factory to every descendant. Direct recursive Component syntax is
 	// rejected by QML, while resolving the URL after completion is supported.
@@ -248,6 +249,7 @@ ModernMenu {
 
 	function reconcileEntries() {
 		reconcilePending = false
+		entriesDirty = false
 		const nextEntries = normalizedEntries || []
 		if (canUpdateEntriesInPlace(nextEntries)) {
 			for (let index = 0; index < nextEntries.length; ++index)
@@ -284,6 +286,13 @@ ModernMenu {
 
 	onNormalizedEntriesChanged: {
 		if (componentCompleted) {
+			entriesDirty = true
+			// App, profile and context menus normally remain closed. Updating their
+			// backing payload must not synchronously instantiate or walk a hidden
+			// recursive Qt Quick menu tree during connection or chat scrolling.
+			// The latest typed payload is materialized in the menu-opening turn.
+			if (!visible)
+				return
 			// Existing trees update synchronously. A child created by the shared
 			// QQmlComponent defers only its first recursive expansion so the same
 			// compiled component is never re-entered while createObject() is active.
@@ -293,11 +302,14 @@ ModernMenu {
 				reconcileEntries()
 		}
 	}
+	onVisibleChanged: {
+		if (visible && componentCompleted && entriesDirty)
+			reconcileEntries()
+	}
 	Component.onCompleted: {
 		componentCompleted = true
-		if (parentMenu)
-			scheduleReconcile()
-		else
+		entriesDirty = true
+		if (visible)
 			reconcileEntries()
 	}
 }

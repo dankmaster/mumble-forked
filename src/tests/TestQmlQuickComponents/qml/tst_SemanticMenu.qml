@@ -170,6 +170,56 @@ TestCase {
 		verify(entries[3].items.every(function(entry) { return entry.id !== "hidden" }))
 	}
 
+	function test_hidden_menu_defers_recursive_entry_materialization_until_open() {
+		const menu = menuLoader.item
+		menu.dismiss()
+		tryVerify(function() { return !menu.visible })
+
+		const originalGroups = menu.groups
+		const connectItem = itemForAction(menu, "server.connect")
+		const originalLabel = connectItem ? connectItem.text : ""
+		const rebuildsBeforeChange = menu.entryTreeRebuildCount
+		try {
+			const updatedGroups = JSON.parse(JSON.stringify(originalGroups))
+			updatedGroups[1].items[1].label = "Connect without blocking startup"
+			menu.groups = updatedGroups
+			wait(0)
+			compare(menu.entriesDirty, true)
+			compare(menu.entryTreeRebuildCount, rebuildsBeforeChange)
+			if (connectItem)
+				compare(connectItem.text, originalLabel)
+
+			menu.open()
+			tryVerify(function() { return menu.visible })
+			tryVerify(function() { return menu.generatedEntryCount > 0 })
+			compare(menu.entriesDirty, false)
+			const serverMenu = menuForGroup("server")
+			verify(serverMenu !== null)
+			compare(serverMenu.entriesDirty, true)
+			openSubmenuWithKey(triggerForMenu(serverMenu), Qt.Key_Return)
+			tryVerify(function() { return serverMenu.visible })
+			tryVerify(function() {
+				return itemForActionInMenu(serverMenu, "server.connect") !== null
+			})
+			compare(itemForActionInMenu(serverMenu, "server.connect").text,
+				"Connect without blocking startup")
+		} finally {
+			menu.groups = originalGroups
+			if (!menu.visible)
+				menu.open()
+			tryVerify(function() { return menu.visible })
+			const restoredServerMenu = menuForGroup("server")
+			verify(restoredServerMenu !== null)
+			if (!restoredServerMenu.visible)
+				restoredServerMenu.open()
+			tryVerify(function() {
+				return itemForActionInMenu(restoredServerMenu, "server.connect") !== null
+			})
+			tryCompare(itemForActionInMenu(restoredServerMenu, "server.connect"),
+				"text", "Connect")
+		}
+	}
+
 	function test_group_rows_render_representative_typed_action_icons() {
 		menuLoader.item.open()
 		tryVerify(function() { return menuLoader.item.visible })
@@ -388,10 +438,14 @@ TestCase {
 
 	function test_stable_payload_refresh_reuses_the_compiled_submenu_tree() {
 		const menu = menuLoader.item
+		menu.open()
+		tryVerify(function() { return menu.visible })
 		const originalGroups = menu.groups
 		const serverMenu = menuForGroup("server")
 		const administrationMenu = childMenuForAction(serverMenu, "server.administration")
 		verify(serverMenu !== null && administrationMenu !== null)
+		openSubmenuWithKey(triggerForMenu(serverMenu), Qt.Key_Return)
+		tryVerify(function() { return serverMenu.visible })
 		const rootCreated = menu.entryObjectCreationCount
 		const rootRebuilds = menu.entryTreeRebuildCount
 		const serverCreated = serverMenu.entryObjectCreationCount
