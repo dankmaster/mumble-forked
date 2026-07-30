@@ -195,7 +195,8 @@ FocusScope {
 	signal steamMediaOpenRequested(int index)
 
 	objectName: "providerDetails"
-	implicitHeight: hasDetails ? detailsColumn.implicitHeight : 0
+	implicitHeight: hasDetails && detailsLoader.item
+		? detailsLoader.item.implicitHeight : 0
 	visible: hasDetails
 	activeFocusOnTab: false
 	Accessible.role: Accessible.Grouping
@@ -1449,11 +1450,24 @@ FocusScope {
 		return joinAccessibleSentences(parts)
 	}
 
-	ColumnLayout {
-		id: detailsColumn
+	// ProviderDetails contains several mutually exclusive, provider-specific
+	// presentations. Incubate only the selected visual tree instead of making
+	// every cold timeline delegate synchronously construct thousands of hidden
+	// controls. The lightweight semantic/provider properties above remain
+	// available immediately to RichPreviewCard.
+	Loader {
+		id: detailsLoader
 		anchors.left: parent.left
 		anchors.right: parent.right
-		spacing: Theme.space2
+		active: root.visible
+		asynchronous: true
+
+		sourceComponent: Component {
+			ColumnLayout {
+				id: detailsColumn
+				anchors.left: parent.left
+				anchors.right: parent.right
+				spacing: Theme.space2
 
 		Rectangle {
 			id: warningBanner
@@ -4304,6 +4318,8 @@ FocusScope {
 						}
 					}
 				}
+			}
+		}
 			}
 		}
 	}
