@@ -270,7 +270,7 @@ TestCase {
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
 		verify(!/deferredMaterializationTimer\.running|deferredMaterializationQueue\.length/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
-		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
+		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\([\s\S]*contentHeight\s*\+\s*timeline\.height[\s\S]*richScrollRetentionBuffer\s*=[\s\S]*richScrollRetentionTarget[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")
 		const rowsInsertedEnd = mainSource.indexOf("function onModelReset", rowsInsertedStart)
@@ -365,7 +365,7 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]{0,520}chatModel\.presentationBusy\s*=\s*true/.test(mainSource))

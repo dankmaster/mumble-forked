@@ -3218,7 +3218,14 @@ ApplicationWindow {
 					// from falling out of the retained range.
 					readonly property real richScrollRetentionRampStep: 128
 					readonly property real maximumRichScrollRetentionBuffer: 18000
-					cacheBuffer: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
+					// During cold entry every rich source row is still a childless
+					// provider-height summary. Let ListView instantiate that inexpensive
+					// geometry for the complete bounded page so its contentHeight is an
+					// exact sum, not an average extrapolated from whichever three rows
+					// happen to intersect the tail.
+					cacheBuffer: scopePresentationPending
+						? maximumRichScrollRetentionBuffer
+						: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
 					readonly property bool richScrollInProgress: moving || dragging || flicking
 						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
 					property var richLoaderResumeQueue: []
@@ -3591,6 +3598,17 @@ ApplicationWindow {
 							deferredMaterializationTimer.stop()
 							timeline.deferredMaterializationQueue = []
 							timeline.deferredMaterializationActiveId = ""
+							// Keep the now-known initial page geometry alive through the
+							// first real scroll. Offscreen rich rows remain lightweight and
+							// provider resources are still admitted only inside their
+							// hydration window, so this retains positions without eagerly
+							// constructing every embed.
+							timeline.richScrollRetentionTarget = Math.min(
+								timeline.maximumRichScrollRetentionBuffer,
+								Math.max(timeline.baseCacheBuffer,
+									timeline.contentHeight + timeline.height))
+							timeline.richScrollRetentionBuffer =
+								timeline.richScrollRetentionTarget
 							timeline.scopePresentationForcedByDeadline =
 								timeline.scopePresentationForcedByDeadline || !!forcedByDeadline
 							timeline.scopeResetPending = false
