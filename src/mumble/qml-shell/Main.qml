@@ -3280,10 +3280,14 @@ ApplicationWindow {
 					// admitted until the final append has completed. Yield one event turn
 					// here, but do not add a fixed delay to every cold room entry.
 					readonly property int coldScopeMaterializationDelayMs: 0
-					// Admit one fixed-height source row per frame. The complete current
-					// PROD page still settles within the one-second entry gate, while no
-					// frame has to construct several attachment/provider trees at once.
-					readonly property int deferredMaterializationsPerFrame: 1
+					// Cold finalization admits one source row at a time so provider trees
+					// cannot converge into a startup hitch. After a real scroll, admit the
+					// two rows that can straddle the viewport together: their outer Loaders
+					// incubate asynchronously and the measured frame budget has ample
+					// headroom, while serial admission otherwise leaves a visible handoff
+					// gap at the oldest loaded boundary.
+					readonly property int deferredMaterializationsPerFrame:
+						scopePresentationFinalizing ? 1 : 2
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -5003,7 +5007,11 @@ ApplicationWindow {
 								property bool resumeDuringFinalization: false
 								readonly property bool performanceTimelineDelegate: true
 								readonly property bool lightweightDeferredPresentation: false
-								readonly property string presentationSummary: ""
+								readonly property string presentationSummary:
+									[title, subtitle, timestamp]
+										.filter(function(part) {
+											return String(part || "").trim().length > 0
+										}).join("  ·  ")
 								readonly property bool contentNeedsHydration: item
 									? item.contentNeedsHydration : true
 								readonly property bool richLoaderSuspended: item
@@ -5039,6 +5047,56 @@ ApplicationWindow {
 								// inactive is important: asynchronous incubation still lets a
 								// burst of visible delegates finish in one GUI heartbeat.
 								active: !deferredPresentation
+
+								// DelegateChooser replaces the lightweight source delegate
+								// before this asynchronous Loader has completed incubation.
+								// Keep the same real message summary visible in that bounded
+								// handoff instead of exposing an empty reserved rectangle.
+								Rectangle {
+									anchors.fill: parent
+									z: -1
+									visible: asyncMessageDelegate.active
+										&& asyncMessageDelegate.status !== Loader.Ready
+									radius: Theme.innerRadius
+									color: Theme.surfaceRaised
+									border.width: 1
+									border.color: Theme.divider
+									Accessible.ignored: true
+
+									RowLayout {
+										anchors.fill: parent
+										anchors.leftMargin: Theme.space3
+										anchors.rightMargin: Theme.space3
+										spacing: Theme.space2
+
+										Label {
+											Layout.maximumWidth: Math.max(80,
+												asyncMessageDelegate.width * 0.24)
+											textFormat: Text.PlainText
+											text: asyncMessageDelegate.title
+											color: Theme.textStrong
+											font.pixelSize: Theme.fontLabel
+											font.weight: Font.DemiBold
+											elide: Text.ElideRight
+										}
+										Label {
+											Layout.fillWidth: true
+											textFormat: Text.PlainText
+											text: asyncMessageDelegate.subtitle
+											color: Theme.textMain
+											font.pixelSize: Theme.fontBody
+											elide: Text.ElideRight
+											maximumLineCount: 1
+										}
+										Label {
+											visible: text.length > 0
+											textFormat: Text.PlainText
+											text: asyncMessageDelegate.timestamp
+											color: Theme.textMuted
+											font.pixelSize: Theme.fontCaption
+										}
+									}
+								}
 
 								function openAutomationActions() {
 									return item ? item.openAutomationActions() : null
