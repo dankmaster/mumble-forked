@@ -3182,11 +3182,11 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
-					// Four fixed-height source rows per frame keep the cold-entry queue
+					// Three fixed-height source rows per frame keep the cold-entry queue
 					// below the one-second gate without recreating the multi-loader burst
 					// that made rich histories hitch. Preview/provider trees remain on
 					// their independently paced one-at-a-time resume queue.
-					readonly property int deferredMaterializationsPerFrame: 4
+					readonly property int deferredMaterializationsPerFrame: 3
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
