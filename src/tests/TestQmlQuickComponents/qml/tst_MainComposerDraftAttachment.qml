@@ -233,6 +233,7 @@ TestCase {
 		verify(!/role:\s*"deferredPresentation"[\s\S]{0,240}roleValue:\s*true/.test(mainSource))
 		verify(/id:\s*chatMessageFrameWarmupLoader[\s\S]*active:\s*true[\s\S]*asynchronous:\s*false[\s\S]*visible:\s*false[\s\S]*stableId:\s*"__shell_warmup__"[\s\S]*accessibilityBarrierEnabled:\s*false/.test(mainSource))
 		verify(!/id:\s*chatMessageFrameWarmupLoader[\s\S]{0,360}active\s*=\s*false/.test(mainSource))
+		verify(/id:\s*chatMessageDelegateWarmupModel[\s\S]*"stableId":\s*"__delegate_warmup__"[\s\S]*"preview":\s*\(\{\}\)[\s\S]*"attachments":\s*\[\][\s\S]*id:\s*chatMessageDelegateWarmupList[\s\S]*visible:\s*false[\s\S]*model:\s*chatMessageDelegateWarmupModel[\s\S]*delegate:\s*timeline\.delegate[\s\S]*Accessible\.ignored:\s*true/.test(mainSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*height:\s*item\s*\?\s*item\.implicitHeight[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(mainSource))
 		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending\s*&&\s*chatModel\.count\s*>\s*0[\s\S]*Preparing conversation/.test(mainSource))

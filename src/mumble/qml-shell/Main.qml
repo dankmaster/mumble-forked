@@ -6625,6 +6625,53 @@ ApplicationWindow {
 			}
 		}
 
+		// Exercise the exact production delegate graph once while the shell is
+		// still hidden. ChatMessageFrame alone does not construct the authored-row
+		// layout inside timeline.delegate, leaving its first real incubation able
+		// to block a connected GUI heartbeat. This one local row has no preview,
+		// attachment, hydration, or accessible surface and performs no I/O.
+		ListModel {
+			id: chatMessageDelegateWarmupModel
+			dynamicRoles: true
+			Component.onCompleted: append({
+				"stableId": "__delegate_warmup__",
+				"deferredPresentation": false,
+				"own": false,
+				"title": "Warmup",
+				"subtitle": "",
+				"status": "",
+				"avatarUrl": "",
+				"timestamp": "",
+				"replyActor": "",
+				"replySnippet": "",
+				"reactions": [],
+				"bodySegments": [],
+				"bodyHydrationPending": false,
+				"preview": ({}),
+				"attachments": [],
+				"source": ({}),
+				"modelStartsGroup": true,
+				"dateBoundary": false,
+				"deleted": false,
+				"canReply": false,
+				"canReact": false,
+				"canDelete": false
+			})
+		}
+		ListView {
+			id: chatMessageDelegateWarmupList
+			objectName: "chatMessageDelegateWarmupList"
+			width: Math.max(1, timeline.width)
+			height: timeline.deferredMessageRowHeight
+			visible: false
+			interactive: false
+			reuseItems: false
+			cacheBuffer: height
+			model: chatMessageDelegateWarmupModel
+			delegate: timeline.delegate
+			Accessible.ignored: true
+		}
+
 		Loader {
 			id: windowTopStonksTickerLoader
 			anchors.left: parent.left
