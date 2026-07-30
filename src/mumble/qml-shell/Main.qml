@@ -3505,8 +3505,6 @@ ApplicationWindow {
 							// down every Loader synchronously creates its own scroll-start
 							// hitch. Pooled/reused delegates still retire the complete tree.
 							item.richResourcesActive = false
-							if (item.inVisibleViewport === true)
-								item.richLoaderSuspended = true
 						}
 					}
 
