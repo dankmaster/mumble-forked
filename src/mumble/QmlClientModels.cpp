@@ -1515,7 +1515,11 @@ namespace {
 				|| !preview.value(QStringLiteral("embedKind")).toString().trimmed().isEmpty()
 				|| !preview.value(QStringLiteral("thumbnailUrl")).toString().trimmed().isEmpty()
 				|| !preview.value(QStringLiteral("mediaUrl")).toString().trimmed().isEmpty();
-			if (!hasMedia) return 248;
+			// Metadata-only/link-loading cards still include the message frame's
+			// provider header and footer. Reserve that complete stable geometry so
+			// the cached preview handoff cannot add the observed final 18 px after
+			// the cold scope has already been exposed.
+			if (!hasMedia) return 266;
 			if (aspect == QLatin1String("short")) return 724;
 			if (aspect == QLatin1String("square")) return 664;
 			if (aspect == QLatin1String("compact-audio")) return 370;

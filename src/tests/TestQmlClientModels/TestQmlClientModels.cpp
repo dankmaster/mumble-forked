@@ -579,6 +579,10 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		{ QStringLiteral("embedAspect"), QStringLiteral("wide") },
 		{ QStringLiteral("thumbnailUrl"), QStringLiteral("https://example.com/poster.jpg") }
 	};
+	const QVariantMap metadataOnlyPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://example.test/article") },
+		{ QStringLiteral("title"), QStringLiteral("Article") }
+	};
 	QCOMPARE(estimateModel.appendMessages(
 				 { QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
@@ -586,9 +590,13 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 					 { QStringLiteral("preview"), richPreview } },
 				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:plain") },
-					 { QStringLiteral("plainText"), QStringLiteral("Plain") } } },
+					 { QStringLiteral("plainText"), QStringLiteral("Plain") } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:metadata-only") },
+					 { QStringLiteral("plainText"), QStringLiteral("Metadata") },
+					 { QStringLiteral("preview"), metadataOnlyPreview } } },
 				 true),
-			 2);
+			 3);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 530);
@@ -599,6 +607,9 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		estimateModel.roleNames().key(QByteArrayLiteral("deferredPresentationHeight"), -1);
 	QVERIFY(estimateRole >= 0);
 	QCOMPARE(estimateModel.data(estimateModel.index(0, 0), estimateRole).toInt(), 530);
+	QCOMPARE(estimateModel.get(2).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 266);
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {

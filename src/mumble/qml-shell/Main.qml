@@ -5093,9 +5093,10 @@ ApplicationWindow {
 								// handoff instead of exposing an empty reserved rectangle.
 								Rectangle {
 									anchors.fill: parent
-									z: -1
+									z: 1
 									visible: asyncMessageDelegate.active
-										&& asyncMessageDelegate.status !== Loader.Ready
+										&& (!asyncMessageDelegate.item
+											|| !asyncMessageDelegate.item.currentMessagePresentationReady)
 									radius: Theme.innerRadius
 									color: Theme.surfaceRaised
 									border.width: 1
@@ -5256,6 +5257,12 @@ ApplicationWindow {
 						// window stays a lightweight geometry shell until scrolling stops,
 						// avoiding full message-tree allocation and GC on the input frame.
 						property bool messageRowMaterialized: false
+						// A cached preview refresh can briefly replace a ready provider
+						// tree with its loading surface. Once this stable-id has shown a
+						// complete message, retain that presentation contract and keep the
+						// real title/subtitle/timestamp summary above the rebuilding tree.
+						// Pooling or rebinding resets the latch for the next message.
+						property bool messagePresentationReadyLatched: false
 						property bool richResourceActivationQueued: false
 						readonly property bool previewPresentationReady: !hasPreviewContent
 							|| previewNeedsHydration
@@ -5264,14 +5271,22 @@ ApplicationWindow {
 									|| (messageRowLoader.item.previewLoader.status === Loader.Ready
 										&& messageRowLoader.item.previewLoader.item
 										&& messageRowLoader.item.previewLoader.item.materializationSettled)))
-						readonly property bool messageRowReady: messageRowMaterialized
+						readonly property bool currentMessagePresentationReady:
+							messageRowMaterialized
 							&& (messageRowLoader.status === Loader.Error
 								|| (messageRowLoader.status === Loader.Ready
 									&& previewPresentationReady))
+						readonly property bool messageRowReady: messageRowMaterialized
+							&& (currentMessagePresentationReady
+								|| messagePresentationReadyLatched)
 						readonly property bool messageContentLoaderReady:
 							messageRowLoader.status === Loader.Ready
 						readonly property bool richResourcesRequired: hasPreviewContent
 							|| hasAttachmentContent || hasInlineImageContent
+						onCurrentMessagePresentationReadyChanged: {
+							if (currentMessagePresentationReady)
+								messagePresentationReadyLatched = true
+						}
 						function suspendRichResourcesForScroll() {
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
@@ -5457,6 +5472,7 @@ ApplicationWindow {
 							accessibilityPooled = true
 							richLoaderSuspended = true
 							messageRowMaterialized = false
+							messagePresentationReadyLatched = false
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -5487,6 +5503,7 @@ ApplicationWindow {
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
 							backendHydrationRequested = false
+							messagePresentationReadyLatched = false
 							resumeRichContentAfterScroll()
 						}
 						Component.onCompleted: {
