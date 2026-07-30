@@ -3059,7 +3059,11 @@ ApplicationWindow {
 					// it with every older-history page.
 					property real richScrollRetentionBuffer: 0
 					property real richScrollRetentionTarget: 0
-					readonly property real richScrollRetentionRampStep: 224
+					// Stay narrowly ahead of the 112 px performance/wheel step. A wider
+					// lead can make ListView construct two variable-height message frames
+					// in one GUI turn, while 128 px still prevents rows behind the gesture
+					// from falling out of the retained range.
+					readonly property real richScrollRetentionRampStep: 128
 					readonly property real maximumRichScrollRetentionBuffer: 18000
 					cacheBuffer: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
 					readonly property bool richScrollInProgress: moving || dragging || flicking
