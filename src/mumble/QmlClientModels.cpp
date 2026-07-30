@@ -3759,6 +3759,16 @@ void ChatTimelineModel::drainQueuedAppend() {
 	// delegates in the same GUI turn can exceed the heartbeat budget. Admit one
 	// real row per presentation interval so every frame remains responsive.
 	const QVariant message = m_pendingAppendMessages.takeFirst();
+	const QVariantMap messageMap = message.toMap();
+	const QVariantMap preview = messageMap.value(QStringLiteral("preview")).toMap();
+	const QVariantList attachments = messageMap.value(QStringLiteral("attachments")).toList();
+	mumble::chatperf::recordNote("qml.chat.append_drain",
+		QStringLiteral("id=%1 preview=%2 attachments=%3 body_segments=%4 remaining=%5")
+			.arg(messageMap.value(QStringLiteral("stableId")).toString())
+			.arg(preview.isEmpty() ? 0 : 1)
+			.arg(attachments.size())
+			.arg(messageMap.value(QStringLiteral("bodySegments")).toList().size())
+			.arg(m_pendingAppendMessages.size()));
 	if (appendMessages(QVariantList { message }) != 1) {
 		cancelQueuedAppend();
 		return;
