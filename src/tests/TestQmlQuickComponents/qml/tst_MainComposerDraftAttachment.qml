@@ -244,7 +244,7 @@ TestCase {
 		verify(!/id:\s*messageDelegate[\s\S]{0,360}required property int index/.test(mainSource))
 		verify(/toggleQuickReactions\(messageDelegate\.stableId,[\s\S]{0,180}chatModel\.presentationModel\.rowForStableId\([\s\S]{0,80}messageDelegate\.stableId\)/.test(mainSource))
 		verify(/id:\s*activityLogRow[\s\S]{0,300}visible:\s*messageDelegate\.logEntry[\s\S]{0,1000}objectName:\s*"activityLogTimestamp"[\s\S]{0,1400}objectName:\s*"activityLogGutter"[\s\S]{0,1600}objectName:\s*"activityLogEvent"/.test(mainSource))
-		verify(/id:\s*messageRow[\s\S]{0,180}visible:\s*!messageDelegate\.logEntry/.test(mainSource))
+		verify(/id:\s*messageRowLoader[\s\S]{0,360}active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*!timeline\.richScrollInProgress[\s\S]*messageDelegate\.inHydrationWindow/.test(mainSource))
 	}
 
 	function test_composer_keeps_its_destination_visible_while_typing() {
@@ -320,6 +320,9 @@ TestCase {
 		verify(/property bool richResourcesActive:\s*false[\s\S]*function\s+updateRichResourceActivity\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richResourcesActive\s*=\s*true/.test(mainSource))
 		verify(/hydrationWarmDistance:\s*Math\.min\(timeline\.baseCacheBuffer,[\s\S]*timeline\.height\s*\*\s*1\.5\)/.test(mainSource))
 		verify(/property bool richLoaderSuspended:\s*false[\s\S]*ListView\.onPooled:[\s\S]*richLoaderSuspended\s*=\s*true[\s\S]*ListView\.onReused:[\s\S]*richLoaderSuspended\s*=\s*timeline\.richScrollInProgress/.test(mainSource))
+		verify(/property bool messageRowMaterialized:\s*false[\s\S]*ListView\.onPooled:[\s\S]*messageRowMaterialized\s*=\s*false/.test(mainSource))
+		verify(/id:\s*messageRowLoader[\s\S]*active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*!timeline\.richScrollInProgress[\s\S]*messageDelegate\.inHydrationWindow[\s\S]*asynchronous:\s*true[\s\S]*onLoaded:[\s\S]*messageDelegate\.messageRowMaterialized\s*=\s*true/.test(mainSource))
+		verify(/lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\?\s*previewPlaceholderHeight\s*\+\s*72[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*\+\s*72/.test(mainSource))
 		verify(/function\s+resumeRichContentAfterScroll\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richLoaderSuspended\s*=\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(\)[\s\S]*inHydrationWindow[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*forceLayout\(\)/.test(mainSource))

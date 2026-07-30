@@ -4352,22 +4352,16 @@ ApplicationWindow {
 					&& !timeline.richScrollInProgress
 						function openAutomationActions() {
 							openMessageActions()
-							return messageActions
+							return messageRowLoader.item
+								? messageRowLoader.item.actionsMenu : null
 						}
 						function openMessageActions() {
-							messageActions.targetId = stableId
-							messageActions.targetCanReply = canReply
-							messageActions.targetCanReact = canReact
-							messageActions.targetCanDelete = canDelete
-							messageActions.targetCanRetry = !!source.deliveryCanRetry
-							messageActions.open()
+							if (messageRowLoader.item)
+								messageRowLoader.item.openActions()
 						}
 						function closeMessageActionsForReuse() {
-							if (!messageActions)
-								return
-							if (messageActions.visible)
-								messageActions.close()
-							messageActions.targetId = ""
+							if (messageRowLoader.item)
+								messageRowLoader.item.closeActionsForReuse()
 						}
 						readonly property bool previewNeedsHydration: !!preview
 							&& Object.keys(preview).length > 0
@@ -4385,6 +4379,11 @@ ApplicationWindow {
 						// viewport, keep a provider-aware geometry estimate, and wake
 						// only the settled visible rows after scrolling ends.
 						property bool richLoaderSuspended: false
+						// Existing visible rows keep their complete presentation through a
+						// gesture. A delegate first created by the expanding retention
+						// window stays a lightweight geometry shell until scrolling stops,
+						// avoiding full message-tree allocation and GC on the input frame.
+						property bool messageRowMaterialized: false
 						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
@@ -4439,10 +4438,15 @@ ApplicationWindow {
 						}
 						function primaryRichContentViewportBounds() {
 							let content = null
-							if (messagePreviewLoader.status === Loader.Ready && messagePreviewLoader.item)
-								content = messagePreviewLoader.item
-							else if (messageAttachmentLoader.status === Loader.Ready && messageAttachmentLoader.item)
-								content = messageAttachmentLoader.item
+							const row = messageRowLoader.item
+							const previewLoader = row ? row.previewLoader : null
+							const attachmentLoader = row ? row.attachmentLoader : null
+							if (previewLoader && previewLoader.status === Loader.Ready
+									&& previewLoader.item)
+								content = previewLoader.item
+							else if (attachmentLoader && attachmentLoader.status === Loader.Ready
+									&& attachmentLoader.item)
+								content = attachmentLoader.item
 							if (!content || !content.mapToItem || content.height <= 0)
 								return null
 							const point = content.mapToItem(timeline, 0, 0)
@@ -4474,6 +4478,7 @@ ApplicationWindow {
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
 							richLoaderSuspended = true
+							messageRowMaterialized = false
 							updateRichResourceActivity()
 						}
 						ListView.onReused: {
@@ -4482,8 +4487,9 @@ ApplicationWindow {
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
 							richLoaderSuspended = timeline.richScrollInProgress
-							if (messagePreviewLoader.item)
-								messagePreviewLoader.item.resetForReuse()
+							const row = messageRowLoader.item
+							if (row && row.previewLoader && row.previewLoader.item)
+								row.previewLoader.item.resetForReuse()
 							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
 						}
 						onContentNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
@@ -4532,7 +4538,10 @@ ApplicationWindow {
 						startsGroup: modelStartsGroup
 						dateSeparatorLabel: dateBoundary ? root.messageDateLabel(source) : ""
 						bodyImplicitHeight: logEntry
-							? activityLogRow.implicitHeight : messageRow.implicitHeight
+							? activityLogRow.implicitHeight
+							: messageRowLoader.item
+								? messageRowLoader.item.implicitHeight
+								: lightweightMessageRowHeight
 						// Flickable margins do not constrain a vertical ListView delegate's
 						// horizontal scene rect. Reserve the shell-safe trailing inset here as
 						// well, otherwise compact metadata extends beneath productSurface's
@@ -4563,12 +4572,18 @@ ApplicationWindow {
 							? compactActionButtonCount * 30 + Theme.space1 : 0
 						readonly property real compactActionTextInset: usesCompactActionOverlay
 							? compactActionTrayWidth + Theme.space2 : 0
-						readonly property bool performancePreviewMaterialized: messagePreviewLoader.status === Loader.Ready
-							&& !!messagePreviewLoader.item
-						readonly property bool performanceAttachmentMaterialized: messageAttachmentLoader.status === Loader.Ready
-							&& !!messageAttachmentLoader.item
-						readonly property real previewTargetWidth: hasPreviewContent && messagePreviewLoader.item
-							? messagePreviewLoader.item.targetCardWidth
+						readonly property bool performancePreviewMaterialized:
+							!!messageRowLoader.item
+							&& messageRowLoader.item.previewLoader.status === Loader.Ready
+							&& !!messageRowLoader.item.previewLoader.item
+						readonly property bool performanceAttachmentMaterialized:
+							!!messageRowLoader.item
+							&& messageRowLoader.item.attachmentLoader.status === Loader.Ready
+							&& !!messageRowLoader.item.attachmentLoader.item
+						readonly property real previewTargetWidth: hasPreviewContent
+							&& messageRowLoader.item
+							&& messageRowLoader.item.previewLoader.item
+							? messageRowLoader.item.previewLoader.item.targetCardWidth
 							: preview && preview.previewSize === "compact" ? 460
 							: preview && preview.previewSize === "large" ? 720 : 580
 						readonly property real previewPlaceholderWidth: Math.min(previewTargetWidth,
@@ -4591,6 +4606,14 @@ ApplicationWindow {
 							previewPlaceholderHasMedia
 								? previewPlaceholderMediaHeight + 132 : 176
 						readonly property real attachmentPlaceholderHeight: 320
+						readonly property real lightweightMessageRowHeight:
+							hasPreviewContent ? previewPlaceholderHeight + 72
+							: hasAttachmentContent ? attachmentPlaceholderHeight + 72
+							: hasInlineImageContent ? 360
+							: Math.max(48, Math.min(180,
+								48 + (bodySegments || []).length * 22
+									+ (hasReplyContent ? 44 : 0)
+									+ (hasEmbeddedFooterContent ? 34 : 0)))
 						// Reactions are compact metadata and wrap naturally in their Flow. Treating
 						// one reaction like a media card makes an otherwise short message expand
 						// across the complete conversation lane.
@@ -4690,11 +4713,44 @@ ApplicationWindow {
 								onLinkRequested: link => Qt.openUrlExternally(link)
 							}
 						}
-                        RowLayout {
-							id: messageRow
+						Loader {
+							id: messageRowLoader
 							anchors.fill: parent
-							visible: !messageDelegate.logEntry
-							spacing: Theme.space2
+							active: !messageDelegate.logEntry
+								&& (messageDelegate.messageRowMaterialized
+									|| (!timeline.richScrollInProgress
+										&& messageDelegate.inHydrationWindow))
+							asynchronous: true
+							visible: active
+							onLoaded: {
+								messageDelegate.messageRowMaterialized = true
+								if (timeline.topAnchorActive) {
+									topAnchorSettleTimer.restart()
+									Qt.callLater(function() { timeline.restoreTopAnchor() })
+								}
+							}
+							sourceComponent: Component {
+								RowLayout {
+									id: messageRow
+									property alias previewLoader: messagePreviewLoader
+									property alias attachmentLoader: messageAttachmentLoader
+									property alias actionsMenu: messageActions
+									function openActions() {
+										messageActions.targetId = messageDelegate.stableId
+										messageActions.targetCanReply = messageDelegate.canReply
+										messageActions.targetCanReact = messageDelegate.canReact
+										messageActions.targetCanDelete = messageDelegate.canDelete
+										messageActions.targetCanRetry =
+											!!messageDelegate.source.deliveryCanRetry
+										messageActions.open()
+									}
+									function closeActionsForReuse() {
+										if (messageActions.visible)
+											messageActions.close()
+										messageActions.targetId = ""
+									}
+									anchors.fill: parent
+									spacing: Theme.space2
                             Rectangle {
 								Layout.preferredWidth: messageDelegate.own || messageDelegate.systemMessage ? 0 : Theme.avatarMedium
 								Layout.preferredHeight: Layout.preferredWidth
@@ -5320,7 +5376,9 @@ ApplicationWindow {
 									}
 								}
 								}
-                        }
+								}
+							}
+						}
 							}
 						}
                     }
