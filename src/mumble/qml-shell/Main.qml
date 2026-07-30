@@ -3956,10 +3956,12 @@ ApplicationWindow {
 								|| prependAnchorActive
 								|| (scopePresentationPending && !pendingAllowed))
 							return
-						const queued = deferredMaterializationQueue.slice()
+						// Rebuild from the current viewport on every pass. A rich row can
+						// expand enough to move a previously queued summary completely
+						// offscreen before its 16 ms turn; retaining that stale id would
+						// mutate hidden geometry after the conversation has been revealed.
+						const queued = []
 						const queuedSet = ({})
-						for (let queuedIndex = 0; queuedIndex < queued.length; ++queuedIndex)
-							queuedSet[queued[queuedIndex]] = true
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]

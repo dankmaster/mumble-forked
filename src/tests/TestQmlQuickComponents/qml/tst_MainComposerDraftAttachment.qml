@@ -242,6 +242,18 @@ TestCase {
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.lightweightDeferredPresentation\s*!==\s*true[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
+		const visibleMaterializationStart =
+			mainSource.indexOf("function queueVisibleDeferredMaterialization")
+		const visibleMaterializationEnd =
+			mainSource.indexOf("function queueVisiblePreviewHydration",
+				visibleMaterializationStart)
+		verify(visibleMaterializationStart >= 0
+			&& visibleMaterializationEnd > visibleMaterializationStart)
+		const visibleMaterializationSource =
+			mainSource.slice(visibleMaterializationStart, visibleMaterializationEnd)
+		verify(/const\s+queued\s*=\s*\[\]/.test(visibleMaterializationSource))
+		verify(!/deferredMaterializationQueue\.slice\(\)/.test(
+			visibleMaterializationSource))
 		verify(/coldScopeMaterializationDelayMs:\s*0[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*visiblePresentationReady\(diagnostics\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
