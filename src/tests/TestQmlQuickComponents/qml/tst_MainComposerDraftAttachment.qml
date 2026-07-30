@@ -223,7 +223,7 @@ TestCase {
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationDeadlineTimer[\s\S]*interval:\s*2000[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
 		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*scopePresentationFinalizeStartTimer\.restart\(\)[\s\S]*function\s+continueScopePresentationFinalization\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisiblePreviewHydration\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.start\(\)[\s\S]*scopePresentationFinalizeDeadlineTimer\.start\(\)/.test(mainSource))
+		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopePresentationFinalizeStartTimer\.restart\(\)[\s\S]*function\s+continueScopePresentationFinalization\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisiblePreviewHydration\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.start\(\)[\s\S]*scopePresentationFinalizeDeadlineTimer\.start\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeStartTimer[\s\S]*interval:\s*16[\s\S]*timeline\.continueScopePresentationFinalization\(\)/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*coldPreviewHydrationPacingActive\s*=\s*true[\s\S]*queueVisiblePreviewHydration\(true\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeQuietTimer[\s\S]*interval:\s*120[\s\S]*completeScopePresentationFinalization\(false\)/.test(mainSource))
@@ -309,7 +309,7 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/id:\s*richScrollRetentionRampTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*true[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\([\s\S]*richScrollRetentionRampStep[\s\S]*stop\(\)/.test(mainSource))
@@ -355,7 +355,8 @@ TestCase {
 		verify(/function\s+resumeRichContentAfterScroll\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationPending\s*&&\s*!pendingAllowed[\s\S]*richLoaderSuspended\s*=\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*!backendHydrationRequested[\s\S]*inVisibleViewport[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))
 		verify(/ListView\.onPooled:[\s\S]*backendHydrationRequested\s*=\s*false[\s\S]*onStableIdChanged:[\s\S]*backendHydrationRequested\s*=\s*false/.test(mainSource))
-		verify(/function\s+beginScopeChange\(\)[\s\S]*scopeReuseResetActive\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopeReuseResetActive\s*=\s*false[\s\S]*positionTailImmediately\(\)/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopePresentationFinalizeStartTimer\.restart\(\)/.test(mainSource))
+		verify(!mainSource.includes("scopeReuseResetActive"))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.attachmentNeedsHydration[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
 		verify(/id:\s*messageAttachmentHydrationPlaceholder[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*messageDelegate\.attachmentNeedsHydration/.test(mainSource))
 		verify(/function\s+deferPrependedRichRows\(first,\s*last\)[\s\S]*row\.deferredPresentation\s*!==\s*true[\s\S]*deferred\[stableId\]\s*=\s*true[\s\S]*deferredPrependRichIds\s*=\s*deferred/.test(mainSource))

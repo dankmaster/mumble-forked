@@ -3068,7 +3068,7 @@ ApplicationWindow {
 					leftMargin: root.timelineHorizontalMargin
 					rightMargin: root.timelineHorizontalMargin
 					topMargin: activeScope.activity ? Theme.space1 : root.timelineVerticalMargin
-					reuseItems: !scopeReuseResetActive
+					reuseItems: true
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
 						id: timelineScrollBar
@@ -3208,12 +3208,6 @@ ApplicationWindow {
 					property real scopePresentationExposedTailTravel: 0
 					property double scopePresentationStartedAt: 0
 					property double scopePresentationCompletedAt: 0
-					// Scope replacement removes one conversation and inserts another in the
-					// same event turn. Temporarily retire the reuse pool so Qt Quick cannot
-					// present a delegate with geometry/content retained from the old scope.
-					// Reuse resumes immediately after the new scope has laid out and remains
-					// enabled for all steady-state chat scrolling.
-					property bool scopeReuseResetActive: false
 					property real bottomFollowThreshold: 48
 					onStickToBottomChanged: {
 						if (stickToBottom)
@@ -3274,7 +3268,6 @@ ApplicationWindow {
 						scopePresentationStartedAt = Date.now()
 						scopePresentationCompletedAt = 0
 						performanceHistoryProbeAnchorId = ""
-						scopeReuseResetActive = true
 						followTailAfterInsert = false
 						pendingTailInsertCount = 0
 						pendingTailMessageCount = 0
@@ -3393,13 +3386,8 @@ ApplicationWindow {
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
-						// Re-enable steady-state delegate reuse while the conversation is still
-						// hidden. Creating the replacement pool can refine rich-row geometry, so
-						// give it its own bounded quiet window before exposing the timeline.
-						scopeReuseResetActive = false
-						// Re-enabling reuse can schedule its own ListView polish. Keep that
-						// turn separate from tail containment, rich-loader admission, and
-						// preview hydration so none converge into one long heartbeat.
+						// Keep tail containment, rich-loader admission, and preview
+						// hydration in a separate turn from the final model insert.
 						scopePresentationFinalizeStartTimer.restart()
 					}
 
@@ -4398,13 +4386,6 @@ ApplicationWindow {
 								timeline.requestBottomFollow()
 							} else if (timeline.pendingTailInsertCount > 0)
 								timeline.pendingTailMessageCount += timeline.pendingTailInsertCount
-							if (timeline.scopeReuseResetActive)
-								Qt.callLater(function() {
-									// The ListView's ordinary polish pass already owns delegate
-									// creation and geometry after the insert. A synchronous second
-									// layout blocks the GUI heartbeat on rich conversations.
-									timeline.scopeReuseResetActive = false
-								})
 							if (timeline.scopePresentationPending)
 								timeline.noteScopePresentationMutation()
 							timeline.followTailAfterInsert = false
