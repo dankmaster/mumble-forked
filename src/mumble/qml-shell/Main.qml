@@ -3815,7 +3815,10 @@ ApplicationWindow {
 						running: timeline.prependAnchorActive
 							&& timeline.prependAnchorCorrectionFrames > 0
 						onTriggered: {
-							timeline.restorePrependAnchor()
+							if (timeline.deferredPrependAnchorActive)
+								timeline.restoreDeferredPrependAnchor()
+							else
+								timeline.restorePrependAnchor()
 							timeline.prependAnchorCorrectionFrames = Math.max(0,
 								timeline.prependAnchorCorrectionFrames - 1)
 						}
@@ -4076,7 +4079,11 @@ ApplicationWindow {
 							if (first === 0 && timeline.prependAnchorActive) {
 								timeline.extendDeferredPrependAnchorTarget(last - first + 1)
 								Qt.callLater(function() {
-									timeline.prependAnchorCorrectionFrames = 0
+									// ListView may apply its automatic insert displacement one or
+									// two scene-graph frames after a chunk arrives. Keep correcting
+									// to the original numerical target across that bounded window.
+									timeline.prependAnchorCorrectionFrames = Math.max(
+										timeline.prependAnchorCorrectionFrames, 4)
 									timeline.restoreDeferredPrependAnchor()
 									timeline.prependMutationInProgress = false
 								})

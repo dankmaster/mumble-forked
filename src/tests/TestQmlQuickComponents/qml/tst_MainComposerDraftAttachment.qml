@@ -142,6 +142,8 @@ TestCase {
 		verify(/item\.y \+ item\.height <= contentY \+ 0\.5/.test(mainSource))
 		verify(/onMovementStarted[\s\S]*!prependMutationInProgress[\s\S]*releasePrependAnchor\(\)/.test(mainSource))
 		verify(/FrameAnimation[\s\S]*prependAnchorCorrectionFrames > 0[\s\S]*timeline\.restorePrependAnchor\(\)/.test(mainSource))
+		verify(/FrameAnimation[\s\S]*deferredPrependAnchorActive[\s\S]*timeline\.restoreDeferredPrependAnchor\(\)[\s\S]*timeline\.restorePrependAnchor\(\)/.test(mainSource))
+		verify(/onRowsInserted[\s\S]*prependAnchorCorrectionFrames\s*=\s*Math\.max\([\s\S]*prependAnchorCorrectionFrames,\s*4\)/.test(mainSource))
 		verify(/objectName:\s*"chatTimelineScrollBar"[\s\S]*visible:\s*root\.visualFixtureSurfaceVariant\s*!==\s*"chat-history-prepend-anchor"[\s\S]*Accessible\.ignored:\s*!visible/.test(mainSource))
 	}
 
