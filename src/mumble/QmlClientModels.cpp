@@ -1885,11 +1885,22 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 	}
 	{
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.global");
-		if (state.contains(QStringLiteral("updateBanner")))
-			setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
-		if (state.contains(QStringLiteral("stonks"))) setStonks(state.value(QStringLiteral("stonks")).toMap());
-		if (state.contains(QStringLiteral("collapsedNavigationSections")))
-			setCollapsedNavigationSections(state.value(QStringLiteral("collapsedNavigationSections")).toStringList());
+		{
+			mumble::chatperf::ScopedDuration fieldTrace("qml.session.apply.global.update_banner");
+			if (state.contains(QStringLiteral("updateBanner")))
+				setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
+		}
+		{
+			mumble::chatperf::ScopedDuration fieldTrace("qml.session.apply.global.stonks");
+			if (state.contains(QStringLiteral("stonks")))
+				setStonks(state.value(QStringLiteral("stonks")).toMap());
+		}
+		{
+			mumble::chatperf::ScopedDuration fieldTrace("qml.session.apply.global.collapsed_navigation");
+			if (state.contains(QStringLiteral("collapsedNavigationSections")))
+				setCollapsedNavigationSections(
+					state.value(QStringLiteral("collapsedNavigationSections")).toStringList());
+		}
 	}
 	{
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.motd");
