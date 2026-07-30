@@ -4598,6 +4598,7 @@ ApplicationWindow {
 							Loader {
 								id: asyncMessageDelegate
 								required property string stableId
+								required property bool deferredPresentation
 								required property bool own
 								required property string title
 								required property string subtitle
@@ -4638,7 +4639,11 @@ ApplicationWindow {
 									: timeline.deferredMessageRowHeight
 								opacity: timeline.scopePresentationPending ? 0 : 1
 								asynchronous: true
-								active: true
+								// A cold row stays as a fixed-height placeholder until the
+								// frame-paced admission queue selects it. Keeping the Loader
+								// inactive is important: asynchronous incubation still lets a
+								// burst of visible delegates finish in one GUI heartbeat.
+								active: !deferredPresentation
 
 								function openAutomationActions() {
 									return item ? item.openAutomationActions() : null
