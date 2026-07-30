@@ -858,7 +858,8 @@ ApplicationWindow {
     }
 
     function flushPreviewHydrationQueue() {
-		if (timeline && (timeline.prependAnchorActive || chatModel.prependPending)) {
+		if (timeline && (timeline.prependAnchorActive || chatModel.appendPending
+				|| chatModel.prependPending)) {
 			previewHydrationTimer.restart()
 			return
 		}
@@ -1872,6 +1873,7 @@ ApplicationWindow {
 				"prependAnchorTargetY": timeline.prependAnchorTargetY,
 				"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
 				"prependQueuePending": chatModel.prependPending,
+				"appendQueuePending": chatModel.appendPending,
 				"deferredPrependRichCount":
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
 				"durationMs": timeline.scopePresentationStartedAt > 0
@@ -1885,7 +1887,7 @@ ApplicationWindow {
 				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
-					&& !chatModel.prependPending
+					&& !chatModel.appendPending && !chatModel.prependPending
 			}
 		} catch (error) {
 			return { "error": String(error), "settled": false }
@@ -3298,7 +3300,7 @@ ApplicationWindow {
 
 					function canCompleteScopePresentationFastPath() {
 						if (!scopePresentationPending || scopePresentationFinalizing
-								|| activeScope.loading)
+								|| activeScope.loading || chatModel.appendPending)
 							return false
 						// Activity rows are already materialized client log entries. They do
 						// not need the rich-message hydration gate used by conversations.
@@ -4306,6 +4308,10 @@ ApplicationWindow {
 							// enter the warm rich ListView model. Preserve the original item by
 							// the exact fixed prefix extent, then release after one quiet turn.
 							timeline.restoreDeferredPrependAnchor()
+						}
+						function onAppendPendingChanged() {
+							if (!chatModel.appendPending)
+								timeline.scheduleScopePresentationFastPath()
 						}
 						function onRowsAboutToChange(first, last) {
 							if (!chatModel.presentationBusy

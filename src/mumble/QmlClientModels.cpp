@@ -3504,6 +3504,44 @@ int ChatTimelineModel::appendMessages(const QVariantList &messages) {
 	return applied;
 }
 
+int ChatTimelineModel::enqueueAppendMessages(const QVariantList &messages) {
+	if (!acceptsFrontendStateMutation(this) || messages.isEmpty() || m_appendPending) {
+		return 0;
+	}
+
+	QSet< QString > incomingIds;
+	QVariantList acceptedMessages;
+	incomingIds.reserve(messages.size());
+	acceptedMessages.reserve(messages.size());
+	for (const QVariant &entry : messages) {
+		const QVariantMap message = entry.toMap();
+		const QVariant messageIdValue = message.value(QStringLiteral("messageId"));
+		QString messageId =
+			messageIdValue.toULongLong() > 0 ? messageIdValue.toString().trimmed() : QString();
+		if (messageId.isEmpty()) {
+			messageId = message.value(QStringLiteral("messageKey")).toString().trimmed();
+		}
+		if (messageId.isEmpty()) {
+			messageId = message.value(QStringLiteral("id")).toString().trimmed();
+		}
+		if (messageId.isEmpty() || incomingIds.contains(messageId) || indexOf(messageId) >= 0) {
+			return 0;
+		}
+		incomingIds.insert(messageId);
+		acceptedMessages.push_back(message);
+	}
+	if (acceptedMessages.isEmpty()) {
+		return 0;
+	}
+
+	++m_appendGeneration;
+	m_pendingAppendMessages = acceptedMessages;
+	m_appendPending = true;
+	emit appendPendingChanged();
+	scheduleQueuedAppendDrain();
+	return acceptedMessages.size();
+}
+
 int ChatTimelineModel::prependMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this) || messages.isEmpty()) {
 		return 0;
@@ -3620,6 +3658,10 @@ bool ChatTimelineModel::prependPending() const {
 	return m_prependPending;
 }
 
+bool ChatTimelineModel::appendPending() const {
+	return m_appendPending;
+}
+
 bool ChatTimelineModel::presentationBusy() const {
 	return m_presentationBusy;
 }
@@ -3661,6 +3703,58 @@ ChatTimelinePresentationProxyModel *ChatTimelineModel::presentationModel() {
 
 ChatTimelinePresentationProxyModel *ChatTimelineModel::deferredPresentationModel() {
 	return &m_deferredPresentationModel;
+}
+
+void ChatTimelineModel::cancelQueuedAppend() {
+	++m_appendGeneration;
+	m_pendingAppendMessages.clear();
+	m_appendDrainScheduled = false;
+	if (!m_appendPending) {
+		return;
+	}
+	m_appendPending = false;
+	emit appendPendingChanged();
+}
+
+void ChatTimelineModel::scheduleQueuedAppendDrain() {
+	if (!m_appendPending || m_pendingAppendMessages.isEmpty() || m_appendDrainScheduled) {
+		return;
+	}
+	const qulonglong generation = m_appendGeneration;
+	m_appendDrainScheduled = true;
+	QTimer::singleShot(16, this, [this, generation]() {
+		if (generation != m_appendGeneration) {
+			return;
+		}
+		m_appendDrainScheduled = false;
+		drainQueuedAppend();
+	});
+}
+
+void ChatTimelineModel::drainQueuedAppend() {
+	if (!m_appendPending) {
+		return;
+	}
+	if (m_pendingAppendMessages.isEmpty()) {
+		m_appendPending = false;
+		emit appendPendingChanged();
+		return;
+	}
+
+	// Cold history keeps a complete newest tail, but constructing several rich
+	// delegates in the same GUI turn can exceed the heartbeat budget. Admit one
+	// real row per presentation interval so every frame remains responsive.
+	const QVariant message = m_pendingAppendMessages.takeFirst();
+	if (appendMessages(QVariantList { message }) != 1) {
+		cancelQueuedAppend();
+		return;
+	}
+	if (m_pendingAppendMessages.isEmpty()) {
+		m_appendPending = false;
+		emit appendPendingChanged();
+		return;
+	}
+	scheduleQueuedAppendDrain();
 }
 
 void ChatTimelineModel::cancelQueuedPrepend() {
@@ -3726,6 +3820,7 @@ void ChatTimelineModel::drainQueuedPrepend() {
 
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
+	cancelQueuedAppend();
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
@@ -3808,6 +3903,7 @@ bool ChatTimelineModel::hasUserHistory() const {
 
 void ChatTimelineModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
+	cancelQueuedAppend();
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();

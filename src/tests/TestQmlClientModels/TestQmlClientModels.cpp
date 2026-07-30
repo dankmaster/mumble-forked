@@ -24,6 +24,7 @@ private slots:
 	void synchronizeRowsUsesIncrementalSignals();
 	void largeSynchronizationsStayResetFree();
 	void chatTimelineDirectPrependDoesNotTouchExistingRows();
+	void chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame();
 	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
@@ -522,6 +523,52 @@ void TestQmlClientModels::chatTimelineDirectPrependDoesNotTouchExistingRows() {
 	QTRY_VERIFY_WITH_TIMEOUT(
 		!model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
 	QVERIFY(!model.requestBodyHydration(QStringLiteral("older-direct:0")));
+}
+
+void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
+	ChatTimelineModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy pendingSpy(&model, &ChatTimelineModel::appendPendingChanged);
+	const QVariantList messages {
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("tail:0") },
+					  { QStringLiteral("plainText"), QStringLiteral("Tail 0") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("tail:1") },
+					  { QStringLiteral("plainText"), QStringLiteral("Tail 1") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("tail:2") },
+					  { QStringLiteral("plainText"), QStringLiteral("Tail 2") } }
+	};
+
+	QCOMPARE(model.enqueueAppendMessages(messages), 3);
+	QVERIFY(model.appendPending());
+	QCOMPARE(model.rowCount(), 0);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 3);
+	QCOMPARE(pendingSpy.count(), 2);
+	QCOMPARE(insertSpy.count(), 3);
+	for (int row = 0; row < insertSpy.count(); ++row) {
+		const QList< QVariant > arguments = insertSpy.at(row);
+		QCOMPARE(arguments.at(1).toInt(), row);
+		QCOMPARE(arguments.at(2).toInt(), row);
+		QCOMPARE(model.get(row).value(QStringLiteral("id")).toString(),
+				 QStringLiteral("tail:%1").arg(row));
+		QVERIFY(!model.get(row).value(QStringLiteral("deferredPresentation")).toBool());
+	}
+	QCOMPARE(model.presentationModel()->rowCount(), 3);
+	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
+	QCOMPARE(resetSpy.count(), 0);
+
+	QCOMPARE(model.enqueueAppendMessages(messages), 0);
+	model.replaceMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("replacement:0") },
+		{ QStringLiteral("plainText"), QStringLiteral("Replacement") }
+	} });
+	QVERIFY(!model.appendPending());
+	QCOMPARE(model.rowCount(), 1);
+	QTest::qWait(40);
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(),
+			 QStringLiteral("replacement:0"));
 }
 
 void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
@@ -2129,6 +2176,7 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.snapshot_append.windowed_prefix")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.snapshot_append.windowed_fallback")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("ScopeFirstPaintRows = 3")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueueAppendMessages(firstPaintTail)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && messages.size() > ScopeFirstPaintRows")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("enqueuePrependMessages(deferredPrefix)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.windowed_prefix")));

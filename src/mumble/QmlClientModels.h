@@ -492,6 +492,7 @@ class ChatTimelineModel final : public StableListModel {
 	Q_PROPERTY(int currentMatchIndex READ currentMatchIndex NOTIFY currentMatchChanged)
 	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
 	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
+	Q_PROPERTY(bool appendPending READ appendPending NOTIFY appendPendingChanged)
 	Q_PROPERTY(bool prependPending READ prependPending NOTIFY prependPendingChanged)
 	Q_PROPERTY(bool presentationBusy READ presentationBusy WRITE setPresentationBusy
 				   NOTIFY presentationBusyChanged)
@@ -505,6 +506,7 @@ public:
 	bool upsertMessage(const QVariantMap &message);
 	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
+	int enqueueAppendMessages(const QVariantList &messages);
 	int prependMessages(const QVariantList &messages);
 	int enqueuePrependMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
@@ -517,6 +519,7 @@ public:
 	int currentMatchIndex() const;
 	int currentMatchRow() const;
 	QString currentMatchStableId() const;
+	bool appendPending() const;
 	bool prependPending() const;
 	bool presentationBusy() const;
 	bool deferredPresentationUpdatesPending() const;
@@ -534,6 +537,7 @@ signals:
 	void queryChanged();
 	void matchCountChanged();
 	void currentMatchChanged();
+	void appendPendingChanged();
 	void prependPendingChanged();
 	void presentationBusyChanged();
 	void deferredPresentationUpdatesPendingChanged();
@@ -565,6 +569,9 @@ private:
 	void launchRichBodyParseBatch();
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
+	void cancelQueuedAppend();
+	void scheduleQueuedAppendDrain();
+	void drainQueuedAppend();
 	void cancelQueuedPrepend();
 	void scheduleQueuedPrependDrain();
 	void drainQueuedPrepend();
@@ -593,6 +600,10 @@ private:
 	int m_currentMatchRow = -1;
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
+	bool m_appendPending = false;
+	bool m_appendDrainScheduled = false;
+	qulonglong m_appendGeneration = 0;
+	QVariantList m_pendingAppendMessages;
 	bool m_prependPending = false;
 	bool m_prependDrainScheduled = false;
 	qulonglong m_prependGeneration = 0;
