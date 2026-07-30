@@ -4337,11 +4337,10 @@ ApplicationWindow {
 							|| attachmentNeedsHydration
 						readonly property bool contentNeedsHydration: backendContentNeedsHydration
 							|| bodyNeedsHydration
-						// Keep the lightweight rich-card tree through ListView pooling.
-						// Recreating that tree while a variable-height ListView moves
-						// costs a UI frame even though provider media is already gated by
-						// richResourcesActive. Deferred prepend rows still use the
-						// provider-aware placeholder until they reach the viewport.
+						// A pooled rich-card tree is expensive to retarget while a
+						// variable-height ListView is moving. Retire it outside the
+						// viewport, keep a provider-aware geometry estimate, and wake
+						// only the settled visible rows after scrolling ends.
 						property bool richLoaderSuspended: false
 						readonly property real hydrationWarmDistance: Math.min(timeline.cacheBuffer,
 							timeline.height * 1.5)
@@ -4431,6 +4430,7 @@ ApplicationWindow {
 								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = true
+							richLoaderSuspended = true
 							updateRichResourceActivity()
 						}
 						ListView.onReused: {
@@ -4438,6 +4438,7 @@ ApplicationWindow {
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
 							accessibilityPooled = false
+							richLoaderSuspended = timeline.richScrollInProgress
 							if (messagePreviewLoader.item)
 								messagePreviewLoader.item.resetForReuse()
 							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
@@ -4455,6 +4456,7 @@ ApplicationWindow {
 						Component.onCompleted: {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateCreatedCount
+							richLoaderSuspended = timeline.richScrollInProgress
 							resumeRichContentAfterScroll()
 						}
 						// This technical delegate frame must remain ignored for its entire
