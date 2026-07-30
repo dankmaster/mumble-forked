@@ -241,7 +241,7 @@ TestCase {
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*deferredHeaderVisible[\s\S]*deferredRepeater\.count\s*-\s*1[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
-		verify(/coldScopeMaterializationDelayMs:\s*500[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
+		verify(/coldScopeMaterializationDelayMs:\s*350[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldMaterializationPending[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
 		const finalizeStart = mainSource.indexOf("function completeScopePresentationFinalization")

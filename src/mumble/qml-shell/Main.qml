@@ -3213,7 +3213,7 @@ ApplicationWindow {
 					// constructing provider/image trees. Direct navigation commonly
 					// follows the restored snapshot by a few hundred milliseconds; the
 					// fixed-height source rows remain complete and stable meanwhile.
-					readonly property int coldScopeMaterializationDelayMs: 500
+					readonly property int coldScopeMaterializationDelayMs: 350
 					// Admit one fixed-height source row per frame. The complete current
 					// PROD page still settles within the one-second entry gate, while no
 					// frame has to construct several attachment/provider trees at once.
