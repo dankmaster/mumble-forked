@@ -2101,6 +2101,8 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case ModelStartsGroupRole: return row.value(QStringLiteral("modelStartsGroup"), true);
 		case DateBoundaryRole: return row.value(QStringLiteral("dateBoundary"), true);
 		case BodyHydrationPendingRole: return row.value(QStringLiteral("bodyHydrationPending"));
+		case DeferredPresentationInlineRole:
+			return row.value(QStringLiteral("deferredPresentationInline"));
 		default: return {};
 	}
 }
@@ -2121,7 +2123,8 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { DeferredPresentationRole, "deferredPresentation" },
 			 { ModelStartsGroupRole, "modelStartsGroup" },
 			 { DateBoundaryRole, "dateBoundary" },
-			 { BodyHydrationPendingRole, "bodyHydrationPending" } };
+			 { BodyHydrationPendingRole, "bodyHydrationPending" },
+			 { DeferredPresentationInlineRole, "deferredPresentationInline" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -3129,8 +3132,11 @@ bool ChatTimelinePresentationProxyModel::filterAcceptsRow(
 	if (!sourceIndex.isValid()) {
 		return false;
 	}
-	return sourceModel()->data(sourceIndex, StableListModel::DeferredPresentationRole).toBool()
-		== m_deferredPresentation;
+	const bool deferred =
+		sourceModel()->data(sourceIndex, StableListModel::DeferredPresentationRole).toBool();
+	const bool inlineDeferred =
+		sourceModel()->data(sourceIndex, StableListModel::DeferredPresentationInlineRole).toBool();
+	return m_deferredPresentation ? deferred && !inlineDeferred : !deferred || inlineDeferred;
 }
 
 ChatTimelineModel::ChatTimelineModel(QObject *parent)
@@ -3543,7 +3549,8 @@ int ChatTimelineModel::enqueueAppendMessages(const QVariantList &messages) {
 	return acceptedMessages.size();
 }
 
-int ChatTimelineModel::prependMessages(const QVariantList &messages) {
+int ChatTimelineModel::prependMessages(
+	const QVariantList &messages, const bool inlineDeferredPresentation) {
 	if (!acceptsFrontendStateMutation(this) || messages.isEmpty()) {
 		return 0;
 	}
@@ -3570,6 +3577,7 @@ int ChatTimelineModel::prependMessages(const QVariantList &messages) {
 		// viewport. This avoids constructing an entire rich message tree merely
 		// to calculate the displacement of the existing viewport anchor.
 		row.insert(QStringLiteral("deferredPresentation"), true);
+		row.insert(QStringLiteral("deferredPresentationInline"), inlineDeferredPresentation);
 		rows.push_back(row);
 	}
 
@@ -3978,6 +3986,7 @@ bool ChatTimelineModel::materializeDeferredMessage(const QString &messageId) {
 	QVariantMap row = get(rowIndex);
 	if (!row.value(QStringLiteral("deferredPresentation")).toBool()) return false;
 	row.insert(QStringLiteral("deferredPresentation"), false);
+	row.insert(QStringLiteral("deferredPresentationInline"), false);
 	upsertRowFromInternalResult(row);
 	return true;
 }

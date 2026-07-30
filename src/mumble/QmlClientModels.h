@@ -356,7 +356,8 @@ public:
 		DeferredPresentationRole,
 		ModelStartsGroupRole,
 		DateBoundaryRole,
-		BodyHydrationPendingRole
+		BodyHydrationPendingRole,
+		DeferredPresentationInlineRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -507,7 +508,7 @@ public:
 	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
 	int enqueueAppendMessages(const QVariantList &messages);
-	int prependMessages(const QVariantList &messages);
+	int prependMessages(const QVariantList &messages, bool inlineDeferredPresentation = false);
 	int enqueuePrependMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
 	QVariantList messages() const;

@@ -30558,7 +30558,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// must not monopolize the first interactive heartbeat.
 		if (previousMessageCount == 0 && !appendedMessages.isEmpty()) {
 			const int deferred =
-				m_qmlShellHost->chatModel()->prependMessages(appendedMessages);
+				m_qmlShellHost->chatModel()->prependMessages(appendedMessages, true);
 			if (deferred == appendedMessages.size()) {
 				mumble::chatperf::recordValue(
 					"qml.chat.snapshot_append.deferred_first_paint", deferred);
@@ -30589,7 +30589,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// turn and gives the hidden finalization gate one bounded row per frame.
 		if (switchingScope && !messages.isEmpty()) {
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages);
+			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages, true);
 			if (deferred == messages.size()) {
 				mumble::chatperf::recordValue(
 					"qml.chat.scope_sync.deferred_first_paint", deferred);
