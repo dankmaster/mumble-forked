@@ -3182,7 +3182,11 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
-					readonly property int deferredMaterializationsPerFrame: 1
+					// Two fixed-height source rows per frame keep the cold-entry queue
+					// below the one-second gate without recreating the multi-loader burst
+					// that made rich histories hitch. Preview/provider trees remain on
+					// their independently paced one-at-a-time resume queue.
+					readonly property int deferredMaterializationsPerFrame: 2
 					property string viewportAnchorId: ""
 					property real viewportAnchorOffset: 0
 					property bool viewportAnchorActive: false
@@ -4189,9 +4193,9 @@ ApplicationWindow {
 						repeat: false
 						onTriggered: {
 							const recoveryPending = chatModel.presentationBusy
-								|| timeline.richContentResumeTimer.running
-								|| timeline.richLoaderResumeTimer.running
-								|| timeline.deferredMaterializationTimer.running
+								|| richContentResumeTimer.running
+								|| richLoaderResumeTimer.running
+								|| deferredMaterializationTimer.running
 								|| timeline.richLoaderResumeQueue.length > 0
 								|| timeline.richLoaderResumeActiveId.length > 0
 								|| timeline.deferredMaterializationQueue.length > 0
@@ -5379,7 +5383,7 @@ ApplicationWindow {
 											objectName: "previewHydrationPlaceholder"
 											implicitWidth: messagePreviewHydrationPlaceholderLoader.Layout.preferredWidth
 											implicitHeight: messageDelegate.previewPlaceholderHeight
-											radius: Theme.radiusMedium
+											radius: Theme.innerRadius
 											color: Theme.surfaceRaised
 											border.color: Theme.divider
 											border.width: 1
