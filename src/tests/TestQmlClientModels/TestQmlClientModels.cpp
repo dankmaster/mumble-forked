@@ -549,12 +549,17 @@ void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {
 	}
 
 	QCOMPARE(model.enqueuePrependMessages(olderMessages), 13);
+	QVERIFY(model.prependPending());
+	QCOMPARE(model.rowCount(), 1);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 5000);
 	QCOMPARE(model.rowCount(), 14);
-	QVERIFY(!model.prependPending());
 	QCOMPARE(pendingSpy.count(), 2);
-	QCOMPARE(insertSpy.count(), 1);
-	QCOMPARE(insertSpy.constFirst().at(1).toInt(), 0);
-	QCOMPARE(insertSpy.constFirst().at(2).toInt(), 12);
+	QCOMPARE(insertSpy.count(), 4);
+	for (const QList< QVariant > &arguments : insertSpy) {
+		QCOMPARE(arguments.at(1).toInt(), 0);
+		QVERIFY(arguments.at(2).toInt() >= arguments.at(1).toInt());
+		QVERIFY(arguments.at(2).toInt() - arguments.at(1).toInt() < 4);
+	}
 	QCOMPARE(resetSpy.count(), 0);
 	QCOMPARE(model.presentationModel()->rowCount(), 1);
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 13);

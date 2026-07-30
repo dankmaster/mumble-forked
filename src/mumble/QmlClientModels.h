@@ -565,6 +565,8 @@ private:
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
 	void cancelQueuedPrepend();
+	void scheduleQueuedPrependDrain();
+	void drainQueuedPrepend();
 	void scheduleDeferredPresentationUpdateDrain();
 	void drainDeferredPresentationUpdates();
 	bool searchActive() const;
@@ -591,6 +593,9 @@ private:
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
 	bool m_prependPending = false;
+	bool m_prependDrainScheduled = false;
+	qulonglong m_prependGeneration = 0;
+	QVariantList m_pendingPrependRows;
 	bool m_presentationBusy = false;
 	bool m_deferredPresentationUpdateDrainScheduled = false;
 	QHash< QString, QVariantMap > m_deferredPresentationUpdates;

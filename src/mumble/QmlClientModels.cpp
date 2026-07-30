@@ -3564,14 +3564,9 @@ int ChatTimelineModel::enqueuePrependMessages(const QVariantList &messages) {
 	for (const RichBodyParseRequest &request : requests) {
 		m_deferredRichBodyMessageIds.insert(request.messageId);
 	}
+	++m_prependGeneration;
 	m_prependPending = true;
 	emit prependPendingChanged();
-	const int prepended = prependRows(rows);
-	if (prepended != rows.size()) {
-		cancelQueuedPrepend();
-		return 0;
-	}
-
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	for (const QVariant &entry : rows) {
 		const QVariantMap row = entry.toMap();
@@ -3582,12 +3577,9 @@ int ChatTimelineModel::enqueuePrependMessages(const QVariantList &messages) {
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) {
 		emit hasUserHistoryChanged();
 	}
-	m_prependPending = false;
-	emit prependPendingChanged();
-	if (searchActive()) {
-		refreshSearchState(true);
-	}
-	return prepended;
+	m_pendingPrependRows = rows;
+	scheduleQueuedPrependDrain();
+	return rows.size();
 }
 
 bool ChatTimelineModel::prependPending() const {
@@ -3638,11 +3630,64 @@ ChatTimelinePresentationProxyModel *ChatTimelineModel::deferredPresentationModel
 }
 
 void ChatTimelineModel::cancelQueuedPrepend() {
+	++m_prependGeneration;
+	m_pendingPrependRows.clear();
+	m_prependDrainScheduled = false;
 	if (!m_prependPending) {
 		return;
 	}
 	m_prependPending = false;
 	emit prependPendingChanged();
+}
+
+void ChatTimelineModel::scheduleQueuedPrependDrain() {
+	if (!m_prependPending || m_pendingPrependRows.isEmpty() || m_prependDrainScheduled) {
+		return;
+	}
+	const qulonglong generation = m_prependGeneration;
+	m_prependDrainScheduled = true;
+	QTimer::singleShot(16, this, [this, generation]() {
+		if (generation != m_prependGeneration) {
+			return;
+		}
+		m_prependDrainScheduled = false;
+		drainQueuedPrepend();
+	});
+}
+
+void ChatTimelineModel::drainQueuedPrepend() {
+	if (!m_prependPending) {
+		return;
+	}
+	if (m_pendingPrependRows.isEmpty()) {
+		m_prependPending = false;
+		emit prependPendingChanged();
+		if (searchActive()) {
+			refreshSearchState(true);
+		}
+		return;
+	}
+
+	// Prepend newest chunks first so every later chunk lands in front of it and
+	// the final source ordering remains identical to the server page.
+	constexpr qsizetype PrependRowsPerFrame = 4;
+	const qsizetype chunkSize = std::min(PrependRowsPerFrame, m_pendingPrependRows.size());
+	const qsizetype chunkStart = m_pendingPrependRows.size() - chunkSize;
+	const QVariantList chunk = m_pendingPrependRows.mid(chunkStart, chunkSize);
+	if (prependRows(chunk) != chunkSize) {
+		cancelQueuedPrepend();
+		return;
+	}
+	m_pendingPrependRows.remove(chunkStart, chunkSize);
+	if (m_pendingPrependRows.isEmpty()) {
+		m_prependPending = false;
+		emit prependPendingChanged();
+		if (searchActive()) {
+			refreshSearchState(true);
+		}
+		return;
+	}
+	scheduleQueuedPrependDrain();
 }
 
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
