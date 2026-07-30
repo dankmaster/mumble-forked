@@ -3182,6 +3182,11 @@ ApplicationWindow {
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					readonly property real deferredMessageRowHeight: 58
+					// Give an auto-restored scope one short supersede window before
+					// constructing provider/image trees. Direct navigation commonly
+					// follows the restored snapshot by a few hundred milliseconds; the
+					// fixed-height source rows remain complete and stable meanwhile.
+					readonly property int coldScopeMaterializationDelayMs: 320
 					// Three fixed-height source rows per frame keep the cold-entry queue
 					// below the one-second gate without recreating the multi-loader burst
 					// that made rich histories hitch. Preview/provider trees remain on
@@ -3265,6 +3270,7 @@ ApplicationWindow {
 						richLoaderResumeActiveId = ""
 						deferredMaterializationTimer.stop()
 						deferredMaterializationQueue = []
+						coldScopeMaterializationDelayTimer.restart()
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
@@ -3633,7 +3639,8 @@ ApplicationWindow {
 					}
 
 					function scheduleRichContentResume() {
-						if (richScrollInProgress)
+						if (richScrollInProgress
+								|| coldScopeMaterializationDelayTimer.running)
 							return
 						richContentResumeTimer.restart()
 					}
@@ -3751,7 +3758,9 @@ ApplicationWindow {
 					function queueVisibleDeferredMaterialization(allowDuringFinalization) {
 						const pendingAllowed = allowDuringFinalization === true
 							&& scopePresentationFinalizing
-						if (richScrollInProgress || prependAnchorActive
+						if (richScrollInProgress
+								|| coldScopeMaterializationDelayTimer.running
+								|| prependAnchorActive
 								|| (scopePresentationPending && !pendingAllowed))
 							return
 						const queued = deferredMaterializationQueue.slice()
@@ -3823,7 +3832,9 @@ ApplicationWindow {
 					function materializeNextDeferredRow() {
 						const pendingAllowed = scopePresentationPending
 							&& scopePresentationFinalizing
-						if (richScrollInProgress || prependAnchorActive
+						if (richScrollInProgress
+								|| coldScopeMaterializationDelayTimer.running
+								|| prependAnchorActive
 								|| (scopePresentationPending && !pendingAllowed)) {
 							scheduleRichContentResume()
 							return
@@ -4149,6 +4160,13 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: coldScopeMaterializationDelayTimer
+						interval: timeline.coldScopeMaterializationDelayMs
+						repeat: false
+						onTriggered: timeline.scheduleRichContentResume()
+					}
+
+					Timer {
 						id: richContentResumeTimer
 						interval: 0
 						repeat: false
@@ -4197,6 +4215,7 @@ ApplicationWindow {
 						repeat: false
 						onTriggered: {
 							const recoveryPending = chatModel.presentationBusy
+								|| coldScopeMaterializationDelayTimer.running
 								|| richContentResumeTimer.running
 								|| richLoaderResumeTimer.running
 								|| deferredMaterializationTimer.running
