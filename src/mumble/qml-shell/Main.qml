@@ -3303,10 +3303,13 @@ ApplicationWindow {
 					property bool restoringBottom: false
 					property bool scopeResetPending: false
 					// Rich text, preview cards, and attachments refine delegate heights after
-					// a scope arrives. Keep that churn behind one stable loading surface and
-					// expose the fully anchored tail in a single frame.
+					// a scope arrives. Hide the retiring scope only until the replacement
+					// snapshot reaches finalization, then expose its real-data summaries while
+					// the heavier rows finish inside their reserved geometry.
 					property bool scopePresentationPending: false
 					property bool scopePresentationFinalizing: false
+					readonly property bool scopePresentationContentVisible:
+						!scopePresentationPending || scopePresentationFinalizing
 					property bool scopePresentationFastPath: false
 					property bool scopePresentationObservationActive: false
 					property bool scopePresentationForcedByDeadline: false
@@ -3342,8 +3345,20 @@ ApplicationWindow {
 					function requestBottomFollow() {
 						if (stickToBottom && !prependAnchorActive && !restoringBottom
 								&& !scopePresentationPending && !bottomFollowTimer.running
-								&& !root.performanceChatScrollRunning)
+								&& !root.performanceChatScrollRunning) {
+							const maximumY = Math.max(originY,
+								originY + contentHeight - height)
+							// Metadata-only preview updates emit dataChanged as their cache
+							// state advances. If geometry is already exactly at the tail,
+							// starting a 16 ms correction timer only makes the otherwise
+							// stable first paint report busy and delays input readiness.
+							if (!scopeResetPending
+									&& Math.abs(maximumY - contentY) <= 0.5) {
+								markVisibleScopeReadIfEligible()
+								return
+							}
 							bottomFollowTimer.start()
+						}
 					}
 
 					function beginScopeChange() {
@@ -4649,10 +4664,10 @@ ApplicationWindow {
 					Timer {
 						id: scopePresentationFinalizeQuietTimer
 						// Rich rows already expose Ready only after their own 48 ms
-						// materialization settle. One matching quiet interval plus the
-						// final callLater verification is sufficient and keeps real cold
-						// room entry inside the one-second product gate.
-						interval: 48
+						// materialization settle. One scene frame plus the final callLater
+						// verification is sufficient; another duplicate 48 ms wait makes
+						// an otherwise complete real room miss the one-second product gate.
+						interval: 16
 						repeat: false
 						onTriggered: timeline.completeScopePresentationFinalization(false)
 					}
@@ -4850,7 +4865,7 @@ ApplicationWindow {
 						height: implicitHeight
 						spacing: 0
                         visible: height > 0
-						opacity: timeline.scopePresentationPending ? 0 : 1
+						opacity: timeline.scopePresentationContentVisible ? 1 : 0
 						Item {
 							width: timelineHeader.width
 							height: (activeScope.canLoadOlder
@@ -4958,7 +4973,7 @@ ApplicationWindow {
 								color: Theme.surfaceRaised
 								border.width: 1
 								border.color: Theme.divider
-								opacity: timeline.scopePresentationPending ? 0 : 1
+								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								Accessible.role: Accessible.ListItem
 								Accessible.name: presentationSummary
 
@@ -5064,7 +5079,7 @@ ApplicationWindow {
 								height: Math.max(timeline.deferredMessageRowHeight,
 									deferredPresentationHeight,
 									item ? item.implicitHeight : 0)
-								opacity: timeline.scopePresentationPending ? 0 : 1
+								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								asynchronous: true
 								// A cold row stays as a fixed-height placeholder until the
 								// frame-paced admission queue selects it. Keeping the Loader
@@ -6503,10 +6518,13 @@ ApplicationWindow {
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
 						readonly property bool visualLoading: !activeScope.activity && (activeScope.loading
-							|| (timeline.scopePresentationPending && chatModel.count > 0)
-						)
+							|| (timeline.scopePresentationPending
+								&& !timeline.scopePresentationFinalizing
+								&& chatModel.count > 0))
 						visible: (activeScope.activity ? chatModel.count === 0
-							: timeline.scopePresentationPending || chatModel.count === 0)
+							: (timeline.scopePresentationPending
+								&& !timeline.scopePresentationFinalizing)
+								|| chatModel.count === 0)
 							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
 						z: 5
