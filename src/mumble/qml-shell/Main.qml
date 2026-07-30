@@ -4595,9 +4595,107 @@ ApplicationWindow {
 							}
 						}
 						DelegateChoice {
-							ChatMessageFrame {
+							Loader {
+								id: asyncMessageDelegate
+								required property string stableId
+								required property bool own
+								required property string title
+								required property string subtitle
+								required property string status
+								required property string avatarUrl
+								required property string timestamp
+								required property string replyActor
+								required property string replySnippet
+								required property var reactions
+								required property var bodySegments
+								required property bool bodyHydrationPending
+								required property var preview
+								required property var attachments
+								required property var source
+								required property bool modelStartsGroup
+								required property bool dateBoundary
+								required property bool deleted
+								required property bool canReply
+								required property bool canReact
+								required property bool canDelete
+								property bool accessibilityPooled: false
+								property bool resumeRequested: false
+								property bool resumeDuringFinalization: false
+								readonly property bool performanceTimelineDelegate: true
+								readonly property bool contentNeedsHydration: item
+									? item.contentNeedsHydration : true
+								readonly property bool richLoaderSuspended: item
+									? item.richLoaderSuspended : true
+								readonly property bool richResourcesActive: item
+									? item.richResourcesActive : false
+								readonly property bool messageRowReady: item
+									? item.messageRowReady : false
+								readonly property bool inVisibleViewport: !accessibilityPooled
+									&& y + height >= timeline.contentY
+									&& y <= timeline.contentY + timeline.height
+								width: timeline.width
+								height: item ? item.implicitHeight
+									: timeline.deferredMessageRowHeight
+								opacity: timeline.scopePresentationPending ? 0 : 1
+								asynchronous: true
+								active: true
+
+								function openAutomationActions() {
+									return item ? item.openAutomationActions() : null
+								}
+								function openMessageActions() {
+									if (item)
+										item.openMessageActions()
+								}
+								function closeMessageActionsForReuse() {
+									if (item)
+										item.closeMessageActionsForReuse()
+								}
+								function primaryRichContentViewportBounds() {
+									return item ? item.primaryRichContentViewportBounds() : null
+								}
+								function requestPreviewHydrationIfNeeded(allowDuringFinalization) {
+									if (item)
+										item.requestPreviewHydrationIfNeeded(allowDuringFinalization)
+								}
+								function resumeRichContentAfterScroll(allowDuringFinalization) {
+									if (item) {
+										item.resumeRichContentAfterScroll(allowDuringFinalization)
+										return
+									}
+									resumeRequested = true
+									resumeDuringFinalization = allowDuringFinalization === true
+								}
+								function completeRichLoaderResumeWhenReady() {
+									if (item)
+										item.completeRichLoaderResumeWhenReady()
+								}
+
+								ListView.onPooled: {
+									accessibilityPooled = true
+									if (item)
+										item.handleListViewPooled()
+								}
+								ListView.onReused: {
+									accessibilityPooled = false
+									if (item)
+										item.handleListViewReused()
+								}
+								onLoaded: {
+									item.accessibilityPooled = accessibilityPooled
+									if (resumeRequested) {
+										const allowDuringFinalization = resumeDuringFinalization
+										resumeRequested = false
+										resumeDuringFinalization = false
+										item.resumeRichContentAfterScroll(allowDuringFinalization)
+									}
+								}
+
+								sourceComponent: Component {
+									ChatMessageFrame {
 						id: messageDelegate
-						opacity: timeline.scopePresentationPending ? 0 : 1
+						stableId: asyncMessageDelegate.stableId
+						own: asyncMessageDelegate.own
 						readonly property bool performanceTimelineDelegate: true
 						logEntry: activeScope.activity
 						logAlternating: logEntry && root.stableAlternatingRow(stableId)
@@ -4833,7 +4931,7 @@ ApplicationWindow {
 							return point.y >= -0.5 && point.y + item.height <= timeline.height + 0.5
 								&& isFinite(scrollPosition)
 						}
-						ListView.onPooled: {
+						function handleListViewPooled() {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegatePooledCount
 							closeMessageActionsForReuse()
@@ -4846,7 +4944,7 @@ ApplicationWindow {
 							backendHydrationRequested = false
 							updateRichResourceActivity()
 						}
-						ListView.onReused: {
+						function handleListViewReused() {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
@@ -4884,25 +4982,25 @@ ApplicationWindow {
 						// reuses it leaves both promoted and nested children in the Windows
 						// accessibility tree.
 						Accessible.ignored: accessibilityFrameIgnored
-						required property string title
-                        required property string subtitle
-                        required property string status
-                        required property string avatarUrl
-                        required property string timestamp
-                        required property string replyActor
-                        required property string replySnippet
-                        required property var reactions
-                        required property var bodySegments
-						required property bool bodyHydrationPending
-                        required property var preview
-						required property var attachments
-                        required property var source
-						required property bool modelStartsGroup
-						required property bool dateBoundary
-                        required property bool deleted
-                        required property bool canReply
-						required property bool canReact
-						required property bool canDelete
+						property string title: asyncMessageDelegate.title
+						property string subtitle: asyncMessageDelegate.subtitle
+						property string status: asyncMessageDelegate.status
+						property string avatarUrl: asyncMessageDelegate.avatarUrl
+						property string timestamp: asyncMessageDelegate.timestamp
+						property string replyActor: asyncMessageDelegate.replyActor
+						property string replySnippet: asyncMessageDelegate.replySnippet
+						property var reactions: asyncMessageDelegate.reactions
+						property var bodySegments: asyncMessageDelegate.bodySegments
+						property bool bodyHydrationPending: asyncMessageDelegate.bodyHydrationPending
+						property var preview: asyncMessageDelegate.preview
+						property var attachments: asyncMessageDelegate.attachments
+						property var source: asyncMessageDelegate.source
+						property bool modelStartsGroup: asyncMessageDelegate.modelStartsGroup
+						property bool dateBoundary: asyncMessageDelegate.dateBoundary
+						property bool deleted: asyncMessageDelegate.deleted
+						property bool canReply: asyncMessageDelegate.canReply
+						property bool canReact: asyncMessageDelegate.canReact
+						property bool canDelete: asyncMessageDelegate.canDelete
 						searchCurrent: root.conversationSearchOpen
 							&& stableId === String(chatModel.currentMatchStableId || "")
 						systemMessage: logEntry || !!source.system
@@ -5885,6 +5983,8 @@ ApplicationWindow {
 						}
 							}
 						}
+									}
+								}
                     }
 					}
 					Rectangle {
