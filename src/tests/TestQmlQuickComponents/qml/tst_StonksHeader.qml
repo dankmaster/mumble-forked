@@ -58,6 +58,8 @@ TestCase {
 		testCase.forceActiveFocus()
 		loader.width = 620
 		loader.item.narrowLayout = false
+		loader.item.docked = false
+		loader.item.dockedDividerEdge = "bottom"
 		loader.item.scopeToken = "text:7"
 		loader.item.scopeLabel = "stonks"
 		const state = populatedState()
