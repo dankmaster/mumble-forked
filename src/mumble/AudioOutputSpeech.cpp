@@ -13,6 +13,8 @@
 #include "Utils.h"
 #include "Global.h"
 
+#include <QtConcurrent/QtConcurrentRun>
+
 #include <opus.h>
 
 #include <algorithm>
@@ -124,16 +126,27 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 					 OPUS_SET_PHASE_INVERSION_DISABLED(1)); // Disable phase inversion for better mono downmix.
 
 	// Remote cleanup is an utterance-scoped processor. Settings and the per-user
-	// enable decision are snapshotted here, off the mixer thread, and changes made
-	// while somebody is speaking deliberately take effect on their next utterance.
-	// This avoids model creation/reload and state discontinuities in the callback.
+	// enable decision are snapshotted here, and changes made while somebody is
+	// speaking deliberately take effect on their next utterance. Neural model
+	// creation can consume a complete UI heartbeat even from the network dispatch
+	// thread, so prepare it on the general worker pool. Audio passes through
+	// unchanged until the mixer adopts the completed processor.
 	m_remoteSpeechCleanupSelection = currentRemoteSpeechCleanupSelection();
 	m_remoteSpeechCleanupRequested = user && user->isRemoteSpeechCleanupEnabled();
 	m_remoteSpeechCleanupPreset    = Global::get().s.remoteSpeechCleanupPreset;
 	m_remoteSpeechCleanupMixFactor = remoteSpeechCleanupMixFactor(m_remoteSpeechCleanupPreset);
 	if (m_remoteSpeechCleanupRequested) {
-		m_remoteSpeechCleanup       = createSpeechCleanupProcessor(m_remoteSpeechCleanupSelection);
-		m_remoteSpeechCleanupActive = m_remoteSpeechCleanup && m_remoteSpeechCleanup->isReady();
+		const Mumble::SpeechCleanup::Selection selection = m_remoteSpeechCleanupSelection;
+		m_remoteSpeechCleanupPreparation = QtConcurrent::run(
+			[selection]() -> std::unique_ptr< SpeechCleanupProcessor > {
+				try {
+					return createSpeechCleanupProcessor(selection);
+				} catch (...) {
+					// Model initialization must never propagate into the realtime
+					// audio callback when the completed future is adopted.
+					return {};
+				}
+			});
 	}
 
 	// iAudioBufferSize: size (in unit of float) of the buffer used to store decoded pcm data.
@@ -237,7 +250,19 @@ bool AudioOutputSpeech::isEffectivelyDualMono(const float *samples, unsigned int
 	return true;
 }
 
+void AudioOutputSpeech::adoptPreparedRemoteSpeechCleanup() {
+	if (!m_remoteSpeechCleanupRequested || m_remoteSpeechCleanupPreparationConsumed
+		|| !m_remoteSpeechCleanupPreparation.isValid() || !m_remoteSpeechCleanupPreparation.isFinished()) {
+		return;
+	}
+
+	m_remoteSpeechCleanupPreparationConsumed = true;
+	m_remoteSpeechCleanup = m_remoteSpeechCleanupPreparation.takeResult();
+	m_remoteSpeechCleanupActive = m_remoteSpeechCleanup && m_remoteSpeechCleanup->isReady();
+}
+
 bool AudioOutputSpeech::applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount) {
+	adoptPreparedRemoteSpeechCleanup();
 	if (!samples || !m_remoteSpeechCleanupRequested || !m_remoteSpeechCleanupActive
 		|| !m_remoteSpeechCleanup || !bStereo || sampleCount == 0
 		|| !isEffectivelyDualMono(samples, sampleCount)) {

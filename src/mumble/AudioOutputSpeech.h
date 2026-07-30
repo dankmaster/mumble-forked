@@ -9,12 +9,14 @@
 #include <speex/speex_jitter.h>
 #include <speex/speex_resampler.h>
 
+#include <QtCore/QFuture>
 #include <QtCore/QMutex>
 
 #include "AudioOutputBuffer.h"
 #include "AudioOutputCache.h"
 #include "MumbleProtocol.h"
 #include "SpeechCleanup.h"
+#include "SpeechCleanupProcessor.h"
 #include "Settings.h"
 
 #include <array>
@@ -23,7 +25,6 @@
 #include <vector>
 
 class ClientUser;
-class SpeechCleanupProcessor;
 struct OpusDecoder;
 
 class AudioOutputSpeech : public AudioOutputBuffer {
@@ -64,6 +65,7 @@ protected:
 	QList< QByteArray > qlFrames;
 
 	std::unique_ptr< SpeechCleanupProcessor > m_remoteSpeechCleanup;
+	QFuture< std::unique_ptr< SpeechCleanupProcessor > > m_remoteSpeechCleanupPreparation;
 	Mumble::SpeechCleanup::Selection m_remoteSpeechCleanupSelection = {};
 	std::array< float, 5760 > m_remoteSpeechCleanupMonoBuffer = {};
 	bool m_remoteSpeechCleanupRequested = false;
@@ -74,10 +76,12 @@ protected:
 	unsigned int m_remoteSpeechCleanupDrainSamplesRemaining = 0;
 	unsigned int m_remoteSpeechCleanupDrainedSamples = 0;
 	bool m_remoteSpeechCleanupDrainCompleted = false;
+	bool m_remoteSpeechCleanupPreparationConsumed = false;
 	bool m_outputEndKnown = false;
 	unsigned int m_outputEndBufferOffset = 0;
 
 	bool isEffectivelyDualMono(const float *samples, unsigned int sampleCount) const;
+	void adoptPreparedRemoteSpeechCleanup();
 	bool applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount);
 	bool beginRemoteSpeechCleanupDrain() noexcept;
 	Settings::TalkState talkStateForAudioContext(Mumble::Protocol::audio_context_t context) const;
