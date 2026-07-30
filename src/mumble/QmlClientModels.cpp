@@ -1497,6 +1497,38 @@ namespace {
 		return normalized;
 	}
 
+	int deferredPresentationHeight(const QVariantMap &preview,
+								   const QVariantList &attachments,
+								   const QVariantList &bodySegments,
+								   const bool bodyHydrationPending,
+								   const bool hasReplyContent) {
+		// Keep cold/offscreen rows childless, but give ListView a provider-aware
+		// geometry estimate. The previous universal 58 px estimate let an entire
+		// rich page appear to fit in the cold viewport; replacing one summary with
+		// a 500+ px card then moved the tail and admitted another stale candidate.
+		// These values mirror Main.qml's lightweight card geometry at the normal
+		// 580 px rich-card width without copying the full preview map into QML.
+		if (!preview.isEmpty()) {
+			const QString aspect =
+				preview.value(QStringLiteral("embedAspect")).toString().trimmed().toLower();
+			const bool hasMedia = !preview.value(QStringLiteral("mediaItems")).toList().isEmpty()
+				|| !preview.value(QStringLiteral("embedKind")).toString().trimmed().isEmpty()
+				|| !preview.value(QStringLiteral("thumbnailUrl")).toString().trimmed().isEmpty()
+				|| !preview.value(QStringLiteral("mediaUrl")).toString().trimmed().isEmpty();
+			if (!hasMedia) return 248;
+			if (aspect == QLatin1String("short")) return 724;
+			if (aspect == QLatin1String("square")) return 664;
+			if (aspect == QLatin1String("compact-audio")) return 370;
+			if (aspect == QLatin1String("audio")) return 504;
+			return 530;
+		}
+		if (!attachments.isEmpty()) return 392;
+		if (bodyHydrationPending) return 180;
+		const int lightweightBodyHeight = 48 + bodySegments.size() * 22
+			+ (hasReplyContent ? 44 : 0);
+		return std::clamp(lightweightBodyHeight, 58, 180);
+	}
+
 	QVariantList normalizedReactions(const QVariant &value) {
 		QVariantList normalized;
 		QSet< QString > seenEmoji;
@@ -2100,6 +2132,8 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case DeferredPresentationRole: return row.value(QStringLiteral("deferredPresentation"));
 		case ModelStartsGroupRole: return row.value(QStringLiteral("modelStartsGroup"), true);
 		case DateBoundaryRole: return row.value(QStringLiteral("dateBoundary"), true);
+		case DeferredPresentationHeightRole:
+			return row.value(QStringLiteral("deferredPresentationHeight"), 58);
 		case BodyHydrationPendingRole: return row.value(QStringLiteral("bodyHydrationPending"));
 		case DeferredPresentationInlineRole:
 			return row.value(QStringLiteral("deferredPresentationInline"));
@@ -2123,6 +2157,7 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { DeferredPresentationRole, "deferredPresentation" },
 			 { ModelStartsGroupRole, "modelStartsGroup" },
 			 { DateBoundaryRole, "dateBoundary" },
+			 { DeferredPresentationHeightRole, "deferredPresentationHeight" },
 			 { BodyHydrationPendingRole, "bodyHydrationPending" },
 			 { DeferredPresentationInlineRole, "deferredPresentationInline" } };
 }
@@ -3345,6 +3380,9 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	}
 	const QVariant previewValue = message.contains(QStringLiteral("preview"))
 		? message.value(QStringLiteral("preview")) : message.value(QStringLiteral("previewStub"));
+	const QVariantMap preview = normalizedPreview(previewValue);
+	const QVariantList attachments =
+		normalizedAttachments(message.value(QStringLiteral("attachments")));
 	QVariantMap source = message;
 	// Preview payloads can contain base64 audio/video data. The normalized preview
 	// role below is the single QML-facing copy; retaining the original payload in
@@ -3365,8 +3403,8 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")) },
 			 { QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")) },
 			 { QStringLiteral("reactions"), normalizedReactions(message.value(QStringLiteral("reactions"))) },
-			 { QStringLiteral("preview"), normalizedPreview(previewValue) },
-			 { QStringLiteral("attachments"), normalizedAttachments(message.value(QStringLiteral("attachments"))) },
+			 { QStringLiteral("preview"), preview },
+			 { QStringLiteral("attachments"), attachments },
 			 // Required QML bool roles must never be invalid. ListView can otherwise
 			 // retain the previous delegate value when a sparse row is rebound.
 			 { QStringLiteral("own"), message.value(QStringLiteral("own")).toBool() },
@@ -3378,6 +3416,11 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("deferredPresentationInline"), false },
 			 { QStringLiteral("modelStartsGroup"), true },
 			 { QStringLiteral("dateBoundary"), true },
+			 { QStringLiteral("deferredPresentationHeight"),
+			   deferredPresentationHeight(
+				   preview, attachments, bodySegments, bodyHydrationPending,
+				   !message.value(QStringLiteral("replyActor")).toString().isEmpty()
+					   || !message.value(QStringLiteral("replySnippet")).toString().isEmpty()) },
 			 { QStringLiteral("bodyHydrationPending"), bodyHydrationPending },
 			 { QStringLiteral("source"), source } };
 }

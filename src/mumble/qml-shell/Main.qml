@@ -4089,6 +4089,7 @@ ApplicationWindow {
 					function materializeNextDeferredRow() {
 						const pendingAllowed = scopePresentationPending
 							&& scopePresentationFinalizing
+						const serializeSourcePromotion = scopePresentationFinalizing
 						if (richScrollInProgress
 								|| coldScopeMaterializationDelayTimer.running
 								|| prependAnchorActive
@@ -4107,10 +4108,11 @@ ApplicationWindow {
 							const stableId = String(queued.shift() || "")
 							if (!deferredPresentationStillEligible(stableId))
 								continue
-							deferredMaterializationActiveId = stableId
+							if (serializeSourcePromotion)
+								deferredMaterializationActiveId = stableId
 							if (chatModel.materializeDeferredMessage(stableId))
 								++materialized
-							else
+							else if (serializeSourcePromotion)
 								deferredMaterializationActiveId = ""
 						}
 						// Never carry candidates across a geometry-changing promotion.
@@ -4136,6 +4138,8 @@ ApplicationWindow {
 							if (timeline.scopePresentationFinalizing)
 								timeline.positionTailImmediately()
 							timeline.queueRichLoaderResumes()
+							if (!timeline.scopePresentationFinalizing)
+								timeline.queueVisibleDeferredMaterialization(false)
 						})
 					}
 
@@ -4888,6 +4892,7 @@ ApplicationWindow {
 								required property string title
 								required property string subtitle
 								required property string timestamp
+								required property int deferredPresentationHeight
 								property bool accessibilityPooled: false
 								readonly property bool performanceTimelineDelegate: true
 								readonly property bool lightweightDeferredPresentation: true
@@ -4901,7 +4906,8 @@ ApplicationWindow {
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
 								width: timeline.width
-								height: timeline.deferredMessageRowHeight
+								height: Math.max(timeline.deferredMessageRowHeight,
+									deferredPresentationHeight)
 								radius: Theme.innerRadius
 								color: Theme.surfaceRaised
 								border.width: 1
@@ -4959,6 +4965,7 @@ ApplicationWindow {
 								required property string status
 								required property string avatarUrl
 								required property string timestamp
+								required property int deferredPresentationHeight
 								required property string replyActor
 								required property string replySnippet
 								required property var reactions
@@ -5000,7 +5007,8 @@ ApplicationWindow {
 									&& y <= timeline.contentY + timeline.height
 								width: timeline.width
 								height: item ? item.implicitHeight
-									: timeline.deferredMessageRowHeight
+									: Math.max(timeline.deferredMessageRowHeight,
+										deferredPresentationHeight)
 								opacity: timeline.scopePresentationPending ? 0 : 1
 								asynchronous: true
 								// A cold row stays as a fixed-height placeholder until the
@@ -7016,6 +7024,7 @@ ApplicationWindow {
 			Component.onCompleted: append({
 				"stableId": "__delegate_warmup__",
 				"deferredPresentation": false,
+				"deferredPresentationHeight": 58,
 				"own": false,
 				"title": "Warmup",
 				"subtitle": "",

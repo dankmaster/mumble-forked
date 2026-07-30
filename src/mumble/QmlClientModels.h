@@ -356,6 +356,7 @@ public:
 		DeferredPresentationRole,
 		ModelStartsGroupRole,
 		DateBoundaryRole,
+		DeferredPresentationHeightRole,
 		BodyHydrationPendingRole,
 		DeferredPresentationInlineRole
 	};

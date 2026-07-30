@@ -572,6 +572,33 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentationInline")).toBool());
 	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
 			 QStringLiteral("Cold one updated"));
+
+	ChatTimelineModel estimateModel;
+	const QVariantMap richPreview {
+		{ QStringLiteral("embedKind"), QStringLiteral("youtube") },
+		{ QStringLiteral("embedAspect"), QStringLiteral("wide") },
+		{ QStringLiteral("thumbnailUrl"), QStringLiteral("https://example.com/poster.jpg") }
+	};
+	QCOMPARE(estimateModel.appendMessages(
+				 { QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
+					 { QStringLiteral("plainText"), QStringLiteral("Rich") },
+					 { QStringLiteral("preview"), richPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:plain") },
+					 { QStringLiteral("plainText"), QStringLiteral("Plain") } } },
+				 true),
+			 2);
+	QCOMPARE(estimateModel.get(0).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 530);
+	QCOMPARE(estimateModel.get(1).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 70);
+	const auto estimateRole =
+		estimateModel.roleNames().key(QByteArrayLiteral("deferredPresentationHeight"), -1);
+	QVERIFY(estimateRole >= 0);
+	QCOMPARE(estimateModel.data(estimateModel.index(0, 0), estimateRole).toInt(), 530);
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
