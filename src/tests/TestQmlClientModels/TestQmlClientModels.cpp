@@ -2181,6 +2181,8 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
 	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
+	QVERIFY(source.contains(QStringLiteral("m_persistentChatSnapshotPublishTimer->setInterval(50)")));
+	QVERIFY(source.contains(QStringLiteral("m_persistentChatSnapshotPublishTimer->start()")));
 
 	const qsizetype snapshotApplyStart =
 		source.indexOf(QStringLiteral("const bool appendedAtTail ="));

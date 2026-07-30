@@ -30357,8 +30357,19 @@ void MainWindow::initializePersistentChatBackend() {
 	m_persistentChatController = new PersistentChatController(this);
 	m_persistentChatController->setGateway(m_persistentChatGateway);
 
-	connect(m_persistentChatController, &PersistentChatController::activeSnapshotChanged, this,
+	m_persistentChatSnapshotPublishTimer = new QTimer(this);
+	m_persistentChatSnapshotPublishTimer->setSingleShot(true);
+	m_persistentChatSnapshotPublishTimer->setInterval(50);
+	connect(m_persistentChatSnapshotPublishTimer, &QTimer::timeout, this,
 			&MainWindow::publishPersistentChatSnapshot);
+	connect(m_persistentChatController, &PersistentChatController::activeSnapshotChanged, this,
+			[this]() {
+				// Startup restore, explicit navigation, and history replies are
+				// independent event streams. Coalesce a short burst before any
+				// snapshot reaches QML so a restored room that is immediately
+				// replaced never constructs and then tears down its rich rows.
+				m_persistentChatSnapshotPublishTimer->start();
+			});
 	connect(m_persistentChatController, &PersistentChatController::unreadStateChanged, this,
 			[this]() { scheduleQmlRoomStateUpdate(); });
 	connect(m_persistentChatController, &PersistentChatController::activeReadStateChanged, this,
