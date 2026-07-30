@@ -1862,6 +1862,15 @@ ApplicationWindow {
 		}
 	}
 
+	function requestOlderMessagesPreservingAnchor() {
+		if (!timeline.scopeResetPending && !timeline.stickToBottom
+				&& !timeline.prependAnchorActive) {
+			timeline.prependMutationInProgress = timeline.capturePrependAnchor()
+			timeline.deferredPrependAnchorActive = timeline.prependMutationInProgress
+		}
+		uiCommands.requestOlderMessages()
+	}
+
 	function performanceChatScrollState() {
 		const currentDiagnostics = timelineDelegateDiagnostics()
 		const beforeDiagnostics = performanceChatScrollDiagnosticsBefore || ({})
@@ -2372,7 +2381,7 @@ ApplicationWindow {
 		entries: root.chatBackgroundMenuEntries()
 		onActionRequested: (actionId, payload) => {
 			if (actionId === "activeScope.loadOlder")
-				uiCommands.requestOlderMessages()
+				root.requestOlderMessagesPreservingAnchor()
 			else if (String(actionId || "").substring(0, 5) === "self.")
 				uiCommands.invokeAppAction(actionId,
 					payload && payload.payload ? payload.payload : ({}))
@@ -4166,7 +4175,7 @@ ApplicationWindow {
 								Accessible.name: text
 								Accessible.description: qsTr(
 									"Load messages sent before the currently visible history")
-								onClicked: uiCommands.requestOlderMessages()
+								onClicked: root.requestOlderMessagesPreservingAnchor()
 							}
 						}
 						Repeater {

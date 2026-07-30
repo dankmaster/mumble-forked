@@ -3794,7 +3794,7 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 	QVERIFY(automationSource.contains(QStringLiteral("qmlTimelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("timelinePresentationState")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlRequestOlderMessages")));
-	QVERIFY(automationSource.contains(QStringLiteral("requestOlderMessages()")));
+	QVERIFY(automationSource.contains(QStringLiteral("requestOlderMessagesPreservingAnchor")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPrepareHistoryLoadPerformanceProbe")));
 	const QString historyProbeQml =
 		readTestSource(QFINDTESTDATA("../../mumble/qml-shell/Main.qml"));

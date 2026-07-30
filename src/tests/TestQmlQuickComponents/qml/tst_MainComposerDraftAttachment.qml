@@ -285,6 +285,12 @@ TestCase {
 		verify(!/currentIndex\s*=/.test(probeSource))
 	}
 
+	function test_older_history_request_captures_the_visible_anchor_before_loading_state_changes() {
+		verify(/function\s+requestOlderMessagesPreservingAnchor\(\)[\s\S]*capturePrependAnchor\(\)[\s\S]*deferredPrependAnchorActive\s*=\s*timeline\.prependMutationInProgress[\s\S]*uiCommands\.requestOlderMessages\(\)/.test(mainSource))
+		verify(/actionId\s*===\s*"activeScope\.loadOlder"[\s\S]{0,120}root\.requestOlderMessagesPreservingAnchor\(\)/.test(mainSource))
+		verify(/Loading older messages[\s\S]*onClicked:\s*root\.requestOlderMessagesPreservingAnchor\(\)/.test(mainSource))
+	}
+
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
 		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*!scopeReuseResetActive[\s\S]*cacheBuffer:\s*Math\.max\(480,\s*Math\.min\(1200,\s*height\s*\*\s*0\.75\)\)/.test(mainSource))
 		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))

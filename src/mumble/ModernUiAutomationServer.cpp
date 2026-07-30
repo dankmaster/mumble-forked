@@ -6177,7 +6177,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("qmlRequestOlderMessages")) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
-		host->commandController()->requestOlderMessages();
+		if (!QMetaObject::invokeMethod(host->window(), "requestOlderMessagesPreservingAnchor")) {
+			return errorResponse(tr("The chat history-load request path is unavailable."));
+		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("requested"), true);
 		response.insert(QStringLiteral("messageCount"), host->chatModel()->rowCount());
