@@ -3809,7 +3809,9 @@ ApplicationWindow {
 									|| item.accessibilityPooled === true
 									|| item.lightweightDeferredPresentation === true
 									|| (item.richLoaderSuspended !== true
-										&& item.richResourcesActive === true))
+										&& item.messageRowReady === true
+										&& (item.richResourcesRequired !== true
+											|| item.richResourcesActive === true)))
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length === 0)
@@ -3862,10 +3864,11 @@ ApplicationWindow {
 									&& item.accessibilityPooled !== true
 									&& String(item.stableId || "") === stableId) {
 								richLoaderResumeActiveId = stableId
-								item.resumeRichContentAfterScroll(
-									timeline.scopePresentationFinalizing)
-								resumed = true
-								if (item.messageRowReady === true)
+								resumed = item.resumeRichContentAfterScroll(
+									timeline.scopePresentationFinalizing) !== false
+								if (!resumed)
+									richLoaderResumeActiveId = ""
+								else if (item.messageRowReady === true)
 									Qt.callLater(function() {
 										item.completeRichLoaderResumeWhenReady()
 									})
@@ -3875,7 +3878,9 @@ ApplicationWindow {
 						if (!resumed && queued.length > 0)
 							richLoaderResumeTimer.start()
 						else if (!resumed)
-							finishRichContentRecoveryIfIdle()
+							Qt.callLater(function() {
+								timeline.queueRichLoaderResumes()
+							})
 					}
 
 					function completeRichLoaderResume(stableId) {
@@ -3889,7 +3894,12 @@ ApplicationWindow {
 						if (richLoaderResumeQueue.length > 0)
 							richLoaderResumeTimer.start()
 						else
-							finishRichContentRecoveryIfIdle()
+							// Rich placeholder heights can move a different row into the
+							// viewport. Re-scan after polish instead of declaring recovery
+							// complete from a stale candidate snapshot.
+							Qt.callLater(function() {
+								timeline.queueRichLoaderResumes()
+							})
 					}
 
 					function queueVisibleDeferredMaterialization(allowDuringFinalization) {
@@ -4823,6 +4833,8 @@ ApplicationWindow {
 									? item.messageContentLoaderReady : false
 								readonly property bool previewPresentationReady: item
 									? item.previewPresentationReady : false
+								readonly property bool richResourcesRequired: item
+									? item.richResourcesRequired : false
 								readonly property bool inVisibleViewport: !accessibilityPooled
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
@@ -4857,11 +4869,11 @@ ApplicationWindow {
 								}
 								function resumeRichContentAfterScroll(allowDuringFinalization) {
 									if (item) {
-										item.resumeRichContentAfterScroll(allowDuringFinalization)
-										return
+										return item.resumeRichContentAfterScroll(allowDuringFinalization)
 									}
 									resumeRequested = true
 									resumeDuringFinalization = allowDuringFinalization === true
+									return true
 								}
 								function completeRichLoaderResumeWhenReady() {
 									if (item)
@@ -4888,7 +4900,9 @@ ApplicationWindow {
 										const allowDuringFinalization = resumeDuringFinalization
 										resumeRequested = false
 										resumeDuringFinalization = false
-										item.resumeRichContentAfterScroll(allowDuringFinalization)
+										if (item.resumeRichContentAfterScroll(
+												allowDuringFinalization) === false)
+											timeline.completeRichLoaderResume(stableId)
 									}
 								}
 
@@ -4968,6 +4982,8 @@ ApplicationWindow {
 									&& previewPresentationReady))
 						readonly property bool messageContentLoaderReady:
 							messageRowLoader.status === Loader.Ready
+						readonly property bool richResourcesRequired: hasPreviewContent
+							|| hasAttachmentContent || hasInlineImageContent
 						function suspendRichResourcesForScroll() {
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
@@ -5084,7 +5100,7 @@ ApplicationWindow {
 							if (!timeline.richScrollInProgress) {
 								if (timeline.scopePresentationPending && !pendingAllowed) {
 									updateRichResourceActivity()
-									return
+									return false
 								}
 								richLoaderSuspended = false
 								// Delegates discovered by the retention window stay as
@@ -5097,6 +5113,7 @@ ApplicationWindow {
 							}
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
+							return logEntry || messageRowMaterialized
 						}
 						Timer {
 							id: richResourceReleaseTimer
