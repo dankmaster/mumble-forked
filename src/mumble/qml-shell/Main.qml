@@ -142,6 +142,18 @@ ApplicationWindow {
 	readonly property string stonksTickerPlacement: String(stonksTickerState.tickerPlacement || "bottom")
 	readonly property string stonksTickerDirection: String(stonksTickerState.tickerDirection || "left")
 	readonly property string stonksTickerSpeed: String(stonksTickerState.tickerSpeed || "normal")
+	readonly property bool stonksRoomPanelActive: {
+		if (stonksTickerState.automationHeaderVisible === true)
+			return true
+		const label = String(activeScope.label || "").trim().toLowerCase().replace(/^#/, "")
+		if (label === "stonks")
+			return true
+		const channelId = Number(stonksTickerState.textChannelId || 0)
+		if (channelId <= 0)
+			return false
+		const token = String(activeScope.scopeToken || "").trim().toLowerCase()
+		return token === "text:" + channelId || token === "3:" + channelId
+	}
 	property string contextScopeToken: ""
 	property string contextScopeKind: ""
 	property var contextScopeActions: []
@@ -2779,20 +2791,27 @@ ApplicationWindow {
                     }
                 }
 
-				StonksHeader {
-					id: topStonksTicker
-					objectName: "stonksTickerTop"
+				Loader {
+					id: topStonksTickerLoader
 					Layout.fillWidth: true
-					Layout.preferredHeight: visible ? implicitHeight : 0
-					stonks: root.stonksTickerState
-					tickerBannerEnabled: root.stonksTickerEnabled && root.stonksTickerPlacement === "top"
-					tickerDirection: root.stonksTickerDirection
-					tickerSpeed: root.stonksTickerSpeed
-					scopeToken: activeScope.scopeToken
-					scopeLabel: activeScope.label
-					narrowLayout: root.narrowShell
-					docked: true
-					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+					Layout.preferredHeight: active && item && item.visible ? item.implicitHeight : 0
+					active: root.stonksTickerEnabled && root.stonksTickerPlacement === "top"
+					asynchronous: true
+					sourceComponent: Component {
+						StonksHeader {
+							objectName: "stonksTickerTop"
+							width: parent ? parent.width : implicitWidth
+							stonks: root.stonksTickerState
+							tickerBannerEnabled: true
+							tickerDirection: root.stonksTickerDirection
+							tickerSpeed: root.stonksTickerSpeed
+							scopeToken: activeScope.scopeToken
+							scopeLabel: activeScope.label
+							narrowLayout: root.narrowShell
+							docked: true
+							onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+						}
+					}
 				}
 
 				ConversationSearchBar {
@@ -2887,20 +2906,29 @@ ApplicationWindow {
 					renderActive: visible
 				}
 
-				StonksRoomPanel {
-					id: stonksRoomPanel
-					objectName: "stonksRoomPanel"
+				Loader {
+					id: stonksRoomPanelLoader
 					Layout.fillWidth: true
 					Layout.leftMargin: Theme.spacing
 					Layout.rightMargin: Theme.spacing
-					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
-					Layout.preferredHeight: visible ? implicitHeight : 0
-					stonks: root.stonksTickerState
-					scopeToken: activeScope.scopeToken
-					scopeLabel: activeScope.label
-					narrowLayout: root.narrowShell
-					accessibilitySuppressed: root.backgroundAccessibilitySuppressed
-					onActionRequested: (actionId, payload) => uiCommands.invokeAppAction(actionId, payload)
+					Layout.topMargin: active && item && item.visible
+						? Math.max(4, Math.round(Theme.spacing / 2)) : 0
+					Layout.preferredHeight: active && item && item.visible ? item.implicitHeight : 0
+					active: root.stonksRoomPanelActive
+					asynchronous: true
+					sourceComponent: Component {
+						StonksRoomPanel {
+							objectName: "stonksRoomPanel"
+							width: parent ? parent.width : implicitWidth
+							stonks: root.stonksTickerState
+							scopeToken: activeScope.scopeToken
+							scopeLabel: activeScope.label
+							narrowLayout: root.narrowShell
+							accessibilitySuppressed: root.backgroundAccessibilitySuppressed
+							onActionRequested: (actionId, payload) =>
+								uiCommands.invokeAppAction(actionId, payload)
+						}
+					}
 				}
 
 				Item {
@@ -5673,21 +5701,28 @@ ApplicationWindow {
 					}
 				}
 
-				StonksHeader {
-					id: aboveComposerStonksTicker
-					objectName: "stonksTickerAboveComposer"
+				Loader {
+					id: aboveComposerStonksTickerLoader
 					Layout.fillWidth: true
-					Layout.preferredHeight: visible ? implicitHeight : 0
-					stonks: root.stonksTickerState
-					tickerBannerEnabled: root.stonksTickerEnabled
+					Layout.preferredHeight: active && item && item.visible ? item.implicitHeight : 0
+					active: root.stonksTickerEnabled
 						&& root.stonksTickerPlacement === "aboveComposer"
-					tickerDirection: root.stonksTickerDirection
-					tickerSpeed: root.stonksTickerSpeed
-					scopeToken: activeScope.scopeToken
-					scopeLabel: activeScope.label
-					narrowLayout: root.narrowShell
-					docked: true
-					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+					asynchronous: true
+					sourceComponent: Component {
+						StonksHeader {
+							objectName: "stonksTickerAboveComposer"
+							width: parent ? parent.width : implicitWidth
+							stonks: root.stonksTickerState
+							tickerBannerEnabled: true
+							tickerDirection: root.stonksTickerDirection
+							tickerSpeed: root.stonksTickerSpeed
+							scopeToken: activeScope.scopeToken
+							scopeLabel: activeScope.label
+							narrowLayout: root.narrowShell
+							docked: true
+							onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+						}
+					}
 				}
 
 				Rectangle {
@@ -6175,43 +6210,56 @@ ApplicationWindow {
 			}
 		}
 
-		StonksHeader {
-			id: windowTopStonksTicker
-			objectName: "stonksTickerWindowTop"
+		Loader {
+			id: windowTopStonksTickerLoader
 			anchors.left: parent.left
 			anchors.right: parent.right
 			anchors.top: parent.top
-			height: visible ? implicitHeight : 0
-			stonks: root.stonksTickerState
-			tickerBannerEnabled: root.stonksTickerEnabled
-				&& root.stonksTickerPlacement === "windowTop"
-			tickerDirection: root.stonksTickerDirection
-			tickerSpeed: root.stonksTickerSpeed
-			scopeToken: activeScope.scopeToken
-			scopeLabel: activeScope.label
-			narrowLayout: root.narrowShell
-			docked: true
+			height: active && item && item.visible ? item.implicitHeight : 0
+			active: root.stonksTickerEnabled && root.stonksTickerPlacement === "windowTop"
+			asynchronous: true
 			z: 2
-			onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+			sourceComponent: Component {
+				StonksHeader {
+					objectName: "stonksTickerWindowTop"
+					width: parent ? parent.width : implicitWidth
+					stonks: root.stonksTickerState
+					tickerBannerEnabled: true
+					tickerDirection: root.stonksTickerDirection
+					tickerSpeed: root.stonksTickerSpeed
+					scopeToken: activeScope.scopeToken
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					docked: true
+					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+				}
+			}
 		}
 
-		StonksHeader {
-			id: bottomStonksTicker
-			objectName: "stonksTickerBottom"
+		Loader {
+			id: bottomStonksTickerLoader
 			anchors.left: parent.left
 			anchors.right: parent.right
 			anchors.bottom: parent.bottom
-			height: visible ? implicitHeight : 0
-			stonks: root.stonksTickerState
-			tickerBannerEnabled: root.stonksTickerEnabled && root.stonksTickerPlacement === "bottom"
-			tickerDirection: root.stonksTickerDirection
-			tickerSpeed: root.stonksTickerSpeed
-			scopeToken: activeScope.scopeToken
-			scopeLabel: activeScope.label
-			narrowLayout: root.narrowShell
-			docked: true
+			height: active && item && item.visible ? item.implicitHeight : 0
+			active: root.stonksTickerEnabled && root.stonksTickerPlacement === "bottom"
+			asynchronous: true
 			z: 2
-			onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+			sourceComponent: Component {
+				StonksHeader {
+					objectName: "stonksTickerBottom"
+					width: parent ? parent.width : implicitWidth
+					stonks: root.stonksTickerState
+					tickerBannerEnabled: true
+					tickerDirection: root.stonksTickerDirection
+					tickerSpeed: root.stonksTickerSpeed
+					scopeToken: activeScope.scopeToken
+					scopeLabel: activeScope.label
+					narrowLayout: root.narrowShell
+					docked: true
+					onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+				}
+			}
 		}
 
 		MouseArea {
