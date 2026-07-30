@@ -211,6 +211,7 @@ TestCase {
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]{0,420}scopePresentationFinalizing\s*=\s*true/.test(mainSource))
 		verify(!/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]{0,260}pendingScopeHydrationCount\(\)\s*>\s*0/.test(mainSource))
 		verify(/function\s+queueVisiblePreviewHydration\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*inVisibleViewport[\s\S]*requestPreviewHydrationIfNeeded\(pendingAllowed\)/.test(mainSource))
+		verify(/function\s+flushPreviewHydrationQueue\(\)[\s\S]*maxBatch\s*=\s*timeline\s*&&\s*timeline\.scopePresentationFinalizing\s*\?\s*1\s*:\s*32[\s\S]*batch\.length\s*<\s*maxBatch/.test(mainSource))
 		verify(/property bool bodyNeedsHydration:\s*!!source\.bodyHydrationPending[\s\S]*property bool contentNeedsHydration:[\s\S]*bodyNeedsHydration/.test(mainSource))
 		verify(/property bool backendHydrationRequested:\s*false/.test(mainSource))
 		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*backendContentNeedsHydration\s*&&\s*!backendHydrationRequested[\s\S]*inVisibleViewport[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*queuePreviewHydration[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))

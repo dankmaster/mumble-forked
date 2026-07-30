@@ -861,7 +861,12 @@ ApplicationWindow {
         if (keys.length === 0)
             return
         const batch = []
-        for (let index = 0; index < keys.length && batch.length < 32; ++index) {
+		// Cold scope reveal is especially sensitive to several cached provider
+		// results instantiating rich trees in the same GUI turn. Admit one visible
+		// warm-up request per frame while the hidden finalization gate owns geometry;
+		// steady-state hydration keeps the wider throughput-oriented batch.
+		const maxBatch = timeline && timeline.scopePresentationFinalizing ? 1 : 32
+        for (let index = 0; index < keys.length && batch.length < maxBatch; ++index) {
             const key = keys[index]
             batch.push(pendingPreviewHydrationIds[key])
             delete pendingPreviewHydrationIds[key]

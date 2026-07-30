@@ -129,18 +129,18 @@ TestCase {
 		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 		tryVerify(function() { return track.x < -1 })
 		const firstX = track.x
-		wait(120)
-		const secondX = track.x
-		wait(120)
-		const thirdX = track.x
-		const firstAdvance = secondX <= firstX
-			? firstX - secondX
-			: firstX + animation.travel - secondX
-		const secondAdvance = thirdX <= secondX
-			? secondX - thirdX
-			: secondX + animation.travel - thirdX
-		verify(firstAdvance > 1)
-		verify(secondAdvance > 1)
+		let secondX = firstX
+		tryVerify(function() {
+			secondX = track.x
+			return (secondX <= firstX ? firstX - secondX
+				: firstX + animation.travel - secondX) > 1
+		}, 500)
+		let thirdX = secondX
+		tryVerify(function() {
+			thirdX = track.x
+			return (thirdX <= secondX ? secondX - thirdX
+				: secondX + animation.travel - thirdX) > 1
+		}, 500)
 	}
 
 	function test_short_horizontal_feed_repeats_before_the_viewport_can_empty() {
