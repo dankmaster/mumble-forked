@@ -1932,6 +1932,49 @@ ApplicationWindow {
 			"scrollable": timeline.count === 96 && maximumY - minimumY >= 8 }
 	}
 
+	function nearViewportPrefetchDiagnostics() {
+		const stableId = String(timeline.nearViewportPrefetchActiveId
+			|| timeline.nearViewportPrefetchReadyId || timeline.nearViewportWarmId || "")
+		const item = stableId.length > 0
+			? timeline.timelineDelegateForStableId(stableId) : null
+		if (!item)
+			return { "id": stableId, "delegateAvailable": false }
+		const point = item.mapToItem(timeline, 0, 0)
+		return {
+			"id": stableId,
+			"delegateAvailable": true,
+			"viewportY": point.y,
+			"height": item.height,
+			"inVisibleViewport": item.inVisibleViewport === true,
+			"richContentViewportEligible":
+				item.richContentViewportEligible === true,
+			"contentNeedsHydration": item.contentNeedsHydration === true,
+			"previewNeedsHydration": item.previewNeedsHydration === true,
+			"messageRowReady": item.messageRowReady === true,
+			"previewPresentationReady":
+				item.previewPresentationReady === true,
+			"richResourcesRequired": item.richResourcesRequired === true,
+			"richResourcesActive": item.richResourcesActive === true,
+			"richResourceActivationPending":
+				item.richResourceActivationPending === true,
+			"richLoaderSuspended": item.richLoaderSuspended === true,
+			"previewMaterializationAdmitted":
+				item.previewMaterializationAdmitted === true,
+			"previewLoaderStatus": Number(item.previewLoaderStatus),
+			"previewLoaderSurfaceState":
+				String(item.previewLoaderSurfaceState || "blank"),
+			"previewLoaderIncubationWatchdogRunning":
+				item.previewLoaderIncubationWatchdogRunning === true,
+			"previewLoaderIncubationWatchdogStartedAt":
+				Number(item.previewLoaderIncubationWatchdogStartedAt || 0),
+			"previewLoaderIncubationSuppressed":
+				item.previewLoaderIncubationSuppressed === true,
+			"previewLoaderFailed": item.previewLoaderFailed === true,
+			"nearViewportPrefetchTerminal":
+				item.nearViewportPrefetchTerminal === true
+		}
+	}
+
 	function timelinePresentationState() {
 		try {
 			const minimumY = timeline.originY
@@ -1994,6 +2037,7 @@ ApplicationWindow {
 				"nearViewportPrefetchActiveId": timeline.nearViewportPrefetchActiveId,
 				"nearViewportWarmId": timeline.nearViewportWarmId,
 				"nearViewportPrefetchReadyId": timeline.nearViewportPrefetchReadyId,
+				"nearViewportPrefetch": nearViewportPrefetchDiagnostics(),
 				"topAnchorActive": timeline.topAnchorActive,
 				"topAnchorProgrammaticMovementGuard":
 					timeline.topAnchorProgrammaticMovementGuard,
@@ -4296,12 +4340,21 @@ ApplicationWindow {
 								return
 							}
 						}
+						// A cached delegate can finish its provider polish between
+						// candidate discovery and ownership publication. Reconcile that
+						// already-ready state before waiting for a transition that will
+						// never fire again.
+						if (completeNearViewportPrefetchIfReady(candidate.id))
+							return
 						Qt.callLater(function() {
 							if (timeline.nearViewportPrefetchActiveId !== candidate.id
 									|| timeline.richScrollInProgress)
 								return
+							if (timeline.completeNearViewportPrefetchIfReady(candidate.id))
+								return
 							timeline.queueRichLoaderResumes()
 							timeline.queueVisiblePreviewHydration()
+							timeline.completeNearViewportPrefetchIfReady(candidate.id)
 						})
 					}
 
@@ -4313,6 +4366,25 @@ ApplicationWindow {
 						if (item && item.cancelNearViewportPrefetchForScroll)
 							item.cancelNearViewportPrefetchForScroll()
 						abandonNearViewportPrefetch(activeId, false)
+					}
+
+					function expireNearViewportPrefetch() {
+						const activeId = String(nearViewportPrefetchActiveId || "")
+						if (activeId.length === 0)
+							return false
+						// A completion and this timer can land on adjacent event-loop
+						// turns. Give the fully settled card one final chance to publish
+						// ready before retiring the exact preview generation.
+						if (completeNearViewportPrefetchIfReady(activeId))
+							return true
+						if (nearViewportPrefetchActiveId !== activeId)
+							return true
+						const item = timelineDelegateForStableId(activeId)
+						if (item && item.cancelNearViewportPrefetchForScroll)
+							item.cancelNearViewportPrefetchForScroll()
+						if (nearViewportPrefetchActiveId !== activeId)
+							return true
+						return retireTerminalNearViewportPrefetch(activeId)
 					}
 
 					function abandonNearViewportPrefetch(stableId, restoreOwnedAnchor) {
@@ -5211,13 +5283,13 @@ ApplicationWindow {
 
 					Timer {
 						id: nearViewportPrefetchDeadlineTimer
-						// Backend preview hydration is bounded at eight seconds. Retire
-						// the warm grant just after that bound; a timeout is cleanup only
-						// and must never promote an incomplete/black row to ready.
-						interval: 8200
+						// Adjacent preheating is speculative and must not monopolize the
+						// warm slot or outlive the strict populated-room readiness gate.
+						// Healthy cached provider trees settle well inside this bound;
+						// slower work remains retryable when the row becomes visible.
+						interval: 2400
 						repeat: false
-						onTriggered: timeline.abandonNearViewportPrefetch(
-							timeline.nearViewportPrefetchActiveId, true)
+						onTriggered: timeline.expireNearViewportPrefetch()
 					}
 
 					Timer {
@@ -5738,6 +5810,13 @@ ApplicationWindow {
 										.filter(function(part) {
 											return String(part || "").trim().length > 0
 										}).join("  ·  ")
+								// Viewport membership controls provider activation, which
+								// refines the delegate's final height. Probe only with model
+								// geometry so that activation can never feed back through
+								// this Loader's item or live height binding.
+								readonly property real viewportProbeHeight: Math.max(
+									timeline.deferredMessageRowHeight,
+									deferredPresentationHeight)
 								readonly property bool contentNeedsHydration: item
 									? item.contentNeedsHydration : true
 								readonly property bool previewNeedsHydration: item
@@ -5760,6 +5839,8 @@ ApplicationWindow {
 									? item.previewLoaderFailed : false
 								readonly property bool nearViewportPrefetchTerminal: item
 									? item.nearViewportPrefetchTerminal : false
+								readonly property string previewLoaderSurfaceState: item
+									? item.previewLoaderSurfaceState : "blank"
 								readonly property bool previewLoaderIncubationWatchdogRunning:
 									outerLoaderIncubationWatchdog.running
 									|| (item ? item.previewLoaderIncubationWatchdogRunning : false)
@@ -5780,8 +5861,8 @@ ApplicationWindow {
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
 								readonly property bool inVisibleViewport: !accessibilityPooled
-									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
+									&& y + viewportProbeHeight >= timeline.contentY
 								readonly property bool richContentViewportEligible:
 									inVisibleViewport || stableId === timeline.nearViewportWarmId
 								onRichContentViewportEligibleChanged: {
@@ -6415,13 +6496,13 @@ ApplicationWindow {
 							if (richResourcesRequired && richResourceActivationReady
 									&& !richResourcesActive) {
 								scheduleRichResourceActivation()
-								// Keep the single global materialization token through
-								// the first provider-resource activation and polish window.
-								// Releasing it now would let the next RichPreviewCard
-								// incubate on the same frame as this card's poster/gallery.
-								if (richResourceActivationPending)
-									return
 							}
+							// Keep the single global materialization token through the
+							// first provider-resource activation and polish window.
+							// Releasing it now would let the next RichPreviewCard incubate
+							// on the same frame as this card's poster/gallery.
+							if (richResourceActivationPending)
+								return
 							timeline.completeNearViewportPrefetchIfReady(stableId)
 							// The complete message/card tree now owns its final layout
 							// geometry and its first bounded resource window has settled.
@@ -6441,10 +6522,11 @@ ApplicationWindow {
 						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
 							timeline.height * 1.5)
 						readonly property bool inHydrationWindow: !accessibilityPooled
-							&& asyncMessageDelegate.y + asyncMessageDelegate.height
-								>= timeline.contentY - hydrationWarmDistance
 							&& asyncMessageDelegate.y <= timeline.contentY + timeline.height
 								+ hydrationWarmDistance
+							&& asyncMessageDelegate.y
+								+ asyncMessageDelegate.viewportProbeHeight
+								>= timeline.contentY - hydrationWarmDistance
 						// ChatMessageFrame is nested inside the asynchronous delegate
 						// Loader, so its own y is always zero. The ListView-space outer
 						// delegate owns viewport membership.
@@ -6522,14 +6604,21 @@ ApplicationWindow {
 										&& !messageDelegate.previewLoaderFailed)
 									richResourceActivationSettleTimer.restart()
 								else
-									messageDelegate.completeRichLoaderResumeWhenReady()
+									Qt.callLater(function() {
+										messageDelegate.completeRichLoaderResumeWhenReady()
+									})
 							}
 						}
 						Timer {
 							id: richResourceActivationSettleTimer
 							interval: 48
 							repeat: false
-							onTriggered: messageDelegate.completeRichLoaderResumeWhenReady()
+							// Timer.running may remain true while onTriggered executes.
+							// Reconcile on the following event-loop turn so the prefetch
+							// ready gate observes a genuinely completed polish window.
+							onTriggered: Qt.callLater(function() {
+								messageDelegate.completeRichLoaderResumeWhenReady()
+							})
 						}
 						function requestPreviewHydrationIfNeeded(allowDuringFinalization) {
 							const pendingAllowed = allowDuringFinalization === true
