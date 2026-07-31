@@ -3809,6 +3809,8 @@ ApplicationWindow {
 								"previewUrl": String(preview.url || preview.sourceUrl || ""),
 								"previewKeyCount": previewKeyCount,
 								"previewSurfaceState": previewSurfaceState,
+								"previewMaterializationWatchdogReady":
+									item.previewMaterializationWatchdogReady === true,
 								"blankPreviewSurface": blankPreviewSurface
 							})
 							if (item.lightweightDeferredPresentation === true) {
@@ -5167,6 +5169,8 @@ ApplicationWindow {
 									? item.richResourceActivationQueued : false
 								readonly property bool richResourceActivationPending: item
 									? item.richResourceActivationPending : false
+								readonly property bool previewMaterializationWatchdogReady: item
+									? item.previewMaterializationWatchdogReady : false
 								readonly property bool messageRowReady: item
 									? item.messageRowReady : false
 								readonly property bool messageRowMaterialized: item
@@ -5409,6 +5413,11 @@ ApplicationWindow {
 						// surface until the timeline's single global loader token admits
 						// its RichPreviewCard tree.
 						property bool previewMaterializationAdmitted: false
+						// ProviderDetails is itself an asynchronous, provider-specific
+						// subtree. It normally reports its final geometry quickly, but a
+						// pathological provider document must not own the global preview
+						// token forever once a branded non-blank card surface is visible.
+						property bool previewMaterializationWatchdogReady: false
 						property bool richResourceActivationQueued: false
 						readonly property bool richResourceActivationPending:
 							richResourceActivationQueued
@@ -5430,7 +5439,9 @@ ApplicationWindow {
 								&& (messageRowLoader.item.previewLoader.status === Loader.Error
 									|| (messageRowLoader.item.previewLoader.status === Loader.Ready
 										&& messageRowLoader.item.previewLoader.item
-										&& messageRowLoader.item.previewLoader.item.materializationSettled)))
+										&& (messageRowLoader.item.previewLoader.item.materializationSettled
+											|| (previewMaterializationWatchdogReady
+												&& performancePreviewSurfaceState !== "blank")))))
 						readonly property bool currentMessagePresentationReady:
 							messageRowMaterialized
 							&& (messageRowLoader.status === Loader.Error
@@ -5443,13 +5454,43 @@ ApplicationWindow {
 							messageRowLoader.status === Loader.Ready
 						readonly property bool richResourcesRequired: hasPreviewContent
 							|| hasAttachmentContent || hasInlineImageContent
+						onPerformancePreviewSurfaceStateChanged: {
+							if (performancePreviewSurfaceState === "blank"
+									&& previewMaterializationWatchdogReady) {
+								previewMaterializationWatchdogReady = false
+								timeline.scheduleRichContentResume()
+							}
+							armPreviewMaterializationWatchdog()
+						}
 						onCurrentMessagePresentationReadyChanged: {
 							if (currentMessagePresentationReady) {
+								previewMaterializationWatchdogTimer.stop()
 								messagePresentationReadyLatched = true
 								completeRichLoaderResumeWhenReady()
 							}
 						}
+						function resetPreviewMaterializationWatchdog() {
+							previewMaterializationWatchdogTimer.stop()
+							previewMaterializationWatchdogReady = false
+						}
+						function armPreviewMaterializationWatchdog() {
+							const row = messageRowLoader.item
+							const loader = row ? row.previewLoader : null
+							if (!previewMaterializationAdmitted || accessibilityPooled
+									|| !inVisibleViewport || timeline.richScrollInProgress
+									|| timeline.richLoaderResumeActiveId !== stableId
+									|| !loader || loader.status !== Loader.Ready || !loader.item
+									|| loader.item.materializationSettled
+									|| previewMaterializationWatchdogReady
+									|| performancePreviewSurfaceState === "blank") {
+								previewMaterializationWatchdogTimer.stop()
+								return
+							}
+							if (!previewMaterializationWatchdogTimer.running)
+								previewMaterializationWatchdogTimer.start()
+						}
 						function suspendRichResourcesForScroll() {
+							resetPreviewMaterializationWatchdog()
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -5590,8 +5631,11 @@ ApplicationWindow {
 								if (admitPreviewMaterialization === true
 										&& hasPreviewContent && !previewNeedsHydration) {
 									previewAdmissionAccepted = inVisibleViewport
-									if (previewAdmissionAccepted)
+									if (previewAdmissionAccepted) {
+										resetPreviewMaterializationWatchdog()
 										previewMaterializationAdmitted = true
+										armPreviewMaterializationWatchdog()
+									}
 								}
 							}
 							updateRichResourceActivity()
@@ -5602,6 +5646,31 @@ ApplicationWindow {
 								timeline.scheduleRichContentResume()
 							return (logEntry || messageRowMaterialized)
 								&& previewAdmissionAccepted
+						}
+						Timer {
+							id: previewMaterializationWatchdogTimer
+							// Six 60 Hz frames leave the nested asynchronous provider tree
+							// room to settle naturally. The fallback then keeps the already
+							// visible branded surface responsive while preserving the
+							// separate 16 + 48 ms resource activation window below.
+							interval: 96
+							repeat: false
+							onTriggered: {
+								const row = messageRowLoader.item
+								const loader = row ? row.previewLoader : null
+								if (!messageDelegate.previewMaterializationAdmitted
+										|| messageDelegate.accessibilityPooled
+										|| !messageDelegate.inVisibleViewport
+										|| timeline.richScrollInProgress
+										|| timeline.richLoaderResumeActiveId
+											!== messageDelegate.stableId
+										|| !loader || loader.status !== Loader.Ready || !loader.item
+										|| loader.item.materializationSettled
+										|| messageDelegate.performancePreviewSurfaceState === "blank")
+									return
+								messageDelegate.previewMaterializationWatchdogReady = true
+								messageDelegate.completeRichLoaderResumeWhenReady()
+							}
 						}
 						Timer {
 							id: richResourceReleaseTimer
@@ -5658,6 +5727,7 @@ ApplicationWindow {
 							richLoaderSuspended = true
 							messageRowMaterialized = false
 							messagePresentationReadyLatched = false
+							resetPreviewMaterializationWatchdog()
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -5669,6 +5739,7 @@ ApplicationWindow {
 							if (root.visualFixtureOverrideActive)
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
+							resetPreviewMaterializationWatchdog()
 							accessibilityPooled = false
 							richLoaderSuspended = timeline.richScrollInProgress
 								|| timeline.scopePresentationPending
@@ -5725,6 +5796,7 @@ ApplicationWindow {
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
+							resetPreviewMaterializationWatchdog()
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -6468,9 +6540,14 @@ ApplicationWindow {
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, messageDelegate.previewPlaceholderWidth))
 									Layout.maximumWidth: Layout.preferredWidth
+									onActiveChanged: {
+										if (!active)
+											messageDelegate.resetPreviewMaterializationWatchdog()
+									}
 									onLoaded: {
 										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
 										messageDelegate.completeRichLoaderResumeWhenReady()
+										messageDelegate.armPreviewMaterializationWatchdog()
 										if (timeline.topAnchorActive) {
 											topAnchorSettleTimer.restart()
 											topAnchorFrameTimer.restart()
@@ -6480,8 +6557,16 @@ ApplicationWindow {
 											++root.performanceChatPreviewLoadedCount
 									}
 									onStatusChanged: {
-										if (status === Loader.Error)
+										if (status === Loader.Error) {
+											messageDelegate.resetPreviewMaterializationWatchdog()
 											messageDelegate.completeRichLoaderResumeWhenReady()
+										} else if (status === Loader.Ready) {
+											messageDelegate.armPreviewMaterializationWatchdog()
+										} else {
+											messageDelegate.resetPreviewMaterializationWatchdog()
+											if (active)
+												timeline.scheduleRichContentResume()
+										}
 									}
 									sourceComponent: Component {
 										RichPreviewCard {
