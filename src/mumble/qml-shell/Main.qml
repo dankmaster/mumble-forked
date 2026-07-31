@@ -5092,7 +5092,8 @@ ApplicationWindow {
 							if (!chatModel.presentationBusy
 									&& !timeline.topAnchorActive
 									&& !timeline.scopeResetPending && !timeline.stickToBottom
-									&& !timeline.prependAnchorActive)
+									&& !timeline.prependAnchorActive
+									&& !timeline.viewportAnchorActive)
 								timeline.capturePrependAnchor()
 						}
 						function onDataChanged(topLeft, bottomRight, roles) {
