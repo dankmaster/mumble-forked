@@ -525,6 +525,7 @@ public:
 	bool prependPending() const;
 	bool presentationBusy() const;
 	bool deferredPresentationUpdatesPending() const;
+	void requestScopeReplacementPresentation();
 	void setPresentationBusy(bool busy);
 	ChatTimelinePresentationProxyModel *presentationModel();
 	ChatTimelinePresentationProxyModel *deferredPresentationModel();
@@ -543,6 +544,7 @@ signals:
 	void prependPendingChanged();
 	void presentationBusyChanged();
 	void deferredPresentationUpdatesPendingChanged();
+	void scopeReplacementPresentationRequested();
 
 private:
 	struct RichBodyParseRequest {
@@ -574,7 +576,7 @@ private:
 	void cancelQueuedAppend(bool notify = true);
 	void scheduleQueuedAppendDrain();
 	void drainQueuedAppend();
-	void cancelQueuedPrepend();
+	void cancelQueuedPrepend(bool notify = true);
 	void scheduleQueuedPrependDrain();
 	void drainQueuedPrepend();
 	void scheduleDeferredPresentationUpdateDrain();

@@ -197,6 +197,7 @@ TestCase {
 	function test_scope_change_does_not_leave_focus_in_hidden_conversation_search() {
 		verify(/function\s+closeConversationSearch\(restoreFocus\)[\s\S]*searchOwnedFocus\s*=\s*root\.itemOwnsActiveFocus\(conversationSearchBar\)[\s\S]*conversationSearchButton\.forceActiveFocus/.test(mainSource))
 		verify(/function\s+onScopeTokenChanged\(\)[\s\S]*closeConversationSearch\(false\)/.test(mainSource))
+		verify(/function\s+onScopeReplacementPresentationRequested\(\)[\s\S]*timeline\.beginScopeChange\(\)/.test(mainSource))
 	}
 
 	function test_performance_chat_fixture_waits_for_a_stable_scroll_surface() {
@@ -977,7 +978,7 @@ TestCase {
 		verify(/function\s+releasePrependAnchor\(preserveViewportAnchor\)[\s\S]*preserveViewportAnchor\s*===\s*true[\s\S]*preservedAnchorId\s*=\s*prependAnchorId[\s\S]*prependAnchorActive\s*=\s*false[\s\S]*viewportAnchorId\s*=\s*preservedAnchorId[\s\S]*viewportAnchorOffset\s*=\s*preservedAnchorOffset[\s\S]*viewportAnchorActive\s*=\s*true[\s\S]*scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/id:\s*richContentResumeTimer[\s\S]*!timeline\.stickToBottom\s*&&\s*!timeline\.viewportAnchorActive[\s\S]*timeline\.captureViewportAnchor\(\)[\s\S]*timeline\.queueVisibleDeferredMaterialization\(\)/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"viewportAnchorActive":\s*timeline\.viewportAnchorActive[\s\S]*"viewportAnchorId":\s*timeline\.viewportAnchorId[\s\S]*"viewportAnchorOffset":\s*timeline\.viewportAnchorOffset/.test(mainSource))
-		verify(/id:\s*prependAnchorSettleTimer[\s\S]*interval:\s*180[\s\S]*correctionPending[\s\S]*prependAnchorCorrectionFrames\s*>\s*0[\s\S]*restoreDeferredPrependAnchor\(\)[\s\S]*restorePrependAnchor\(\)[\s\S]*releasePrependAnchor\(true\)/.test(mainSource))
+		verify(/id:\s*prependAnchorSettleTimer[\s\S]*interval:\s*48[\s\S]*correctionPending[\s\S]*prependAnchorCorrectionFrames\s*>\s*0[\s\S]*restoreDeferredPrependAnchor\(\)[\s\S]*restorePrependAnchor\(\)[\s\S]*releasePrependAnchor\(true\)/.test(mainSource))
 		verify(!/id:\s*prependAnchorSettleTimer[\s\S]{0,900}pendingScopeHydrationCount\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
 		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))

@@ -5430,7 +5430,10 @@ ApplicationWindow {
 
 					Timer {
 						id: prependAnchorSettleTimer
-						interval: 180
+						// Four scene-graph frame corrections already cover the structural
+						// insert. Keep a short quiet window after the last correction without
+						// turning a static, responsive viewport into a >60 ms frame interval.
+						interval: 48
 						repeat: false
 						onTriggered: {
 							// The anchor owns only the structural prepend/correction
@@ -5541,6 +5544,13 @@ ApplicationWindow {
 
 					Connections {
 						target: chatModel
+						function onScopeReplacementPresentationRequested() {
+							// Rapid A -> B -> A navigation can restore the already
+							// selected token after A's rows were precleared. Re-open
+							// the same presentation transaction explicitly because the
+							// typed selection correctly emits no token-change signal.
+							timeline.beginScopeChange()
+						}
 						function onRowsAboutToBePrepended(count) {
 							if (count <= 0)
 								return

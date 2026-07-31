@@ -643,8 +643,9 @@ public:
 	void setCachedPersistentChatUnreadCount(MumbleProto::ChatScope scope, unsigned int scopeID,
 											unsigned int lastReadMessageID, std::size_t unreadCount);
 	std::size_t totalCachedPersistentChatUnreadCount() const;
+	bool persistentChatNavigationFramePending() const;
 	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload = false,
-									   bool useVoiceTree = false);
+									   bool useVoiceTree = false, const QString &railKind = QString());
 	ChanACL::Permissions channelPermissions(Channel *channel, bool requestPermissions = true) const;
 	bool canEditChannelACL(Channel *channel) const;
 	bool canCreateVoiceRoom(Channel *channel) const;
@@ -1206,6 +1207,8 @@ protected:
 	quint64 m_modernDialogFocusRequestSerial                = 0;
 	quint64 m_qmlOperationRevision                         = 0;
 	quint64 m_qmlMessageGeneration                         = 0;
+	quint64 m_deferredPersistentChatNavigationGeneration   = 0;
+	QString m_preclearedPersistentChatNavigationScopeToken;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;

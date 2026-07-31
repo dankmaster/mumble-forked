@@ -849,6 +849,36 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 	QCOMPARE(cancellationSignalOrder,
 		QStringList({ QStringLiteral("rows-removed:0"), QStringLiteral("append-idle:0") }));
 
+	ChatTimelineModel cancelledPrependModel;
+	cancelledPrependModel.appendMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("retiring:0") },
+		{ QStringLiteral("plainText"), QStringLiteral("Retiring") }
+	} });
+	QStringList prependCancellationSignalOrder;
+	connect(&cancelledPrependModel, &QAbstractItemModel::rowsRemoved, this,
+		[&cancelledPrependModel, &prependCancellationSignalOrder](const QModelIndex &, int, int) {
+			prependCancellationSignalOrder.push_back(
+				QStringLiteral("rows-removed:%1").arg(cancelledPrependModel.rowCount()));
+		});
+	connect(&cancelledPrependModel, &ChatTimelineModel::prependPendingChanged, this,
+		[&cancelledPrependModel, &prependCancellationSignalOrder]() {
+			if (!cancelledPrependModel.prependPending()) {
+				prependCancellationSignalOrder.push_back(
+					QStringLiteral("prepend-idle:%1").arg(cancelledPrependModel.rowCount()));
+			}
+		});
+	QCOMPARE(cancelledPrependModel.enqueuePrependMessages(cancellableMessages), 8);
+	QVERIFY(cancelledPrependModel.prependPending());
+	cancelledPrependModel.replaceMessages({});
+	QCOMPARE(cancelledPrependModel.rowCount(), 0);
+	QCOMPARE(prependCancellationSignalOrder,
+		QStringList({ QStringLiteral("rows-removed:0"), QStringLiteral("prepend-idle:0") }));
+	QSignalSpy replacementPresentationSpy(
+		&cancelledPrependModel,
+		&ChatTimelineModel::scopeReplacementPresentationRequested);
+	cancelledPrependModel.requestScopeReplacementPresentation();
+	QCOMPARE(replacementPresentationSpy.count(), 1);
+
 	model.clear();
 	insertSpy.clear();
 	const QVariantList prefix {
@@ -2538,7 +2568,47 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(navigateStart >= 0);
 	QVERIFY(navigateEnd > navigateStart);
 	const QString navigateBody = source.mid(navigateStart, navigateEnd - navigateStart);
-	QVERIFY(!navigateBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
+	QVERIFY(navigateBody.contains(QStringLiteral("scopeKeyChanges && hasRetiringTimeline")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("m_deferredPersistentChatNavigationGeneration = navigationGeneration")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("QTimer::singleShot(PersistentChatNavigationFrameMs")));
+	QVERIFY(navigateBody.contains(QStringLiteral("chatModel->replaceMessages({})")));
+	QVERIFY(navigateBody.contains(QStringLiteral("currentSelection->applySelection(targetScopeToken")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("requestScopeReplacementPresentation()")));
+	QVERIFY(navigateBody.contains(QStringLiteral("controllerAlreadyMatchesTarget")));
+	QVERIFY(navigateBody.contains(QStringLiteral("updateChatBar(forceReload, false)")));
+	QVERIFY(navigateBody.contains(QStringLiteral("publishPersistentChatSnapshot()")));
+	QVERIFY(!navigateBody.contains(QStringLiteral("forceReload || modelWasPrecleared")));
+	QVERIFY(!navigateBody.contains(
+		QStringLiteral("m_deferredModernShellPreviewUpdateKeys.clear()")));
+	QVERIFY(!navigateBody.contains(
+		QStringLiteral("m_deferredModernShellPreviewUpdateDrainScheduled = false")));
+	const qsizetype scopeSelectionStart =
+		source.indexOf(QStringLiteral("bool MainWindow::handleModernShellScopeSelection"));
+	const qsizetype railSelectionStart =
+		source.indexOf(QStringLiteral("bool MainWindow::handleModernShellScopeRailSelection"));
+	const qsizetype voiceJoinStart =
+		source.indexOf(QStringLiteral("bool MainWindow::handleModernShellVoiceJoin"));
+	const qsizetype scopeActionStart =
+		source.indexOf(QStringLiteral("bool MainWindow::handleModernShellScopeAction"));
+	QVERIFY(scopeSelectionStart >= 0);
+	QVERIFY(railSelectionStart > scopeSelectionStart);
+	QVERIFY(voiceJoinStart > railSelectionStart);
+	QVERIFY(scopeActionStart > voiceJoinStart);
+	const QString scopeSelectionBody =
+		source.mid(scopeSelectionStart, railSelectionStart - scopeSelectionStart);
+	QVERIFY(scopeSelectionBody.contains(QStringLiteral("if (!persistentHistoryScope)")));
+	QVERIFY(scopeSelectionBody.indexOf(
+				QStringLiteral("scopeValue == LocalDirectMessageScope"))
+		< scopeSelectionBody.indexOf(QStringLiteral("if (!persistentHistoryScope)")));
+	QVERIFY(scopeSelectionBody.indexOf(QStringLiteral("if (!persistentHistoryScope)"))
+		< scopeSelectionBody.indexOf(QStringLiteral("selection->applySelection")));
+	QVERIFY(!source.mid(railSelectionStart, voiceJoinStart - railSelectionStart)
+				 .contains(QStringLiteral("applySelection")));
+	QVERIFY(!source.mid(voiceJoinStart, scopeActionStart - voiceJoinStart)
+				 .contains(QStringLiteral("applySelection")));
 
 	const qsizetype snapshotApplyStart =
 		source.indexOf(QStringLiteral("const bool appendedAtTail ="));
@@ -2561,6 +2631,9 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 		QStringLiteral("qml.chat.snapshot_append.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("if (switchingScope)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("if (!modelPreclearedForSnapshot)")));
+	QVERIFY(snapshotApplyBody.contains(
+		QStringLiteral("qml.chat.scope_navigation.preclear_reused")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("qml.chat.scope_navigation.retiring_rows_cleared")));
 	QVERIFY(snapshotApplyBody.contains(

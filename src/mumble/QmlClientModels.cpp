@@ -3804,6 +3804,10 @@ bool ChatTimelineModel::deferredPresentationUpdatesPending() const {
 	return !m_deferredPresentationUpdates.isEmpty();
 }
 
+void ChatTimelineModel::requestScopeReplacementPresentation() {
+	emit scopeReplacementPresentationRequested();
+}
+
 void ChatTimelineModel::setPresentationBusy(bool busy) {
 	if (m_presentationBusy == busy) return;
 	m_presentationBusy = busy;
@@ -3917,7 +3921,7 @@ void ChatTimelineModel::drainQueuedAppend() {
 	scheduleQueuedAppendDrain();
 }
 
-void ChatTimelineModel::cancelQueuedPrepend() {
+void ChatTimelineModel::cancelQueuedPrepend(bool notify) {
 	++m_prependGeneration;
 	m_pendingPrependRows.clear();
 	m_prependDrainScheduled = false;
@@ -3925,7 +3929,7 @@ void ChatTimelineModel::cancelQueuedPrepend() {
 		return;
 	}
 	m_prependPending = false;
-	emit prependPendingChanged();
+	if (notify) emit prependPendingChanged();
 }
 
 void ChatTimelineModel::scheduleQueuedPrependDrain() {
@@ -3988,8 +3992,9 @@ void ChatTimelineModel::drainQueuedPrepend() {
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	const bool appendWasPending = m_appendPending;
+	const bool prependWasPending = m_prependPending;
 	cancelQueuedAppend(false);
-	cancelQueuedPrepend();
+	cancelQueuedPrepend(false);
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
 	m_deferredRowUpdates.clear();
@@ -4045,10 +4050,12 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	}
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	synchronizeRows(rows);
-	// A queued cold tail can still have admitted rows from the retiring scope.
-	// Publish appendPending=false only after those rows have been removed or
-	// replaced so QML never finalizes the old scope against a half-torn model.
+	// A queued cold tail or older-history prefix can still have admitted rows
+	// from the retiring scope. Publish their idle state only after those rows
+	// have been removed or replaced so QML never restores/finalizes a half-torn
+	// timeline.
 	if (appendWasPending) emit appendPendingChanged();
+	if (prependWasPending) emit prependPendingChanged();
 	m_deferredRichBodyMessageIds = retainedDeferredMessageIds;
 	m_userHistoryMessageIds = std::move(userHistoryMessageIds);
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
@@ -4077,8 +4084,9 @@ bool ChatTimelineModel::hasUserHistory() const {
 void ChatTimelineModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
 	const bool appendWasPending = m_appendPending;
+	const bool prependWasPending = m_prependPending;
 	cancelQueuedAppend(false);
-	cancelQueuedPrepend();
+	cancelQueuedPrepend(false);
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
 	m_deferredRowUpdates.clear();
@@ -4098,6 +4106,7 @@ void ChatTimelineModel::clear() {
 	m_userHistoryMessageIds.clear();
 	StableListModel::clear();
 	if (appendWasPending) emit appendPendingChanged();
+	if (prependWasPending) emit prependPendingChanged();
 	if (hadUserHistory) emit hasUserHistoryChanged();
 	if (searchActive()) refreshSearchState(true);
 }

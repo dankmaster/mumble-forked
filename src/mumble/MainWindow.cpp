@@ -289,6 +289,7 @@ std::optional< ModernAutoConnectTarget > modernAutoConnectTargetForLastServer(
 constexpr int QmlStateActiveCoalesceMs   = 100;
 constexpr int QmlStateInactiveCoalesceMs = 350;
 constexpr int QmlRoomStateBatchMs            = 16;
+constexpr int PersistentChatNavigationFrameMs = 16;
 constexpr int ModernShellPreviewUpdateDrainMs = 50;
 constexpr std::size_t ModernDirectMessageMaxMessages = 200;
 constexpr int ModernConnectServerPingIntervalMs     = 75;
@@ -25444,6 +25445,7 @@ void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) 
 
 void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty() || m_deferredModernShellPreviewUpdateDrainScheduled
+		|| persistentChatNavigationFramePending()
 		|| !m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
@@ -25462,6 +25464,7 @@ void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 
 void MainWindow::drainDeferredModernShellPreviewUpdates() {
 	if (m_deferredModernShellPreviewUpdateKeys.isEmpty()
+		|| persistentChatNavigationFramePending()
 		|| !m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
@@ -27341,6 +27344,13 @@ void MainWindow::flushQmlRoomStateUpdates() {
 }
 
 void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) {
+	if (persistentChatNavigationFramePending()) {
+		// The controller/cache retains the message for its authoritative scope.
+		// Do not rebuild it against the retiring target during the one-frame gap.
+		mumble::chatperf::recordValue(
+			"qml.chat.scope_navigation.pending_source_suppressed", 1);
+		return;
+	}
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	if (target.serverLog || target.directMessage || !m_qmlShellHost) {
 		return;
@@ -27370,6 +27380,7 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) 
 
 void MainWindow::scheduleDeferredModernShellChatMessageDrain() {
 	if (m_deferredModernShellChatMessages.isEmpty() || m_deferredModernShellChatMessageDrainScheduled
+		|| persistentChatNavigationFramePending()
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
@@ -27384,6 +27395,7 @@ void MainWindow::scheduleDeferredModernShellChatMessageDrain() {
 
 void MainWindow::drainDeferredModernShellChatMessages() {
 	if (m_deferredModernShellChatMessages.isEmpty()
+		|| persistentChatNavigationFramePending()
 		|| (m_qmlShellHost && (m_qmlShellHost->chatModel()->presentationBusy()
 							 || m_qmlShellHost->chatModel()->deferredPresentationUpdatesPending()))) {
 		return;
@@ -28523,20 +28535,34 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		|| (configuredToolTextChannel && !modernShellToolsAllowed())) {
 		return false;
 	}
+	if (scopeValue == LocalDirectMessageScope
+		&& !ClientUser::get(scopeID)
+		&& !m_modernDirectMessageConversations.contains(scopeID)) {
+		return false;
+	}
 
-	if (QmlSelectionState *selection = qmlSelectionState())
-		selection->applySelection(scopeToken, scopeValue, scopeID,
-			scopeValue == LocalDirectMessageScope ? QVariant::fromValue(scopeID) : QVariant(),
-			scopeValue == static_cast< int >(MumbleProto::Channel) ? QVariant::fromValue(scopeID)
-																 : selection->selectedVoiceChannelId());
-	if (m_qmlShellHost) {
-		m_qmlShellHost->roomModel()->selectScope(scopeValue == LocalServerLogScope ? QString() : scopeToken);
-		m_qmlShellHost->navigationModel()->selectScope(
-			scopeValue == LocalServerLogScope ? QString() : scopeToken);
+	const bool persistentHistoryScope =
+		scopeValue == static_cast< int >(MumbleProto::Channel)
+		|| scopeValue == static_cast< int >(MumbleProto::TextChannel);
+	if (!persistentHistoryScope) {
+		// A non-history target supersedes any one-frame persistent navigation.
+		// Invalidate its callback before publishing the synchronous scope token.
+		++m_qmlMessageGeneration;
+		m_deferredPersistentChatNavigationGeneration = 0;
+		m_preclearedPersistentChatNavigationScopeToken.clear();
+		if (QmlSelectionState *selection = qmlSelectionState())
+			selection->applySelection(scopeToken, scopeValue, scopeID,
+				scopeValue == LocalDirectMessageScope ? QVariant::fromValue(scopeID) : QVariant(),
+				selection->selectedVoiceChannelId());
+		if (m_qmlShellHost) {
+			m_qmlShellHost->roomModel()->selectScope(
+				scopeValue == LocalServerLogScope ? QString() : scopeToken);
+			m_qmlShellHost->navigationModel()->selectScope(
+				scopeValue == LocalServerLogScope ? QString() : scopeToken);
+		}
 	}
 
 	if (scopeValue == LocalServerLogScope) {
-		++m_qmlMessageGeneration;
 		setPersistentChatTargetUsesVoiceTree(false);
 		m_persistentChatSelectedScopeValue = LocalServerLogScope;
 		m_persistentChatSelectedScopeID    = 0;
@@ -28549,9 +28575,6 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 	}
 
 	if (scopeValue == LocalDirectMessageScope) {
-		if (!ClientUser::get(scopeID) && !m_modernDirectMessageConversations.contains(scopeID)) {
-			return false;
-		}
 		return openModernDirectMessage(scopeID, true);
 	}
 
@@ -28587,16 +28610,11 @@ bool MainWindow::handleModernShellScopeRailSelection(const QString &scopeToken, 
 	}
 
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
-		if (QmlSelectionState *selection = qmlSelectionState())
-			selection->applySelection(scopeToken, scopeValue, scopeID, {}, scopeID);
 		const QString normalizedRailKind = railKind.trimmed().toLower();
 		if (normalizedRailKind == QLatin1String("voice") || normalizedRailKind == QLatin1String("text")) {
-			if (m_qmlShellHost)
-				m_qmlShellHost->roomModel()->selectScopeFromRail(scopeToken, normalizedRailKind);
-			if (m_qmlShellHost)
-				m_qmlShellHost->navigationModel()->selectScopeFromRail(scopeToken, normalizedRailKind);
 			return navigateToPersistentChatScope(MumbleProto::Channel, scopeID, false,
-												 normalizedRailKind == QLatin1String("voice"));
+												 normalizedRailKind == QLatin1String("voice"),
+												 normalizedRailKind);
 		}
 	}
 
@@ -28615,8 +28633,6 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 	if (!channel) {
 		return false;
 	}
-	if (QmlSelectionState *selection = qmlSelectionState())
-		selection->applySelection(scopeToken, scopeValue, scopeID, {}, scopeID);
 
 	if (Global::get().sh && Global::get().uiSession != 0) {
 		if (const Channel *currentChannel = currentVoiceChannel(); currentChannel && currentChannel->iId == channel->iId) {
@@ -30447,6 +30463,15 @@ void MainWindow::initializePersistentChatBackend() {
 void MainWindow::publishPersistentChatSnapshot() {
 	mumble::chatperf::ScopedDuration trace("chat.publish.snapshot");
 	if (!m_persistentChatController) return;
+	if (persistentChatNavigationFramePending()) {
+		// activeSnapshotChanged can race the one-frame gap between retiring the
+		// old model and publishing the requested scope token. The controller
+		// remains authoritative, but that obsolete snapshot must not repopulate
+		// the cleared timeline.
+		mumble::chatperf::recordValue(
+			"qml.chat.scope_navigation.pending_snapshot_suppressed", 1);
+		return;
+	}
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	const PersistentChatScopeStateSnapshot snapshot = m_persistentChatController->activeSnapshot();
@@ -30467,10 +30492,19 @@ void MainWindow::publishPersistentChatSnapshot() {
 	const unsigned int previousTailThreadID =
 		m_persistentChatMessages.empty() ? 0 : m_persistentChatMessages.back().thread_id();
 	const quint64 previousMessagesRevision = m_visiblePersistentChatMessagesRevision;
+	const bool modelPreclearedForSnapshot =
+		snapshot.key.valid
+		&& m_preclearedPersistentChatNavigationScopeToken
+			== modernShellScopeToken(
+				static_cast< int >(snapshot.key.scope), snapshot.key.scopeID);
 	const bool switchingScope =
-		previousScope.has_value() != snapshot.key.valid
+		modelPreclearedForSnapshot
+		|| previousScope.has_value() != snapshot.key.valid
 		|| (previousScope.has_value()
 			&& (!snapshot.key.valid || !snapshot.key.matches(*previousScope, previousScopeID)));
+	if (modelPreclearedForSnapshot) {
+		m_preclearedPersistentChatNavigationScopeToken.clear();
+	}
 	const std::size_t snapshotMessageCount = static_cast< std::size_t >(snapshot.messages.size());
 	const std::size_t reportedPrependCount = snapshot.prependedMessageCount > 0
 												? static_cast< std::size_t >(snapshot.prependedMessageCount)
@@ -30657,13 +30691,16 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// construct every fixed-height delegate in the synchronous scope-switch
 		// turn before the heavier provider admission queue has even started.
 		if (switchingScope) {
-			// The authoritative scope token is already published, so QML has
-			// entered presentationBusy before these retiring rows disappear.
-			// replaceMessages reports appendPending=false only after the model is
-			// empty; that keeps the old scope out of finalization and polish.
-			m_qmlShellHost->chatModel()->replaceMessages({});
-			mumble::chatperf::recordValue(
-				"qml.chat.scope_navigation.retiring_rows_cleared", 1);
+			if (!modelPreclearedForSnapshot) {
+				// Non-interactive/bootstrap selection can still enter through a
+				// snapshot without the frame-split navigation path.
+				m_qmlShellHost->chatModel()->replaceMessages({});
+				mumble::chatperf::recordValue(
+					"qml.chat.scope_navigation.retiring_rows_cleared", 1);
+			} else {
+				mumble::chatperf::recordValue(
+					"qml.chat.scope_navigation.preclear_reused", 1);
+			}
 			if (!messages.isEmpty()) {
 				const int deferred =
 					m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
@@ -31373,10 +31410,6 @@ void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
 	if (!channel) {
 		return;
 	}
-	if (QmlSelectionState *selection = qmlSelectionState()) {
-		selection->applySelection(modernShellScopeToken(MumbleProto::Channel, channel->iId),
-			static_cast< int >(MumbleProto::Channel), channel->iId, {}, channel->iId);
-	}
 
 	setPersistentChatTargetUsesVoiceTree(true);
 	rebuildPersistentChatChannelList();
@@ -31655,8 +31688,13 @@ std::size_t MainWindow::totalCachedPersistentChatUnreadCount() const {
 	return m_persistentChatController ? static_cast< std::size_t >(m_persistentChatController->totalUnreadCount()) : 0;
 }
 
+bool MainWindow::persistentChatNavigationFramePending() const {
+	return m_deferredPersistentChatNavigationGeneration != 0
+		&& m_deferredPersistentChatNavigationGeneration == m_qmlMessageGeneration;
+}
+
 bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload,
-											   bool useVoiceTree) {
+											   bool useVoiceTree, const QString &railKind) {
 	if (scope == MumbleProto::TextChannel && !m_persistentTextChannels.contains(scopeID)) {
 		return false;
 	}
@@ -31668,25 +31706,144 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 	}
 
 	const bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;
-	if (QmlSelectionState *selection = qmlSelectionState()) {
-		selection->applySelection(modernShellScopeToken(static_cast< int >(scope), scopeID),
-			static_cast< int >(scope), scopeID, {},
-			scope == MumbleProto::Channel ? QVariant::fromValue(scopeID) : selection->selectedVoiceChannelId());
-	}
+	const QString targetScopeToken =
+		modernShellScopeToken(static_cast< int >(scope), scopeID);
+	const QString normalizedRailKind = railKind.trimmed().toLower();
+	QmlSelectionState *selection = qmlSelectionState();
+	const QString previousScopeToken = selection ? selection->scopeToken() : QString();
+	const bool scopeKeyChanges = previousScopeToken != targetScopeToken;
+	ChatTimelineModel *chatModel = m_qmlShellHost ? m_qmlShellHost->chatModel() : nullptr;
+	const bool hasRetiringTimeline = chatModel
+		&& (chatModel->rowCount() > 0 || chatModel->appendPending() || chatModel->prependPending());
+	const bool inheritsPreclearedTimeline =
+		!m_preclearedPersistentChatNavigationScopeToken.isEmpty();
+	const bool splitAcrossPresentationFrame =
+		inheritsPreclearedTimeline || (scopeKeyChanges && hasRetiringTimeline);
+	const quint64 navigationGeneration = ++m_qmlMessageGeneration;
+
 	appendModernShellConnectTrace(QStringLiteral("navigateToPersistentChatScope direct scope=%1 id=%2 force=%3 rail=%4")
 									  .arg(static_cast< int >(scope))
 									  .arg(scopeID)
 									  .arg(forceReload ? 1 : 0)
 									  .arg(useVoiceTreeTarget ? 1 : 0));
-	++m_qmlMessageGeneration;
-	setPersistentChatTargetUsesVoiceTree(useVoiceTreeTarget);
-	m_persistentChatSelectedScopeValue = static_cast< int >(scope);
-	m_persistentChatSelectedScopeID    = scopeID;
-	updateServerNavigatorChrome();
-	updatePersistentTextChannelControls();
-	scheduleQmlRoomStateUpdate();
-	updateChatBar(forceReload, false);
-	scheduleQmlRoomStateUpdate();
+
+	const auto applyNavigation =
+		[this, scope, scopeID, forceReload, useVoiceTreeTarget, normalizedRailKind,
+		 previousScopeToken, targetScopeToken, navigationGeneration]() {
+			if (navigationGeneration != m_qmlMessageGeneration
+				|| m_deferredPersistentChatNavigationGeneration != navigationGeneration) {
+				return;
+			}
+			const bool targetStillValid =
+				(scope == MumbleProto::TextChannel && m_persistentTextChannels.contains(scopeID))
+				|| (scope == MumbleProto::Channel && Channel::get(scopeID));
+			QmlSelectionState *currentSelection = qmlSelectionState();
+			const QString currentScopeToken =
+				currentSelection ? currentSelection->scopeToken() : QString();
+			const bool modelWasPrecleared =
+				m_preclearedPersistentChatNavigationScopeToken == targetScopeToken;
+			const bool restoringPreclearedSelectedToken =
+				modelWasPrecleared && currentScopeToken == targetScopeToken;
+			if (!targetStillValid) {
+				m_deferredPersistentChatNavigationGeneration = 0;
+				// If the requested room vanished during the frame gap, restore
+				// the still-selected controller snapshot into the precleared
+				// model. When selection validation also removed that token,
+				// fall back to the current voice room instead of leaving an
+				// empty timeline.
+				if (modelWasPrecleared && !currentScopeToken.isEmpty()
+					&& currentScopeToken != targetScopeToken && m_qmlShellHost) {
+					m_preclearedPersistentChatNavigationScopeToken =
+						currentScopeToken;
+					m_qmlShellHost->chatModel()
+						->requestScopeReplacementPresentation();
+					publishPersistentChatSnapshot();
+				} else {
+					m_preclearedPersistentChatNavigationScopeToken.clear();
+					Channel *fallback = currentVoiceChannel();
+					if (fallback && fallback->iId != scopeID) {
+						navigateToPersistentChatScope(
+							MumbleProto::Channel, fallback->iId);
+					}
+				}
+				return;
+			}
+			if (!currentScopeToken.isEmpty()
+				&& currentScopeToken != previousScopeToken
+				&& currentScopeToken != targetScopeToken) {
+				m_deferredPersistentChatNavigationGeneration = 0;
+				if (m_preclearedPersistentChatNavigationScopeToken == targetScopeToken)
+					m_preclearedPersistentChatNavigationScopeToken.clear();
+				return;
+			}
+
+			// Publish the typed token first. QML enters presentationBusy
+			// synchronously from onScopeTokenChanged before any controller snapshot
+			// can enqueue the replacement rows.
+			if (currentSelection) {
+				currentSelection->applySelection(targetScopeToken,
+					static_cast< int >(scope), scopeID, {},
+					scope == MumbleProto::Channel ? QVariant::fromValue(scopeID)
+												 : currentSelection->selectedVoiceChannelId());
+			}
+			if (restoringPreclearedSelectedToken && m_qmlShellHost) {
+				m_qmlShellHost->chatModel()->requestScopeReplacementPresentation();
+			}
+			if (m_qmlShellHost) {
+				if (normalizedRailKind == QLatin1String("voice")
+					|| normalizedRailKind == QLatin1String("text")) {
+					m_qmlShellHost->roomModel()->selectScopeFromRail(
+						targetScopeToken, normalizedRailKind);
+					m_qmlShellHost->navigationModel()->selectScopeFromRail(
+						targetScopeToken, normalizedRailKind);
+				} else {
+					m_qmlShellHost->roomModel()->selectScope(targetScopeToken);
+					m_qmlShellHost->navigationModel()->selectScope(targetScopeToken);
+				}
+			}
+
+			setPersistentChatTargetUsesVoiceTree(useVoiceTreeTarget);
+			m_persistentChatSelectedScopeValue = static_cast< int >(scope);
+			m_persistentChatSelectedScopeID    = scopeID;
+			updateServerNavigatorChrome();
+			updatePersistentTextChannelControls();
+			scheduleQmlRoomStateUpdate();
+			const bool controllerAlreadyMatchesTarget =
+				m_persistentChatController
+				&& m_persistentChatController->activeScope().matches(scope, scopeID);
+			m_deferredPersistentChatNavigationGeneration = 0;
+			appendModernShellConnectTrace(
+				QStringLiteral("navigateToPersistentChatScope apply scope=%1 id=%2 precleared=%3")
+					.arg(static_cast< int >(scope))
+					.arg(scopeID)
+					.arg(modelWasPrecleared ? 1 : 0));
+			updateChatBar(forceReload, false);
+			// Rapid A -> B -> A can preclear A while its controller snapshot is
+			// still authoritative. Re-publish that cached snapshot locally; do
+			// not turn an ordinary room switch into a network refresh.
+			if (modelWasPrecleared && controllerAlreadyMatchesTarget && !forceReload) {
+				publishPersistentChatSnapshot();
+			}
+			scheduleQmlRoomStateUpdate();
+		};
+
+	m_deferredPersistentChatNavigationGeneration = navigationGeneration;
+	if (splitAcrossPresentationFrame) {
+		// The old fixed-height rows and their queued prefix/tail are one layout
+		// transaction. Retire them before the scope token changes, then let the
+		// scene graph present that empty state before admitting the new scope.
+		m_preclearedPersistentChatNavigationScopeToken = targetScopeToken;
+		m_deferredModernShellChatMessages.clear();
+		QTimer::singleShot(PersistentChatNavigationFrameMs, this, applyNavigation);
+		if (chatModel) {
+			chatModel->replaceMessages({});
+		}
+		mumble::chatperf::recordValue(
+			"qml.chat.scope_navigation.frame_split_preclear", 1);
+		return true;
+	}
+
+	applyNavigation();
 	return true;
 }
 
@@ -43608,6 +43765,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	qaServerAddToFavorites->setEnabled(false);
 	qaServerInformation->setEnabled(false);
 	qaServerBanList->setEnabled(false);
+	++m_qmlMessageGeneration;
+	m_deferredPersistentChatNavigationGeneration = 0;
+	m_preclearedPersistentChatNavigationScopeToken.clear();
 	if (QmlSelectionState *selection = qmlSelectionState()) {
 		selection->applySelection({}, -1, {}, {}, {});
 	}
