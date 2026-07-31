@@ -1502,7 +1502,14 @@ namespace {
 								   const QVariantList &attachments,
 								   const QVariantList &bodySegments,
 								   const bool bodyHydrationPending,
-								   const bool hasReplyContent) {
+								   const bool hasReplyContent,
+								   const bool hasEmbeddedFooterContent) {
+		// Reply context adds a 44 px block. Reactions, delivery state and an
+		// outgoing timestamp can independently enable the embedded 34 px footer.
+		// Keep both in every estimate so materializing the real row cannot move
+		// the viewport after the cold placeholder was exposed.
+		const int richMetadataHeight = (hasReplyContent ? 44 : 0)
+			+ (hasEmbeddedFooterContent ? 34 : 0);
 		// Keep cold/offscreen rows childless, but give ListView a provider-aware
 		// geometry estimate. The previous universal 58 px estimate let an entire
 		// rich page appear to fit in the cold viewport; replacing one summary with
@@ -1520,32 +1527,47 @@ namespace {
 			// Steam's provider details expand the complete production card to this
 			// measured height. Reserve it for both the URL-only loading DTO and the
 			// hydrated metadata/media DTO so the handoff cannot move the viewport.
-			if (steamPreview) return 741;
+			if (steamPreview) return 741 + richMetadataHeight;
 			const QString aspect =
 				preview.value(QStringLiteral("embedAspect")).toString().trimmed().toLower();
+			const QString presentationKind =
+				metadata.value(QStringLiteral("previewKind")).toString().trimmed().toLower();
+			const bool hasProviderPresentation = !presentationKind.isEmpty();
 			const bool hasMedia = !preview.value(QStringLiteral("mediaItems")).toList().isEmpty()
 				|| !preview.value(QStringLiteral("embedKind")).toString().trimmed().isEmpty()
-				|| !preview.value(QStringLiteral("thumbnailUrl")).toString().trimmed().isEmpty()
-				|| !preview.value(QStringLiteral("mediaUrl")).toString().trimmed().isEmpty();
+				|| !preview.value(QStringLiteral("mediaUrl")).toString().trimmed().isEmpty()
+				|| hasProviderPresentation;
+			// A generic thumbnail/poster is rendered inside RichPreviewCard's compact
+			// identity header, not in the media stage. Treating it as full media makes
+			// a URL-only loading row grow by 282 px when metadata hydration adds the
+			// thumbnail, even though the settled card remains compact. Typed provider
+			// presentations retain the larger reservation for their article/commerce hero.
 			// Metadata-only/link-loading cards still include the message frame's
 			// provider header and footer. Reserve that complete stable geometry so
 			// the cached preview handoff cannot add the observed final 18 px after
 			// the cold scope has already been exposed.
-			if (!hasMedia) return 266;
+			if (!hasMedia) return 285 + richMetadataHeight;
 			// Real PROD rows include the complete message/provider chrome around
 			// the media surface. Reserve the measured final geometry rather than
 			// the poster-only fixture height: otherwise the first hydrated
 			// Instagram post grows by up to 174 px after a full scroll.
-			if (aspect == QLatin1String("short")) return 727;
-			if (aspect == QLatin1String("square")) return 838;
-			if (aspect == QLatin1String("compact-audio")) return 370;
-			if (aspect == QLatin1String("audio")) return 504;
-			return 548;
+			if (aspect == QLatin1String("short")) return 727 + richMetadataHeight;
+			if (aspect == QLatin1String("square")) return 838 + richMetadataHeight;
+			if (aspect == QLatin1String("compact-audio")) return 370 + richMetadataHeight;
+			if (aspect == QLatin1String("audio")) return 504 + richMetadataHeight;
+			return 548 + richMetadataHeight;
 		}
-		if (!attachments.isEmpty()) return 392;
+		if (!attachments.isEmpty()) return 392 + richMetadataHeight;
+		for (const QVariant &segmentValue : bodySegments) {
+			const QVariantMap segment = segmentValue.toMap();
+			if (segment.value(QStringLiteral("kind")).toString().compare(
+					QLatin1String("image"), Qt::CaseInsensitive)
+				== 0)
+				return 360 + richMetadataHeight;
+		}
 		if (bodyHydrationPending) return 180;
 		const int lightweightBodyHeight = 48 + bodySegments.size() * 22
-			+ (hasReplyContent ? 44 : 0);
+			+ richMetadataHeight;
 		return std::clamp(lightweightBodyHeight, 58, 180);
 	}
 
@@ -3403,6 +3425,24 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 	const QVariantMap preview = normalizedPreview(previewValue);
 	const QVariantList attachments =
 		normalizedAttachments(message.value(QStringLiteral("attachments")));
+	const QVariantList reactions =
+		normalizedReactions(message.value(QStringLiteral("reactions")));
+	const QString replyActor =
+		message.value(QStringLiteral("replyActor")).toString();
+	const QString replySnippet =
+		message.value(QStringLiteral("replySnippet")).toString();
+	const bool hasReplyContent = !replyActor.isEmpty() || !replySnippet.isEmpty();
+	const QString deliveryState =
+		message.value(QStringLiteral("deliveryState")).toString().trimmed().toLower();
+	const bool hasDeliveryStatus = deliveryState == QLatin1String("sending")
+		|| deliveryState == QLatin1String("failed")
+		|| deliveryState == QLatin1String("cancelled");
+	const bool own = message.value(QStringLiteral("own")).toBool();
+	const QString timeLabel = message.value(QStringLiteral("timeLabel")).toString();
+	const bool hasEmbeddedFooterContent = !reactions.isEmpty() || hasReplyContent
+		|| hasDeliveryStatus
+		|| (own && !message.value(QStringLiteral("system")).toBool()
+			&& !timeLabel.isEmpty());
 	QVariantMap source = message;
 	// Preview payloads can contain base64 audio/video data. The normalized preview
 	// role below is the single QML-facing copy; retaining the original payload in
@@ -3419,15 +3459,15 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("kind"), QStringLiteral("message") },
 			 { QStringLiteral("status"), message.value(QStringLiteral("deliveryState")) },
 			 { QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")) },
-			 { QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")) },
-			 { QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")) },
-			 { QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")) },
-			 { QStringLiteral("reactions"), normalizedReactions(message.value(QStringLiteral("reactions"))) },
+			 { QStringLiteral("timestamp"), timeLabel },
+			 { QStringLiteral("replyActor"), replyActor },
+			 { QStringLiteral("replySnippet"), replySnippet },
+			 { QStringLiteral("reactions"), reactions },
 			 { QStringLiteral("preview"), preview },
 			 { QStringLiteral("attachments"), attachments },
 			 // Required QML bool roles must never be invalid. ListView can otherwise
 			 // retain the previous delegate value when a sparse row is rebound.
-			 { QStringLiteral("own"), message.value(QStringLiteral("own")).toBool() },
+			 { QStringLiteral("own"), own },
 			 { QStringLiteral("deleted"), message.value(QStringLiteral("deleted")).toBool() },
 			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")).toBool() },
 			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")).toBool() },
@@ -3439,8 +3479,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("deferredPresentationHeight"),
 			   deferredPresentationHeight(
 				   preview, attachments, bodySegments, bodyHydrationPending,
-				   !message.value(QStringLiteral("replyActor")).toString().isEmpty()
-					   || !message.value(QStringLiteral("replySnippet")).toString().isEmpty()) },
+				   hasReplyContent, hasEmbeddedFooterContent) },
 			 { QStringLiteral("bodyHydrationPending"), bodyHydrationPending },
 			 { QStringLiteral("source"), source } };
 }

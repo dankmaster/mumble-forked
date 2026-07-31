@@ -3557,7 +3557,8 @@ void ModernSettingsController::open(const Settings &settings, const QString &pag
 	refreshModernThemeCatalog();
 	forceModernLayout();
 	setActivePage(pageName);
-	if (m_activePage == QLatin1String("audioInput") && Global::get().inputEnhancementPackageVerifier) {
+	if (m_activePage == QLatin1String("audioInput") && Global::g_global_struct
+		&& Global::get().inputEnhancementPackageVerifier) {
 		// The real Quality/Voice Focus capability probe initializes a neural
 		// model and processes a synthetic corpus. It is relevant only while the
 		// user is reviewing input-enhancement choices, so do not spend that

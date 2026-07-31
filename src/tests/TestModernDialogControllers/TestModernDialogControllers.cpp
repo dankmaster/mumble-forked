@@ -3832,6 +3832,16 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 		"if (previewKey && fastFirstPaint && !messageState.contains(QStringLiteral(\"preview\")))")));
 	QVERIFY(!messageStateBody.contains(QStringLiteral(
 		"restorePersistentChatPreviewDiskCache(*previewKey)")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"if (!previewKey->startsWith(QLatin1String(\"image:\")))")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"richPreviewProviderForUrl(previewUrl)")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"QStringLiteral(\"provider\"), provider->key")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"QStringLiteral(\"previewProvider\"), provider->key")));
+	QVERIFY(messageStateBody.contains(QStringLiteral(
+		"QStringLiteral(\"previewKind\"), provider->kind")));
 	const qsizetype hydrationFlushStart = mainWindowSource.indexOf(
 		QStringLiteral("void MainWindow::flushModernShellPreviewHydrationQueue()"));
 	const qsizetype hydrationFlushEnd = mainWindowSource.indexOf(
@@ -3874,6 +3884,14 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(dto.contains(QStringLiteral(
 		"const QUrl canonicalPreviewUrl(preview.canonicalUrl)")));
 	QVERIFY(dto.contains(QStringLiteral(
+		"const std::optional< RichPreviewProviderInfo > richProvider")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewKey.startsWith(QLatin1String(\"image:\"))")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"const bool richProviderMetadataComplete")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"previewKey.startsWith(QLatin1String(\"image:\")) || richProviderMetadataComplete")));
+	QVERIFY(dto.contains(QStringLiteral(
 		"const QString displayHost = previewDisplayHost(canonicalPreviewUrl)")));
 	QVERIFY(dto.contains(QStringLiteral(
 		"previewState.insert(QStringLiteral(\"host\"), displayHost)")));
@@ -3899,6 +3917,8 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 		"metadataState.insert(QStringLiteral(\"provider\"), providerKey)")));
 	QVERIFY(dto.contains(QStringLiteral(
 		"metadataState.insert(QStringLiteral(\"previewProvider\"), providerKey)")));
+	QVERIFY(dto.contains(QStringLiteral(
+		"metadataState.insert(QStringLiteral(\"previewKind\"), richProvider->kind)")));
 	QVERIFY(dto.contains(QStringLiteral(
 		"const std::optional< PersistentChatPreviewProviderInfo > providerInfo")));
 	QVERIFY(dto.contains(QStringLiteral(

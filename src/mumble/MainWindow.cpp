@@ -25304,6 +25304,22 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 							   previewUrl.isValid() ? previewDisplayHost(previewUrl) : tr("Link preview"));
 			previewStub.insert(QStringLiteral("singleUrl"), persistentChatSourceTextIsSinglePreviewableUrl(bodyText));
 			previewStub.insert(QStringLiteral("loadingLabel"), tr("Load preview"));
+			// Provider URL classification is synchronous and stable across hydration.
+			// Publish it in the loading DTO so the lightweight row reserves exactly
+			// the same article/commerce/forum geometry as the hydrated preview.
+			// Direct-image keys use their own compact image geometry even when their
+			// host also belongs to a rich link provider.
+			if (!previewKey->startsWith(QLatin1String("image:"))) {
+				if (const std::optional< RichPreviewProviderInfo > provider =
+						richPreviewProviderForUrl(previewUrl);
+					provider) {
+					previewStub.insert(
+						QStringLiteral("metadata"),
+						QVariantMap { { QStringLiteral("provider"), provider->key },
+									  { QStringLiteral("previewProvider"), provider->key },
+									  { QStringLiteral("previewKind"), provider->kind } });
+				}
+			}
 			// Cache reads and authoritative embed-state updates are asynchronous. A
 			// full DTO can therefore be rebuilt while its preview object is briefly
 			// unavailable. Keep the same real URL-backed loading contract instead of
@@ -25527,6 +25543,16 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 	previewState.insert(QStringLiteral("kind"), previewKind);
 	previewState.insert(QStringLiteral("url"), preview.canonicalUrl);
 	const QUrl canonicalPreviewUrl(preview.canonicalUrl);
+	QVariantMap metadataState = preview.metadata;
+	const bool richProviderIdentityPresent =
+		!metadataState.value(QStringLiteral("provider")).toString().trimmed().isEmpty()
+		|| !metadataState.value(QStringLiteral("previewProvider")).toString().trimmed().isEmpty();
+	const bool richProviderMetadataComplete = richProviderIdentityPresent
+		&& !metadataState.value(QStringLiteral("previewKind")).toString().trimmed().isEmpty();
+	const std::optional< RichPreviewProviderInfo > richProvider =
+		previewKey.startsWith(QLatin1String("image:")) || richProviderMetadataComplete
+			? std::nullopt
+			: richPreviewProviderForUrl(canonicalPreviewUrl);
 	const QString displayHost = previewDisplayHost(canonicalPreviewUrl);
 	if (!displayHost.isEmpty()) {
 		previewState.insert(QStringLiteral("host"), displayHost);
@@ -25551,7 +25577,6 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 	if (!preview.thumbnailProviderUrl.isEmpty()) {
 		previewState.insert(QStringLiteral("thumbnailUrl"), preview.thumbnailProviderUrl);
 	}
-	QVariantMap metadataState = preview.metadata;
 	QString providerKey =
 		metadataState.value(QStringLiteral("provider")).toString().trimmed().toLower();
 	if (providerKey.isEmpty()) {
@@ -25567,10 +25592,8 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 					   previewOEmbedTargetForUrl(canonicalPreviewUrl);
 				   oEmbedTarget) {
 			providerKey = oEmbedTarget->providerKey;
-		} else if (const std::optional< RichPreviewProviderInfo > provider =
-					   richPreviewProviderForUrl(canonicalPreviewUrl);
-				   provider) {
-			providerKey = provider->key;
+		} else if (richProvider) {
+			providerKey = richProvider->key;
 		} else if (const std::optional< GameStorePreviewInfo > store =
 					   gameStorePreviewInfoForUrl(canonicalPreviewUrl);
 				   store) {
@@ -25586,6 +25609,10 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 		if (metadataState.value(QStringLiteral("previewProvider")).toString().trimmed().isEmpty()) {
 			metadataState.insert(QStringLiteral("previewProvider"), providerKey);
 		}
+	}
+	if (richProvider
+		&& metadataState.value(QStringLiteral("previewKind")).toString().trimmed().isEmpty()) {
+		metadataState.insert(QStringLiteral("previewKind"), richProvider->kind);
 	}
 	// A few legacy/direct previews (for example i.4cdn.org) have a known
 	// provider label but no typed metadata key. Preserve that correct identity

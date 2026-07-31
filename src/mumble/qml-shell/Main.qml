@@ -1991,6 +1991,9 @@ ApplicationWindow {
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
 				"richLoaderResumeQueueCount": timeline.richLoaderResumeQueue.length,
 				"richLoaderResumeActiveId": timeline.richLoaderResumeActiveId,
+				"nearViewportPrefetchActiveId": timeline.nearViewportPrefetchActiveId,
+				"nearViewportWarmId": timeline.nearViewportWarmId,
+				"nearViewportPrefetchReadyId": timeline.nearViewportPrefetchReadyId,
 				"topAnchorActive": timeline.topAnchorActive,
 				"topAnchorProgrammaticMovementGuard":
 					timeline.topAnchorProgrammaticMovementGuard,
@@ -3312,8 +3315,18 @@ ApplicationWindow {
 					// reports Ready (or Error), otherwise their final polish work can
 					// converge into one long GUI heartbeat gap.
 					property string richLoaderResumeActiveId: ""
+					// Once the visible viewport is fully quiet, warm exactly one row no
+					// farther away than a native 112 px wheel step. The stable-id grants
+					// that row narrowly scoped access to the existing serial hydration and
+					// Loader token; it never broadens visible readiness diagnostics.
+					property string nearViewportPrefetchActiveId: ""
+					property string nearViewportWarmId: ""
+					property string nearViewportPrefetchReadyId: ""
+					property string nearViewportPrefetchViewportSignature: ""
+					property bool nearViewportPrefetchOwnsViewportAnchor: false
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
+							cancelActiveNearViewportPrefetchForScroll()
 							richScrollRetentionTarget = Math.min(maximumRichScrollRetentionBuffer,
 								Math.max(richScrollRetentionTarget, contentHeight + height))
 							if (richScrollRetentionBuffer < richScrollRetentionTarget
@@ -3371,6 +3384,7 @@ ApplicationWindow {
 					property bool viewportAnchorActive: false
 					property bool restoringViewportAnchor: false
 					property int viewportAnchorRetries: 0
+					property bool viewportAnchorReleasePending: false
 					property bool topAnchorActive: false
 					property bool restoringTopAnchor: false
 					property bool topAnchorProgrammaticMovementGuard: false
@@ -3448,6 +3462,13 @@ ApplicationWindow {
 
 					function beginScopeChange() {
 						richScrollRetentionRampTimer.stop()
+						nearViewportPrefetchTimer.stop()
+						nearViewportPrefetchDeadlineTimer.stop()
+						nearViewportPrefetchActiveId = ""
+						nearViewportWarmId = ""
+						nearViewportPrefetchReadyId = ""
+						nearViewportPrefetchViewportSignature = ""
+						nearViewportPrefetchOwnsViewportAnchor = false
 						richScrollRetentionBuffer = 0
 						richScrollRetentionTarget = 0
 						// A provider/image result from the retiring scope may arrive
@@ -4037,6 +4058,7 @@ ApplicationWindow {
 							return false
 						viewportAnchorOffset = item.mapToItem(timeline, 0, 0).y
 						viewportAnchorRetries = 0
+						viewportAnchorReleasePending = false
 						viewportAnchorActive = true
 						return true
 					}
@@ -4045,6 +4067,7 @@ ApplicationWindow {
 						viewportAnchorActive = false
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
+						viewportAnchorReleasePending = false
 					}
 
 					function noteExplicitWheelInput() {
@@ -4110,6 +4133,247 @@ ApplicationWindow {
 						richContentResumeTimer.restart()
 					}
 
+					function timelineDelegateForStableId(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0)
+							return null
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (item && item.performanceTimelineDelegate === true
+									&& item.accessibilityPooled !== true
+									&& String(item.stableId || "") === key)
+								return item
+						}
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						for (let childIndex = 0;
+								deferredRepeater && childIndex < deferredRepeater.count;
+								++childIndex) {
+							const item = deferredRepeater.itemAt(childIndex)
+							if (item && item.performanceTimelineDelegate === true
+									&& item.accessibilityPooled !== true
+									&& String(item.stableId || "") === key)
+								return item
+						}
+						return null
+					}
+
+					function nearViewportPrefetchSignature() {
+						const first = firstVisibleMessageDelegate()
+						if (!first)
+							return ""
+						const point = first.mapToItem(timeline, 0, 0)
+						return String(first.stableId || "") + "|"
+							+ String(Math.round(point.y * 2) / 2)
+					}
+
+					function nearViewportPrefetchCandidateFromItem(item, candidate) {
+						if (!item || item.accessibilityPooled === true || !item.visible)
+							return candidate
+						const deferred = item.lightweightDeferredPresentation === true
+						// Plain summaries are at most 180 px. Spending the single
+						// adjacent warm slot on one would leave the next media card cold.
+						const deferredRich = deferred
+							&& Number(item.deferredPresentationHeight || 0) > 180
+						const needsWarmRecovery = !deferred
+							&& item.richResourcesRequired === true
+							&& (item.richResourcesActive !== true
+								|| item.richLoaderSuspended === true
+								|| item.messageRowReady !== true
+								|| item.previewPresentationReady !== true)
+						if (!deferredRich && !needsWarmRecovery)
+							return candidate
+						const point = item.mapToItem(timeline, 0, 0)
+						const above = point.y + item.height <= 0.5
+						const below = point.y >= height - 0.5
+						if (!above && !below)
+							return candidate
+						// At the absolute beginning there is no stable row above which
+						// can own an expansion anchor. The lower candidate remains safe.
+						if (above && Math.abs(contentY - originY) <= 0.5)
+							return candidate
+						const distance = above
+							? Math.max(0, -(point.y + item.height))
+							: Math.max(0, point.y - height)
+						if (distance > richScrollRetentionRampStep + 0.5)
+							return candidate
+						const stableId = String(item.stableId || "")
+						if (stableId.length === 0
+								|| (candidate && candidate.distance <= distance))
+							return candidate
+						return { "id": stableId, "distance": distance,
+							"above": above, "deferred": deferredRich }
+					}
+
+					function nearestDeferredPrefetchCandidate() {
+						let candidate = null
+						const children = contentItem ? contentItem.children : []
+						for (let childIndex = 0; childIndex < children.length; ++childIndex)
+							candidate = nearViewportPrefetchCandidateFromItem(
+								children[childIndex], candidate)
+						const deferredRepeater = headerItem
+							? headerItem.deferredRepeater : null
+						for (let childIndex = 0;
+								deferredRepeater && childIndex < deferredRepeater.count;
+								++childIndex)
+							candidate = nearViewportPrefetchCandidateFromItem(
+								deferredRepeater.itemAt(childIndex), candidate)
+						return candidate
+					}
+
+					function nearViewportPrefetchAllowed() {
+						return !stickToBottom && !richScrollInProgress
+							&& !scopePresentationPending && !scopePresentationFinalizing
+							&& !scopeResetPending && !scopePresentationObservationActive
+							&& !prependAnchorActive && !topAnchorActive && !activeScope.loading
+							&& !chatModel.appendPending && !chatModel.prependPending
+							&& !root.coldPreviewHydrationPacingActive
+							&& pendingVisibleHydrationCount() === 0
+							&& pendingVisibleRichRecoveryCount() === 0
+							&& richContentResumeTimer.running !== true
+							&& richLoaderResumeTimer.running !== true
+							&& deferredMaterializationTimer.running !== true
+							&& richLoaderResumeActiveId.length === 0
+							&& deferredMaterializationActiveId.length === 0
+							&& richLoaderResumeQueue.length === 0
+							&& deferredMaterializationQueue.length === 0
+					}
+
+					function scheduleNearViewportPrefetch() {
+						if (nearViewportPrefetchActiveId.length > 0
+								|| nearViewportPrefetchTimer.running
+								|| !nearViewportPrefetchAllowed())
+							return
+						nearViewportPrefetchTimer.start()
+					}
+
+					function startNearViewportPrefetch() {
+						if (!nearViewportPrefetchAllowed()
+								|| nearViewportPrefetchActiveId.length > 0)
+							return
+						const signature = nearViewportPrefetchSignature()
+						if (signature.length === 0
+								|| signature === nearViewportPrefetchViewportSignature)
+							return
+						if (nearViewportPrefetchReadyId.length > 0) {
+							nearViewportPrefetchReadyId = ""
+							nearViewportWarmId = ""
+						}
+						const candidate = nearestDeferredPrefetchCandidate()
+						if (!candidate)
+							return
+						nearViewportPrefetchViewportSignature = signature
+						nearViewportPrefetchActiveId = candidate.id
+						nearViewportWarmId = candidate.id
+						nearViewportPrefetchReadyId = ""
+						nearViewportPrefetchOwnsViewportAnchor = false
+						nearViewportPrefetchDeadlineTimer.restart()
+						if (candidate.above && !viewportAnchorActive) {
+							if (!captureViewportAnchor()) {
+								nearViewportPrefetchDeadlineTimer.stop()
+								nearViewportPrefetchActiveId = ""
+								nearViewportWarmId = ""
+								return
+							}
+							nearViewportPrefetchOwnsViewportAnchor = true
+						}
+						if (candidate.deferred) {
+							deferredMaterializationActiveId = candidate.id
+							if (!chatModel.materializeDeferredMessage(candidate.id)) {
+								nearViewportPrefetchDeadlineTimer.stop()
+								deferredMaterializationActiveId = ""
+								nearViewportPrefetchActiveId = ""
+								nearViewportWarmId = ""
+								if (nearViewportPrefetchOwnsViewportAnchor
+										&& viewportAnchorActive)
+									releaseViewportAnchor()
+								nearViewportPrefetchOwnsViewportAnchor = false
+								return
+							}
+						}
+						Qt.callLater(function() {
+							if (timeline.nearViewportPrefetchActiveId !== candidate.id
+									|| timeline.richScrollInProgress)
+								return
+							timeline.queueRichLoaderResumes()
+							timeline.queueVisiblePreviewHydration()
+						})
+					}
+
+					function cancelActiveNearViewportPrefetchForScroll() {
+						const activeId = nearViewportPrefetchActiveId
+						if (activeId.length === 0)
+							return
+						const item = timelineDelegateForStableId(activeId)
+						if (item && item.cancelNearViewportPrefetchForScroll)
+							item.cancelNearViewportPrefetchForScroll()
+						abandonNearViewportPrefetch(activeId, false)
+					}
+
+					function abandonNearViewportPrefetch(stableId, restoreOwnedAnchor) {
+						const key = String(stableId || "")
+						if (key.length === 0
+								|| (key !== nearViewportPrefetchActiveId
+									&& key !== nearViewportWarmId
+									&& key !== nearViewportPrefetchReadyId))
+							return false
+						nearViewportPrefetchDeadlineTimer.stop()
+						richLoaderResumeQueue = richLoaderResumeQueue.filter(function(stableId) {
+							return String(stableId || "") !== key
+						})
+						const releasedToken = richLoaderResumeActiveId === key
+						if (releasedToken)
+							richLoaderResumeActiveId = ""
+						if (deferredMaterializationActiveId === key)
+							deferredMaterializationActiveId = ""
+						if (nearViewportPrefetchActiveId === key)
+							nearViewportPrefetchActiveId = ""
+						if (nearViewportWarmId === key)
+							nearViewportWarmId = ""
+						if (nearViewportPrefetchReadyId === key)
+							nearViewportPrefetchReadyId = ""
+						if (nearViewportPrefetchOwnsViewportAnchor
+								&& viewportAnchorActive) {
+							if (restoreOwnedAnchor === true)
+								restoreViewportAnchor(true)
+							else
+								releaseViewportAnchor()
+						}
+						nearViewportPrefetchOwnsViewportAnchor = false
+						if (releasedToken && !richScrollInProgress) {
+							if (richLoaderResumeQueue.length > 0)
+								richLoaderResumeTimer.start()
+							else
+								Qt.callLater(function() {
+									timeline.queueRichLoaderResumes()
+								})
+						}
+						return true
+					}
+
+					function completeNearViewportPrefetchIfReady(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0 || key !== nearViewportPrefetchActiveId)
+							return false
+						const item = timelineDelegateForStableId(key)
+						if (!item || item.messageRowReady !== true
+								|| item.previewPresentationReady !== true
+								|| item.contentNeedsHydration === true
+								|| (item.richResourcesRequired === true
+									&& item.richResourcesActive !== true))
+							return false
+						nearViewportPrefetchDeadlineTimer.stop()
+						nearViewportPrefetchActiveId = ""
+						nearViewportPrefetchReadyId = key
+						if (nearViewportPrefetchOwnsViewportAnchor
+								&& viewportAnchorActive) {
+							restoreViewportAnchor(true)
+						}
+						nearViewportPrefetchOwnsViewportAnchor = false
+						return true
+					}
+
 					function suspendRichContentForScroll() {
 						richLoaderResumeQueue = []
 						richLoaderResumeActiveId = ""
@@ -4128,7 +4392,9 @@ ApplicationWindow {
 							// wheel gesture. Clearing it here paints a black card and makes
 							// renderActive=false close or detach an active inline player.
 							// A retained row suspends only when it actually leaves the viewport.
-							if (item.inVisibleViewport === true)
+							if (item.inVisibleViewport === true
+									|| String(item.stableId || "")
+										=== nearViewportPrefetchReadyId)
 								continue
 							item.suspendRichResourcesForScroll()
 						}
@@ -4160,10 +4426,13 @@ ApplicationWindow {
 							const point = item.mapToItem(timeline, 0, 0)
 							const visible = point.y + item.height > 0.5
 								&& point.y < height - 0.5
+							const prefetchEligible = String(item.stableId || "")
+								=== nearViewportWarmId
 							// Cache-buffer delegates retain their bounded placeholder
 							// geometry. Rebuilding provider trees that are still outside
 							// the viewport consumes UI frames without drawing anything.
-							if (!visible)
+							// The one named 128 px prefetch row is the sole exception.
+							if (!visible && !prefetchEligible)
 								continue
 							const distance = visible ? 0
 								: Math.min(Math.abs(point.y), Math.abs(point.y - height))
@@ -4207,7 +4476,9 @@ ApplicationWindow {
 								const point = item.mapToItem(timeline, 0, 0)
 								const stillVisible = point.y + item.height > 0.5
 									&& point.y < height - 0.5
-								if (!stillVisible)
+								const prefetchEligible = String(item.stableId || "")
+									=== nearViewportWarmId
+								if (!stillVisible && !prefetchEligible)
 									break
 								richLoaderResumeActiveId = stableId
 								resumed = item.resumeRichContentAfterScroll(
@@ -4364,7 +4635,9 @@ ApplicationWindow {
 							if (item && item.performanceTimelineDelegate === true
 									&& item.accessibilityPooled !== true
 									&& item.lightweightDeferredPresentation !== true
-									&& item.inVisibleViewport === true)
+									&& (item.inVisibleViewport === true
+										|| String(item.stableId || "")
+											=== nearViewportWarmId))
 								item.requestPreviewHydrationIfNeeded(pendingAllowed)
 						}
 					}
@@ -4474,35 +4747,38 @@ ApplicationWindow {
 							topAnchorSettleTimer.restart()
 						}
 						chatModel.presentationBusy = false
+						scheduleNearViewportPrefetch()
 					}
 
-					function restoreViewportAnchor() {
+					function restoreViewportAnchor(releaseWhenRestored) {
+						if (releaseWhenRestored === true)
+							viewportAnchorReleasePending = true
 						if (!viewportAnchorActive || restoringViewportAnchor || stickToBottom
 								|| prependAnchorActive || scopePresentationPending
 								|| moving || dragging || flicking)
-							return
-						const row = chatModel.presentationModel.rowForStableId(viewportAnchorId)
-						if (row < 0) {
-							releaseViewportAnchor()
-							return
-						}
-						const item = itemAtIndex(row)
+							return false
+						const item = timelineDelegateForStableId(viewportAnchorId)
 						if (!item) {
-							if (++viewportAnchorRetries <= 4)
+							if (++viewportAnchorRetries <= 8)
 								Qt.callLater(function() { timeline.restoreViewportAnchor() })
 							else
 								releaseViewportAnchor()
-							return
+							return false
 						}
 						restoringViewportAnchor = true
+						const currentOffset = item.mapToItem(timeline, 0, 0).y
 						const minimumY = originY
 						const maximumY = Math.max(minimumY, originY + contentHeight - height)
 						const desiredY = Math.max(minimumY,
-							Math.min(maximumY, item.y - viewportAnchorOffset))
+							Math.min(maximumY,
+								contentY + currentOffset - viewportAnchorOffset))
 						if (Math.abs(contentY - desiredY) > 0.5)
 							contentY = desiredY
 						restoringViewportAnchor = false
 						viewportAnchorRetries = 0
+						if (viewportAnchorReleasePending)
+							releaseViewportAnchor()
+						return true
 					}
 
 					function releasePrependAnchor(preserveViewportAnchor) {
@@ -4529,6 +4805,7 @@ ApplicationWindow {
 							viewportAnchorId = preservedAnchorId
 							viewportAnchorOffset = preservedAnchorOffset
 							viewportAnchorRetries = 0
+							viewportAnchorReleasePending = false
 							viewportAnchorActive = true
 						}
 						scheduleRichContentResume()
@@ -4880,6 +5157,24 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: nearViewportPrefetchTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.startNearViewportPrefetch()
+					}
+
+					Timer {
+						id: nearViewportPrefetchDeadlineTimer
+						// Backend preview hydration is bounded at eight seconds. Retire
+						// the warm grant just after that bound; a timeout is cleanup only
+						// and must never promote an incomplete/black row to ready.
+						interval: 8200
+						repeat: false
+						onTriggered: timeline.abandonNearViewportPrefetch(
+							timeline.nearViewportPrefetchActiveId, true)
+					}
+
+					Timer {
 						id: richScrollRetentionRampTimer
 						interval: 16
 						repeat: true
@@ -4933,6 +5228,7 @@ ApplicationWindow {
 								restart()
 							} else {
 								timeline.releaseTopAnchor()
+								timeline.scheduleNearViewportPrefetch()
 							}
 						}
 					}
@@ -5022,7 +5318,10 @@ ApplicationWindow {
 						id: scopePresentationObservationTimer
 						interval: 400
 						repeat: false
-						onTriggered: timeline.scopePresentationObservationActive = false
+						onTriggered: {
+							timeline.scopePresentationObservationActive = false
+							timeline.scheduleNearViewportPrefetch()
+						}
 					}
 
 					Timer {
@@ -5231,6 +5530,7 @@ ApplicationWindow {
 								required property string title
 								required property string subtitle
 								required property string timestamp
+								required property int deferredPresentationHeight
 								readonly property bool deferredPrefixItem: true
 								readonly property bool performanceTimelineDelegate: true
 								readonly property bool lightweightDeferredPresentation: true
@@ -5432,8 +5732,10 @@ ApplicationWindow {
 								readonly property bool inVisibleViewport: !accessibilityPooled
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
-								onInVisibleViewportChanged: {
-									if (inVisibleViewport || item)
+								readonly property bool richContentViewportEligible:
+									inVisibleViewport || stableId === timeline.nearViewportWarmId
+								onRichContentViewportEligibleChanged: {
+									if (richContentViewportEligible || item)
 										return
 									const ownedStableId = resumeOwnedStableId
 									resumeRequested = false
@@ -5445,14 +5747,21 @@ ApplicationWindow {
 										timeline.cancelRichLoaderResume(ownedStableId)
 								}
 								width: timeline.width
+								readonly property bool richGeometrySettling: item
+									&& item.richResourcesRequired
+									&& (!item.messageRowReady
+										|| item.richResourceActivationPending
+										|| !item.richResourcesActive)
 								// Incubation and provider-resource activation can briefly
-								// report a smaller implicitHeight than the lightweight row
-								// that ListView already positioned. Never surrender that
-								// provider-aware reservation: real content may grow beyond
-								// it, but cannot collapse the viewport during Loader handoff.
+								// expose both placeholder and provider heights. The outer
+								// delegate owns one reserved geometry until the provider's
+								// resource/polish window settles; settled real content may
+								// still grow beyond that estimate.
 								height: Math.max(timeline.deferredMessageRowHeight,
 									deferredPresentationHeight,
-									item ? item.implicitHeight : 0)
+									item ? item.lightweightMessageRowHeight : 0,
+									!richGeometrySettling && item ? item.implicitHeight : 0)
+								clip: richGeometrySettling
 								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								asynchronous: true
 								// A cold row stays as a fixed-height placeholder until the
@@ -5483,7 +5792,13 @@ ApplicationWindow {
 									z: 1
 									visible: asyncMessageDelegate.active
 										&& (!asyncMessageDelegate.item
-											|| !asyncMessageDelegate.item.currentMessagePresentationReady)
+											|| !asyncMessageDelegate.item.currentMessagePresentationReady
+											|| (asyncMessageDelegate.item.richResourcesRequired
+												&& !asyncMessageDelegate.item.richResourcesActive)
+											|| (asyncMessageDelegate.item.richLoaderSuspended
+												&& (asyncMessageDelegate.item.richResourcesRequired
+													|| asyncMessageDelegate.item.previewNeedsHydration
+													|| asyncMessageDelegate.item.previewLoaderIncubationSuppressed)))
 									radius: Theme.innerRadius
 									color: Theme.surfaceRaised
 									border.width: 1
@@ -5569,6 +5884,18 @@ ApplicationWindow {
 									if (item)
 										item.suspendRichResourcesForScroll()
 								}
+								function cancelNearViewportPrefetchForScroll() {
+									const ownedStableId = resumeOwnedStableId
+									resumeRequested = false
+									resumeDuringFinalization = false
+									resumeAdmitsPreview = false
+									resumeOwnedStableId = ""
+									resetOuterLoaderIncubationWatchdog()
+									if (item)
+										item.cancelNearViewportPrefetchForScroll()
+									if (ownedStableId.length > 0)
+										timeline.cancelRichLoaderResume(ownedStableId)
+								}
 								function resetOuterLoaderIncubationWatchdog(clearSuppression) {
 									outerLoaderIncubationWatchdog.stop()
 									outerLoaderIncubationWatchdogStartedAt = 0
@@ -5606,7 +5933,9 @@ ApplicationWindow {
 									resumeDuringFinalization = false
 									resumeAdmitsPreview = false
 									resumeOwnedStableId = ""
-									timeline.cancelRichLoaderResume(ownedStableId)
+									if (!timeline.abandonNearViewportPrefetch(
+											ownedStableId, true))
+										timeline.cancelRichLoaderResume(ownedStableId)
 								}
 								Timer {
 									id: outerLoaderIncubationWatchdog
@@ -5618,10 +5947,11 @@ ApplicationWindow {
 
 								ListView.onPooled: {
 									resetOuterLoaderIncubationWatchdog(true)
-									if (resumeOwnedStableId.length > 0)
-										timeline.cancelRichLoaderResume(resumeOwnedStableId)
-									else
-										timeline.cancelRichLoaderResume(stableId)
+									const retiredStableId = resumeOwnedStableId.length > 0
+										? resumeOwnedStableId : stableId
+									if (!timeline.abandonNearViewportPrefetch(
+											retiredStableId, true))
+										timeline.cancelRichLoaderResume(retiredStableId)
 									accessibilityPooled = true
 									resumeRequested = false
 									resumeDuringFinalization = false
@@ -5639,7 +5969,9 @@ ApplicationWindow {
 								onStableIdChanged: {
 									const ownedStableId = resumeOwnedStableId
 									if (ownedStableId.length > 0
-											&& ownedStableId !== stableId)
+											&& ownedStableId !== stableId
+											&& !timeline.abandonNearViewportPrefetch(
+												ownedStableId, true))
 										timeline.cancelRichLoaderResume(ownedStableId)
 									resumeRequested = false
 									resumeDuringFinalization = false
@@ -5648,9 +5980,14 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 								}
 								Component.onDestruction: {
-									if (typeof timeline !== "undefined" && timeline
-											&& resumeOwnedStableId.length > 0)
-										timeline.cancelRichLoaderResume(resumeOwnedStableId)
+									if (typeof timeline !== "undefined" && timeline) {
+										const retiredStableId = resumeOwnedStableId.length > 0
+											? resumeOwnedStableId : stableId
+										const abandoned = timeline.abandonNearViewportPrefetch(
+											retiredStableId, true)
+										if (resumeOwnedStableId.length > 0 && !abandoned)
+											timeline.cancelRichLoaderResume(resumeOwnedStableId)
+									}
 								}
 								onLoaded: {
 									const outerIncubationRecovered =
@@ -5885,7 +6222,7 @@ ApplicationWindow {
 										&& previewLoaderSurfaceNonBlank))
 							if (!previewMaterializationAdmitted
 									|| previewLoaderIncubationSuppressed
-									|| accessibilityPooled || !inVisibleViewport
+									|| accessibilityPooled || !richContentViewportEligible
 									|| timeline.richScrollInProgress
 									|| timeline.richLoaderResumeActiveId !== stableId
 									|| loaderFinished) {
@@ -5903,7 +6240,7 @@ ApplicationWindow {
 							const loader = row ? row.previewLoader : null
 							if (!previewMaterializationAdmitted
 									|| previewLoaderIncubationSuppressed
-									|| accessibilityPooled || !inVisibleViewport
+									|| accessibilityPooled || !richContentViewportEligible
 									|| timeline.richScrollInProgress
 									|| timeline.richLoaderResumeActiveId !== stableId
 									|| (loader && (loader.status === Loader.Error
@@ -5933,6 +6270,13 @@ ApplicationWindow {
 							richResourceActivationQueued = false
 							richResourcesActive = false
 						}
+						function cancelNearViewportPrefetchForScroll() {
+							timeline.cancelRichLoaderResume(stableId)
+							previewMaterializationAdmitted = false
+							richLoaderSuspended = true
+							resetPreviewLoaderIncubationWatchdog()
+							suspendRichResourcesForScroll()
+						}
 						function completeRichLoaderResumeWhenReady() {
 							if (!messageRowReady || !previewPresentationReady)
 								return
@@ -5947,6 +6291,7 @@ ApplicationWindow {
 								if (richResourceActivationPending)
 									return
 							}
+							timeline.completeNearViewportPrefetchIfReady(stableId)
 							// The complete message/card tree now owns its final layout
 							// geometry and its first bounded resource window has settled.
 							const rowId = stableId
@@ -5974,6 +6319,8 @@ ApplicationWindow {
 						// delegate owns viewport membership.
 						readonly property bool inVisibleViewport:
 							asyncMessageDelegate.inVisibleViewport
+						readonly property bool richContentViewportEligible:
+							asyncMessageDelegate.richContentViewportEligible
 						property bool richResourcesActive: false
 						onRichResourcesActiveChanged: {
 							const retainedId = String(stableId || "")
@@ -5981,6 +6328,9 @@ ApplicationWindow {
 									&& root.performanceChatScrollRetainedRichIds[
 										retainedId] === true)
 								++root.performanceChatScrollRetainedRichResourceDropCount
+							if (!richResourcesActive && !inVisibleViewport
+									&& !timeline.richScrollInProgress)
+								timeline.scheduleNearViewportPrefetch()
 						}
 						function scheduleRichResourceActivation() {
 							if (richResourcesActive || richResourceActivationQueued
@@ -6051,7 +6401,7 @@ ApplicationWindow {
 							const pendingAllowed = allowDuringFinalization === true
 								&& timeline.scopePresentationFinalizing
 							if (backendContentNeedsHydration && !backendHydrationRequested
-									&& inVisibleViewport
+									&& richContentViewportEligible
 									&& (!timeline.scopePresentationPending || pendingAllowed)
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
@@ -6062,7 +6412,7 @@ ApplicationWindow {
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
 									&& timeline.prependRichContentActive(stableId,
-										inVisibleViewport))
+										richContentViewportEligible))
 								chatModel.requestBodyHydration(stableId)
 						}
 						function resumeRichContentAfterScroll(allowDuringFinalization,
@@ -6081,13 +6431,13 @@ ApplicationWindow {
 								// ordered resume queue promote one visible message tree per
 								// frame instead of allowing every visible Loader binding to
 								// activate together on the first idle polish pass.
-								if (!logEntry && inVisibleViewport)
+								if (!logEntry && richContentViewportEligible)
 									messageRowMaterialized = true
 								if (admitPreviewMaterialization === true
 										&& hasPreviewContent) {
 									previewAdmissionAccepted = !previewNeedsHydration
 										&& !previewLoaderIncubationSuppressed
-										&& inVisibleViewport
+										&& richContentViewportEligible
 									if (previewAdmissionAccepted) {
 										previewMaterializationAdmitted = true
 										armPreviewLoaderIncubationWatchdog()
@@ -6098,7 +6448,7 @@ ApplicationWindow {
 							requestPreviewHydrationIfNeeded()
 							if (hasPreviewContent && !previewNeedsHydration
 									&& !previewMaterializationAdmitted
-									&& inVisibleViewport)
+									&& richContentViewportEligible)
 								timeline.scheduleRichContentResume()
 							return (logEntry || messageRowMaterialized)
 								&& previewAdmissionAccepted
@@ -6228,15 +6578,12 @@ ApplicationWindow {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
-						// The hydration window intentionally extends beyond the viewport.
-						// A row can therefore become warm while it is still offscreen and
-						// have its request rejected by the visible-only admission gate.
-						// Re-evaluate when it actually crosses the viewport boundary; the
-						// post-scroll scan below remains the recovery path when ListView
-						// reports that transition while a flick is still active.
-						onInVisibleViewportChanged: {
+						// Visible rows and the single named 128 px prefetch row share the
+						// serial admission path. Every other cache delegate remains a
+						// geometry-only shell.
+						onRichContentViewportEligibleChanged: {
 							requestPreviewHydrationIfNeeded()
-							if (!inVisibleViewport) {
+							if (!richContentViewportEligible) {
 								timeline.cancelRichLoaderResume(stableId)
 								// Cancelling the global single-flight token must also
 								// retire the provider tree it admitted. Otherwise an
@@ -6334,6 +6681,9 @@ ApplicationWindow {
 						readonly property bool hasEmbeddedFooterContent: hasReactions
 							|| hasReplyContent || hasDeliveryStatus
 							|| (own && !systemMessage && timestamp.length > 0)
+						readonly property real richPresentationMetadataHeight:
+							(hasReplyContent ? 44 : 0)
+							+ (hasEmbeddedFooterContent ? 34 : 0)
 						readonly property bool usesCompactActionOverlay: hasMessageActions
 						readonly property int compactActionButtonCount:
 							(canReply ? 1 : 0) + (canReact ? 1 : 0)
@@ -6360,10 +6710,14 @@ ApplicationWindow {
 							Math.max(220, laneAvailableWidth - richContentChromeWidth))
 						readonly property string previewPlaceholderAspect:
 							String(preview ? (preview.embedAspect || "") : "").toLowerCase()
+						readonly property string previewPlaceholderKind:
+							String(preview ? ((preview.metadata || {}).previewKind
+								|| preview.previewKind || "") : "").toLowerCase()
 						readonly property bool previewPlaceholderHasMedia: !!preview
 							&& ((preview.mediaItems || []).length > 0
 								|| String(preview.embedKind || "").length > 0
-								|| String(preview.thumbnailUrl || preview.posterUrl || "").length > 0)
+								|| String(preview.mediaUrl || "").length > 0
+								|| previewPlaceholderKind.length > 0)
 						readonly property real previewPlaceholderMediaHeight:
 							previewPlaceholderAspect === "short"
 								? Math.min(520, previewPlaceholderWidth * 16 / 9)
@@ -6378,8 +6732,10 @@ ApplicationWindow {
 						readonly property real attachmentPlaceholderHeight: 320
 						readonly property real lightweightMessageRowHeight:
 							hasPreviewContent ? previewPlaceholderHeight + 72
+								+ richPresentationMetadataHeight
 							: hasAttachmentContent ? attachmentPlaceholderHeight + 72
-							: hasInlineImageContent ? 360
+								+ richPresentationMetadataHeight
+							: hasInlineImageContent ? 360 + richPresentationMetadataHeight
 							: Math.max(48, Math.min(180,
 								48 + (bodySegments || []).length * 22
 									+ (hasReplyContent ? 44 : 0)
@@ -6507,7 +6863,9 @@ ApplicationWindow {
 										}
 							}
 							onStatusChanged: {
-								if (status === Loader.Error)
+								if (status === Loader.Error
+										&& !timeline.abandonNearViewportPrefetch(
+											messageDelegate.stableId, true))
 									timeline.completeRichLoaderResume(messageDelegate.stableId)
 							}
 							sourceComponent: Component {
@@ -6738,7 +7096,8 @@ ApplicationWindow {
 										&& !messageDelegate.attachmentNeedsHydration
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
-											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+											messageDelegate.stableId,
+											messageDelegate.richContentViewportEligible)
 									// Older history can insert many rich rows in one model
 									// mutation. Incubate off-screen galleries over subsequent
 									// frames instead of constructing the entire cache window on
@@ -6831,7 +7190,8 @@ ApplicationWindow {
 											|| !messageDelegate.previewLoaderSurfaceNonBlank)
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
-											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+											messageDelegate.stableId,
+											messageDelegate.richContentViewportEligible)
 									visible: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
 											|| !messageDelegate.previewMaterializationAdmitted
@@ -6979,7 +7339,8 @@ ApplicationWindow {
 										&& messageDelegate.previewMaterializationAdmitted
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
-											messageDelegate.stableId, messageDelegate.inVisibleViewport)
+											messageDelegate.stableId,
+											messageDelegate.richContentViewportEligible)
 									// The large ListView cache keeps rich-card geometry warm for
 									// smooth scrolling. Asynchronous incubation preserves that
 									// benefit without letting a page of newly prepended embeds

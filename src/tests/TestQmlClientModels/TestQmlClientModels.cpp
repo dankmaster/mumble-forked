@@ -574,6 +574,34 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
 			 QStringLiteral("Cold one updated"));
 
+	const QString inlineImageBodyText =
+		QStringLiteral("Open the inline estimate artwork.");
+	const QString inlineImageBodyHtml =
+		QStringLiteral("<p><a href=\"https://example.test/inline-estimate\">"
+					   "<img src=\"image://mumble/inline-estimate?g=1\" "
+					   "alt=\"Inline estimate\" width=\"640\" height=\"360\"></a></p>");
+	// Prime the shared bounded rich-body cache through its real worker path.
+	// Cold rows can then exercise the cached image estimator synchronously,
+	// without making this geometry assertion depend on a second worker turn.
+	{
+		ChatTimelineModel richBodyPrimer;
+		QVERIFY(richBodyPrimer.upsertMessage(
+			{ { QStringLiteral("messageKey"), QStringLiteral("estimate:inline-primer") },
+			  { QStringLiteral("plainText"), inlineImageBodyText },
+			  { QStringLiteral("bodyHtml"), inlineImageBodyHtml } }));
+		const auto hasParsedInlineImage = [&richBodyPrimer] {
+			for (const QVariant &entry :
+				 richBodyPrimer.get(0).value(QStringLiteral("bodySegments")).toList()) {
+				if (entry.toMap().value(QStringLiteral("kind")).toString()
+					== QLatin1String("image")) {
+					return true;
+				}
+			}
+			return false;
+		};
+		QTRY_VERIFY_WITH_TIMEOUT(hasParsedInlineImage(), 5000);
+	}
+
 	ChatTimelineModel estimateModel;
 	const QVariantMap richPreview {
 		{ QStringLiteral("embedKind"), QStringLiteral("youtube") },
@@ -588,6 +616,20 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		{ QStringLiteral("embedKind"), QStringLiteral("instagram") },
 		{ QStringLiteral("embedAspect"), QStringLiteral("square") },
 		{ QStringLiteral("thumbnailUrl"), QStringLiteral("https://example.com/poster-square.jpg") }
+	};
+	const QVariantMap thumbnailOnlyPreview {
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.nike.com/se/t/shoe/example-product") },
+		{ QStringLiteral("thumbnailUrl"),
+		  QStringLiteral("image://mumble/nike-compact-header?g=1") }
+	};
+	const QVariantMap providerHeroPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://example.test/article") },
+		{ QStringLiteral("thumbnailUrl"),
+		  QStringLiteral("image://mumble/article-provider-hero?g=1") },
+		{ QStringLiteral("metadata"),
+		  QVariantMap { { QStringLiteral("provider"), QStringLiteral("news") },
+						{ QStringLiteral("previewKind"), QStringLiteral("article") } } }
 	};
 	const QVariantMap steamLoadingPreview {
 		{ QStringLiteral("url"),
@@ -624,15 +666,46 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 					 { QStringLiteral("plainText"), QStringLiteral("Square") },
 					 { QStringLiteral("preview"), squarePreview } },
 				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:thumbnail-only") },
+					 { QStringLiteral("plainText"), QStringLiteral("Thumbnail only") },
+					 { QStringLiteral("preview"), thumbnailOnlyPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:provider-hero") },
+					 { QStringLiteral("plainText"), QStringLiteral("Provider hero") },
+					 { QStringLiteral("preview"), providerHeroPreview } },
+				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:steam-loading") },
 					 { QStringLiteral("plainText"), QStringLiteral("Steam loading") },
 					 { QStringLiteral("preview"), steamLoadingPreview } },
 				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:steam-ready") },
 					 { QStringLiteral("plainText"), QStringLiteral("Steam ready") },
-					 { QStringLiteral("preview"), steamReadyPreview } } },
+					 { QStringLiteral("preview"), steamReadyPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:inline-image") },
+					 { QStringLiteral("plainText"), inlineImageBodyText },
+					 { QStringLiteral("bodyHtml"), inlineImageBodyHtml } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:preview-reply") },
+					 { QStringLiteral("plainText"), QStringLiteral("Preview reply") },
+					 { QStringLiteral("preview"), metadataOnlyPreview },
+					 { QStringLiteral("replyActor"), QStringLiteral("Original author") },
+					 { QStringLiteral("replySnippet"), QStringLiteral("Original message") } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:plain-reply") },
+					 { QStringLiteral("plainText"), QStringLiteral("Plain reply") },
+					 { QStringLiteral("replyActor"), QStringLiteral("Original author") },
+					 { QStringLiteral("replySnippet"), QStringLiteral("Original message") } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:preview-reaction") },
+					 { QStringLiteral("plainText"), QStringLiteral("Preview reaction") },
+					 { QStringLiteral("preview"), metadataOnlyPreview },
+					 { QStringLiteral("reactions"),
+					   QVariantList { QVariantMap {
+						   { QStringLiteral("emoji"), QString::fromUtf8("👍") },
+						   { QStringLiteral("count"), 1 } } } } } },
 				 true),
-			 6);
+			 12);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 548);
@@ -645,28 +718,50 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(estimateModel.data(estimateModel.index(0, 0), estimateRole).toInt(), 548);
 	QCOMPARE(estimateModel.get(2).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
-			 266);
+			 285);
 	QCOMPARE(estimateModel.get(3).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 838);
 	QCOMPARE(estimateModel.get(4).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 285);
+	QCOMPARE(estimateModel.get(5).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 548);
+	const QVariantMap normalizedThumbnailOnly =
+		estimateModel.get(4).value(QStringLiteral("preview")).toMap();
+	QCOMPARE(normalizedThumbnailOnly.value(QStringLiteral("thumbnailUrl")).toString(),
+			 QStringLiteral("image://mumble/nike-compact-header?g=1"));
+	QCOMPARE(estimateModel.get(6).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 741);
 	const QVariantMap normalizedSteamLoading =
-		estimateModel.get(4).value(QStringLiteral("preview")).toMap();
+		estimateModel.get(6).value(QStringLiteral("preview")).toMap();
 	QVERIFY(normalizedSteamLoading.value(QStringLiteral("loading")).toBool());
 	QCOMPARE(normalizedSteamLoading.value(QStringLiteral("state")).toString(),
 			 QStringLiteral("loading"));
-	QCOMPARE(estimateModel.get(5).value(
+	QCOMPARE(estimateModel.get(7).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 741);
 	const QVariantMap normalizedSteamReady =
-		estimateModel.get(5).value(QStringLiteral("preview")).toMap();
+		estimateModel.get(7).value(QStringLiteral("preview")).toMap();
 	QCOMPARE(normalizedSteamReady.value(QStringLiteral("state")).toString(),
 			 QStringLiteral("ready"));
 	QCOMPARE(normalizedSteamReady.value(QStringLiteral("metadata")).toMap().value(
 				 QStringLiteral("provider")).toString(),
 			 QStringLiteral("steam"));
+	QCOMPARE(estimateModel.get(8).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 360);
+	QCOMPARE(estimateModel.get(9).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 363);
+	QCOMPARE(estimateModel.get(10).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 148);
+	QCOMPARE(estimateModel.get(11).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 319);
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
