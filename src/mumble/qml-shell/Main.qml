@@ -4171,6 +4171,8 @@ ApplicationWindow {
 					function nearViewportPrefetchCandidateFromItem(item, candidate) {
 						if (!item || item.accessibilityPooled === true || !item.visible)
 							return candidate
+						if (item.nearViewportPrefetchTerminal === true)
+							return candidate
 						const deferred = item.lightweightDeferredPresentation === true
 						// Plain summaries are at most 180 px. Spending the single
 						// adjacent warm slot on one would leave the next media card cold.
@@ -4178,6 +4180,8 @@ ApplicationWindow {
 							&& Number(item.deferredPresentationHeight || 0) > 180
 						const needsWarmRecovery = !deferred
 							&& item.richResourcesRequired === true
+							&& item.previewLoaderIncubationSuppressed !== true
+							&& item.previewLoaderFailed !== true
 							&& (item.richResourcesActive !== true
 								|| item.richLoaderSuspended === true
 								|| item.messageRowReady !== true
@@ -4352,6 +4356,37 @@ ApplicationWindow {
 						return true
 					}
 
+					function invalidateNearViewportPrefetchReady(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0 || key !== nearViewportPrefetchReadyId)
+							return false
+						if (!abandonNearViewportPrefetch(key, true))
+							return false
+						// Hydration invalidation is recoverable for this generation.
+						// Rearm the same viewport so the row can preheat again once
+						// its body/attachment/preview data settles.
+						nearViewportPrefetchViewportSignature = ""
+						return true
+					}
+
+					function retireTerminalNearViewportPrefetch(stableId) {
+						const key = String(stableId || "")
+						const item = timelineDelegateForStableId(key)
+						if (item && item.markNearViewportPrefetchTerminal)
+							item.markNearViewportPrefetchTerminal()
+						if (!abandonNearViewportPrefetch(key, true))
+							return false
+						// This generation cannot ever publish active preview media.
+						// Allow the same viewport to select a distinct eligible neighbor;
+						// the terminal row is excluded by candidate filtering above.
+						nearViewportPrefetchViewportSignature = ""
+						Qt.callLater(function() {
+							if (!timeline.richScrollInProgress)
+								timeline.scheduleNearViewportPrefetch()
+						})
+						return true
+					}
+
 					function completeNearViewportPrefetchIfReady(stableId) {
 						const key = String(stableId || "")
 						if (key.length === 0 || key !== nearViewportPrefetchActiveId)
@@ -4359,9 +4394,20 @@ ApplicationWindow {
 						const item = timelineDelegateForStableId(key)
 						if (!item || item.messageRowReady !== true
 								|| item.previewPresentationReady !== true
-								|| item.contentNeedsHydration === true
-								|| (item.richResourcesRequired === true
-									&& item.richResourcesActive !== true))
+								|| item.contentNeedsHydration === true)
+							return false
+						// A provider watchdog/error fallback is a valid non-blank
+						// presentation, but it is not preheated media. Retire that
+						// candidate instead of publishing a false ready grant that
+						// would expose an inactive card on the next wheel step.
+						if (item.previewLoaderIncubationSuppressed === true
+								|| item.previewLoaderFailed === true
+								|| item.richResourcesRequired !== true) {
+							retireTerminalNearViewportPrefetch(key)
+							return false
+						}
+						if (item.richResourcesActive !== true
+								|| item.richResourceActivationPending === true)
 							return false
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
@@ -5710,6 +5756,10 @@ ApplicationWindow {
 									? outerLoaderIncubationSuppressed
 										|| item.previewLoaderIncubationSuppressed
 									: outerLoaderIncubationSuppressed
+								readonly property bool previewLoaderFailed: item
+									? item.previewLoaderFailed : false
+								readonly property bool nearViewportPrefetchTerminal: item
+									? item.nearViewportPrefetchTerminal : false
 								readonly property bool previewLoaderIncubationWatchdogRunning:
 									outerLoaderIncubationWatchdog.running
 									|| (item ? item.previewLoaderIncubationWatchdogRunning : false)
@@ -5795,6 +5845,8 @@ ApplicationWindow {
 											|| !asyncMessageDelegate.item.currentMessagePresentationReady
 											|| (asyncMessageDelegate.item.richResourcesRequired
 												&& !asyncMessageDelegate.item.richResourcesActive)
+											|| asyncMessageDelegate.item
+												.terminalPreviewFallbackUnavailable
 											|| (asyncMessageDelegate.item.richLoaderSuspended
 												&& (asyncMessageDelegate.item.richResourcesRequired
 													|| asyncMessageDelegate.item.previewNeedsHydration
@@ -5880,6 +5932,10 @@ ApplicationWindow {
 									if (item)
 										item.completeRichLoaderResumeWhenReady()
 								}
+								function markNearViewportPrefetchTerminal() {
+									if (item)
+										item.markNearViewportPrefetchTerminal()
+								}
 								function suspendRichResourcesForScroll() {
 									if (item)
 										item.suspendRichResourcesForScroll()
@@ -5928,6 +5984,14 @@ ApplicationWindow {
 										return
 									const ownedStableId = resumeOwnedStableId
 									outerLoaderIncubationWatchdogStartedAt = 0
+									// The single adjacent prefetch is bounded by the
+									// timeline's 8.2 s deadline and cancelled by scroll.
+									// Let its asynchronous outer delegate finish instead
+									// of converting it to a terminal summary after 192 ms.
+									if (!inVisibleViewport
+											&& timeline.nearViewportPrefetchActiveId
+												=== ownedStableId)
+										return
 									outerLoaderIncubationSuppressed = true
 									resumeRequested = false
 									resumeDuringFinalization = false
@@ -6091,6 +6155,8 @@ ApplicationWindow {
 						// or the delegate leaves the viewport.
 						property bool previewLoaderIncubationSuppressed: false
 						property string previewLoaderIncubationSuppressedIdentity: ""
+						property string previewLoaderTerminalErrorIdentity: ""
+						property string nearViewportPrefetchTerminalIdentity: ""
 						property double previewLoaderIncubationWatchdogStartedAt: 0
 						readonly property bool previewLoaderIncubationWatchdogRunning:
 							previewLoaderIncubationWatchdogTimer.running
@@ -6118,6 +6184,10 @@ ApplicationWindow {
 									|| metadata.revision || "")
 							].join("|")
 						}
+						readonly property bool nearViewportPrefetchTerminal:
+							nearViewportPrefetchTerminalIdentity.length > 0
+							&& nearViewportPrefetchTerminalIdentity
+								=== previewLoaderIncubationIdentity
 						property bool richResourceActivationQueued: false
 						readonly property bool richResourceActivationPending:
 							richResourceActivationQueued
@@ -6142,10 +6212,22 @@ ApplicationWindow {
 									.toLowerCase()
 								: "blank"
 						readonly property bool previewLoaderFailed:
-							messageRowLoader.item && messageRowLoader.item.previewLoader
-							&& messageRowLoader.item.previewLoader.status === Loader.Error
+							(previewLoaderTerminalErrorIdentity.length > 0
+								&& previewLoaderTerminalErrorIdentity
+									=== previewLoaderIncubationIdentity)
+							|| (messageRowLoader.item && messageRowLoader.item.previewLoader
+								&& messageRowLoader.item.previewLoader.status === Loader.Error)
+						readonly property bool previewTerminalUnavailable:
+							previewLoaderFailed || previewLoaderIncubationSuppressed
+						readonly property bool terminalPreviewFallbackUnavailable:
+							hasPreviewContent
+							&& previewTerminalUnavailable
+							&& (!messageRowLoader.item || richLoaderSuspended
+								|| !timeline.prependRichContentActive(
+									stableId, richContentViewportEligible))
 						readonly property bool previewPresentationReady: !hasPreviewContent
 							|| previewNeedsHydration
+							|| previewLoaderFailed
 							|| previewLoaderIncubationSuppressed
 							|| (previewMaterializationAdmitted
 								&& messageRowLoader.item && messageRowLoader.item.previewLoader
@@ -6184,10 +6266,39 @@ ApplicationWindow {
 										=== Loader.Ready
 									&& messageRowLoader.item.previewLoader.item
 									&& previewLoaderSurfaceNonBlank))
-						onRichResourcesRequiredChanged: updateRichResourceActivity()
+						onRichResourcesRequiredChanged: {
+							const terminalId = String(stableId || "")
+							if (!richResourcesRequired
+									&& (timeline.nearViewportPrefetchReadyId === terminalId
+										|| (timeline.nearViewportPrefetchActiveId === terminalId
+											&& messageRowReady && previewPresentationReady
+											&& !contentNeedsHydration)))
+								timeline.retireTerminalNearViewportPrefetch(terminalId)
+							updateRichResourceActivity()
+						}
+						onPreviewLoaderIncubationSuppressedChanged: {
+							if (!previewLoaderIncubationSuppressed)
+								return
+							retireOwnedTerminalPreviewPrefetch()
+						}
+						onPreviewLoaderFailedChanged: {
+							const row = messageRowLoader.item
+							const loader = row ? row.previewLoader : null
+							if (!loader || loader.status !== Loader.Error)
+								return
+							previewLoaderTerminalErrorIdentity =
+								previewLoaderIncubationIdentity
+							retireOwnedTerminalPreviewPrefetch()
+							messagePresentationReadyLatched = true
+							completeRichLoaderResumeWhenReady()
+						}
 						onPreviewLoaderSurfaceStateChanged: {
 							if (previewLoaderSurfaceNonBlank) {
-								resetPreviewLoaderIncubationWatchdog()
+								// A successful settled retry supersedes any terminal
+								// marker from an earlier Error/watchdog generation.
+								resetPreviewLoaderIncubationWatchdog(true)
+								previewLoaderTerminalErrorIdentity = ""
+								nearViewportPrefetchTerminalIdentity = ""
 							} else if (previewMaterializationAdmitted) {
 								armPreviewLoaderIncubationWatchdog()
 								// A loaded provider tree can begin a new asynchronous
@@ -6212,6 +6323,17 @@ ApplicationWindow {
 								previewLoaderIncubationSuppressed = false
 								previewLoaderIncubationSuppressedIdentity = ""
 							}
+						}
+						function markNearViewportPrefetchTerminal() {
+							nearViewportPrefetchTerminalIdentity =
+								previewLoaderIncubationIdentity
+						}
+						function retireOwnedTerminalPreviewPrefetch() {
+							const terminalId = String(stableId || "")
+							if (timeline.nearViewportPrefetchActiveId === terminalId
+									|| timeline.nearViewportPrefetchReadyId
+										=== terminalId)
+								timeline.retireTerminalNearViewportPrefetch(terminalId)
 						}
 						function armPreviewLoaderIncubationWatchdog() {
 							const row = messageRowLoader.item
@@ -6247,6 +6369,15 @@ ApplicationWindow {
 										|| (loader.status === Loader.Ready
 											&& previewLoaderSurfaceNonBlank))))
 								return
+							// The single offscreen prefetch already has its own 8.2 s
+							// deadline and is cancelled synchronously by user scroll.
+							// Do not convert its slower asynchronous provider tree into
+							// the visible path's 192 ms terminal summary fallback.
+							if (!inVisibleViewport
+									&& timeline.nearViewportPrefetchActiveId === stableId) {
+								previewLoaderIncubationWatchdogStartedAt = 0
+								return
+							}
 							previewLoaderIncubationSuppressed = true
 							previewLoaderIncubationSuppressedIdentity =
 								previewLoaderIncubationIdentity
@@ -6324,6 +6455,9 @@ ApplicationWindow {
 						property bool richResourcesActive: false
 						onRichResourcesActiveChanged: {
 							const retainedId = String(stableId || "")
+							if (!richResourcesActive && richResourcesRequired
+									&& timeline.nearViewportPrefetchReadyId === retainedId)
+								timeline.abandonNearViewportPrefetch(retainedId, true)
 							if (!richResourcesActive && timeline.richScrollInProgress
 									&& root.performanceChatScrollRetainedRichIds[
 										retainedId] === true)
@@ -6437,6 +6571,7 @@ ApplicationWindow {
 										&& hasPreviewContent) {
 									previewAdmissionAccepted = !previewNeedsHydration
 										&& !previewLoaderIncubationSuppressed
+										&& !previewLoaderFailed
 										&& richContentViewportEligible
 									if (previewAdmissionAccepted) {
 										previewMaterializationAdmitted = true
@@ -6448,6 +6583,7 @@ ApplicationWindow {
 							requestPreviewHydrationIfNeeded()
 							if (hasPreviewContent && !previewNeedsHydration
 									&& !previewMaterializationAdmitted
+									&& !previewLoaderFailed
 									&& richContentViewportEligible)
 								timeline.scheduleRichContentResume()
 							return (logEntry || messageRowMaterialized)
@@ -6518,6 +6654,8 @@ ApplicationWindow {
 							messageRowMaterialized = false
 							messagePresentationReadyLatched = false
 							resetPreviewLoaderIncubationWatchdog(true)
+							previewLoaderTerminalErrorIdentity = ""
+							nearViewportPrefetchTerminalIdentity = ""
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -6530,6 +6668,8 @@ ApplicationWindow {
 								++root.performanceChatDelegateReusedCount
 							closeMessageActionsForReuse()
 							resetPreviewLoaderIncubationWatchdog(true)
+							previewLoaderTerminalErrorIdentity = ""
+							nearViewportPrefetchTerminalIdentity = ""
 							accessibilityPooled = false
 							richLoaderSuspended = timeline.richScrollInProgress
 								|| timeline.scopePresentationPending
@@ -6560,19 +6700,41 @@ ApplicationWindow {
 							}
 						}
 						onPreviewLoaderIncubationIdentityChanged: {
-							if (!previewLoaderIncubationSuppressed
-									|| previewLoaderIncubationIdentity
-										=== previewLoaderIncubationSuppressedIdentity)
+							const suppressionChanged =
+								previewLoaderIncubationSuppressed
+								&& previewLoaderIncubationIdentity
+									!== previewLoaderIncubationSuppressedIdentity
+							const terminalErrorChanged =
+								previewLoaderTerminalErrorIdentity.length > 0
+								&& previewLoaderIncubationIdentity
+									!== previewLoaderTerminalErrorIdentity
+							const prefetchTerminalChanged =
+								nearViewportPrefetchTerminalIdentity.length > 0
+								&& previewLoaderIncubationIdentity
+									!== nearViewportPrefetchTerminalIdentity
+							if (!suppressionChanged && !terminalErrorChanged
+									&& !prefetchTerminalChanged)
 								return
 							resetPreviewLoaderIncubationWatchdog(true)
+							if (terminalErrorChanged)
+								previewLoaderTerminalErrorIdentity = ""
+							if (prefetchTerminalChanged)
+								nearViewportPrefetchTerminalIdentity = ""
 							previewMaterializationAdmitted = false
 							timeline.cancelRichLoaderResume(stableId)
 							timeline.scheduleRichContentResume()
 						}
 						onContentNeedsHydrationChanged: {
+							const hydrationId = String(stableId || "")
+							if (contentNeedsHydration)
+								timeline.invalidateNearViewportPrefetchReady(
+									hydrationId)
 							requestPreviewHydrationIfNeeded()
-							if (!contentNeedsHydration)
+							if (!contentNeedsHydration) {
+								completeRichLoaderResumeWhenReady()
 								timeline.scheduleRichContentResume()
+								timeline.scheduleNearViewportPrefetch()
+							}
 						}
 						onInHydrationWindowChanged: {
 							updateRichResourceActivity()
@@ -6603,6 +6765,8 @@ ApplicationWindow {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
 							resetPreviewLoaderIncubationWatchdog(true)
+							previewLoaderTerminalErrorIdentity = ""
+							nearViewportPrefetchTerminalIdentity = ""
 							richResourceActivationTimer.stop()
 							richResourceActivationSettleTimer.stop()
 							richResourceActivationQueued = false
@@ -7215,7 +7379,7 @@ ApplicationWindow {
 											border.width: 1
 											clip: true
 											Accessible.role: Accessible.StaticText
-											Accessible.name: (messageDelegate.previewLoaderFailed
+											Accessible.name: (messageDelegate.previewTerminalUnavailable
 												? qsTr("Link preview unavailable for %1")
 												: qsTr("Loading link preview for %1")).arg(
 													String(messageDelegate.preview.host
@@ -7251,7 +7415,7 @@ ApplicationWindow {
 													Label {
 														objectName: "previewHydrationStateLabel"
 														textFormat: Text.PlainText
-														text: messageDelegate.previewLoaderFailed
+														text: messageDelegate.previewTerminalUnavailable
 															? qsTr("Preview unavailable")
 															: qsTr("Loading link preview")
 														color: Theme.textMuted
@@ -7302,7 +7466,7 @@ ApplicationWindow {
 														Label {
 															Layout.fillWidth: true
 															textFormat: Text.PlainText
-															text: (messageDelegate.previewLoaderFailed
+															text: (messageDelegate.previewTerminalUnavailable
 																? qsTr("%1 preview unavailable")
 																: qsTr("Loading %1")).arg(
 																	String(messageDelegate.preview.host
@@ -7321,7 +7485,7 @@ ApplicationWindow {
 															running: messagePreviewHydrationPlaceholderLoader.visible
 																&& messageDelegate.inVisibleViewport
 																&& !timeline.richScrollInProgress
-																&& !messageDelegate.previewLoaderFailed
+																&& !messageDelegate.previewTerminalUnavailable
 															visible: running
 															animated: !root.visualFixtureOverrideActive
 															Accessible.ignored: true
