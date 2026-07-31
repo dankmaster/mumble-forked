@@ -385,6 +385,37 @@ TestCase {
 		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]{0,220}if\s*\(scopePresentationPending\)[\s\S]{0,80}return/.test(mainSource))
 		verify(/id:\s*richScrollRetentionRampTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*true[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\([\s\S]*richScrollRetentionRampStep[\s\S]*stop\(\)/.test(mainSource))
+		const viewportMembershipFunctionsStart =
+			mainSource.indexOf("function updateViewportMemberships()")
+		const viewportMembershipFunctionsEnd =
+			mainSource.indexOf("function nearViewportPrefetchSignature()",
+				viewportMembershipFunctionsStart)
+		verify(viewportMembershipFunctionsStart >= 0
+			&& viewportMembershipFunctionsEnd > viewportMembershipFunctionsStart)
+		const viewportMembershipFunctionsSource = mainSource.slice(
+			viewportMembershipFunctionsStart, viewportMembershipFunctionsEnd)
+		verify(/function\s+updateViewportMemberships\(\)[\s\S]*if\s*\(!contentItem\)\s*return[\s\S]*const children\s*=\s*contentItem\.children[\s\S]*item\.performanceTimelineDelegate\s*===\s*true[\s\S]*item\.updateViewportMembership[\s\S]*item\.updateViewportMembership\(\)[\s\S]*function\s+scheduleViewportMembershipUpdate\(\)[\s\S]*viewportMembershipUpdatePending\s*=\s*true[\s\S]*!viewportMembershipTimer\.running[\s\S]*viewportMembershipTimer\.start\(\)/.test(
+			viewportMembershipFunctionsSource))
+		verify(/id:\s*viewportMembershipTimer[\s\S]*interval:\s*0[\s\S]*repeat:\s*false[\s\S]*onTriggered:\s*\{\s*timeline\.viewportMembershipUpdatePending\s*=\s*false\s*timeline\.updateViewportMemberships\(\)[\s\S]*Qt\.callLater\(function\(\)\s*\{\s*if\s*\(timeline\.viewportMembershipUpdatePending\)[\s\S]*!viewportMembershipTimer\.running[\s\S]*viewportMembershipTimer\.start\(\)\s*return\s*\}\s*timeline\.scheduleNearViewportPrefetch\(\)/.test(
+			mainSource))
+		verify(/"settled":[\s\S]*!viewportMembershipTimer\.running[\s\S]*!timeline\.viewportMembershipUpdatePending/.test(
+			mainSource))
+		verify(/function\s+nearViewportPrefetchAllowed\(\)[\s\S]*viewportMembershipTimer\.running\s*!==\s*true[\s\S]*viewportMembershipUpdatePending\s*!==\s*true/.test(
+			mainSource))
+		verify(/if\s*\(viewportMembershipTimer\.running\s*\|\|\s*(?:timeline\.)?viewportMembershipUpdatePending\)\s*\{\s*scopePresentationFinalizeQuietTimer\.restart\(\)\s*return/.test(
+			mainSource))
+		verify(/onContentYChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
+		verify(/onContentHeightChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
+		verify(/onHeightChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
+		verify(/onOriginYChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
+		verify(/function onCountChanged\(\)\s*\{\s*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
+		verify(/onScopeResetPendingChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
+			mainSource))
 		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*required property int deferredPresentationHeight[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))
 		verify(/id:\s*deferredHistoryRow[\s\S]{0,900}summaryText:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]{0,260}join\("  ·  "\)[\s\S]{0,900}text:\s*deferredHistoryRow\.summaryText/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
@@ -430,7 +461,7 @@ TestCase {
 		const completeResumeStart =
 			mainSource.indexOf("function completeRichLoaderResumeWhenReady()")
 		const completeResumeEnd =
-			mainSource.indexOf("readonly property real hydrationWarmDistance",
+			mainSource.indexOf("readonly property bool inHydrationWindow:",
 				completeResumeStart)
 		verify(completeResumeStart >= 0 && completeResumeEnd > completeResumeStart)
 		const completeResumeSource =
@@ -630,9 +661,10 @@ TestCase {
 		verify(!/function\s+restoreTopAnchor\(\)[\s\S]{0,240}positionViewAtBeginning\(\)/.test(mainSource))
 		verify(!/function\s+restoreTopAnchor\(\)[\s\S]{0,240}forceLayout\(\)/.test(mainSource))
 		verify(/property bool richResourcesActive:\s*false[\s\S]*function\s+updateRichResourceActivity\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richResourcesActive\s*=\s*true/.test(mainSource))
-		verify(/hydrationWarmDistance:\s*Math\.min\(timeline\.baseCacheBuffer,[\s\S]*timeline\.height\s*\*\s*1\.5\)/.test(mainSource))
-		verify(/property bool inHydrationWindow:[\s\S]*asyncMessageDelegate\.y\s*\+\s*asyncMessageDelegate\.viewportProbeHeight[\s\S]*timeline\.contentY\s*-\s*hydrationWarmDistance/.test(mainSource))
-		verify(/property bool inVisibleViewport:\s*asyncMessageDelegate\.inVisibleViewport/.test(mainSource))
+		verify(/readonly property bool inHydrationWindow:\s*asyncMessageDelegate\.inHydrationWindow/.test(
+			mainSource))
+		verify(/readonly property bool inVisibleViewport:\s*asyncMessageDelegate\.inVisibleViewport/.test(
+			mainSource))
 		verify(!/property bool inVisibleViewport:[\s\S]{0,120}\by\s*\+\s*height\s*>=\s*timeline\.contentY/.test(mainSource.slice(
 			mainSource.indexOf("id: messageDelegate"), mainSource.indexOf("id: messageRowLoader"))))
 		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*richResourceActivationTimer\.stop\(\)[\s\S]*richResourceActivationSettleTimer\.stop\(\)[\s\S]*richResourcesActive\s*=\s*false/.test(mainSource))
@@ -814,7 +846,7 @@ TestCase {
 		const asyncDelegateSource = mainSource.slice(
 			mainSource.indexOf("id: asyncMessageDelegate"),
 			mainSource.indexOf("id: messageDelegate"))
-		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*readonly property bool inVisibleViewport:\s*!accessibilityPooled\s*&&\s*y\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*&&\s*y\s*\+\s*viewportProbeHeight\s*>=\s*timeline\.contentY/.test(
+		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*property bool inVisibleViewport:\s*false[\s\S]*property bool inHydrationWindow:\s*false/.test(
 			asyncDelegateSource))
 		const viewportProbeSeedMatch =
 			/property real viewportProbeHeight:[\s\S]*?\n\s*function viewportProbeBaseHeight\(\)/.exec(
@@ -833,33 +865,67 @@ TestCase {
 			asyncDelegateSource.slice(viewportProbeUpdateStart, viewportProbeUpdateEnd)
 		verify(/viewportProbeStableId\s*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*Math\.max\([\s\S]*item\.lightweightMessageRowHeight[\s\S]*item\.implicitHeight[\s\S]*Number\(height\s*\|\|\s*0\)[\s\S]*settledHeight\s*>\s*viewportProbeHeight[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
 			viewportProbeUpdateSource))
+		const viewportMembershipUpdateStart =
+			asyncDelegateSource.indexOf("function updateViewportMembership()")
+		const viewportMembershipUpdateEnd =
+			asyncDelegateSource.indexOf("function scheduleViewportProbeHeightUpdate()",
+				viewportMembershipUpdateStart)
+		verify(viewportMembershipUpdateStart >= 0
+			&& viewportMembershipUpdateEnd > viewportMembershipUpdateStart)
+		const viewportMembershipUpdateSource = asyncDelegateSource.slice(
+			viewportMembershipUpdateStart, viewportMembershipUpdateEnd)
+		verify(/const rowTop\s*=\s*Number\(y\s*\|\|\s*0\)[\s\S]*const extent\s*=\s*Math\.max\(0,[\s\S]*Number\(viewportProbeHeight\s*\|\|\s*0\)[\s\S]*const viewportTop\s*=\s*Number\(timeline\.contentY\s*\|\|\s*0\)[\s\S]*const viewportBottom\s*=\s*viewportTop[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)[\s\S]*const warmDistance\s*=\s*Math\.min\([\s\S]*timeline\.baseCacheBuffer[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)\s*\*\s*1\.5/.test(
+			viewportMembershipUpdateSource))
+		verify(/const nextVisible\s*=\s*!accessibilityPooled[\s\S]*rowTop\s*<=\s*viewportBottom[\s\S]*rowTop\s*\+\s*extent\s*>=\s*viewportTop[\s\S]*const nextHydration\s*=\s*!accessibilityPooled[\s\S]*rowTop\s*<=\s*viewportBottom\s*\+\s*warmDistance[\s\S]*rowTop\s*\+\s*extent\s*>=\s*viewportTop\s*-\s*warmDistance[\s\S]*const visibleChanged\s*=\s*inVisibleViewport\s*!==\s*nextVisible[\s\S]*const hydrationChanged\s*=\s*inHydrationWindow\s*!==\s*nextHydration[\s\S]*if\s*\(!visibleChanged\s*&&\s*!hydrationChanged\)\s*return[\s\S]*viewportMembershipUpdating\s*=\s*true\s*inHydrationWindow\s*=\s*nextHydration\s*inVisibleViewport\s*=\s*nextVisible\s*viewportMembershipUpdating\s*=\s*false\s*reconcileViewportMembership\(\)\s*if\s*\(item\s*&&\s*item\.reconcileViewportMembership\)\s*item\.reconcileViewportMembership\(\)/.test(
+			viewportMembershipUpdateSource))
+		verify(/property bool viewportMembershipUpdating:\s*false/.test(
+			asyncDelegateSource))
 		verify(/id:\s*viewportProbeUpdateTimer[\s\S]*interval:\s*0[\s\S]*repeat:\s*false[\s\S]*updateViewportProbeHeight\(\)/.test(
 			asyncDelegateSource))
 		verify(/onRichGeometrySettlingChanged:[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*height:\s*Math\.max[\s\S]*onHeightChanged:[\s\S]*item\.richResourcesRequired[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
 			asyncDelegateSource))
 		verify(/function scheduleViewportProbeReset\(\)[\s\S]*viewportProbeStableId[\s\S]*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
 			asyncDelegateSource))
-		verify(/ListView\.onPooled:[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*accessibilityPooled\s*=\s*false[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*onStableIdChanged:[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*Component\.onCompleted:\s*scheduleViewportProbeReset\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+		verify(/onViewportProbeHeightChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*onYChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
 			asyncDelegateSource))
-		verify(!/readonly property bool inVisibleViewport:[\s\S]{0,120}\by\s*\+\s*height\s*>=\s*timeline\.contentY/.test(
+		verify(/ListView\.onPooled:\s*\{\s*accessibilityPooled\s*=\s*true\s*updateViewportMembership\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:\s*\{[\s\S]*viewportProbeUpdateTimer\.stop\(\)\s*resetViewportProbeHeight\(\)\s*if\s*\(item\)\s*item\.handleListViewReused\(\)\s*accessibilityPooled\s*=\s*false\s*updateViewportMembership\(\)\s*scheduleViewportProbeHeightUpdate\(\)/.test(
+			asyncDelegateSource))
+		verify(/onStableIdChanged:\s*\{\s*scheduleViewportProbeReset\(\)\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*Component\.onCompleted:\s*\{\s*scheduleViewportProbeReset\(\)\s*updateViewportMembership\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+			asyncDelegateSource))
+		verify(!/property bool inVisibleViewport:\s*!accessibilityPooled/.test(
+			asyncDelegateSource))
+		verify(!/property bool inHydrationWindow:\s*!accessibilityPooled/.test(
 			asyncDelegateSource))
 		const hydrationWindowStart =
 			mainSource.indexOf("readonly property bool inHydrationWindow:")
 		const hydrationWindowEnd =
-			mainSource.indexOf("// ChatMessageFrame", hydrationWindowStart)
+			mainSource.indexOf("readonly property bool richContentViewportEligible:",
+				hydrationWindowStart)
 		verify(hydrationWindowStart >= 0 && hydrationWindowEnd > hydrationWindowStart)
 		const hydrationWindowSource =
 			mainSource.slice(hydrationWindowStart, hydrationWindowEnd)
-		verify(/asyncMessageDelegate\.y[\s\S]*asyncMessageDelegate\.viewportProbeHeight[\s\S]*timeline\.contentY\s*-\s*hydrationWarmDistance/.test(
+		verify(/readonly property bool inHydrationWindow:\s*asyncMessageDelegate\.inHydrationWindow[\s\S]*readonly property bool inVisibleViewport:\s*asyncMessageDelegate\.inVisibleViewport/.test(
 			hydrationWindowSource))
-		verify(!hydrationWindowSource.includes("asyncMessageDelegate.height"))
+		verify(!/asyncMessageDelegate\.(?:y|height|viewportProbeHeight)|timeline\.contentY/.test(
+			hydrationWindowSource))
 		verify(/visible:\s*asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
 			asyncDelegateSource))
 		verify(/readonly property bool previewLoaderFailed:\s*item\s*\?\s*item\.previewLoaderFailed\s*:\s*false\s*readonly property bool nearViewportPrefetchTerminal:\s*item\s*\?\s*item\.nearViewportPrefetchTerminal\s*:\s*false/.test(
 			asyncDelegateSource))
 		verify(/function markNearViewportPrefetchTerminal\(\)\s*\{\s*if\s*\(item\)\s*item\.markNearViewportPrefetchTerminal\(\)\s*\}/.test(
 			asyncDelegateSource))
-		verify(/readonly property bool inVisibleViewport:[\s\S]*readonly property bool richContentViewportEligible:[\s\S]*nearViewportWarmId[\s\S]*onRichContentViewportEligibleChanged:[\s\S]*resetOuterLoaderIncubationWatchdog\(true\)[\s\S]*cancelRichLoaderResume\(ownedStableId\)/.test(asyncDelegateSource))
+		verify(/property bool inVisibleViewport:\s*false[\s\S]*readonly property bool richContentViewportEligible:[\s\S]*nearViewportWarmId[\s\S]*function reconcileViewportMembership\(\)[\s\S]*richContentViewportEligible\s*\|\|\s*item[\s\S]*resetOuterLoaderIncubationWatchdog\(true\)[\s\S]*cancelRichLoaderResume\(ownedStableId\)[\s\S]*onRichContentViewportEligibleChanged:\s*\{\s*if\s*\(viewportMembershipUpdating\)\s*return\s*reconcileViewportMembership\(\)/.test(
+			asyncDelegateSource))
+		const innerViewportReconcileStart =
+			mainSource.indexOf("function reconcileViewportMembership()", innerDelegateStart)
+		const innerViewportReconcileEnd =
+			mainSource.indexOf("onStableIdChanged:", innerViewportReconcileStart)
+		verify(innerViewportReconcileStart > innerDelegateStart
+			&& innerViewportReconcileEnd > innerViewportReconcileStart)
+		const innerViewportReconcileSource = mainSource.slice(
+			innerViewportReconcileStart, innerViewportReconcileEnd)
+		verify(/function reconcileViewportMembership\(\)\s*\{\s*updateRichResourceActivity\(\)\s*requestPreviewHydrationIfNeeded\(\)[\s\S]*!richContentViewportEligible[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*previewMaterializationAdmitted\s*=\s*false[\s\S]*suspendRichResourcesForScroll\(\)[\s\S]*else\s*\{\s*timeline\.scheduleRichContentResume\(\)[\s\S]*onInHydrationWindowChanged:\s*\{\s*if\s*\(!asyncMessageDelegate\.viewportMembershipUpdating\)\s*reconcileViewportMembership\(\)[\s\S]*onRichContentViewportEligibleChanged:\s*\{\s*if\s*\(!asyncMessageDelegate\.viewportMembershipUpdating\)\s*reconcileViewportMembership\(\)/.test(
+			innerViewportReconcileSource))
 		verify(/active:\s*!deferredPresentation[\s\S]*onActiveChanged:\s*\{[\s\S]*!active[\s\S]*resumeRequested\s*=\s*false[\s\S]*resumeAdmitsPreview\s*=\s*false[\s\S]*cancelRichLoaderResume\(ownedStableId\)/.test(asyncDelegateSource))
 		verify(/onStableIdChanged:\s*\{[\s\S]*cancelRichLoaderResume\(ownedStableId\)[\s\S]*resumeRequested\s*=\s*false[\s\S]*resumeDuringFinalization\s*=\s*false[\s\S]*resumeAdmitsPreview\s*=\s*false[\s\S]*resumeOwnedStableId\s*=\s*""/.test(asyncDelegateSource))
 		verify(/"outerReady":\s*item\.outerLoaderReady\s*===\s*true[\s\S]*item\.previewLoaderStatus[\s\S]*item\.previewLoaderIncubationSuppressed/.test(mainSource))

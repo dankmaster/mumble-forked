@@ -1928,6 +1928,8 @@ ApplicationWindow {
 			"settled": !bottomFollowTimer.running && !timeline.scopeResetPending
 				&& !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 				&& !timeline.restoringBottom && !timeline.prependAnchorActive
+				&& !viewportMembershipTimer.running
+				&& !timeline.viewportMembershipUpdatePending
 				&& !performanceChatScrollRunning,
 			"scrollable": timeline.count === 96 && maximumY - minimumY >= 8 }
 	}
@@ -2060,6 +2062,10 @@ ApplicationWindow {
 				"deferredMaterializationRunning": deferredMaterializationTimer.running,
 				"coldMaterializationDelayRunning":
 					coldScopeMaterializationDelayTimer.running,
+				"viewportMembershipUpdateRunning":
+					viewportMembershipTimer.running,
+				"viewportMembershipUpdatePending":
+					timeline.viewportMembershipUpdatePending,
 				"presentationFinalizeQuietRunning":
 					scopePresentationFinalizeQuietTimer.running,
 				"presentationFinalizeDeadlineRunning":
@@ -2089,6 +2095,8 @@ ApplicationWindow {
 				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
+					&& !viewportMembershipTimer.running
+					&& !timeline.viewportMembershipUpdatePending
 					&& !chatModel.appendPending && !chatModel.prependPending
 					&& (chatModel.count === 0
 						|| (visiblePresentation.visibleCount > 0
@@ -3446,6 +3454,8 @@ ApplicationWindow {
 					property int pendingTailMessageCount: 0
 					property bool restoringBottom: false
 					property bool scopeResetPending: false
+					property bool viewportMembershipUpdatePending: false
+					onScopeResetPendingChanged: scheduleViewportMembershipUpdate()
 					// Rich text, preview cards, and attachments refine delegate heights after
 					// a scope arrives. Hide the retiring scope only until the replacement
 					// snapshot reaches finalization, then expose its real-data summaries while
@@ -3507,6 +3517,8 @@ ApplicationWindow {
 
 					function beginScopeChange() {
 						richScrollRetentionRampTimer.stop()
+						viewportMembershipTimer.stop()
+						viewportMembershipUpdatePending = false
 						nearViewportPrefetchTimer.stop()
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
@@ -3568,6 +3580,7 @@ ApplicationWindow {
 						pendingTailMessageCount = 0
 						stickToBottom = true
 						scopeResetPending = true
+						scheduleViewportMembershipUpdate()
 						scopePresentationQuietTimer.start()
 						scopePresentationDeadlineTimer.start()
 						scheduleScopePresentationFastPath()
@@ -3762,6 +3775,11 @@ ApplicationWindow {
 							restoringBottom = true
 							containTailMessageWhenPossible()
 							restoringBottom = false
+							if (viewportMembershipTimer.running
+									|| viewportMembershipUpdatePending) {
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
 							queueVisibleDeferredMaterialization(true)
 							// Source materialization activates the asynchronous outer
 							// delegate, but its message tree still enters as a geometry
@@ -3793,6 +3811,11 @@ ApplicationWindow {
 							timeline.restoringBottom = true
 							timeline.containTailMessageWhenPossible()
 							timeline.restoringBottom = false
+							if (viewportMembershipTimer.running
+									|| timeline.viewportMembershipUpdatePending) {
+								scopePresentationFinalizeQuietTimer.restart()
+								return
+							}
 							if (!forcedByDeadline) {
 								timeline.forceLayout()
 								const settledDiagnostics =
@@ -4204,6 +4227,24 @@ ApplicationWindow {
 						return null
 					}
 
+					function updateViewportMemberships() {
+						if (!contentItem)
+							return
+						const children = contentItem.children
+						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+							const item = children[childIndex]
+							if (item && item.performanceTimelineDelegate === true
+									&& item.updateViewportMembership)
+								item.updateViewportMembership()
+						}
+					}
+
+					function scheduleViewportMembershipUpdate() {
+						viewportMembershipUpdatePending = true
+						if (!viewportMembershipTimer.running)
+							viewportMembershipTimer.start()
+					}
+
 					function nearViewportPrefetchSignature() {
 						const first = firstVisibleMessageDelegate()
 						if (!first)
@@ -4283,6 +4324,8 @@ ApplicationWindow {
 							&& richContentResumeTimer.running !== true
 							&& richLoaderResumeTimer.running !== true
 							&& deferredMaterializationTimer.running !== true
+							&& viewportMembershipTimer.running !== true
+							&& viewportMembershipUpdatePending !== true
 							&& richLoaderResumeActiveId.length === 0
 							&& deferredMaterializationActiveId.length === 0
 							&& richLoaderResumeQueue.length === 0
@@ -5071,6 +5114,7 @@ ApplicationWindow {
 					}
 
 					onContentYChanged: {
+						scheduleViewportMembershipUpdate()
 						// A native wheel event can arrive while a geometry-driven
 						// movement epoch is already active, in which case ListView does
 						// not emit a second movementStarted. A real content delta inside
@@ -5080,7 +5124,10 @@ ApplicationWindow {
 								&& Math.abs(contentY - explicitWheelInputStartY) > 0.01)
 							takeExplicitNavigationOwnership("native-wheel")
 					}
+					onOriginYChanged: scheduleViewportMembershipUpdate()
+					onHeightChanged: scheduleViewportMembershipUpdate()
 					onContentHeightChanged: {
+						scheduleViewportMembershipUpdate()
 						if (scopePresentationPending) {
 							noteScopePresentationMutation()
 							// Keep the hidden cold transaction anchored to its real tail
@@ -5265,6 +5312,28 @@ ApplicationWindow {
 							// settled viewport explicitly to admit any request that crossed
 							// the visibility boundary while scrolling.
 							timeline.queueVisiblePreviewHydration()
+						}
+					}
+
+					Timer {
+						id: viewportMembershipTimer
+						interval: 0
+						repeat: false
+						onTriggered: {
+							timeline.viewportMembershipUpdatePending = false
+							timeline.updateViewportMemberships()
+							// A membership transition can retire the previous offscreen
+							// resource while this single-shot still reports running. Flush
+							// any geometry dirtied by the scan before readiness or prefetch
+							// can observe the new snapshot.
+							Qt.callLater(function() {
+								if (timeline.viewportMembershipUpdatePending) {
+									if (!viewportMembershipTimer.running)
+										viewportMembershipTimer.start()
+									return
+								}
+								timeline.scheduleNearViewportPrefetch()
+							})
 						}
 					}
 
@@ -5579,6 +5648,7 @@ ApplicationWindow {
 							timeline.pendingTailInsertCount = 0
 						}
 						function onModelReset() {
+							timeline.scheduleViewportMembershipUpdate()
 							timeline.releasePrependAnchor()
 							timeline.clearDeferredPrependRichRows()
 							timeline.pendingTailInsertCount = 0
@@ -5590,6 +5660,7 @@ ApplicationWindow {
 								timeline.requestBottomFollow()
 						}
 						function onCountChanged() {
+							timeline.scheduleViewportMembershipUpdate()
 							if (timeline.scopePresentationPending) {
 								timeline.noteScopePresentationMutation()
 								timeline.scheduleScopePresentationFastPath()
@@ -5820,6 +5891,7 @@ ApplicationWindow {
 								property real viewportProbeHeight: Math.max(
 									timeline.deferredMessageRowHeight,
 									deferredPresentationHeight)
+								property bool viewportMembershipUpdating: false
 								function viewportProbeBaseHeight() {
 									return Math.max(timeline.deferredMessageRowHeight,
 										Number(deferredPresentationHeight || 0))
@@ -5841,6 +5913,39 @@ ApplicationWindow {
 										Number(height || 0))
 									if (settledHeight > viewportProbeHeight)
 										viewportProbeHeight = settledHeight
+								}
+								function updateViewportMembership() {
+									const rowTop = Number(y || 0)
+									const extent = Math.max(0,
+										Number(viewportProbeHeight || 0))
+									const viewportTop = Number(timeline.contentY || 0)
+									const viewportBottom = viewportTop
+										+ Number(timeline.height || 0)
+									const warmDistance = Math.min(
+										timeline.baseCacheBuffer,
+										Number(timeline.height || 0) * 1.5)
+									const nextVisible = !accessibilityPooled
+										&& rowTop <= viewportBottom
+										&& rowTop + extent >= viewportTop
+									const nextHydration = !accessibilityPooled
+										&& rowTop <= viewportBottom + warmDistance
+										&& rowTop + extent >= viewportTop - warmDistance
+									const visibleChanged =
+										inVisibleViewport !== nextVisible
+									const hydrationChanged =
+										inHydrationWindow !== nextHydration
+									if (!visibleChanged && !hydrationChanged)
+										return
+									// Publish the pair from one geometry snapshot. Suppress
+									// nested provider handlers until neither value can observe
+									// the other value from the previous viewport.
+									viewportMembershipUpdating = true
+									inHydrationWindow = nextHydration
+									inVisibleViewport = nextVisible
+									viewportMembershipUpdating = false
+									reconcileViewportMembership()
+									if (item && item.reconcileViewportMembership)
+										item.reconcileViewportMembership()
 								}
 								function scheduleViewportProbeHeightUpdate() {
 									viewportProbeUpdateTimer.restart()
@@ -5865,6 +5970,9 @@ ApplicationWindow {
 											viewportProbeHeight,
 											viewportProbeBaseHeight())
 								}
+								onViewportProbeHeightChanged:
+									timeline.scheduleViewportMembershipUpdate()
+								onYChanged: timeline.scheduleViewportMembershipUpdate()
 								readonly property bool contentNeedsHydration: item
 									? item.contentNeedsHydration : true
 								readonly property bool previewNeedsHydration: item
@@ -5908,12 +6016,11 @@ ApplicationWindow {
 									? item.previewPresentationReady : false
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
-								readonly property bool inVisibleViewport: !accessibilityPooled
-									&& y <= timeline.contentY + timeline.height
-									&& y + viewportProbeHeight >= timeline.contentY
+								property bool inVisibleViewport: false
+								property bool inHydrationWindow: false
 								readonly property bool richContentViewportEligible:
 									inVisibleViewport || stableId === timeline.nearViewportWarmId
-								onRichContentViewportEligibleChanged: {
+								function reconcileViewportMembership() {
 									if (richContentViewportEligible || item)
 										return
 									const ownedStableId = resumeOwnedStableId
@@ -5924,6 +6031,11 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 									if (ownedStableId.length > 0)
 										timeline.cancelRichLoaderResume(ownedStableId)
+								}
+								onRichContentViewportEligibleChanged: {
+									if (viewportMembershipUpdating)
+										return
+									reconcileViewportMembership()
 								}
 								width: timeline.width
 								readonly property bool richGeometrySettling: item
@@ -6155,6 +6267,8 @@ ApplicationWindow {
 								}
 
 								ListView.onPooled: {
+									accessibilityPooled = true
+									updateViewportMembership()
 									viewportProbeUpdateTimer.stop()
 									resetOuterLoaderIncubationWatchdog(true)
 									const retiredStableId = resumeOwnedStableId.length > 0
@@ -6162,7 +6276,6 @@ ApplicationWindow {
 									if (!timeline.abandonNearViewportPrefetch(
 											retiredStableId, true))
 										timeline.cancelRichLoaderResume(retiredStableId)
-									accessibilityPooled = true
 									resumeRequested = false
 									resumeDuringFinalization = false
 									resumeAdmitsPreview = false
@@ -6174,13 +6287,15 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 									viewportProbeUpdateTimer.stop()
 									resetViewportProbeHeight()
-									accessibilityPooled = false
-									scheduleViewportProbeHeightUpdate()
 									if (item)
 										item.handleListViewReused()
+									accessibilityPooled = false
+									updateViewportMembership()
+									scheduleViewportProbeHeightUpdate()
 								}
 								onStableIdChanged: {
 									scheduleViewportProbeReset()
+									timeline.scheduleViewportMembershipUpdate()
 									const ownedStableId = resumeOwnedStableId
 									if (ownedStableId.length > 0
 											&& ownedStableId !== stableId
@@ -6193,7 +6308,10 @@ ApplicationWindow {
 									resumeOwnedStableId = ""
 									resetOuterLoaderIncubationWatchdog(true)
 								}
-								Component.onCompleted: scheduleViewportProbeReset()
+								Component.onCompleted: {
+									scheduleViewportProbeReset()
+									updateViewportMembership()
+								}
 								Component.onDestruction: {
 									if (typeof timeline !== "undefined" && timeline) {
 										const retiredStableId = resumeOwnedStableId.length > 0
@@ -6590,14 +6708,8 @@ ApplicationWindow {
 									timeline.completeRichLoaderResume(rowId)
 							})
 						}
-						readonly property real hydrationWarmDistance: Math.min(timeline.baseCacheBuffer,
-							timeline.height * 1.5)
-						readonly property bool inHydrationWindow: !accessibilityPooled
-							&& asyncMessageDelegate.y <= timeline.contentY + timeline.height
-								+ hydrationWarmDistance
-							&& asyncMessageDelegate.y
-								+ asyncMessageDelegate.viewportProbeHeight
-								>= timeline.contentY - hydrationWarmDistance
+						readonly property bool inHydrationWindow:
+							asyncMessageDelegate.inHydrationWindow
 						// ChatMessageFrame is nested inside the asynchronous delegate
 						// Loader, so its own y is always zero. The ListView-space outer
 						// delegate owns viewport membership.
@@ -6650,6 +6762,25 @@ ApplicationWindow {
 									scheduleRichResourceActivation()
 							} else if (!timeline.richScrollInProgress) {
 								richResourceReleaseTimer.restart()
+							}
+						}
+						function reconcileViewportMembership() {
+							updateRichResourceActivity()
+							requestPreviewHydrationIfNeeded()
+							if (!richContentViewportEligible) {
+								timeline.cancelRichLoaderResume(stableId)
+								// Cancelling the global single-flight token must also
+								// retire the provider tree it admitted. Otherwise an
+								// offscreen asynchronous Loader can keep incubating
+								// while the next visible preview owns the token.
+								previewMaterializationAdmitted = false
+								resetPreviewLoaderIncubationWatchdog(true)
+								// Scroll-start preserves already-painted visible media. Once
+								// the row actually leaves the viewport it is safe to release
+								// the poster/player even when it did not own the global token.
+								suspendRichResourcesForScroll()
+							} else {
+								timeline.scheduleRichContentResume()
 							}
 						}
 						Timer {
@@ -6897,29 +7028,15 @@ ApplicationWindow {
 							}
 						}
 						onInHydrationWindowChanged: {
-							updateRichResourceActivity()
-							requestPreviewHydrationIfNeeded()
+							if (!asyncMessageDelegate.viewportMembershipUpdating)
+								reconcileViewportMembership()
 						}
 						// Visible rows and the single named 128 px prefetch row share the
 						// serial admission path. Every other cache delegate remains a
 						// geometry-only shell.
 						onRichContentViewportEligibleChanged: {
-							requestPreviewHydrationIfNeeded()
-							if (!richContentViewportEligible) {
-								timeline.cancelRichLoaderResume(stableId)
-								// Cancelling the global single-flight token must also
-								// retire the provider tree it admitted. Otherwise an
-								// offscreen asynchronous Loader can keep incubating
-								// while the next visible preview owns the token.
-								previewMaterializationAdmitted = false
-								resetPreviewLoaderIncubationWatchdog(true)
-								// Scroll-start preserves already-painted visible media. Once
-								// the row actually leaves the viewport it is safe to release
-								// the poster/player even when it did not own the global token.
-								suspendRichResourcesForScroll()
-							} else {
-								timeline.scheduleRichContentResume()
-							}
+							if (!asyncMessageDelegate.viewportMembershipUpdating)
+								reconcileViewportMembership()
 						}
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
