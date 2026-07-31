@@ -4664,8 +4664,16 @@ ApplicationWindow {
 						root.closeQuickReactions()
 						richContentResumeTimer.stop()
 						releaseViewportAnchor()
-						if (scopePresentationObservationActive && stickToBottom
-								&& !dragging && !flicking) {
+						// QQuickListView also emits movementStarted when an asynchronous
+						// delegate changes the estimated content geometry. That is not user
+						// navigation and must not release tail-follow merely because the
+						// short cold-presentation observation window has elapsed. Every
+						// explicit input path is observable here (drag/flick, smooth wheel,
+						// the performance scroll runner), while scrollbar presses clear
+						// stickToBottom before this signal arrives.
+						if (stickToBottom && !dragging && !flicking
+								&& !timelineScrollHandler.scrolling
+								&& !root.performanceChatScrollRunning) {
 							requestBottomFollow()
 							return
 						}
@@ -4691,7 +4699,13 @@ ApplicationWindow {
 					}
 					onMovementEnded: {
 						if (!restoringBottom) {
-							stickToBottom = isNearBottom()
+							// An automatic ListView geometry movement may finish before the
+							// coalesced bottom-follow timer gets its next frame. Preserve an
+							// existing tail intent here; explicit input paths clear it before
+							// movement starts and still recompute whether the gesture ended
+							// back inside the tail threshold.
+							if (!stickToBottom)
+								stickToBottom = isNearBottom()
 							requestBottomFollow()
 							if (!stickToBottom)
 								captureViewportAnchor()
