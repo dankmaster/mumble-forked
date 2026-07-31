@@ -2671,6 +2671,33 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(navigateBody.contains(QStringLiteral("controllerAlreadyMatchesTarget")));
 	QVERIFY(navigateBody.contains(QStringLiteral("updateChatBar(forceReload, false)")));
 	QVERIFY(navigateBody.contains(QStringLiteral("publishPersistentChatSnapshot()")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("if (controllerAlreadyMatchesTarget && !forceReload)")));
+	QVERIFY(!navigateBody.contains(
+		QStringLiteral("modelWasPrecleared && controllerAlreadyMatchesTarget")));
+	const qsizetype controllerMatchIndex =
+		navigateBody.indexOf(QStringLiteral("const bool controllerAlreadyMatchesTarget"));
+	const qsizetype navigationClearIndex =
+		navigateBody.indexOf(
+			QStringLiteral("m_deferredPersistentChatNavigationGeneration = 0"),
+			controllerMatchIndex);
+	const qsizetype finalUpdateIndex =
+		navigateBody.indexOf(
+			QStringLiteral("updateChatBar(forceReload, false)"),
+			navigationClearIndex);
+	const qsizetype cacheReplayConditionIndex =
+		navigateBody.indexOf(
+			QStringLiteral("if (controllerAlreadyMatchesTarget && !forceReload)"),
+			finalUpdateIndex);
+	const qsizetype cacheReplayIndex =
+		navigateBody.indexOf(
+			QStringLiteral("publishPersistentChatSnapshot()"),
+			cacheReplayConditionIndex);
+	QVERIFY(controllerMatchIndex >= 0);
+	QVERIFY(navigationClearIndex > controllerMatchIndex);
+	QVERIFY(finalUpdateIndex > navigationClearIndex);
+	QVERIFY(cacheReplayConditionIndex > finalUpdateIndex);
+	QVERIFY(cacheReplayIndex > cacheReplayConditionIndex);
 	QVERIFY(!navigateBody.contains(QStringLiteral("forceReload || modelWasPrecleared")));
 	QVERIFY(!navigateBody.contains(
 		QStringLiteral("m_deferredModernShellPreviewUpdateKeys.clear()")));

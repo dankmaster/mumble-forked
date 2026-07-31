@@ -31956,12 +31956,14 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 							.arg(scopeID)
 							.arg(modelWasPrecleared ? 1 : 0));
 					updateChatBar(forceReload, false);
-					// Rapid A -> B -> A can preclear A while its controller
-					// snapshot is still authoritative. Re-publish that cached
-					// snapshot locally; do not turn an ordinary room switch into
-					// a network refresh.
-					if (modelWasPrecleared && controllerAlreadyMatchesTarget
-						&& !forceReload) {
+					// Any activeSnapshotChanged signal delivered during the
+					// selection-frame barrier was deliberately suppressed. The
+					// controller may therefore already contain the complete
+					// network reply even when updateChatBar has nothing left to
+					// reload. Re-publish its authoritative cache after the
+					// barrier; this also restores rapid A -> B -> A preclears
+					// without turning either path into a network refresh.
+					if (controllerAlreadyMatchesTarget && !forceReload) {
 						publishPersistentChatSnapshot();
 					}
 					scheduleQmlRoomStateUpdate();
