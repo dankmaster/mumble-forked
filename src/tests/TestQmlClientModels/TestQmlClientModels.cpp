@@ -2354,7 +2354,15 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellChatMessages.insert")));
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
-	QVERIFY(source.contains(QStringLiteral("QTimer::singleShot(16, this")));
+	QVERIFY(source.contains(QStringLiteral("constexpr int ModernShellPreviewUpdateDrainMs = 50")));
+	const qsizetype previewDrainScheduleStart =
+		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"));
+	QVERIFY(previewDrainScheduleStart >= 0);
+	QVERIFY(drainStart > previewDrainScheduleStart);
+	const QString previewDrainScheduleBody =
+		source.mid(previewDrainScheduleStart, drainStart - previewDrainScheduleStart);
+	QVERIFY(previewDrainScheduleBody.contains(
+		QStringLiteral("QTimer::singleShot(ModernShellPreviewUpdateDrainMs, this")));
 	const qsizetype navigateStart =
 		source.indexOf(QStringLiteral("bool MainWindow::navigateToPersistentChatScope"));
 	const qsizetype navigateEnd =

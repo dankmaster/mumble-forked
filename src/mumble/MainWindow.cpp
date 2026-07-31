@@ -289,6 +289,7 @@ std::optional< ModernAutoConnectTarget > modernAutoConnectTargetForLastServer(
 constexpr int QmlStateActiveCoalesceMs   = 100;
 constexpr int QmlStateInactiveCoalesceMs = 350;
 constexpr int QmlRoomStateBatchMs            = 16;
+constexpr int ModernShellPreviewUpdateDrainMs = 50;
 constexpr std::size_t ModernDirectMessageMaxMessages = 200;
 constexpr int ModernConnectServerPingIntervalMs     = 75;
 constexpr int NativeWindowMoveResizeWatchdogMs      = 4000;
@@ -25434,7 +25435,10 @@ void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 	}
 
 	m_deferredModernShellPreviewUpdateDrainScheduled = true;
-	QTimer::singleShot(16, this, [this]() {
+	// A completed provider DTO can trigger variable-height QML card polish.
+	// Leave one heartbeat/render window between final writes so several
+	// providers completing together cannot monopolize the GUI event loop.
+	QTimer::singleShot(ModernShellPreviewUpdateDrainMs, this, [this]() {
 		m_deferredModernShellPreviewUpdateDrainScheduled = false;
 		drainDeferredModernShellPreviewUpdates();
 	});
