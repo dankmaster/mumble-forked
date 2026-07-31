@@ -3839,7 +3839,7 @@ ChatTimelinePresentationProxyModel *ChatTimelineModel::deferredPresentationModel
 	return &m_deferredPresentationModel;
 }
 
-void ChatTimelineModel::cancelQueuedAppend() {
+void ChatTimelineModel::cancelQueuedAppend(bool notify) {
 	++m_appendGeneration;
 	m_pendingAppendMessages.clear();
 	m_appendDrainScheduled = false;
@@ -3849,7 +3849,7 @@ void ChatTimelineModel::cancelQueuedAppend() {
 		return;
 	}
 	m_appendPending = false;
-	emit appendPendingChanged();
+	if (notify) emit appendPendingChanged();
 }
 
 void ChatTimelineModel::scheduleQueuedAppendDrain() {
@@ -3987,7 +3987,8 @@ void ChatTimelineModel::drainQueuedPrepend() {
 
 void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	if (!acceptsFrontendStateMutation(this)) return;
-	cancelQueuedAppend();
+	const bool appendWasPending = m_appendPending;
+	cancelQueuedAppend(false);
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
@@ -4044,6 +4045,10 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	}
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	synchronizeRows(rows);
+	// A queued cold tail can still have admitted rows from the retiring scope.
+	// Publish appendPending=false only after those rows have been removed or
+	// replaced so QML never finalizes the old scope against a half-torn model.
+	if (appendWasPending) emit appendPendingChanged();
 	m_deferredRichBodyMessageIds = retainedDeferredMessageIds;
 	m_userHistoryMessageIds = std::move(userHistoryMessageIds);
 	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
@@ -4071,7 +4076,8 @@ bool ChatTimelineModel::hasUserHistory() const {
 
 void ChatTimelineModel::clear() {
 	if (!acceptsFrontendStateMutation(this)) return;
-	cancelQueuedAppend();
+	const bool appendWasPending = m_appendPending;
+	cancelQueuedAppend(false);
 	cancelQueuedPrepend();
 	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
 	m_deferredPresentationUpdates.clear();
@@ -4091,6 +4097,7 @@ void ChatTimelineModel::clear() {
 	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	m_userHistoryMessageIds.clear();
 	StableListModel::clear();
+	if (appendWasPending) emit appendPendingChanged();
 	if (hadUserHistory) emit hasUserHistoryChanged();
 	if (searchActive()) refreshSearchState(true);
 }

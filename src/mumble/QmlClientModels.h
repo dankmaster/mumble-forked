@@ -571,7 +571,7 @@ private:
 	void launchRichBodyParseBatch();
 	void scheduleRichBodyDrain();
 	void drainRichBodyResults();
-	void cancelQueuedAppend();
+	void cancelQueuedAppend(bool notify = true);
 	void scheduleQueuedAppendDrain();
 	void drainQueuedAppend();
 	void cancelQueuedPrepend();

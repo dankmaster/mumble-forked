@@ -30656,17 +30656,25 @@ void MainWindow::publishPersistentChatSnapshot() {
 		// summaries one per frame: a cached rich room can otherwise make Qt Quick
 		// construct every fixed-height delegate in the synchronous scope-switch
 		// turn before the heavier provider admission queue has even started.
-		if (switchingScope && !messages.isEmpty()) {
+		if (switchingScope) {
+			// The authoritative scope token is already published, so QML has
+			// entered presentationBusy before these retiring rows disappear.
+			// replaceMessages reports appendPending=false only after the model is
+			// empty; that keeps the old scope out of finalization and polish.
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int deferred =
-				m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
-			if (deferred == messages.size()) {
-				mumble::chatperf::recordValue(
-					"qml.chat.scope_sync.deferred_first_paint", deferred);
-			} else {
-				m_qmlShellHost->chatModel()->replaceMessages(messages);
-				mumble::chatperf::recordValue(
-					"qml.chat.scope_sync.deferred_fallback", 1);
+			mumble::chatperf::recordValue(
+				"qml.chat.scope_navigation.retiring_rows_cleared", 1);
+			if (!messages.isEmpty()) {
+				const int deferred =
+					m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
+				if (deferred == messages.size()) {
+					mumble::chatperf::recordValue(
+						"qml.chat.scope_sync.deferred_first_paint", deferred);
+				} else {
+					m_qmlShellHost->chatModel()->replaceMessages(messages);
+					mumble::chatperf::recordValue(
+						"qml.chat.scope_sync.deferred_fallback", 1);
+				}
 			}
 		} else {
 			m_qmlShellHost->chatModel()->replaceMessages(messages);
@@ -31657,17 +31665,6 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 	}
 	if (scope != MumbleProto::TextChannel && scope != MumbleProto::Channel) {
 		return false;
-	}
-
-	const bool replacingVisibleScope =
-		m_visiblePersistentChatScope
-		&& (*m_visiblePersistentChatScope != scope || m_visiblePersistentChatScopeID != scopeID);
-	if (replacingVisibleScope && m_qmlShellHost && m_qmlShellHost->chatModel()) {
-		// Selection is authoritative before the controller's next snapshot.
-		// Remove the retiring room synchronously so its deferred rich rows cannot
-		// keep materializing while the newly selected room is loading.
-		m_qmlShellHost->chatModel()->replaceMessages({});
-		mumble::chatperf::recordValue("qml.chat.scope_navigation.retiring_rows_cleared", 1);
 	}
 
 	const bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;

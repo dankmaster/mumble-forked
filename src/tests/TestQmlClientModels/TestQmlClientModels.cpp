@@ -820,6 +820,35 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(),
 			 QStringLiteral("replacement:0"));
 
+	ChatTimelineModel cancelledColdModel;
+	QStringList cancellationSignalOrder;
+	connect(&cancelledColdModel, &QAbstractItemModel::rowsRemoved, this,
+		[&cancelledColdModel, &cancellationSignalOrder](const QModelIndex &, int, int) {
+			cancellationSignalOrder.push_back(
+				QStringLiteral("rows-removed:%1").arg(cancelledColdModel.rowCount()));
+		});
+	connect(&cancelledColdModel, &ChatTimelineModel::appendPendingChanged, this,
+		[&cancelledColdModel, &cancellationSignalOrder]() {
+			if (!cancelledColdModel.appendPending()) {
+				cancellationSignalOrder.push_back(
+					QStringLiteral("append-idle:%1").arg(cancelledColdModel.rowCount()));
+			}
+		});
+	QVariantList cancellableMessages;
+	for (int row = 0; row < 8; ++row) {
+		cancellableMessages.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("cancel:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Cancel %1").arg(row) }
+		});
+	}
+	QCOMPARE(cancelledColdModel.enqueueAppendMessages(cancellableMessages, true), 8);
+	QTRY_VERIFY_WITH_TIMEOUT(
+		cancelledColdModel.rowCount() > 0 && cancelledColdModel.appendPending(), 5000);
+	cancelledColdModel.replaceMessages({});
+	QCOMPARE(cancelledColdModel.rowCount(), 0);
+	QCOMPARE(cancellationSignalOrder,
+		QStringList({ QStringLiteral("rows-removed:0"), QStringLiteral("append-idle:0") }));
+
 	model.clear();
 	insertSpy.clear();
 	const QVariantList prefix {
@@ -2509,10 +2538,7 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(navigateStart >= 0);
 	QVERIFY(navigateEnd > navigateStart);
 	const QString navigateBody = source.mid(navigateStart, navigateEnd - navigateStart);
-	QVERIFY(navigateBody.contains(QStringLiteral("replacingVisibleScope")));
-	QVERIFY(navigateBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
-	QVERIFY(navigateBody.contains(
-		QStringLiteral("qml.chat.scope_navigation.retiring_rows_cleared")));
+	QVERIFY(!navigateBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
 
 	const qsizetype snapshotApplyStart =
 		source.indexOf(QStringLiteral("const bool appendedAtTail ="));
@@ -2533,7 +2559,10 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 		QStringLiteral("qml.chat.snapshot_append.deferred_first_paint_queued")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("qml.chat.snapshot_append.deferred_fallback")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("switchingScope && !messages.isEmpty()")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("if (switchingScope)")));
+	QVERIFY(snapshotApplyBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
+	QVERIFY(snapshotApplyBody.contains(
+		QStringLiteral("qml.chat.scope_navigation.retiring_rows_cleared")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("enqueueAppendMessages(messages, true)")));
 	QVERIFY(!snapshotApplyBody.contains(QStringLiteral("prependMessages(messages, true)")));
