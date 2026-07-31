@@ -1945,6 +1945,7 @@ ApplicationWindow {
 			"delegateAvailable": true,
 			"viewportY": point.y,
 			"height": item.height,
+			"viewportProbeHeight": Number(item.viewportProbeHeight || 0),
 			"inVisibleViewport": item.inVisibleViewport === true,
 			"richContentViewportEligible":
 				item.richContentViewportEligible === true,
@@ -5811,12 +5812,59 @@ ApplicationWindow {
 											return String(part || "").trim().length > 0
 										}).join("  ·  ")
 								// Viewport membership controls provider activation, which
-								// refines the delegate's final height. Probe only with model
-								// geometry so that activation can never feed back through
-								// this Loader's item or live height binding.
-								readonly property real viewportProbeHeight: Math.max(
+								// refines the delegate's final height. Start with model
+								// geometry, then grow this imperative latch only after the
+								// real row has settled. Visibility never binds back to item
+								// or live height, while tall media keeps its painted tail.
+								property string viewportProbeStableId: ""
+								property real viewportProbeHeight: Math.max(
 									timeline.deferredMessageRowHeight,
 									deferredPresentationHeight)
+								function viewportProbeBaseHeight() {
+									return Math.max(timeline.deferredMessageRowHeight,
+										Number(deferredPresentationHeight || 0))
+								}
+								function resetViewportProbeHeight() {
+									viewportProbeStableId = String(stableId || "")
+									viewportProbeHeight = viewportProbeBaseHeight()
+								}
+								function updateViewportProbeHeight() {
+									const identity = String(stableId || "")
+									if (viewportProbeStableId !== identity)
+										resetViewportProbeHeight()
+									if (accessibilityPooled || richGeometrySettling || !item)
+										return
+									const settledHeight = Math.max(
+										viewportProbeBaseHeight(),
+										Number(item.lightweightMessageRowHeight || 0),
+										Number(item.implicitHeight || 0),
+										Number(height || 0))
+									if (settledHeight > viewportProbeHeight)
+										viewportProbeHeight = settledHeight
+								}
+								function scheduleViewportProbeHeightUpdate() {
+									viewportProbeUpdateTimer.restart()
+								}
+								function scheduleViewportProbeReset() {
+									const identity = String(stableId || "")
+									Qt.callLater(function() {
+										if (String(asyncMessageDelegate.stableId || "")
+												!== identity)
+											return
+										if (asyncMessageDelegate.viewportProbeStableId
+												!== identity)
+											asyncMessageDelegate.resetViewportProbeHeight()
+										asyncMessageDelegate.scheduleViewportProbeHeightUpdate()
+									})
+								}
+								onDeferredPresentationHeightChanged: {
+									if (viewportProbeStableId !== String(stableId || ""))
+										scheduleViewportProbeReset()
+									else
+										viewportProbeHeight = Math.max(
+											viewportProbeHeight,
+											viewportProbeBaseHeight())
+								}
 								readonly property bool contentNeedsHydration: item
 									? item.contentNeedsHydration : true
 								readonly property bool previewNeedsHydration: item
@@ -5883,6 +5931,10 @@ ApplicationWindow {
 									&& (!item.messageRowReady
 										|| item.richResourceActivationPending
 										|| !item.richResourcesActive)
+								onRichGeometrySettlingChanged: {
+									if (!richGeometrySettling)
+										scheduleViewportProbeHeightUpdate()
+								}
 								// Incubation and provider-resource activation can briefly
 								// expose both placeholder and provider heights. The outer
 								// delegate owns one reserved geometry until the provider's
@@ -5892,6 +5944,11 @@ ApplicationWindow {
 									deferredPresentationHeight,
 									item ? item.lightweightMessageRowHeight : 0,
 									!richGeometrySettling && item ? item.implicitHeight : 0)
+								onHeightChanged: {
+									if (item && item.richResourcesRequired
+											&& !richGeometrySettling)
+										scheduleViewportProbeHeightUpdate()
+								}
 								clip: richGeometrySettling
 								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								asynchronous: true
@@ -6066,7 +6123,7 @@ ApplicationWindow {
 									const ownedStableId = resumeOwnedStableId
 									outerLoaderIncubationWatchdogStartedAt = 0
 									// The single adjacent prefetch is bounded by the
-									// timeline's 8.2 s deadline and cancelled by scroll.
+									// timeline's 2.4 s deadline and cancelled by scroll.
 									// Let its asynchronous outer delegate finish instead
 									// of converting it to a terminal summary after 192 ms.
 									if (!inVisibleViewport
@@ -6083,6 +6140,13 @@ ApplicationWindow {
 										timeline.cancelRichLoaderResume(ownedStableId)
 								}
 								Timer {
+									id: viewportProbeUpdateTimer
+									interval: 0
+									repeat: false
+									onTriggered:
+										asyncMessageDelegate.updateViewportProbeHeight()
+								}
+								Timer {
 									id: outerLoaderIncubationWatchdog
 									interval: 192
 									repeat: false
@@ -6091,6 +6155,7 @@ ApplicationWindow {
 								}
 
 								ListView.onPooled: {
+									viewportProbeUpdateTimer.stop()
 									resetOuterLoaderIncubationWatchdog(true)
 									const retiredStableId = resumeOwnedStableId.length > 0
 										? resumeOwnedStableId : stableId
@@ -6107,11 +6172,15 @@ ApplicationWindow {
 								}
 								ListView.onReused: {
 									resetOuterLoaderIncubationWatchdog(true)
+									viewportProbeUpdateTimer.stop()
+									resetViewportProbeHeight()
 									accessibilityPooled = false
+									scheduleViewportProbeHeightUpdate()
 									if (item)
 										item.handleListViewReused()
 								}
 								onStableIdChanged: {
+									scheduleViewportProbeReset()
 									const ownedStableId = resumeOwnedStableId
 									if (ownedStableId.length > 0
 											&& ownedStableId !== stableId
@@ -6124,6 +6193,7 @@ ApplicationWindow {
 									resumeOwnedStableId = ""
 									resetOuterLoaderIncubationWatchdog(true)
 								}
+								Component.onCompleted: scheduleViewportProbeReset()
 								Component.onDestruction: {
 									if (typeof timeline !== "undefined" && timeline) {
 										const retiredStableId = resumeOwnedStableId.length > 0
@@ -6140,6 +6210,7 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 									outerLoaderReady = true
 									item.accessibilityPooled = accessibilityPooled
+									scheduleViewportProbeHeightUpdate()
 									if (resumeRequested) {
 										const allowDuringFinalization = resumeDuringFinalization
 										const admitPreviewMaterialization =
@@ -6450,7 +6521,7 @@ ApplicationWindow {
 										|| (loader.status === Loader.Ready
 											&& previewLoaderSurfaceNonBlank))))
 								return
-							// The single offscreen prefetch already has its own 8.2 s
+							// The single offscreen prefetch already has its own 2.4 s
 							// deadline and is cancelled synchronously by user scroll.
 							// Do not convert its slower asynchronous provider tree into
 							// the visible path's 192 ms terminal summary fallback.

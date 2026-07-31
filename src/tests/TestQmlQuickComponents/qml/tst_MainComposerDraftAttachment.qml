@@ -577,7 +577,7 @@ TestCase {
 		verify(/function\s+suspendRichContentForScroll\(\)[\s\S]*nearViewportPrefetchReadyId[\s\S]*continue[\s\S]*suspendRichResourcesForScroll\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*nearViewportPrefetchTimer\.stop\(\)[\s\S]*nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*nearViewportPrefetchActiveId\s*=\s*""[\s\S]*nearViewportWarmId\s*=\s*""[\s\S]*nearViewportPrefetchReadyId\s*=\s*""/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"nearViewportPrefetchActiveId":[\s\S]*"nearViewportWarmId":[\s\S]*"nearViewportPrefetchReadyId":/.test(mainSource))
-		verify(/function\s+nearViewportPrefetchDiagnostics\(\)[\s\S]*timelineDelegateForStableId\(stableId\)[\s\S]*"richResourcesActive":[\s\S]*"richResourceActivationPending":[\s\S]*"previewMaterializationAdmitted":[\s\S]*"previewLoaderSurfaceState":[\s\S]*"previewLoaderIncubationWatchdogRunning":[\s\S]*"nearViewportPrefetchTerminal":[\s\S]*function\s+timelinePresentationState\(\)[\s\S]*"nearViewportPrefetch":\s*nearViewportPrefetchDiagnostics\(\)/.test(mainSource))
+		verify(/function\s+nearViewportPrefetchDiagnostics\(\)[\s\S]*timelineDelegateForStableId\(stableId\)[\s\S]*"viewportProbeHeight":[\s\S]*"richResourcesActive":[\s\S]*"richResourceActivationPending":[\s\S]*"previewMaterializationAdmitted":[\s\S]*"previewLoaderSurfaceState":[\s\S]*"previewLoaderIncubationWatchdogRunning":[\s\S]*"nearViewportPrefetchTerminal":[\s\S]*function\s+timelinePresentationState\(\)[\s\S]*"nearViewportPrefetch":\s*nearViewportPrefetchDiagnostics\(\)/.test(mainSource))
 		verify(/onRichContentViewportEligibleChanged:\s*\{[\s\S]*requestPreviewHydrationIfNeeded\(\)/.test(mainSource))
 		const previewHydrationStart =
 			mainSource.indexOf("function queueVisiblePreviewHydration")
@@ -814,13 +814,33 @@ TestCase {
 		const asyncDelegateSource = mainSource.slice(
 			mainSource.indexOf("id: asyncMessageDelegate"),
 			mainSource.indexOf("id: messageDelegate"))
-		verify(/readonly property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*readonly property bool inVisibleViewport:\s*!accessibilityPooled\s*&&\s*y\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*&&\s*y\s*\+\s*viewportProbeHeight\s*>=\s*timeline\.contentY/.test(
+		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*readonly property bool inVisibleViewport:\s*!accessibilityPooled\s*&&\s*y\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*&&\s*y\s*\+\s*viewportProbeHeight\s*>=\s*timeline\.contentY/.test(
 			asyncDelegateSource))
-		const viewportProbeMatch =
-			/readonly property real viewportProbeHeight:[\s\S]*?\n\s*readonly property bool contentNeedsHydration:/.exec(
+		const viewportProbeSeedMatch =
+			/property real viewportProbeHeight:[\s\S]*?\n\s*function viewportProbeBaseHeight\(\)/.exec(
 				asyncDelegateSource)
-		verify(viewportProbeMatch !== null)
-		verify(!/\bitem\b|\brichGeometrySettling\b/.test(viewportProbeMatch[0]))
+		verify(viewportProbeSeedMatch !== null)
+		verify(!/\bitem\b|\brichGeometrySettling\b|\bheight\b/.test(
+			viewportProbeSeedMatch[0]))
+		const viewportProbeUpdateStart =
+			asyncDelegateSource.indexOf("function updateViewportProbeHeight()")
+		const viewportProbeUpdateEnd =
+			asyncDelegateSource.indexOf("function scheduleViewportProbeHeightUpdate()",
+				viewportProbeUpdateStart)
+		verify(viewportProbeUpdateStart >= 0
+			&& viewportProbeUpdateEnd > viewportProbeUpdateStart)
+		const viewportProbeUpdateSource =
+			asyncDelegateSource.slice(viewportProbeUpdateStart, viewportProbeUpdateEnd)
+		verify(/viewportProbeStableId\s*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*Math\.max\([\s\S]*item\.lightweightMessageRowHeight[\s\S]*item\.implicitHeight[\s\S]*Number\(height\s*\|\|\s*0\)[\s\S]*settledHeight\s*>\s*viewportProbeHeight[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
+			viewportProbeUpdateSource))
+		verify(/id:\s*viewportProbeUpdateTimer[\s\S]*interval:\s*0[\s\S]*repeat:\s*false[\s\S]*updateViewportProbeHeight\(\)/.test(
+			asyncDelegateSource))
+		verify(/onRichGeometrySettlingChanged:[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*height:\s*Math\.max[\s\S]*onHeightChanged:[\s\S]*item\.richResourcesRequired[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+			asyncDelegateSource))
+		verify(/function scheduleViewportProbeReset\(\)[\s\S]*viewportProbeStableId[\s\S]*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+			asyncDelegateSource))
+		verify(/ListView\.onPooled:[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*accessibilityPooled\s*=\s*false[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*onStableIdChanged:[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*Component\.onCompleted:\s*scheduleViewportProbeReset\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+			asyncDelegateSource))
 		verify(!/readonly property bool inVisibleViewport:[\s\S]{0,120}\by\s*\+\s*height\s*>=\s*timeline\.contentY/.test(
 			asyncDelegateSource))
 		const hydrationWindowStart =
