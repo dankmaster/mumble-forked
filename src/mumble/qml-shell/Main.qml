@@ -5707,9 +5707,16 @@ ApplicationWindow {
 										|| !messageDelegate.messageRowReady)
 									return
 								messageDelegate.richResourcesActive = true
-								// Give asynchronous image/provider bindings their own polish
-								// window before admitting the next complete rich-card tree.
-								richResourceActivationSettleTimer.restart()
+								// A provider tree gets its own polish window before the next
+								// complete card is admitted. Attachment/inline-only rows have
+								// no nested provider tree to polish, so release the token via
+								// completeRichLoaderResumeWhenReady's queued turn; the global
+								// resume timer still prevents a same-frame activation burst.
+								if (messageDelegate.hasPreviewContent
+										&& !messageDelegate.previewLoaderFailed)
+									richResourceActivationSettleTimer.restart()
+								else
+									messageDelegate.completeRichLoaderResumeWhenReady()
 							}
 						}
 						Timer {
@@ -5778,7 +5785,7 @@ ApplicationWindow {
 							// Six 60 Hz frames leave the nested asynchronous provider tree
 							// room to settle naturally. The fallback then keeps the already
 							// visible branded surface responsive while preserving the
-							// separate 16 + 48 ms resource activation window below.
+							// separate paced provider-resource activation window below.
 							interval: 96
 							repeat: false
 							onTriggered: {

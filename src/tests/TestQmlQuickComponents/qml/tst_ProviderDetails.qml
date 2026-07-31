@@ -126,6 +126,7 @@ TestCase {
 	function selectedPresentationLoader(item) {
 		const loader = findChild(item, "providerSelectedPresentationLoader")
 		verify(loader !== null)
+		compare(loader.active, true)
 		return loader
 	}
 
@@ -709,6 +710,7 @@ TestCase {
 		const item = harness.item
 		const shellLoader = findChild(item, "providerDetailsShellLoader")
 		verify(shellLoader !== null)
+		compare(shellLoader.asynchronous, true)
 		compare(item.hasDetails, false)
 		compare(shellLoader.active, false)
 		compare(shellLoader.item, null)

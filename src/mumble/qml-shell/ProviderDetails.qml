@@ -1454,9 +1454,9 @@ FocusScope {
 		return joinAccessibleSentences(parts)
 	}
 
-	// The outer loader is a lightweight lifetime shell. The selected provider
-	// presentation is incubated by the single asynchronous loader inside it, so
-	// cold timeline delegates never construct mutually exclusive hidden cards.
+	// Incubate the lifetime shell before starting its selected provider loader.
+	// This splits a cold card across bounded GUI-thread turns without allowing
+	// nested asynchronous incubation or constructing mutually exclusive cards.
 	// Keep an already-loaded shell alive across transient metadata states so its
 	// selected presentation does not tear down and perturb card geometry.
 	Loader {
@@ -1465,6 +1465,7 @@ FocusScope {
 		property bool presentationSettled: false
 		anchors.left: parent.left
 		anchors.right: parent.right
+		asynchronous: true
 		active: (root.visible && root.hasDetails) || detailsLoader.item !== null
 		onActiveChanged: {
 			presentationSettled = false
@@ -4147,6 +4148,7 @@ FocusScope {
 			objectName: "providerSelectedPresentationLoader"
 			Layout.fillWidth: true
 			Layout.preferredHeight: item ? item.implicitHeight : 0
+			active: detailsLoader.status === Loader.Ready
 			asynchronous: true
 			sourceComponent: root.steamPresentation ? steamCardComponent
 				: root.googlePresentation ? googleCardComponent
