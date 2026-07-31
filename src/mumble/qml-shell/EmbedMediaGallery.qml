@@ -33,6 +33,17 @@ ColumnLayout {
 		|| currentKind === "animated-image" ? String(currentItem.url || "")
 		: String(currentItem.posterUrl || currentItem.poster
 			|| currentItem.thumbnailUrl || currentItem.thumbnail || "")
+	readonly property bool currentVisualReady: currentKind === "animated-image"
+		? animatedImageLoader.mediaStatus === Image.Ready
+		: stillImage.status === Image.Ready
+	readonly property bool currentVisualLoading: currentKind === "animated-image"
+		? animatedImageLoader.active && animatedImageLoader.mediaStatus === Image.Loading
+		: stillImage.status === Image.Loading
+	readonly property string performanceMediaSurfaceState: !viewportVisible
+		? "not-required" : mediaRequiresReveal ? "reveal"
+		: currentVisualReady ? "poster"
+		: currentVisualLoading ? "loading"
+		: mediaFallbackIcon.visible ? "fallback" : "blank"
 	readonly property bool compactFallback: viewportVisible
 		&& currentImageSource.length === 0 && !mediaRequiresReveal
 	readonly property real resolvedViewportHeight: !viewportVisible ? 0
@@ -79,6 +90,23 @@ ColumnLayout {
 		Accessible.name: root.accessibleTitle.length > 0
 			? root.accessibleTitle : qsTr("Preview media")
 
+		// This underlay is deliberately always present behind the renderer. A
+		// virtualized row clears its Image source to release decoded data, while
+		// Image.Ready may also precede the first scene-graph texture frame. In
+		// both cases the provider viewport must remain visibly actionable rather
+		// than exposing the black media canvas.
+		ModernIcon {
+			id: mediaFallbackIcon
+			objectName: "embedDocumentMediaFallbackIcon"
+			anchors.centerIn: parent
+			visible: !root.mediaRequiresReveal
+			name: root.currentKind === "audio" ? "volume"
+				: root.currentKind === "video" ? "play" : "eye"
+			size: Theme.space6
+			color: Theme.mediaOverlayTextMuted
+			Accessible.ignored: true
+		}
+
 		Image {
 			id: stillImage
 			objectName: "embedDocumentMediaImage"
@@ -90,7 +118,9 @@ ColumnLayout {
 			sourceSize: Qt.size(Math.min(1280, width * Screen.devicePixelRatio),
 				Math.min(960, height * Screen.devicePixelRatio))
 			fillMode: Image.PreserveAspectFit
-			visible: status === Image.Ready
+			// Leave the Image item mounted throughout the source handoff; the
+			// fallback underlay remains visible when no texture exists.
+			visible: String(source).length > 0
 		}
 
 		Loader {
@@ -121,16 +151,6 @@ ColumnLayout {
 			visible: running
 			animated: root.animationsEnabled
 			Accessible.name: qsTr("Loading preview media")
-		}
-
-		ModernIcon {
-			anchors.centerIn: parent
-			visible: !root.mediaRequiresReveal && root.currentImageSource.length === 0
-			name: root.currentKind === "audio" ? "volume"
-				: root.currentKind === "video" ? "play" : "eye"
-			size: Theme.space6
-			color: Theme.mediaOverlayTextMuted
-			Accessible.ignored: true
 		}
 
 		Rectangle {

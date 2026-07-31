@@ -1460,6 +1460,7 @@ TestCase {
 		const loader = findChild(card, "previewInlineMediaLoader")
 		const playButton = findChild(card, "previewPlayButton")
 		verify(panel !== null && poster !== null && loader !== null && playButton !== null)
+		compare(poster.retainWhileLoading, false)
 
 		const cases = [
 			{ "aspect": "", "normalized": "wide", "width": card.width,
@@ -1477,11 +1478,14 @@ TestCase {
 				"state": "ready", "title": "Provider media", "description": "Visible summary",
 				"url": "https://example.com/watch", "embedUrl": "https://www.youtube.com/embed/test",
 				"embedKind": "youtube", "embedAspect": fixture.aspect,
-				"thumbnailUrl": "image://mumble/embed-poster"
+				"thumbnailUrl": "image://mumble/embed-poster?case=" + index
 			}
 			card.previewIdentity = "message:aspect:" + fixture.normalized
 			compare(card.normalizedEmbedAspect, fixture.normalized)
 			tryCompare(panel, "visible", true)
+			verify(["fallback", "loading", "poster"].indexOf(
+				card.performanceEmbedSurfaceState) >= 0,
+				fixture.normalized + " exposed a blank surface while rebinding the poster")
 			tryVerify(function() { return Math.abs(panel.width - fixture.width) < 1 }, 1000,
 				fixture.normalized + " panel width=" + panel.width + " expected=" + fixture.width
 				+ " card=" + card.width + " slot=" + panel.parent.width)
@@ -1749,20 +1753,28 @@ TestCase {
 		mediaRuntime.runtimeReady = true
 
 		const loader = findChild(card, "previewInlineMediaLoader")
+		const fallback = findChild(card, "previewEmptyPosterIcon")
+		verify(fallback !== null)
 		tryCompare(loader, "active", true)
 		tryVerify(function() { return loader.item !== null })
+		tryCompare(card, "performanceEmbedSurfaceState", "ready")
 		const activeHeight = card.implicitHeight
 		const activePanelHeight = card.embedPanelHeight
 
 		card.renderActive = false
 		tryCompare(loader, "active", false)
 		tryCompare(loader, "item", null)
+		verify(fallback.visible)
+		compare(card.performanceEmbedSurfaceState, "fallback")
 		compare(card.embedPanelHeight, activePanelHeight)
 		compare(card.implicitHeight, activeHeight)
 
 		card.renderActive = true
+		verify(["fallback", "loading", "ready"].indexOf(
+			card.performanceEmbedSurfaceState) >= 0)
 		tryCompare(loader, "active", true)
 		tryVerify(function() { return loader.item !== null })
+		tryCompare(card, "performanceEmbedSurfaceState", "ready")
 		compare(card.embedPanelHeight, activePanelHeight)
 		compare(card.implicitHeight, activeHeight)
 	}
@@ -2567,6 +2579,73 @@ TestCase {
 		compare(card.implicitHeight, stableHeight)
 		card.renderActive = true
 		tryVerify(function() { return String(thumbnailImage.source).length > 0 })
+	}
+
+	function test_typed_instagram_gallery_never_blanks_when_scroll_suspends_rendering() {
+		const card = previewLoader.item
+		const sourceUrl = "https://www.instagram.com/p/scroll-regression/"
+		const imageUrl = "image://mumble/instagram-scroll-regression?g=1"
+		card.preview = {
+			"state": "ready",
+			"title": "Instagram scroll regression",
+			"url": sourceUrl,
+			"metadata": { "provider": "instagram", "previewKind": "socialPost" },
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "social",
+				"provider": {
+					"id": "instagram",
+					"label": "Instagram",
+					"host": "www.instagram.com"
+				},
+				"source": { "url": sourceUrl, "displayUrl": sourceUrl },
+				"content": {
+					"type": "social-post",
+					"title": "Instagram scroll regression",
+					"description": "The native fallback must cover suspended media."
+				},
+				"thread": {},
+				"facts": [],
+				"media": [{
+					"id": "media:0",
+					"kind": "image",
+					"url": imageUrl,
+					"thumbnailUrl": imageUrl,
+					"title": "Instagram post image",
+					"directPlayable": true
+				}],
+				"playback": { "mode": "none", "provider": "instagram" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:instagram-scroll-regression"
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const image = findChild(card, "embedDocumentMediaImage")
+		const fallback = findChild(card, "embedDocumentMediaFallbackIcon")
+		verify(gallery !== null && gallery.visible)
+		verify(image !== null && fallback !== null)
+		compare(image.retainWhileLoading, false)
+		tryCompare(image, "status", Image.Ready)
+		compare(gallery.performanceMediaSurfaceState, "poster")
+		compare(card.performanceEmbedSurfaceState, "poster")
+
+		card.renderActive = false
+		tryCompare(image, "source", "")
+		tryCompare(image, "status", Image.Null)
+		verify(fallback.visible)
+		compare(gallery.performanceMediaSurfaceState, "fallback")
+		compare(card.performanceEmbedSurfaceState, "fallback")
+
+		card.renderActive = true
+		verify(["fallback", "loading", "poster"].indexOf(
+			gallery.performanceMediaSurfaceState) >= 0)
+		verify(card.performanceEmbedSurfaceState !== "blank")
+		tryCompare(image, "status", Image.Ready)
+		compare(gallery.performanceMediaSurfaceState, "poster")
+		compare(card.performanceEmbedSurfaceState, "poster")
 	}
 
 	function test_typed_provider_gallery_keeps_height_and_thumbnails_when_playback_starts() {

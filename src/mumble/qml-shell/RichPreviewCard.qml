@@ -37,6 +37,9 @@ Rectangle {
 	// loading, reveal and fallback surfaces are all meaningful, while a reserved
 	// embed viewport with none of those layers is a real blank presentation.
 	readonly property string performanceEmbedSurfaceState: {
+		if (embedDocumentMediaGallery.visible
+				&& embedDocumentMediaGallery.viewportVisible)
+			return embedDocumentMediaGallery.performanceMediaSurfaceState
 		if (!inlineMediaStageVisible)
 			return "not-required"
 		if (previewEmbedRevealSurface.visible)
@@ -46,8 +49,6 @@ Rectangle {
 			return "loading"
 		if (embedPoster.visible && embedPoster.status === Image.Ready)
 			return "poster"
-		if (previewEmptyPosterIcon.visible || previewPlayButton.visible)
-			return "fallback"
 		if (inlineMediaLoader.status === Loader.Ready && inlineMediaLoader.item) {
 			const rendererState = String(inlineMediaLoader.item.rendererState || "")
 				.toLowerCase()
@@ -58,6 +59,8 @@ Rectangle {
 			if (rendererState === "error")
 				return "fallback"
 		}
+		if (previewEmptyPosterIcon.visible || previewPlayButton.visible)
+			return "fallback"
 		return "blank"
 	}
 	readonly property int animationDuration: animationsEnabled ? Theme.motionFast : 0
@@ -1341,6 +1344,21 @@ Rectangle {
 			border.width: 1
 			clip: true
 
+			// Keep a native, allocation-free surface behind every poster/player.
+			// It remains painted while virtualization releases the renderer and
+			// during the Image.Ready-to-texture handoff, so a wheel gesture can
+			// never expose a black provider viewport.
+			ModernIcon {
+				id: previewEmptyPosterIcon
+				objectName: "previewEmptyPosterIcon"
+				anchors.centerIn: parent
+				visible: root.inlineMediaStageVisible && !root.mediaRequiresReveal
+				name: root.inlineActionIconName
+				size: Theme.space6
+				color: Theme.mediaOverlayTextMuted
+				Accessible.ignored: true
+			}
+
 			Image {
 				id: embedPoster
 				objectName: "previewEmbedPoster"
@@ -1358,7 +1376,7 @@ Rectangle {
 				// the provider action, including audio embeds. PreserveAspectFit left
 				// square album art floating in a wide empty strip for Spotify.
 				fillMode: Image.PreserveAspectCrop
-				visible: status === Image.Ready
+				visible: String(source).length > 0
 					&& (!root.inlinePlaybackActive || root.inlineAdapterPending)
 				onStatusChanged: {
 					if (status === Image.Loading && root.renderActive)
@@ -1404,18 +1422,6 @@ Rectangle {
 					else
 						root.requestInlinePlaybackWithFocus()
 				}
-			}
-
-			ModernIcon {
-				id: previewEmptyPosterIcon
-				objectName: "previewEmptyPosterIcon"
-				anchors.centerIn: parent
-				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal
-					&& root.previewState !== "loading" && embedPoster.status !== Image.Ready
-				name: root.inlineActionIconName
-				size: Theme.space6
-				color: Theme.mediaOverlayTextMuted
-				Accessible.ignored: true
 			}
 
 			ModernBusyIndicator {
@@ -1780,6 +1786,7 @@ Rectangle {
 			}
 
 			EmbedMediaGallery {
+				id: embedDocumentMediaGallery
 				objectName: "previewDocumentMediaGallery"
 				Layout.fillWidth: true
 				visible: root.typedDocumentActive && root.previewState === "ready"
