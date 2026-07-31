@@ -1519,15 +1519,28 @@ namespace {
 		if (!preview.isEmpty()) {
 			const QVariantMap metadata = preview.value(QStringLiteral("metadata")).toMap();
 			const QString provider =
-				metadata.value(QStringLiteral("provider")).toString().trimmed().toLower();
+				metadata.value(QStringLiteral("provider"),
+							   metadata.value(QStringLiteral("previewProvider")))
+					.toString()
+					.trimmed()
+					.toLower();
 			const QUrl previewUrl(preview.value(QStringLiteral("url")).toString());
+			const QString previewHost = previewUrl.host();
 			const bool steamPreview = provider == QLatin1String("steam")
-				|| previewUrl.host().compare(QLatin1String("store.steampowered.com"),
-										 Qt::CaseInsensitive) == 0;
+				|| previewHost.compare(QLatin1String("store.steampowered.com"),
+									   Qt::CaseInsensitive) == 0;
+			const bool blocketPreview = provider == QLatin1String("blocket")
+				|| previewHost.compare(QLatin1String("blocket.se"), Qt::CaseInsensitive) == 0
+				|| previewHost.endsWith(QLatin1String(".blocket.se"), Qt::CaseInsensitive);
 			// Steam's provider details expand the complete production card to this
 			// measured height. Reserve it for both the URL-only loading DTO and the
 			// hydrated metadata/media DTO so the handoff cannot move the viewport.
 			if (steamPreview) return 741 + richMetadataHeight;
+			// Blocket's marketplace facts and gallery expand the complete production
+			// card beyond the generic provider hero. The URL-only loading stub already
+			// carries provider identity, so reserve the same measured 737 px for both
+			// sides of the hydration handoff.
+			if (blocketPreview) return 737 + richMetadataHeight;
 			const QString aspect =
 				preview.value(QStringLiteral("embedAspect")).toString().trimmed().toLower();
 			const QString presentationKind =

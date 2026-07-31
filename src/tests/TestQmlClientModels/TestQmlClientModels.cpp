@@ -649,6 +649,41 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		{ QStringLiteral("metadata"),
 		  QVariantMap { { QStringLiteral("provider"), QStringLiteral("steam") } } }
 	};
+	const QVariantMap blocketLoadingPreview {
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.blocket.se/mobility/item/25261134?ci=1") },
+		{ QStringLiteral("loadingLabel"), QStringLiteral("Loading Blocket preview") },
+		{ QStringLiteral("metadata"),
+		  QVariantMap {
+			  { QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") }
+		  } }
+	};
+	const QVariantMap blocketReadyPreview {
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://www.blocket.se/mobility/item/25261134?ci=1") },
+		{ QStringLiteral("mediaItems"),
+		  QVariantList { QVariantMap {
+			  { QStringLiteral("kind"), QStringLiteral("image") },
+			  { QStringLiteral("url"), QStringLiteral("image://mumble/blocket-hero?g=1") }
+		  } } },
+		{ QStringLiteral("metadata"),
+		  QVariantMap { { QStringLiteral("provider"), QStringLiteral("blocket") },
+						{ QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") } } }
+	};
+	const QVariantMap blocketProviderFallbackPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://example.test/listing") },
+		{ QStringLiteral("metadata"),
+		  QVariantMap {
+			  { QStringLiteral("previewProvider"), QStringLiteral("blocket") }
+		  } }
+	};
+	const QVariantMap falseBlocketHostPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://notblocket.se/item/25261134") },
+		{ QStringLiteral("metadata"),
+		  QVariantMap {
+			  { QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") }
+		  } }
+	};
 	QCOMPARE(estimateModel.appendMessages(
 				 { QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
@@ -703,9 +738,31 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 					 { QStringLiteral("reactions"),
 					   QVariantList { QVariantMap {
 						   { QStringLiteral("emoji"), QString::fromUtf8("👍") },
-						   { QStringLiteral("count"), 1 } } } } } },
+						   { QStringLiteral("count"), 1 } } } } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:blocket-loading") },
+					 { QStringLiteral("plainText"), QStringLiteral("Blocket loading") },
+					 { QStringLiteral("previewStub"), blocketLoadingPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:blocket-ready") },
+					 { QStringLiteral("plainText"), QStringLiteral("Blocket ready") },
+					 { QStringLiteral("preview"), blocketReadyPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:blocket-provider-fallback") },
+					 { QStringLiteral("plainText"), QStringLiteral("Blocket provider fallback") },
+					 { QStringLiteral("preview"), blocketProviderFallbackPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:blocket-reply") },
+					 { QStringLiteral("plainText"), QStringLiteral("Blocket reply") },
+					 { QStringLiteral("preview"), blocketReadyPreview },
+					 { QStringLiteral("replyActor"), QStringLiteral("Original author") },
+					 { QStringLiteral("replySnippet"), QStringLiteral("Original message") } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:false-blocket-host") },
+					 { QStringLiteral("plainText"), QStringLiteral("Not Blocket") },
+					 { QStringLiteral("preview"), falseBlocketHostPreview } } },
 				 true),
-			 12);
+			 17);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 548);
@@ -762,6 +819,35 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(estimateModel.get(11).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 319);
+	QCOMPARE(estimateModel.get(12).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 737);
+	const QVariantMap normalizedBlocketLoading =
+		estimateModel.get(12).value(QStringLiteral("preview")).toMap();
+	QVERIFY(normalizedBlocketLoading.value(QStringLiteral("loading")).toBool());
+	QCOMPARE(normalizedBlocketLoading.value(QStringLiteral("state")).toString(),
+			 QStringLiteral("loading"));
+	QCOMPARE(estimateModel.get(13).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 737);
+	const QVariantMap normalizedBlocketReady =
+		estimateModel.get(13).value(QStringLiteral("preview")).toMap();
+	QCOMPARE(normalizedBlocketReady.value(QStringLiteral("state")).toString(),
+			 QStringLiteral("ready"));
+	QCOMPARE(normalizedBlocketReady.value(QStringLiteral("mediaItems")).toList().size(), 1);
+	QCOMPARE(estimateModel.get(14).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 737);
+	QCOMPARE(estimateModel.get(14).value(QStringLiteral("preview")).toMap()
+				 .value(QStringLiteral("metadata")).toMap()
+				 .value(QStringLiteral("previewProvider")).toString(),
+			 QStringLiteral("blocket"));
+	QCOMPARE(estimateModel.get(15).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 815);
+	QCOMPARE(estimateModel.get(16).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 548);
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
@@ -2571,7 +2657,12 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(navigateBody.contains(QStringLiteral("scopeKeyChanges && hasRetiringTimeline")));
 	QVERIFY(navigateBody.contains(
 		QStringLiteral("m_deferredPersistentChatNavigationGeneration = navigationGeneration")));
-	QVERIFY(navigateBody.contains(
+	QCOMPARE(navigateBody.count(
+				 QStringLiteral("schedulePersistentChatNavigationAfterPresentedFrame(")),
+			 2);
+	QVERIFY(navigateBody.contains(QStringLiteral("QStringLiteral(\"preclear\")")));
+	QVERIFY(navigateBody.contains(QStringLiteral("QStringLiteral(\"selection\")")));
+	QVERIFY(!navigateBody.contains(
 		QStringLiteral("QTimer::singleShot(PersistentChatNavigationFrameMs")));
 	QVERIFY(navigateBody.contains(QStringLiteral("chatModel->replaceMessages({})")));
 	QVERIFY(navigateBody.contains(QStringLiteral("currentSelection->applySelection(targetScopeToken")));
@@ -2585,6 +2676,28 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 		QStringLiteral("m_deferredModernShellPreviewUpdateKeys.clear()")));
 	QVERIFY(!navigateBody.contains(
 		QStringLiteral("m_deferredModernShellPreviewUpdateDrainScheduled = false")));
+	const qsizetype frameBarrierStart = source.indexOf(
+		QStringLiteral("void MainWindow::schedulePersistentChatNavigationAfterPresentedFrame"));
+	const qsizetype frameBarrierEnd =
+		source.indexOf(QStringLiteral("bool MainWindow::persistentChatNavigationFramePending"),
+					   frameBarrierStart);
+	QVERIFY(frameBarrierStart >= 0);
+	QVERIFY(frameBarrierEnd > frameBarrierStart);
+	const QString frameBarrierBody =
+		source.mid(frameBarrierStart, frameBarrierEnd - frameBarrierStart);
+	QVERIFY(source.contains(
+		QStringLiteral("constexpr int PersistentChatNavigationFrameFallbackMs = 32")));
+	QVERIFY(frameBarrierBody.contains(QStringLiteral("&QQuickWindow::afterSynchronizing")));
+	QVERIFY(frameBarrierBody.contains(QStringLiteral("&QQuickWindow::frameSwapped")));
+	QVERIFY(frameBarrierBody.contains(QStringLiteral("Qt::DirectConnection")));
+	QVERIFY(frameBarrierBody.contains(QStringLiteral("Qt::QueuedConnection")));
+	QVERIFY(frameBarrierBody.contains(QStringLiteral("window->update()")));
+	QVERIFY(frameBarrierBody.contains(
+		QStringLiteral("QTimer::singleShot(PersistentChatNavigationFrameFallbackMs")));
+	QVERIFY(frameBarrierBody.contains(
+		QStringLiteral("navigationGeneration != m_qmlMessageGeneration")));
+	QVERIFY(frameBarrierBody.contains(
+		QStringLiteral("cancelPersistentChatNavigationFrameBarrier()")));
 	const qsizetype scopeSelectionStart =
 		source.indexOf(QStringLiteral("bool MainWindow::handleModernShellScopeSelection"));
 	const qsizetype railSelectionStart =
