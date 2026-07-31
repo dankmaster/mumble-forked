@@ -589,6 +589,24 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 		{ QStringLiteral("embedAspect"), QStringLiteral("square") },
 		{ QStringLiteral("thumbnailUrl"), QStringLiteral("https://example.com/poster-square.jpg") }
 	};
+	const QVariantMap steamLoadingPreview {
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://store.steampowered.com/app/2806050/Halo_Campaign_Evolved/") },
+		{ QStringLiteral("loading"), true },
+		{ QStringLiteral("loadingLabel"), QStringLiteral("Loading Steam preview") }
+	};
+	const QVariantMap steamReadyPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://example.test/game") },
+		{ QStringLiteral("embedKind"), QStringLiteral("image") },
+		{ QStringLiteral("embedAspect"), QStringLiteral("wide") },
+		{ QStringLiteral("mediaItems"),
+		  QVariantList { QVariantMap {
+			  { QStringLiteral("kind"), QStringLiteral("image") },
+			  { QStringLiteral("url"), QStringLiteral("https://example.com/steam-hero.jpg") }
+		  } } },
+		{ QStringLiteral("metadata"),
+		  QVariantMap { { QStringLiteral("provider"), QStringLiteral("steam") } } }
+	};
 	QCOMPARE(estimateModel.appendMessages(
 				 { QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
@@ -604,9 +622,17 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:square") },
 					 { QStringLiteral("plainText"), QStringLiteral("Square") },
-					 { QStringLiteral("preview"), squarePreview } } },
+					 { QStringLiteral("preview"), squarePreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:steam-loading") },
+					 { QStringLiteral("plainText"), QStringLiteral("Steam loading") },
+					 { QStringLiteral("preview"), steamLoadingPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:steam-ready") },
+					 { QStringLiteral("plainText"), QStringLiteral("Steam ready") },
+					 { QStringLiteral("preview"), steamReadyPreview } } },
 				 true),
-			 4);
+			 6);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 548);
@@ -623,6 +649,24 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(estimateModel.get(3).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 838);
+	QCOMPARE(estimateModel.get(4).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 741);
+	const QVariantMap normalizedSteamLoading =
+		estimateModel.get(4).value(QStringLiteral("preview")).toMap();
+	QVERIFY(normalizedSteamLoading.value(QStringLiteral("loading")).toBool());
+	QCOMPARE(normalizedSteamLoading.value(QStringLiteral("state")).toString(),
+			 QStringLiteral("loading"));
+	QCOMPARE(estimateModel.get(5).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 741);
+	const QVariantMap normalizedSteamReady =
+		estimateModel.get(5).value(QStringLiteral("preview")).toMap();
+	QCOMPARE(normalizedSteamReady.value(QStringLiteral("state")).toString(),
+			 QStringLiteral("ready"));
+	QCOMPARE(normalizedSteamReady.value(QStringLiteral("metadata")).toMap().value(
+				 QStringLiteral("provider")).toString(),
+			 QStringLiteral("steam"));
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {

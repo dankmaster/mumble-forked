@@ -180,6 +180,8 @@ Rectangle {
 	readonly property string safeEmbedUrl: safeProviderEmbedUrl(preview ? preview.embedUrl : "")
 	readonly property string safeEmbedProvider: safeText(preview ? preview.embedKind : "", 64)
 	readonly property string normalizedEmbedProvider: safeEmbedProvider.toLowerCase()
+	readonly property var providerDetailsFallbackPresentation: ProviderPresentation.resolve(
+		normalizedEmbedProvider || inferredGenericSocialProviderToken || providerLabel)
 	readonly property string normalizedEmbedAspect: normalizeEmbedAspect(preview ? preview.embedAspect : "")
 	readonly property string contentBranch: safeText(preview && preview.metadata
 		? preview.metadata.contentBranch : "", 64).toLowerCase()
@@ -2303,27 +2305,65 @@ Rectangle {
 			}
 		}
 
-		ProviderDetails {
+		Loader {
 			id: providerDetails
+			objectName: "richPreviewProviderDetailsLoader"
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? implicitHeight : 0
-			height: visible ? implicitHeight : 0
+			readonly property real loadedImplicitHeight:
+				ready && item ? item.implicitHeight : 0
+			Layout.preferredHeight: visible ? loadedImplicitHeight : 0
+			height: visible ? loadedImplicitHeight : 0
 			visible: !root.providerOwnsDetails && !root.typedDocumentActive
-			metadata: root.providerMetadata
-			previewKind: root.preview ? String(root.preview.kind || "") : ""
-			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""
-			previewTitle: root.displayTitle
-			previewSubtitle: root.metadataLine
-			previewDescription: root.sanitizedDescription
-			previewImageSource: root.mediaRequiresReveal ? "" : root.imageSource
-			expanded: root.expanded
-			steamMediaItems: root.mediaItems
-			steamMediaIndex: root.selectedMediaIndex
-			onExternalOpenRequested: (url) => root.externalOpenRequested(url)
-			onSteamMediaSelectionRequested: (index) => root.selectedMediaIndex = index
-			onSteamMediaOpenRequested: (index) => {
-				root.selectedMediaIndex = index
-				currentMediaRequestTimer.restart()
+			// A cold provider-owned or typed-document card never uses this tree.
+			// Once a visible details surface has loaded, retain the same item across
+			// temporary ownership changes so playback cannot churn its identity.
+			active: visible || item !== null
+			asynchronous: true
+			readonly property bool ready: status === Loader.Ready && !!item
+			readonly property bool presentationReady: !visible || status === Loader.Error
+				|| (ready && item.visible === visible && item.presentationReady)
+			readonly property bool ownsDescription: root.providerOwnsDetails
+				|| (ready && item.ownsDescription)
+			readonly property bool canExpand: ready && item.canExpand
+			readonly property string providerToken: ready
+				? String(item.providerToken || "")
+				: String(root.providerDetailsFallbackPresentation.token || "")
+			readonly property color providerAccent: ready
+				? item.providerAccent
+				: root.providerDetailsFallbackPresentation.accent || Theme.accent
+			readonly property color providerForeground: ready
+				? item.providerForeground : Theme.contrastText(providerAccent)
+			readonly property string providerMark: ready
+				? String(item.providerMark || "")
+				: String(root.providerDetailsFallbackPresentation.mark || "")
+			readonly property bool ownsHeader: root.providerOwnsDetails
+				|| (ready && item.ownsHeader)
+			readonly property bool ownsMediaGallery: ready && item.ownsMediaGallery
+			sourceComponent: Component {
+				ProviderDetails {
+					width: providerDetails.width
+					// Let the outer asynchronous incubation finish before the inner
+					// provider-specific shell starts its own selected presentation.
+					visible: providerDetails.ready && providerDetails.visible
+					metadata: root.providerMetadata
+					previewKind: root.preview ? String(root.preview.kind || "") : ""
+					providerHint: root.preview
+						? String(root.preview.embedKind || root.providerLabel || "") : ""
+					previewTitle: root.displayTitle
+					previewSubtitle: root.metadataLine
+					previewDescription: root.sanitizedDescription
+					previewImageSource: root.mediaRequiresReveal ? "" : root.imageSource
+					expanded: root.expanded
+					steamMediaItems: root.mediaItems
+					steamMediaIndex: root.selectedMediaIndex
+					onExternalOpenRequested: (url) => root.externalOpenRequested(url)
+					onSteamMediaSelectionRequested: (index) =>
+						root.selectedMediaIndex = index
+					onSteamMediaOpenRequested: (index) => {
+						root.selectedMediaIndex = index
+						currentMediaRequestTimer.restart()
+					}
+				}
 			}
 		}
 

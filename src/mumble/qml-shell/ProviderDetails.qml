@@ -189,10 +189,15 @@ FocusScope {
 	]), 1024) || safeText(previewDescription, 1024) || qsTr("Search")
 	readonly property var googleTabs: [qsTr("All"), qsTr("Images"), qsTr("News"),
 		qsTr("Videos"), qsTr("Shopping")]
-	readonly property bool presentationReady: !detailsLoader.active
-		|| detailsLoader.status === Loader.Error
-		|| (detailsLoader.item && detailsLoader.item.selectedPresentationError)
-		|| detailsLoader.presentationSettled
+	readonly property bool presentationRequired: visible && hasDetails
+	// When the outer asynchronous ProviderDetails Loader becomes Ready, this
+	// item's visible binding and the inner Loader's active binding propagate in
+	// separate turns. Do not report a transient ready state between those turns.
+	readonly property bool presentationReady: !presentationRequired
+		|| (detailsLoader.active
+			&& (detailsLoader.status === Loader.Error
+				|| (detailsLoader.item && detailsLoader.item.selectedPresentationError)
+				|| detailsLoader.presentationSettled))
 
 	signal externalOpenRequested(string url)
 	signal steamMediaSelectionRequested(int index)

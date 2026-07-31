@@ -27,6 +27,7 @@
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QUuid>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtGui/QAction>
@@ -1509,6 +1510,17 @@ namespace {
 		// These values mirror Main.qml's lightweight card geometry at the normal
 		// 580 px rich-card width without copying the full preview map into QML.
 		if (!preview.isEmpty()) {
+			const QVariantMap metadata = preview.value(QStringLiteral("metadata")).toMap();
+			const QString provider =
+				metadata.value(QStringLiteral("provider")).toString().trimmed().toLower();
+			const QUrl previewUrl(preview.value(QStringLiteral("url")).toString());
+			const bool steamPreview = provider == QLatin1String("steam")
+				|| previewUrl.host().compare(QLatin1String("store.steampowered.com"),
+										 Qt::CaseInsensitive) == 0;
+			// Steam's provider details expand the complete production card to this
+			// measured height. Reserve it for both the URL-only loading DTO and the
+			// hydrated metadata/media DTO so the handoff cannot move the viewport.
+			if (steamPreview) return 741;
 			const QString aspect =
 				preview.value(QStringLiteral("embedAspect")).toString().trimmed().toLower();
 			const bool hasMedia = !preview.value(QStringLiteral("mediaItems")).toList().isEmpty()

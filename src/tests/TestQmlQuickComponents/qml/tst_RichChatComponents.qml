@@ -45,6 +45,22 @@ TestCase {
         })
     }
 
+	Component {
+		id: isolatedPreviewLoaderComponent
+
+		Loader {
+			width: 720
+			height: 180
+			visible: true
+		}
+	}
+
+	Component {
+		id: materializationSignalSpyComponent
+
+		SignalSpy {}
+	}
+
     Loader {
         id: attachmentLoader
         anchors.top: previewLoader.bottom
@@ -305,14 +321,198 @@ TestCase {
 		}]
     }
 
-	function waitForProviderPresentation(card, expectedObjectName) {
-		const details = findChild(card, "providerDetails")
-		verify(details !== null)
+	function waitForProviderPresentation(card, expectedObjectName, expectedProviderToken) {
+		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
+		verify(detailsLoader !== null)
+		let details = null
+		tryVerify(function() {
+			details = detailsLoader.item
+			return detailsLoader.status === Loader.Ready && details !== null
+		}, 5000, "Asynchronous ProviderDetails did not materialize")
 		tryVerify(function() {
 			return details.presentationReady
 				&& (!expectedObjectName || findChild(card, expectedObjectName) !== null)
+				&& (!expectedProviderToken
+					|| details.providerToken === expectedProviderToken)
 		})
 		return details
+	}
+
+	function test_cold_hidden_provider_details_do_not_incubate_unused_trees() {
+		const spotifyLoader = createTemporaryObject(isolatedPreviewLoaderComponent, testCase)
+		verify(spotifyLoader !== null)
+		spotifyLoader.setSource("qrc:/qml-shell/RichPreviewCard.qml", {
+			"previewIdentity": "isolated:spotify-cold",
+			"preview": {
+				"state": "ready",
+				"title": "Cold Spotify card",
+				"url": "https://open.spotify.com/album/example",
+				"embedUrl": "https://open.spotify.com/embed/album/example",
+				"embedKind": "spotify",
+				"embedAspect": "compact-audio",
+				"metadata": { "previewProvider": "spotify" }
+			}
+		})
+		tryVerify(function() {
+			return spotifyLoader.status === Loader.Ready && spotifyLoader.item !== null
+		})
+		const spotifyCard = spotifyLoader.item
+		const spotifyDetailsLoader = findChild(
+			spotifyCard, "richPreviewProviderDetailsLoader")
+		verify(spotifyDetailsLoader !== null)
+		tryCompare(spotifyCard, "providerOwnsDetails", true)
+		compare(spotifyDetailsLoader.visible, false)
+		compare(spotifyDetailsLoader.active, false)
+		compare(spotifyDetailsLoader.status, Loader.Null)
+		compare(spotifyDetailsLoader.item, null)
+		compare(spotifyDetailsLoader.providerToken, "spotify")
+		compare(findChild(spotifyCard, "previewGenericHeader").visible, false)
+		compare(findChild(spotifyCard, "previewDescription").visible, false)
+		compare(spotifyCard.materializationSettled, true)
+
+		const soundcloudLoader = createTemporaryObject(
+			isolatedPreviewLoaderComponent, testCase)
+		verify(soundcloudLoader !== null)
+		soundcloudLoader.setSource("qrc:/qml-shell/RichPreviewCard.qml", {
+			"previewIdentity": "isolated:soundcloud-cold",
+			"preview": {
+				"state": "ready",
+				"title": "Cold SoundCloud card",
+				"description": "The provider surface owns this audio summary.",
+				"url": "https://soundcloud.com/example/track",
+				"embedUrl": "https://w.soundcloud.com/player/?url=example",
+				"embedKind": "soundcloud",
+				"embedAspect": "audio",
+				"metadata": {
+					"previewProvider": "soundcloud",
+					"audioProvider": "SoundCloud",
+					"audioProgram": "Cold SoundCloud card"
+				}
+			}
+		})
+		tryVerify(function() {
+			return soundcloudLoader.status === Loader.Ready
+				&& soundcloudLoader.item !== null
+		})
+		const soundcloudCard = soundcloudLoader.item
+		const soundcloudDetailsLoader = findChild(
+			soundcloudCard, "richPreviewProviderDetailsLoader")
+		verify(soundcloudDetailsLoader !== null)
+		tryCompare(soundcloudCard, "providerOwnsDetails", true)
+		compare(soundcloudDetailsLoader.visible, false)
+		compare(soundcloudDetailsLoader.active, false)
+		compare(soundcloudDetailsLoader.status, Loader.Null)
+		compare(soundcloudDetailsLoader.item, null)
+		compare(soundcloudDetailsLoader.providerToken, "soundcloud")
+		compare(findChild(soundcloudCard, "previewGenericHeader").visible, false)
+		compare(findChild(soundcloudCard, "previewDescription").visible, false)
+		compare(soundcloudCard.materializationSettled, true)
+
+		const steamLoader = createTemporaryObject(isolatedPreviewLoaderComponent, testCase)
+		verify(steamLoader !== null)
+		steamLoader.setSource("qrc:/qml-shell/RichPreviewCard.qml", {
+			"previewIdentity": "isolated:typed-steam-cold",
+			"preview": {
+				"state": "ready",
+				"title": "Cold typed Steam card",
+				"url": "https://store.steampowered.com/app/730",
+				"metadata": { "provider": "steam" },
+				"document": {
+					"schemaVersion": 1,
+					"commonPresentation": true,
+					"presentation": "game",
+					"provider": {
+						"id": "steam",
+						"label": "Steam",
+						"host": "store.steampowered.com"
+					},
+					"source": {
+						"url": "https://store.steampowered.com/app/730",
+						"displayUrl": "https://store.steampowered.com/app/730"
+					},
+					"content": { "type": "game", "title": "Cold typed Steam card" },
+					"thread": {},
+					"facts": [],
+					"media": [],
+					"playback": { "mode": "none", "provider": "steam" },
+					"state": { "status": "ready" }
+				}
+			}
+		})
+		tryVerify(function() {
+			return steamLoader.status === Loader.Ready && steamLoader.item !== null
+		})
+		const steamCard = steamLoader.item
+		const steamDetailsLoader = findChild(
+			steamCard, "richPreviewProviderDetailsLoader")
+		verify(steamDetailsLoader !== null)
+		tryCompare(steamCard, "typedDocumentActive", true)
+		compare(steamDetailsLoader.visible, false)
+		compare(steamDetailsLoader.active, false)
+		compare(steamDetailsLoader.status, Loader.Null)
+		compare(steamDetailsLoader.item, null)
+		compare(steamDetailsLoader.providerToken, "steam")
+		compare(steamCard.materializationSettled, true)
+	}
+
+	function test_visible_provider_settles_once_and_retains_its_item_when_hidden() {
+		const isolatedLoader = createTemporaryObject(
+			isolatedPreviewLoaderComponent, testCase)
+		verify(isolatedLoader !== null)
+		isolatedLoader.setSource("qrc:/qml-shell/RichPreviewCard.qml", {
+			"previewIdentity": "isolated:inet-visible",
+			"preview": {
+				"state": "ready",
+				"kind": "product",
+				"title": "Visible provider card",
+				"url": "https://www.inet.se/produkt/example",
+				"metadata": {
+					"provider": "inet",
+					"previewKind": "product",
+					"productTitle": "Visible provider card",
+					"productPrice": "1 499 kr"
+				}
+			}
+		})
+		tryVerify(function() {
+			return isolatedLoader.status === Loader.Ready && isolatedLoader.item !== null
+		})
+		const card = isolatedLoader.item
+		compare(card.materializationSettled, false)
+		const settledSpy = createTemporaryObject(
+			materializationSignalSpyComponent, testCase, {
+				"target": card,
+				"signalName": "materializationSettledChanged"
+			})
+		verify(settledSpy !== null)
+
+		const details = waitForProviderPresentation(
+			card, "providerCommerceCard", "inet")
+		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
+		verify(detailsLoader !== null)
+		tryCompare(card, "materializationSettled", true)
+		compare(settledSpy.count, 1,
+			"Cold provider materialization must not report a transient ready state")
+		compare(detailsLoader.item, details)
+
+		card.preview = {
+			"state": "ready",
+			"title": "Retained Spotify card",
+			"url": "https://open.spotify.com/album/example",
+			"embedUrl": "https://open.spotify.com/embed/album/example",
+			"embedKind": "spotify",
+			"embedAspect": "compact-audio",
+			"metadata": { "previewProvider": "spotify" }
+		}
+		card.previewIdentity = "isolated:spotify-retained"
+		tryCompare(card, "providerOwnsDetails", true)
+		tryCompare(detailsLoader, "visible", false)
+		tryCompare(details, "visible", false)
+		compare(detailsLoader.active, true)
+		compare(detailsLoader.status, Loader.Ready)
+		compare(detailsLoader.item, details)
+		compare(detailsLoader.providerToken, "spotify")
+		compare(card.materializationSettled, true)
 	}
 
     function test_sender_content_is_escaped_and_links_are_allowlisted() {
@@ -745,7 +945,8 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:expanded-product-insets"
-		const details = waitForProviderPresentation(card, "providerCommerceCard")
+		const details = waitForProviderPresentation(
+			card, "providerCommerceCard", "inet")
 		const content = findChild(card, "previewContent")
 		const header = findChild(card, "previewGenericHeader")
 		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
@@ -793,7 +994,8 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:article-tldr"
-		waitForProviderPresentation(card, "providerArticleCard")
+		waitForProviderPresentation(
+			card, "providerArticleCard", "goteborgsposten")
 
 		const header = findChild(card, "previewGenericHeader")
 		const article = findChild(card, "providerArticleCard")
@@ -843,7 +1045,8 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:blocket-gallery"
-		waitForProviderPresentation(card, "providerCommerceCard")
+		waitForProviderPresentation(
+			card, "providerCommerceCard", "blocket")
 
 		const gallery = findChild(card, "providerCommerceCard")
 		const hero = findChild(card, "providerCommerceHero")
@@ -894,19 +1097,25 @@ TestCase {
 		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
 		const content = findChild(card, "previewContent")
 		const actionFlow = findChild(card, "previewActionFlow")
-		const details = findChild(card, "providerDetails")
+		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
+		const genericHeader = findChild(card, "previewGenericHeader")
+		const genericDescription = findChild(card, "previewDescription")
 		const closeButton = findChild(card, "previewInlineCloseButton")
 		const originalButton = findChild(card, "previewEmbedOriginalButton")
 		verify(panel !== null && mediaSlot !== null && content !== null && actionFlow !== null
-			&& details !== null && closeButton !== null && originalButton !== null)
+			&& detailsLoader !== null && genericHeader !== null && genericDescription !== null
+			&& closeButton !== null && originalButton !== null)
+		compare(detailsLoader.asynchronous, true)
 		tryCompare(card, "providerOwnsDetails", true)
-		compare(details.visible, false)
+		compare(detailsLoader.visible, false)
+		compare(genericHeader.visible, false)
+		compare(genericDescription.visible, false)
 		const collapsedHeight = card.implicitHeight
 
 		inlineSession.active = true
 		tryCompare(card, "inlinePlaybackActive", true)
 		compare(card.inlineProviderOwnsDetails, true)
-		compare(details.visible, false)
+		compare(detailsLoader.visible, false)
 		tryVerify(function() {
 			return Math.abs(card.implicitHeight - collapsedHeight) <= 1
 		})
@@ -1924,9 +2133,7 @@ TestCase {
 		inlineSession.active = true
 		wait(0)
 
-		const details = findChild(card, "providerDetails")
-		verify(details !== null)
-		tryVerify(function() { return details.presentationReady })
+		const details = waitForProviderPresentation(card, "", "instagram")
 		compare(details.providerToken, "instagram")
 		compare(details.presentation, "identity")
 		verify(!card.inlineProviderOwnsDetails)
@@ -1972,7 +2179,7 @@ TestCase {
 		wait(0)
 
 		const loader = findChild(card, "previewInlineMediaLoader")
-		const details = findChild(card, "providerDetails")
+		const details = waitForProviderPresentation(card, "", "instagram")
 		const loadingSurface = findChild(card, "previewInlineAdapterLoadingSurface")
 		const loadingBusy = findChild(card, "previewInlineAdapterBusyIndicator")
 		verify(loader !== null && details !== null && loadingSurface !== null
@@ -2066,7 +2273,8 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:x-common-social-card"
-		const details = waitForProviderPresentation(card, "providerSocialPost")
+		const details = waitForProviderPresentation(
+			card, "providerSocialPost", "x")
 
 		const socialPost = findChild(card, "providerSocialPost")
 		const xCard = findChild(card, "providerXCard")
@@ -2144,8 +2352,9 @@ TestCase {
 		const sourceLabel = findChild(card, "embedSourceUrl")
 		const body = findChild(card, "previewDocumentBody")
 		const genericHeader = findChild(card, "previewGenericHeader")
-		const details = findChild(card, "providerDetails")
+		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
 		verify(sourceLink !== null && sourceLink.visible)
+		verify(detailsLoader !== null)
 		verify(sourceLabel !== null && sourceLabel.visible)
 		compare(sourceLabel.text, sourceUrl)
 		compare(sourceLabel.elide, Text.ElideNone)
@@ -2158,7 +2367,7 @@ TestCase {
 		verify(sourceLabel.width <= sourceLink.width)
 		verify(body !== null && body.visible)
 		compare(genericHeader.visible, false)
-		compare(details.visible, false)
+		compare(detailsLoader.visible, false)
 		verify(findChild(card, "embedThreadContextItem_0") !== null)
 		verify(findChild(card, "embedThreadContextItem_1") !== null)
 		const parentMetrics = findChild(card, "embedThreadContextMetrics_0")
@@ -2242,14 +2451,15 @@ TestCase {
 		const gallery = findChild(card, "previewDocumentMediaGallery")
 		const thumbnailList = findChild(card, "embedDocumentMediaThumbnailList")
 		const sourceLabel = findChild(card, "embedSourceUrl")
-		const details = findChild(card, "providerDetails")
+		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
 		verify(gallery !== null && gallery.visible && thumbnailList !== null)
+		verify(detailsLoader !== null)
 		compare(thumbnailList.reuseItems, true)
 		compare(thumbnailList.cacheBuffer, 96)
 		compare(gallery.mediaItems.length, 2)
 		compare(card.mediaItems[1].url, "image://mumble/steam-cs2-shot-two?g=72")
 		compare(sourceLabel.text, sourceUrl)
-		compare(details.visible, false)
+		compare(detailsLoader.visible, false)
 		const first = findChild(card, "embedDocumentMediaThumbnail_0")
 		const second = findChild(card, "embedDocumentMediaThumbnail_1")
 		const previous = findChild(card, "embedDocumentPreviousMediaButton")
@@ -2672,7 +2882,7 @@ TestCase {
 		const providerBadge = findChild(card, "previewEmbedProviderBadge")
 		const stateBadge = findChild(card, "previewEmbedProviderState")
 		const posterScrim = findChild(card, "previewTwitchPosterScrim")
-		const details = findChild(card, "providerDetails")
+		const details = waitForProviderPresentation(card, "", "twitch")
 		verify(providerBadge === null && stateBadge === null && posterScrim === null)
 		verify(findChild(card, "previewTwitchPosterCopy") === null)
 		verify(details !== null)
@@ -3400,7 +3610,7 @@ TestCase {
 		tryVerify(function() { return chip.width > 0 && label.width > 0 })
 		verify(label.width + 0.5 >= label.implicitWidth,
 			"provider label width " + label.width + " clipped implicit width " + label.implicitWidth)
-		const details = findChild(card, "providerDetails")
+		const details = waitForProviderPresentation(card, "", "inet")
 		compare(String(label.color), String(details.providerForeground))
 		compare(String(chip.color), String(details.providerAccentSubtle))
 		compare(String(chip.border.color), String(details.providerAccentBorder))
@@ -3426,7 +3636,8 @@ TestCase {
 			card.previewIdentity = "message:generic-social:" + index
 			wait(0)
 
-			const details = waitForProviderPresentation(card, "providerSocialPost")
+			const details = waitForProviderPresentation(
+				card, "providerSocialPost", fixture.provider)
 			const socialPost = findChild(card, "providerSocialPost")
 			const genericHeader = findChild(card, "previewGenericHeader")
 			const providerChip = findChild(card, "previewProviderChip")
@@ -3467,7 +3678,8 @@ TestCase {
 		compare(card.providerLabel, "Steam")
 		const genericProviderLabel = findChild(card, "previewProviderLabel")
 		compare(genericProviderLabel.text, "STEAM")
-		const details = waitForProviderPresentation(card, "providerSteamCard")
+		const details = waitForProviderPresentation(
+			card, "providerSteamCard", "steam")
 		compare(details.providerToken, "steam")
 		compare(details.providerDisplayName, "Steam")
 		compare(details.ownsHeader, true)
@@ -3496,7 +3708,7 @@ TestCase {
 				"steamAppName": "Hades II", "steamPrice": "29,99 €" }
 		}
 		card.previewIdentity = "message:steam-gallery"
-		waitForProviderPresentation(card, "providerSteamCard")
+		waitForProviderPresentation(card, "providerSteamCard", "steam")
 		card.userExpanded = false
 		tryVerify(function() { return !card.expanded && card.implicitHeight > 0 })
 		previewLoader.height = Math.ceil(card.implicitHeight)
@@ -3543,7 +3755,7 @@ TestCase {
 				"steamHistoricalLowPrice": "19,99 EUR", "steamHistoricalLowShop": "Steam" }
 		}
 		card.previewIdentity = "message:steam-deal"
-		waitForProviderPresentation(card, "providerSteamCard")
+		waitForProviderPresentation(card, "providerSteamCard", "steam")
 		const deal = findChild(card, "providerSteamBestDeal")
 		verify(deal !== null)
 		tryCompare(deal, "visible", true)
@@ -3886,6 +4098,7 @@ TestCase {
 		const compactRevealSurface = findChild(card, "previewCompactRevealSurface")
 		const expandedRevealSurface = findChild(card, "previewExpandedRevealSurface")
 		const embedRevealSurface = findChild(card, "previewEmbedRevealSurface")
+		waitForProviderPresentation(card)
 		const providerWarning = findChild(card, "providerDetailsWarning")
 		verify(reveal !== null && reveal.visible)
 		verify(revealState !== null)
