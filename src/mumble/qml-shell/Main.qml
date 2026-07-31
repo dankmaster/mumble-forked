@@ -98,6 +98,8 @@ ApplicationWindow {
 	property int performanceChatPreviewLoadedCount: 0
 	property int performanceChatAttachmentLoadedCount: 0
 	property var performanceChatScrollDiagnosticsBefore: ({})
+	property var performanceChatScrollRetainedRichIds: ({})
+	property int performanceChatScrollRetainedRichResourceDropCount: 0
 	readonly property bool compactNavigation: width < 900
 	readonly property bool narrowShell: width < 600
 	readonly property string normalizedConnectionState: String(clientSession.connectionState || "").toLowerCase()
@@ -1757,10 +1759,17 @@ ApplicationWindow {
 		// Each step must move the real ListView by at least two logical pixels so
 		// the scene-graph cannot legitimately coalesce it into a no-op frame.
 		const loadedTravel = maximumY - minimumY
+		const availableUp = Math.max(0, timeline.contentY - minimumY)
+		const availableDown = Math.max(0, maximumY - timeline.contentY)
+		const maximumDirectionalTravel = Math.max(availableUp, availableDown)
+		const desiredGestureTravel = requestedSteps * 16
+		const minimumGestureTravel = Math.min(80, desiredGestureTravel)
 		const liveRangeUnavailable = fullRangeToStart === true
 			&& (timeline.count < 2 || loadedTravel < 8)
 		const fixtureRangeUnavailable = fullRangeToStart !== true
-			&& (timeline.count < 20 || loadedTravel < requestedSteps * 2)
+			&& (timeline.count < 2
+				|| maximumDirectionalTravel
+					< Math.max(requestedSteps * 2, minimumGestureTravel))
 		if (liveRangeUnavailable || fixtureRangeUnavailable)
 			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
@@ -1773,16 +1782,42 @@ ApplicationWindow {
 			// Model a sustained wheel/trackpad gesture, not a teleport through the
 			// entire history. Sixteen logical pixels per presented input mirrors a
 			// high-resolution wheel or trackpad gesture for the synthetic fixture.
-			const travelDistance = Math.min(maximumY - minimumY, requestedSteps * 16)
-			performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8
-				? Math.max(minimumY, performanceChatScrollStartY - travelDistance)
-				: Math.min(maximumY, performanceChatScrollStartY + travelDistance)
+			const travelDistance = Math.min(maximumDirectionalTravel,
+				desiredGestureTravel)
+			const scrollUp = availableUp >= travelDistance
+				&& (availableDown < travelDistance || availableUp >= availableDown)
+			performanceChatScrollTargetY = scrollUp
+				? performanceChatScrollStartY - travelDistance
+				: performanceChatScrollStartY + travelDistance
 		}
 		bottomFollowTimer.stop()
 		timeline.stickToBottom = false
 		timeline.releaseViewportAnchor()
 		timeline.releaseTopAnchor()
 		performanceChatScrollDiagnosticsBefore = timelineDelegateDiagnostics()
+		performanceChatScrollRetainedRichIds = ({})
+		performanceChatScrollRetainedRichResourceDropCount = 0
+		const retainedRichIds = ({})
+		const scrollDelta = performanceChatScrollTargetY - performanceChatScrollStartY
+		const children = timeline.contentItem ? timeline.contentItem.children : []
+		for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+			const item = children[childIndex]
+			if (!item || item.performanceTimelineDelegate !== true
+					|| item.accessibilityPooled === true
+					|| item.richResourcesRequired !== true
+					|| item.richResourcesActive !== true)
+				continue
+			const point = item.mapToItem(timeline, 0, 0)
+			const finalY = point.y - scrollDelta
+			const visibleNow = point.y + item.height > 0.5
+				&& point.y < timeline.height - 0.5
+			const visibleAtTarget = finalY + item.height > 0.5
+				&& finalY < timeline.height - 0.5
+			const retainedId = String(item.stableId || "")
+			if (visibleNow && visibleAtTarget && retainedId.length > 0)
+				retainedRichIds[retainedId] = true
+		}
+		performanceChatScrollRetainedRichIds = retainedRichIds
 		performanceChatScrollCompletedSteps = 0
 		performanceChatScrollTargetSteps = requestedSteps
 		performanceChatScrollFullRangeToStart = fullRangeToStart === true
@@ -1846,6 +1881,8 @@ ApplicationWindow {
 			+ (performanceChatScrollTargetY - performanceChatScrollStartY) * easedProgress
 		performanceChatScrollCompletedSteps = nextStep
 		return { "advanced": Math.abs(timeline.contentY - previousY) > 0.01,
+			"reachedTarget": Math.abs(timeline.contentY
+				- performanceChatScrollTargetY) <= 0.5,
 			"currentY": timeline.contentY, "completedSteps": performanceChatScrollCompletedSteps }
 	}
 
@@ -1898,6 +1935,8 @@ ApplicationWindow {
 				timeline.originY + timeline.contentHeight - timeline.height)
 			const firstVisible = timeline.firstVisibleMessageDelegate()
 			const visiblePresentation = timeline.visiblePresentationDiagnostics()
+			const pendingVisibleRichRecoveryCount =
+				timeline.pendingVisibleRichRecoveryCount()
 			const completedAt = timeline.scopePresentationCompletedAt > 0
 				? timeline.scopePresentationCompletedAt : Date.now()
 			const probeAnchor = timeline.historyLoadProbeAnchorState()
@@ -1930,8 +1969,10 @@ ApplicationWindow {
 				"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
 				"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
 				"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
+				"pendingVisibleHydrationCount":
+					timeline.pendingVisibleHydrationCount(),
 				"pendingVisibleRichRecoveryCount":
-					timeline.pendingVisibleRichRecoveryCount(),
+					pendingVisibleRichRecoveryCount,
 				"prependAnchorActive": timeline.prependAnchorActive,
 				"prependAnchorId": timeline.prependAnchorId,
 				"prependAnchorOffset": timeline.prependAnchorOffset,
@@ -1966,6 +2007,8 @@ ApplicationWindow {
 				"visiblePreviewReadyCount": visiblePresentation.previewReadyCount,
 				"visibleBlankPreviewSurfaceCount":
 					visiblePresentation.blankPreviewSurfaceCount,
+				"visibleInactiveRichResourceCount":
+					visiblePresentation.inactiveRichResourceCount,
 				"visibleRows": visiblePresentation.rows,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
@@ -1981,7 +2024,9 @@ ApplicationWindow {
 					&& !chatModel.appendPending && !chatModel.prependPending
 					&& (chatModel.count === 0
 						|| (visiblePresentation.visibleCount > 0
-							&& visiblePresentation.blankCount === 0))
+							&& visiblePresentation.blankCount === 0
+							&& visiblePresentation.inactiveRichResourceCount === 0
+							&& pendingVisibleRichRecoveryCount === 0))
 			}
 		} catch (error) {
 			return { "error": String(error), "settled": false }
@@ -2033,6 +2078,10 @@ ApplicationWindow {
 			"running": performanceChatScrollRunning,
 			"completedSteps": performanceChatScrollCompletedSteps,
 			"targetSteps": performanceChatScrollTargetSteps,
+			"retainedRichResourceIds":
+				Object.keys(performanceChatScrollRetainedRichIds || ({})),
+			"retainedRichResourceDropCount":
+				performanceChatScrollRetainedRichResourceDropCount,
 			"delegateDiagnosticsBefore": beforeDiagnostics,
 			"delegateDiagnostics": currentDiagnostics,
 			"delegateDiagnosticsDelta": {
@@ -3535,6 +3584,26 @@ ApplicationWindow {
 						return pending
 					}
 
+					function pendingVisibleHydrationCount() {
+						const children = contentItem ? contentItem.children : []
+						let pending = 0
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (item && item.contentNeedsHydration === true
+									&& item.inVisibleViewport === true
+									&& item.accessibilityPooled !== true)
+								++pending
+						}
+						return pending
+					}
+
+					function richResourceRecoveryPending(item) {
+						return !!item
+							&& item.richResourcesRequired === true
+							&& item.contentNeedsHydration !== true
+							&& item.richResourcesActive !== true
+					}
+
 					function pendingVisibleRichRecoveryCount() {
 						const children = contentItem ? contentItem.children : []
 						let pending = 0
@@ -3548,7 +3617,8 @@ ApplicationWindow {
 								continue
 							if (item.messageRowReady !== true
 									|| item.previewPresentationReady !== true
-									|| item.richResourceActivationPending === true)
+									|| item.richResourceActivationPending === true
+									|| richResourceRecoveryPending(item))
 								++pending
 						}
 						return pending
@@ -3762,6 +3832,7 @@ ApplicationWindow {
 							"rowLoaderReadyCount": 0,
 							"previewReadyCount": 0,
 							"blankPreviewSurfaceCount": 0,
+							"inactiveRichResourceCount": 0,
 							"rows": []
 						}
 
@@ -3788,6 +3859,10 @@ ApplicationWindow {
 								&& previewSurfaceState === "blank"
 							if (blankPreviewSurface)
 								++diagnostics.blankPreviewSurfaceCount
+							const inactiveRichResources =
+								timeline.richResourceRecoveryPending(item)
+							if (inactiveRichResources)
+								++diagnostics.inactiveRichResourceCount
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
 								"title": String(item.title || ""),
@@ -3811,6 +3886,17 @@ ApplicationWindow {
 								"previewSurfaceState": previewSurfaceState,
 								"previewMaterializationWatchdogReady":
 									item.previewMaterializationWatchdogReady === true,
+								"previewMaterializationWatchdogRunning":
+									item.previewMaterializationWatchdogRunning === true,
+								"previewMaterializationWatchdogElapsedMs":
+									item.previewMaterializationWatchdogStartedAt > 0
+										? Math.max(0, Date.now()
+											- item.previewMaterializationWatchdogStartedAt) : 0,
+								"richResourcesRequired": item.richResourcesRequired === true,
+								"richResourcesActive": item.richResourcesActive === true,
+								"richResourceActivationPending":
+									item.richResourceActivationPending === true,
+								"inactiveRichResources": inactiveRichResources,
 								"blankPreviewSurface": blankPreviewSurface
 							})
 							if (item.lightweightDeferredPresentation === true) {
@@ -3858,6 +3944,7 @@ ApplicationWindow {
 							&& diagnostics.fullMessageCount === diagnostics.visibleCount
 							&& diagnostics.deferredSummaryCount === 0
 							&& diagnostics.blankCount === 0
+							&& diagnostics.inactiveRichResourceCount === 0
 					}
 
 					function historyLoadProbeAnchorState() {
@@ -3980,6 +4067,12 @@ ApplicationWindow {
 							// release posters, animations and provider players here; tearing
 							// down every Loader synchronously creates its own scroll-start
 							// hitch. Pooled/reused delegates still retire the complete tree.
+							// Already-painted visible media remains active through a shallow
+							// wheel gesture. Clearing it here paints a black card and makes
+							// renderActive=false close or detach an active inline player.
+							// A retained row suspends only when it actually leaves the viewport.
+							if (item.inVisibleViewport === true)
+								continue
 							item.suspendRichResourcesForScroll()
 						}
 					}
@@ -3996,7 +4089,8 @@ ApplicationWindow {
 									|| item.lightweightDeferredPresentation === true
 									|| (item.richLoaderSuspended !== true
 										&& item.messageRowReady === true
-										&& item.previewPresentationReady === true))
+										&& item.previewPresentationReady === true
+										&& !richResourceRecoveryPending(item)))
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length === 0)
@@ -5171,6 +5265,10 @@ ApplicationWindow {
 									? item.richResourceActivationPending : false
 								readonly property bool previewMaterializationWatchdogReady: item
 									? item.previewMaterializationWatchdogReady : false
+								readonly property bool previewMaterializationWatchdogRunning: item
+									? item.previewMaterializationWatchdogRunning : false
+								readonly property double previewMaterializationWatchdogStartedAt: item
+									? item.previewMaterializationWatchdogStartedAt : 0
 								readonly property bool messageRowReady: item
 									? item.messageRowReady : false
 								readonly property bool messageRowMaterialized: item
@@ -5418,6 +5516,9 @@ ApplicationWindow {
 						// pathological provider document must not own the global preview
 						// token forever once a branded non-blank card surface is visible.
 						property bool previewMaterializationWatchdogReady: false
+						property double previewMaterializationWatchdogStartedAt: 0
+						readonly property bool previewMaterializationWatchdogRunning:
+							previewMaterializationWatchdogTimer.running
 						property bool richResourceActivationQueued: false
 						readonly property bool richResourceActivationPending:
 							richResourceActivationQueued
@@ -5452,8 +5553,23 @@ ApplicationWindow {
 								|| messagePresentationReadyLatched)
 						readonly property bool messageContentLoaderReady:
 							messageRowLoader.status === Loader.Ready
-						readonly property bool richResourcesRequired: hasPreviewContent
+						// A component-level preview error is a terminal branded
+						// "unavailable" surface, not a resource that can ever be
+						// reactivated. Other rich content in the same message still
+						// owns the normal resource lifecycle.
+						readonly property bool richResourcesRequired:
+							(hasPreviewContent && !previewLoaderFailed)
 							|| hasAttachmentContent || hasInlineImageContent
+						readonly property bool richResourceActivationReady:
+							!backendContentNeedsHydration
+							&& (!hasPreviewContent || previewLoaderFailed
+								|| (previewMaterializationAdmitted
+									&& messageRowLoader.item
+									&& messageRowLoader.item.previewLoader
+									&& messageRowLoader.item.previewLoader.status
+										=== Loader.Ready
+									&& messageRowLoader.item.previewLoader.item))
+						onRichResourcesRequiredChanged: updateRichResourceActivity()
 						onPerformancePreviewSurfaceStateChanged: {
 							if (performancePreviewSurfaceState === "blank"
 									&& previewMaterializationWatchdogReady) {
@@ -5465,6 +5581,7 @@ ApplicationWindow {
 						onCurrentMessagePresentationReadyChanged: {
 							if (currentMessagePresentationReady) {
 								previewMaterializationWatchdogTimer.stop()
+								previewMaterializationWatchdogStartedAt = 0
 								messagePresentationReadyLatched = true
 								completeRichLoaderResumeWhenReady()
 							}
@@ -5472,6 +5589,7 @@ ApplicationWindow {
 						function resetPreviewMaterializationWatchdog() {
 							previewMaterializationWatchdogTimer.stop()
 							previewMaterializationWatchdogReady = false
+							previewMaterializationWatchdogStartedAt = 0
 						}
 						function armPreviewMaterializationWatchdog() {
 							const row = messageRowLoader.item
@@ -5484,10 +5602,13 @@ ApplicationWindow {
 									|| previewMaterializationWatchdogReady
 									|| performancePreviewSurfaceState === "blank") {
 								previewMaterializationWatchdogTimer.stop()
+								previewMaterializationWatchdogStartedAt = 0
 								return
 							}
-							if (!previewMaterializationWatchdogTimer.running)
+							if (!previewMaterializationWatchdogTimer.running) {
+								previewMaterializationWatchdogStartedAt = Date.now()
 								previewMaterializationWatchdogTimer.start()
+							}
 						}
 						function suspendRichResourcesForScroll() {
 							resetPreviewMaterializationWatchdog()
@@ -5500,12 +5621,8 @@ ApplicationWindow {
 							if (!messageRowReady || !previewPresentationReady)
 								return
 							timeline.completeDeferredMaterialization(stableId)
-							const previewLoader = messageRowLoader.item
-								? messageRowLoader.item.previewLoader : null
-							if (hasPreviewContent && !previewNeedsHydration
-									&& !richResourcesActive && previewLoader
-									&& previewLoader.status === Loader.Ready
-									&& previewLoader.item) {
+							if (richResourcesRequired && richResourceActivationReady
+									&& !richResourcesActive) {
 								scheduleRichResourceActivation()
 								// Keep the single global materialization token through
 								// the first provider-resource activation and polish window.
@@ -5536,8 +5653,17 @@ ApplicationWindow {
 						readonly property bool inVisibleViewport:
 							asyncMessageDelegate.inVisibleViewport
 						property bool richResourcesActive: false
+						onRichResourcesActiveChanged: {
+							const retainedId = String(stableId || "")
+							if (!richResourcesActive && timeline.richScrollInProgress
+									&& root.performanceChatScrollRetainedRichIds[
+										retainedId] === true)
+								++root.performanceChatScrollRetainedRichResourceDropCount
+						}
 						function scheduleRichResourceActivation() {
 							if (richResourcesActive || richResourceActivationQueued
+									|| !richResourcesRequired
+									|| !richResourceActivationReady
 									|| accessibilityPooled || !inHydrationWindow
 									|| timeline.richScrollInProgress
 									|| (timeline.scopePresentationPending
@@ -5548,7 +5674,7 @@ ApplicationWindow {
 							richResourceActivationTimer.restart()
 						}
 						function updateRichResourceActivity() {
-							if (accessibilityPooled) {
+							if (accessibilityPooled || !richResourcesRequired) {
 								richResourceActivationTimer.stop()
 								richResourceActivationSettleTimer.stop()
 								richResourceActivationQueued = false
@@ -5669,6 +5795,7 @@ ApplicationWindow {
 										|| messageDelegate.performancePreviewSurfaceState === "blank")
 									return
 								messageDelegate.previewMaterializationWatchdogReady = true
+								messageDelegate.previewMaterializationWatchdogStartedAt = 0
 								messageDelegate.completeRichLoaderResumeWhenReady()
 							}
 						}
@@ -5767,7 +5894,11 @@ ApplicationWindow {
 								timeline.scheduleRichContentResume()
 							}
 						}
-						onContentNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
+						onContentNeedsHydrationChanged: {
+							requestPreviewHydrationIfNeeded()
+							if (!contentNeedsHydration)
+								timeline.scheduleRichContentResume()
+						}
 						onInHydrationWindowChanged: {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
@@ -5787,8 +5918,11 @@ ApplicationWindow {
 									// offscreen asynchronous Loader can keep incubating
 									// while the next visible preview owns the token.
 									previewMaterializationAdmitted = false
-									suspendRichResourcesForScroll()
 								}
+								// Scroll-start preserves already-painted visible media. Once
+								// the row actually leaves the viewport it is safe to release
+								// the poster/player even when it did not own the global token.
+								suspendRichResourcesForScroll()
 							} else {
 								timeline.scheduleRichContentResume()
 							}
@@ -6671,6 +6805,7 @@ ApplicationWindow {
 									enabled: !!target
 									ignoreUnknownSignals: true
 									function onMaterializationSettledChanged() {
+										messageDelegate.armPreviewMaterializationWatchdog()
 										messageDelegate.completeRichLoaderResumeWhenReady()
 									}
 								}

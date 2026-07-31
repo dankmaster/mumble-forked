@@ -5629,11 +5629,13 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			m_chatPerformanceWorkload.liveMode = true;
 			m_chatPerformanceWorkload.targetSteps =
 				qBound(1, request.value(QStringLiteral("stepCount"), 240).toInt(), 1000);
+			const bool fullRangeToStart =
+				request.value(QStringLiteral("fullRangeToStart"), true).toBool();
 			QVariant started;
 			if (!QMetaObject::invokeMethod(host->window(), "preparePerformanceChatScrollWorkload",
 					Q_RETURN_ARG(QVariant, started),
 					Q_ARG(QVariant, m_chatPerformanceWorkload.targetSteps),
-					Q_ARG(QVariant, true))) {
+					Q_ARG(QVariant, fullRangeToStart))) {
 				m_chatPerformanceWorkload = {};
 				return errorResponse(tr("The Qt Quick root does not expose the live chat-scroll workload."));
 			}
@@ -5653,6 +5655,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			QVariantMap response = okResponse();
 			response.insert(QStringLiteral("running"), true);
 			response.insert(QStringLiteral("targetSteps"), m_chatPerformanceWorkload.targetSteps);
+			response.insert(QStringLiteral("fullRangeToStart"), fullRangeToStart);
 			response.insert(QStringLiteral("scroll"), startedState);
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatScrollStatus")) {

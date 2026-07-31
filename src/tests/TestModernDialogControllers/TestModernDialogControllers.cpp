@@ -2773,6 +2773,7 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 	QVERIFY(automationSource.contains(QStringLiteral("advanceTalkPerformanceWorkload")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceChatScrollRun")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceLiveChatScrollRun")));
+	QVERIFY(automationSource.contains(QStringLiteral("request.value(QStringLiteral(\"fullRangeToStart\"), true)")));
 	QVERIFY(automationSource.contains(QStringLiteral("advanceChatPerformanceWorkload")));
 	QVERIFY(automationSource.contains(QStringLiteral("&QQuickWindow::afterAnimating")));
 	QVERIFY(automationSource.contains(QStringLiteral("m_chatPerformanceWorkload.animationConnection")));
@@ -2785,6 +2786,10 @@ void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterm
 		QStringLiteral("function preparePerformanceChatScrollWorkload(stepCount, fullRangeToStart)")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("performanceChatScrollTargetY = minimumY")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("function advancePerformanceChatScrollWorkload(step, totalSteps)")));
+	QVERIFY(mainQmlSource.contains(
+		QStringLiteral("\"reachedTarget\": Math.abs(timeline.contentY")));
+	QVERIFY(mainQmlSource.contains(
+		QStringLiteral("- performanceChatScrollTargetY) <= 0.5")));
 	QVERIFY(mainQmlSource.contains(QStringLiteral("timeline.contentY = performanceChatScrollStartY")));
 	const qsizetype historyProbeStart =
 		mainQmlSource.indexOf(QStringLiteral("function prepareHistoryLoadPerformanceProbe()"));

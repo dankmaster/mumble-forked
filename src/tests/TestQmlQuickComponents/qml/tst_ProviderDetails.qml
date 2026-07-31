@@ -23,6 +23,13 @@ TestCase {
 		})
 	}
 
+	Component {
+		id: isolatedDetailsLoaderComponent
+		Loader {
+			width: 680
+		}
+	}
+
 	function details() {
 		tryVerify(function() { return detailsLoader.item !== null })
 		tryVerify(function() { return detailsLoader.item.presentationReady })
@@ -112,7 +119,35 @@ TestCase {
 		item.previewImageSource = ""
 		item.expanded = expanded === undefined ? true : expanded
 		wait(0)
+		tryVerify(function() { return item.presentationReady })
 		return item
+	}
+
+	function selectedPresentationLoader(item) {
+		const loader = findChild(item, "providerSelectedPresentationLoader")
+		verify(loader !== null)
+		return loader
+	}
+
+	function verifyOnlyPresentationInstantiated(item, expectedObjectName) {
+		const loader = selectedPresentationLoader(item)
+		tryVerify(function() {
+			return loader.status === Loader.Ready && loader.item !== null
+				&& loader.item.objectName === expectedObjectName
+		})
+		const presentationRoots = [
+			"providerArticleCard", "providerCommerceCard", "providerSteamCard",
+			"providerGoogleSearch", "providerFlashbackThread", "providerSocialPost",
+			"providerInstagramPost", "providerGitHubRepository", "providerTwitchStream",
+			"providerGenericDetailsPresentation"
+		]
+		for (let index = 0; index < presentationRoots.length; ++index) {
+			const objectName = presentationRoots[index]
+			const expectedCount = objectName === expectedObjectName ? 1 : 0
+			compare(findChild(item, objectName) !== null ? 1 : 0, expectedCount,
+				objectName + " must " + (expectedCount > 0 ? "" : "not ")
+					+ "be instantiated for " + expectedObjectName)
+		}
 	}
 
 	function exposedProviderGroupingCount(item) {
@@ -299,8 +334,8 @@ TestCase {
 		compare(item.presentation, "socialPost")
 		verify(findChild(item, "providerSocialPost").visible)
 		compare(findChild(item, "providerSocialPostText").text, "Post")
-		compare(findChild(item, "providerIdentity").visible, false)
-		compare(findChild(item, "providerDetailsStats").visible, false)
+		compare(findChild(item, "providerIdentity"), null)
+		compare(findChild(item, "providerDetailsStats"), null)
 
 		item = setFixture({
 			"provider": "instagram", "previewKind": "instagram",
@@ -313,7 +348,7 @@ TestCase {
 		verify(findChild(item, "providerInstagramPost").visible)
 		compare(findChild(item, "providerInstagramCaption").text,
 			"Stable scrolling with bounded delegates.")
-		compare(findChild(item, "providerIdentity").visible, false)
+		compare(findChild(item, "providerIdentity"), null)
 
 		item = setFixture({
 			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
@@ -325,7 +360,7 @@ TestCase {
 		verify(findChild(item, "providerTwitchStream").visible)
 		compare(findChild(item, "providerTwitchState").visible, true)
 		compare(findChild(item, "providerTwitchAudience").text, "1.8K watching now")
-		compare(findChild(item, "providerIdentity").visible, false)
+		compare(findChild(item, "providerIdentity"), null)
 	}
 
 	function test_stable_kind_and_provider_routing_precedes_field_heuristics() {
@@ -423,9 +458,9 @@ TestCase {
 			compare(post.text, fixture.post)
 			compare(description.text, fixture.expectedDescription)
 			compare(description.visible, fixture.expectedDescription.length > 0)
-			compare(findChild(item, "providerIdentity").visible, false)
-			compare(findChild(item, "providerSummary").visible, false)
-			compare(findChild(item, "providerSocialPresentationLoader").active, false)
+			compare(findChild(item, "providerIdentity"), null)
+			compare(findChild(item, "providerSummary"), null)
+			verifyOnlyPresentationInstantiated(item, "providerSocialPost")
 			compare(occurrenceCount(card.Accessible.description, fixture.name), 1)
 			compare(occurrenceCount(card.Accessible.description, fixture.author), 1)
 			compare(occurrenceCount(card.Accessible.description, fixture.post), 1)
@@ -521,7 +556,7 @@ TestCase {
 		compare(findChild(item, "providerSteamDiscount").visible, true)
 		compare(findChild(item, "providerSteamOriginalPrice").font.strikeout, true)
 		compare(findChild(item, "providerSteamFinalPrice").text, "29,99 €")
-		compare(findChild(item, "providerSummary").visible, false)
+		compare(findChild(item, "providerSummary"), null)
 	}
 
 	function test_bespoke_provider_cards_expose_one_semantic_owner() {
@@ -629,42 +664,56 @@ TestCase {
 		compare(exposedProviderGroupingCount(item), 1)
 	}
 
-	function test_social_provider_presentations_are_lazy_and_mutually_exclusive() {
-		let item = setFixture({ "previewKind": "product", "productPrice": "10 kr" },
-			"product", false)
-		const loader = findChild(item, "providerSocialPresentationLoader")
-		verify(loader !== null)
-		compare(loader.active, false)
-		compare(loader.item, null)
-		compare(instantiatedSocialCardCount(item), 0)
-
-		item = setFixture({ "previewKind": "x", "xHandle": "@mumble" }, "x", false)
-		tryCompare(loader, "active", false)
-		verify(findChild(item, "providerSocialPost").visible)
-
+	function test_provider_presentations_are_lazy_and_mutually_exclusive() {
 		const fixtures = [
-			{ "kind": "instagram", "name": "providerInstagramPost", "metadata": {
-				"provider": "instagram", "instagramHandle": "@mumble" } },
-			{ "kind": "github", "name": "providerGitHubRepository", "metadata": {
-				"provider": "github", "githubRepo": "mumble" } },
-			{ "kind": "twitch", "name": "providerTwitchStream", "metadata": {
-				"provider": "twitch", "twitchChannel": "mumbledev" } }
+			{ "kind": "product", "provider": "amazon", "name": "providerCommerceCard",
+			  "metadata": { "previewKind": "product", "productPrice": "10 kr" } },
+			{ "kind": "gameStoreProduct", "provider": "steam", "name": "providerSteamCard",
+			  "metadata": { "previewProvider": "steam", "steamPrice": "29,99 €" } },
+			{ "kind": "search", "provider": "google-search", "name": "providerGoogleSearch",
+			  "metadata": { "provider": "google-search", "googleSearchQuery": "Qt Quick" } },
+			{ "kind": "forum", "provider": "flashback", "name": "providerFlashbackThread",
+			  "metadata": { "provider": "flashback", "forumThreadTitle": "Renderloopar" } },
+			{ "kind": "article", "provider": "svt", "name": "providerArticleCard",
+			  "metadata": { "previewProvider": "svt", "articleTitle": "A native article" } },
+			{ "kind": "x", "provider": "x", "name": "providerSocialPost",
+			  "metadata": { "previewKind": "x", "xHandle": "@mumble" } },
+			{ "kind": "instagram", "provider": "instagram", "name": "providerInstagramPost",
+			  "metadata": { "provider": "instagram", "instagramHandle": "@mumble" } },
+			{ "kind": "github", "provider": "github", "name": "providerGitHubRepository",
+			  "metadata": { "provider": "github", "githubRepo": "mumble" } },
+			{ "kind": "twitch", "provider": "twitch", "name": "providerTwitchStream",
+			  "metadata": { "provider": "twitch", "twitchChannel": "mumbledev" } },
+			{ "kind": "audio", "provider": "sverigesradio",
+			  "name": "providerGenericDetailsPresentation",
+			  "metadata": { "previewKind": "audio", "audioProgram": "Morning" } }
 		]
 		for (let index = 0; index < fixtures.length; ++index) {
 			const fixture = fixtures[index]
-			item = setFixture(fixture.metadata, fixture.kind, false,
-				fixture.metadata.provider || "")
-			tryCompare(loader, "active", true)
-			tryVerify(function() { return loader.item !== null })
-			compare(loader.item.objectName, fixture.name)
-			compare(instantiatedSocialCardCount(item), 1)
+			const item = setFixture(fixture.metadata, fixture.kind, false,
+				fixture.provider)
+			verifyOnlyPresentationInstantiated(item, fixture.name)
 		}
+	}
 
-		item = setFixture({ "previewKind": "audio", "audioProgram": "Morning" },
-			"audio", false)
-		tryCompare(loader, "active", false)
-		tryCompare(loader, "item", null)
-		compare(instantiatedSocialCardCount(item), 0)
+	function test_sparse_visible_details_do_not_instantiate_a_presentation() {
+		const harness = createTemporaryObject(isolatedDetailsLoaderComponent, testCase)
+		verify(harness !== null)
+		harness.setSource("qrc:/qml-shell/ProviderDetails.qml", {
+			"metadata": {},
+			"previewKind": "youtube",
+			"providerHint": "youtube",
+			"visible": true
+		})
+		tryVerify(function() { return harness.item !== null })
+		const item = harness.item
+		const shellLoader = findChild(item, "providerDetailsShellLoader")
+		verify(shellLoader !== null)
+		compare(item.hasDetails, false)
+		compare(shellLoader.active, false)
+		compare(shellLoader.item, null)
+		compare(findChild(item, "providerSelectedPresentationLoader"), null)
+		compare(item.presentationReady, true)
 	}
 
 	function test_google_search_preserves_result_identity_and_active_tab() {
@@ -679,8 +728,8 @@ TestCase {
 			"Qt Quick model performance")
 		compare(findChild(item, "providerGoogleTab_0").active, false)
 		compare(findChild(item, "providerGoogleTab_1").active, true)
-		compare(findChild(item, "providerSummary").visible, false)
-		compare(findChild(item, "providerIdentity").visible, false)
+		compare(findChild(item, "providerSummary"), null)
+		compare(findChild(item, "providerIdentity"), null)
 	}
 
 	function test_marketplace_prefers_scannable_chips_over_repeated_listing_stats() {
@@ -1024,7 +1073,7 @@ TestCase {
 		compare(item.identityTitle, "Mumble Dev")
 		compare(item.allChips[0].tone, "success")
 		compare(item.allChips.length, 1)
-		compare(findChild(item, "providerIdentity").visible, false)
+		compare(findChild(item, "providerIdentity"), null)
 		verify(findChild(item, "providerTwitchStream").visible)
 		compare(findChild(item, "providerTwitchNote").visible, false)
 

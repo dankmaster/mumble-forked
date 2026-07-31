@@ -190,7 +190,9 @@ FocusScope {
 	readonly property var googleTabs: [qsTr("All"), qsTr("Images"), qsTr("News"),
 		qsTr("Videos"), qsTr("Shopping")]
 	readonly property bool presentationReady: !detailsLoader.active
-		|| detailsLoader.status === Loader.Error || detailsLoader.presentationSettled
+		|| detailsLoader.status === Loader.Error
+		|| (detailsLoader.item && detailsLoader.item.selectedPresentationError)
+		|| detailsLoader.presentationSettled
 
 	signal externalOpenRequested(string url)
 	signal steamMediaSelectionRequested(int index)
@@ -1452,31 +1454,31 @@ FocusScope {
 		return joinAccessibleSentences(parts)
 	}
 
-	// ProviderDetails contains several mutually exclusive, provider-specific
-	// presentations. Incubate only the selected visual tree instead of making
-	// every cold timeline delegate synchronously construct thousands of hidden
-	// controls. The lightweight semantic/provider properties above remain
-	// available immediately to RichPreviewCard.
+	// The outer loader is a lightweight lifetime shell. The selected provider
+	// presentation is incubated by the single asynchronous loader inside it, so
+	// cold timeline delegates never construct mutually exclusive hidden cards.
+	// Keep an already-loaded shell alive across transient metadata states so its
+	// selected presentation does not tear down and perturb card geometry.
 	Loader {
 		id: detailsLoader
+		objectName: "providerDetailsShellLoader"
 		property bool presentationSettled: false
 		anchors.left: parent.left
 		anchors.right: parent.right
-		// Incubate only once details first become visible. Retain the completed
-		// presentation across transient metadata states so a late provider update
-		// cannot tear down and rebuild the same tree (or change card geometry).
-		active: root.visible || detailsLoader.item !== null
-		asynchronous: true
+		active: (root.visible && root.hasDetails) || detailsLoader.item !== null
 		onActiveChanged: {
 			presentationSettled = false
 			if (!active)
 				detailsSettleTimer.stop()
 		}
-		onLoaded: detailsSettleTimer.restart()
 
 		sourceComponent: Component {
 			ColumnLayout {
 				id: detailsColumn
+				readonly property bool selectedPresentationReady:
+					selectedPresentationLoader.status === Loader.Ready
+				readonly property bool selectedPresentationError:
+					selectedPresentationLoader.status === Loader.Error
 				anchors.left: parent.left
 				anchors.right: parent.right
 				spacing: Theme.space2
@@ -1519,9 +1521,12 @@ FocusScope {
 			}
 		}
 
+		Component {
+			id: articleCardComponent
 		Rectangle {
 			id: articleCard
 			objectName: "providerArticleCard"
+			implicitHeight: articleLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? articleLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.articlePresentation
@@ -1686,10 +1691,14 @@ FocusScope {
 				}
 			}
 		}
+		}
 
+		Component {
+			id: commerceCardComponent
 		Rectangle {
 			id: commerceCard
 			objectName: "providerCommerceCard"
+			implicitHeight: commerceCardLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? commerceCardLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.commercePresentation
@@ -1930,10 +1939,14 @@ FocusScope {
 				}
 			}
 		}
+		}
 
+		Component {
+			id: steamCardComponent
 		Rectangle {
 			id: steamCard
 			objectName: "providerSteamCard"
+			implicitHeight: steamLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? steamLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.steamPresentation
@@ -2483,10 +2496,14 @@ FocusScope {
 				}
 			}
 		}
+		}
 
+		Component {
+			id: googleCardComponent
 		Rectangle {
 			id: googleCard
 			objectName: "providerGoogleSearch"
+			implicitHeight: googleLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? googleLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.googlePresentation
@@ -2613,10 +2630,14 @@ FocusScope {
 				}
 			}
 		}
+		}
 
+		Component {
+			id: flashbackCardComponent
 		Rectangle {
 			id: flashbackCard
 			objectName: "providerFlashbackThread"
+			implicitHeight: flashbackLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight + Theme.space3 * 2 : 0
 			visible: root.flashbackPresentation
@@ -2873,6 +2894,7 @@ FocusScope {
 					}
 				}
 			}
+		}
 		}
 
 		Component {
@@ -3508,21 +3530,12 @@ FocusScope {
 			}
 		}
 
-		Loader {
-			id: socialPresentationLoader
-			objectName: "providerSocialPresentationLoader"
-			Layout.fillWidth: true
-			Layout.preferredHeight: item ? item.implicitHeight : 0
-			active: root.socialBespokePresentation
-			sourceComponent: root.xPresentation ? xCardComponent
-				: root.instagramPresentation ? instagramCardComponent
-				: root.githubPresentation ? githubCardComponent
-				: root.twitchPresentation ? twitchCardComponent : null
-		}
-
+		Component {
+			id: genericSocialPostComponent
 		Rectangle {
 			id: genericSocialPostCard
 			objectName: "providerSocialPost"
+			implicitHeight: genericSocialPostLayout.implicitHeight + Theme.space3 * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? genericSocialPostLayout.implicitHeight
 				+ Theme.space3 * 2 : 0
@@ -3603,6 +3616,14 @@ FocusScope {
 				}
 			}
 		}
+		}
+
+		Component {
+			id: genericDetailsComponent
+		ColumnLayout {
+			id: genericDetailsColumn
+			objectName: "providerGenericDetailsPresentation"
+			spacing: Theme.space2
 
 		ColumnLayout {
 			id: summaryBlock
@@ -4118,6 +4139,33 @@ FocusScope {
 				}
 			}
 		}
+		}
+		}
+
+		Loader {
+			id: selectedPresentationLoader
+			objectName: "providerSelectedPresentationLoader"
+			Layout.fillWidth: true
+			Layout.preferredHeight: item ? item.implicitHeight : 0
+			asynchronous: true
+			sourceComponent: root.steamPresentation ? steamCardComponent
+				: root.googlePresentation ? googleCardComponent
+				: root.flashbackPresentation ? flashbackCardComponent
+				: root.articlePresentation ? articleCardComponent
+				: root.commercePresentation ? commerceCardComponent
+				: root.instagramPresentation ? instagramCardComponent
+				: root.githubPresentation ? githubCardComponent
+				: root.twitchPresentation ? twitchCardComponent
+				: root.genericSocialPostPresentation ? genericSocialPostComponent
+				: genericDetailsComponent
+			onStatusChanged: {
+				if (status !== Loader.Ready) {
+					detailsLoader.presentationSettled = false
+					detailsSettleTimer.stop()
+				}
+			}
+			onLoaded: detailsSettleTimer.restart()
+		}
 
 		Rectangle {
 			id: releaseCard
@@ -4340,6 +4388,7 @@ FocusScope {
 		id: detailsSettleTimer
 		interval: 16
 		repeat: false
-		onTriggered: detailsLoader.presentationSettled = true
+		onTriggered: detailsLoader.presentationSettled = detailsLoader.item
+			&& detailsLoader.item.selectedPresentationReady
 	}
 }

@@ -305,6 +305,16 @@ TestCase {
 		}]
     }
 
+	function waitForProviderPresentation(card, expectedObjectName) {
+		const details = findChild(card, "providerDetails")
+		verify(details !== null)
+		tryVerify(function() {
+			return details.presentationReady
+				&& (!expectedObjectName || findChild(card, expectedObjectName) !== null)
+		})
+		return details
+	}
+
     function test_sender_content_is_escaped_and_links_are_allowlisted() {
         const body = bodyLoader.item
         verify(body.renderedHtml.indexOf("&lt;img") >= 0)
@@ -735,9 +745,9 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:expanded-product-insets"
+		const details = waitForProviderPresentation(card, "providerCommerceCard")
 		const content = findChild(card, "previewContent")
 		const header = findChild(card, "previewGenericHeader")
-		const details = findChild(card, "providerDetails")
 		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
 		const commerceCard = findChild(card, "providerCommerceCard")
 		const commerceHero = findChild(card, "providerCommerceHero")
@@ -783,6 +793,7 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:article-tldr"
+		waitForProviderPresentation(card, "providerArticleCard")
 
 		const header = findChild(card, "previewGenericHeader")
 		const article = findChild(card, "providerArticleCard")
@@ -790,9 +801,8 @@ TestCase {
 		const title = findChild(card, "providerArticleTitle")
 		const tldr = findChild(card, "providerArticleTldr")
 		const meta = findChild(card, "providerArticleMeta")
-		const stats = findChild(card, "providerDetailsStats")
 		verify(header !== null && article !== null && hero !== null && title !== null
-			&& tldr !== null && meta !== null && stats !== null)
+			&& tldr !== null && meta !== null)
 		compare(header.visible, false)
 		tryCompare(article, "visible", true)
 		tryCompare(hero, "visible", true)
@@ -801,7 +811,7 @@ TestCase {
 		verify(meta.text.indexOf("Göteborgs-Posten") >= 0)
 		verify(meta.text.indexOf("Politics") >= 0)
 		verify(meta.text.indexOf("T18:17:01") < 0)
-		compare(stats.visible, false)
+		compare(findChild(card, "providerDetailsStats"), null)
 		compare(findChild(card, "previewDescription").visible, false)
 	}
 
@@ -833,6 +843,7 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:blocket-gallery"
+		waitForProviderPresentation(card, "providerCommerceCard")
 
 		const gallery = findChild(card, "providerCommerceCard")
 		const hero = findChild(card, "providerCommerceHero")
@@ -952,9 +963,11 @@ TestCase {
 		verify(panel !== null && toggle !== null)
 		tryCompare(toggle, "visible", true)
 		compare(toggle.text, "Pause animation")
-		const panelOrigin = panel.mapToItem(card, 0, 0)
-		const toggleOrigin = toggle.mapToItem(card, 0, 0)
-		verify(toggleOrigin.y >= panelOrigin.y + panel.height - 1)
+		tryVerify(function() {
+			const panelOrigin = panel.mapToItem(card, 0, 0)
+			const toggleOrigin = toggle.mapToItem(card, 0, 0)
+			return toggleOrigin.y >= panelOrigin.y + panel.height - 1
+		})
 		toggle.clicked()
 		compare(inlineSession.pauseCalls, 1)
 		compare(inlineSession.state, "paused")
@@ -2053,9 +2066,8 @@ TestCase {
 			}
 		}
 		card.previewIdentity = "message:x-common-social-card"
-		wait(0)
+		const details = waitForProviderPresentation(card, "providerSocialPost")
 
-		const details = findChild(card, "providerDetails")
 		const socialPost = findChild(card, "providerSocialPost")
 		const xCard = findChild(card, "providerXCard")
 		const genericHeader = findChild(card, "previewGenericHeader")
@@ -2329,9 +2341,11 @@ TestCase {
 		compare(findChild(card, "embedDocumentFactValue_0").text, "7 500 kr")
 		compare(findChild(card, "embedDocumentFactValue_1").text, "65463 Karlstad")
 		compare(findChild(card, "embedDocumentFactValue_2").text, "As new")
-		verify(findChild(card, "embedDocumentMediaThumbnail_0") !== null)
-		verify(findChild(card, "embedDocumentMediaThumbnail_1") !== null)
-		verify(findChild(card, "embedDocumentMediaThumbnail_2") !== null)
+		tryVerify(function() {
+			return findChild(card, "embedDocumentMediaThumbnail_0") !== null
+				&& findChild(card, "embedDocumentMediaThumbnail_1") !== null
+				&& findChild(card, "embedDocumentMediaThumbnail_2") !== null
+		})
 
 		const thumbnailImage = findChild(card, "embedDocumentMediaThumbnailImage_0")
 		verify(thumbnailImage !== null)
@@ -3412,7 +3426,7 @@ TestCase {
 			card.previewIdentity = "message:generic-social:" + index
 			wait(0)
 
-			const details = findChild(card, "providerDetails")
+			const details = waitForProviderPresentation(card, "providerSocialPost")
 			const socialPost = findChild(card, "providerSocialPost")
 			const genericHeader = findChild(card, "previewGenericHeader")
 			const providerChip = findChild(card, "previewProviderChip")
@@ -3453,7 +3467,7 @@ TestCase {
 		compare(card.providerLabel, "Steam")
 		const genericProviderLabel = findChild(card, "previewProviderLabel")
 		compare(genericProviderLabel.text, "STEAM")
-		const details = findChild(card, "providerDetails")
+		const details = waitForProviderPresentation(card, "providerSteamCard")
 		compare(details.providerToken, "steam")
 		compare(details.providerDisplayName, "Steam")
 		compare(details.ownsHeader, true)
@@ -3482,6 +3496,7 @@ TestCase {
 				"steamAppName": "Hades II", "steamPrice": "29,99 €" }
 		}
 		card.previewIdentity = "message:steam-gallery"
+		waitForProviderPresentation(card, "providerSteamCard")
 		card.userExpanded = false
 		tryVerify(function() { return !card.expanded && card.implicitHeight > 0 })
 		previewLoader.height = Math.ceil(card.implicitHeight)
@@ -3528,6 +3543,7 @@ TestCase {
 				"steamHistoricalLowPrice": "19,99 EUR", "steamHistoricalLowShop": "Steam" }
 		}
 		card.previewIdentity = "message:steam-deal"
+		waitForProviderPresentation(card, "providerSteamCard")
 		const deal = findChild(card, "providerSteamBestDeal")
 		verify(deal !== null)
 		tryCompare(deal, "visible", true)
