@@ -7321,7 +7321,6 @@ ApplicationWindow {
 										: messageDelegate.previewNeedsHydration
 											|| !messageDelegate.previewMaterializationAdmitted
 											|| messagePreviewLoader.status !== Loader.Ready
-											|| !messageDelegate.previewLoaderSurfaceNonBlank
 											? messagePreviewHydrationPlaceholderLoader.visible
 												&& messagePreviewHydrationPlaceholderLoader.status
 													=== Loader.Ready
@@ -7330,9 +7329,17 @@ ApplicationWindow {
 											: messagePreviewLoader.visible
 												&& messagePreviewLoader.status === Loader.Ready
 												&& !!messagePreviewLoader.item
-													? String(messagePreviewLoader.item
-														.performanceEmbedSurfaceState || "blank")
-														.toLowerCase()
+													// RichPreviewCard paints an opaque themed
+													// frame as soon as its Loader is Ready. Its
+													// deeper provider tree can still report blank
+													// until materialization settles; describe that
+													// painted handoff as loading while the separate
+													// readiness gate remains strict.
+													? messageDelegate.previewLoaderSurfaceNonBlank
+														? String(messagePreviewLoader.item
+															.performanceEmbedSurfaceState || "blank")
+															.toLowerCase()
+														: "loading"
 													: "blank"
 									function openActions() {
 										messageActions.targetId = messageDelegate.stableId

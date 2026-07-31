@@ -985,8 +985,20 @@ TestCase {
 		verify(/objectName:\s*"previewHydrationBusyIndicator"[\s\S]{0,220}running:\s*messagePreviewHydrationPlaceholderLoader\.visible\s*&&\s*messageDelegate\.inVisibleViewport\s*&&\s*!timeline\.richScrollInProgress/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*!messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\([\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
 		verify(/readonly property string performancePreviewSurfaceState:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*messageRowLoader\.item\.previewSurfaceState/.test(mainSource))
-		verify(/readonly property string previewSurfaceState:[\s\S]*messagePreviewHydrationPlaceholderLoader\.visible[\s\S]*Loader\.Ready[\s\S]*messagePreviewLoader\.visible[\s\S]*performanceEmbedSurfaceState/.test(mainSource))
-		verify(/readonly property string previewSurfaceState:[\s\S]*messagePreviewLoader\.status\s*===\s*Loader\.Error\s*\?\s*"error"/.test(mainSource))
+		const messageRowPreviewSurfaceStart = mainSource.indexOf(
+			"readonly property string previewSurfaceState:", innerDelegateStart)
+		const messageRowPreviewSurfaceEnd = mainSource.indexOf(
+			"function openActions()", messageRowPreviewSurfaceStart)
+		verify(messageRowPreviewSurfaceStart > innerDelegateStart
+			&& messageRowPreviewSurfaceEnd > messageRowPreviewSurfaceStart)
+		const messageRowPreviewSurfaceSource = mainSource.slice(
+			messageRowPreviewSurfaceStart, messageRowPreviewSurfaceEnd)
+		verify(/messagePreviewLoader\.status\s*===\s*Loader\.Error\s*\?\s*"error"/.test(
+			messageRowPreviewSurfaceSource))
+		verify(/messageDelegate\.previewNeedsHydration[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*messagePreviewHydrationPlaceholderLoader\.visible[\s\S]*messagePreviewLoader\.visible[\s\S]*messagePreviewLoader\.status\s*===\s*Loader\.Ready[\s\S]*!!messagePreviewLoader\.item[\s\S]*\?\s*messageDelegate\.previewLoaderSurfaceNonBlank[\s\S]*performanceEmbedSurfaceState\s*\|\|\s*"blank"[\s\S]*:\s*"loading"/.test(
+			messageRowPreviewSurfaceSource))
+		verify(!/\|\|\s*!messageDelegate\.previewLoaderSurfaceNonBlank/.test(
+			messageRowPreviewSurfaceSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\(/.test(mainSource))
 		verify(/previewPlaceholderHeight[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*previewPlaceholderHeight/.test(mainSource))

@@ -30652,12 +30652,14 @@ void MainWindow::publishPersistentChatSnapshot() {
 	{
 		mumble::chatperf::ScopedDuration applyTrace("chat.publish.snapshot.apply");
 		// A cold scope keeps the complete authoritative snapshot while QML admits
-		// only the real rows intersecting the tail. This avoids constructing even
-		// the newest provider/attachment delegates in the synchronous scope-sync
-		// turn and gives the hidden finalization gate one bounded row per frame.
+		// only the real rows intersecting the tail. Queue even the lightweight
+		// summaries one per frame: a cached rich room can otherwise make Qt Quick
+		// construct every fixed-height delegate in the synchronous scope-switch
+		// turn before the heavier provider admission queue has even started.
 		if (switchingScope && !messages.isEmpty()) {
 			m_qmlShellHost->chatModel()->replaceMessages({});
-			const int deferred = m_qmlShellHost->chatModel()->prependMessages(messages, true);
+			const int deferred =
+				m_qmlShellHost->chatModel()->enqueueAppendMessages(messages, true);
 			if (deferred == messages.size()) {
 				mumble::chatperf::recordValue(
 					"qml.chat.scope_sync.deferred_first_paint", deferred);
