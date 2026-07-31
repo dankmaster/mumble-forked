@@ -67,7 +67,6 @@ Rectangle {
 	readonly property bool documentReady: visualFixtureRendererReady
 		|| (nativeDirectMedia && nativePlayerLoader.item
 			&& nativePlayerLoader.item.documentReady)
-		|| (providerPostPresentation && providerDocumentPresented)
 		|| (!nativeDirectMedia && _documentReadyGeneration === _mediaGeneration
 			&& _mediaGeneration > 0 && _rendererHealthy)
 	readonly property bool surfaceVerified: documentReady
@@ -78,12 +77,14 @@ Rectangle {
 		&& ((session && String(session.state || "") === "playing")
 			|| (_playbackVerifiedGeneration === _mediaGeneration && _mediaGeneration > 0))
 	readonly property string surfaceVerificationState: visualFixtureRendererReady ? "verified"
-		: providerPostPresentation && providerDocumentPresented ? "verified"
+		: providerPostPresentation ? _surfaceVerificationState
 		: nativeDirectMedia ? (documentReady ? "verified" : rendererHealthy ? "pending" : "idle")
 		: String(session ? session.error || "" : "").length > 0
 			&& _surfaceVerificationState === "idle" ? "failed" : _surfaceVerificationState
 	readonly property string surfaceVerificationEvidence: visualFixtureRendererReady ? "fixture"
-		: providerPostPresentation && providerDocumentPresented ? "provider-document"
+		: providerPostPresentation && providerDocumentPresented
+			? (_surfaceVerificationEvidence.length > 0
+				? _surfaceVerificationEvidence : "provider-document")
 		: nativeDirectMedia && documentReady ? "native-media" : _surfaceVerificationEvidence
 	readonly property string surfaceVerificationDetail: _surfaceVerificationDetail
 	readonly property bool statePollInFlight: _statePollGeneration === _mediaGeneration
@@ -101,12 +102,15 @@ Rectangle {
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
 	readonly property bool webSurfaceActive: playerLoader.active
 	readonly property bool nativeSurfaceActive: nativePlayerLoader.active
-	// Once WebEngine has finished loading the provider document, let that real
-	// surface own the presentation while transport verification continues.
-	// Keeping Mumble's loading chrome above an already visible provider page
-	// obscures consent, sign-in, image, and player controls.
+	// A normal provider player may own the presentation while its transport
+	// verification settles. Provider-post documents are different: WebEngine's
+	// load progress is not proof that the provider rendered usable post content.
 	readonly property bool providerDocumentPresented: !nativeDirectMedia
-		&& rendererHealthy && !!session && session.loadProgress >= 99
+		&& rendererHealthy && !!session
+		&& (providerPostPresentation
+			? _providerDocumentPresentedGeneration === _mediaGeneration
+				&& _mediaGeneration > 0
+			: session.loadProgress >= 99)
 	readonly property string rendererBackend: visualFixtureRendererReady ? "fixture"
 		: nativeSurfaceActive ? "native" : webSurfaceActive ? "webengine" : "none"
 	readonly property bool secondaryAudioActive: nativeSurfaceActive && nativePlayerLoader.item
@@ -144,6 +148,17 @@ Rectangle {
 	property int documentReadyProbeAttempts: 0
 	property string documentReadyProbeState: "idle"
 	property int documentReadyProbeMaxAttempts: isolatedMediaDocument ? 400 : 160
+	property int providerPostDocumentProbeMaxAttempts: 7
+	property int providerPostDocumentProbeBudgetMs: 12000
+	property int _providerDocumentPresentedGeneration: -1
+	property int _providerPostDocumentProbeBudgetGeneration: -1
+	property double _providerPostDocumentProbeStartedAt: 0
+	property double _providerPostDocumentProbeElapsedMs: 0
+	readonly property bool providerPostDocumentProbeBudgetRunning:
+		_providerPostDocumentProbeBudgetGeneration === _mediaGeneration
+		&& _providerPostDocumentProbeStartedAt > 0
+	readonly property double providerPostDocumentProbeElapsedMs:
+		_providerPostDocumentProbeElapsedMs
 	property int _transportVerifiedGeneration: -1
 	property int _playbackVerifiedGeneration: -1
 	property string _surfaceVerificationState: "idle"
@@ -216,6 +231,14 @@ Rectangle {
 	}
 
 	Timer {
+		id: providerPostDocumentProbeTimer
+		interval: 150
+		repeat: false
+		property int generation: -1
+		onTriggered: inlinePlayer.probeProviderPostDocumentReady(generation)
+	}
+
+	Timer {
 		id: deferredReloadTimer
 		interval: 0
 		repeat: false
@@ -246,10 +269,20 @@ Rectangle {
 		repeat: true
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
 			&& !inlinePlayer.documentReady
-			&& inlinePlayer.surfaceVerificationState !== "blocked"
-			&& (!inlinePlayer.providerPostPresentation
-				|| !inlinePlayer.providerDocumentPresented)
+			&& (inlinePlayer.providerPostPresentation
+				? !inlinePlayer.providerDocumentPresented
+				: inlinePlayer.surfaceVerificationState !== "blocked")
 		onTriggered: {
+			if (inlinePlayer.providerPostPresentation
+					&& inlinePlayer.providerPostDocumentProbeBudgetRunning) {
+				inlinePlayer._providerPostDocumentProbeElapsedMs = Math.max(0,
+					Date.now() - inlinePlayer._providerPostDocumentProbeStartedAt)
+				inlinePlayer._providerDocumentLoadElapsedMs =
+					inlinePlayer._providerPostDocumentProbeElapsedMs
+				if (inlinePlayer.providerPostDocumentProbeDeadlineExpired(Date.now()))
+					inlinePlayer.recoverProviderDocumentLoadTimeout()
+				return
+			}
 			if (inlinePlayer._providerDocumentLoadStartedAt <= 0) {
 				inlinePlayer.armProviderDocumentLoadTimeout()
 				return
@@ -279,10 +312,30 @@ Rectangle {
 		_providerDocumentLoadElapsedMs = 0
 	}
 
+	function armProviderPostDocumentProbeBudget(generation) {
+		if (!providerPostPresentation || generation !== _mediaGeneration)
+			return false
+		if (_providerPostDocumentProbeBudgetGeneration === generation
+				&& _providerPostDocumentProbeStartedAt > 0)
+			return true
+		_providerPostDocumentProbeBudgetGeneration = generation
+		_providerPostDocumentProbeStartedAt = Date.now()
+		_providerPostDocumentProbeElapsedMs = 0
+		_providerDocumentLoadElapsedMs = 0
+		return true
+	}
+
+	function providerPostDocumentProbeDeadlineExpired(now) {
+		if (!providerPostDocumentProbeBudgetRunning)
+			return false
+		return Math.max(0, Number(now) - _providerPostDocumentProbeStartedAt)
+			>= Math.max(1000, providerPostDocumentProbeBudgetMs)
+	}
+
 	function recoverProviderDocumentLoadTimeout() {
 		if (nativeDirectMedia || documentReady
-				|| surfaceVerificationState === "blocked"
 				|| (providerPostPresentation && providerDocumentPresented)
+				|| (!providerPostPresentation && surfaceVerificationState === "blocked")
 				|| !ready || !session)
 			return false
 		// Keep the real native poster and metadata card as the fallback. A
@@ -290,6 +343,9 @@ Rectangle {
 		// overlay or emit a global notification over unrelated media.
 		_providerDocumentLoadStartedAt = 0
 		_providerDocumentLoadElapsedMs = 0
+		_providerPostDocumentProbeBudgetGeneration = -1
+		_providerPostDocumentProbeStartedAt = 0
+		_providerPostDocumentProbeElapsedMs = 0
 		session.closePlayer()
 		return true
 	}
@@ -316,6 +372,62 @@ Rectangle {
 				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1,error:playbackError};}"
 				  + "if(media)return {position:Number(media.currentTime||0),duration:isFinite(media.duration)?Number(media.duration):0,paused:!!media.paused,error:playbackError};return null;")
 			+ "})()"
+	}
+
+	function providerPostDocumentProbeScript() {
+		const provider = JSON.stringify(
+			String(session ? session.provider || "" : "").trim().toLowerCase())
+		return "(function(){"
+			+ "const provider=" + provider + ";"
+			+ "const readyState=String(document.readyState||'');"
+			+ "const empty={readyState:readyState,rootVisible:false,mediaVisible:false,actionVisible:false,textLength:0,standaloneMediaVisible:false,blockedKind:'',failureKind:'',blockedSurfaceVisible:false,failureSurfaceVisible:false,detail:''};"
+			+ "const body=document.body;if(!body)return empty;"
+			+ "const selectors={instagram:'article,blockquote.instagram-media,[role=\"main\"],main',tiktok:'[data-e2e=\"embed-video\"],[data-e2e*=\"photo\"],article,[role=\"main\"],main',facebook:'[data-testid*=\"post\"],article,[role=\"main\"],main'};"
+			+ "const root=document.querySelector(selectors[provider]||'article,blockquote,[role=\"main\"],main');"
+			+ "function visible(node,minWidth,minHeight){if(!node||typeof node.getBoundingClientRect!=='function')return false;const rect=node.getBoundingClientRect();if(!rect||rect.width<minWidth||rect.height<minHeight)return false;const style=window.getComputedStyle(node);return !!style&&style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity||1)>0;}"
+			+ "function renderedMedia(node){if(!node)return false;const tag=String(node.tagName||'').toLowerCase();if(tag==='img')return !!node.complete&&Number(node.naturalWidth||0)>=32&&Number(node.naturalHeight||0)>=32;if(tag==='video')return Number(node.readyState||0)>=1||String(node.poster||'').length>0;if(tag==='iframe')return String(node.src||'').length>0&&!/^about:blank/i.test(String(node.src||''));if(tag==='canvas')return Number(node.width||0)>=32&&Number(node.height||0)>=32;return true;}"
+			+ "const mediaSelector='video,iframe[src],canvas,picture img[src],img[src]';"
+			+ "const rootMedia=root&&(root.matches(mediaSelector)?root:root.querySelector(mediaSelector));"
+			+ "const action=root&&root.querySelector('a[href],button,[role=\"button\"],input:not([type=\"hidden\"])');"
+			+ "const actionLabel=String(action&&(action.innerText||action.textContent||action.getAttribute('aria-label')||action.getAttribute('title'))||'').replace(/\\s+/g,' ').trim();"
+			+ "const text=String(root&&(root.innerText||root.textContent)||'').replace(/\\s+/g,' ').trim().slice(0,512);"
+			+ "const bodyText=String(body.innerText||body.textContent||'').replace(/\\s+/g,' ').trim().slice(0,1200);"
+			+ "const lower=bodyText.toLowerCase();"
+			+ "const standaloneMedia=document.querySelector(mediaSelector);"
+			+ "const rootVisible=visible(root,48,32);"
+			+ "const mediaVisible=visible(rootMedia,64,48)&&renderedMedia(rootMedia);"
+			+ "const actionVisible=visible(action,16,16)&&actionLabel.length>=2;"
+			+ "const standaloneMediaVisible=visible(standaloneMedia,160,90)&&renderedMedia(standaloneMedia);"
+			+ "const challenge=document.querySelector('.g-recaptcha,iframe[src*=\"recaptcha\"],iframe[src*=\"challenge\"],form[action*=\"challenge\"],input[name*=\"captcha\"]');"
+			+ "const password=document.querySelector('input[type=\"password\"]');"
+			+ "const explicitError=document.querySelector('.ytp-error,.ytp-error-content-wrap,.player-error,.error-page,[data-a-target=\"content-overlay-gate\"]');"
+			+ "const challengeVisible=visible(challenge,16,16);"
+			+ "const passwordVisible=visible(password,16,16);"
+			+ "const explicitErrorVisible=visible(explicitError,16,16);"
+			+ "const challengeText=/(confirm (that )?you('| a)?re not a bot|sign in to confirm|verify (that )?you are human|unusual traffic|bekräfta att du inte är en bot|logga in för att bekräfta|captcha)/.test(lower);"
+			+ "const signInText=/(sign in|log in|logga in|sign-in required|login required)/.test(lower);"
+			+ "const consentRoots=[document];const tiktokConsent=document.querySelector('tiktok-cookie-banner');if(tiktokConsent&&tiktokConsent.shadowRoot)consentRoots.push(tiktokConsent.shadowRoot);"
+			+ "let consentAction=null;for(let rootIndex=0;rootIndex<consentRoots.length&&!consentAction;++rootIndex){const nodes=consentRoots[rootIndex].querySelectorAll('button,[role=\"button\"]');for(let nodeIndex=0;nodeIndex<Math.min(nodes.length,32);++nodeIndex){const node=nodes[nodeIndex];const label=String(node.innerText||node.textContent||node.getAttribute('aria-label')||'').replace(/\\s+/g,' ').trim().toLowerCase();if(/^(allow all( cookies)?|accept all( cookies)?|decline optional cookies|reject optional cookies|only allow essential cookies|tillåt alla( cookies)?|godkänn alla( cookies)?|avvisa valfria cookies|endast nödvändiga cookies)$/.test(label)){consentAction=node;break;}}}"
+			+ "const consentActionVisible=visible(consentAction,16,16);"
+			+ "const unavailableText=/(video (is )?unavailable|this content isn('|’)t available|content unavailable|innehållet är inte tillgängligt|videon är inte tillgänglig|access denied|forbidden|page isn('|’)t available|sidan är inte tillgänglig)/.test(lower);"
+			+ "const usableMediaVisible=mediaVisible||standaloneMediaVisible;"
+			+ "let blockedKind='';let failureKind='';"
+			+ "if(challengeVisible||(challengeText&&!usableMediaVisible))blockedKind='verification';"
+			+ "else if(passwordVisible&&(!mediaVisible||signInText))blockedKind='sign-in';"
+			+ "else if(consentActionVisible)blockedKind='consent';"
+			+ "else if(unavailableText&&!usableMediaVisible)failureKind='unavailable';"
+			+ "else if(explicitErrorVisible)failureKind='error';"
+			+ "const blockedSurfaceVisible=blockedKind.length>0&&(challengeVisible||passwordVisible||consentActionVisible||(rootVisible&&actionVisible&&text.length>=16));"
+			+ "const failureSurfaceVisible=failureKind.length>0&&(explicitErrorVisible||(unavailableText&&rootVisible&&text.length>=16));"
+			+ "return {readyState:readyState,rootVisible:rootVisible,mediaVisible:mediaVisible,actionVisible:actionVisible,textLength:text.length,standaloneMediaVisible:standaloneMediaVisible,blockedKind:blockedKind,failureKind:failureKind,blockedSurfaceVisible:blockedSurfaceVisible,failureSurfaceVisible:failureSurfaceVisible,detail:bodyText.slice(0,240)};"
+			+ "})()"
+	}
+
+	function providerPostDocumentProbeDelay(attempts) {
+		const backoffMs = [ 150, 300, 600, 1200, 2000, 3000, 3000 ]
+		const index = Math.max(0, Math.min(backoffMs.length - 1,
+			Math.floor(Number(attempts || 0))))
+		return backoffMs[index]
 	}
 
 	function playbackDocumentUrl() {
@@ -350,12 +462,22 @@ Rectangle {
 	function resetMediaLifecycle(documentUrl, rendererIsHealthy) {
 		if (!rendererIsHealthy || String(documentUrl || "").length === 0)
 			verificationNavigationActive = false
+		providerPostDocumentProbeTimer.stop()
+		providerPostDocumentProbeTimer.generation = -1
 		_webSecondaryAudioWarning = ""
 		_mediaGeneration += 1
 		_documentUrl = String(documentUrl || "")
 		_documentReadyGeneration = -1
+		_providerDocumentPresentedGeneration = -1
 		_documentReadyProbeGeneration = -1
 		_documentReadyProbeStartedAt = 0
+		_providerPostDocumentProbeBudgetGeneration = -1
+		_providerPostDocumentProbeStartedAt = 0
+		_providerPostDocumentProbeElapsedMs = 0
+		if (providerPostPresentation && rendererIsHealthy) {
+			_providerDocumentLoadStartedAt = Date.now()
+			_providerDocumentLoadElapsedMs = 0
+		}
 		documentReadyProbeAttempts = 0
 		documentReadyProbeState = "idle"
 		_transportVerifiedGeneration = -1
@@ -433,18 +555,157 @@ Rectangle {
 		return true
 	}
 
-	function completeProviderPostDocumentLoad(generation) {
+	function providerPostDocumentEvaluation(value) {
+		const result = value && typeof value === "object" ? value : ({})
+		const readyState = String(result.readyState || "")
+		const documentLoaded = readyState === "interactive" || readyState === "complete"
+		const rootVisible = result.rootVisible === true
+		const mediaVisible = result.mediaVisible === true
+		const actionVisible = result.actionVisible === true
+		const meaningfulText = Number(result.textLength || 0) >= 16
+		const standaloneMediaVisible = result.standaloneMediaVisible === true
+		const blockedKind = String(result.blockedKind || "")
+		const failureKind = String(result.failureKind || "")
+		const detail = String(result.detail || "").replace(/\s+/g, " ").trim().slice(0, 240)
+		const blockedSurfaceVisible = result.blockedSurfaceVisible === true
+		const failureSurfaceVisible = result.failureSurfaceVisible === true
+		const usable = documentLoaded
+			&& ((rootVisible && (mediaVisible || (actionVisible && meaningfulText)))
+				|| standaloneMediaVisible)
+		const evidence = []
+		if (documentLoaded)
+			evidence.push("document")
+		if (rootVisible)
+			evidence.push("provider-root")
+		if (mediaVisible || standaloneMediaVisible)
+			evidence.push("media")
+		if (actionVisible)
+			evidence.push("action")
+		if (meaningfulText)
+			evidence.push("text")
+		if (blockedKind.length > 0)
+			evidence.push("blocked:" + blockedKind)
+		if (failureKind.length > 0)
+			evidence.push("failed:" + failureKind)
+		if (blockedKind.length > 0 && (blockedSurfaceVisible || !usable)) {
+			return {
+				state: "blocked",
+				kind: blockedKind,
+				detail: detail,
+				evidence: evidence.join(","),
+				presented: blockedSurfaceVisible
+			}
+		}
+		if (failureKind.length > 0 && (failureSurfaceVisible || !usable)) {
+			return {
+				state: "failed",
+				kind: failureKind,
+				detail: detail,
+				evidence: evidence.join(","),
+				presented: false
+			}
+		}
+		return {
+			state: usable ? "verified" : "pending",
+			kind: "",
+			detail: "",
+			evidence: evidence.join(","),
+			presented: usable
+		}
+	}
+
+	function completeProviderPostDocumentLoad(generation, value) {
 		if (generation !== _mediaGeneration || !_rendererHealthy)
 			return false
+		const evaluation = providerPostDocumentEvaluation(value)
+		if (evaluation.state !== "verified")
+			return false
+		const semanticEvidence = String(evaluation.evidence || "")
+		_surfaceVerificationEvidence = semanticEvidence
+		documentReadyProbeState = String(evaluation.state || "pending")
+			+ (_surfaceVerificationEvidence.length > 0
+				? ":" + _surfaceVerificationEvidence : "")
 		_documentReadyGeneration = generation
+		_providerDocumentPresentedGeneration = generation
 		_documentReadyProbeGeneration = -1
+		_documentReadyProbeStartedAt = 0
+		providerPostDocumentProbeTimer.stop()
+		_providerPostDocumentProbeBudgetGeneration = -1
+		_providerPostDocumentProbeStartedAt = 0
+		_providerPostDocumentProbeElapsedMs = 0
 		_surfaceVerificationState = "verified"
 		_surfaceVerificationEvidence = "provider-document"
+			+ (semanticEvidence.length > 0 ? "," + semanticEvidence : "")
 		_surfaceVerificationDetail = ""
-		documentReadyProbeState = "verified:provider-document"
+		documentReadyProbeState = "verified:" + _surfaceVerificationEvidence
 		if (session)
 			session.reportLoadProgress(100)
 		return true
+	}
+
+	function blockProviderPostDocument(generation, evaluation) {
+		if (generation !== _mediaGeneration || !_rendererHealthy)
+			return false
+		_documentReadyGeneration = -1
+		_transportVerifiedGeneration = -1
+		_playbackVerifiedGeneration = -1
+		_providerDocumentPresentedGeneration = evaluation.presented === true
+			? generation : -1
+		_surfaceVerificationState = "blocked"
+		_surfaceVerificationEvidence = String(evaluation.evidence || "")
+		_surfaceVerificationDetail = verificationFailureMessage(evaluation)
+		documentReadyProbeState = "blocked:" + String(evaluation.kind || "verification")
+		if (evaluation.presented === true) {
+			providerPostDocumentProbeTimer.stop()
+			_providerPostDocumentProbeBudgetGeneration = -1
+			_providerPostDocumentProbeStartedAt = 0
+			_providerPostDocumentProbeElapsedMs = 0
+		}
+		return true
+	}
+
+	function failProviderPostDocument(generation, evaluation) {
+		if (generation !== _mediaGeneration || !_rendererHealthy)
+			return false
+		_documentReadyGeneration = -1
+		_providerDocumentPresentedGeneration = -1
+		_transportVerifiedGeneration = -1
+		_playbackVerifiedGeneration = -1
+		_surfaceVerificationState = "failed"
+		_surfaceVerificationEvidence = String(evaluation.evidence || "")
+		_surfaceVerificationDetail = verificationFailureMessage(evaluation)
+		documentReadyProbeState = "failed:" + String(evaluation.kind || "provider-document")
+		providerPostDocumentProbeTimer.stop()
+		_providerPostDocumentProbeBudgetGeneration = -1
+		_providerPostDocumentProbeStartedAt = 0
+		_providerPostDocumentProbeElapsedMs = 0
+		if (session && ready)
+			session.closePlayer()
+		return true
+	}
+
+	function applyProviderPostDocumentProbeResult(generation, value) {
+		if (generation !== _mediaGeneration)
+			return false
+		const evaluation = providerPostDocumentEvaluation(value)
+		if (evaluation.state === "verified")
+			return completeProviderPostDocumentLoad(generation, value)
+		if (evaluation.state === "blocked") {
+			if (!blockProviderPostDocument(generation, evaluation))
+				return false
+			if (!providerDocumentPresented)
+				scheduleProviderPostDocumentProbe(generation)
+			return true
+		}
+		if (evaluation.state === "failed")
+			return failProviderPostDocument(generation, evaluation)
+		_surfaceVerificationState = "pending"
+		_surfaceVerificationEvidence = String(evaluation.evidence || "")
+		documentReadyProbeState = "pending"
+			+ (_surfaceVerificationEvidence.length > 0
+				? ":" + _surfaceVerificationEvidence : "")
+		scheduleProviderPostDocumentProbe(generation)
+		return false
 	}
 
 	function verificationFailureMessage(evaluation) {
@@ -549,6 +810,59 @@ Rectangle {
 				_documentReadyProbeGeneration = -1
 			_documentReadyProbeStartedAt = 0
 			documentReadyProbeState = "error:" + String(error)
+			return false
+		}
+	}
+
+	function scheduleProviderPostDocumentProbe(generation) {
+		if (!providerPostPresentation || generation !== _mediaGeneration
+				|| documentReady || providerDocumentPresented
+				|| _surfaceVerificationState === "failed")
+			return false
+		if (!armProviderPostDocumentProbeBudget(generation)
+				|| documentReadyProbeAttempts
+					>= Math.max(1, providerPostDocumentProbeMaxAttempts))
+			return false
+		providerPostDocumentProbeTimer.generation = generation
+		providerPostDocumentProbeTimer.interval =
+			providerPostDocumentProbeDelay(documentReadyProbeAttempts)
+		providerPostDocumentProbeTimer.restart()
+		return true
+	}
+
+	function probeProviderPostDocumentReady(generation) {
+		if (!providerPostPresentation || generation !== _mediaGeneration
+				|| documentReady || providerDocumentPresented
+				|| _surfaceVerificationState === "failed"
+				|| _documentReadyProbeGeneration === generation
+				|| !playerLoader.item
+				|| documentReadyProbeAttempts
+					>= Math.max(1, providerPostDocumentProbeMaxAttempts))
+			return false
+		if (providerPostDocumentProbeDeadlineExpired(Date.now())) {
+			recoverProviderDocumentLoadTimeout()
+			return false
+		}
+		const webPlayer = playerLoader.item
+		_documentReadyProbeGeneration = generation
+		_documentReadyProbeStartedAt = Date.now()
+		documentReadyProbeAttempts += 1
+		documentReadyProbeState = "submitted:provider-document"
+		try {
+			webPlayer.runJavaScript(providerPostDocumentProbeScript(), function(value) {
+				if (inlinePlayer._documentReadyProbeGeneration !== generation)
+					return
+				inlinePlayer._documentReadyProbeGeneration = -1
+				inlinePlayer._documentReadyProbeStartedAt = 0
+				inlinePlayer.applyProviderPostDocumentProbeResult(generation, value)
+			})
+			return true
+		} catch (error) {
+			if (_documentReadyProbeGeneration === generation)
+				_documentReadyProbeGeneration = -1
+			_documentReadyProbeStartedAt = 0
+			documentReadyProbeState = "error:" + String(error)
+			scheduleProviderPostDocumentProbe(generation)
 			return false
 		}
 	}
@@ -936,6 +1250,7 @@ Rectangle {
 	Component.onDestruction: {
 		deferredPlaybackStateTimer.stop()
 		deferredMediaProbeTimer.stop()
+		providerPostDocumentProbeTimer.stop()
 		deferredReloadTimer.stop()
 		deferredFocusTimer.stop()
 		providerDocumentLoadTimeoutTimer.stop()
@@ -1122,8 +1437,12 @@ Rectangle {
 				inlinePlayer.session.reportLoadProgress(Math.min(99, loadProgress))
 				if (loadProgress === 100) {
 					const generation = loadGeneration
-					deferredMediaProbeTimer.generation = generation
-					deferredMediaProbeTimer.restart()
+					if (inlinePlayer.providerPostPresentation)
+						inlinePlayer.scheduleProviderPostDocumentProbe(generation)
+					else {
+						deferredMediaProbeTimer.generation = generation
+						deferredMediaProbeTimer.restart()
+					}
 				}
 			}
 			onLoadingChanged: function(request) {
@@ -1139,9 +1458,9 @@ Rectangle {
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
 					inlinePlayer.session.reportLoadProgress(99)
-					if (inlinePlayer.providerPostPresentation) {
-						inlinePlayer.completeProviderPostDocumentLoad(generation)
-					} else {
+					if (inlinePlayer.providerPostPresentation)
+						inlinePlayer.scheduleProviderPostDocumentProbe(generation)
+					else {
 						deferredMediaProbeTimer.generation = generation
 						deferredMediaProbeTimer.restart()
 					}
@@ -1224,6 +1543,7 @@ Rectangle {
 		interval: inlinePlayer.providerVerificationRequired ? 500 : 75
 		running: inlinePlayer.ready && !inlinePlayer.nativeDirectMedia
 			&& inlinePlayer.rendererHealthy
+			&& !inlinePlayer.providerPostPresentation
 			&& !inlinePlayer.documentReady && inlinePlayer.session
 			&& inlinePlayer.session.loadProgress >= 99
 		repeat: true

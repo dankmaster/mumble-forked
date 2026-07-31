@@ -32,6 +32,34 @@ Rectangle {
 	property bool hoverEffectsEnabled: true
 	readonly property bool materializationSettled: !providerDetails.visible
 		|| providerDetails.presentationReady
+	// Automation observes the same already-instantiated presentation layers that
+	// the user sees. Provider/network readiness is deliberately not required:
+	// loading, reveal and fallback surfaces are all meaningful, while a reserved
+	// embed viewport with none of those layers is a real blank presentation.
+	readonly property string performanceEmbedSurfaceState: {
+		if (!inlineMediaStageVisible)
+			return "not-required"
+		if (previewEmbedRevealSurface.visible)
+			return "reveal"
+		if (inlineAdapterLoadingSurface.visible || inlineRuntimeLoadingSurface.visible
+				|| previewEmbedBusyIndicator.visible)
+			return "loading"
+		if (embedPoster.visible && embedPoster.status === Image.Ready)
+			return "poster"
+		if (previewEmptyPosterIcon.visible || previewPlayButton.visible)
+			return "fallback"
+		if (inlineMediaLoader.status === Loader.Ready && inlineMediaLoader.item) {
+			const rendererState = String(inlineMediaLoader.item.rendererState || "")
+				.toLowerCase()
+			if (inlineMediaLoader.item.documentReady === true || rendererState === "active")
+				return "ready"
+			if (rendererState === "loading")
+				return "loading"
+			if (rendererState === "error")
+				return "fallback"
+		}
+		return "blank"
+	}
 	readonly property int animationDuration: animationsEnabled ? Theme.motionFast : 0
 	readonly property bool effectiveHovered: hoverEffectsEnabled && cardHover.hovered
 	property bool userExpanded: false
@@ -314,7 +342,9 @@ Rectangle {
 		&& String(mediaSessionController.sessionId || "") === mediaSessionId
 	readonly property bool inlineAdapterReady: inlinePlaybackActive
 		&& inlineMediaLoader.status === Loader.Ready && !!inlineMediaLoader.item
-		&& inlineMediaLoader.item.documentReady === true
+		&& (inlineMediaLoader.item.documentReady === true
+			|| (providerPostPresentation
+				&& inlineMediaLoader.item.providerDocumentPresented === true))
 	readonly property bool inlineAdapterPending: inlinePlaybackActive
 		&& providerPostPresentation && !inlineAdapterReady
 	readonly property bool directInlinePlaybackActive: inlinePlaybackActive && !hasEmbedPreview
@@ -1375,6 +1405,7 @@ Rectangle {
 			}
 
 			ModernIcon {
+				id: previewEmptyPosterIcon
 				objectName: "previewEmptyPosterIcon"
 				anchors.centerIn: parent
 				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal
@@ -1386,12 +1417,12 @@ Rectangle {
 			}
 
 			ModernBusyIndicator {
+				id: previewEmbedBusyIndicator
 				objectName: "previewEmbedBusyIndicator"
 				anchors.centerIn: parent
 				running: !root.mediaRequiresReveal
-					&& ((!root.inlinePlaybackActive
-							&& (root.previewState === "loading" || embedPoster.status === Image.Loading))
-						|| root.inlineAdapterPending)
+					&& !root.inlinePlaybackActive
+					&& (root.previewState === "loading" || embedPoster.status === Image.Loading)
 				visible: running
 				animated: root.animationsEnabled
 				Accessible.name: qsTr("Loading provider preview")
@@ -1450,6 +1481,7 @@ Rectangle {
 			}
 
 			Rectangle {
+				id: previewEmbedRevealSurface
 				objectName: "previewEmbedRevealSurface"
 				anchors.fill: parent
 				z: 2
@@ -1520,6 +1552,84 @@ Rectangle {
 				onStatusChanged: if (status === Loader.Error && active)
 					root.reportInlinePlayerComponentFailure()
 				Component.onCompleted: updateSource()
+			}
+
+			Rectangle {
+				id: inlineAdapterLoadingSurface
+				objectName: "previewInlineAdapterLoadingSurface"
+				anchors.fill: parent
+				opacity: root.inlineAdapterPending ? 1 : 0
+				visible: opacity > 0
+				enabled: false
+				z: 9
+				color: Theme.embedSurface
+				border.color: root.withAlpha(providerDetails.providerAccent, 0.42)
+				border.width: 1
+				gradient: Gradient {
+					GradientStop {
+						position: 0.0
+						color: root.withAlpha(providerDetails.providerAccent, 0.18)
+					}
+					GradientStop {
+						position: 1.0
+						color: Theme.embedSurface
+					}
+				}
+				Accessible.role: Accessible.AlertMessage
+				Accessible.name: qsTr("Loading %1").arg(root.providerLabel)
+				Accessible.description: qsTr("Loading provider preview")
+				Accessible.ignored: !root.inlineAdapterPending
+				Behavior on opacity {
+					NumberAnimation { duration: root.animationDuration }
+				}
+
+				ColumnLayout {
+					anchors.centerIn: parent
+					width: Math.max(1, Math.min(parent.width - Theme.space6 * 2, 360))
+					spacing: root.narrowLayout ? Theme.space1 : Theme.space3
+
+					ModernBusyIndicator {
+						objectName: "previewInlineAdapterBusyIndicator"
+						Layout.alignment: Qt.AlignHCenter
+						running: root.inlineAdapterPending
+						visible: running
+						animated: root.animationsEnabled
+						Accessible.ignored: true
+					}
+
+					ProviderIdentityBadge {
+						objectName: "previewInlineAdapterProviderBadge"
+						Layout.alignment: Qt.AlignHCenter
+						providerToken: root.normalizedEmbedProvider
+						badgeText: root.providerLabel
+						presentation: "inline"
+						accent: providerDetails.providerAccent
+						foreground: providerDetails.providerForeground
+					}
+
+					Label {
+						objectName: "previewInlineAdapterLoadingHeading"
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: qsTr("Loading %1").arg(root.providerLabel)
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontTitle
+						font.weight: Font.DemiBold
+						horizontalAlignment: Text.AlignHCenter
+						elide: Text.ElideRight
+					}
+
+					Label {
+						objectName: "previewInlineAdapterLoadingDetail"
+						Layout.fillWidth: true
+						visible: !root.narrowLayout
+						textFormat: Text.PlainText
+						text: qsTr("Loading provider preview")
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						horizontalAlignment: Text.AlignHCenter
+					}
+				}
 			}
 
 			Rectangle {

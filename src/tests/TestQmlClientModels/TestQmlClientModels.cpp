@@ -40,6 +40,7 @@ private slots:
 	void qmlRoomAndAvatarHydrationAvoidSynchronousUiDatabaseWork();
 	void mainWindowDatabaseBlobReadsStayAsync();
 	void persistentChatVideoPosterDetachesFrameBeforePreviewWorker();
+	void persistentChatRemotePlayableMediaTransformsStayOffGuiThread();
 	void toolsRequireNegotiatedRootAclPermission();
 	void stonksRequiresNegotiatedRootAclPermission();
 	void aclEntryPointsUseExplicitRoomTargets();
@@ -1476,6 +1477,70 @@ void TestQmlClientModels::persistentChatVideoPosterDetachesFrameBeforePreviewWor
 	QVERIFY2(!method.contains(QStringLiteral("[frame]()")),
 		"A QVideoFrame captured by a preview worker can create a short-lived Qt Multimedia QRhi");
 	QCOMPARE(method.count(QStringLiteral("frame.toImage()")), 1);
+}
+
+void TestQmlClientModels::persistentChatRemotePlayableMediaTransformsStayOffGuiThread() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile sourceFile(sourcePath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+
+	const qsizetype mediaTransformStart = source.indexOf(QStringLiteral(
+		"PersistentChatRemoteMediaTransformResult transformPersistentChatRemotePlayableMedia("));
+	const qsizetype audioTransformStart = source.indexOf(QStringLiteral(
+		"PersistentChatRemoteMediaTransformResult transformPersistentChatRemotePlayableAudio("));
+	const qsizetype transformEnd =
+		source.indexOf(QStringLiteral("bool isTrackingPreviewQueryItem("), audioTransformStart);
+	QVERIFY(mediaTransformStart >= 0);
+	QVERIFY(audioTransformStart > mediaTransformStart);
+	QVERIFY(transformEnd > audioTransformStart);
+	const QString mediaTransform =
+		source.mid(mediaTransformStart, audioTransformStart - mediaTransformStart);
+	const QString audioTransform =
+		source.mid(audioTransformStart, transformEnd - audioTransformStart);
+	QVERIFY(mediaTransform.contains(QStringLiteral("remotePlayableMediaBytesLookValid(")));
+	QVERIFY(mediaTransform.contains(QStringLiteral("playableMediaDataUrl(")));
+	QVERIFY(mediaTransform.contains(QStringLiteral("mp4BytesLikelyHaveAudioTrack(")));
+	QVERIFY(audioTransform.contains(QStringLiteral("remotePlayableAudioBytesLookValid(")));
+	QVERIFY(audioTransform.contains(QStringLiteral("playableAudioDataUrl(")));
+
+	const qsizetype methodStart = source.indexOf(QStringLiteral(
+		"bool MainWindow::requestPersistentChatRemotePlayableMediaCache("));
+	const qsizetype methodEnd = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatPreviewPosterImage("), methodStart);
+	QVERIFY(methodStart >= 0);
+	QVERIFY(methodEnd > methodStart);
+	const QString method = source.mid(methodStart, methodEnd - methodStart);
+
+	QCOMPARE(method.count(QStringLiteral(
+		"submit< PersistentChatRemoteMediaTransformResult >")), 2);
+	const qsizetype mediaSubmit = method.indexOf(QStringLiteral(
+		"submit< PersistentChatRemoteMediaTransformResult >"));
+	const qsizetype mediaTransformCall =
+		method.indexOf(QStringLiteral("transformPersistentChatRemotePlayableMedia("), mediaSubmit);
+	const qsizetype audioSubmit = method.indexOf(QStringLiteral(
+		"submit< PersistentChatRemoteMediaTransformResult >"), mediaSubmit + 1);
+	const qsizetype audioTransformCall =
+		method.indexOf(QStringLiteral("transformPersistentChatRemotePlayableAudio("), audioSubmit);
+	QVERIFY(mediaSubmit >= 0);
+	QVERIFY(mediaTransformCall > mediaSubmit);
+	QVERIFY(audioSubmit > mediaTransformCall);
+	QVERIFY(audioTransformCall > audioSubmit);
+	QVERIFY(!method.contains(QStringLiteral("remotePlayableMediaBytesLookValid(")));
+	QVERIFY(!method.contains(QStringLiteral("playableMediaDataUrl(")));
+	QVERIFY(!method.contains(QStringLiteral("mp4BytesLikelyHaveAudioTrack(")));
+	QVERIFY(!method.contains(QStringLiteral("remotePlayableAudioBytesLookValid(")));
+	QVERIFY(!method.contains(QStringLiteral("playableAudioDataUrl(")));
+	QVERIFY(method.contains(QStringLiteral("persistentChatPreviewWorkerGroup(previewKey)")));
+	QVERIFY(method.contains(QStringLiteral("expectedPreviewSource")));
+	QVERIFY(method.count(QStringLiteral("canonicalUrl != expectedPreviewSource")) >= 3);
+	QVERIFY(method.contains(QStringLiteral("const bool transformUnavailable = !transformed;")));
+	QVERIFY(method.contains(QStringLiteral(
+		"transformUnavailable || !success || mediaBytesLookValid")));
+	QVERIFY(method.contains(QStringLiteral("if (!transformedAudio)")));
+	QVERIFY(method.contains(QStringLiteral("applyPersistentChatRemoteAudioMedia(")));
+	QVERIFY(method.count(QStringLiteral("remoteMediaRequested")) >= 8);
 }
 
 void TestQmlClientModels::toolsRequireNegotiatedRootAclPermission() {

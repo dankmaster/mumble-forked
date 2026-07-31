@@ -1951,6 +1951,8 @@ ApplicationWindow {
 				"visibleRowMaterializedCount": visiblePresentation.rowMaterializedCount,
 				"visibleRowLoaderReadyCount": visiblePresentation.rowLoaderReadyCount,
 				"visiblePreviewReadyCount": visiblePresentation.previewReadyCount,
+				"visibleBlankPreviewSurfaceCount":
+					visiblePresentation.blankPreviewSurfaceCount,
 				"visibleRows": visiblePresentation.rows,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
@@ -3724,6 +3726,7 @@ ApplicationWindow {
 							"rowMaterializedCount": 0,
 							"rowLoaderReadyCount": 0,
 							"previewReadyCount": 0,
+							"blankPreviewSurfaceCount": 0,
 							"rows": []
 						}
 
@@ -3736,6 +3739,20 @@ ApplicationWindow {
 								return
 							++diagnostics.visibleCount
 							const preview = item.preview || ({})
+							const previewKeyCount = Object.keys(preview).length
+							const previewSurfaceState = previewKeyCount === 0
+								? "not-required"
+								: item.item
+									? String(item.item.performancePreviewSurfaceState
+										|| "blank").toLowerCase()
+									: "blank"
+							const blankPreviewSurface =
+								item.lightweightDeferredPresentation !== true
+								&& item.messageRowReady === true
+								&& previewKeyCount > 0
+								&& previewSurfaceState === "blank"
+							if (blankPreviewSurface)
+								++diagnostics.blankPreviewSurfaceCount
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
 								"title": String(item.title || ""),
@@ -3755,7 +3772,9 @@ ApplicationWindow {
 								"previewState": String(preview.state || ""),
 								"previewTitle": String(preview.title || ""),
 								"previewUrl": String(preview.url || preview.sourceUrl || ""),
-								"previewKeyCount": Object.keys(preview).length
+								"previewKeyCount": previewKeyCount,
+								"previewSurfaceState": previewSurfaceState,
+								"blankPreviewSurface": blankPreviewSurface
 							})
 							if (item.lightweightDeferredPresentation === true) {
 								if (String(item.presentationSummary || "").trim().length > 0) {
@@ -4547,6 +4566,11 @@ ApplicationWindow {
 								timeline.captureViewportAnchor()
 							timeline.queueRichLoaderResumes()
 							timeline.queueVisibleDeferredMaterialization()
+							// Loading previews count as structurally ready rows, so they are
+							// intentionally absent from queueRichLoaderResumes(). Rescan the
+							// settled viewport explicitly to admit any request that crossed
+							// the visibility boundary while scrolling.
+							timeline.queueVisiblePreviewHydration()
 						}
 					}
 
@@ -5264,6 +5288,12 @@ ApplicationWindow {
 						// Pooling or rebinding resets the latch for the next message.
 						property bool messagePresentationReadyLatched: false
 						property bool richResourceActivationQueued: false
+						readonly property string performancePreviewSurfaceState:
+							!hasPreviewContent ? "not-required"
+							: messageRowLoader.status === Loader.Ready && messageRowLoader.item
+								? String(messageRowLoader.item.previewSurfaceState || "blank")
+									.toLowerCase()
+								: "blank"
 						readonly property bool previewPresentationReady: !hasPreviewContent
 							|| previewNeedsHydration
 							|| (messageRowLoader.item && messageRowLoader.item.previewLoader
@@ -5496,6 +5526,13 @@ ApplicationWindow {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 						}
+						// The hydration window intentionally extends beyond the viewport.
+						// A row can therefore become warm while it is still offscreen and
+						// have its request rejected by the visible-only admission gate.
+						// Re-evaluate when it actually crosses the viewport boundary; the
+						// post-scroll scan below remains the recovery path when ListView
+						// reports that transition while a flick is still active.
+						onInVisibleViewportChanged: requestPreviewHydrationIfNeeded()
 						onStableIdChanged: {
 							closeMessageActionsForReuse()
 							richResourcesActive = false
@@ -5757,6 +5794,21 @@ ApplicationWindow {
 									property alias previewLoader: messagePreviewLoader
 									property alias attachmentLoader: messageAttachmentLoader
 									property alias actionsMenu: messageActions
+									readonly property string previewSurfaceState:
+										!messageDelegate.hasPreviewContent ? "not-required"
+										: messageDelegate.previewNeedsHydration
+											? messagePreviewHydrationPlaceholderLoader.visible
+												&& messagePreviewHydrationPlaceholderLoader.status
+													=== Loader.Ready
+												&& !!messagePreviewHydrationPlaceholderLoader.item
+													? "loading" : "blank"
+											: messagePreviewLoader.visible
+												&& messagePreviewLoader.status === Loader.Ready
+												&& !!messagePreviewLoader.item
+													? String(messagePreviewLoader.item
+														.performanceEmbedSurfaceState || "blank")
+														.toLowerCase()
+													: "blank"
 									function openActions() {
 										messageActions.targetId = messageDelegate.stableId
 										messageActions.targetCanReply = messageDelegate.canReply
@@ -6075,33 +6127,107 @@ ApplicationWindow {
 												String(messageDelegate.preview.host
 													|| messageDelegate.preview.url || qsTr("link")))
 
-											Column {
-												anchors.left: parent.left
-												anchors.right: parent.right
-												anchors.top: parent.top
+											ColumnLayout {
+												anchors.fill: parent
 												anchors.margins: Theme.space3
-												spacing: Theme.space1
+												spacing: Theme.space2
 
-												Label {
-													width: parent.width
-													textFormat: Text.PlainText
-													text: String(messageDelegate.preview.host
-														|| messageDelegate.preview.providerName
-														|| qsTr("Link preview"))
-													color: Theme.textStrong
-													font.pixelSize: Theme.fontBody
-													font.weight: Font.DemiBold
-													elide: Text.ElideRight
+												RowLayout {
+													Layout.fillWidth: true
+													spacing: Theme.space2
+
+													ProviderIdentityBadge {
+														id: previewHydrationProviderBadge
+														objectName: "previewHydrationProviderBadge"
+														Layout.maximumWidth: Math.max(1,
+															messagePreviewHydrationPlaceholderLoader.width * 0.62)
+														providerToken: String(messageDelegate.preview.embedKind
+															|| messageDelegate.preview.provider
+															|| messageDelegate.preview.providerName
+															|| messageDelegate.preview.host || "")
+														badgeText: String(messageDelegate.preview.host
+															|| messageDelegate.preview.providerName
+															|| qsTr("Link preview"))
+														presentation: "inline"
+														labelObjectName: "previewHydrationProviderLabel"
+													}
+
+													Item { Layout.fillWidth: true }
+
+													Label {
+														objectName: "previewHydrationStateLabel"
+														textFormat: Text.PlainText
+														text: qsTr("Loading link preview")
+														color: Theme.textMuted
+														font.pixelSize: Theme.fontCaption
+														elide: Text.ElideRight
+													}
 												}
 
-												Label {
-													width: parent.width
-													textFormat: Text.PlainText
-													text: String(messageDelegate.preview.loadingLabel
-														|| qsTr("Loading preview"))
-													color: Theme.textMuted
-													font.pixelSize: Theme.fontCaption
-													elide: Text.ElideRight
+												Rectangle {
+													id: previewHydrationMediaSkeleton
+													objectName: "previewHydrationMediaSkeleton"
+													Layout.fillWidth: true
+													Layout.fillHeight: true
+													radius: Theme.innerRadius
+													color: Theme.embedSurface
+													border.color: Theme.withAlpha(
+														previewHydrationProviderBadge.accent, 0.32)
+													border.width: 1
+													gradient: Gradient {
+														GradientStop {
+															position: 0.0
+															color: Theme.withAlpha(
+																previewHydrationProviderBadge.accent, 0.16)
+														}
+														GradientStop {
+															position: 1.0
+															color: Theme.embedSurface
+														}
+													}
+													Accessible.ignored: true
+
+													ColumnLayout {
+														anchors.centerIn: parent
+														width: Math.max(1, Math.min(parent.width
+															- Theme.space6 * 2, 320))
+														spacing: Theme.space2
+
+														ProviderIdentityBadge {
+															objectName: "previewHydrationProviderMark"
+															Layout.alignment: Qt.AlignHCenter
+															providerToken: previewHydrationProviderBadge.providerToken
+															presentation: "mark"
+															markExtent: 44
+															accent: previewHydrationProviderBadge.accent
+															foreground: previewHydrationProviderBadge.foreground
+														}
+
+														Label {
+															Layout.fillWidth: true
+															textFormat: Text.PlainText
+															text: qsTr("Loading %1").arg(
+																String(messageDelegate.preview.host
+																	|| messageDelegate.preview.providerName
+																	|| qsTr("preview")))
+															color: Theme.textStrong
+															font.pixelSize: Theme.fontLabel
+															font.weight: Font.DemiBold
+															horizontalAlignment: Text.AlignHCenter
+															elide: Text.ElideRight
+														}
+
+														ModernBusyIndicator {
+															objectName: "previewHydrationBusyIndicator"
+															Layout.alignment: Qt.AlignHCenter
+															running: messagePreviewHydrationPlaceholderLoader.visible
+																&& messageDelegate.inVisibleViewport
+																&& !timeline.richScrollInProgress
+															visible: running
+															animated: !root.visualFixtureOverrideActive
+															Accessible.ignored: true
+														}
+													}
 												}
 											}
 										}

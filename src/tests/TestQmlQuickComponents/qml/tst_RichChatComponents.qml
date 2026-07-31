@@ -1293,9 +1293,11 @@ TestCase {
 	function test_loading_embed_reserves_final_media_geometry() {
 		const card = previewLoader.item
 		const panel = findChild(card, "previewEmbedMediaPanel")
+		const busyIndicator = findChild(card, "previewEmbedBusyIndicator")
 		const originalButton = findChild(card, "previewEmbedOriginalButton")
 		const overflowButton = findChild(card, "previewOverflowButton")
-		verify(panel !== null && originalButton !== null && overflowButton !== null)
+		verify(panel !== null && busyIndicator !== null
+			&& originalButton !== null && overflowButton !== null)
 
 		card.preview = {
 			"state": "loading", "loading": true,
@@ -1306,6 +1308,8 @@ TestCase {
 		}
 		card.previewIdentity = "message:loading-embed"
 		tryCompare(panel, "visible", true)
+		tryCompare(busyIndicator, "visible", true)
+		tryCompare(card, "performanceEmbedSurfaceState", "loading")
 		tryCompare(originalButton, "visible", true)
 		compare(overflowButton.visible, false)
 		originalButton.clicked()
@@ -1324,7 +1328,36 @@ TestCase {
 			"embedKind": "youtube", "embedAspect": "wide"
 		}
 		tryCompare(panel, "visible", true)
+		tryCompare(card, "performanceEmbedSurfaceState", "fallback")
 		compare(panel.height, loadingMediaHeight)
+	}
+
+	function test_embed_surface_contract_accepts_fallback_and_reveal_layers() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Fallback provider preview",
+			"url": "https://www.youtube.com/watch?v=fallback",
+			"embedUrl": "https://www.youtube.com/embed/fallback",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:embed-fallback"
+		tryCompare(card, "performanceEmbedSurfaceState", "fallback")
+
+		card.preview = {
+			"state": "ready",
+			"title": "Sensitive provider preview",
+			"url": "https://www.youtube.com/watch?v=sensitive",
+			"embedUrl": "https://www.youtube.com/embed/sensitive",
+			"embedKind": "youtube", "embedAspect": "wide",
+			"metadata": {
+				"contentWarning": "Sensitive provider media",
+				"thumbnailBlur": true
+			}
+		}
+		card.previewIdentity = "message:embed-reveal"
+		tryCompare(card, "mediaRequiresReveal", true)
+		tryCompare(card, "performanceEmbedSurfaceState", "reveal")
 	}
 
 	function test_unresolved_youtube_clip_keeps_its_final_player_geometry() {
@@ -1861,17 +1894,81 @@ TestCase {
 
 		const loader = findChild(card, "previewInlineMediaLoader")
 		const details = findChild(card, "providerDetails")
-		verify(loader !== null && details !== null)
+		const loadingSurface = findChild(card, "previewInlineAdapterLoadingSurface")
+		const loadingBusy = findChild(card, "previewInlineAdapterBusyIndicator")
+		verify(loader !== null && details !== null && loadingSurface !== null
+			&& loadingBusy !== null)
 		verify(card.inlineAdapterPending)
 		tryCompare(loader, "opacity", 0)
+		tryCompare(loadingSurface, "opacity", 1)
+		verify(loadingSurface.visible)
+		verify(loadingBusy.running)
+		compare(card.performanceEmbedSurfaceState, "loading")
 		verify(details.visible)
 		const loadingHeight = card.implicitHeight
 
 		loader.item.visualFixtureMode = "active"
 		tryVerify(function() { return card.inlineAdapterReady })
 		tryCompare(loader, "opacity", 1)
+		tryCompare(loadingSurface, "opacity", 0)
+		verify(!loadingSurface.visible)
+		verify(!loadingBusy.running)
+		compare(card.performanceEmbedSurfaceState, "ready")
 		compare(card.implicitHeight, loadingHeight)
 		verify(details.visible)
+	}
+
+	function test_provider_post_presents_interactive_block_without_claiming_document_ready() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Instagram verification transition",
+			"url": "https://www.instagram.com/reel/blocked/",
+			"embedUrl": "https://www.instagram.com/reel/blocked/embed/",
+			"embedKind": "instagram",
+			"embedAspect": "short",
+			"metadata": {
+				"provider": "instagram",
+				"instagramMediaKind": "reel",
+				"mediaPresentation": "provider-post-card"
+			}
+		}
+		card.previewIdentity = "message:instagram-blocked-transition"
+		card.mediaSessionId = "message:instagram-blocked-transition"
+		card.mediaSessionController = inlineSession
+		card.visualMediaFixtureMode = "loading"
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "instagram"
+		inlineSession.detached = false
+		inlineSession.active = true
+		wait(0)
+
+		const loader = findChild(card, "previewInlineMediaLoader")
+		const loadingSurface = findChild(card, "previewInlineAdapterLoadingSurface")
+		verify(loader !== null && loadingSurface !== null)
+		tryVerify(function() { return loader.item !== null })
+		const generation = loader.item.beginMediaDocumentLoad(
+			"about:blank#provider-post-blocked")
+		verify(loader.item.applyProviderPostDocumentProbeResult(generation, {
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": false,
+			"actionVisible": true,
+			"textLength": 32,
+			"standaloneMediaVisible": false,
+			"blockedKind": "consent",
+			"failureKind": "",
+			"blockedSurfaceVisible": true,
+			"detail": "Allow all cookies"
+		}))
+
+		verify(!loader.item.documentReady)
+		verify(loader.item.providerDocumentPresented)
+		compare(loader.item.surfaceVerificationState, "blocked")
+		tryVerify(function() { return card.inlineAdapterReady })
+		tryCompare(loader, "opacity", 1)
+		tryCompare(loadingSurface, "opacity", 0)
+		verify(card.performanceEmbedSurfaceState !== "blank")
 	}
 
 	function test_x_uses_the_common_mumble_social_post_card() {

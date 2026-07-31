@@ -10368,6 +10368,43 @@ QString playableAudioDataUrl(const QString &mime, const QByteArray &bytes) {
 	return QString::fromLatin1("data:%1;base64,%2").arg(normalizedMime, QString::fromLatin1(bytes.toBase64()));
 }
 
+struct PersistentChatRemoteMediaTransformResult {
+	QString resolvedMime;
+	QString dataUrl;
+	bool bytesLookValid = false;
+	bool hasOwnAudio    = false;
+};
+
+PersistentChatRemoteMediaTransformResult transformPersistentChatRemotePlayableMedia(
+	const QByteArray &bytes, const QUrl &mediaUrl, const QString &suggestedMime,
+	const QString &replyMime, const bool success) {
+	PersistentChatRemoteMediaTransformResult result;
+	result.resolvedMime = playableMediaMimeForUrl(
+		mediaUrl, replyMime.isEmpty() ? suggestedMime : replyMime);
+	result.bytesLookValid = success && remotePlayableMediaBytesLookValid(bytes, result.resolvedMime);
+	if (!result.bytesLookValid) {
+		return result;
+	}
+
+	result.dataUrl = playableMediaDataUrl(result.resolvedMime, bytes);
+	if (!result.dataUrl.isEmpty() && result.resolvedMime == QLatin1String("video/mp4")) {
+		result.hasOwnAudio = mp4BytesLikelyHaveAudioTrack(bytes);
+	}
+	return result;
+}
+
+PersistentChatRemoteMediaTransformResult transformPersistentChatRemotePlayableAudio(
+	const QByteArray &bytes, const QUrl &audioUrl, const QString &suggestedMime,
+	const QString &replyMime, const bool success) {
+	PersistentChatRemoteMediaTransformResult result;
+	result.resolvedMime   = playableAudioMimeForReply(audioUrl, suggestedMime, replyMime);
+	result.bytesLookValid = success && remotePlayableAudioBytesLookValid(bytes, result.resolvedMime);
+	if (result.bytesLookValid) {
+		result.dataUrl = playableAudioDataUrl(result.resolvedMime, bytes);
+	}
+	return result;
+}
+
 bool isTrackingPreviewQueryItem(const QString &name) {
 	const QString key = name.trimmed().toLower();
 	return key.startsWith(QLatin1String("utm_")) || key == QLatin1String("fbclid")
@@ -33936,6 +33973,7 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 	if (!mime.startsWith(QLatin1String("video/"))) {
 		return false;
 	}
+	const QString expectedPreviewSource = it->canonicalUrl;
 
 	it->remoteMediaRequested = true;
 
@@ -33944,118 +33982,181 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_MEDIA_CACHE_BYTES);
 	connect(reply, &QNetworkReply::finished, this,
-			[this, reply, previewKey, normalizedMediaUrl, mime, audioUrl, suggestedAudioMime]() {
-				const QByteArray data   = reply->readAll();
-				const bool success      = reply->error() == QNetworkReply::NoError;
-				const QString replyMime = reply->header(QNetworkRequest::ContentTypeHeader)
-											  .toString()
-											  .section(QLatin1Char(';'), 0, 0)
-											  .trimmed()
-											  .toLower();
+			[this, reply, previewKey, expectedPreviewSource, normalizedMediaUrl, mime, audioUrl,
+			 suggestedAudioMime]() {
+				QByteArray data           = reply->readAll();
+				const bool success        = reply->error() == QNetworkReply::NoError;
+				const QString replyMime   = reply->header(QNetworkRequest::ContentTypeHeader)
+												.toString()
+												.section(QLatin1Char(';'), 0, 0)
+												.trimmed()
+												.toLower();
 				reply->deleteLater();
 
-				auto previewIt = m_persistentChatPreviews.find(previewKey);
-				if (previewIt == m_persistentChatPreviews.end()) {
+				const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
+				if (previewIt == m_persistentChatPreviews.cend()
+					|| previewIt->canonicalUrl != expectedPreviewSource
+					|| !previewIt->remoteMediaRequested) {
 					return;
 				}
 
-				previewIt->remoteMediaRequested = false;
-				previewIt->remoteMediaFinished  = true;
-
-				const QString resolvedMime = playableMediaMimeForUrl(normalizedMediaUrl, replyMime.isEmpty() ? mime : replyMime);
-				const bool mediaBytesLookValid = success && remotePlayableMediaBytesLookValid(data, resolvedMime);
-				bool appliedMedia              = false;
-				if (mediaBytesLookValid) {
-					const QString dataUrl = playableMediaDataUrl(resolvedMime, data);
-					if (!dataUrl.isEmpty()) {
-						previewIt->mediaDataUrl = dataUrl;
-						previewIt->mediaMime    = resolvedMime;
-						previewIt->mediaKind    = resolvedMime.startsWith(QLatin1String("video/"))
-													  ? QStringLiteral("video")
-													  : (resolvedMime == QLatin1String("image/gif") ? QStringLiteral("gif")
-																									: QStringLiteral("image"));
-						previewIt->autoplay          = false;
-						previewIt->metadataFinished  = true;
-						previewIt->thumbnailFinished = true;
-						previewIt->failed            = false;
-						if (previewDescriptionIsPlaceholder(previewIt->description)) {
-							previewIt->description = resolvedMime == QLatin1String("image/gif")
-														 ? tr("Animated image preview")
-														 : (resolvedMime.startsWith(QLatin1String("image/"))
-																? tr("Image preview")
-																: tr("Video preview"));
+				const qint64 estimatedBytes = data.size();
+				persistentChatPreviewWorkerQueue().submit< PersistentChatRemoteMediaTransformResult >(
+					this, persistentChatPreviewWorkerGroup(previewKey),
+					persistentChatPreviewWorkerSourceKey(
+						QStringLiteral("remote-media"), normalizedMediaUrl.toString(QUrl::FullyEncoded)),
+					estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
+					[data = std::move(data), normalizedMediaUrl, mime, replyMime, success]() {
+						return transformPersistentChatRemotePlayableMedia(
+							data, normalizedMediaUrl, mime, replyMime, success);
+					},
+					[this, previewKey, expectedPreviewSource, normalizedMediaUrl, mime, audioUrl,
+					 suggestedAudioMime, success](
+						std::optional< PersistentChatRemoteMediaTransformResult > transformed) mutable {
+						auto previewIt = m_persistentChatPreviews.find(previewKey);
+						if (previewIt == m_persistentChatPreviews.end()
+							|| previewIt->canonicalUrl != expectedPreviewSource
+							|| !previewIt->remoteMediaRequested) {
+							return;
 						}
-						appliedMedia = true;
 
-						const bool mediaHasOwnAudio =
-							resolvedMime == QLatin1String("video/mp4") && mp4BytesLikelyHaveAudioTrack(data);
-						if (!audioUrl.isEmpty() && resolvedMime == QLatin1String("video/mp4")
-							&& !mediaHasOwnAudio) {
-							const QString audioMime = playableAudioMimeForUrl(audioUrl, suggestedAudioMime);
-							if (!audioMime.isEmpty() && isTrustedRemoteAudioMediaUrl(audioUrl, audioMime)) {
-								previewIt->remoteMediaRequested = true;
-								previewIt->remoteMediaFinished  = false;
+						previewIt->remoteMediaRequested = false;
+						previewIt->remoteMediaFinished  = true;
 
-								QNetworkRequest audioRequest(audioUrl);
-								preparePreviewMediaRequest(audioRequest, audioUrl);
-								QNetworkReply *audioReply = startPersistentChatPreviewGet(audioRequest, previewKey);
-								applyPreviewReplyGuards(audioReply, PREVIEW_MAX_AUDIO_CACHE_BYTES);
-								connect(audioReply, &QNetworkReply::finished, this,
-										[this, audioReply, previewKey, audioUrl, suggestedAudioMime]() {
-											const QByteArray audioData = audioReply->readAll();
-											const bool audioSuccess    = audioReply->error() == QNetworkReply::NoError;
-											const QString audioReplyMime =
-												audioReply->header(QNetworkRequest::ContentTypeHeader)
-													.toString()
-													.section(QLatin1Char(';'), 0, 0)
-													.trimmed()
-													.toLower();
-											audioReply->deleteLater();
-
-											auto audioPreviewIt = m_persistentChatPreviews.find(previewKey);
-											if (audioPreviewIt == m_persistentChatPreviews.end()) {
-												return;
-											}
-
-											audioPreviewIt->remoteMediaRequested = false;
-											audioPreviewIt->remoteMediaFinished  = true;
-
-											const QString resolvedAudioMime =
-												playableAudioMimeForReply(audioUrl, suggestedAudioMime, audioReplyMime);
-											const QString audioDataUrl =
-												(audioSuccess
-												 && remotePlayableAudioBytesLookValid(audioData, resolvedAudioMime))
-													? playableAudioDataUrl(resolvedAudioMime, audioData)
-													: QString();
-											if (!audioDataUrl.isEmpty()) {
-												audioPreviewIt->mediaAudioDataUrl = audioDataUrl;
-												audioPreviewIt->mediaAudioMime    = resolvedAudioMime;
-											} else {
-												audioPreviewIt->mediaAudioDataUrl.clear();
-												audioPreviewIt->mediaAudioMime.clear();
-											}
-
-											publishPersistentChatPreviewUpdate(previewKey);
-										});
-								return;
+						const bool transformUnavailable = !transformed;
+						const bool mediaBytesLookValid = transformed && transformed->bytesLookValid;
+						bool appliedMedia              = false;
+						if (mediaBytesLookValid && !transformed->dataUrl.isEmpty()) {
+							const QString resolvedMime = transformed->resolvedMime;
+							const bool mediaHasOwnAudio = transformed->hasOwnAudio;
+							previewIt->mediaDataUrl     = std::move(transformed->dataUrl);
+							previewIt->mediaMime        = resolvedMime;
+							previewIt->mediaKind        = resolvedMime.startsWith(QLatin1String("video/"))
+								? QStringLiteral("video")
+								: (resolvedMime == QLatin1String("image/gif") ? QStringLiteral("gif")
+																			: QStringLiteral("image"));
+							previewIt->autoplay          = false;
+							previewIt->metadataFinished  = true;
+							previewIt->thumbnailFinished = true;
+							previewIt->failed            = false;
+							if (previewDescriptionIsPlaceholder(previewIt->description)) {
+								previewIt->description = resolvedMime == QLatin1String("image/gif")
+									? tr("Animated image preview")
+									: (resolvedMime.startsWith(QLatin1String("image/"))
+											? tr("Image preview")
+											: tr("Video preview"));
 							}
-							previewIt->mediaAudioDataUrl.clear();
-							previewIt->mediaAudioMime.clear();
-						} else if (mediaHasOwnAudio) {
-							previewIt->mediaAudioDataUrl.clear();
-							previewIt->mediaAudioMime.clear();
-						}
-					}
-				}
-				if (!appliedMedia && (!success || mediaBytesLookValid)) {
-					const bool appliedRemoteMedia =
-						applyPersistentChatRemotePlayableMedia(*previewIt, normalizedMediaUrl, mime);
-					if (appliedRemoteMedia) {
-						applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, suggestedAudioMime);
-					}
-				}
+							appliedMedia = true;
 
-				publishPersistentChatPreviewUpdate(previewKey);
+							if (!audioUrl.isEmpty() && resolvedMime == QLatin1String("video/mp4")
+								&& !mediaHasOwnAudio) {
+								const QString audioMime = playableAudioMimeForUrl(audioUrl, suggestedAudioMime);
+								if (!audioMime.isEmpty()
+									&& isTrustedRemoteAudioMediaUrl(audioUrl, audioMime)) {
+									previewIt->remoteMediaRequested = true;
+									previewIt->remoteMediaFinished  = false;
+
+									QNetworkRequest audioRequest(audioUrl);
+									preparePreviewMediaRequest(audioRequest, audioUrl);
+									QNetworkReply *audioReply =
+										startPersistentChatPreviewGet(audioRequest, previewKey);
+									applyPreviewReplyGuards(audioReply, PREVIEW_MAX_AUDIO_CACHE_BYTES);
+									connect(audioReply, &QNetworkReply::finished, this,
+											[this, audioReply, previewKey, expectedPreviewSource, audioUrl,
+											 suggestedAudioMime]() {
+												QByteArray audioData        = audioReply->readAll();
+												const bool audioSuccess     =
+													audioReply->error() == QNetworkReply::NoError;
+												const QString audioReplyMime =
+													audioReply->header(QNetworkRequest::ContentTypeHeader)
+														.toString()
+														.section(QLatin1Char(';'), 0, 0)
+														.trimmed()
+														.toLower();
+												audioReply->deleteLater();
+
+												const auto audioPreviewIt =
+													m_persistentChatPreviews.constFind(previewKey);
+												if (audioPreviewIt == m_persistentChatPreviews.cend()
+													|| audioPreviewIt->canonicalUrl != expectedPreviewSource
+													|| !audioPreviewIt->remoteMediaRequested) {
+													return;
+												}
+
+												const qint64 estimatedAudioBytes = audioData.size();
+												persistentChatPreviewWorkerQueue()
+													.submit< PersistentChatRemoteMediaTransformResult >(
+														this, persistentChatPreviewWorkerGroup(previewKey),
+														persistentChatPreviewWorkerSourceKey(
+															QStringLiteral("remote-audio"),
+															audioUrl.toString(QUrl::FullyEncoded)),
+														estimatedAudioBytes,
+														PersistentChatPreviewWorkerPriority::Interactive,
+														[audioData = std::move(audioData), audioUrl,
+														 suggestedAudioMime, audioReplyMime, audioSuccess]() {
+															return transformPersistentChatRemotePlayableAudio(
+																audioData, audioUrl, suggestedAudioMime,
+																audioReplyMime, audioSuccess);
+														},
+														[this, previewKey, expectedPreviewSource, audioUrl,
+														 suggestedAudioMime](
+															std::optional<
+																PersistentChatRemoteMediaTransformResult >
+																transformedAudio) mutable {
+															auto audioPreviewIt =
+																m_persistentChatPreviews.find(previewKey);
+															if (audioPreviewIt
+																	== m_persistentChatPreviews.end()
+																|| audioPreviewIt->canonicalUrl
+																	!= expectedPreviewSource
+																|| !audioPreviewIt->remoteMediaRequested) {
+																return;
+															}
+
+															audioPreviewIt->remoteMediaRequested = false;
+															audioPreviewIt->remoteMediaFinished  = true;
+															if (!transformedAudio) {
+																if (!applyPersistentChatRemoteAudioMedia(
+																		*audioPreviewIt, audioUrl,
+																		suggestedAudioMime)) {
+																	audioPreviewIt->mediaAudioDataUrl.clear();
+																	audioPreviewIt->mediaAudioMime.clear();
+																}
+															} else if (!transformedAudio->dataUrl.isEmpty()) {
+																audioPreviewIt->mediaAudioDataUrl =
+																	std::move(transformedAudio->dataUrl);
+																audioPreviewIt->mediaAudioMime =
+																	transformedAudio->resolvedMime;
+															} else {
+																audioPreviewIt->mediaAudioDataUrl.clear();
+																audioPreviewIt->mediaAudioMime.clear();
+															}
+
+															publishPersistentChatPreviewUpdate(previewKey);
+														});
+											});
+									return;
+								}
+								previewIt->mediaAudioDataUrl.clear();
+								previewIt->mediaAudioMime.clear();
+							} else if (mediaHasOwnAudio) {
+								previewIt->mediaAudioDataUrl.clear();
+								previewIt->mediaAudioMime.clear();
+							}
+						}
+						if (!appliedMedia
+							&& (transformUnavailable || !success || mediaBytesLookValid)) {
+							const bool appliedRemoteMedia =
+								applyPersistentChatRemotePlayableMedia(
+									*previewIt, normalizedMediaUrl, mime);
+							if (appliedRemoteMedia) {
+								applyPersistentChatRemoteAudioMedia(
+									*previewIt, audioUrl, suggestedAudioMime);
+							}
+						}
+
+						publishPersistentChatPreviewUpdate(previewKey);
+					});
 			});
 
 	return true;

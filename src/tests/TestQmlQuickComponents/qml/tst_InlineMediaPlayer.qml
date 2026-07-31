@@ -115,6 +115,8 @@ TestCase {
 		playerLoader.item.providerVerificationStabilityMs = 0
 		playerLoader.item.providerVerificationProbeCount = 1
 		playerLoader.item.providerDocumentLoadTimeoutMs = 12000
+		playerLoader.item.providerPostDocumentProbeMaxAttempts = 7
+		playerLoader.item.providerPostDocumentProbeBudgetMs = 12000
 		mediaRuntime.videoDocumentUrl = ""
 		mediaRuntime.audioDocumentUrl = ""
 		playerLoader.item.statePollTimeoutMs = 3000
@@ -362,7 +364,7 @@ TestCase {
 		session.loadProgress = 0
 	}
 
-	function test_provider_post_uses_loaded_document_without_playback_probe() {
+	function test_provider_post_requires_semantically_usable_document() {
 		const player = playerLoader.item
 		const loadingSurface = findChild(player, "inlineMediaLoadingSurface")
 		const failureSurface = findChild(player, "inlineMediaFailureOverlay")
@@ -379,14 +381,40 @@ TestCase {
 
 		session.loadProgress = 99
 		wait(0)
+		verify(!player.providerDocumentPresented)
+		verify(!player.documentReady)
+		verify(loadingSurface.visible)
+		verify(!player.applyProviderPostDocumentProbeResult(player.mediaGeneration, {
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": false,
+			"actionVisible": false,
+			"textLength": 0,
+			"standaloneMediaVisible": false
+		}))
+		verify(!player.providerDocumentPresented)
+		verify(!player.documentReady)
+		compare(player.surfaceVerificationState, "pending")
+		compare(session.loadReports, 0)
+		wait(50)
+		verify(!player.documentReady)
+
+		verify(player.applyProviderPostDocumentProbeResult(player.mediaGeneration, {
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": true,
+			"actionVisible": false,
+			"textLength": 0,
+			"standaloneMediaVisible": false
+		}))
 		verify(player.providerDocumentPresented)
 		verify(player.documentReady)
-		verify(player.completeProviderPostDocumentLoad(player.mediaGeneration))
 		verify(player.surfaceVerified)
 		verify(!player.transportVerified)
 		verify(!player.playbackVerified)
 		compare(player.surfaceVerificationState, "verified")
-		compare(player.surfaceVerificationEvidence, "provider-document")
+		verify(player.surfaceVerificationEvidence.indexOf("provider-document") === 0)
+		verify(player.surfaceVerificationEvidence.indexOf("media") > 0)
 		compare(session.lastLoadProgress, 100)
 		compare(player.rendererState, "active")
 		verify(!loadingSurface.visible)
@@ -394,6 +422,220 @@ TestCase {
 
 		player.presentationMode = ""
 		session.active = false
+		session.loadProgress = 0
+	}
+
+	function test_provider_post_cold_load_gets_separate_bounded_semantic_budget() {
+		const player = playerLoader.item
+		session.active = true
+		session.loadProgress = 99
+		player.presentationMode = "provider-post-card"
+		const generation = player.beginMediaDocumentLoad(
+			"about:blank#provider-post-cold-load")
+		const coldLoadStartedAt = Date.now() - 11000
+		player._providerDocumentLoadStartedAt = coldLoadStartedAt
+
+		verify(player.scheduleProviderPostDocumentProbe(generation))
+		verify(player.providerPostDocumentProbeBudgetRunning)
+		compare(player._providerPostDocumentProbeBudgetGeneration, generation)
+		verify(player._providerPostDocumentProbeStartedAt > coldLoadStartedAt)
+		compare(player.providerPostDocumentProbeElapsedMs, 0)
+		compare(player.providerPostDocumentProbeMaxAttempts, 7)
+		let sevenProbeDelayMs = 0
+		const expectedBackoffMs = [ 150, 300, 600, 1200, 2000, 3000, 3000 ]
+		for (let attempt = 0; attempt < expectedBackoffMs.length; ++attempt) {
+			compare(player.providerPostDocumentProbeDelay(attempt),
+				expectedBackoffMs[attempt])
+			sevenProbeDelayMs += expectedBackoffMs[attempt]
+		}
+		compare(sevenProbeDelayMs, 10250)
+		verify(sevenProbeDelayMs < player.providerPostDocumentProbeBudgetMs)
+		compare(player.providerPostDocumentProbeDelay(99), 3000)
+		verify(!player.providerPostDocumentProbeDeadlineExpired(
+			player._providerPostDocumentProbeStartedAt + sevenProbeDelayMs))
+		verify(player.providerPostDocumentProbeDeadlineExpired(
+			player._providerPostDocumentProbeStartedAt
+				+ player.providerPostDocumentProbeBudgetMs))
+		player.documentReadyProbeAttempts = 7
+		verify(!player.scheduleProviderPostDocumentProbe(generation))
+
+		player.presentationMode = ""
+		session.active = false
+		session.loadProgress = 0
+	}
+
+	function test_provider_post_semantic_readiness_is_generation_bound() {
+		const player = playerLoader.item
+		session.active = true
+		session.loadProgress = 99
+		player.presentationMode = "provider-post-card"
+		const firstGeneration = player.beginMediaDocumentLoad(
+			"about:blank#provider-post-first")
+		const secondGeneration = player.beginMediaDocumentLoad(
+			"about:blank#provider-post-second")
+		const usableDocument = {
+			"readyState": "interactive",
+			"rootVisible": true,
+			"mediaVisible": false,
+			"actionVisible": true,
+			"textLength": 24,
+			"standaloneMediaVisible": false
+		}
+
+		verify(!player.completeProviderPostDocumentLoad(
+			firstGeneration, usableDocument))
+		verify(!player.documentReady)
+		compare(session.loadReports, 0)
+		verify(player.completeProviderPostDocumentLoad(
+			secondGeneration, usableDocument))
+		verify(player.documentReady)
+		compare(session.loadReports, 1)
+
+		player.presentationMode = ""
+		session.active = false
+		session.loadProgress = 0
+	}
+
+	function test_provider_post_blocked_surface_wins_before_semantic_readiness_data() {
+		return [
+			{
+				tag: "challenge",
+				blockedKind: "verification",
+				detail: "Logga in för att bekräfta att du inte är en bot",
+				messageFragment: "Complete verification"
+			},
+			{
+				tag: "sign in",
+				blockedKind: "sign-in",
+				detail: "Sign in required",
+				messageFragment: "Complete verification"
+			},
+			{
+				tag: "consent",
+				blockedKind: "consent",
+				detail: "Allow all cookies",
+				messageFragment: "cookie preferences"
+			}
+		]
+	}
+
+	function test_provider_post_blocked_surface_wins_before_semantic_readiness(data) {
+		const player = playerLoader.item
+		session.active = true
+		session.loadProgress = 99
+		player.presentationMode = "provider-post-card"
+		const generation = player.beginMediaDocumentLoad(
+			"about:blank#provider-post-blocked-" + data.blockedKind)
+
+		verify(player.applyProviderPostDocumentProbeResult(generation, {
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": true,
+			"actionVisible": true,
+			"textLength": 48,
+			"standaloneMediaVisible": true,
+			"blockedKind": data.blockedKind,
+			"failureKind": "",
+			"blockedSurfaceVisible": true,
+			"detail": data.detail
+		}))
+		verify(!player.documentReady)
+		verify(player.providerDocumentPresented)
+		compare(player.surfaceVerificationState, "blocked")
+		verify(player.surfaceVerificationEvidence.indexOf(
+			"blocked:" + data.blockedKind) >= 0)
+		verify(player.surfaceVerificationDetail.indexOf(data.messageFragment) >= 0)
+		verify(player.providerVerificationRequired)
+		verify(!player.providerDocumentLoadTimeoutRunning)
+		compare(session.closeCalls, 0)
+		compare(session.errorReports, 0)
+
+		player.presentationMode = ""
+		session.active = false
+		session.loadProgress = 0
+	}
+
+	function test_provider_post_hidden_failure_markers_do_not_override_usable_media_data() {
+		return [
+			{
+				tag: "hidden challenge",
+				blockedKind: "verification",
+				failureKind: ""
+			},
+			{
+				tag: "hidden error surface",
+				blockedKind: "",
+				failureKind: "error"
+			},
+			{
+				tag: "unavailable phrase in post text",
+				blockedKind: "",
+				failureKind: "unavailable"
+			}
+		]
+	}
+
+	function test_provider_post_hidden_failure_markers_do_not_override_usable_media(data) {
+		const player = playerLoader.item
+		const evaluation = player.providerPostDocumentEvaluation({
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": true,
+			"actionVisible": true,
+			"textLength": 48,
+			"standaloneMediaVisible": true,
+			"blockedKind": data.blockedKind,
+			"failureKind": data.failureKind,
+			"blockedSurfaceVisible": false,
+			"failureSurfaceVisible": false,
+			"detail": "A normal provider post"
+		})
+
+		compare(evaluation.state, "verified")
+		compare(evaluation.kind, "")
+		verify(evaluation.presented)
+	}
+
+	function test_provider_post_terminal_failure_falls_back_without_toast_data() {
+		return [
+			{ tag: "unavailable", failureKind: "unavailable" },
+			{ tag: "provider error", failureKind: "error" }
+		]
+	}
+
+	function test_provider_post_terminal_failure_falls_back_without_toast(data) {
+		const player = playerLoader.item
+		session.active = true
+		session.loadProgress = 99
+		player.presentationMode = "provider-post-card"
+		const generation = player.beginMediaDocumentLoad(
+			"about:blank#provider-post-" + data.failureKind)
+		const result = {
+			"readyState": "complete",
+			"rootVisible": true,
+			"mediaVisible": true,
+			"actionVisible": true,
+			"textLength": 48,
+			"standaloneMediaVisible": true,
+			"blockedKind": "",
+			"failureKind": data.failureKind,
+			"blockedSurfaceVisible": false,
+			"failureSurfaceVisible": true,
+			"detail": data.failureKind === "unavailable"
+				? "This content isn't available" : "Provider error"
+		}
+		const evaluation = player.providerPostDocumentEvaluation(result)
+		compare(evaluation.state, "failed")
+		compare(evaluation.kind, data.failureKind)
+
+		verify(player.applyProviderPostDocumentProbeResult(generation, result))
+		verify(!player.documentReady)
+		verify(!player.providerDocumentPresented)
+		compare(session.closeCalls, 1)
+		verify(!session.active)
+		compare(session.errorReports, 0)
+
+		player.presentationMode = ""
 		session.loadProgress = 0
 	}
 
@@ -411,7 +653,19 @@ TestCase {
 		session.state = "loading"
 		session.loadProgress = 0
 		player.presentationMode = data.presentationMode
-		player.beginMediaDocumentLoad("about:blank#provider-document-timeout")
+		const generation = player.beginMediaDocumentLoad(
+			"about:blank#provider-document-timeout")
+		if (player.providerPostPresentation) {
+			session.loadProgress = 99
+			verify(!player.applyProviderPostDocumentProbeResult(generation, {
+				"readyState": "complete",
+				"rootVisible": true,
+				"mediaVisible": false,
+				"actionVisible": false,
+				"textLength": 0,
+				"standaloneMediaVisible": false
+			}))
+		}
 		wait(0)
 
 		compare(player.providerPostPresentation,
@@ -419,6 +673,7 @@ TestCase {
 		verify(!player.providerDocumentPresented)
 		verify(!player.documentReady)
 		verify(player.ready)
+		verify(player.providerDocumentLoadTimeoutRunning)
 		verify(player.recoverProviderDocumentLoadTimeout())
 		compare(session.closeCalls, 1)
 		verify(!session.active)
