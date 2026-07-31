@@ -1960,6 +1960,9 @@ ApplicationWindow {
 				"probeAnchorId": probeAnchor.id,
 				"probeAnchorOffset": probeAnchor.offset,
 				"probeAnchorVisible": probeAnchor.visible,
+				"viewportAnchorActive": timeline.viewportAnchorActive,
+				"viewportAnchorId": timeline.viewportAnchorId,
+				"viewportAnchorOffset": timeline.viewportAnchorOffset,
 				"presentationPending": timeline.scopePresentationPending,
 				"presentationFinalizing": timeline.scopePresentationFinalizing,
 				"scopeResetPending": timeline.scopeResetPending,
@@ -4496,7 +4499,18 @@ ApplicationWindow {
 						viewportAnchorRetries = 0
 					}
 
-					function releasePrependAnchor() {
+					function releasePrependAnchor(preserveViewportAnchor) {
+						// The structural prepend settles before its deferred rich rows are
+						// allowed to replace their fixed-height summaries. Hand the exact
+						// message/offset to the ordinary viewport anchor on the quiet path
+						// so that those later card expansions cannot displace what the user
+						// was reading. Cancellation paths (input, search, scope reset and
+						// missing rows) omit the flag and do not create this handoff.
+						const handoffToViewport = preserveViewportAnchor === true
+							&& prependAnchorActive && !stickToBottom
+							&& !scopePresentationPending && prependAnchorId.length > 0
+						const preservedAnchorId = prependAnchorId
+						const preservedAnchorOffset = prependAnchorOffset
 						prependAnchorSettleTimer.stop()
 						prependMutationInProgress = false
 						prependAnchorActive = false
@@ -4505,6 +4519,12 @@ ApplicationWindow {
 						prependAnchorRetries = 0
 						prependAnchorCorrectionFrames = 0
 						prependAnchorInsertedExtent = 0
+						if (handoffToViewport) {
+							viewportAnchorId = preservedAnchorId
+							viewportAnchorOffset = preservedAnchorOffset
+							viewportAnchorRetries = 0
+							viewportAnchorActive = true
+						}
 						scheduleRichContentResume()
 					}
 
@@ -4834,7 +4854,7 @@ ApplicationWindow {
 						onTriggered: {
 							if (timeline.richScrollInProgress)
 								return
-							if (!timeline.stickToBottom)
+							if (!timeline.stickToBottom && !timeline.viewportAnchorActive)
 								timeline.captureViewportAnchor()
 							timeline.queueRichLoaderResumes()
 							timeline.queueVisibleDeferredMaterialization()
@@ -4937,7 +4957,7 @@ ApplicationWindow {
 									timeline.restorePrependAnchor()
 								restart()
 							} else {
-								timeline.releasePrependAnchor()
+								timeline.releasePrependAnchor(true)
 							}
 						}
 					}
