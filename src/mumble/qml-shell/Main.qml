@@ -1168,6 +1168,8 @@ ApplicationWindow {
 			return
 		}
 		timeline.releasePrependAnchor()
+		timeline.releaseViewportAnchor()
+		timeline.releaseTopAnchor()
 		timeline.stickToBottom = false
 		timeline.currentIndex = presentationRow
 		timeline.positionViewAtIndex(presentationRow, ListView.Center)
@@ -1180,6 +1182,8 @@ ApplicationWindow {
 		if (row < 0)
 			return false
 		timeline.releasePrependAnchor()
+		timeline.releaseViewportAnchor()
+		timeline.releaseTopAnchor()
 		bottomFollowTimer.stop()
 		timeline.followTailAfterInsert = false
 		timeline.pendingTailInsertCount = 0
@@ -3363,6 +3367,7 @@ ApplicationWindow {
 					property bool topAnchorActive: false
 					property bool restoringTopAnchor: false
 					property bool topAnchorProgrammaticMovementGuard: false
+					property bool explicitNavigationMovement: false
 					property bool stickToBottom: true
 					property bool followTailAfterInsert: false
 					property int pendingTailInsertCount: 0
@@ -4212,20 +4217,21 @@ ApplicationWindow {
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
 							if (!item || item.lightweightDeferredPresentation !== true
-									|| item.contentNeedsHydration !== true || !item.visible
-									|| item.y + item.height <= contentY + 0.5
-									|| item.y >= contentY + height - 0.5)
+									|| item.accessibilityPooled === true
+									|| item.contentNeedsHydration !== true || !item.visible)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5
+									|| point.y >= height - 0.5)
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								const point = item.mapToItem(timeline, 0, 0)
 								candidates.push({ "id": stableId, "viewportY": point.y })
 								queuedSet[stableId] = true
 							}
 						}
 						const deferredRepeater = headerItem
 							? headerItem.deferredRepeater : null
-						let deferredHeaderVisible = false
 						for (let childIndex = 0;
 								deferredRepeater && childIndex < deferredRepeater.count; ++childIndex) {
 							const item = deferredRepeater.itemAt(childIndex)
@@ -4234,22 +4240,15 @@ ApplicationWindow {
 							const point = item.mapToItem(timeline, 0, 0)
 							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
 								continue
-							deferredHeaderVisible = true
-							break
-						}
-						// Once the inline deferred header reaches the viewport, restore
-						// its source rows newest-to-oldest. This preserves chronological
-						// order while each row crosses into the real ListView proxy.
-						for (let childIndex = deferredHeaderVisible && deferredRepeater
-								? deferredRepeater.count - 1 : -1; childIndex >= 0; --childIndex) {
-							const item = deferredRepeater.itemAt(childIndex)
 							const stableId = item ? String(item.stableId || "") : ""
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								const point = item.mapToItem(timeline, 0, 0)
 								candidates.push({ "id": stableId, "viewportY": point.y })
 								queuedSet[stableId] = true
 							}
 						}
+						// Only promote inline-header rows that themselves intersect the
+						// viewport. A visible sibling does not make the rest of the fixed
+						// 58 px prefix eligible for hidden geometry work.
 						// Cold scopes and prepend headers are both anchored from their
 						// newest/bottom edge. Promote that edge first, then rebuild after
 						// ListView polishes the resulting real height. This prevents the
@@ -4276,6 +4275,7 @@ ApplicationWindow {
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
 							if (!item || item.lightweightDeferredPresentation !== true
+									|| item.accessibilityPooled === true
 									|| String(item.stableId || "") !== key || !item.visible)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
@@ -4284,20 +4284,17 @@ ApplicationWindow {
 						}
 						const deferredRepeater = headerItem
 							? headerItem.deferredRepeater : null
-						let requestedItem = null
-						let headerVisible = false
 						for (let childIndex = 0;
 								deferredRepeater && childIndex < deferredRepeater.count; ++childIndex) {
 							const item = deferredRepeater.itemAt(childIndex)
-							if (!item || !item.visible)
+							if (!item || !item.visible
+									|| String(item.stableId || "") !== key)
 								continue
-							if (String(item.stableId || "") === key)
-								requestedItem = item
 							const point = item.mapToItem(timeline, 0, 0)
-							headerVisible = headerVisible
-								|| (point.y + item.height > 0.5 && point.y < height - 0.5)
+							return point.y + item.height > 0.5
+								&& point.y < height - 0.5
 						}
-						return requestedItem !== null && headerVisible
+						return false
 					}
 
 					function queueVisiblePreviewHydration(allowDuringFinalization) {
@@ -4352,6 +4349,13 @@ ApplicationWindow {
 						if (topAnchorActive) {
 							topAnchorSettleTimer.restart()
 							topAnchorFrameTimer.restart()
+						}
+						if (materialized === 0) {
+							// A pooled or already-promoted candidate changed no geometry.
+							// Finish this pass instead of immediately rebuilding the same
+							// stale one-item queue forever at 16 ms intervals.
+							finishRichContentRecoveryIfIdle()
+							return
 						}
 						const finalizationGeneration = scopePresentationFinalizing
 							? scopePresentationGeneration : -1
@@ -4661,29 +4665,33 @@ ApplicationWindow {
 							requestBottomFollow()
 					}
 					onMovementStarted: {
+						const explicitNavigation = dragging || flicking
+							|| timelineScrollHandler.scrolling
+							|| timelineScrollBar.pressed
+							|| root.performanceChatScrollRunning
+						explicitNavigationMovement = explicitNavigation
+						// QQuickListView also emits movementStarted when an asynchronous
+						// delegate changes its measured geometry. Preserve whichever stable
+						// content anchor owns that automatic movement; mouse, touch,
+						// scrollbar and performance-runner input are classified above.
+						if (!explicitNavigation) {
+							if (stickToBottom)
+								requestBottomFollow()
+							else if (topAnchorActive) {
+								topAnchorFrameTimer.restart()
+								topAnchorSettleTimer.restart()
+							} else if (prependAnchorActive) {
+								prependAnchorSettleTimer.restart()
+							} else if (viewportAnchorActive) {
+								Qt.callLater(function() {
+									timeline.restoreViewportAnchor()
+								})
+							}
+							return
+						}
 						root.closeQuickReactions()
 						richContentResumeTimer.stop()
 						releaseViewportAnchor()
-						// QQuickListView also emits movementStarted when an asynchronous
-						// delegate changes the estimated content geometry. That is not user
-						// navigation and must not release tail-follow merely because the
-						// short cold-presentation observation window has elapsed. Every
-						// explicit input path is observable here (drag/flick, smooth wheel,
-						// the performance scroll runner), while scrollbar presses clear
-						// stickToBottom before this signal arrives.
-						if (stickToBottom && !dragging && !flicking
-								&& !timelineScrollHandler.scrolling
-								&& !root.performanceChatScrollRunning) {
-							requestBottomFollow()
-							return
-						}
-						if (topAnchorActive && topAnchorProgrammaticMovementGuard
-								&& !dragging && !flicking
-								&& !timelineScrollHandler.scrolling) {
-							topAnchorFrameTimer.restart()
-							topAnchorSettleTimer.restart()
-							return
-						}
 						if (!restoringTopAnchor) {
 							releaseTopAnchor()
 						}
@@ -4698,7 +4706,41 @@ ApplicationWindow {
 						}
 					}
 					onMovementEnded: {
+						const explicitNavigation = explicitNavigationMovement
+						explicitNavigationMovement = false
 						if (!restoringBottom) {
+							if (!explicitNavigation) {
+								if (stickToBottom)
+									requestBottomFollow()
+								else if (topAnchorActive) {
+									topAnchorFrameTimer.restart()
+									topAnchorSettleTimer.restart()
+									restoreTopAnchor()
+								} else if (prependAnchorActive) {
+									if (deferredPrependAnchorActive)
+										restoreDeferredPrependAnchor()
+									else
+										restorePrependAnchor()
+								} else if (viewportAnchorActive) {
+									restoreViewportAnchor()
+								} else {
+									// Explicit programmatic jumps release their previous
+									// anchors before changing contentY. Re-establish tail
+									// intent when such a jump lands on the latest row;
+									// otherwise protect the newly revealed message.
+									stickToBottom = isNearBottom()
+									if (stickToBottom)
+										requestBottomFollow()
+									else
+										captureViewportAnchor()
+								}
+								scheduleRichContentResume()
+								if (stickToBottom)
+									Qt.callLater(function() {
+										timeline.markVisibleScopeReadIfEligible()
+									})
+								return
+							}
 							// An automatic ListView geometry movement may finish before the
 							// coalesced bottom-follow timer gets its next frame. Preserve an
 							// existing tail intent here; explicit input paths clear it before
