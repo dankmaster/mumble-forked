@@ -44,11 +44,17 @@ TestCase {
 		target: middleDrag
 		signalName: "scrollingEnded"
 	}
+	SignalSpy {
+		id: wheelInputObservedSpy
+		target: middleDrag
+		signalName: "wheelInputObserved"
+	}
 
 	function init() {
 		middleDrag.cancelSmoothWheel()
 		scrollingStartedSpy.clear()
 		scrollingEndedSpy.clear()
+		wheelInputObservedSpy.clear()
 		flickable.contentX = 120
 		flickable.contentY = 180
 		wait(1)
@@ -67,6 +73,7 @@ TestCase {
 			0, -120, Qt.NoButton, Qt.NoModifier, 20)
 		verify(middleDrag.wheelAnimationActive)
 		compare(scrollingStartedSpy.count, 1)
+		compare(wheelInputObservedSpy.count, 1)
 		compare(middleDrag.wheelTargetY, expectedY)
 		tryVerify(function() { return flickable.contentY > 180 }, 500)
 		verify(flickable.contentY < expectedY,
@@ -88,6 +95,9 @@ TestCase {
 	function test_precision_wheel_stays_on_the_native_flickable_path() {
 		verify(!middleDrag.shouldSmoothWheel(15, 0))
 		verify(!middleDrag.shouldSmoothWheel(120, 4))
+		mouseWheel(middleDrag, middleDrag.width / 2, 100,
+			0, -15, Qt.NoButton, Qt.NoModifier, 20)
+		compare(wheelInputObservedSpy.count, 1)
 		verify(!middleDrag.wheelAnimationActive)
 	}
 

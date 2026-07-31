@@ -31,6 +31,7 @@ MouseArea {
 	property bool wheelAnimationActive: false
 	signal scrollingStarted()
 	signal scrollingEnded()
+	signal wheelInputObserved()
 
 	anchors.fill: parent
 	acceptedButtons: Qt.MiddleButton
@@ -234,6 +235,10 @@ MouseArea {
 	onWheel: event => {
 		const angleY = event.angleDelta ? event.angleDelta.y : 0
 		const pixelY = event.pixelDelta ? event.pixelDelta.y : 0
+		// Owners need to classify native wheel/touchpad movement before this
+		// handler deliberately passes precision deltas through to Flickable.
+		if (Math.abs(angleY) > 0.01 || Math.abs(pixelY) > 0.01)
+			wheelInputObserved()
 		if (shouldSmoothWheel(angleY, pixelY)) {
 			event.accepted = queueSmoothWheelDelta(angleY)
 			return

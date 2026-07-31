@@ -1991,6 +1991,19 @@ ApplicationWindow {
 				"topAnchorActive": timeline.topAnchorActive,
 				"topAnchorProgrammaticMovementGuard":
 					timeline.topAnchorProgrammaticMovementGuard,
+				"stickToBottom": timeline.stickToBottom,
+				"moving": timeline.moving,
+				"dragging": timeline.dragging,
+				"flicking": timeline.flicking,
+				"scrollHandlerScrolling": timelineScrollHandler.scrolling,
+				"scrollbarPressed": timelineScrollBar.pressed,
+				"explicitWheelInputPending": timeline.explicitWheelInputPending,
+				"explicitNavigationMovement": timeline.explicitNavigationMovement,
+				"lastMovementClassification": timeline.lastMovementClassification,
+				"explicitNavigationMovementCount":
+					timeline.explicitNavigationMovementCount,
+				"automaticLayoutMovementCount":
+					timeline.automaticLayoutMovementCount,
 				"deferredMaterializationQueueCount":
 					timeline.deferredMaterializationQueue.length,
 				"deferredMaterializationRunning": deferredMaterializationTimer.running,
@@ -3236,11 +3249,7 @@ ApplicationWindow {
 						onPressedChanged: {
 							if (pressed) {
 								timelineScrollHandler.cancelSmoothWheel()
-								bottomFollowTimer.stop()
-								timeline.stickToBottom = false
-								timeline.releasePrependAnchor()
-								timeline.releaseViewportAnchor()
-								timeline.releaseTopAnchor()
+								timeline.takeExplicitNavigationOwnership("scrollbar")
 							} else {
 								timeline.stickToBottom = timeline.isNearBottom()
 								timeline.requestBottomFollow()
@@ -3255,14 +3264,8 @@ ApplicationWindow {
 						horizontalEnabled: false
 						smoothWheelEnabled: true
 						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
-						onScrollingStarted: {
-							bottomFollowTimer.stop()
-							richContentResumeTimer.stop()
-							timeline.stickToBottom = false
-							timeline.releasePrependAnchor()
-							timeline.releaseViewportAnchor()
-							timeline.releaseTopAnchor()
-						}
+						onScrollingStarted:
+							timeline.takeExplicitNavigationOwnership("wheel-or-middle-drag")
 						onScrollingEnded: {
 							timeline.stickToBottom = timeline.isNearBottom()
 							timeline.requestBottomFollow()
@@ -3270,6 +3273,7 @@ ApplicationWindow {
 								timeline.captureViewportAnchor()
 							timeline.scheduleRichContentResume()
 						}
+						onWheelInputObserved: timeline.noteExplicitWheelInput()
 					}
 					// Keep less than one extra viewport of delegates warm. Rich preview
 					// loaders incubate asynchronously, so a multi-viewport cache only makes
@@ -3367,7 +3371,13 @@ ApplicationWindow {
 					property bool topAnchorActive: false
 					property bool restoringTopAnchor: false
 					property bool topAnchorProgrammaticMovementGuard: false
+					property bool explicitWheelInputPending: false
+					property int explicitWheelInputGeneration: 0
+					property real explicitWheelInputStartY: 0
 					property bool explicitNavigationMovement: false
+					property string lastMovementClassification: ""
+					property int explicitNavigationMovementCount: 0
+					property int automaticLayoutMovementCount: 0
 					property bool stickToBottom: true
 					property bool followTailAfterInsert: false
 					property int pendingTailInsertCount: 0
@@ -3476,6 +3486,13 @@ ApplicationWindow {
 						scopePresentationExposedTailTravel = 0
 						scopePresentationStartedAt = Date.now()
 						scopePresentationCompletedAt = 0
+						explicitWheelInputPending = false
+						++explicitWheelInputGeneration
+						explicitWheelInputStartY = contentY
+						explicitNavigationMovement = false
+						lastMovementClassification = ""
+						explicitNavigationMovementCount = 0
+						automaticLayoutMovementCount = 0
 						performanceHistoryProbeAnchorId = ""
 						followTailAfterInsert = false
 						pendingTailInsertCount = 0
@@ -4022,6 +4039,35 @@ ApplicationWindow {
 						viewportAnchorActive = false
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
+					}
+
+					function noteExplicitWheelInput() {
+						const generation = ++explicitWheelInputGeneration
+						explicitWheelInputStartY = contentY
+						explicitWheelInputPending = true
+						// Native precision deltas are handled by Flickable after the
+						// overlay passes the current wheel event through. The matching
+						// movementStarted consumes this one-turn token synchronously;
+						// an edge-clamped event must not classify a later layout change.
+						Qt.callLater(function() {
+							if (generation === timeline.explicitWheelInputGeneration)
+								timeline.explicitWheelInputPending = false
+						})
+					}
+
+					function takeExplicitNavigationOwnership(classification) {
+						if (!explicitNavigationMovement)
+							++explicitNavigationMovementCount
+						explicitNavigationMovement = true
+						explicitWheelInputPending = false
+						lastMovementClassification = String(classification || "explicit")
+						root.closeQuickReactions()
+						stickToBottom = false
+						releasePrependAnchor()
+						releaseViewportAnchor()
+						releaseTopAnchor()
+						bottomFollowTimer.stop()
+						richContentResumeTimer.stop()
 					}
 
 					function beginTopAnchor(guardProgrammaticMovement) {
@@ -4602,6 +4648,16 @@ ApplicationWindow {
 						}
 					}
 
+					onContentYChanged: {
+						// A native wheel event can arrive while a geometry-driven
+						// movement epoch is already active, in which case ListView does
+						// not emit a second movementStarted. A real content delta inside
+						// the one-turn wheel token still transfers ownership to the user;
+						// an edge-clamped wheel event changes nothing and expires quietly.
+						if (explicitWheelInputPending
+								&& Math.abs(contentY - explicitWheelInputStartY) > 0.01)
+							takeExplicitNavigationOwnership("native-wheel")
+					}
 					onContentHeightChanged: {
 						if (scopePresentationPending) {
 							noteScopePresentationMutation()
@@ -4665,11 +4721,23 @@ ApplicationWindow {
 							requestBottomFollow()
 					}
 					onMovementStarted: {
-						const explicitNavigation = dragging || flicking
+						const pendingNativeWheel = explicitWheelInputPending
+						const explicitNavigation = dragging
 							|| timelineScrollHandler.scrolling
 							|| timelineScrollBar.pressed
 							|| root.performanceChatScrollRunning
-						explicitNavigationMovement = explicitNavigation
+							|| pendingNativeWheel
+						explicitWheelInputPending = false
+						if (!explicitNavigation) {
+							explicitNavigationMovement = false
+							++automaticLayoutMovementCount
+							lastMovementClassification = "layout"
+						} else
+							takeExplicitNavigationOwnership(dragging ? "drag"
+								: timelineScrollHandler.scrolling ? "wheel-or-middle-drag"
+								: timelineScrollBar.pressed ? "scrollbar"
+								: root.performanceChatScrollRunning ? "performance"
+								: "native-wheel")
 						// QQuickListView also emits movementStarted when an asynchronous
 						// delegate changes its measured geometry. Preserve whichever stable
 						// content anchor owns that automatic movement; mouse, touch,
@@ -4688,21 +4756,6 @@ ApplicationWindow {
 								})
 							}
 							return
-						}
-						root.closeQuickReactions()
-						richContentResumeTimer.stop()
-						releaseViewportAnchor()
-						if (!restoringTopAnchor) {
-							releaseTopAnchor()
-						}
-						// QQuickListView reports its own insert displacement as movement.
-						// Preserve the pre-structural anchor through that transition, while
-						// ordinary wheel, drag and flick movement still cancels restoration.
-						if (!restoringPrependAnchor && !restoringBottom
-								&& !prependMutationInProgress
-								&& !deferredPrependAnchorActive) {
-							stickToBottom = false
-							releasePrependAnchor()
 						}
 					}
 					onMovementEnded: {
