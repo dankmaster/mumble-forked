@@ -929,7 +929,30 @@ TestCase {
 		verify(/active:\s*!deferredPresentation[\s\S]*onActiveChanged:\s*\{[\s\S]*!active[\s\S]*resumeRequested\s*=\s*false[\s\S]*resumeAdmitsPreview\s*=\s*false[\s\S]*cancelRichLoaderResume\(ownedStableId\)/.test(asyncDelegateSource))
 		verify(/onStableIdChanged:\s*\{[\s\S]*cancelRichLoaderResume\(ownedStableId\)[\s\S]*resumeRequested\s*=\s*false[\s\S]*resumeDuringFinalization\s*=\s*false[\s\S]*resumeAdmitsPreview\s*=\s*false[\s\S]*resumeOwnedStableId\s*=\s*""/.test(asyncDelegateSource))
 		verify(/"outerReady":\s*item\.outerLoaderReady\s*===\s*true[\s\S]*item\.previewLoaderStatus[\s\S]*item\.previewLoaderIncubationSuppressed/.test(mainSource))
-		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:[\s\S]*!messageDelegate\.previewLoaderSurfaceNonBlank[\s\S]*visible:[\s\S]*!messageDelegate\.previewLoaderSurfaceNonBlank[\s\S]*id:\s*messagePreviewLoader[\s\S]*visible:[\s\S]*messageDelegate\.previewLoaderSurfaceNonBlank/.test(mainSource))
+		const previewPlaceholderLoaderStart =
+			mainSource.indexOf("id: messagePreviewHydrationPlaceholderLoader")
+		const previewPlaceholderVisibilityEnd =
+			mainSource.indexOf("Layout.fillWidth:", previewPlaceholderLoaderStart)
+		verify(previewPlaceholderLoaderStart >= 0
+			&& previewPlaceholderVisibilityEnd > previewPlaceholderLoaderStart)
+		const previewPlaceholderVisibilitySource = mainSource.slice(
+			previewPlaceholderLoaderStart, previewPlaceholderVisibilityEnd)
+		verify(/active:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
+			previewPlaceholderVisibilitySource))
+		verify(!previewPlaceholderVisibilitySource.includes(
+			"previewLoaderSurfaceNonBlank"))
+		const previewCardLoaderStart =
+			mainSource.indexOf("id: messagePreviewLoader", previewPlaceholderVisibilityEnd)
+		const previewCardVisibilityEnd =
+			mainSource.indexOf("Layout.fillWidth:", previewCardLoaderStart)
+		verify(previewCardLoaderStart > previewPlaceholderVisibilityEnd
+			&& previewCardVisibilityEnd > previewCardLoaderStart)
+		const previewCardVisibilitySource = mainSource.slice(
+			previewCardLoaderStart, previewCardVisibilityEnd)
+		verify(/visible:\s*active\s*&&\s*status\s*===\s*Loader\.Ready\s*&&\s*!!item\s*&&\s*messageDelegate\.hasPreviewContent\s*&&\s*!messageDelegate\.previewNeedsHydration/.test(
+			previewCardVisibilitySource))
+		verify(!previewCardVisibilitySource.includes(
+			"previewLoaderSurfaceNonBlank"))
 		verify(/ListView\.onPooled:[\s\S]*const\s+retiredStableId\s*=\s*resumeOwnedStableId\.length\s*>\s*0[\s\S]*abandonNearViewportPrefetch\([\s\S]*retiredStableId,\s*true\)[\s\S]*cancelRichLoaderResume\(retiredStableId\)[\s\S]*resumeOwnedStableId\s*=\s*""/.test(mainSource))
 		verify(/Component\.onDestruction:[\s\S]*resumeOwnedStableId\.length\s*>\s*0[\s\S]*cancelRichLoaderResume\(resumeOwnedStableId\)/.test(mainSource))
 		verify(/function\s+handleListViewPooled\(\)[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*previewMaterializationAdmitted\s*=\s*false/.test(mainSource))

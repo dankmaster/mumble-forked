@@ -7624,11 +7624,14 @@ ApplicationWindow {
 								}
 								Loader {
 									id: messagePreviewHydrationPlaceholderLoader
+									// Own the slot only until the asynchronous card tree exists.
+									// Once Ready, the card must become effectively visible so its
+									// provider-owned loading/poster surface can settle without a
+									// Loader.visible -> surface-state -> visibility cycle.
 									active: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
 											|| !messageDelegate.previewMaterializationAdmitted
-											|| messagePreviewLoader.status !== Loader.Ready
-											|| !messageDelegate.previewLoaderSurfaceNonBlank)
+											|| messagePreviewLoader.status !== Loader.Ready)
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId,
@@ -7636,8 +7639,7 @@ ApplicationWindow {
 									visible: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
 											|| !messageDelegate.previewMaterializationAdmitted
-											|| messagePreviewLoader.status !== Loader.Ready
-											|| !messageDelegate.previewLoaderSurfaceNonBlank)
+											|| messagePreviewLoader.status !== Loader.Ready)
 									Layout.fillWidth: false
 									Layout.preferredHeight: visible
 										? messageDelegate.previewPlaceholderHeight : 0
@@ -7790,10 +7792,13 @@ ApplicationWindow {
 									// Only the provider tree is inactive during scroll. Preserve
 									// the lightweight row estimate in Layout so pooled delegates
 									// cannot move the viewport when rich content resumes.
+									// Do not gate effective visibility on the child's reported
+									// surface state: RichPreviewCard owns a non-blank loading frame,
+									// while previewPresentationReady separately requires its final
+									// surface and materialization state.
 									visible: active && status === Loader.Ready && !!item
 										&& messageDelegate.hasPreviewContent
 										&& !messageDelegate.previewNeedsHydration
-										&& messageDelegate.previewLoaderSurfaceNonBlank
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
 									// pooled delegate drops rich content. Bind the layout height to
