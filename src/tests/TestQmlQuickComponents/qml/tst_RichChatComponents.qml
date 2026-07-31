@@ -999,6 +999,72 @@ TestCase {
         compare(directMediaSpy.signalArguments[0][3], "audio/mp4")
     }
 
+	function test_typed_gallery_virtualizes_large_thumbnail_rows() {
+		const card = previewLoader.item
+		const items = []
+		for (let index = 0; index < 16; ++index) {
+			items.push({
+				"id": "media:" + index,
+				"kind": "image",
+				"url": "image://mumble/virtualized-gallery-" + index + "?g=" + (200 + index),
+				"thumbnailUrl": "image://mumble/virtualized-gallery-thumb-" + index
+					+ "?g=" + (300 + index),
+				"title": "Gallery image " + (index + 1),
+				"directPlayable": true
+			})
+		}
+		card.preview = {
+			"state": "ready",
+			"title": "Large typed gallery",
+			"url": "https://store.steampowered.com/app/730",
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "game",
+				"provider": {
+					"id": "steam",
+					"label": "Steam",
+					"host": "store.steampowered.com"
+				},
+				"source": {
+					"url": "https://store.steampowered.com/app/730",
+					"displayUrl": "https://store.steampowered.com/app/730"
+				},
+				"content": { "type": "game", "title": "Large typed gallery" },
+				"thread": {},
+				"facts": [],
+				"media": items,
+				"playback": { "mode": "none", "provider": "steam" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:virtualized-gallery"
+		card.renderActive = true
+		wait(0)
+
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const thumbnailList = findChild(card, "embedDocumentMediaThumbnailList")
+		verify(gallery !== null && gallery.visible && thumbnailList !== null)
+		compare(gallery.mediaItems.length, 16)
+		compare(thumbnailList.reuseItems, true)
+		compare(thumbnailList.cacheBuffer, 96)
+		thumbnailList.forceLayout()
+		tryVerify(function() {
+			return findChild(card, "embedDocumentMediaThumbnail_0") !== null
+		})
+		let materializedCount = 0
+		for (let index = 0; index < 16; ++index) {
+			if (findChild(card, "embedDocumentMediaThumbnail_" + index) !== null)
+				++materializedCount
+		}
+		verify(materializedCount < 16,
+			"ListView eagerly materialized all " + materializedCount + " thumbnails")
+		thumbnailList.positionViewAtIndex(15, ListView.End)
+		tryVerify(function() {
+			return findChild(card, "embedDocumentMediaThumbnail_15") !== null
+		})
+	}
+
     function test_watch_together_is_disabled_while_session_active() {
         const card = previewLoader.item
         card.preview = {
@@ -2162,9 +2228,12 @@ TestCase {
 		wait(0)
 
 		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const thumbnailList = findChild(card, "embedDocumentMediaThumbnailList")
 		const sourceLabel = findChild(card, "embedSourceUrl")
 		const details = findChild(card, "providerDetails")
-		verify(gallery !== null && gallery.visible)
+		verify(gallery !== null && gallery.visible && thumbnailList !== null)
+		compare(thumbnailList.reuseItems, true)
+		compare(thumbnailList.cacheBuffer, 96)
 		compare(gallery.mediaItems.length, 2)
 		compare(card.mediaItems[1].url, "image://mumble/steam-cs2-shot-two?g=72")
 		compare(sourceLabel.text, sourceUrl)

@@ -269,86 +269,95 @@ ColumnLayout {
 		}
 	}
 
-	ScrollView {
+	ListView {
+		id: thumbnailList
+		objectName: "embedDocumentMediaThumbnailList"
 		Layout.fillWidth: true
 		Layout.preferredHeight: visible ? 64 : 0
 		visible: root.mediaItems.length > 1
-		ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-		ScrollBar.horizontal.policy: ScrollBar.AsNeeded
-		contentWidth: thumbnailRow.implicitWidth
-		contentHeight: height
+		orientation: ListView.Horizontal
+		spacing: Theme.space2
+		clip: true
+		reuseItems: true
+		// Keep one neighbouring thumbnail warm, not the provider's complete
+		// gallery. A Steam preview may expose 16 media items; eager construction
+		// made every hidden button and image binding join the same GUI polish.
+		cacheBuffer: 96
+		boundsBehavior: Flickable.StopAtBounds
+		model: root.mediaItems
+		ScrollBar.horizontal: ScrollBar {
+			policy: ScrollBar.AsNeeded
+		}
 
-		Row {
-			id: thumbnailRow
-			height: parent.height
-			spacing: Theme.space2
+		delegate: Button {
+			id: thumbnailButton
+			required property int index
+			required property var modelData
+			readonly property bool inThumbnailViewport:
+				x + width > thumbnailList.contentX
+				&& x < thumbnailList.contentX + thumbnailList.width
+			objectName: "embedDocumentMediaThumbnail_" + index
 
-			Repeater {
-				model: root.mediaItems
+			width: 82
+			height: 56
+			hoverEnabled: true
+			Accessible.name: qsTr("Show media %1 of %2")
+				.arg(index + 1).arg(root.mediaItems.length)
+			Accessible.ignored: !inThumbnailViewport
+			onClicked: root.selectionRequested(index)
 
-				delegate: Button {
-					id: thumbnailButton
-					required property int index
-					required property var modelData
-					objectName: "embedDocumentMediaThumbnail_" + index
+			background: Rectangle {
+				radius: Theme.innerRadius
+				color: thumbnailButton.down ? Theme.embedSelection : Theme.embedSurface
+				border.color: root.selectedIndex === thumbnailButton.index
+					? root.accent : Theme.embedBorder
+				border.width: root.selectedIndex === thumbnailButton.index ? 2 : 1
+			}
 
-					width: 82
-					height: 56
-					hoverEnabled: true
-					Accessible.name: qsTr("Show media %1 of %2")
-						.arg(index + 1).arg(root.mediaItems.length)
-					onClicked: root.selectionRequested(index)
-
-					background: Rectangle {
-						radius: Theme.innerRadius
-						color: thumbnailButton.down ? Theme.embedSelection : Theme.embedSurface
-						border.color: root.selectedIndex === thumbnailButton.index
-							? root.accent : Theme.embedBorder
-						border.width: root.selectedIndex === thumbnailButton.index ? 2 : 1
+			contentItem: Item {
+				Image {
+					objectName: "embedDocumentMediaThumbnailImage_" + thumbnailButton.index
+					anchors.fill: parent
+					anchors.margins: 2
+					source: {
+						if (!root.renderActive || !thumbnailButton.inThumbnailViewport)
+							return ""
+						const kind = thumbnailButton.modelData.managedAnimated
+							? "animated-image" : String(thumbnailButton.modelData.kind || "")
+						if (kind === "image" || kind === "animated-image")
+							return String(thumbnailButton.modelData.thumbnailUrl
+								|| thumbnailButton.modelData.thumbnail
+								|| thumbnailButton.modelData.url || "")
+						return String(thumbnailButton.modelData.posterUrl
+							|| thumbnailButton.modelData.poster
+							|| thumbnailButton.modelData.thumbnailUrl
+							|| thumbnailButton.modelData.thumbnail || "")
 					}
-
-					contentItem: Item {
-						Image {
-							objectName: "embedDocumentMediaThumbnailImage_" + thumbnailButton.index
-							anchors.fill: parent
-							anchors.margins: 2
-							source: {
-								if (!root.renderActive)
-									return ""
-								const kind = thumbnailButton.modelData.managedAnimated
-									? "animated-image" : String(thumbnailButton.modelData.kind || "")
-								if (kind === "image" || kind === "animated-image")
-									return String(thumbnailButton.modelData.thumbnailUrl
-										|| thumbnailButton.modelData.thumbnail
-										|| thumbnailButton.modelData.url || "")
-								return String(thumbnailButton.modelData.posterUrl
-									|| thumbnailButton.modelData.poster
-									|| thumbnailButton.modelData.thumbnailUrl
-									|| thumbnailButton.modelData.thumbnail || "")
-							}
-							asynchronous: true
-							// These are intentionally tiny. Caching the bounded decoded
-							// thumbnails prevents a multi-image card from decoding the same
-							// strip again after every ListView pool/reuse cycle.
-							cache: true
-							sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio),
-								Math.ceil(height * Screen.devicePixelRatio))
-							fillMode: Image.PreserveAspectCrop
-						}
-						ModernIcon {
-							anchors.centerIn: parent
-							visible: {
-								const kind = String(thumbnailButton.modelData.kind || "")
-								return kind === "video" || kind === "audio"
-							}
-							name: String(thumbnailButton.modelData.kind || "") === "audio"
-								? "volume" : "play"
-							size: Theme.avatarSmall
-							color: Theme.mediaOverlayTextStrong
-							Accessible.ignored: true
-						}
-					}
+					asynchronous: true
+					cache: true
+					sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio),
+						Math.ceil(height * Screen.devicePixelRatio))
+					fillMode: Image.PreserveAspectCrop
 				}
+				ModernIcon {
+					anchors.centerIn: parent
+					visible: {
+						const kind = String(thumbnailButton.modelData.kind || "")
+						return kind === "video" || kind === "audio"
+					}
+					name: String(thumbnailButton.modelData.kind || "") === "audio"
+						? "volume" : "play"
+					size: Theme.avatarSmall
+					color: Theme.mediaOverlayTextStrong
+					Accessible.ignored: true
+				}
+			}
+		}
+
+		Connections {
+			target: root
+			function onSelectedIndexChanged() {
+				thumbnailList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
 			}
 		}
 	}
