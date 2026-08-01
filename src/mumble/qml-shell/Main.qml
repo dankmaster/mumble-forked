@@ -6801,7 +6801,6 @@ ApplicationWindow {
 						function completeRichLoaderResumeWhenReady() {
 							if (!messageRowReady || !previewPresentationReady)
 								return
-							timeline.completeDeferredMaterialization(stableId)
 							if (richResourcesRequired && richResourceActivationReady
 									&& !richResourcesActive) {
 								scheduleRichResourceActivation()
@@ -6812,6 +6811,7 @@ ApplicationWindow {
 							// on the same frame as this card's poster/gallery.
 							if (richResourceActivationPending)
 								return
+							timeline.completeDeferredMaterialization(stableId)
 							timeline.completeNearViewportPrefetchIfReady(stableId)
 							// The complete message/card tree now owns its final layout
 							// geometry and its first bounded resource window has settled.

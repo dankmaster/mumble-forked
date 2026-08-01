@@ -492,8 +492,15 @@ TestCase {
 		verify(completeResumeStart >= 0 && completeResumeEnd > completeResumeStart)
 		const completeResumeSource =
 			mainSource.slice(completeResumeStart, completeResumeEnd)
-		verify(/scheduleRichResourceActivation\(\)[\s\S]*if\s*\(richResourceActivationPending\)\s*return[\s\S]*completeNearViewportPrefetchIfReady\(stableId\)/.test(
-			completeResumeSource))
+		const activationPendingGuard =
+			completeResumeSource.indexOf("if (richResourceActivationPending)")
+		const deferredCompletion = completeResumeSource.indexOf(
+			"timeline.completeDeferredMaterialization(stableId)")
+		const nearViewportCompletion = completeResumeSource.indexOf(
+			"timeline.completeNearViewportPrefetchIfReady(stableId)")
+		verify(activationPendingGuard >= 0
+			&& deferredCompletion > activationPendingGuard
+			&& nearViewportCompletion > deferredCompletion)
 		const activationTimerStart =
 			mainSource.indexOf("id: richResourceActivationTimer")
 		const activationTimerEnd =
