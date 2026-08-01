@@ -6628,6 +6628,17 @@ ApplicationWindow {
 									&& root.normalizedModelList(attachments).length === 0
 									&& String(replyActor || "").length === 0
 									&& String(replySnippet || "").length === 0
+								// The retained still cache already paid the decode cost while this
+								// row was near the viewport. Reuse only that completed, safe local
+								// source during the scroll handoff; never start provider/network or
+								// animated/player work from this lightweight outer delegate.
+								readonly property string cachedStaticHandoffSource:
+									previewOnlyAtomicHandoff
+										? timeline.staticPreviewSourceFor(preview || ({})) : ""
+								readonly property bool cachedStaticHandoffReady:
+									cachedStaticHandoffSource.length > 0
+									&& timeline.staticPreviewPreheatCompletedSources[
+										cachedStaticHandoffSource] === true
 								// Viewport membership controls provider activation, which
 								// refines the delegate's final height. Start with model
 								// geometry, then grow this imperative latch only after the
@@ -6836,6 +6847,7 @@ ApplicationWindow {
 								// Keep the same real message summary visible in that bounded
 								// handoff instead of exposing an empty reserved rectangle.
 								Rectangle {
+									id: asyncRichHandoff
 									anchors.fill: parent
 									z: 1
 									visible: asyncMessageDelegate.active
@@ -6896,6 +6908,44 @@ ApplicationWindow {
 											text: asyncMessageDelegate.timestamp
 											color: Theme.textMuted
 											font.pixelSize: Theme.fontCaption
+										}
+									}
+
+									// Long wheel interpolation deliberately suspends the heavy card.
+									// Paint its already-retained still until the real presentation is
+									// ready so the optimization never leaks through as an empty row.
+									Rectangle {
+										objectName: "asyncCachedStaticPreviewHandoff"
+										anchors.centerIn: parent
+										width: Math.min(640, Math.max(1,
+											parent.width - Theme.space4 * 2))
+										height: Math.min(Math.max(1,
+											parent.height - Theme.space4 * 2),
+											Math.max(160, width * 0.5625))
+										visible: asyncMessageDelegate.previewOnlyAtomicHandoff
+											&& asyncMessageDelegate.cachedStaticHandoffReady
+											&& cachedStaticHandoffImage.status === Image.Ready
+										radius: Theme.innerRadius
+										color: Theme.embedSurface
+										border.width: 1
+										border.color: Theme.embedBorder
+										clip: true
+										Accessible.ignored: true
+
+										Image {
+											id: cachedStaticHandoffImage
+											anchors.fill: parent
+											anchors.margins: 1
+											source: asyncRichHandoff.visible
+												&& asyncMessageDelegate.cachedStaticHandoffReady
+												? asyncMessageDelegate.cachedStaticHandoffSource : ""
+											asynchronous: true
+											cache: true
+											sourceSize: Qt.size(1280, 960)
+											fillMode: Image.PreserveAspectFit
+											smooth: true
+											mipmap: false
+											Accessible.ignored: true
 										}
 									}
 								}

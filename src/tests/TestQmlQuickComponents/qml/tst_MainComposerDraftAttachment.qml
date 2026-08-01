@@ -1164,6 +1164,20 @@ TestCase {
 		verify(/id:\s*deferredHistoryRow[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*color:\s*richPresentationReserved\s*\?\s*"transparent"[\s\S]*Accessible\.ignored:\s*richPresentationReserved/.test(mainSource))
 		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible[\s\S]*!richPresentationReserved\s*\?\s*1\s*:\s*0[\s\S]*visible:\s*!deferredInlineMessageDelegate\.richPresentationReserved/.test(mainSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0[\s\S]*objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(mainSource))
+		const cachedStaticHandoffStart = mainSource.indexOf(
+			"readonly property string cachedStaticHandoffSource:")
+		const cachedStaticHandoffEnd = mainSource.indexOf(
+			"function openAutomationActions()", cachedStaticHandoffStart)
+		verify(cachedStaticHandoffStart >= 0
+			&& cachedStaticHandoffEnd > cachedStaticHandoffStart)
+		const cachedStaticHandoffSource = mainSource.slice(cachedStaticHandoffStart,
+			cachedStaticHandoffEnd)
+		verify(/cachedStaticHandoffSource:[\s\S]*previewOnlyAtomicHandoff[\s\S]*timeline\.staticPreviewSourceFor\(preview\s*\|\|\s*\(\{\}\)\)[\s\S]*cachedStaticHandoffReady:[\s\S]*staticPreviewPreheatCompletedSources/.test(
+			cachedStaticHandoffSource))
+		verify(/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]*cachedStaticHandoffReady[\s\S]*cachedStaticHandoffImage\.status\s*===\s*Image\.Ready[\s\S]*source:\s*asyncRichHandoff\.visible[\s\S]*cachedStaticHandoffSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)[\s\S]*fillMode:\s*Image\.PreserveAspectFit/.test(
+			cachedStaticHandoffSource))
+		verify(!/AnimatedImage|InlineMediaPlayer|MediaPlayer/.test(
+			cachedStaticHandoffSource))
 		verify(/id:\s*messageBody[\s\S]*visible:\s*!messageDelegate\.deleted[\s\S]*!messageDelegate\.previewSourceOnly/.test(mainSource))
 		verify(/function\s+messageBodyIsPreviewSourceOnly\(segments,\s*preview\)[\s\S]*sourceUrls\s*=\s*\[typedSourceUrl,\s*value\.url,\s*value\.sourceUrl,[\s\S]*value\.embedUrl,\s*value\.mediaUrl\][\s\S]*sourceUrls\.indexOf\(bodyUrl\)\s*<\s*0/.test(mainSource))
 		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent[\s\S]{0,100}!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
