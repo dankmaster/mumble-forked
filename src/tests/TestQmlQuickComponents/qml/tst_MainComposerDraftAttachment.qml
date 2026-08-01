@@ -587,6 +587,9 @@ TestCase {
 		verify(staticLookaheadSource.includes("candidates.sort"))
 		verify(/function\s+refillStaticPreviewLookahead\(\)[\s\S]*staticPreviewPreheatQueue\s*=\s*nextQueue/.test(mainSource))
 		verify(/id:\s*staticPreviewPreheater[\s\S]*visible:\s*false[\s\S]*source:\s*timeline\.staticPreviewPreheatActiveSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)/.test(mainSource))
+		verify(/id:\s*staticPreviewPreheater[\s\S]*onStatusChanged:\s*\{[\s\S]*observedSource\s*=\s*String\(source\s*\|\|\s*""\)[\s\S]*Qt\.callLater\(function\(\)[\s\S]*staticPreviewPreheater\.source[\s\S]*staticPreviewPreheatActiveSource\s*===\s*observedSource[\s\S]*completeStaticPreviewPreheat\(observedStatus\)/.test(mainSource))
+		verify(!/onStatusChanged:\s*timeline\.completeStaticPreviewPreheat\(status\)/.test(
+			mainSource))
 		verify(/maximumRetainedStaticPreviews:\s*4[\s\S]*function\s+touchRetainedStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.move[\s\S]*function\s+retainStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.remove\(0\)[\s\S]*delete completed\[evicted\][\s\S]*staticPreviewRetainedModel\.append/.test(mainSource))
 		verify(/function\s+completeStaticPreviewPreheat\(status\)[\s\S]*status\s*===\s*Image\.Ready[\s\S]*retainStaticPreviewSource\(completedSource\)[\s\S]*coolDownStaticPreviewSource\(completedSource\)/.test(mainSource))
 		verify(/function\s+coolDownStaticPreviewSource\(source\)[\s\S]*Date\.now\(\)\s*\+\s*10000[\s\S]*maximumStaticPreviewRetryEntries/.test(mainSource))

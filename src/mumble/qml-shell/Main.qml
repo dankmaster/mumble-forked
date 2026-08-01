@@ -5998,7 +5998,19 @@ ApplicationWindow {
 						asynchronous: true
 						cache: true
 						sourceSize: Qt.size(1280, 960)
-						onStatusChanged: timeline.completeStaticPreviewPreheat(status)
+						onStatusChanged: {
+							const observedSource = String(source || "")
+							const observedStatus = status
+							// Completing mutates staticPreviewPreheatActiveSource, which owns
+							// this Image's source binding. Leave the binding evaluation first
+							// and ignore a stale completion after a teleport/reprioritization.
+							Qt.callLater(function() {
+								if (observedSource.length > 0
+										&& String(staticPreviewPreheater.source || "") === observedSource
+										&& timeline.staticPreviewPreheatActiveSource === observedSource)
+									timeline.completeStaticPreviewPreheat(observedStatus)
+							})
+						}
 						onSourceChanged: Qt.callLater(function() {
 							if (staticPreviewPreheater.status === Image.Ready
 									|| staticPreviewPreheater.status === Image.Error)
