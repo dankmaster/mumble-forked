@@ -357,7 +357,8 @@ Rectangle {
 	readonly property bool embedPosterUnavailable: hasEmbedPreview && embedPosterFallbackActive
 		&& !inlinePlaybackActive
 	readonly property bool inlineMediaStageVisible:
-		(reserveEmbedGeometry
+		previewState !== "error" && previewState !== "failed"
+		&& (reserveEmbedGeometry
 			|| (hasEmbedPreview && localPlaybackSupported && !embedPosterUnavailable)
 			|| hasDirectMedia)
 		&& (!typedDocumentUsesGallery || inlinePlaybackActive)

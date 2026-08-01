@@ -696,6 +696,36 @@ TestCase {
 		verify(!card.compact)
     }
 
+	function test_backend_error_with_reserved_embed_geometry_uses_compact_fallback() {
+		const card = previewLoader.item
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		verify(panel !== null)
+
+		card.preview = {
+			"state": "error", "failed": true,
+			"title": "Steam preview unavailable",
+			"url": "https://store.steampowered.com/app/123/Example/",
+			"embedKind": "steam", "embedUrl": "https://store.steampowered.com/app/123",
+			"embedAspect": "wide", "reserveEmbedGeometry": true
+		}
+		card.previewIdentity = "message:steam-error-fallback"
+		wait(0)
+		compare(card.previewState, "error")
+		verify(!card.inlineMediaStageVisible)
+		verify(!panel.visible)
+
+		card.preview = {
+			"state": "ready", "title": "Example Steam game",
+			"url": "https://store.steampowered.com/app/123/Example/",
+			"embedKind": "steam", "embedUrl": "https://store.steampowered.com/app/123",
+			"embedAspect": "wide"
+		}
+		card.previewIdentity = "message:steam-error-fallback"
+		wait(0)
+		verify(card.inlineMediaStageVisible)
+		verify(panel.visible)
+	}
+
 	function test_loading_indicator_uses_the_shared_accent_token() {
 		const indicator = findChild(previewLoader.item, "previewCompactBusyIndicator")
 		verify(indicator !== null)

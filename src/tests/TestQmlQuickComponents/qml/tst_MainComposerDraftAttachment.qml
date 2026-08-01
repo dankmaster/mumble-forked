@@ -669,8 +669,8 @@ TestCase {
 		verify(!/property bool inVisibleViewport:[\s\S]{0,120}\by\s*\+\s*height\s*>=\s*timeline\.contentY/.test(mainSource.slice(
 			mainSource.indexOf("id: messageDelegate"), mainSource.indexOf("id: messageRowLoader"))))
 		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*richResourceActivationTimer\.stop\(\)[\s\S]*richResourceActivationSettleTimer\.stop\(\)[\s\S]*richResourcesActive\s*=\s*false/.test(mainSource))
-		verify(/property bool richResourcesRequired:[\s\S]*hasPreviewContent\s*&&\s*!previewLoaderFailed[\s\S]*hasAttachmentContent[\s\S]*hasInlineImageContent/.test(mainSource))
-		verify(/property bool richResourceActivationReady:[\s\S]*!backendContentNeedsHydration[\s\S]*!hasPreviewContent\s*\|\|\s*previewLoaderFailed[\s\S]*previewMaterializationAdmitted[\s\S]*Loader\.Ready/.test(mainSource))
+		verify(/readonly property bool richResourcesRequired:[\s\S]*hasPreviewContent\s*&&\s*!previewTerminalUnavailable[\s\S]*hasAttachmentContent[\s\S]*hasInlineImageContent/.test(mainSource))
+		verify(/readonly property bool richResourceActivationReady:[\s\S]*!backendContentNeedsHydration[\s\S]*!hasPreviewContent\s*\|\|\s*previewTerminalUnavailable[\s\S]*previewMaterializationAdmitted[\s\S]*Loader\.Ready/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*richResourcesRequired\s*&&\s*richResourceActivationReady[\s\S]*scheduleRichResourceActivation\(\)/.test(mainSource))
 		const richResourcesRequiredStart =
 			mainSource.indexOf("onRichResourcesRequiredChanged:")
@@ -728,7 +728,7 @@ TestCase {
 		verify(/property bool messagePresentationReadyLatched:\s*false[\s\S]*readonly property bool currentMessagePresentationReady:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Error[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*previewPresentationReady[\s\S]*readonly property bool messageRowReady:[\s\S]*currentMessagePresentationReady[\s\S]*messagePresentationReadyLatched[\s\S]*onCurrentMessagePresentationReadyChanged:[\s\S]*messagePresentationReadyLatched\s*=\s*true/.test(mainSource))
 		verify(/function\s+handleListViewPooled\(\)[\s\S]*messageRowMaterialized\s*=\s*false[\s\S]*messagePresentationReadyLatched\s*=\s*false[\s\S]*onStableIdChanged:[\s\S]*messagePresentationReadyLatched\s*=\s*false/.test(mainSource))
 		verify(/id:\s*messageRowLoader[\s\S]*onLoaded:[\s\S]*messageDelegate\.completeRichLoaderResumeWhenReady\(\)[\s\S]*onStatusChanged:[\s\S]*status\s*===\s*Loader\.Error/.test(mainSource))
-		verify(/readonly property real richPresentationMetadataHeight:[\s\S]*hasReplyContent\s*\?\s*44[\s\S]*hasEmbeddedFooterContent\s*\?\s*34[\s\S]*lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\?\s*previewPlaceholderHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasInlineImageContent\s*\?\s*360\s*\+\s*richPresentationMetadataHeight/.test(mainSource))
+		verify(/readonly property real richPresentationMetadataHeight:[\s\S]*hasReplyContent\s*\?\s*44[\s\S]*hasEmbeddedFooterContent\s*\?\s*34[\s\S]*previewReservedHeight:[\s\S]*previewTerminalUnavailable\s*\?\s*previewStagingHeight[\s\S]*previewPlaceholderHeight[\s\S]*lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\?\s*previewReservedHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasInlineImageContent\s*\?\s*360\s*\+\s*richPresentationMetadataHeight/.test(mainSource))
 		verify(/readonly property string previewPlaceholderKind:[\s\S]*preview\.metadata[\s\S]*previewKind/.test(mainSource))
 		const previewMediaClassification =
 			/readonly property bool previewPlaceholderHasMedia:[\s\S]{0,420}/.exec(mainSource)
@@ -740,8 +740,9 @@ TestCase {
 		verify(/property bool previewLoaderIncubationSuppressed:\s*false[\s\S]*property string previewLoaderIncubationSuppressedIdentity:\s*""[\s\S]*readonly property bool previewLoaderIncubationWatchdogRunning:[\s\S]*previewLoaderIncubationWatchdogTimer\.running/.test(mainSource))
 		verify(/property string previewLoaderTerminalErrorIdentity:\s*""\s*property string nearViewportPrefetchTerminalIdentity:\s*""[\s\S]*readonly property bool nearViewportPrefetchTerminal:\s*nearViewportPrefetchTerminalIdentity\.length\s*>\s*0\s*&&\s*nearViewportPrefetchTerminalIdentity\s*===\s*previewLoaderIncubationIdentity/.test(mainSource))
 		verify(/readonly property bool previewLoaderFailed:\s*\(previewLoaderTerminalErrorIdentity\.length\s*>\s*0\s*&&\s*previewLoaderTerminalErrorIdentity\s*===\s*previewLoaderIncubationIdentity\)\s*\|\|\s*\(messageRowLoader\.item\s*&&\s*messageRowLoader\.item\.previewLoader\s*&&\s*messageRowLoader\.item\.previewLoader\.status\s*===\s*Loader\.Error\)/.test(mainSource))
-		verify(/readonly property bool previewTerminalUnavailable:\s*previewLoaderFailed\s*\|\|\s*previewLoaderIncubationSuppressed\s*readonly property bool terminalPreviewFallbackUnavailable:\s*hasPreviewContent\s*&&\s*previewTerminalUnavailable\s*&&\s*\(!messageRowLoader\.item\s*\|\|\s*richLoaderSuspended\s*\|\|\s*!timeline\.prependRichContentActive\(\s*stableId,\s*richContentViewportEligible\)\)/.test(mainSource))
-		verify(/Accessible\.name:\s*\(messageDelegate\.previewTerminalUnavailable[\s\S]*text:\s*messageDelegate\.previewTerminalUnavailable\s*\?\s*qsTr\("Preview unavailable"\)[\s\S]*text:\s*\(messageDelegate\.previewTerminalUnavailable\s*\?\s*qsTr\("%1 preview unavailable"\)[\s\S]*running:\s*messagePreviewHydrationPlaceholderLoader\.visible[\s\S]*&&\s*!messageDelegate\.previewTerminalUnavailable/.test(mainSource))
+		verify(/readonly property bool previewBackendError:[\s\S]*state === "error"[\s\S]*state === "failed"[\s\S]*preview\.failed === true/.test(mainSource))
+		verify(/readonly property bool previewTerminalUnavailable:\s*previewBackendError\s*\|\|\s*previewLoaderFailed\s*\|\|\s*previewLoaderIncubationSuppressed\s*readonly property bool terminalPreviewFallbackUnavailable:\s*hasPreviewContent\s*&&\s*previewTerminalUnavailable\s*&&\s*\(!messageRowLoader\.item\s*\|\|\s*richLoaderSuspended\s*\|\|\s*!timeline\.prependRichContentActive\(\s*stableId,\s*richContentViewportEligible\)\)/.test(mainSource))
+		verify(/objectName:\s*"asyncRichHandoffSummary"[\s\S]*anchors\.top:\s*parent\.top[\s\S]*color:\s*"transparent"/.test(mainSource))
 		const previewWatchdogResetStart =
 			mainSource.indexOf("function resetPreviewLoaderIncubationWatchdog")
 		const previewTerminalMarkStart =
@@ -938,7 +939,7 @@ TestCase {
 			&& previewPlaceholderVisibilityEnd > previewPlaceholderLoaderStart)
 		const previewPlaceholderVisibilitySource = mainSource.slice(
 			previewPlaceholderLoaderStart, previewPlaceholderVisibilityEnd)
-		verify(/active:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
+		verify(/active:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
 			previewPlaceholderVisibilitySource))
 		verify(!previewPlaceholderVisibilitySource.includes(
 			"previewLoaderSurfaceNonBlank"))
@@ -982,8 +983,21 @@ TestCase {
 		verify(!/id:\s*prependAnchorSettleTimer[\s\S]{0,900}pendingScopeHydrationCount\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
 		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
-		verify(/objectName:\s*"previewHydrationPlaceholder"[\s\S]*objectName:\s*"previewHydrationProviderBadge"[\s\S]*objectName:\s*"previewHydrationMediaSkeleton"[\s\S]*Layout\.fillHeight:\s*true[\s\S]*objectName:\s*"previewHydrationBusyIndicator"/.test(mainSource))
-		verify(/objectName:\s*"previewHydrationBusyIndicator"[\s\S]{0,220}running:\s*messagePreviewHydrationPlaceholderLoader\.visible\s*&&\s*messageDelegate\.inVisibleViewport\s*&&\s*!timeline\.richScrollInProgress/.test(mainSource))
+		const previewHydrationPlaceholderStart =
+			mainSource.indexOf("id: messagePreviewHydrationPlaceholderLoader")
+		const previewHydrationPlaceholderEnd =
+			mainSource.indexOf("id: messagePreviewLoader", previewHydrationPlaceholderStart)
+		verify(previewHydrationPlaceholderStart >= 0
+			&& previewHydrationPlaceholderEnd > previewHydrationPlaceholderStart)
+		const previewHydrationPlaceholderSource = mainSource.slice(
+			previewHydrationPlaceholderStart, previewHydrationPlaceholderEnd)
+		verify(/objectName:\s*"previewHydrationPlaceholder"[\s\S]*objectName:\s*"previewHydrationCompactRow"[\s\S]*objectName:\s*"previewHydrationProviderBadge"[\s\S]*objectName:\s*"previewHydrationOpenButton"/.test(
+			previewHydrationPlaceholderSource))
+		verify(/previewTerminalUnavailable[\s\S]*previewStagingHeight[\s\S]*previewPlaceholderHeight/.test(
+			previewHydrationPlaceholderSource))
+		verify(!previewHydrationPlaceholderSource.includes("ModernBusyIndicator"))
+		verify(!previewHydrationPlaceholderSource.includes("previewHydrationMediaSkeleton"))
+		verify(/id:\s*messagePreviewLoader[\s\S]*!messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewTerminalUnavailable[\s\S]*messageDelegate\.previewMaterializationAdmitted/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*!messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\([\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
 		verify(/readonly property string performancePreviewSurfaceState:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*messageRowLoader\.item\.previewSurfaceState/.test(mainSource))
 		const messageRowPreviewSurfaceStart = mainSource.indexOf(
@@ -1002,14 +1016,14 @@ TestCase {
 			messageRowPreviewSurfaceSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\(/.test(mainSource))
 		verify(/previewPlaceholderHeight[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
-		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*previewPlaceholderHeight/.test(mainSource))
+		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*previewTerminalUnavailable[\s\S]*previewStagingHeight[\s\S]*previewPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewMaterializationAdmitted[\s\S]*visible:\s*active\s*&&\s*status\s*===\s*Loader\.Ready\s*&&\s*!!item[\s\S]*Layout\.preferredHeight:\s*visible\s*&&\s*item[\s\S]*item\.implicitHeight\s*:\s*0/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*onActiveChanged:[\s\S]*resetPreviewLoaderIncubationWatchdog\(\)[\s\S]*onLoaded:[\s\S]*armPreviewLoaderIncubationWatchdog\(\)[\s\S]*onStatusChanged:[\s\S]*Loader\.Error[\s\S]*Loader\.Ready/.test(mainSource))
 		verify(/"visibleInactiveRichResourceCount":[\s\S]*visiblePresentation\.inactiveRichResourceCount/.test(mainSource))
 		verify(/"richResourcesActive":[\s\S]*item\.richResourcesActive\s*===\s*true[\s\S]*"inactiveRichResources":\s*inactiveRichResources/.test(mainSource))
 		verify(/"settled":[\s\S]*visiblePresentation\.inactiveRichResourceCount\s*===\s*0/.test(mainSource))
-		verify(/objectName:\s*"previewHydrationStateLabel"[\s\S]*previewTerminalUnavailable[\s\S]*qsTr\("Preview unavailable"\)[\s\S]*objectName:\s*"previewHydrationBusyIndicator"[\s\S]*!messageDelegate\.previewTerminalUnavailable/.test(mainSource))
+		verify(/objectName:\s*"previewHydrationStateLabel"[\s\S]*previewTerminalUnavailable[\s\S]*qsTr\("Preview unavailable"\)[\s\S]*objectName:\s*"previewHydrationStateIcon"[\s\S]*\?\s*"warning"\s*:\s*"link"[\s\S]*objectName:\s*"previewHydrationOpenButton"/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*true/.test(mainSource))

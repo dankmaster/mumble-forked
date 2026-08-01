@@ -6111,14 +6111,23 @@ ApplicationWindow {
 												&& (asyncMessageDelegate.item.richResourcesRequired
 													|| asyncMessageDelegate.item.previewNeedsHydration
 													|| asyncMessageDelegate.item.previewLoaderIncubationSuppressed)))
-									radius: Theme.innerRadius
-									color: Theme.surfaceRaised
-									border.width: 1
-									border.color: Theme.divider
+									// This item retains the outer delegate's reserved geometry while
+									// its asynchronous handoff is in flight. Do not paint that
+									// complete height as a card: a cold rich row can be several
+									// hundred pixels tall before the real delegate is ready.
+									radius: 0
+									color: "transparent"
+									border.width: 0
 									Accessible.ignored: true
 
 									RowLayout {
-										anchors.fill: parent
+										objectName: "asyncRichHandoffSummary"
+										anchors.left: parent.left
+										anchors.right: parent.right
+										anchors.top: parent.top
+										anchors.topMargin: Theme.space2
+										height: Math.min(48, Math.max(1, parent.height
+											- Theme.space2 * 2))
 										anchors.leftMargin: Theme.space3
 										anchors.rightMargin: Theme.space3
 										spacing: Theme.space2
@@ -6393,7 +6402,17 @@ ApplicationWindow {
 						}
 						readonly property bool previewNeedsHydration: !!preview
 							&& Object.keys(preview).length > 0
+							&& !previewBackendError
 							&& (preview.state === "loading" || preview.loading === true)
+						readonly property bool previewBackendError: {
+							const state = String(preview ? preview.state || "" : "")
+								.toLowerCase()
+							const status = String(preview ? preview.status || "" : "")
+								.toLowerCase()
+							return state === "error" || state === "failed"
+								|| status === "error" || status === "failed"
+								|| !!(preview && preview.failed === true)
+						}
 						readonly property bool attachmentNeedsHydration: (attachments || []).some(function(attachment) {
 							return !!attachment && String(attachment.state || "").toLowerCase() === "loading"
 						})
@@ -6456,6 +6475,7 @@ ApplicationWindow {
 								String(value.url || value.sourceUrl || ""),
 								String(value.embedUrl || value.mediaUrl || ""),
 								String(value.state || ""),
+								String(value.failed === true ? "failed" : ""),
 								String(value.title || ""),
 								String(value.thumbnailUrl || value.posterUrl || ""),
 								String(metadata.provider || metadata.previewProvider || ""),
@@ -6498,7 +6518,8 @@ ApplicationWindow {
 							|| (messageRowLoader.item && messageRowLoader.item.previewLoader
 								&& messageRowLoader.item.previewLoader.status === Loader.Error)
 						readonly property bool previewTerminalUnavailable:
-							previewLoaderFailed || previewLoaderIncubationSuppressed
+							previewBackendError || previewLoaderFailed
+							|| previewLoaderIncubationSuppressed
 						readonly property bool terminalPreviewFallbackUnavailable:
 							hasPreviewContent
 							&& previewTerminalUnavailable
@@ -6507,6 +6528,7 @@ ApplicationWindow {
 									stableId, richContentViewportEligible))
 						readonly property bool previewPresentationReady: !hasPreviewContent
 							|| previewNeedsHydration
+							|| previewTerminalUnavailable
 							|| previewLoaderFailed
 							|| previewLoaderIncubationSuppressed
 							|| (previewMaterializationAdmitted
@@ -6532,13 +6554,11 @@ ApplicationWindow {
 						// reactivated. Other rich content in the same message still
 						// owns the normal resource lifecycle.
 						readonly property bool richResourcesRequired:
-							(hasPreviewContent && !previewLoaderFailed
-								&& !previewLoaderIncubationSuppressed)
+							(hasPreviewContent && !previewTerminalUnavailable)
 							|| hasAttachmentContent || hasInlineImageContent
 						readonly property bool richResourceActivationReady:
 							!backendContentNeedsHydration
-							&& (!hasPreviewContent || previewLoaderFailed
-								|| previewLoaderIncubationSuppressed
+							&& (!hasPreviewContent || previewTerminalUnavailable
 								|| (previewMaterializationAdmitted
 									&& messageRowLoader.item
 									&& messageRowLoader.item.previewLoader
@@ -7118,6 +7138,23 @@ ApplicationWindow {
 							- timeline.leftMargin - timeline.rightMargin - Theme.space4)
 						laneMaximumWidth: root.conversationLaneMaximumWidth
 						readonly property bool hasPreviewContent: !!preview && Object.keys(preview).length > 0
+						readonly property string previewOpenUrl: {
+							const value = preview || ({})
+							const candidates = [value.url, value.sourceUrl, value.embedUrl,
+								value.mediaUrl]
+							for (let index = 0; index < candidates.length; ++index) {
+								const candidate = String(candidates[index] || "").trim()
+								if (/^https?:\/\/\S+$/i.test(candidate))
+									return candidate.slice(0, 2048)
+							}
+							return ""
+						}
+						readonly property string previewProviderLabel: String(preview
+							? (preview.host || preview.providerName || preview.provider || "") : "")
+							.trim() || qsTr("Link preview")
+						readonly property string previewTitleLabel: String(preview
+							? (preview.title || previewProviderLabel || previewOpenUrl) : "")
+							.trim() || previewProviderLabel
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
 						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
@@ -7180,9 +7217,16 @@ ApplicationWindow {
 						readonly property real previewPlaceholderHeight:
 							previewPlaceholderHasMedia
 								? previewPlaceholderMediaHeight + 132 : 176
+						// Terminal provider/Loader failure is a native link row, not a
+						// media-sized error card. Loading still keeps its reserved estimate
+						// so admission and scroll anchors remain stable without painting it.
+						readonly property real previewStagingHeight: 64
+						readonly property real previewReservedHeight:
+							previewTerminalUnavailable ? previewStagingHeight
+								: previewPlaceholderHeight
 						readonly property real attachmentPlaceholderHeight: 320
 						readonly property real lightweightMessageRowHeight:
-							hasPreviewContent ? previewPlaceholderHeight + 72
+							hasPreviewContent ? previewReservedHeight + 72
 								+ richPresentationMetadataHeight
 							: hasAttachmentContent ? attachmentPlaceholderHeight + 72
 								+ richPresentationMetadataHeight
@@ -7329,6 +7373,7 @@ ApplicationWindow {
 										!messageDelegate.hasPreviewContent ? "not-required"
 										: messagePreviewLoader.status === Loader.Error ? "error"
 										: messageDelegate.previewNeedsHydration
+											|| messageDelegate.previewTerminalUnavailable
 											|| !messageDelegate.previewMaterializationAdmitted
 											|| messagePreviewLoader.status !== Loader.Ready
 											? messagePreviewHydrationPlaceholderLoader.visible
@@ -7642,11 +7687,11 @@ ApplicationWindow {
 								Loader {
 									id: messagePreviewHydrationPlaceholderLoader
 									// Own the slot only until the asynchronous card tree exists.
-									// Once Ready, the card must become effectively visible so its
-									// provider-owned loading/poster surface can settle without a
-									// Loader.visible -> surface-state -> visibility cycle.
+									// Keep the staging surface native and compact; a Loader that
+									// never reaches Ready must not expose a media-sized error card.
 									active: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
+											|| messageDelegate.previewTerminalUnavailable
 											|| !messageDelegate.previewMaterializationAdmitted
 											|| messagePreviewLoader.status !== Loader.Ready)
 										&& !messageDelegate.richLoaderSuspended
@@ -7655,11 +7700,14 @@ ApplicationWindow {
 											messageDelegate.richContentViewportEligible)
 									visible: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
+											|| messageDelegate.previewTerminalUnavailable
 											|| !messageDelegate.previewMaterializationAdmitted
 											|| messagePreviewLoader.status !== Loader.Ready)
 									Layout.fillWidth: false
 									Layout.preferredHeight: visible
-										? messageDelegate.previewPlaceholderHeight : 0
+										? messageDelegate.previewTerminalUnavailable
+											? messageDelegate.previewStagingHeight
+											: messageDelegate.previewPlaceholderHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, messageDelegate.previewPlaceholderWidth))
@@ -7668,12 +7716,13 @@ ApplicationWindow {
 										Rectangle {
 											objectName: "previewHydrationPlaceholder"
 											implicitWidth: messagePreviewHydrationPlaceholderLoader.Layout.preferredWidth
-											implicitHeight: messageDelegate.previewPlaceholderHeight
+											implicitHeight: messagePreviewHydrationPlaceholderLoader.Layout.preferredHeight
 											radius: Theme.innerRadius
-											color: Theme.surfaceRaised
-											border.color: Theme.divider
-											border.width: 1
-											clip: true
+											color: messageDelegate.previewTerminalUnavailable
+												? Theme.surfaceRaised : "transparent"
+											border.color: messageDelegate.previewTerminalUnavailable
+												? Theme.divider : "transparent"
+											border.width: messageDelegate.previewTerminalUnavailable ? 1 : 0
 											Accessible.role: Accessible.StaticText
 											Accessible.name: (messageDelegate.previewTerminalUnavailable
 												? qsTr("Link preview unavailable for %1")
@@ -7681,35 +7730,40 @@ ApplicationWindow {
 													String(messageDelegate.preview.host
 														|| messageDelegate.preview.url || qsTr("link")))
 
-											ColumnLayout {
-												anchors.fill: parent
-												anchors.margins: Theme.space3
+											RowLayout {
+												id: previewHydrationCompactRow
+												objectName: "previewHydrationCompactRow"
+												anchors.left: parent.left
+												anchors.right: parent.right
+												anchors.top: parent.top
+												anchors.margins: Theme.space2
+												height: Math.max(1, messageDelegate.previewStagingHeight
+													- Theme.space2 * 2)
 												spacing: Theme.space2
 
-												RowLayout {
+												ProviderIdentityBadge {
+													id: previewHydrationProviderBadge
+													objectName: "previewHydrationProviderBadge"
+													Layout.maximumWidth: Math.max(1,
+														previewHydrationCompactRow.width * 0.30)
+													providerToken: String(messageDelegate.preview.embedKind
+														|| messageDelegate.preview.provider
+														|| messageDelegate.preview.providerName
+														|| messageDelegate.preview.host || "")
+													badgeText: messageDelegate.previewProviderLabel
+													presentation: "inline"
+													labelObjectName: "previewHydrationProviderLabel"
+												}
+
+												ColumnLayout {
+													objectName: "previewHydrationTextColumn"
 													Layout.fillWidth: true
-													spacing: Theme.space2
-
-													ProviderIdentityBadge {
-														id: previewHydrationProviderBadge
-														objectName: "previewHydrationProviderBadge"
-														Layout.maximumWidth: Math.max(1,
-															messagePreviewHydrationPlaceholderLoader.width * 0.62)
-														providerToken: String(messageDelegate.preview.embedKind
-															|| messageDelegate.preview.provider
-															|| messageDelegate.preview.providerName
-															|| messageDelegate.preview.host || "")
-														badgeText: String(messageDelegate.preview.host
-															|| messageDelegate.preview.providerName
-															|| qsTr("Link preview"))
-														presentation: "inline"
-														labelObjectName: "previewHydrationProviderLabel"
-													}
-
-													Item { Layout.fillWidth: true }
+													Layout.minimumWidth: 0
+													spacing: 0
 
 													Label {
 														objectName: "previewHydrationStateLabel"
+														Layout.fillWidth: true
 														textFormat: Text.PlainText
 														text: messageDelegate.previewTerminalUnavailable
 															? qsTr("Preview unavailable")
@@ -7718,75 +7772,52 @@ ApplicationWindow {
 														font.pixelSize: Theme.fontCaption
 														elide: Text.ElideRight
 													}
+
+													Label {
+														objectName: "previewHydrationTitleLabel"
+														Layout.fillWidth: true
+														textFormat: Text.PlainText
+														text: messageDelegate.previewTitleLabel
+														color: Theme.textStrong
+														font.pixelSize: Theme.fontLabel
+														font.weight: Font.DemiBold
+														elide: Text.ElideRight
+														maximumLineCount: 1
+													}
+
+													Label {
+														objectName: "previewHydrationUrlLabel"
+														Layout.fillWidth: true
+														textFormat: Text.PlainText
+														text: messageDelegate.previewOpenUrl
+														color: Theme.textMuted
+														font.pixelSize: Theme.fontCaption
+														elide: Text.ElideRight
+														maximumLineCount: 1
+													}
 												}
 
-												Rectangle {
-													id: previewHydrationMediaSkeleton
-													objectName: "previewHydrationMediaSkeleton"
-													Layout.fillWidth: true
-													Layout.fillHeight: true
-													radius: Theme.innerRadius
-													color: Theme.embedSurface
-													border.color: Theme.withAlpha(
-														previewHydrationProviderBadge.accent, 0.32)
-													border.width: 1
-													gradient: Gradient {
-														GradientStop {
-															position: 0.0
-															color: Theme.withAlpha(
-																previewHydrationProviderBadge.accent, 0.16)
-														}
-														GradientStop {
-															position: 1.0
-															color: Theme.embedSurface
-														}
-													}
+												ModernIcon {
+													objectName: "previewHydrationStateIcon"
+													name: messageDelegate.previewTerminalUnavailable
+														? "warning" : "link"
+													size: 18
+													color: messageDelegate.previewTerminalUnavailable
+														? Theme.warning : Theme.textMuted
 													Accessible.ignored: true
+												}
 
-													ColumnLayout {
-														anchors.centerIn: parent
-														width: Math.max(1, Math.min(parent.width
-															- Theme.space6 * 2, 320))
-														spacing: Theme.space2
-
-														ProviderIdentityBadge {
-															objectName: "previewHydrationProviderMark"
-															Layout.alignment: Qt.AlignHCenter
-															providerToken: previewHydrationProviderBadge.providerToken
-															presentation: "mark"
-															markExtent: 44
-															accent: previewHydrationProviderBadge.accent
-															foreground: previewHydrationProviderBadge.foreground
-														}
-
-														Label {
-															Layout.fillWidth: true
-															textFormat: Text.PlainText
-															text: (messageDelegate.previewTerminalUnavailable
-																? qsTr("%1 preview unavailable")
-																: qsTr("Loading %1")).arg(
-																	String(messageDelegate.preview.host
-																		|| messageDelegate.preview.providerName
-																		|| qsTr("preview")))
-															color: Theme.textStrong
-															font.pixelSize: Theme.fontLabel
-															font.weight: Font.DemiBold
-															horizontalAlignment: Text.AlignHCenter
-															elide: Text.ElideRight
-														}
-
-														ModernBusyIndicator {
-															objectName: "previewHydrationBusyIndicator"
-															Layout.alignment: Qt.AlignHCenter
-															running: messagePreviewHydrationPlaceholderLoader.visible
-																&& messageDelegate.inVisibleViewport
-																&& !timeline.richScrollInProgress
-																&& !messageDelegate.previewTerminalUnavailable
-															visible: running
-															animated: !root.visualFixtureOverrideActive
-															Accessible.ignored: true
-														}
-													}
+												ModernIconButton {
+													objectName: "previewHydrationOpenButton"
+													Layout.alignment: Qt.AlignVCenter
+													iconName: "external"
+													dense: true
+													visible: messageDelegate.previewOpenUrl.length > 0
+													enabled: visible
+													toolTipText: qsTr("Open link")
+													Accessible.name: qsTr("Open link")
+													onClicked: Qt.openUrlExternally(
+														messageDelegate.previewOpenUrl)
 												}
 											}
 										}
@@ -7796,6 +7827,7 @@ ApplicationWindow {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
 										&& !messageDelegate.previewNeedsHydration
+										&& !messageDelegate.previewTerminalUnavailable
 										&& messageDelegate.previewMaterializationAdmitted
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
@@ -7816,6 +7848,7 @@ ApplicationWindow {
 									visible: active && status === Loader.Ready && !!item
 										&& messageDelegate.hasPreviewContent
 										&& !messageDelegate.previewNeedsHydration
+										&& !messageDelegate.previewTerminalUnavailable
 									Layout.fillWidth: false
 									// Loader retains its previous implicitHeight briefly while a
 									// pooled delegate drops rich content. Bind the layout height to
