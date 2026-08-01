@@ -291,6 +291,8 @@ TestCase {
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
 		verify(!/deferredMaterializationTimer\.running|deferredMaterializationQueue\.length/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
+		verify(!/deferredMaterializationActiveId\s*=/.test(
+			mainSource.slice(finalizeStart, finalizeEnd)))
 		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\([\s\S]*contentHeight\s*\+\s*timeline\.height[\s\S]*richScrollRetentionBuffer\s*=[\s\S]*richScrollRetentionTarget[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")

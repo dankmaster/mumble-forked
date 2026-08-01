@@ -3844,7 +3844,6 @@ ApplicationWindow {
 							// the loading surface has gone away.
 							deferredMaterializationTimer.stop()
 							timeline.deferredMaterializationQueue = []
-							timeline.deferredMaterializationActiveId = ""
 							// Keep the now-known initial page geometry alive through the
 							// first real scroll. Offscreen rich rows remain lightweight and
 							// provider resources are still admitted only inside their
