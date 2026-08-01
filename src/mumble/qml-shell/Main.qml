@@ -7959,18 +7959,26 @@ ApplicationWindow {
 							- timeline.leftMargin - timeline.rightMargin - Theme.space4)
 						laneMaximumWidth: root.conversationLaneMaximumWidth
 						readonly property bool hasPreviewContent: !!preview && Object.keys(preview).length > 0
+						// messagePreviewLoader lives inside messageRowLoader's source Component.
+						// Reach it through the row's public alias so these outer readiness bindings
+						// never resolve an id outside their component scope during reuse/scroll.
+						readonly property var previewPresentationLoader: messageRowLoader.item
+							? messageRowLoader.item.previewLoader : null
 						readonly property bool previewVisualPresentationPending:
-							hasPreviewContent && messagePreviewLoader.status === Loader.Ready
-							&& !!messagePreviewLoader.item
-							&& messagePreviewLoader.item.visualPresentationPending === true
+							hasPreviewContent && !!previewPresentationLoader
+							&& previewPresentationLoader.status === Loader.Ready
+							&& !!previewPresentationLoader.item
+							&& previewPresentationLoader.item.visualPresentationPending === true
 						readonly property bool previewPrewarmVisualReady: !hasPreviewContent
-							|| (messagePreviewLoader.status === Loader.Ready
-								&& !!messagePreviewLoader.item
-								&& messagePreviewLoader.item.prewarmVisualReady === true)
+							|| (!!previewPresentationLoader
+								&& previewPresentationLoader.status === Loader.Ready
+								&& !!previewPresentationLoader.item
+								&& previewPresentationLoader.item.prewarmVisualReady === true)
 						readonly property bool previewPaintPending: hasPreviewContent
 							&& !previewTerminalUnavailable
 							&& (previewNeedsHydration || !previewMaterializationAdmitted
-								|| messagePreviewLoader.status !== Loader.Ready
+								|| !previewPresentationLoader
+								|| previewPresentationLoader.status !== Loader.Ready
 								|| previewVisualPresentationPending)
 						readonly property bool previewSourceOnly: root.messageBodyIsPreviewSourceOnly(
 							bodySegments || [], preview || ({}))

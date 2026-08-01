@@ -1146,6 +1146,16 @@ TestCase {
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
 		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]{0,100}messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
 		verify(/readonly property bool previewPaintPending:[\s\S]*previewVisualPresentationPending[\s\S]*readonly property bool previewOnlyPaintPending:[\s\S]*previewSourceOnly[\s\S]*id:\s*messageBubble[\s\S]*color:[\s\S]*previewOnlyPaintPending[\s\S]*\?\s*"transparent"/.test(mainSource))
+		const outerPreviewGateStart = mainSource.indexOf(
+			"readonly property bool hasPreviewContent:")
+		const outerPreviewGateEnd = mainSource.indexOf(
+			"readonly property bool previewSourceOnly:", outerPreviewGateStart)
+		verify(outerPreviewGateStart >= 0 && outerPreviewGateEnd > outerPreviewGateStart)
+		const outerPreviewGate = mainSource.slice(outerPreviewGateStart,
+			outerPreviewGateEnd)
+		verify(/readonly property var previewPresentationLoader:\s*messageRowLoader\.item[\s\S]*messageRowLoader\.item\.previewLoader/.test(
+			outerPreviewGate))
+		verify(!/\bmessagePreviewLoader\.(status|item)\b/.test(outerPreviewGate))
 		verify(/Layout\.preferredWidth:[\s\S]*Theme\.avatarMedium[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending[\s\S]*\?\s*0[\s\S]*id:\s*messageSenderLabel/.test(mainSource))
 		verify(/visible:\s*\(messageDelegate\.startsGroup[\s\S]*messageDelegate\.systemMessage[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending\s*\?\s*0\s*:\s*1/.test(mainSource))
 		verify(/accessibilitySuppressed:[\s\S]*timeline\.scopePresentationPending\s*\|\|\s*previewOnlyPaintPending[\s\S]*hoverEffectsEnabled:[\s\S]*!previewOnlyPaintPending/.test(mainSource))
