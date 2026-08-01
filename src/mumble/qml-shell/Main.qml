@@ -6426,6 +6426,8 @@ ApplicationWindow {
 						// provider stages, so do not enqueue the same message again while
 						// that pipeline is already in flight.
 						property bool backendHydrationRequested: false
+						property bool previewBackendErrorEpochActive: false
+						property string previewBackendErrorStableId: ""
 						// A pooled rich-card tree is expensive to retarget while a
 						// variable-height ListView is moving. Retire it outside the
 						// viewport, keep a provider-aware geometry estimate, and wake
@@ -6581,6 +6583,31 @@ ApplicationWindow {
 								return
 							retireOwnedTerminalPreviewPrefetch()
 						}
+						onPreviewBackendErrorChanged: {
+							if (previewBackendError) {
+								previewBackendErrorEpochActive = true
+								previewBackendErrorStableId = String(stableId || "")
+								// A backend error is terminal for the current preview
+								// generation, but not for this stable message. Clear any
+								// in-flight latch and release only preview ownership so a
+								// mixed attachment/inline row keeps its shared resource token.
+								backendHydrationRequested = false
+								previewMaterializationAdmitted = false
+								previewLoaderTerminalErrorIdentity = ""
+								nearViewportPrefetchTerminalIdentity = ""
+								resetPreviewLoaderIncubationWatchdog(true)
+								retireOwnedTerminalPreviewPrefetch()
+								return
+							}
+							const previousBackendError = previewBackendErrorEpochActive
+							const previousStableId = previewBackendErrorStableId
+							previewBackendErrorEpochActive = false
+							previewBackendErrorStableId = ""
+							recoverPreviewBackendGeneration(
+								previewBackendRecoveryAction(previousStableId,
+									String(stableId || ""), previousBackendError,
+									previewBackendError, previewNeedsHydration))
+						}
 						onPreviewLoaderFailedChanged: {
 							const row = messageRowLoader.item
 							const loader = row ? row.previewLoader : null
@@ -6624,6 +6651,37 @@ ApplicationWindow {
 								previewLoaderIncubationSuppressedIdentity = ""
 							}
 						}
+						function previewBackendRecoveryAction(previousStableId, currentStableId,
+								previousBackendError, currentBackendError, currentNeedsHydration) {
+							if (currentNeedsHydration)
+								return "hydrate"
+							if (previousBackendError && !currentBackendError
+									&& String(previousStableId || "")
+										=== String(currentStableId || "")
+									&& String(currentStableId || "").length > 0)
+								return "resume"
+							return "none"
+						}
+						function recoverPreviewBackendGeneration(recoveryAction) {
+							if (recoveryAction !== "hydrate")
+								backendHydrationRequested = false
+							previewMaterializationAdmitted = false
+							previewLoaderTerminalErrorIdentity = ""
+							nearViewportPrefetchTerminalIdentity = ""
+							resetPreviewLoaderIncubationWatchdog(true)
+							richResourceActivationTimer.stop()
+							richResourceActivationSettleTimer.stop()
+							richResourceActivationQueued = false
+							updateRichResourceActivity()
+							if (recoveryAction === "hydrate") {
+								requestPreviewHydrationIfNeeded()
+								return
+							}
+							if (recoveryAction === "resume" && hasPreviewContent
+									&& richContentViewportEligible
+									&& !timeline.richScrollInProgress)
+								timeline.scheduleRichContentResume()
+						}
 						function markNearViewportPrefetchTerminal() {
 							nearViewportPrefetchTerminalIdentity =
 								previewLoaderIncubationIdentity
@@ -6634,6 +6692,7 @@ ApplicationWindow {
 									|| timeline.nearViewportPrefetchReadyId
 										=== terminalId)
 								timeline.retireTerminalNearViewportPrefetch(terminalId)
+							updateRichResourceActivity()
 						}
 						function armPreviewLoaderIncubationWatchdog() {
 							const row = messageRowLoader.item
@@ -6982,6 +7041,8 @@ ApplicationWindow {
 							richResourceActivationQueued = false
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
+							previewBackendErrorEpochActive = false
+							previewBackendErrorStableId = ""
 							updateRichResourceActivity()
 						}
 						function handleListViewReused() {
@@ -6991,6 +7052,8 @@ ApplicationWindow {
 							resetPreviewLoaderIncubationWatchdog(true)
 							previewLoaderTerminalErrorIdentity = ""
 							nearViewportPrefetchTerminalIdentity = ""
+							previewBackendErrorEpochActive = false
+							previewBackendErrorStableId = ""
 							accessibilityPooled = false
 							richLoaderSuspended = timeline.richScrollInProgress
 								|| timeline.scopePresentationPending
@@ -7012,10 +7075,14 @@ ApplicationWindow {
 						}
 						onPreviewNeedsHydrationChanged: {
 							if (previewNeedsHydration) {
+								// Loading is a new backend epoch after a terminal error;
+								// clear the old single-flight latch before enqueueing once.
+								backendHydrationRequested = false
 								timeline.cancelRichLoaderResume(stableId)
 								suspendRichResourcesForScroll()
 								resetPreviewLoaderIncubationWatchdog(true)
 								previewMaterializationAdmitted = false
+								requestPreviewHydrationIfNeeded()
 							} else {
 								timeline.scheduleRichContentResume()
 							}
@@ -7079,6 +7146,8 @@ ApplicationWindow {
 							richResourceActivationQueued = false
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
+							previewBackendErrorEpochActive = false
+							previewBackendErrorStableId = ""
 							messagePresentationReadyLatched = false
 							resumeRichContentAfterScroll()
 						}

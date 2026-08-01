@@ -742,16 +742,35 @@ TestCase {
 		verify(/readonly property bool previewLoaderFailed:\s*\(previewLoaderTerminalErrorIdentity\.length\s*>\s*0\s*&&\s*previewLoaderTerminalErrorIdentity\s*===\s*previewLoaderIncubationIdentity\)\s*\|\|\s*\(messageRowLoader\.item\s*&&\s*messageRowLoader\.item\.previewLoader\s*&&\s*messageRowLoader\.item\.previewLoader\.status\s*===\s*Loader\.Error\)/.test(mainSource))
 		verify(/readonly property bool previewBackendError:[\s\S]*state === "error"[\s\S]*state === "failed"[\s\S]*preview\.failed === true/.test(mainSource))
 		verify(/readonly property bool previewTerminalUnavailable:\s*previewBackendError\s*\|\|\s*previewLoaderFailed\s*\|\|\s*previewLoaderIncubationSuppressed\s*readonly property bool terminalPreviewFallbackUnavailable:\s*hasPreviewContent\s*&&\s*previewTerminalUnavailable\s*&&\s*\(!messageRowLoader\.item\s*\|\|\s*richLoaderSuspended\s*\|\|\s*!timeline\.prependRichContentActive\(\s*stableId,\s*richContentViewportEligible\)\)/.test(mainSource))
+		verify(/property bool previewBackendErrorEpochActive:\s*false\s*property string previewBackendErrorStableId:\s*""/.test(mainSource))
 		verify(/objectName:\s*"asyncRichHandoffSummary"[\s\S]*anchors\.top:\s*parent\.top[\s\S]*color:\s*"transparent"/.test(mainSource))
+		const backendErrorChangedStart =
+			mainSource.indexOf("onPreviewBackendErrorChanged:")
+		const backendErrorChangedEnd =
+			mainSource.indexOf("onPreviewLoaderFailedChanged:", backendErrorChangedStart)
+		verify(backendErrorChangedStart >= 0
+			&& backendErrorChangedEnd > backendErrorChangedStart)
+		const backendErrorChangedSource =
+			mainSource.slice(backendErrorChangedStart, backendErrorChangedEnd)
+		verify(/previewBackendErrorEpochActive\s*=\s*true[\s\S]*previewBackendErrorStableId\s*=\s*String\(stableId\s*\|\|\s*""\)[\s\S]*backendHydrationRequested\s*=\s*false[\s\S]*retireOwnedTerminalPreviewPrefetch\(\)[\s\S]*return/.test(
+			backendErrorChangedSource))
+		verify(!backendErrorChangedSource.includes("suspendRichResourcesForScroll()"))
+		verify(/const previousBackendError\s*=\s*previewBackendErrorEpochActive[\s\S]*const previousStableId\s*=\s*previewBackendErrorStableId[\s\S]*previewBackendRecoveryAction\(previousStableId,[\s\S]*previewNeedsHydration/.test(
+			backendErrorChangedSource))
+		verify(/richResourcesRequired:[\s\S]*hasAttachmentContent\s*\|\|\s*hasInlineImageContent/.test(mainSource))
 		const previewWatchdogResetStart =
 			mainSource.indexOf("function resetPreviewLoaderIncubationWatchdog")
+		const previewWatchdogResetEnd =
+			mainSource.indexOf("function previewBackendRecoveryAction",
+				previewWatchdogResetStart)
 		const previewTerminalMarkStart =
 			mainSource.indexOf("function markNearViewportPrefetchTerminal",
 				previewWatchdogResetStart)
 		verify(previewWatchdogResetStart >= 0
+			&& previewWatchdogResetEnd > previewWatchdogResetStart
 			&& previewTerminalMarkStart > previewWatchdogResetStart)
 		const previewWatchdogResetSource =
-			mainSource.slice(previewWatchdogResetStart, previewTerminalMarkStart)
+			mainSource.slice(previewWatchdogResetStart, previewWatchdogResetEnd)
 		verify(/if\s*\(clearSuppression\s*===\s*true\)\s*\{\s*previewLoaderIncubationSuppressed\s*=\s*false\s*previewLoaderIncubationSuppressedIdentity\s*=\s*""\s*\}/.test(
 			previewWatchdogResetSource))
 		verify(!previewWatchdogResetSource.includes(
@@ -766,10 +785,33 @@ TestCase {
 			mainSource.slice(previewTerminalMarkStart, previewTerminalMarkEnd)
 		verify(/nearViewportPrefetchTerminalIdentity\s*=\s*previewLoaderIncubationIdentity/.test(
 			previewTerminalMarkSource))
-		verify(/function retireOwnedTerminalPreviewPrefetch\(\)\s*\{\s*const terminalId\s*=\s*String\(stableId\s*\|\|\s*""\)\s*if\s*\(timeline\.nearViewportPrefetchActiveId\s*===\s*terminalId\s*\|\|\s*timeline\.nearViewportPrefetchReadyId\s*===\s*terminalId\)\s*timeline\.retireTerminalNearViewportPrefetch\(terminalId\)\s*\}/.test(
+		verify(/function retireOwnedTerminalPreviewPrefetch\(\)[\s\S]*timeline\.retireTerminalNearViewportPrefetch\(terminalId\)[\s\S]*updateRichResourceActivity\(\)/.test(
 			previewTerminalMarkSource))
+		const backendRecoveryActionStart =
+			mainSource.indexOf("function previewBackendRecoveryAction(")
+		const backendRecoveryActionEnd =
+			mainSource.indexOf("function recoverPreviewBackendGeneration(",
+				backendRecoveryActionStart)
+		verify(backendRecoveryActionStart >= 0
+			&& backendRecoveryActionEnd > backendRecoveryActionStart)
+		const backendRecoveryActionSource = mainSource.slice(
+			backendRecoveryActionStart, backendRecoveryActionEnd)
+		const backendRecoveryActionProbe = Qt.createQmlObject(
+			"import QtQuick\nQtObject {\n"
+				+ backendRecoveryActionSource + "\n}",
+			testCase, "backendRecoveryActionProbe")
+		verify(backendRecoveryActionProbe !== null)
+		compare(backendRecoveryActionProbe.previewBackendRecoveryAction(
+			"message-42", "message-42", true, false, false), "resume")
+		compare(backendRecoveryActionProbe.previewBackendRecoveryAction(
+			"message-42", "message-42", true, false, true), "hydrate")
+		compare(backendRecoveryActionProbe.previewBackendRecoveryAction(
+			"message-41", "message-42", true, false, false), "none")
+		compare(backendRecoveryActionProbe.previewBackendRecoveryAction(
+			"message-42", "message-42", false, false, false), "none")
+		backendRecoveryActionProbe.destroy()
 		verify(/readonly property string previewLoaderSurfaceState:[\s\S]*Loader\.Ready[\s\S]*materializationSettled\s*!==\s*true[\s\S]*return\s*"blank"[\s\S]*performanceEmbedSurfaceState/.test(mainSource))
-		verify(/readonly property bool previewPresentationReady:\s*!hasPreviewContent\s*\|\|\s*previewNeedsHydration\s*\|\|\s*previewLoaderFailed\s*\|\|\s*previewLoaderIncubationSuppressed[\s\S]*previewMaterializationAdmitted[\s\S]*previewLoaderSurfaceNonBlank[\s\S]*materializationSettled/.test(mainSource))
+		verify(/readonly property bool previewPresentationReady:\s*!hasPreviewContent\s*\|\|\s*previewNeedsHydration\s*\|\|\s*previewTerminalUnavailable\s*\|\|\s*previewLoaderFailed\s*\|\|\s*previewLoaderIncubationSuppressed[\s\S]*previewMaterializationAdmitted[\s\S]*previewLoaderSurfaceNonBlank[\s\S]*materializationSettled/.test(mainSource))
 		verify(!mainSource.includes("previewMaterializationWatchdog"))
 		verify(/onPreviewLoaderSurfaceStateChanged:[\s\S]*previewLoaderSurfaceNonBlank[\s\S]*armPreviewLoaderIncubationWatchdog\(\)[\s\S]*richLoaderResumeActiveId\s*!==\s*stableId[\s\S]*scheduleRichContentResume\(\)[\s\S]*completeRichLoaderResumeWhenReady\(\)/.test(mainSource))
 		const previewSurfaceChangedStart =
@@ -958,7 +1000,7 @@ TestCase {
 		verify(/ListView\.onPooled:[\s\S]*const\s+retiredStableId\s*=\s*resumeOwnedStableId\.length\s*>\s*0[\s\S]*abandonNearViewportPrefetch\([\s\S]*retiredStableId,\s*true\)[\s\S]*cancelRichLoaderResume\(retiredStableId\)[\s\S]*resumeOwnedStableId\s*=\s*""/.test(mainSource))
 		verify(/Component\.onDestruction:[\s\S]*resumeOwnedStableId\.length\s*>\s*0[\s\S]*cancelRichLoaderResume\(resumeOwnedStableId\)/.test(mainSource))
 		verify(/function\s+handleListViewPooled\(\)[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*previewMaterializationAdmitted\s*=\s*false/.test(mainSource))
-		verify(/onPreviewNeedsHydrationChanged:[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*suspendRichResourcesForScroll\(\)[\s\S]*previewMaterializationAdmitted\s*=\s*false[\s\S]*scheduleRichContentResume\(\)/.test(mainSource))
+		verify(/onPreviewNeedsHydrationChanged:[\s\S]*backendHydrationRequested\s*=\s*false[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*suspendRichResourcesForScroll\(\)[\s\S]*previewMaterializationAdmitted\s*=\s*false[\s\S]*requestPreviewHydrationIfNeeded\(\)[\s\S]*scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/onRichContentViewportEligibleChanged:[\s\S]*!richContentViewportEligible[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*suspendRichResourcesForScroll\(\)[\s\S]*scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/cancelRichLoaderResume\(stableId\)[\s\S]{0,320}previewMaterializationAdmitted\s*=\s*false[\s\S]{0,160}suspendRichResourcesForScroll\(\)/.test(mainSource))
 		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*resetPreviewLoaderIncubationWatchdog\(\)[\s\S]*richResourceActivationTimer\.stop\(\)/.test(mainSource))
