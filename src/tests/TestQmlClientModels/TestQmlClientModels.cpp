@@ -1219,7 +1219,8 @@ void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
 	QVERIFY(!roomState.isEmpty());
 	QVERIFY(roomState.contains(QStringLiteral("qmlConnectionSessionUsable()")));
 	QVERIFY(roomState.contains(QStringLiteral("appState.insert(QStringLiteral(\"connected\"), connected)")));
-	QVERIFY(roomState.contains(QStringLiteral("insertModernShellConnectionStatus(appState, qtReconnect")));
+	QVERIFY(roomState.contains(QRegularExpression(QStringLiteral(
+		R"(insertModernShellConnectionStatus\s*\(\s*appState\s*,\s*qtReconnect)"))));
 	QVERIFY(roomState.contains(QStringLiteral("if (connected && hasPersistentChatCapabilities())")));
 	QVERIFY(roomState.contains(QStringLiteral("if (connected && target.directMessage && target.user)")));
 
