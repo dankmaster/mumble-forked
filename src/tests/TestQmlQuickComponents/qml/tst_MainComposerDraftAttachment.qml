@@ -95,9 +95,9 @@ TestCase {
 		verify(/function\s+normalizedComparableSourceUrl\(value\)/.test(mainSource))
 		verify(/function\s+messageBodyIsPreviewSourceOnly\(segments,\s*preview\)/.test(mainSource))
 		verify(/document\.commonPresentation\s*===\s*true/.test(mainSource))
-		verify(/preview\s*\?\s*preview\.url/.test(mainSource))
-		verify(/bodyUrl\s*!==\s*sourceUrl/.test(mainSource))
-		verify(/id:\s*messageBody[\s\S]{0,220}!root\.messageBodyIsPreviewSourceOnly\(/.test(mainSource))
+		verify(/sourceUrls\s*=\s*\[typedSourceUrl,\s*value\.url,\s*value\.sourceUrl,/.test(mainSource))
+		verify(/sourceUrls\.indexOf\(bodyUrl\)\s*<\s*0/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]{0,220}!messageDelegate\.previewSourceOnly/.test(mainSource))
 	}
 
 	function test_enter_sends_typed_pasted_dropped_or_attachment_drafts_without_breaking_ime() {
@@ -437,7 +437,14 @@ TestCase {
 		verify(/onScopeResetPendingChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
 			mainSource))
 		verify(/id:\s*deferredHistoryRepeater[\s\S]*model:\s*chatModel\.deferredPresentationModel[\s\S]*required property int deferredPresentationHeight[\s\S]*deferredPrefixItem:\s*true[\s\S]*contentNeedsHydration:\s*true/.test(mainSource))
-		verify(/id:\s*deferredHistoryRow[\s\S]{0,900}summaryText:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]{0,260}join\("  ·  "\)[\s\S]{0,900}text:\s*deferredHistoryRow\.summaryText/.test(mainSource))
+		const deferredHistoryStart = mainSource.indexOf("id: deferredHistoryRow")
+		const deferredHistoryEnd = mainSource.indexOf("DelegateChoice {",
+			deferredHistoryStart + 1)
+		verify(deferredHistoryStart >= 0 && deferredHistoryEnd > deferredHistoryStart)
+		const deferredHistorySource = mainSource.slice(deferredHistoryStart,
+			deferredHistoryEnd)
+		verify(/summaryText:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]*join\("  ·  "\)[\s\S]*text:\s*deferredHistoryRow\.summaryText/.test(
+			deferredHistorySource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,1600}ColumnLayout\s*\{/.test(mainSource))
 		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*const wheelStep\s*=\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
@@ -537,10 +544,81 @@ TestCase {
 		verify(finishRecoveryStart >= 0 && finishRecoveryEnd > finishRecoveryStart)
 		const finishRecoverySource =
 			mainSource.slice(finishRecoveryStart, finishRecoveryEnd)
-		verify(/chatModel\.presentationBusy\s*=\s*false[\s\S]*scheduleNearViewportPrefetch\(\)/.test(
+		verify(/chatModel\.presentationBusy\s*=\s*false[\s\S]*scheduleNearViewportPrefetch\(\)[\s\S]*scheduleStaticPreviewSweep\(\)/.test(
 			finishRecoverySource))
 		verify(/id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisibleDeferredMaterialization\(\)[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
 		verify(/richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*256[\s\S]*property string nearViewportPrefetchActiveId:\s*""[\s\S]*property string nearViewportWarmId:\s*""[\s\S]*property string nearViewportPrefetchReadyId:\s*""/.test(mainSource))
+		verify(/staticPreviewLookaheadDistance:[\s\S]{0,160}Math\.min\(baseCacheBuffer,\s*height \* 0\.90\)[\s\S]*staticPreviewPreheatActiveSource:\s*""[\s\S]*staticPreviewPreheatQueue:\s*\[\]/.test(mainSource))
+		verify(/function\s+safeStaticPreviewSource\(value\)[\s\S]*image:\\\/\\\/mumble[\s\S]*qrc:[\s\S]*function\s+staticPreviewSourceFor\(preview\)[\s\S]*mediaAnimated[\s\S]*animated-image[\s\S]*preview\.thumbnailUrl[\s\S]*preview\.posterUrl/.test(mainSource))
+		const staticMediaSourceStart =
+			mainSource.indexOf("function staticPreviewMediaSource(item)")
+		const staticMediaSourceEnd =
+			mainSource.indexOf("function staticPreviewSourceFor(preview)", staticMediaSourceStart)
+		verify(staticMediaSourceStart >= 0 && staticMediaSourceEnd > staticMediaSourceStart)
+		const staticMediaSource = mainSource.slice(staticMediaSourceStart, staticMediaSourceEnd)
+		verify(/if \(imageItem\)[\s\S]*renderSource\s*=\s*safeStaticPreviewSource\(item\.url\)[\s\S]*"eligible": true[\s\S]*animated \? "" : renderSource/.test(staticMediaSource))
+		verify(/playableKind[\s\S]*safeStaticPreviewDirectMediaUrl\(item\.url, playableKind\)[\s\S]*poster \|\| thumbnail[\s\S]*topLevelThumbnail/.test(staticMediaSource))
+		verify(/"eligible": false/.test(staticMediaSource))
+		const staticSourceForStart =
+			mainSource.indexOf("function staticPreviewSourceFor(preview)")
+		const staticSourceForEnd =
+			mainSource.indexOf("function staticPreviewSourceRetainedOrCooling", staticSourceForStart)
+		const staticSourceFor = mainSource.slice(staticSourceForStart, staticSourceForEnd)
+		verify(/embeddedProviderPoster[\s\S]*if \(embeddedProviderPoster && !typedDocument\)[\s\S]*embedPosters = \[preview\.thumbnailUrl, preview\.posterUrl\]/.test(staticSourceFor))
+		verify(/if \(embeddedProviderPoster && typedDocument\)[\s\S]*embedPosters = \[preview\.thumbnailUrl, preview\.posterUrl\][\s\S]*safeStaticPreviewSource\(embedPosters\[index\]\)/.test(staticSourceFor))
+		verify(/preview\.mediaUrl[\s\S]*preview\.mediaExternalUrl[\s\S]*fallbackImage[\s\S]*fallbackPlayable/.test(staticSourceFor))
+		verify(/if \(fallbackImage[\s\S]*safeStaticPreviewSource\(preview\.mediaUrl\)[\s\S]*safeStaticPreviewExternalUrl\(preview\.mediaExternalUrl\)[\s\S]*return source/.test(staticSourceFor))
+		verify(/else if \(fallbackPlayable\)[\s\S]*safeStaticPreviewDirectMediaUrl\(preview\.mediaUrl[\s\S]*safeStaticPreviewExternalUrl\(preview\.mediaExternalUrl\)[\s\S]*safeStaticPreviewSource\(preview\.posterUrl\)[\s\S]*safeStaticPreviewSource\(preview\.thumbnailUrl\)/.test(staticSourceFor))
+		verify(/return !typedDocument \? safeStaticPreviewSource\(preview\.thumbnailUrl\) : ""/.test(staticSourceFor))
+		verify(/candidate\.eligible\s*===\s*true[\s\S]*candidate\.source\.length\s*>\s*0[\s\S]*candidate\.topLevelThumbnail\s*&&\s*!typedDocument/.test(staticSourceFor))
+		verify(/const typedDocument\s*=[\s\S]*document\.commonPresentation\s*===\s*true[\s\S]*const mediaCollection\s*=\s*typedDocument\s*\?\s*document\.media\s*:\s*preview\.mediaItems/.test(mainSource))
+		const staticLookaheadStart =
+			mainSource.indexOf("function staticPreviewLookaheadCandidates()")
+		const staticLookaheadEnd =
+			mainSource.indexOf("function refillStaticPreviewLookahead()", staticLookaheadStart)
+		verify(staticLookaheadStart >= 0 && staticLookaheadEnd > staticLookaheadStart)
+		const staticLookaheadSource =
+			mainSource.slice(staticLookaheadStart, staticLookaheadEnd)
+		verify(staticLookaheadSource.includes("let retainedTouchCandidate = null"))
+		verify(staticLookaheadSource.includes("if (retainedTouchCandidate)"))
+		verify(staticLookaheadSource.includes(
+			"touchRetainedStaticPreviewSource(retainedTouchCandidate.source)"))
+		verify(staticLookaheadSource.includes("staticPreviewLookaheadDistance"))
+		verify(staticLookaheadSource.includes("candidates.sort"))
+		verify(/function\s+refillStaticPreviewLookahead\(\)[\s\S]*staticPreviewPreheatQueue\s*=\s*nextQueue/.test(mainSource))
+		verify(/id:\s*staticPreviewPreheater[\s\S]*visible:\s*false[\s\S]*source:\s*timeline\.staticPreviewPreheatActiveSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)/.test(mainSource))
+		verify(/maximumRetainedStaticPreviews:\s*4[\s\S]*function\s+touchRetainedStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.move[\s\S]*function\s+retainStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.remove\(0\)[\s\S]*delete completed\[evicted\][\s\S]*staticPreviewRetainedModel\.append/.test(mainSource))
+		verify(/function\s+completeStaticPreviewPreheat\(status\)[\s\S]*status\s*===\s*Image\.Ready[\s\S]*retainStaticPreviewSource\(completedSource\)[\s\S]*coolDownStaticPreviewSource\(completedSource\)/.test(mainSource))
+		verify(/function\s+coolDownStaticPreviewSource\(source\)[\s\S]*Date\.now\(\)\s*\+\s*10000[\s\S]*maximumStaticPreviewRetryEntries/.test(mainSource))
+		verify(/function\s+retryCooledStaticPreviews\(\)[\s\S]*delete attempted\[key\][\s\S]*staticPreviewSweepRemainingAttempts[\s\S]*id:\s*staticPreviewRetryTimer[\s\S]*retryCooledStaticPreviews\(\)/.test(mainSource))
+		verify(/id:\s*staticPreviewRetainedModel[\s\S]*model:\s*staticPreviewRetainedModel[\s\S]*delegate:\s*Image[\s\S]*visible:\s*false[\s\S]*cache:\s*true/.test(mainSource))
+		verify(/function\s+staticPreviewSweepAllowed\(\)[\s\S]*!chatModel\.presentationBusy[\s\S]*pendingVisibleHydrationCount\(\)\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\(\)\s*===\s*0[\s\S]*nearViewportPrefetchActiveId\.length\s*===\s*0/.test(mainSource))
+		verify(/property string staticPreviewPreheatActiveOrigin:\s*""[\s\S]*function\s+commitStaticPreviewSweepAttempt\(source\)[\s\S]*staticPreviewSweepAttemptedSources\[key\][\s\S]*staticPreviewSweepRemainingAttempts\s*=\s*Math\.max\(0,[\s\S]*function\s+completeStaticPreviewPreheat\(status\)[\s\S]*completedOrigin\s*===\s*"sweep"[\s\S]*commitStaticPreviewSweepAttempt\(completedSource\)/.test(mainSource))
+		const activateStaticStart =
+			mainSource.indexOf("function activateStaticPreviewPreheat(entry)")
+		const activateStaticEnd =
+			mainSource.indexOf("function reopenStaticPreviewSweepForCanceledIndex",
+				activateStaticStart)
+		verify(activateStaticStart >= 0 && activateStaticEnd > activateStaticStart)
+		const activateStaticSource = mainSource.slice(activateStaticStart,
+			activateStaticEnd)
+		verify(activateStaticSource.indexOf("staticPreviewPreheatActiveOrigin =")
+			< activateStaticSource.indexOf("staticPreviewPreheatActiveSource = source"))
+		verify(activateStaticSource.indexOf("staticPreviewPreheatActiveSweepIndex =")
+			< activateStaticSource.indexOf("staticPreviewPreheatActiveSource = source"))
+		verify(/origin\s*===\s*"sweep"[\s\S]*staticPreviewSweepCompleted[\s\S]*staticPreviewScopeRetainedCount\s*>=\s*maximumRetainedStaticPreviews[\s\S]*return false/.test(
+			activateStaticSource))
+		verify(/function\s+reopenStaticPreviewSweepForCanceledIndex\(index\)[\s\S]*staticPreviewSweepIndex\s*=\s*Math\.max\(staticPreviewSweepIndex,[\s\S]*staticPreviewSweepStarted\s*=\s*true[\s\S]*staticPreviewSweepCompleted\s*=\s*false/.test(mainSource))
+		verify(/function\s+advanceStaticPreviewSweep\(\)[\s\S]*touchRetainedStaticPreviewSource\(source\)[\s\S]*if\s*\(staticPreviewSweepCompleted\)[\s\S]*"origin":\s*"sweep"[\s\S]*id:\s*staticPreviewSweepTimer[\s\S]*interval:\s*96/.test(mainSource))
+		verify(/function\s+advanceStaticPreviewSweep\(\)[\s\S]*const sweepIndex\s*=\s*staticPreviewSweepIndex--[\s\S]*"sweepIndex":\s*sweepIndex/.test(mainSource))
+		verify(/function\s+completeStaticPreviewPreheat\(status\)[\s\S]*const sweepCapacityReached\s*=\s*completedOrigin\s*===\s*"sweep"[\s\S]*staticPreviewScopeRetainedCount\s*>=\s*maximumRetainedStaticPreviews[\s\S]*if\s*\(!sweepCapacityReached\)/.test(mainSource))
+		verify(!/function\s+advanceStaticPreviewSweep\(\)[\s\S]*--staticPreviewSweepRemainingAttempts/.test(mainSource))
+		verify(/function\s+reopenStaticPreviewSweepForNewData\(\)[\s\S]*staticPreviewScopeRetainedCount[\s\S]*staticPreviewSweepStarted\s*=\s*false[\s\S]*maximumRetainedStaticPreviews\s*-\s*staticPreviewScopeRetainedCount[\s\S]*function\s+onDataChanged[\s\S]*reopenStaticPreviewSweepForNewData\(\)/.test(mainSource))
+		verify(/onContentYChanged:[\s\S]*Math\.abs\(staticPreheatDelta\)\s*>=\s*Math\.max\(96,\s*height \* 0\.75\)[\s\S]*staticPreviewPreheatTeleportPending\s*=\s*true/.test(mainSource))
+		verify(/function\s+refillStaticPreviewLookahead\(\)[\s\S]*staticPreviewPreheatTeleportPending[\s\S]*candidates\[0\]\.visible\s*===\s*true[\s\S]*staticPreviewPreheatActiveSource\s*=\s*""/.test(mainSource))
+		verify(/function\s+refillStaticPreviewLookahead\(\)[\s\S]*canceledOrigin\s*===\s*"sweep"[\s\S]*reopenStaticPreviewSweepForCanceledIndex\(canceledSweepIndex\)[\s\S]*queuedSweep[\s\S]*reopenStaticPreviewSweepForCanceledIndex\(queuedSweep\.sweepIndex\)/.test(mainSource))
+		verify(/onContentYChanged:[\s\S]*nextDirection\s*!==\s*staticPreviewPreheatDirection[\s\S]*entry\.origin[\s\S]*reopenStaticPreviewSweepForCanceledIndex\(entry\.sweepIndex\)[\s\S]*staticPreviewPreheatQueue\s*=\s*\[\]/.test(mainSource))
+		verify(/id:\s*scopePresentationObservationTimer[\s\S]*scopePresentationObservationActive\s*=\s*false[\s\S]*retryCooledStaticPreviews\(\)[\s\S]*scheduleStaticPreviewLookahead\(\)/.test(mainSource))
 		const prefetchCandidateStart =
 			mainSource.indexOf("function nearViewportPrefetchCandidateFromItem")
 		const prefetchCandidateEnd =
@@ -632,7 +710,7 @@ TestCase {
 			completePrefetchSource))
 		verify(/if\s*\(item\.previewLoaderIncubationSuppressed\s*===\s*true\s*\|\|\s*item\.previewLoaderFailed\s*===\s*true\s*\|\|\s*item\.richResourcesRequired\s*!==\s*true\)\s*\{\s*retireTerminalNearViewportPrefetch\(key\)\s*return false\s*\}/.test(
 			completePrefetchSource))
-		verify(/if\s*\(item\.richResourcesActive\s*!==\s*true\s*\|\|\s*item\.richResourceActivationPending\s*===\s*true\)\s*return false\s*nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*nearViewportPrefetchReadyId\s*=\s*key[\s\S]*restoreViewportAnchor\(true\)/.test(
+		verify(/if\s*\(item\.richResourcesActive\s*!==\s*true\s*\|\|\s*item\.richResourceActivationPending\s*===\s*true\)\s*return false[\s\S]*item\.previewPrewarmVisualReady\s*!==\s*true[\s\S]*return false[\s\S]*nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*nearViewportPrefetchReadyId\s*=\s*key[\s\S]*restoreViewportAnchor\(true\)/.test(
 			completePrefetchSource))
 		verify(/function\s+recoverOuterLoaderIncubationTimeout\(\)[\s\S]*abandonNearViewportPrefetch\([\s\S]*ownedStableId,\s*true\)/.test(mainSource))
 		verify(/function\s+recoverOuterLoaderIncubationTimeout\(\)[\s\S]*const ownedStableId\s*=\s*resumeOwnedStableId[\s\S]*outerLoaderIncubationWatchdogStartedAt\s*=\s*0[\s\S]*?if\s*\(!inVisibleViewport\s*&&\s*timeline\.nearViewportPrefetchActiveId\s*===\s*ownedStableId\)\s*return\s*outerLoaderIncubationSuppressed\s*=\s*true/.test(mainSource))
@@ -690,7 +768,7 @@ TestCase {
 		verify(/function\s+positionVisualFixtureTimelineAt\(stableId\)[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*positionViewAtIndex\(row,\s*ListView\.Beginning\)/.test(mainSource))
 		verify(/id:\s*topAnchorFrameTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*false[\s\S]*id:\s*topAnchorSettleTimer[\s\S]*interval:\s*180[\s\S]*recoveryPending[\s\S]*pendingScopeHydrationCount\(\)[\s\S]*pendingVisibleRichRecoveryCount\(\)[\s\S]*restoreTopAnchor\(\)[\s\S]*restart\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
 		verify(/id:\s*topAnchorSettleTimer[\s\S]*timeline\.releaseTopAnchor\(\)[\s\S]{0,120}timeline\.scheduleNearViewportPrefetch\(\)/.test(mainSource))
-		verify(/id:\s*scopePresentationObservationTimer[\s\S]*scopePresentationObservationActive\s*=\s*false[\s\S]{0,120}scheduleNearViewportPrefetch\(\)/.test(mainSource))
+		verify(/id:\s*scopePresentationObservationTimer[\s\S]*scopePresentationObservationActive\s*=\s*false[\s\S]*retryCooledStaticPreviews\(\)[\s\S]*scheduleNearViewportPrefetch\(\)/.test(mainSource))
 		verify(!/function\s+restoreTopAnchor\(\)[\s\S]{0,240}positionViewAtBeginning\(\)/.test(mainSource))
 		verify(!/function\s+restoreTopAnchor\(\)[\s\S]{0,240}forceLayout\(\)/.test(mainSource))
 		verify(/property bool richResourcesActive:\s*false[\s\S]*function\s+updateRichResourceActivity\(\)[\s\S]*!timeline\.richScrollInProgress[\s\S]*richResourcesActive\s*=\s*true/.test(mainSource))
@@ -1023,7 +1101,7 @@ TestCase {
 			&& previewPlaceholderVisibilityEnd > previewPlaceholderLoaderStart)
 		const previewPlaceholderVisibilitySource = mainSource.slice(
 			previewPlaceholderLoaderStart, previewPlaceholderVisibilityEnd)
-		verify(/active:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
+		verify(/active:\s*messageDelegate\.hasPreviewContent[\s\S]{0,100}messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
 			previewPlaceholderVisibilitySource))
 		verify(!previewPlaceholderVisibilitySource.includes(
 			"previewLoaderSurfaceNonBlank"))
@@ -1066,7 +1144,19 @@ TestCase {
 		verify(/id:\s*prependAnchorSettleTimer[\s\S]*interval:\s*48[\s\S]*correctionPending[\s\S]*prependAnchorCorrectionFrames\s*>\s*0[\s\S]*restoreDeferredPrependAnchor\(\)[\s\S]*restorePrependAnchor\(\)[\s\S]*releasePrependAnchor\(true\)/.test(mainSource))
 		verify(!/id:\s*prependAnchorSettleTimer[\s\S]{0,900}pendingScopeHydrationCount\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
-		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
+		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]{0,100}messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
+		verify(/readonly property bool previewPaintPending:[\s\S]*previewVisualPresentationPending[\s\S]*readonly property bool previewOnlyPaintPending:[\s\S]*previewSourceOnly[\s\S]*id:\s*messageBubble[\s\S]*color:[\s\S]*previewOnlyPaintPending[\s\S]*\?\s*"transparent"/.test(mainSource))
+		verify(/Layout\.preferredWidth:[\s\S]*Theme\.avatarMedium[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending[\s\S]*\?\s*0[\s\S]*id:\s*messageSenderLabel/.test(mainSource))
+		verify(/visible:\s*\(messageDelegate\.startsGroup[\s\S]*messageDelegate\.systemMessage[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending\s*\?\s*0\s*:\s*1/.test(mainSource))
+		verify(/accessibilitySuppressed:[\s\S]*timeline\.scopePresentationPending\s*\|\|\s*previewOnlyPaintPending[\s\S]*hoverEffectsEnabled:[\s\S]*!previewOnlyPaintPending/.test(mainSource))
+		verify(/TapHandler\s*\{[\s\S]*enabled:\s*!messageDelegate\.logEntry[\s\S]*!messageDelegate\.previewOnlyPaintPending[\s\S]*id:\s*messageRow[\s\S]*enabled:\s*!messageDelegate\.previewOnlyPaintPending[\s\S]*Accessible\.ignored:\s*messageDelegate\.previewOnlyPaintPending/.test(mainSource))
+		verify(/id:\s*compactMessageActionTray[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
+		verify(/id:\s*deferredHistoryRow[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*color:\s*richPresentationReserved\s*\?\s*"transparent"[\s\S]*Accessible\.ignored:\s*richPresentationReserved/.test(mainSource))
+		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible[\s\S]*!richPresentationReserved\s*\?\s*1\s*:\s*0[\s\S]*visible:\s*!deferredInlineMessageDelegate\.richPresentationReserved/.test(mainSource))
+		verify(/id:\s*asyncMessageDelegate[\s\S]*previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0[\s\S]*objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(mainSource))
+		verify(/id:\s*messageBody[\s\S]*visible:\s*!messageDelegate\.deleted[\s\S]*!messageDelegate\.previewSourceOnly/.test(mainSource))
+		verify(/function\s+messageBodyIsPreviewSourceOnly\(segments,\s*preview\)[\s\S]*sourceUrls\s*=\s*\[typedSourceUrl,\s*value\.url,\s*value\.sourceUrl,[\s\S]*value\.embedUrl,\s*value\.mediaUrl\][\s\S]*sourceUrls\.indexOf\(bodyUrl\)\s*<\s*0/.test(mainSource))
+		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent[\s\S]{0,100}!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
 		const previewHydrationPlaceholderStart =
 			mainSource.indexOf("id: messagePreviewHydrationPlaceholderLoader")
 		const previewHydrationPlaceholderEnd =
@@ -1079,10 +1169,13 @@ TestCase {
 			previewHydrationPlaceholderSource))
 		verify(/previewTerminalUnavailable[\s\S]*previewStagingHeight[\s\S]*previewPlaceholderHeight/.test(
 			previewHydrationPlaceholderSource))
+		verify(/active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*opacity:\s*messageDelegate\.previewTerminalUnavailable\s*\?\s*1\s*:\s*0[\s\S]*enabled:\s*active[\s\S]*Accessible\.ignored:\s*!active/.test(
+			previewHydrationPlaceholderSource))
 		verify(!previewHydrationPlaceholderSource.includes("ModernBusyIndicator"))
 		verify(!previewHydrationPlaceholderSource.includes("previewHydrationMediaSkeleton"))
 		verify(/id:\s*messagePreviewLoader[\s\S]*!messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewTerminalUnavailable[\s\S]*messageDelegate\.previewMaterializationAdmitted/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*!messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\([\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*RichPreviewCard\s*\{[\s\S]*renderActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
+		verify(/Connections\s*\{[\s\S]*target:\s*messagePreviewLoader\.item[\s\S]*function\s+onPrewarmVisualReadyChanged\(\)[\s\S]*completeRichLoaderResumeWhenReady\(\)/.test(mainSource))
 		verify(/readonly property string performancePreviewSurfaceState:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*messageRowLoader\.item\.previewSurfaceState/.test(mainSource))
 		const messageRowPreviewSurfaceStart = mainSource.indexOf(
 			"readonly property string previewSurfaceState:", innerDelegateStart)

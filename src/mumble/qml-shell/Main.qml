@@ -493,10 +493,9 @@ ApplicationWindow {
 		const document = preview && preview.document ? preview.document : ({})
 		const typedSourceUrl = document && document.commonPresentation === true && document.source
 			? document.source.url || "" : ""
-		const sourceUrl = normalizedComparableSourceUrl(typedSourceUrl
-			|| (preview ? preview.url || "" : ""))
-		if (sourceUrl.length === 0)
-			return false
+		const value = preview || ({})
+		const sourceUrls = [typedSourceUrl, value.url, value.sourceUrl,
+			value.embedUrl, value.mediaUrl].map(normalizedComparableSourceUrl)
 
 		let text = ""
 		let linkUrl = ""
@@ -512,9 +511,9 @@ ApplicationWindow {
 			}
 		}
 		const bodyUrl = normalizedComparableSourceUrl(text)
-		if (!/^https?:\/\/\S+$/i.test(bodyUrl) || bodyUrl !== sourceUrl)
+		if (!/^https?:\/\/\S+$/i.test(bodyUrl) || sourceUrls.indexOf(bodyUrl) < 0)
 			return false
-		return linkUrl.length === 0 || linkUrl === sourceUrl
+		return linkUrl.length === 0 || linkUrl === bodyUrl
 	}
 
 	function preferredAttachmentMessageWidth(attachments, ownOrSystem) {
@@ -2041,6 +2040,9 @@ ApplicationWindow {
 				"nearViewportWarmId": timeline.nearViewportWarmId,
 				"nearViewportPrefetchReadyId": timeline.nearViewportPrefetchReadyId,
 				"nearViewportPrefetch": nearViewportPrefetchDiagnostics(),
+				"staticPreviewPreheatActiveId": timeline.staticPreviewPreheatActiveId,
+				"staticPreviewPreheatQueueCount": timeline.staticPreviewPreheatQueue.length,
+				"staticPreviewPreheatStatus": Number(staticPreviewPreheater.status),
 				"topAnchorActive": timeline.topAnchorActive,
 				"topAnchorProgrammaticMovementGuard":
 					timeline.topAnchorProgrammaticMovementGuard,
@@ -3357,11 +3359,12 @@ ApplicationWindow {
 					// in one GUI turn, while 128 px still prevents rows behind the gesture
 					// from falling out of the retained range.
 					readonly property real richScrollRetentionRampStep: 128
-					// Prepare one static rich row up to two native wheel steps ahead.
-					// This is deliberately independent from the retention ramp: the
-					// candidate still owns the single global materialization token and
-					// its provider/media resources remain gated by renderActive.
+					// Full RichPreviewCard materialization stays deliberately narrow and
+					// single-flight. A separate static-only preheater below looks farther
+					// ahead without constructing provider/player trees.
 					readonly property real nearViewportPrefetchDistance: 256
+					readonly property real staticPreviewLookaheadDistance:
+						Math.max(256, Math.min(baseCacheBuffer, height * 0.90))
 					readonly property real maximumRichScrollRetentionBuffer: 18000
 					// During cold entry every rich source row is still a childless
 					// provider-height summary. Let ListView instantiate that inexpensive
@@ -3388,8 +3391,31 @@ ApplicationWindow {
 					property string nearViewportPrefetchReadyId: ""
 					property string nearViewportPrefetchViewportSignature: ""
 					property bool nearViewportPrefetchOwnsViewportAnchor: false
+					// One global static decode plus one queued source is enough to hide
+					// wheel lookahead without retaining video, animation or player state.
+					property string staticPreviewPreheatActiveId: ""
+					property string staticPreviewPreheatActiveSource: ""
+					property string staticPreviewPreheatActiveOrigin: ""
+					property int staticPreviewPreheatActiveSweepIndex: -1
+					property var staticPreviewPreheatQueue: []
+					property var staticPreviewPreheatCompletedSources: ({})
+					property var staticPreviewPreheatRetryAfter: ({})
+					property var staticPreviewPreheatRetryOrder: []
+					readonly property int maximumRetainedStaticPreviews: 4
+					readonly property int maximumStaticPreviewRetryEntries: 32
+					property int staticPreviewPreheatDirection: -1
+					property real staticPreviewPreheatLastContentY: 0
+					property bool staticPreviewPreheatTeleportPending: false
+					property int staticPreviewSweepIndex: -1
+					property bool staticPreviewSweepStarted: false
+					property bool staticPreviewSweepCompleted: false
+					property int staticPreviewSweepRemainingAttempts: 0
+					property var staticPreviewSweepAttemptedSources: ({})
+					property var staticPreviewScopeRetainedSources: ({})
+					property int staticPreviewScopeRetainedCount: 0
 					onRichScrollInProgressChanged: {
 						if (richScrollInProgress) {
+							staticPreviewSweepTimer.stop()
 							cancelActiveNearViewportPrefetchForScroll()
 							richScrollRetentionTarget = Math.min(maximumRichScrollRetentionBuffer,
 								Math.max(richScrollRetentionTarget, contentHeight + height))
@@ -3407,7 +3433,8 @@ ApplicationWindow {
 							suspendRichContentForScroll()
 							return
 						}
-						if (Object.keys(root.pendingPreviewHydrationIds).length > 0
+					scheduleStaticPreviewLookahead()
+					if (Object.keys(root.pendingPreviewHydrationIds).length > 0
 								&& !previewHydrationTimer.running)
 							previewHydrationTimer.start()
 						scheduleRichContentResume()
@@ -3530,6 +3557,28 @@ ApplicationWindow {
 						richScrollRetentionRampTimer.stop()
 						viewportMembershipTimer.stop()
 						viewportMembershipUpdatePending = false
+						// Block retiring-scope DTO updates before stopping the optional
+						// preheaters below. Their final Image callbacks can otherwise land
+						// in the same turn as the replacement snapshot.
+						chatModel.presentationBusy = true
+						staticPreviewLookaheadTimer.stop()
+						staticPreviewSweepTimer.stop()
+						staticPreviewPreheatActiveSource = ""
+						staticPreviewPreheatActiveId = ""
+						staticPreviewPreheatActiveOrigin = ""
+						staticPreviewPreheatActiveSweepIndex = -1
+						staticPreviewPreheatQueue = []
+						staticPreviewPreheatDirection = -1
+						staticPreviewPreheatLastContentY = contentY
+						staticPreviewPreheatTeleportPending = false
+						staticPreviewSweepIndex = -1
+						staticPreviewSweepStarted = false
+						staticPreviewSweepCompleted = false
+						staticPreviewSweepRemainingAttempts = maximumRetainedStaticPreviews
+						staticPreviewSweepAttemptedSources = ({})
+						staticPreviewScopeRetainedSources = ({})
+						staticPreviewScopeRetainedCount = 0
+						staticPreviewRetryTimer.stop()
 						nearViewportPrefetchTimer.stop()
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
@@ -3544,7 +3593,6 @@ ApplicationWindow {
 						// Keep those DTO updates in the existing bounded source queue
 						// until the new scope is stable; otherwise QML can polish a rich
 						// card that is immediately removed in the same cold-entry window.
-						chatModel.presentationBusy = true
 						releasePrependAnchor()
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
@@ -4146,6 +4194,559 @@ ApplicationWindow {
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
 						viewportAnchorReleasePending = false
+						Qt.callLater(function() { timeline.scheduleStaticPreviewSweep() })
+					}
+
+					function safeStaticPreviewSource(value) {
+						const source = String(value === undefined || value === null ? "" : value).trim()
+						return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+					}
+
+					function safeStaticPreviewExternalUrl(value) {
+						const source = String(value === undefined || value === null ? "" : value)
+							.trim().slice(0, 2048)
+						return /^(https?:\/\/|mailto:|mumble:\/\/)/i.test(source) ? source : ""
+					}
+
+					function safeStaticPreviewDirectMediaUrl(value, kind) {
+						const source = String(value === undefined || value === null ? "" : value).trim()
+						if (/^https:\/\//i.test(source))
+							return source.slice(0, 2048)
+						const expectedKind = String(kind || "").toLowerCase()
+						if ((expectedKind === "audio" || expectedKind === "video")
+								&& new RegExp("^data:" + expectedKind + "\\/[a-z0-9.+-]+;base64,", "i")
+									.test(source))
+							return source
+						return ""
+					}
+
+					function staticPreviewMediaSource(item) {
+						if (!item)
+							return { "eligible": false, "source": "", "topLevelThumbnail": false }
+						const kind = String(item.kind || "").toLowerCase()
+						const mime = String(item.mime || "").toLowerCase()
+						const presentation = String(item.presentation
+							|| item.mediaPresentation || "").toLowerCase()
+						const branch = String(item.contentBranch || "").toLowerCase()
+						const imageItem = kind === "image" || kind === "gif"
+							|| kind === "animated-image" || mime.indexOf("image/") === 0
+						if (imageItem) {
+							const renderSource = safeStaticPreviewSource(item.url)
+							const externalSource = safeStaticPreviewExternalUrl(item.externalUrl
+								|| (renderSource.length === 0 ? item.url : ""))
+							if (renderSource.length === 0 && externalSource.length === 0)
+								return { "eligible": false, "source": "", "topLevelThumbnail": false }
+							const animated = item.managedAnimated === true || kind === "gif"
+								|| kind === "animated-image" || mime === "image/gif"
+								|| presentation === "animated-image" || branch.indexOf("animated") >= 0
+							return { "eligible": true, "source": animated ? "" : renderSource,
+								"topLevelThumbnail": false }
+						}
+						const playableKind = kind === "audio" || mime.indexOf("audio/") === 0
+							? "audio" : kind === "video" || mime.indexOf("video/") === 0
+								? "video" : ""
+						if (playableKind.length === 0)
+							return { "eligible": false, "source": "", "topLevelThumbnail": false }
+						const playback = safeStaticPreviewDirectMediaUrl(item.url, playableKind)
+						const external = safeStaticPreviewExternalUrl(item.externalUrl || item.url)
+						const target = item.directPlayable !== false && playback.length > 0
+							? playback : external
+						const thumbnail = safeStaticPreviewSource(item.thumbnailUrl)
+							|| safeStaticPreviewSource(item.thumbnail)
+						const poster = safeStaticPreviewSource(item.posterUrl)
+							|| safeStaticPreviewSource(item.poster)
+						if (target.length === 0 && thumbnail.length === 0 && poster.length === 0)
+							return { "eligible": false, "source": "", "topLevelThumbnail": false }
+						return { "eligible": true, "source": poster || thumbnail,
+							"topLevelThumbnail": poster.length === 0 && thumbnail.length === 0 }
+					}
+
+					function staticPreviewSourceFor(preview) {
+						if (!preview || typeof preview !== "object")
+							return ""
+						const state = String(preview.state
+							|| (preview.failed ? "error" : preview.loading ? "loading" : "ready"))
+							.toLowerCase()
+						const metadata = preview.metadata || ({})
+						if (state !== "ready" || preview.failed === true
+								|| preview.mediaAnimated === true
+								|| String(metadata.mediaPresentation || "").toLowerCase()
+									=== "animated-image")
+							return ""
+						const document = preview.document || ({})
+						const typedDocument = Number(document.schemaVersion || 0) === 1
+							&& document.commonPresentation === true
+						const embeddedProviderPoster = String(preview.embedUrl || "").length > 0
+							&& String(preview.embedKind || "").toLowerCase() !== "direct"
+						if (embeddedProviderPoster && !typedDocument) {
+							const embedPosters = [preview.thumbnailUrl, preview.posterUrl]
+							for (let index = 0; index < embedPosters.length; ++index) {
+								const source = safeStaticPreviewSource(embedPosters[index])
+								if (source.length > 0)
+									return source
+							}
+						}
+						const mediaCollection = typedDocument ? document.media : preview.mediaItems
+						const mediaCount = mediaCollection && mediaCollection.length !== undefined
+							? Number(mediaCollection.length) : 0
+						for (let itemIndex = 0; itemIndex < mediaCount; ++itemIndex) {
+							const candidate = staticPreviewMediaSource(mediaCollection[itemIndex])
+							if (candidate.eligible === true) {
+								if (candidate.source.length > 0)
+									return candidate.source
+								return candidate.topLevelThumbnail && !typedDocument
+									? safeStaticPreviewSource(preview.thumbnailUrl) : ""
+							}
+						}
+						if (embeddedProviderPoster && typedDocument) {
+							const embedPosters = [preview.thumbnailUrl, preview.posterUrl]
+							for (let index = 0; index < embedPosters.length; ++index) {
+								const source = safeStaticPreviewSource(embedPosters[index])
+								if (source.length > 0)
+									return source
+							}
+						}
+						if (!typedDocument && (String(preview.mediaUrl || "").length > 0
+								|| safeStaticPreviewExternalUrl(preview.mediaExternalUrl).length > 0)) {
+							const fallbackKind = String(preview.mediaKind || preview.kind || "").toLowerCase()
+							const fallbackMime = String(preview.mediaMime || "").toLowerCase()
+							const fallbackImage = fallbackKind === "image"
+								|| fallbackMime.indexOf("image/") === 0
+							const fallbackPlayable = fallbackKind === "audio" || fallbackKind === "video"
+								|| fallbackMime.indexOf("audio/") === 0
+								|| fallbackMime.indexOf("video/") === 0
+							if (fallbackImage && fallbackKind !== "gif"
+									&& fallbackKind !== "animated-image" && fallbackMime !== "image/gif") {
+								const source = safeStaticPreviewSource(preview.mediaUrl)
+								const external = safeStaticPreviewExternalUrl(preview.mediaExternalUrl)
+									|| (source.length === 0
+										? safeStaticPreviewExternalUrl(preview.mediaUrl) : "")
+								if (source.length > 0 || external.length > 0)
+									return source
+							} else if (fallbackPlayable) {
+								const playback = safeStaticPreviewDirectMediaUrl(preview.mediaUrl,
+									fallbackKind === "audio" ? "audio" : "video")
+								const external = safeStaticPreviewExternalUrl(preview.mediaExternalUrl)
+									|| (playback.length === 0
+										? safeStaticPreviewExternalUrl(preview.mediaUrl) : "")
+								if (playback.length > 0 || external.length > 0)
+									return safeStaticPreviewSource(preview.posterUrl)
+										|| safeStaticPreviewSource(preview.thumbnailUrl)
+							}
+						}
+						return !typedDocument ? safeStaticPreviewSource(preview.thumbnailUrl) : ""
+					}
+
+					function staticPreviewSourceRetainedOrCooling(source) {
+						const key = String(source || "")
+						if (key.length === 0 || staticPreviewPreheatCompletedSources[key] === true)
+							return true
+						const retryAfter = Number(staticPreviewPreheatRetryAfter[key] || 0)
+						if (retryAfter > Date.now())
+							return true
+						if (retryAfter > 0) {
+							const retryMap = Object.assign({}, staticPreviewPreheatRetryAfter)
+							delete retryMap[key]
+							staticPreviewPreheatRetryAfter = retryMap
+							staticPreviewPreheatRetryOrder = staticPreviewPreheatRetryOrder.filter(
+								function(value) { return String(value || "") !== key })
+						}
+						return false
+					}
+
+					function staticPreviewSourceAlreadyOwned(source) {
+						const key = String(source || "")
+						if (staticPreviewSourceRetainedOrCooling(key)
+								|| key === staticPreviewPreheatActiveSource)
+							return true
+						for (let index = 0; index < staticPreviewPreheatQueue.length; ++index) {
+							if (String(staticPreviewPreheatQueue[index].source || "") === key)
+								return true
+						}
+						return false
+					}
+
+					function noteStaticPreviewSourceInScope(source) {
+						const key = String(source || "")
+						if (key.length === 0 || staticPreviewScopeRetainedSources[key] === true)
+							return
+						const retained = Object.assign({}, staticPreviewScopeRetainedSources)
+						retained[key] = true
+						staticPreviewScopeRetainedSources = retained
+						++staticPreviewScopeRetainedCount
+						if (staticPreviewScopeRetainedCount >= maximumRetainedStaticPreviews)
+							staticPreviewSweepCompleted = true
+					}
+
+					function touchRetainedStaticPreviewSource(source) {
+						const key = String(source || "")
+						for (let index = 0; index < staticPreviewRetainedModel.count; ++index) {
+							if (String(staticPreviewRetainedModel.get(index).source || "") !== key)
+								continue
+							if (index !== staticPreviewRetainedModel.count - 1)
+								staticPreviewRetainedModel.move(index,
+									staticPreviewRetainedModel.count - 1, 1)
+							noteStaticPreviewSourceInScope(key)
+							return true
+						}
+						return false
+					}
+
+					function retainStaticPreviewSource(source) {
+						const key = String(source || "")
+						if (key.length === 0)
+							return
+						for (let index = 0; index < staticPreviewRetainedModel.count; ++index) {
+							if (String(staticPreviewRetainedModel.get(index).source || "") !== key)
+								continue
+							touchRetainedStaticPreviewSource(key)
+							return
+						}
+						const completed = Object.assign({}, staticPreviewPreheatCompletedSources)
+						while (staticPreviewRetainedModel.count >= maximumRetainedStaticPreviews) {
+							const evicted = String(staticPreviewRetainedModel.get(0).source || "")
+							staticPreviewRetainedModel.remove(0)
+							delete completed[evicted]
+						}
+						staticPreviewRetainedModel.append({ "source": key })
+						completed[key] = true
+						staticPreviewPreheatCompletedSources = completed
+						noteStaticPreviewSourceInScope(key)
+						const retryMap = Object.assign({}, staticPreviewPreheatRetryAfter)
+						delete retryMap[key]
+						staticPreviewPreheatRetryAfter = retryMap
+						staticPreviewPreheatRetryOrder = staticPreviewPreheatRetryOrder.filter(
+							function(value) { return String(value || "") !== key })
+					}
+
+					function coolDownStaticPreviewSource(source) {
+						const key = String(source || "")
+						if (key.length === 0)
+							return
+						const retryMap = Object.assign({}, staticPreviewPreheatRetryAfter)
+						let order = staticPreviewPreheatRetryOrder.filter(
+							function(value) { return String(value || "") !== key })
+						retryMap[key] = Date.now() + 10000
+						order.push(key)
+						while (order.length > maximumStaticPreviewRetryEntries) {
+							const evicted = String(order.shift() || "")
+							delete retryMap[evicted]
+						}
+						staticPreviewPreheatRetryAfter = retryMap
+						staticPreviewPreheatRetryOrder = order
+						scheduleStaticPreviewRetryWake()
+					}
+
+					function scheduleStaticPreviewRetryWake() {
+						let earliest = 0
+						const now = Date.now()
+						for (const key in staticPreviewPreheatRetryAfter) {
+							const retryAt = Number(staticPreviewPreheatRetryAfter[key] || 0)
+							if (retryAt > now && (earliest <= 0 || retryAt < earliest))
+								earliest = retryAt
+						}
+						if (earliest <= 0) {
+							staticPreviewRetryTimer.stop()
+							return
+						}
+						staticPreviewRetryTimer.interval = Math.max(1, earliest - now)
+						staticPreviewRetryTimer.restart()
+					}
+
+					function retryCooledStaticPreviews() {
+						const now = Date.now()
+						const attempted = Object.assign({}, staticPreviewSweepAttemptedSources)
+						let openedRetry = false
+						for (const key in staticPreviewPreheatRetryAfter) {
+							if (Number(staticPreviewPreheatRetryAfter[key] || 0) > now)
+								continue
+							delete attempted[key]
+							openedRetry = true
+						}
+						staticPreviewSweepAttemptedSources = attempted
+						if (openedRetry && staticPreviewScopeRetainedCount
+								< maximumRetainedStaticPreviews) {
+							staticPreviewSweepIndex = -1
+							staticPreviewSweepStarted = false
+							staticPreviewSweepCompleted = false
+							staticPreviewSweepRemainingAttempts = Math.max(1,
+								maximumRetainedStaticPreviews - staticPreviewScopeRetainedCount)
+							scheduleStaticPreviewSweep()
+						}
+						scheduleStaticPreviewRetryWake()
+					}
+
+					function activateStaticPreviewPreheat(entry) {
+						if (!entry || staticPreviewPreheatActiveSource.length > 0)
+							return false
+						const source = String(entry.source || "")
+						if (source.length === 0 || staticPreviewSourceRetainedOrCooling(source))
+							return false
+						const origin = String(entry.origin || "lookahead")
+						if (origin === "sweep" && (staticPreviewSweepCompleted
+								|| staticPreviewScopeRetainedCount >= maximumRetainedStaticPreviews))
+							return false
+						staticPreviewPreheatActiveId = String(entry.id || "")
+						staticPreviewPreheatActiveOrigin = origin
+						staticPreviewPreheatActiveSweepIndex = Number(entry.sweepIndex === undefined
+							? -1 : entry.sweepIndex)
+						// Image.source is the request trigger and may synchronously reach Ready
+						// on a Qt cache hit. Publish all bookkeeping before changing it.
+						staticPreviewPreheatActiveSource = source
+						return true
+					}
+
+					function reopenStaticPreviewSweepForCanceledIndex(index) {
+						const canceledIndex = Number(index)
+						if (canceledIndex < 0 || staticPreviewScopeRetainedCount
+								>= maximumRetainedStaticPreviews
+								|| staticPreviewSweepRemainingAttempts <= 0)
+							return
+						staticPreviewSweepIndex = Math.max(staticPreviewSweepIndex,
+							Math.min(chatModel.count - 1, canceledIndex))
+						staticPreviewSweepStarted = true
+						staticPreviewSweepCompleted = false
+					}
+
+					function commitStaticPreviewSweepAttempt(source) {
+						const key = String(source || "")
+						if (key.length === 0 || staticPreviewSweepAttemptedSources[key] === true)
+							return
+						const attempted = Object.assign({}, staticPreviewSweepAttemptedSources)
+						attempted[key] = true
+						staticPreviewSweepAttemptedSources = attempted
+						staticPreviewSweepRemainingAttempts = Math.max(0,
+							staticPreviewSweepRemainingAttempts - 1)
+						if (staticPreviewSweepRemainingAttempts <= 0
+								|| staticPreviewScopeRetainedCount >= maximumRetainedStaticPreviews)
+							staticPreviewSweepCompleted = true
+					}
+
+					function activateQueuedStaticPreviewPreheat() {
+						if (staticPreviewPreheatActiveSource.length > 0
+								|| staticPreviewPreheatQueue.length === 0)
+							return false
+						const entry = staticPreviewPreheatQueue[0]
+						staticPreviewPreheatQueue = staticPreviewPreheatQueue.slice(1)
+						return activateStaticPreviewPreheat(entry)
+					}
+
+					function completeStaticPreviewPreheat(status) {
+						if (staticPreviewPreheatActiveSource.length === 0
+								|| (status !== Image.Ready && status !== Image.Error))
+							return false
+						const completedSource = staticPreviewPreheatActiveSource
+						const completedOrigin = staticPreviewPreheatActiveOrigin
+						const sweepCapacityReached = completedOrigin === "sweep"
+							&& staticPreviewScopeRetainedCount >= maximumRetainedStaticPreviews
+						if (!sweepCapacityReached) {
+							if (status === Image.Ready)
+								retainStaticPreviewSource(completedSource)
+							else
+								coolDownStaticPreviewSource(completedSource)
+							if (completedOrigin === "sweep")
+								commitStaticPreviewSweepAttempt(completedSource)
+						}
+						staticPreviewPreheatActiveSource = ""
+						staticPreviewPreheatActiveId = ""
+						staticPreviewPreheatActiveOrigin = ""
+						staticPreviewPreheatActiveSweepIndex = -1
+						Qt.callLater(function() {
+							if (!timeline.activateQueuedStaticPreviewPreheat()) {
+								timeline.scheduleStaticPreviewLookahead()
+								timeline.scheduleStaticPreviewSweep()
+							}
+						})
+						return true
+					}
+
+					function staticPreviewLookaheadCandidates() {
+						const candidates = []
+						const seen = ({})
+						let retainedTouchCandidate = null
+						const children = contentItem ? contentItem.children : []
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (!item || item.performanceTimelineDelegate !== true
+									|| item.accessibilityPooled === true
+									|| typeof item.preview === "undefined")
+								continue
+							const source = staticPreviewSourceFor(item.preview)
+							if (source.length === 0 || seen[source])
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							const visible = point.y + item.height > 0.5 && point.y < height - 0.5
+							const ahead = staticPreviewPreheatDirection < 0
+								? point.y + item.height <= 0.5 : point.y >= height - 0.5
+							if (!visible && !ahead)
+								continue
+							const distance = visible ? 0 : staticPreviewPreheatDirection < 0
+								? Math.max(0, -(point.y + item.height))
+								: Math.max(0, point.y - height)
+							if (distance > staticPreviewLookaheadDistance + 0.5)
+								continue
+							seen[source] = true
+							if (staticPreviewPreheatCompletedSources[source] === true) {
+								// Touch at most one nearest retained still per coalesced refill.
+								// Reordering every visible retained delegate would otherwise
+								// turn the max-four ListModel into scroll-time model churn.
+								if (!retainedTouchCandidate
+										|| (visible && retainedTouchCandidate.visible !== true)
+										|| (visible === retainedTouchCandidate.visible
+											&& distance < retainedTouchCandidate.distance))
+									retainedTouchCandidate = { "source": source,
+										"visible": visible, "distance": distance }
+								continue
+							}
+							if (staticPreviewSourceRetainedOrCooling(source))
+								continue
+							candidates.push({ "id": String(item.stableId || ""),
+								"source": source, "visible": visible, "distance": distance,
+								"origin": "lookahead" })
+						}
+						if (retainedTouchCandidate)
+							touchRetainedStaticPreviewSource(retainedTouchCandidate.source)
+						candidates.sort(function(left, right) {
+							if (left.visible !== right.visible)
+								return left.visible ? -1 : 1
+							return left.distance - right.distance
+						})
+						return candidates
+					}
+
+					function refillStaticPreviewLookahead() {
+						const candidates = staticPreviewLookaheadCandidates()
+						if (staticPreviewPreheatTeleportPending && candidates.length > 0
+								&& candidates[0].visible === true
+								&& staticPreviewPreheatActiveSource.length > 0
+								&& candidates[0].source !== staticPreviewPreheatActiveSource) {
+							// A viewport-scale scrollbar teleport is the one case where stale
+							// decode work loses priority. Ordinary wheel reversals keep it alive.
+							const canceledOrigin = staticPreviewPreheatActiveOrigin
+							const canceledSweepIndex = staticPreviewPreheatActiveSweepIndex
+							staticPreviewPreheatActiveSource = ""
+							staticPreviewPreheatActiveId = ""
+							staticPreviewPreheatActiveOrigin = ""
+							staticPreviewPreheatActiveSweepIndex = -1
+							if (canceledOrigin === "sweep")
+								reopenStaticPreviewSweepForCanceledIndex(canceledSweepIndex)
+						}
+						if (staticPreviewPreheatActiveSource.length === 0) {
+							for (let index = 0; index < candidates.length; ++index) {
+								if (activateStaticPreviewPreheat(candidates[index]))
+									break
+							}
+						}
+						const nextQueue = []
+						for (let index = 0; index < candidates.length; ++index) {
+							const candidate = candidates[index]
+							if (candidate.source === staticPreviewPreheatActiveSource)
+								continue
+							nextQueue.push(candidate)
+							break
+						}
+						let queuedSweep = null
+						for (let index = 0; index < staticPreviewPreheatQueue.length; ++index) {
+							if (String(staticPreviewPreheatQueue[index].origin || "") === "sweep") {
+								queuedSweep = staticPreviewPreheatQueue[index]
+								break
+							}
+						}
+						if (queuedSweep && nextQueue.length > 0
+								&& String(nextQueue[0].source || "")
+									=== String(queuedSweep.source || ""))
+							nextQueue[0] = queuedSweep
+						else if (queuedSweep)
+							reopenStaticPreviewSweepForCanceledIndex(queuedSweep.sweepIndex)
+						staticPreviewPreheatQueue = nextQueue
+						staticPreviewPreheatTeleportPending = false
+					}
+
+					function scheduleStaticPreviewLookahead() {
+						if (!staticPreviewLookaheadTimer.running)
+							staticPreviewLookaheadTimer.start()
+					}
+
+					function staticPreviewSweepAllowed() {
+						return !richScrollInProgress && !scopePresentationPending
+							&& !scopePresentationFinalizing && !scopeResetPending
+							&& !scopePresentationObservationActive && !activeScope.loading
+							&& !chatModel.presentationBusy && !chatModel.appendPending
+							&& !chatModel.prependPending && !root.coldPreviewHydrationPacingActive
+							&& !prependAnchorActive && !topAnchorActive && !restoringViewportAnchor
+							&& pendingVisibleHydrationCount() === 0
+							&& pendingVisibleRichRecoveryCount() === 0
+							&& richContentResumeTimer.running !== true
+							&& richLoaderResumeTimer.running !== true
+							&& deferredMaterializationTimer.running !== true
+							&& viewportMembershipTimer.running !== true
+							&& viewportMembershipUpdatePending !== true
+							&& richLoaderResumeActiveId.length === 0
+							&& deferredMaterializationActiveId.length === 0
+							&& richLoaderResumeQueue.length === 0
+							&& deferredMaterializationQueue.length === 0
+							&& nearViewportPrefetchActiveId.length === 0
+							&& nearViewportPrefetchTimer.running !== true
+					}
+
+					function scheduleStaticPreviewSweep() {
+						if (!staticPreviewSweepAllowed() || chatModel.count <= 0
+								|| staticPreviewSweepCompleted
+								|| staticPreviewSweepRemainingAttempts <= 0
+								|| staticPreviewSweepTimer.running)
+							return
+						staticPreviewSweepTimer.start()
+					}
+
+					function reopenStaticPreviewSweepForNewData() {
+						if (staticPreviewScopeRetainedCount >= maximumRetainedStaticPreviews)
+							return
+						staticPreviewSweepIndex = -1
+						staticPreviewSweepStarted = false
+						staticPreviewSweepCompleted = false
+						staticPreviewSweepRemainingAttempts = Math.max(
+							staticPreviewSweepRemainingAttempts,
+							maximumRetainedStaticPreviews - staticPreviewScopeRetainedCount)
+						scheduleStaticPreviewSweep()
+					}
+
+					function advanceStaticPreviewSweep() {
+						if (!staticPreviewSweepAllowed())
+							return
+						if (staticPreviewSweepCompleted || staticPreviewSweepRemainingAttempts <= 0)
+							return
+						if (staticPreviewPreheatActiveSource.length > 0
+								&& staticPreviewPreheatQueue.length > 0)
+							return
+						if (!staticPreviewSweepStarted) {
+							staticPreviewSweepIndex = chatModel.count - 1
+							staticPreviewSweepStarted = true
+						}
+						while (staticPreviewSweepIndex >= 0) {
+							const sweepIndex = staticPreviewSweepIndex--
+							const row = chatModel.get(sweepIndex)
+							const source = staticPreviewSourceFor(row ? row.preview : null)
+							if (source.length === 0
+									|| staticPreviewSweepAttemptedSources[source] === true)
+								continue
+							if (staticPreviewPreheatCompletedSources[source] === true) {
+								touchRetainedStaticPreviewSource(source)
+								if (staticPreviewSweepCompleted)
+									return
+								continue
+							}
+							if (staticPreviewSourceAlreadyOwned(source))
+								continue
+							const entry = { "id": String(row ? row.stableId || "" : ""),
+								"source": source, "origin": "sweep",
+								"sweepIndex": sweepIndex }
+							if (staticPreviewPreheatActiveSource.length === 0)
+								activateStaticPreviewPreheat(entry)
+							else
+								staticPreviewPreheatQueue = [entry]
+							return
+						}
+						staticPreviewSweepCompleted = true
 					}
 
 					function noteExplicitWheelInput() {
@@ -4356,15 +4957,19 @@ ApplicationWindow {
 							return
 						const signature = nearViewportPrefetchSignature()
 						if (signature.length === 0
-								|| signature === nearViewportPrefetchViewportSignature)
+								|| signature === nearViewportPrefetchViewportSignature) {
+							scheduleStaticPreviewSweep()
 							return
+						}
 						if (nearViewportPrefetchReadyId.length > 0) {
 							nearViewportPrefetchReadyId = ""
 							nearViewportWarmId = ""
 						}
 						const candidate = nearestDeferredPrefetchCandidate()
-						if (!candidate)
+						if (!candidate) {
+							scheduleStaticPreviewSweep()
 							return
+						}
 						nearViewportPrefetchViewportSignature = signature
 						nearViewportPrefetchActiveId = candidate.id
 						nearViewportWarmId = candidate.id
@@ -4535,6 +5140,11 @@ ApplicationWindow {
 						if (item.richResourcesActive !== true
 								|| item.richResourceActivationPending === true)
 							return false
+						// Tree construction and provider-detail polish can finish before the
+						// selected still reaches Image.Ready. Keep the speculative grant until
+						// that cheap visual is ready or its bounded native fallback is final.
+						if (item.previewPrewarmVisualReady !== true)
+							return false
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
 						nearViewportPrefetchReadyId = key
@@ -4543,6 +5153,7 @@ ApplicationWindow {
 							restoreViewportAnchor(true)
 						}
 						nearViewportPrefetchOwnsViewportAnchor = false
+						Qt.callLater(function() { timeline.scheduleStaticPreviewSweep() })
 						return true
 					}
 
@@ -4921,6 +5532,7 @@ ApplicationWindow {
 						}
 						chatModel.presentationBusy = false
 						scheduleNearViewportPrefetch()
+						scheduleStaticPreviewSweep()
 					}
 
 					function restoreViewportAnchor(releaseWhenRestored) {
@@ -5126,6 +5738,25 @@ ApplicationWindow {
 
 					onContentYChanged: {
 						scheduleViewportMembershipUpdate()
+						const staticPreheatDelta = contentY - staticPreviewPreheatLastContentY
+						if (Math.abs(staticPreheatDelta) > 0.5
+								&& (richScrollInProgress || explicitWheelInputPending
+									|| explicitNavigationMovement)) {
+							if (Math.abs(staticPreheatDelta) >= Math.max(96, height * 0.75))
+								staticPreviewPreheatTeleportPending = true
+							const nextDirection = staticPreheatDelta < 0 ? -1 : 1
+							if (nextDirection !== staticPreviewPreheatDirection) {
+								for (let index = 0; index < staticPreviewPreheatQueue.length; ++index) {
+									const entry = staticPreviewPreheatQueue[index]
+									if (String(entry.origin || "") === "sweep")
+										reopenStaticPreviewSweepForCanceledIndex(entry.sweepIndex)
+								}
+								staticPreviewPreheatQueue = []
+							}
+							staticPreviewPreheatDirection = nextDirection
+						}
+						staticPreviewPreheatLastContentY = contentY
+						scheduleStaticPreviewLookahead()
 						// A native wheel event can arrive while a geometry-driven
 						// movement epoch is already active, in which case ListView does
 						// not emit a second movementStarted. A real content delta inside
@@ -5357,6 +5988,66 @@ ApplicationWindow {
 						onTriggered: timeline.resumeNextRichLoader()
 					}
 
+					Image {
+						id: staticPreviewPreheater
+						objectName: "staticPreviewPreheater"
+						visible: false
+						width: 1
+						height: 1
+						source: timeline.staticPreviewPreheatActiveSource
+						asynchronous: true
+						cache: true
+						sourceSize: Qt.size(1280, 960)
+						onStatusChanged: timeline.completeStaticPreviewPreheat(status)
+						onSourceChanged: Qt.callLater(function() {
+							if (staticPreviewPreheater.status === Image.Ready
+									|| staticPreviewPreheater.status === Image.Error)
+								timeline.completeStaticPreviewPreheat(staticPreviewPreheater.status)
+						})
+						Accessible.ignored: true
+					}
+
+					ListModel {
+						id: staticPreviewRetainedModel
+					}
+
+					Repeater {
+						model: staticPreviewRetainedModel
+						delegate: Image {
+							visible: false
+							width: 1
+							height: 1
+							source: String(model.source || "")
+							asynchronous: true
+							cache: true
+							sourceSize: Qt.size(1280, 960)
+							Accessible.ignored: true
+						}
+					}
+
+					Timer {
+						id: staticPreviewLookaheadTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.refillStaticPreviewLookahead()
+					}
+
+					Timer {
+						id: staticPreviewSweepTimer
+						// Idle room sweep is intentionally slower than one frame and shares
+						// the same single static decoder used by wheel lookahead.
+						interval: 96
+						repeat: false
+						onTriggered: timeline.advanceStaticPreviewSweep()
+					}
+
+					Timer {
+						id: staticPreviewRetryTimer
+						interval: 10000
+						repeat: false
+						onTriggered: timeline.retryCooledStaticPreviews()
+					}
+
 					Timer {
 						id: nearViewportPrefetchTimer
 						interval: 16
@@ -5524,7 +6215,12 @@ ApplicationWindow {
 						repeat: false
 						onTriggered: {
 							timeline.scopePresentationObservationActive = false
+							// Room changes cancel timer callbacks, not their bounded cooldown
+							// state. Re-open expired still-image retries (or re-arm the next
+							// deadline) as soon as the replacement scope is genuinely quiet.
+							timeline.retryCooledStaticPreviews()
 							timeline.scheduleNearViewportPrefetch()
+							timeline.scheduleStaticPreviewLookahead()
 						}
 					}
 
@@ -5619,6 +6315,7 @@ ApplicationWindow {
 								timeline.noteScopePresentationMutation()
 							else
 								timeline.requestBottomFollow()
+							timeline.reopenStaticPreviewSweepForNewData()
 						}
 						function onRowsAboutToBeInserted(parentIndex, first, last) {
 							timeline.followTailAfterInsert = false
@@ -5758,17 +6455,21 @@ ApplicationWindow {
 									}).join("  ·  ")
 								readonly property string presentationSummary: summaryText
 								readonly property bool messageRowReady: false
+								readonly property bool richPresentationReserved:
+									deferredPresentationHeight > 180
 								property bool accessibilityPooled: false
 								width: timelineHeader.width
 								height: timeline.deferredMessageRowHeight
-								radius: Theme.innerRadius
-								color: Theme.surfaceRaised
-								border.width: 1
-								border.color: Theme.divider
+								radius: richPresentationReserved ? 0 : Theme.innerRadius
+								color: richPresentationReserved ? "transparent" : Theme.surfaceRaised
+								border.width: richPresentationReserved ? 0 : 1
+								border.color: richPresentationReserved ? "transparent" : Theme.divider
 								Accessible.role: Accessible.ListItem
 								Accessible.name: summaryText
+								Accessible.ignored: richPresentationReserved
 
 								Label {
+									visible: !deferredHistoryRow.richPresentationReserved
 									anchors.fill: parent
 									anchors.leftMargin: Theme.space3
 									anchors.rightMargin: Theme.space3
@@ -5808,6 +6509,8 @@ ApplicationWindow {
 								readonly property bool lightweightDeferredPresentation: true
 								readonly property bool contentNeedsHydration: true
 								readonly property bool messageRowReady: false
+								readonly property bool richPresentationReserved:
+									deferredPresentationHeight > 180
 								readonly property string presentationSummary: [title, subtitle, timestamp]
 									.filter(function(part) {
 										return String(part || "").trim().length > 0
@@ -5821,14 +6524,17 @@ ApplicationWindow {
 								radius: 0
 								color: "transparent"
 								border.width: 0
-								opacity: timeline.scopePresentationContentVisible ? 1 : 0
+								opacity: timeline.scopePresentationContentVisible
+									&& !richPresentationReserved ? 1 : 0
 								Accessible.role: Accessible.ListItem
 								Accessible.name: presentationSummary
+								Accessible.ignored: richPresentationReserved
 
 								ListView.onPooled: accessibilityPooled = true
 								ListView.onReused: accessibilityPooled = false
 
 								RowLayout {
+									visible: !deferredInlineMessageDelegate.richPresentationReserved
 									anchors.left: parent.left
 									anchors.right: parent.right
 									anchors.top: parent.top
@@ -5917,6 +6623,11 @@ ApplicationWindow {
 										.filter(function(part) {
 											return String(part || "").trim().length > 0
 										}).join("  ·  ")
+								readonly property bool previewOnlyAtomicHandoff:
+									root.messageBodyIsPreviewSourceOnly(bodySegments || [], preview || ({}))
+									&& root.normalizedModelList(attachments).length === 0
+									&& String(replyActor || "").length === 0
+									&& String(replySnippet || "").length === 0
 								// Viewport membership controls provider activation, which
 								// refines the delegate's final height. Start with model
 								// geometry, then grow this imperative latch only after the
@@ -6049,6 +6760,8 @@ ApplicationWindow {
 									? item.messageContentLoaderReady : false
 								readonly property bool previewPresentationReady: item
 									? item.previewPresentationReady : false
+								readonly property bool previewPrewarmVisualReady: item
+									? item.previewPrewarmVisualReady : false
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
 								property bool inVisibleViewport: false
@@ -6147,6 +6860,7 @@ ApplicationWindow {
 
 									RowLayout {
 										objectName: "asyncRichHandoffSummary"
+										visible: !asyncMessageDelegate.previewOnlyAtomicHandoff
 										anchors.left: parent.left
 										anchors.right: parent.right
 										anchors.top: parent.top
@@ -6419,16 +7133,18 @@ ApplicationWindow {
 					: y >= timeline.contentY - 0.5
 						&& y + height <= timeline.contentY + timeline.height + 0.5
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
-					|| timeline.scopePresentationPending
+					|| timeline.scopePresentationPending || previewOnlyPaintPending
 				accessibilityBarrierEnabled: logEntry || messageRowReady
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
-					&& !timeline.richScrollInProgress
+					&& !timeline.richScrollInProgress && !previewOnlyPaintPending
 						function openAutomationActions() {
 							openMessageActions()
 							return messageRowLoader.item
 								? messageRowLoader.item.actionsMenu : null
 						}
 						function openMessageActions() {
+							if (previewOnlyPaintPending)
+								return
 							if (messageRowLoader.item)
 								messageRowLoader.item.openActions()
 						}
@@ -7243,6 +7959,23 @@ ApplicationWindow {
 							- timeline.leftMargin - timeline.rightMargin - Theme.space4)
 						laneMaximumWidth: root.conversationLaneMaximumWidth
 						readonly property bool hasPreviewContent: !!preview && Object.keys(preview).length > 0
+						readonly property bool previewVisualPresentationPending:
+							hasPreviewContent && messagePreviewLoader.status === Loader.Ready
+							&& !!messagePreviewLoader.item
+							&& messagePreviewLoader.item.visualPresentationPending === true
+						readonly property bool previewPrewarmVisualReady: !hasPreviewContent
+							|| (messagePreviewLoader.status === Loader.Ready
+								&& !!messagePreviewLoader.item
+								&& messagePreviewLoader.item.prewarmVisualReady === true)
+						readonly property bool previewPaintPending: hasPreviewContent
+							&& !previewTerminalUnavailable
+							&& (previewNeedsHydration || !previewMaterializationAdmitted
+								|| messagePreviewLoader.status !== Loader.Ready
+								|| previewVisualPresentationPending)
+						readonly property bool previewSourceOnly: root.messageBodyIsPreviewSourceOnly(
+							bodySegments || [], preview || ({}))
+						readonly property bool previewOnlyPaintPending: previewPaintPending
+							&& previewSourceOnly && !hasAttachmentContent && !hasReplyContent
 						readonly property string previewOpenUrl: {
 							const value = preview || ({})
 							const candidates = [value.url, value.sourceUrl, value.embedUrl,
@@ -7368,6 +8101,7 @@ ApplicationWindow {
 						width: laneAvailableWidth
 						TapHandler {
 							enabled: !messageDelegate.logEntry
+								&& !messageDelegate.previewOnlyPaintPending
 							acceptedButtons: Qt.RightButton
 							onTapped: messageDelegate.openMessageActions()
 						}
@@ -7471,6 +8205,8 @@ ApplicationWindow {
 							sourceComponent: Component {
 								RowLayout {
 									id: messageRow
+									enabled: !messageDelegate.previewOnlyPaintPending
+									Accessible.ignored: messageDelegate.previewOnlyPaintPending
 									property alias previewLoader: messagePreviewLoader
 									property alias attachmentLoader: messageAttachmentLoader
 									property alias actionsMenu: messageActions
@@ -7525,7 +8261,8 @@ ApplicationWindow {
 								radius: width / 2
                                 color: Theme.strip
                                 clip: true
-								opacity: messageDelegate.startsGroup ? 1 : 0
+									opacity: messageDelegate.previewOnlyPaintPending
+										? 0 : messageDelegate.startsGroup ? 1 : 0
                                 Image {
                                     id: avatarImage
                                     anchors.fill: parent
@@ -7555,6 +8292,7 @@ ApplicationWindow {
 									spacing: Theme.chatMetadataSpacing
 									visible: (messageDelegate.startsGroup && !messageDelegate.own)
 										|| messageDelegate.systemMessage
+									opacity: messageDelegate.previewOnlyPaintPending ? 0 : 1
 									Label {
 										id: messageSenderLabel
 										Layout.fillWidth: true
@@ -7565,6 +8303,7 @@ ApplicationWindow {
 										font.pixelSize: Theme.fontCaption
 										elide: Text.ElideRight
 										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| messageDelegate.previewOnlyPaintPending
 											|| !messageDelegate.itemContainedInViewport(messageSenderLabel)
 									}
 									Label {
@@ -7575,6 +8314,7 @@ ApplicationWindow {
 										font.pixelSize: Theme.fontCaption
 										visible: timestamp.length > 0
 										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| messageDelegate.previewOnlyPaintPending
 											|| !messageDelegate.itemContainedInViewport(messageTimestampLabel)
 									}
 									Label {
@@ -7587,6 +8327,7 @@ ApplicationWindow {
 										visible: status.length > 0
 										elide: Text.ElideRight
 										Accessible.ignored: root.backgroundAccessibilitySuppressed
+											|| messageDelegate.previewOnlyPaintPending
 											|| !messageDelegate.itemContainedInViewport(messageStatusLabel)
 									}
                                 }
@@ -7601,10 +8342,13 @@ ApplicationWindow {
 									Layout.preferredHeight: bubbleContent.implicitHeight + bubbleVerticalInset * 2
 									radius: Theme.innerRadius
 									color: messageDelegate.own || messageDelegate.systemMessage
+										|| messageDelegate.previewOnlyPaintPending
 										? "transparent" : messageDelegate.bubbleColor
 									border.color: messageDelegate.own || messageDelegate.systemMessage
+										|| messageDelegate.previewOnlyPaintPending
 										? "transparent" : messageDelegate.bubbleBorderColor
 									border.width: messageDelegate.own || messageDelegate.systemMessage
+										|| messageDelegate.previewOnlyPaintPending
 										? 0 : messageDelegate.bubbleBorderWidth
 
 									ColumnLayout {
@@ -7649,10 +8393,7 @@ ApplicationWindow {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
-										&& (!root.messageBodyIsPreviewSourceOnly(
-												messageDelegate.bodySegments || [],
-												messageDelegate.preview || ({}))
-											|| messagePreviewLoader.status !== Loader.Ready)
+										&& !messageDelegate.previewSourceOnly
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
 									segments: messageDelegate.bodySegments || []
@@ -7791,14 +8532,10 @@ ApplicationWindow {
 								}
 								Loader {
 									id: messagePreviewHydrationPlaceholderLoader
-									// Own the slot only until the asynchronous card tree exists.
-									// Keep the staging surface native and compact; a Loader that
-									// never reaches Ready must not expose a media-sized error card.
+									// Pending presentation owns geometry only. Construct and paint this
+									// native row solely for a terminal fallback with its Open action.
 									active: messageDelegate.hasPreviewContent
-										&& (messageDelegate.previewNeedsHydration
-											|| messageDelegate.previewTerminalUnavailable
-											|| !messageDelegate.previewMaterializationAdmitted
-											|| messagePreviewLoader.status !== Loader.Ready)
+										&& messageDelegate.previewTerminalUnavailable
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId,
@@ -7817,6 +8554,9 @@ ApplicationWindow {
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, messageDelegate.previewPlaceholderWidth))
 									Layout.maximumWidth: Layout.preferredWidth
+									opacity: messageDelegate.previewTerminalUnavailable ? 1 : 0
+									enabled: active
+									Accessible.ignored: !active
 									sourceComponent: Component {
 										Rectangle {
 											objectName: "previewHydrationPlaceholder"
@@ -8099,14 +8839,17 @@ ApplicationWindow {
 										}
 									}
                                 }
-								Connections {
-									target: messagePreviewLoader.item
-									enabled: !!target
-									ignoreUnknownSignals: true
-									function onMaterializationSettledChanged() {
-										messageDelegate.completeRichLoaderResumeWhenReady()
-									}
+							Connections {
+								target: messagePreviewLoader.item
+								enabled: !!target
+								ignoreUnknownSignals: true
+								function onMaterializationSettledChanged() {
+									messageDelegate.completeRichLoaderResumeWhenReady()
 								}
+								function onPrewarmVisualReadyChanged() {
+									messageDelegate.completeRichLoaderResumeWhenReady()
+								}
+							}
 								RowLayout {
 									id: messageFooter
 									objectName: "chatMessageFooter"
@@ -8115,6 +8858,7 @@ ApplicationWindow {
 									Layout.fillWidth: true
 									Layout.rightMargin: messageDelegate.compactActionTextInset
 									visible: messageDelegate.hasEmbeddedFooterContent
+										&& !messageDelegate.previewOnlyPaintPending
 									spacing: Theme.space2
 
 									Flow {
@@ -8311,8 +9055,9 @@ ApplicationWindow {
 									anchors.rightMargin: Theme.space1
 									width: messageDelegate.compactActionTrayWidth
 									height: 34
-									visible: messageDelegate.usesCompactActionOverlay
-										&& (messageDelegate.hovered || messageDelegate.quickReactionsExpanded)
+								visible: messageDelegate.usesCompactActionOverlay
+									&& !messageDelegate.previewOnlyPaintPending
+									&& (messageDelegate.hovered || messageDelegate.quickReactionsExpanded)
 									radius: height / 2
 									color: Theme.strip
 									border.color: Theme.divider

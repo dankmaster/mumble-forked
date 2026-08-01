@@ -12,6 +12,10 @@ ColumnLayout {
 	property int selectedIndex: 0
 	property bool expanded: false
 	property bool renderActive: true
+	// Retain only the selected still artwork while the owning rich card is
+	// outside the viewport. AnimatedImage and every playable/provider resource
+	// continue to follow renderActive strictly.
+	property bool retainStaticVisual: false
 	property bool animationsEnabled: true
 	property bool mediaRequiresReveal: false
 	property bool viewportVisible: true
@@ -33,12 +37,15 @@ ColumnLayout {
 		|| currentKind === "animated-image" ? String(currentItem.url || "")
 		: String(currentItem.posterUrl || currentItem.poster
 			|| currentItem.thumbnailUrl || currentItem.thumbnail || "")
-	readonly property bool currentVisualReady: currentKind === "animated-image"
-		? animatedImageLoader.mediaStatus === Image.Ready
-		: stillImage.status === Image.Ready
+	readonly property int currentVisualStatus: currentKind === "animated-image"
+		? animatedImageLoader.mediaStatus : stillImage.status
+	readonly property bool currentVisualReady: currentVisualStatus === Image.Ready
 	readonly property bool currentVisualLoading: currentKind === "animated-image"
-		? animatedImageLoader.active && animatedImageLoader.mediaStatus === Image.Loading
-		: stillImage.status === Image.Loading
+		? animatedImageLoader.active && currentVisualStatus === Image.Loading
+		: currentVisualStatus === Image.Loading
+	readonly property bool staticVisualPending: retainStaticVisual
+		&& currentKind !== "animated-image" && currentImageSource.length > 0
+		&& (currentVisualStatus === Image.Null || currentVisualStatus === Image.Loading)
 	readonly property string performanceMediaSurfaceState: !viewportVisible
 		? "not-required" : mediaRequiresReveal ? "reveal"
 		: currentVisualReady ? "poster"
@@ -111,12 +118,12 @@ ColumnLayout {
 			id: stillImage
 			objectName: "embedDocumentMediaImage"
 			anchors.fill: parent
-			source: root.renderActive && !root.mediaRequiresReveal
+			source: (root.renderActive || root.retainStaticVisual) && !root.mediaRequiresReveal
 				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
 			asynchronous: true
 			cache: true
-			sourceSize: Qt.size(Math.min(1280, width * Screen.devicePixelRatio),
-				Math.min(960, height * Screen.devicePixelRatio))
+			// Share one exact decoded-size cache key with Main's bounded preheater.
+			sourceSize: Qt.size(1280, 960)
 			fillMode: Image.PreserveAspectFit
 			// Leave the Image item mounted throughout the source handoff; the
 			// fallback underlay remains visible when no texture exists.

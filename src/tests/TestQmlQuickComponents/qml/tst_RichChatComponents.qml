@@ -700,11 +700,12 @@ TestCase {
 		verify(stateBadgeLabel !== null)
 		compare(stateBadgeLabel.text, "Loading")
 		verify(actionFlow !== null && actionFlow.visible)
-		verify(openButton !== null && openButton.visible && openButton.enabled)
+		verify(openButton !== null && openButton.visible)
+		compare(card.enabled, false)
+		compare(card.Accessible.ignored, true)
+		compare(openButton.enabled, false)
 		compare(openButton.Accessible.role, Accessible.Link)
-		openButton.clicked()
-		compare(externalOpenSpy.count, 1)
-		compare(externalOpenSpy.signalArguments[0][0], "https://example.com/card")
+		compare(externalOpenSpy.count, 0)
 		card.preview = {
             "state": "error",
             "failed": true,
@@ -725,6 +726,12 @@ TestCase {
 		verify(errorText.text.indexOf("<b>Provider request failed</b>") >= 0)
 		verify(errorText.text.indexOf("ordinary content") < 0)
 		compare(card.canExpand, false)
+		compare(card.enabled, true)
+		compare(card.Accessible.ignored, false)
+		compare(openButton.enabled, true)
+		openButton.clicked()
+		compare(externalOpenSpy.count, 1)
+		compare(externalOpenSpy.signalArguments[0][0], "https://example.com/card")
 		card.preview = {
 			"state": "error", "title": "Generic failure",
 			"description": "This is not an error message.", "url": "https://example.com/card"
@@ -767,6 +774,8 @@ TestCase {
 		verify(panel !== null && busy !== null && inlineLoader !== null)
 		verify(card.implicitHeight > 180)
 		compare(card.opacity, 0)
+		compare(card.enabled, false)
+		compare(card.Accessible.ignored, true)
 		compare(card.border.width, 0)
 		compare(panel.opacity, 0)
 		compare(busy.visible, false)
@@ -779,16 +788,39 @@ TestCase {
 			"embedKind": "youtube", "embedAspect": "wide",
 			"thumbnailUrl": "image://mumble/static-cache-poster"
 		}
+		const poster = findChild(card, "previewEmbedPoster")
+		verify(poster !== null)
+		// Let the new DTO's geometry bindings settle before measuring the reserved
+		// height. The static decode may remain asynchronous after this turn.
 		wait(0)
+		// The asynchronous static request may still be Null/Loading on this exact
+		// turn. Geometry stays fixed, but no ready-looking card may be painted.
+		const readyHeight = card.implicitHeight
+		if (poster.status !== Image.Ready) {
+			verify(card.staticEmbedPosterRevealPending)
+			verify(card.visualPresentationPending)
+			compare(card.prewarmVisualReady, false)
+			compare(card.opacity, 0)
+			compare(panel.opacity, 0)
+			compare(card.performanceEmbedSurfaceState, "loading")
+		}
 		compare(card.staticPreviewCacheActive, true)
 		compare(card.staticEmbedPosterCacheActive, true)
 		compare(card.staticCompactImageCacheActive, false)
-		compare(card.opacity, 1)
-		compare(panel.opacity, 1)
-		const poster = findChild(card, "previewEmbedPoster")
-		verify(poster !== null)
+		compare(card.staticTypedMediaCacheActive, false)
 		verify(poster.source.toString().indexOf("image://mumble/static-cache-poster") === 0)
 		compare(poster.cache, true)
+		compare(poster.sourceSize.width, 1280)
+		compare(poster.sourceSize.height, 960)
+		tryCompare(poster, "status", Image.Ready)
+		tryCompare(card, "visualPresentationPending", false)
+		compare(card.prewarmVisualReady, true)
+		compare(card.opacity, 1)
+		compare(card.enabled, true)
+		compare(card.Accessible.ignored, false)
+		compare(panel.opacity, 1)
+		compare(card.performanceEmbedSurfaceState, "poster")
+		compare(card.implicitHeight, readyHeight)
 		compare(inlineLoader.active, false)
 
 		inlineSession.sessionId = card.mediaSessionId
@@ -1175,14 +1207,18 @@ TestCase {
 		const header = findChild(card, "previewGenericHeader")
 		const article = findChild(card, "providerArticleCard")
 		const hero = findChild(card, "providerArticleHero")
+		const heroImage = findChild(card, "providerArticleHeroImage")
 		const title = findChild(card, "providerArticleTitle")
 		const tldr = findChild(card, "providerArticleTldr")
 		const meta = findChild(card, "providerArticleMeta")
-		verify(header !== null && article !== null && hero !== null && title !== null
+		verify(header !== null && article !== null && hero !== null && heroImage !== null && title !== null
 			&& tldr !== null && meta !== null)
 		compare(header.visible, false)
 		tryCompare(article, "visible", true)
 		tryCompare(hero, "visible", true)
+		compare(heroImage.cache, true)
+		compare(heroImage.sourceSize.width, 1280)
+		compare(heroImage.sourceSize.height, 960)
 		compare(title.text, "Government halves the price of monthly transit passes")
 		compare(tldr.text, "Public transit monthly passes will cost half as much for six months.")
 		verify(meta.text.indexOf("Göteborgs-Posten") >= 0)
@@ -1232,6 +1268,9 @@ TestCase {
 			&& controls !== null && price !== null)
 		tryCompare(gallery, "visible", true)
 		tryCompare(hero, "visible", true)
+		compare(heroImage.cache, true)
+		compare(heroImage.sourceSize.width, 1280)
+		compare(heroImage.sourceSize.height, 960)
 		tryCompare(controls, "visible", true)
 		compare(price.text, "8 500 kr")
 		compare(card.selectedMediaIndex, 0)
@@ -1241,6 +1280,40 @@ TestCase {
 		const controlsOrigin = controls.mapToItem(card, 0, 0)
 		const heroOrigin = hero.mapToItem(card, 0, 0)
 		verify(controlsOrigin.y >= heroOrigin.y + hero.height - 1)
+	}
+
+	function test_top_level_direct_video_prefers_exact_static_poster() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Direct clip",
+			"url": "https://provider.example/watch/direct-clip",
+			"mediaUrl": "https://cdn.example/direct-clip.mp4",
+			"mediaKind": "video",
+			"mediaMime": "video/mp4",
+			"posterUrl": "image://mumble/direct-poster?g=1",
+			"thumbnailUrl": "image://mumble/direct-thumb?g=1"
+		}
+		card.previewIdentity = "message:direct-poster-priority"
+		wait(0)
+		compare(card.currentMediaKind, "video")
+		compare(card.currentMedia.poster, "image://mumble/direct-poster?g=1")
+		compare(card.imageSource, "image://mumble/direct-poster?g=1")
+
+		card.preview = {
+			"state": "ready",
+			"title": "External audio",
+			"url": "https://provider.example/audio/external",
+			"mediaExternalUrl": "https://provider.example/audio/source",
+			"mediaKind": "audio",
+			"mediaMime": "audio/mpeg",
+			"posterUrl": "image://mumble/audio-poster?g=1"
+		}
+		card.previewIdentity = "message:external-audio-poster"
+		wait(0)
+		compare(card.currentMediaKind, "audio")
+		compare(card.currentMedia.poster, "image://mumble/audio-poster?g=1")
+		compare(card.imageSource, "image://mumble/audio-poster?g=1")
 	}
 
 	function test_active_provider_player_has_only_external_actions_below_media_and_no_duplicate_spotify_details() {
@@ -2756,7 +2829,7 @@ TestCase {
 		tryVerify(function() { return String(thumbnailImage.source).length > 0 })
 	}
 
-	function test_typed_instagram_gallery_never_blanks_when_scroll_suspends_rendering() {
+	function test_typed_instagram_gallery_retains_only_the_selected_static_still_offscreen() {
 		const card = previewLoader.item
 		const sourceUrl = "https://www.instagram.com/p/scroll-regression/"
 		const imageUrl = "image://mumble/instagram-scroll-regression?g=1"
@@ -2803,22 +2876,24 @@ TestCase {
 		verify(gallery !== null && gallery.visible)
 		verify(image !== null && fallback !== null)
 		compare(image.retainWhileLoading, false)
+		compare(image.sourceSize.width, 1280)
+		compare(image.sourceSize.height, 960)
 		tryCompare(image, "status", Image.Ready)
+		compare(card.staticTypedMediaCacheActive, true)
+		compare(gallery.retainStaticVisual, true)
 		compare(gallery.performanceMediaSurfaceState, "poster")
 		compare(card.performanceEmbedSurfaceState, "poster")
 
 		card.renderActive = false
-		tryCompare(image, "source", "")
-		tryCompare(image, "status", Image.Null)
+		compare(image.source.toString(), imageUrl)
+		compare(image.status, Image.Ready)
 		verify(fallback.visible)
-		compare(gallery.performanceMediaSurfaceState, "fallback")
-		compare(card.performanceEmbedSurfaceState, "fallback")
+		compare(gallery.performanceMediaSurfaceState, "poster")
+		compare(card.performanceEmbedSurfaceState, "poster")
 
 		card.renderActive = true
-		verify(["fallback", "loading", "poster"].indexOf(
-			gallery.performanceMediaSurfaceState) >= 0)
-		verify(card.performanceEmbedSurfaceState !== "blank")
-		tryCompare(image, "status", Image.Ready)
+		compare(image.source.toString(), imageUrl)
+		compare(image.status, Image.Ready)
 		compare(gallery.performanceMediaSurfaceState, "poster")
 		compare(card.performanceEmbedSurfaceState, "poster")
 	}
@@ -3944,6 +4019,9 @@ TestCase {
 		tryCompare(hero, "status", Image.Ready)
 		verify(hero.visible)
 		compare(hero.source.toString(), "image://mumble/steam-hero?g=1")
+		compare(hero.cache, true)
+		compare(hero.sourceSize.width, 1280)
+		compare(hero.sourceSize.height, 960)
 	}
 
 	function test_steam_gallery_is_visible_and_selectable_without_expanding_the_card() {

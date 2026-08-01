@@ -1572,9 +1572,9 @@ FocusScope {
 							anchors.fill: parent
 							source: root.managedPreviewImageSource
 							asynchronous: true
-							cache: false
-							sourceSize.width: 640
-							sourceSize.height: 400
+							cache: true
+							// Match the retained RichPreviewCard/Main decode bucket.
+							sourceSize: Qt.size(1280, 960)
 							fillMode: Image.PreserveAspectCrop
 							Accessible.ignored: true
 						}
@@ -1735,9 +1735,9 @@ FocusScope {
 						anchors.fill: parent
 						source: root.managedPreviewImageSource
 						asynchronous: true
-						cache: false
-						sourceSize.width: 1000
-						sourceSize.height: 700
+						cache: true
+						// Match the retained RichPreviewCard/Main decode bucket.
+						sourceSize: Qt.size(1280, 960)
 						fillMode: root.variant === "product"
 							? Image.PreserveAspectFit : Image.PreserveAspectCrop
 						Accessible.ignored: true
@@ -2033,9 +2033,9 @@ FocusScope {
 						anchors.fill: parent
 						source: root.safeManagedImageSource(root.previewImageSource)
 						asynchronous: true
-						cache: false
-						sourceSize: Qt.size(Math.min(960, width * Screen.devicePixelRatio),
-							Math.min(540, height * Screen.devicePixelRatio))
+						cache: true
+						// Match the retained RichPreviewCard/Main decode bucket.
+						sourceSize: Qt.size(1280, 960)
 						fillMode: Image.PreserveAspectCrop
 						visible: status === Image.Ready
 						Accessible.ignored: true

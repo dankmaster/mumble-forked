@@ -33,19 +33,19 @@ Rectangle {
 	readonly property bool materializationSettled: !providerDetails.visible
 		|| providerDetails.presentationReady
 	// Automation observes the same already-instantiated presentation layers that
-	// the user sees. Provider/network readiness is deliberately not required:
-	// loading, reveal and fallback surfaces are all meaningful, while a reserved
-	// embed viewport with none of those layers is a real blank presentation.
+	// the user sees. Loading remains a truthful diagnostic state even though the
+	// reserved geometry is deliberately not painted until its static visual is
+	// ready or has reached a final native fallback.
 	readonly property string performanceEmbedSurfaceState: {
 		if (embedDocumentMediaGallery.visible
 				&& embedDocumentMediaGallery.viewportVisible)
 			return embedDocumentMediaGallery.performanceMediaSurfaceState
-		if (!inlineMediaStageVisible)
-			return "not-required"
 		// Keep diagnostics truthful even though backend hydration is intentionally
 		// not painted as a media-sized loading surface.
-		if (compactLoadingPresentation)
+		if (visualPresentationPending)
 			return "loading"
+		if (!inlineMediaStageVisible)
+			return "not-required"
 		if (previewEmbedRevealSurface.visible)
 			return "reveal"
 		if (inlineAdapterLoadingSurface.visible || inlineRuntimeLoadingSurface.visible
@@ -109,9 +109,31 @@ Rectangle {
 	readonly property bool staticCompactImageCacheActive: previewState === "ready"
 		&& !mediaRequiresReveal && !inlineMediaStageVisible
 		&& imageSource.length > 0 && !currentMediaManagedAnimated
+	readonly property bool staticTypedMediaCacheActive: previewState === "ready"
+		&& typedDocumentActive && mediaItems.length > 0 && !mediaRequiresReveal
+		&& !currentMediaManagedAnimated
 	readonly property bool staticPreviewCacheActive: staticEmbedPosterCacheActive
-		|| staticCompactImageCacheActive
+		|| staticCompactImageCacheActive || staticTypedMediaCacheActive
 	readonly property bool compactLoadingPresentation: previewState === "loading"
+	// A ready metadata DTO is not yet a paintable preview when its selected still
+	// is Null/Loading. Keep the exact measured geometry and the bounded cached
+	// Image request alive, but reveal the card atomically only on Image.Ready or
+	// after the existing bounded recovery has selected a final native fallback.
+	readonly property bool staticEmbedPosterRevealPending: previewState === "ready"
+		&& inlineMediaStageVisible && !inlinePlaybackActive && !mediaRequiresReveal
+		&& effectiveEmbedPosterSource.length > 0 && !currentMediaManagedAnimated
+		&& !embedPosterFallbackActive && embedPoster.status !== Image.Ready
+	readonly property bool staticCompactImageRevealPending: previewState === "ready"
+		&& !inlineMediaStageVisible && !mediaRequiresReveal && imageSource.length > 0
+		&& !currentMediaManagedAnimated
+		&& (previewImage.status === Image.Null || previewImage.status === Image.Loading)
+	readonly property bool staticTypedMediaRevealPending: previewState === "ready"
+		&& embedDocumentMediaGallery.visible && embedDocumentMediaGallery.viewportVisible
+		&& !mediaRequiresReveal && embedDocumentMediaGallery.staticVisualPending
+	readonly property bool visualPresentationPending: compactLoadingPresentation
+		|| staticEmbedPosterRevealPending || staticCompactImageRevealPending
+		|| staticTypedMediaRevealPending
+	readonly property bool prewarmVisualReady: !visualPresentationPending
 	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
 	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1
 		&& embedDocument.commonPresentation === true
@@ -427,26 +449,28 @@ Rectangle {
 	// Preserve the delegate's measured height while making backend hydration
 	// completely invisible. This also bypasses any in-flight color transition
 	// from a pooled delegate until the static preview DTO is ready.
-	opacity: compactLoadingPresentation ? 0 : 1
+	opacity: visualPresentationPending ? 0 : 1
+	enabled: !visualPresentationPending
 	radius: Theme.innerRadius
-	color: compactLoadingPresentation ? "transparent" : effectiveHovered
+	color: visualPresentationPending ? "transparent" : effectiveHovered
 		? Theme.mixColors(Theme.previewCardHover, providerDetails.providerAccent, 0.055)
 		: Theme.mixColors(Theme.previewCardBackground, providerDetails.providerAccent, 0.03)
-	border.color: compactLoadingPresentation ? "transparent"
+	border.color: visualPresentationPending ? "transparent"
 		: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
 		: root.mediaRequiresReveal ? root.withAlpha(Theme.warning, 0.65)
 		: effectiveHovered ? root.withAlpha(providerDetails.providerAccent, 0.46)
 		: root.withAlpha(providerDetails.providerAccent, 0.24)
-	border.width: compactLoadingPresentation ? 0 : 1
+	border.width: visualPresentationPending ? 0 : 1
 	Behavior on color {
-		enabled: !root.compactLoadingPresentation
+		enabled: !root.visualPresentationPending
 		ColorAnimation { duration: root.animationDuration }
 	}
 	Behavior on border.color {
-		enabled: !root.compactLoadingPresentation
+		enabled: !root.visualPresentationPending
 		ColorAnimation { duration: root.animationDuration }
 	}
 	Accessible.role: Accessible.Grouping
+	Accessible.ignored: visualPresentationPending
 	Accessible.name: displayTitle + (metadataLine.length > 0 ? ": " + metadataLine : "")
 	Accessible.description: previewAccessibilityDescription()
 
@@ -1214,7 +1238,7 @@ Rectangle {
 						"mime": safeText(preview.mediaMime, 128),
 						"kind": "image",
 						"thumbnail": safeRenderImageSource(preview.thumbnailUrl || ""),
-						"poster": safeRenderImageSource(preview.thumbnailUrl || ""),
+						"poster": safeRenderImageSource(preview.posterUrl || preview.thumbnailUrl || ""),
 						"title": root.displayTitle,
 						"directPlayable": renderSource.length > 0,
 						"managedAnimated": !!preview.mediaAnimated && /^file:\/\//i.test(renderSource)
@@ -1234,7 +1258,7 @@ Rectangle {
 					"mime": safeText(preview.mediaMime, 128),
 					"kind": fallbackKind,
 					"thumbnail": safeRenderImageSource(preview.thumbnailUrl || ""),
-					"poster": safeRenderImageSource(preview.thumbnailUrl || ""),
+						"poster": safeRenderImageSource(preview.posterUrl || preview.thumbnailUrl || ""),
 					"title": root.displayTitle,
 					"directPlayable": directPlayable,
 					"managedAnimated": !!preview.mediaAnimated
@@ -1363,7 +1387,7 @@ Rectangle {
 			visible: embedMediaSlot.visible
 			// Loading geometry remains reserved for scroll stability, but its
 			// media-sized surface is not painted until cached metadata is ready.
-			opacity: root.compactLoadingPresentation ? 0 : 1
+			opacity: root.visualPresentationPending ? 0 : 1
 			enabled: opacity > 0
 			Accessible.ignored: opacity <= 0
 			radius: Theme.innerRadius
@@ -1410,8 +1434,9 @@ Rectangle {
 				// The source size is bounded below. Let Qt reuse the decoded poster when
 				// virtualization temporarily suspends and resumes this card.
 				cache: true
-				sourceSize: Qt.size(Math.min(1280, root.inlineMediaStageWidth * Screen.devicePixelRatio),
-					Math.min(1280, root.inlineMediaViewportHeight * Screen.devicePixelRatio))
+				// Main's retained stills use the same bucket, so a room revisit
+				// reuses this decode instead of merely reusing the encoded source.
+				sourceSize: Qt.size(1280, 960)
 				// Match the production preview treatment: the poster is a backdrop for
 				// the provider action, including audio embeds. PreserveAspectFit left
 				// square album art floating in a wide empty strip for Spotify.
@@ -1837,6 +1862,7 @@ Rectangle {
 				selectedIndex: root.selectedMediaIndex
 				expanded: root.expanded
 				renderActive: root.renderActive
+				retainStaticVisual: root.staticTypedMediaCacheActive
 				animationsEnabled: root.animationsEnabled
 				mediaRequiresReveal: root.mediaRequiresReveal
 				viewportVisible: !root.inlinePlaybackActive
@@ -1894,8 +1920,7 @@ Rectangle {
 						&& !root.mediaRequiresReveal ? root.imageSource : ""
                     asynchronous: true
                     cache: true
-                    sourceSize: Qt.size(Math.min(640, width * Screen.devicePixelRatio),
-                                        Math.min(480, height * Screen.devicePixelRatio))
+					sourceSize: Qt.size(1280, 960)
                     fillMode: Image.PreserveAspectCrop
                     visible: status === Image.Ready
 					onStatusChanged: if (status === Image.Error && root.renderActive
@@ -2171,8 +2196,7 @@ Rectangle {
 					? root.imageSource : ""
                 asynchronous: true
 				cache: true
-				sourceSize: Qt.size(Math.min(1280, width * Screen.devicePixelRatio),
-					Math.min(960, height * Screen.devicePixelRatio))
+				sourceSize: Qt.size(1280, 960)
 				fillMode: Image.PreserveAspectCrop
 				visible: !root.inlinePlaybackActive && source.toString().length > 0 && status === Image.Ready
                 onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
