@@ -691,11 +691,12 @@ TestCase {
 	function test_preview_loading_error_and_expansion_states() {
 		const card = previewLoader.item
 		compare(card.previewState, "loading")
+		compare(card.compactLoadingPresentation, true)
 		const stateBadge = findChild(card, "previewStateBadge")
 		const stateBadgeLabel = findChild(card, "previewStateBadgeLabel")
 		const actionFlow = findChild(card, "previewActionFlow")
 		const openButton = findChild(card, "previewOpenButton")
-		verify(stateBadge !== null && stateBadge.visible)
+		verify(stateBadge !== null && !stateBadge.visible)
 		verify(stateBadgeLabel !== null)
 		compare(stateBadgeLabel.text, "Loading")
 		verify(actionFlow !== null && actionFlow.visible)
@@ -744,6 +745,101 @@ TestCase {
 		verify(!card.compact)
     }
 
+	function test_loading_embed_keeps_geometry_invisible_and_ready_static_cache_avoids_player() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "loading", "loading": true,
+			"title": "Cached provider title",
+			"url": "https://www.youtube.com/watch?v=static-cache",
+			"embedUrl": "https://www.youtube.com/embed/static-cache",
+			"embedKind": "youtube", "embedAspect": "wide",
+			"reserveEmbedGeometry": true
+		}
+		card.previewIdentity = "message:loading-static-cache"
+		card.mediaSessionId = card.previewIdentity
+		card.mediaSessionController = inlineSession
+		card.renderActive = false
+		wait(0)
+
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		const busy = findChild(card, "previewEmbedBusyIndicator")
+		const inlineLoader = findChild(card, "previewInlineMediaLoader")
+		verify(panel !== null && busy !== null && inlineLoader !== null)
+		verify(card.implicitHeight > 180)
+		compare(card.opacity, 0)
+		compare(card.border.width, 0)
+		compare(panel.opacity, 0)
+		compare(busy.visible, false)
+		compare(inlineLoader.active, false)
+
+		card.preview = {
+			"state": "ready", "title": "Cached provider title",
+			"url": "https://www.youtube.com/watch?v=static-cache",
+			"embedUrl": "https://www.youtube.com/embed/static-cache",
+			"embedKind": "youtube", "embedAspect": "wide",
+			"thumbnailUrl": "image://mumble/static-cache-poster"
+		}
+		wait(0)
+		compare(card.staticPreviewCacheActive, true)
+		compare(card.staticEmbedPosterCacheActive, true)
+		compare(card.staticCompactImageCacheActive, false)
+		compare(card.opacity, 1)
+		compare(panel.opacity, 1)
+		const poster = findChild(card, "previewEmbedPoster")
+		verify(poster !== null)
+		verify(poster.source.toString().indexOf("image://mumble/static-cache-poster") === 0)
+		compare(poster.cache, true)
+		compare(inlineLoader.active, false)
+
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.provider = "youtube"
+		inlineSession.detached = false
+		inlineSession.active = true
+		tryCompare(card, "inlinePlaybackActive", true)
+		compare(inlineLoader.active, false)
+	}
+
+	function test_offscreen_static_image_error_defers_hydration_until_reentry() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.preview = {
+			"state": "ready", "title": "Missing cached thumbnail",
+			"url": "https://example.com/missing-thumbnail",
+			"thumbnailUrl": "qrc:/missing-static-thumbnail.png"
+		}
+		card.previewIdentity = "message:offscreen-static-error"
+		const image = findChild(card, "previewCompactImage")
+		verify(image !== null)
+		tryCompare(image, "status", Image.Error)
+		compare(card.staticCompactImageCacheActive, true)
+		compare(imageRefreshSpy.count, 0)
+
+		card.renderActive = true
+		tryCompare(imageRefreshSpy, "count", 1)
+	}
+
+	function test_offscreen_poster_error_retries_when_row_reenters_viewport() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.preview = {
+			"state": "ready", "title": "Missing cached poster",
+			"url": "https://example.com/missing-poster",
+			"embedUrl": "https://example.com/embed/missing-poster",
+			"embedKind": "generic", "embedAspect": "wide",
+			"thumbnailUrl": "qrc:/missing-static-poster.png"
+		}
+		card.previewIdentity = "message:offscreen-poster-error"
+		const poster = findChild(card, "previewEmbedPoster")
+		verify(poster !== null)
+		tryCompare(poster, "status", Image.Error)
+		compare(card.embedPosterRetryAttempt, 0)
+
+		card.renderActive = true
+		tryVerify(function() {
+			return card.embedPosterRetryAttempt > 0 || card.embedPosterFallbackActive
+		})
+	}
+
 	function test_backend_error_with_reserved_embed_geometry_uses_compact_fallback() {
 		const card = previewLoader.item
 		const panel = findChild(card, "previewEmbedMediaPanel")
@@ -777,7 +873,8 @@ TestCase {
 	function test_loading_indicator_uses_the_shared_accent_token() {
 		const indicator = findChild(previewLoader.item, "previewCompactBusyIndicator")
 		verify(indicator !== null)
-		compare(indicator.running, true)
+		compare(indicator.running, false)
+		compare(indicator.visible, false)
 		compare(indicator.indicatorColor, Theme.accent)
 		compare(indicator.Accessible.role, Accessible.ProgressBar)
 		compare(indicator.Accessible.name, "Loading link preview")
@@ -1602,10 +1699,9 @@ TestCase {
 		}
 		card.previewIdentity = "message:loading-layout"
 		const compactVisual = findChild(card, "previewCompactVisual")
-		verify(compactVisual !== null && compactVisual.visible)
+		verify(compactVisual !== null && !compactVisual.visible)
 		compare(card.genericHeaderUsesThumbnailGeometry, false)
-		tryCompare(compactVisual, "width", 64)
-		tryCompare(compactVisual, "height", 64)
+		compare(card.compactLoadingPresentation, true)
 
 		card.preview = {
 			"state": "ready", "title": "Vertical creator preview",
@@ -1678,7 +1774,8 @@ TestCase {
 		}
 		card.previewIdentity = "message:loading-embed"
 		tryCompare(panel, "visible", true)
-		tryCompare(busyIndicator, "visible", true)
+		compare(card.opacity, 0)
+		tryCompare(busyIndicator, "visible", false)
 		tryCompare(card, "performanceEmbedSurfaceState", "loading")
 		tryCompare(originalButton, "visible", true)
 		compare(overflowButton.visible, false)
@@ -4218,6 +4315,8 @@ TestCase {
 		tryCompare(animation, "requestedSource", managedGif)
 		card.renderActive = false
 		tryCompare(animationLoader, "active", false)
+		compare(card.staticPreviewCacheActive, false)
+		compare(findChild(card, "previewCompactImage").source.toString(), "")
 		tryVerify(function() {
 			return findChild(card, "previewExpandedAnimatedImage") === null
 		})
@@ -4265,11 +4364,12 @@ TestCase {
 		verify(providerWarning !== null && !providerWarning.visible)
 		verify(reveal.Accessible.description.indexOf("Sensitive imagery") >= 0)
 		compare(findChild(card, "previewExpandedRevealButton").visible, false)
-		mouseMove(reveal, reveal.width / 2, reveal.height / 2)
-		tryVerify(function() { return revealState.visible && revealState.color.a > 0 })
-		mousePress(reveal, reveal.width / 2, reveal.height / 2, Qt.LeftButton)
+		previewLoader.height = Math.ceil(card.implicitHeight)
+		reveal.forceActiveFocus(Qt.OtherFocusReason)
+		tryCompare(reveal, "activeFocus", true)
+		keyPress(Qt.Key_Space)
 		tryCompare(revealState, "color", Theme.accentSubtle)
-		mouseRelease(reveal, reveal.width / 2, reveal.height / 2, Qt.LeftButton)
+		keyRelease(Qt.Key_Space)
 		verify(!card.mediaRequiresReveal)
 		compare(stateBadge.visible, false)
 		verify(!compactRevealSurface.visible && !expandedRevealSurface.visible

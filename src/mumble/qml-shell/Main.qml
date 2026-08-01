@@ -3357,6 +3357,11 @@ ApplicationWindow {
 					// in one GUI turn, while 128 px still prevents rows behind the gesture
 					// from falling out of the retained range.
 					readonly property real richScrollRetentionRampStep: 128
+					// Prepare one static rich row up to two native wheel steps ahead.
+					// This is deliberately independent from the retention ramp: the
+					// candidate still owns the single global materialization token and
+					// its provider/media resources remain gated by renderActive.
+					readonly property real nearViewportPrefetchDistance: 256
 					readonly property real maximumRichScrollRetentionBuffer: 18000
 					// During cold entry every rich source row is still a childless
 					// provider-height summary. Let ListView instantiate that inexpensive
@@ -4291,7 +4296,7 @@ ApplicationWindow {
 						const distance = above
 							? Math.max(0, -(point.y + item.height))
 							: Math.max(0, point.y - height)
-						if (distance > richScrollRetentionRampStep + 0.5)
+						if (distance > nearViewportPrefetchDistance + 0.5)
 							return candidate
 						const stableId = String(item.stableId || "")
 						if (stableId.length === 0
@@ -4598,7 +4603,7 @@ ApplicationWindow {
 							// Cache-buffer delegates retain their bounded placeholder
 							// geometry. Rebuilding provider trees that are still outside
 							// the viewport consumes UI frames without drawing anything.
-							// The one named 128 px prefetch row is the sole exception.
+							// The one named bounded prefetch row is the sole exception.
 							if (!visible && !prefetchEligible)
 								continue
 							const distance = visible ? 0
@@ -7159,7 +7164,7 @@ ApplicationWindow {
 							if (!asyncMessageDelegate.viewportMembershipUpdating)
 								reconcileViewportMembership()
 						}
-						// Visible rows and the single named 128 px prefetch row share the
+						// Visible rows and the single named bounded prefetch row share the
 						// serial admission path. Every other cache delegate remains a
 						// geometry-only shell.
 						onRichContentViewportEligibleChanged: {

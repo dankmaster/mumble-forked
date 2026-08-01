@@ -42,6 +42,10 @@ Rectangle {
 			return embedDocumentMediaGallery.performanceMediaSurfaceState
 		if (!inlineMediaStageVisible)
 			return "not-required"
+		// Keep diagnostics truthful even though backend hydration is intentionally
+		// not painted as a media-sized loading surface.
+		if (compactLoadingPresentation)
+			return "loading"
 		if (previewEmbedRevealSurface.visible)
 			return "reveal"
 		if (inlineAdapterLoadingSurface.visible || inlineRuntimeLoadingSurface.visible
@@ -96,6 +100,18 @@ Rectangle {
 		&& !!mediaProfileFactory && typeof mediaProfileFactory.retryRuntime === "function"
 	readonly property string previewState: preview
         ? (preview.state || (preview.failed ? "error" : preview.loading ? "loading" : "ready")) : ""
+	// A ready DTO is the inexpensive cacheable part of a preview. Retain only a
+	// bounded static poster or thumbnail while provider/player resources are
+	// suspended. Managed animations deliberately follow renderActive instead.
+	readonly property bool staticEmbedPosterCacheActive: previewState === "ready"
+		&& !mediaRequiresReveal && inlineMediaStageVisible
+		&& effectiveEmbedPosterSource.length > 0 && !currentMediaManagedAnimated
+	readonly property bool staticCompactImageCacheActive: previewState === "ready"
+		&& !mediaRequiresReveal && !inlineMediaStageVisible
+		&& imageSource.length > 0 && !currentMediaManagedAnimated
+	readonly property bool staticPreviewCacheActive: staticEmbedPosterCacheActive
+		|| staticCompactImageCacheActive
+	readonly property bool compactLoadingPresentation: previewState === "loading"
 	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
 	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1
 		&& embedDocument.commonPresentation === true
@@ -408,17 +424,28 @@ Rectangle {
 
 	implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
 	clip: true
+	// Preserve the delegate's measured height while making backend hydration
+	// completely invisible. This also bypasses any in-flight color transition
+	// from a pooled delegate until the static preview DTO is ready.
+	opacity: compactLoadingPresentation ? 0 : 1
 	radius: Theme.innerRadius
-	color: effectiveHovered
+	color: compactLoadingPresentation ? "transparent" : effectiveHovered
 		? Theme.mixColors(Theme.previewCardHover, providerDetails.providerAccent, 0.055)
 		: Theme.mixColors(Theme.previewCardBackground, providerDetails.providerAccent, 0.03)
-	border.color: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
+	border.color: compactLoadingPresentation ? "transparent"
+		: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
 		: root.mediaRequiresReveal ? root.withAlpha(Theme.warning, 0.65)
 		: effectiveHovered ? root.withAlpha(providerDetails.providerAccent, 0.46)
 		: root.withAlpha(providerDetails.providerAccent, 0.24)
-	border.width: 1
-	Behavior on color { ColorAnimation { duration: root.animationDuration } }
-	Behavior on border.color { ColorAnimation { duration: root.animationDuration } }
+	border.width: compactLoadingPresentation ? 0 : 1
+	Behavior on color {
+		enabled: !root.compactLoadingPresentation
+		ColorAnimation { duration: root.animationDuration }
+	}
+	Behavior on border.color {
+		enabled: !root.compactLoadingPresentation
+		ColorAnimation { duration: root.animationDuration }
+	}
 	Accessible.role: Accessible.Grouping
 	Accessible.name: displayTitle + (metadataLine.length > 0 ? ": " + metadataLine : "")
 	Accessible.description: previewAccessibilityDescription()
@@ -533,7 +560,8 @@ Rectangle {
 		anchors.left: parent.left
 		anchors.top: parent.top
 		anchors.bottom: parent.bottom
-		visible: !root.hasEmbedPreview || root.previewState === "error" || root.mediaRequiresReveal
+		visible: !root.compactLoadingPresentation
+			&& (!root.hasEmbedPreview || root.previewState === "error" || root.mediaRequiresReveal)
 		width: 2
 		radius: root.radius
 		color: root.previewState === "error" ? Theme.danger
@@ -1005,7 +1033,12 @@ Rectangle {
 				resetEmbedPosterRecovery()
 			} else if (embedPoster.status === Image.Loading) {
 				embedPosterRecoveryTimer.restart()
+			} else if (embedPoster.status === Image.Error
+					&& embedPosterSource.length > 0) {
+				recoverStalledEmbedPoster(Image.Error)
 			}
+			if (previewImage.status === Image.Error && imageSource.length > 0)
+				requestImageRefresh()
 		}
 	}
 	onInlinePlaybackActiveChanged: {
@@ -1328,6 +1361,11 @@ Rectangle {
 			// a frame (and longer in a height-constrained delegate).
 			height: root.embedPanelHeight
 			visible: embedMediaSlot.visible
+			// Loading geometry remains reserved for scroll stability, but its
+			// media-sized surface is not painted until cached metadata is ready.
+			opacity: root.compactLoadingPresentation ? 0 : 1
+			enabled: opacity > 0
+			Accessible.ignored: opacity <= 0
 			radius: Theme.innerRadius
 			color: Theme.embedSurface
 			gradient: Gradient {
@@ -1364,7 +1402,8 @@ Rectangle {
 				id: embedPoster
 				objectName: "previewEmbedPoster"
 				anchors.fill: parent
-				source: root.renderActive && (!root.inlinePlaybackActive || root.inlineAdapterPending)
+				source: (root.renderActive || root.staticEmbedPosterCacheActive)
+					&& (!root.inlinePlaybackActive || root.inlineAdapterPending)
 					&& !root.mediaRequiresReveal
 					? root.effectiveEmbedPosterSource : ""
 				asynchronous: true
@@ -1429,9 +1468,10 @@ Rectangle {
 				id: previewEmbedBusyIndicator
 				objectName: "previewEmbedBusyIndicator"
 				anchors.centerIn: parent
-				running: !root.mediaRequiresReveal
+				running: !root.compactLoadingPresentation
+					&& !root.mediaRequiresReveal
 					&& !root.inlinePlaybackActive
-					&& (root.previewState === "loading" || embedPoster.status === Image.Loading)
+					&& embedPoster.status === Image.Loading
 				visible: running
 				animated: root.animationsEnabled
 				Accessible.name: qsTr("Loading provider preview")
@@ -1839,7 +1879,7 @@ Rectangle {
 				Layout.preferredWidth: root.genericHeaderVisualWidth
 				Layout.preferredHeight: root.genericHeaderVisualHeight
 				visible: !root.inlineMediaStageVisible && (root.imageSource.length > 0
-					|| root.previewState !== "ready" || root.hasExternalImage
+					|| root.previewState === "error" || root.hasExternalImage
 					|| root.hasDirectMedia || root.hasExternalMedia
 					|| root.genericHeaderShowsIdentityMark)
 				radius: Theme.innerRadius
@@ -1850,20 +1890,23 @@ Rectangle {
                     id: previewImage
 					objectName: "previewCompactImage"
                     anchors.fill: parent
-					source: root.renderActive && !root.mediaRequiresReveal ? root.imageSource : ""
+					source: (root.renderActive || root.staticCompactImageCacheActive)
+						&& !root.mediaRequiresReveal ? root.imageSource : ""
                     asynchronous: true
                     cache: true
                     sourceSize: Qt.size(Math.min(640, width * Screen.devicePixelRatio),
                                         Math.min(480, height * Screen.devicePixelRatio))
                     fillMode: Image.PreserveAspectCrop
                     visible: status === Image.Ready
-                    onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
-                                         root.requestImageRefresh()
+					onStatusChanged: if (status === Image.Error && root.renderActive
+										 && root.imageSource.length > 0)
+										 root.requestImageRefresh()
                 }
 				ModernBusyIndicator {
 					objectName: "previewCompactBusyIndicator"
                     anchors.centerIn: parent
-                    running: root.previewState === "loading" || previewImage.status === Image.Loading
+					running: !root.compactLoadingPresentation
+						&& previewImage.status === Image.Loading
 					visible: running
 					animated: root.animationsEnabled
 					Accessible.name: qsTr("Loading link preview")
@@ -2069,6 +2112,7 @@ Rectangle {
 			Layout.preferredWidth: previewStateBadgeLabel.implicitWidth + Theme.space2 * 2
 			Layout.preferredHeight: visible ? Theme.space5 : 0
 			visible: root.previewStateLabel.length > 0
+				&& !root.compactLoadingPresentation
 			radius: height / 2
 			color: root.withAlpha(root.previewStateColor, 0.14)
 			border.color: root.withAlpha(root.previewStateColor, 0.54)
@@ -2321,7 +2365,8 @@ Rectangle {
 				ready && item ? item.implicitHeight : 0
 			Layout.preferredHeight: visible ? loadedImplicitHeight : 0
 			height: visible ? loadedImplicitHeight : 0
-			visible: !root.providerOwnsDetails && !root.typedDocumentActive
+			visible: !root.compactLoadingPresentation
+				&& !root.providerOwnsDetails && !root.typedDocumentActive
 			// A cold provider-owned or typed-document card never uses this tree.
 			// Once a visible details surface has loaded, retain the same item across
 			// temporary ownership changes so playback cannot churn its identity.
