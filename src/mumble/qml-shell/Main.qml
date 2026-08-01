@@ -3364,7 +3364,7 @@ ApplicationWindow {
 					// ahead without constructing provider/player trees.
 					readonly property real nearViewportPrefetchDistance: 256
 					readonly property real staticPreviewLookaheadDistance:
-						Math.max(256, Math.min(baseCacheBuffer, height * 0.90))
+						Math.max(320, Math.min(baseCacheBuffer, height * 1.35))
 					readonly property real maximumRichScrollRetentionBuffer: 18000
 					// During cold entry every rich source row is still a childless
 					// provider-height summary. Let ListView instantiate that inexpensive
@@ -3401,7 +3401,10 @@ ApplicationWindow {
 					property var staticPreviewPreheatCompletedSources: ({})
 					property var staticPreviewPreheatRetryAfter: ({})
 					property var staticPreviewPreheatRetryOrder: []
-					readonly property int maximumRetainedStaticPreviews: 4
+					// Six decoded stills cover a long desktop viewport plus the next wheel
+					// page without retaining provider trees. At 1280x960 this remains a
+					// deliberately small, bounded cache; players and animations never enter it.
+					readonly property int maximumRetainedStaticPreviews: 6
 					readonly property int maximumStaticPreviewRetryEntries: 32
 					property int staticPreviewPreheatDirection: -1
 					property real staticPreviewPreheatLastContentY: 0
@@ -4268,6 +4271,16 @@ ApplicationWindow {
 							|| (preview.failed ? "error" : preview.loading ? "loading" : "ready"))
 							.toLowerCase()
 						const metadata = preview.metadata || ({})
+						const thumbnailBlurValue = metadata.thumbnailBlur
+						const thumbnailBlur = thumbnailBlurValue === true
+							|| thumbnailBlurValue === 1
+							|| String(thumbnailBlurValue || "").toLowerCase() === "true"
+						// RichPreviewCard requires an explicit reveal for either marker. Apply
+						// the same policy before preheating so a retained still can never bypass
+						// that surface for even one scroll frame.
+						if (String(metadata.contentWarning || "").trim().length > 0
+								|| thumbnailBlur)
+							return ""
 						if (state !== "ready" || preview.failed === true
 								|| preview.mediaAnimated === true
 								|| String(metadata.mediaPresentation || "").toLowerCase()
@@ -4335,6 +4348,130 @@ ApplicationWindow {
 							}
 						}
 						return !typedDocument ? safeStaticPreviewSource(preview.thumbnailUrl) : ""
+					}
+
+					function staticPreviewHandoffMediaItem(preview) {
+						if (!preview || typeof preview !== "object")
+							return ({})
+						const document = preview.document || ({})
+						const typedDocument = Number(document.schemaVersion || 0) === 1
+							&& document.commonPresentation === true
+						const media = typedDocument ? document.media : preview.mediaItems
+						const count = media && media.length !== undefined ? Number(media.length) : 0
+						for (let index = 0; index < count; ++index) {
+							const item = media[index] || ({})
+							if (staticPreviewMediaSource(item).eligible === true)
+								return item
+						}
+						return ({})
+					}
+
+					function staticPreviewHandoffMediaKind(item) {
+						const value = item || ({})
+						const kind = String(value.kind || value.mediaKind || "").toLowerCase()
+						const mime = String(value.mime || value.mediaMime || "").toLowerCase()
+						if (kind === "image" || kind === "gif" || kind === "animated-image"
+								|| mime.indexOf("image/") === 0)
+							return "image"
+						if (kind === "audio" || mime.indexOf("audio/") === 0)
+							return "audio"
+						if (kind === "video" || mime.indexOf("video/") === 0)
+							return "video"
+						return ""
+					}
+
+					function staticPreviewHandoffMediaExpanded(item) {
+						const value = item || ({})
+						const kind = staticPreviewHandoffMediaKind(value)
+						if (kind !== "audio" && kind !== "video")
+							return false
+						const playback = safeStaticPreviewDirectMediaUrl(value.url, kind)
+						const external = safeStaticPreviewExternalUrl(value.externalUrl || value.url)
+						return (value.directPlayable !== false && playback.length > 0)
+							|| external.length > 0
+					}
+
+					function staticPreviewHandoffEmbedGeometry(preview) {
+						const value = preview || ({})
+						const kind = String(value.embedKind || "").trim().toLowerCase()
+						const safeEmbed = String(value.embedUrl || "").trim().slice(0, 2048)
+						return kind.length > 0 && kind !== "direct"
+							&& (/^https:\/\//i.test(safeEmbed)
+								|| value.reserveEmbedGeometry === true)
+					}
+
+					function staticPreviewHandoffUsesCompactHeader(preview) {
+						if (!preview || typeof preview !== "object")
+							return true
+						const document = preview.document || ({})
+						const typedDocument = Number(document.schemaVersion || 0) === 1
+							&& document.commonPresentation === true
+						const currentMedia = staticPreviewHandoffMediaItem(preview)
+						const currentKind = staticPreviewHandoffMediaKind(currentMedia)
+						if (typedDocument && currentKind.length > 0)
+							return false
+						if (staticPreviewHandoffEmbedGeometry(preview))
+							return false
+						if (currentKind === "audio" || currentKind === "video")
+							return !staticPreviewHandoffMediaExpanded(currentMedia)
+						if (currentKind.length > 0)
+							return true
+						const fallbackMedia = {
+							"kind": preview.mediaKind || preview.kind || "",
+							"mime": preview.mediaMime || "",
+							"url": preview.mediaUrl || "",
+							"externalUrl": preview.mediaExternalUrl || "",
+							"directPlayable": preview.directPlayable
+						}
+						if (staticPreviewHandoffMediaExpanded(fallbackMedia))
+							return false
+						return true
+					}
+
+					function staticPreviewHandoffAspect(preview) {
+						const value = preview || ({})
+						const token = String(value.embedAspect || "").trim().toLowerCase()
+						if (token === "short" || token === "portrait" || token === "9:16")
+							return "short"
+						if (token === "square" || token === "1:1")
+							return "square"
+						if (token === "audio" || token === "compact-audio" || token === "twitch")
+							return token
+						const provider = String(value.embedKind || "").trim().toLowerCase()
+						if (provider === "tiktok")
+							return "short"
+						if (provider === "instagram") {
+							const metadata = value.metadata || ({})
+							let mediaKind = String(metadata.instagramMediaKind || "").toLowerCase()
+							mediaKind = mediaKind === "p" ? "post"
+								: mediaKind === "reels" ? "reel" : mediaKind
+							const match = String(value.embedUrl || "").match(
+								/^https:\/\/(?:www\.)?(?:instagram\.com|instagr\.am)\/(p|reel|reels|tv)\//i)
+							if (match) {
+								const pathKind = String(match[1] || "").toLowerCase()
+								if (pathKind === "reel" || pathKind === "reels" || pathKind === "tv")
+									mediaKind = pathKind === "reels" ? "reel" : pathKind
+							}
+							return mediaKind === "reel" ? "short" : "square"
+						}
+						if (provider === "spotify")
+							return "compact-audio"
+						if (provider === "twitch")
+							return "twitch"
+						if (provider === "soundcloud" || provider === "bandcamp")
+							return "audio"
+						return "wide"
+					}
+
+					function staticPreviewHandoffSize(preview, savedSizePreset) {
+						const saved = String(savedSizePreset || "").trim()
+						const token = String(saved.length > 0 ? saved
+							: preview ? (preview.previewSize || "") : "").toLowerCase()
+						if (token === "compact" || token === "small")
+							return "compact"
+						if (token === "large" || token === "expanded")
+							return "large"
+						return "default"
 					}
 
 					function staticPreviewSourceRetainedOrCooling(source) {
@@ -6645,12 +6782,197 @@ ApplicationWindow {
 								// source during the scroll handoff; never start provider/network or
 								// animated/player work from this lightweight outer delegate.
 								readonly property string cachedStaticHandoffSource:
-									previewOnlyAtomicHandoff
+									!accessibilityPooled && cachedStaticHandoffEligible
 										? timeline.staticPreviewSourceFor(preview || ({})) : ""
+								readonly property bool cachedStaticHandoffEligible:
+									root.normalizedModelList(attachments).length === 0
+									&& String(replyActor || "").length === 0
+									&& String(replySnippet || "").length === 0
+									&& !bodyHydrationPending && !deleted && !activeScope.activity
+									&& !root.messageContainsInlineImage(bodySegments)
 								readonly property bool cachedStaticHandoffReady:
 									cachedStaticHandoffSource.length > 0
 									&& timeline.staticPreviewPreheatCompletedSources[
 										cachedStaticHandoffSource] === true
+								readonly property bool cachedStaticHandoffCompact:
+									timeline.staticPreviewHandoffUsesCompactHeader(preview || ({}))
+								readonly property bool cachedStaticHandoffSystemMessage:
+									!!source.system || (!source.actorKey && avatarUrl.length === 0
+										&& !canReply && !canReact && !own)
+								readonly property string cachedStaticHandoffProvider: String(preview
+									? (preview.host || preview.providerName || preview.provider
+										|| preview.embedKind || "") : "").trim()
+								readonly property string cachedStaticHandoffTitle: String(preview
+									? (preview.title || preview.loadingLabel
+										|| cachedStaticHandoffProvider || "") : "").trim()
+								readonly property string cachedStaticHandoffDescription: String(preview
+									? (preview.description || preview.subtitle || "") : "").trim()
+								readonly property real cachedStaticHandoffLaneAvailableWidth: Math.max(1,
+									timeline.width - timeline.leftMargin - timeline.rightMargin - Theme.space4)
+								readonly property real cachedStaticHandoffLaneWidth: Math.max(1, Math.min(
+									root.conversationLaneMaximumWidth, cachedStaticHandoffLaneAvailableWidth))
+								readonly property real cachedStaticHandoffRichChromeWidth:
+									own || cachedStaticHandoffSystemMessage
+										? Theme.chatBubbleHorizontalPadding * 2
+										: Theme.avatarMedium + Theme.space2
+											+ Theme.chatBubbleHorizontalPadding * 2
+								readonly property string cachedStaticHandoffAspect:
+									timeline.staticPreviewHandoffAspect(preview || ({}))
+								readonly property string cachedStaticHandoffSize:
+									timeline.staticPreviewHandoffSize(preview || ({}),
+										root.richPreviewSizePreset(stableId))
+								readonly property bool cachedStaticHandoffFullBleed:
+									cachedStaticHandoffEmbedGeometry
+									&& cachedStaticHandoffAspect !== "short"
+									&& cachedStaticHandoffAspect !== "square"
+								readonly property bool cachedStaticHandoffEmbedGeometry: {
+									return timeline.staticPreviewHandoffEmbedGeometry(preview || ({}))
+								}
+								readonly property var cachedStaticHandoffMediaItem:
+									timeline.staticPreviewHandoffMediaItem(preview || ({}))
+								readonly property bool cachedStaticHandoffTypedGallery: {
+									const value = preview || ({})
+									const document = value.document || ({})
+									return Number(document.schemaVersion || 0) === 1
+										&& document.commonPresentation === true
+										&& document.media && document.media.length !== undefined
+										&& document.media.length > 0
+								}
+								readonly property string cachedStaticHandoffItemKind:
+									timeline.staticPreviewHandoffMediaKind(cachedStaticHandoffMediaItem)
+								readonly property string cachedStaticHandoffMediaKind:
+									cachedStaticHandoffItemKind
+									|| timeline.staticPreviewHandoffMediaKind({
+										"kind": preview ? (preview.mediaKind || preview.kind || "") : "",
+										"mime": preview ? (preview.mediaMime || "") : ""
+									})
+								readonly property string cachedStaticHandoffMediaMime: String(
+									cachedStaticHandoffMediaItem.mime
+										|| cachedStaticHandoffMediaItem.mediaMime
+										|| (preview ? (preview.mediaMime || "") : "")).toLowerCase()
+								readonly property bool cachedStaticHandoffMediaExpanded: {
+									if (cachedStaticHandoffItemKind.length > 0)
+										return timeline.staticPreviewHandoffMediaExpanded(
+											cachedStaticHandoffMediaItem)
+									return timeline.staticPreviewHandoffMediaExpanded({
+										"kind": preview ? (preview.mediaKind || preview.kind || "") : "",
+										"mime": preview ? (preview.mediaMime || "") : "",
+										"url": preview ? (preview.mediaUrl || "") : "",
+										"externalUrl": preview ? (preview.mediaExternalUrl || "") : "",
+										"directPlayable": preview ? preview.directPlayable : undefined
+									})
+								}
+								readonly property bool cachedStaticHandoffDirectAudio:
+									cachedStaticHandoffMediaExpanded
+									&& (cachedStaticHandoffMediaKind === "audio"
+										|| cachedStaticHandoffMediaMime.indexOf("audio/") === 0)
+								readonly property bool cachedStaticHandoffDirectVideo:
+									cachedStaticHandoffMediaExpanded
+									&& (cachedStaticHandoffMediaKind === "video"
+										|| cachedStaticHandoffMediaMime.indexOf("video/") === 0)
+								readonly property real cachedStaticHandoffTargetWidth:
+									cachedStaticHandoffAspect === "short"
+										? (cachedStaticHandoffSize === "large" ? 420
+											: cachedStaticHandoffSize === "compact" ? 320 : 360)
+									: cachedStaticHandoffAspect === "square"
+										? (cachedStaticHandoffSize === "large" ? 520
+											: cachedStaticHandoffSize === "compact" ? 340 : 460)
+									: cachedStaticHandoffAspect === "twitch"
+										? (cachedStaticHandoffSize === "large" ? 620
+											: cachedStaticHandoffSize === "compact" ? 420 : 520)
+									: cachedStaticHandoffSize === "compact"
+										? Math.round(Math.max(300, Math.min(460, root.width * 0.48)))
+									: cachedStaticHandoffSize === "large"
+										? Math.round(Math.max(400, Math.min(720, root.width * 0.74)))
+										: Math.round(Math.max(340, Math.min(580, root.width * 0.62)))
+								readonly property real cachedStaticHandoffCardWidth: Math.min(
+									cachedStaticHandoffTargetWidth, Math.max(220,
+										cachedStaticHandoffLaneAvailableWidth
+											- cachedStaticHandoffRichChromeWidth))
+								readonly property real cachedStaticHandoffMessageWidth:
+									cachedStaticHandoffSystemMessage
+										? Math.min(cachedStaticHandoffLaneWidth, 680)
+										: Math.min(cachedStaticHandoffLaneWidth, Math.max(own ? 176 : 220,
+											cachedStaticHandoffCardWidth + cachedStaticHandoffRichChromeWidth))
+								readonly property real cachedStaticHandoffLaneStart: Math.max(0,
+									(cachedStaticHandoffLaneAvailableWidth - cachedStaticHandoffLaneWidth) / 2)
+								readonly property real cachedStaticHandoffMessageX:
+									cachedStaticHandoffSystemMessage
+										? cachedStaticHandoffLaneStart + (cachedStaticHandoffLaneWidth
+											- cachedStaticHandoffMessageWidth) / 2
+									: own ? cachedStaticHandoffLaneStart + cachedStaticHandoffLaneWidth
+										- cachedStaticHandoffMessageWidth : cachedStaticHandoffLaneStart
+								readonly property real cachedStaticHandoffCardX:
+									cachedStaticHandoffMessageX + (own || cachedStaticHandoffSystemMessage
+										? Theme.chatBubbleHorizontalPadding
+										: Theme.avatarMedium + Theme.space2
+											+ Theme.chatBubbleHorizontalPadding)
+								readonly property int cachedStaticHandoffBodyLineCount: {
+									if (previewOnlyAtomicHandoff)
+										return 0
+									const parts = root.normalizedModelList(bodySegments)
+									let body = ""
+									for (let index = 0; index < parts.length; ++index)
+										body += String(parts[index].text || "")
+									const explicitLines = body.length > 0 ? body.split(/\r?\n/).length : 1
+									return Math.max(1, Math.min(4,
+										Math.max(explicitLines, Math.ceil(body.length / 88))))
+								}
+								readonly property real cachedStaticHandoffTopInset:
+									(dateBoundary ? Theme.space5 + Theme.fontCaption : 0)
+									+ (modelStartsGroup ? Theme.space3 : Theme.chatMetadataSpacing)
+									+ ((!own && modelStartsGroup) || cachedStaticHandoffSystemMessage
+										? Theme.fontCaption + Theme.chatMetadataSpacing : 0)
+									+ cachedStaticHandoffBodyLineCount
+										* Math.ceil(Theme.fontBody * Theme.chatBodyLineHeight)
+									+ (cachedStaticHandoffBodyLineCount > 0 ? Theme.chatContentSpacing : 0)
+								readonly property real cachedStaticHandoffActionWidth: Math.max(1,
+									cachedStaticHandoffCardWidth - Theme.space4 * 2)
+								readonly property real cachedStaticHandoffEmbedMediaWidth:
+									cachedStaticHandoffAspect === "short"
+										? Math.min(cachedStaticHandoffActionWidth,
+											cachedStaticHandoffSize === "large" ? 340
+												: cachedStaticHandoffSize === "compact" ? 240 : 280)
+									: cachedStaticHandoffAspect === "square"
+										? cachedStaticHandoffActionWidth
+										: cachedStaticHandoffFullBleed
+											? cachedStaticHandoffCardWidth : cachedStaticHandoffActionWidth
+								readonly property real cachedStaticHandoffEmbedMediaHeight:
+									cachedStaticHandoffAspect === "short"
+										? cachedStaticHandoffEmbedMediaWidth * 16 / 9
+									: cachedStaticHandoffAspect === "square"
+										? cachedStaticHandoffEmbedMediaWidth
+									: cachedStaticHandoffAspect === "twitch"
+										? cachedStaticHandoffEmbedMediaWidth * 3 / 4
+									: cachedStaticHandoffAspect === "compact-audio"
+										? Math.min(166, Math.max(128,
+											cachedStaticHandoffEmbedMediaWidth * 0.29))
+									: cachedStaticHandoffAspect === "audio"
+										? Math.min(352, Math.max(220,
+											cachedStaticHandoffEmbedMediaWidth * 0.61))
+										: cachedStaticHandoffEmbedMediaWidth * 9 / 16
+								readonly property real cachedStaticHandoffMediaHeight:
+									cachedStaticHandoffTypedGallery && !cachedStaticHandoffEmbedGeometry
+										? (cachedStaticHandoffSize === "large"
+											? Math.min(420, Math.max(240,
+												cachedStaticHandoffActionWidth * 9 / 16))
+											: Math.min(320, Math.max(180,
+												cachedStaticHandoffActionWidth * 9 / 16)))
+									: cachedStaticHandoffEmbedGeometry
+										? cachedStaticHandoffEmbedMediaHeight
+									: cachedStaticHandoffDirectAudio
+										? Math.min(166, Math.max(128,
+											cachedStaticHandoffActionWidth * 0.29))
+									: cachedStaticHandoffDirectVideo
+										? cachedStaticHandoffCardWidth * 9 / 16
+										: cachedStaticHandoffEmbedMediaHeight
+								readonly property real cachedStaticHandoffCardHeight:
+									cachedStaticHandoffCompact ? 176 : cachedStaticHandoffMediaHeight + 132
+								readonly property real cachedStaticHandoffY: Math.min(Math.max(0,
+									cachedStaticHandoffTopInset), Math.max(0, height - 1))
+								readonly property real cachedStaticHandoffVisibleHeight: Math.min(
+									cachedStaticHandoffCardHeight, Math.max(1,
+										height - cachedStaticHandoffY))
 								// Viewport membership controls provider activation, which
 								// refines the delegate's final height. Start with model
 								// geometry, then grow this imperative latch only after the
@@ -6928,15 +7250,13 @@ ApplicationWindow {
 									// ready so the optimization never leaks through as an empty row.
 									Rectangle {
 										objectName: "asyncCachedStaticPreviewHandoff"
-										anchors.centerIn: parent
-										width: Math.min(640, Math.max(1,
-											parent.width - Theme.space4 * 2))
-										height: Math.min(Math.max(1,
-											parent.height - Theme.space4 * 2),
-											Math.max(160, width * 0.5625))
-										visible: asyncMessageDelegate.previewOnlyAtomicHandoff
+										x: asyncMessageDelegate.cachedStaticHandoffCardX
+										y: asyncMessageDelegate.cachedStaticHandoffY
+										width: Math.min(asyncMessageDelegate.cachedStaticHandoffCardWidth,
+											Math.max(1, parent.width - x - Theme.space2))
+										height: asyncMessageDelegate.cachedStaticHandoffVisibleHeight
+										visible: !asyncMessageDelegate.accessibilityPooled
 											&& asyncMessageDelegate.cachedStaticHandoffReady
-											&& cachedStaticHandoffImage.status === Image.Ready
 										radius: Theme.innerRadius
 										color: Theme.embedSurface
 										border.width: 1
@@ -6944,20 +7264,92 @@ ApplicationWindow {
 										clip: true
 										Accessible.ignored: true
 
+										Rectangle {
+											anchors.left: parent.left
+											anchors.right: parent.right
+											anchors.top: parent.top
+											height: asyncMessageDelegate.cachedStaticHandoffCompact ? 42 : 44
+											color: Theme.withAlpha(Theme.surfaceRaised, 0.72)
+											border.width: 0
+
+											Column {
+												anchors.left: parent.left
+												anchors.right: parent.right
+												anchors.verticalCenter: parent.verticalCenter
+												anchors.leftMargin: Theme.space3
+												anchors.rightMargin: Theme.space3
+												spacing: 1
+
+												Label {
+													width: parent.width
+													visible: text.length > 0
+													textFormat: Text.PlainText
+													text: asyncMessageDelegate.cachedStaticHandoffProvider
+													color: Theme.textMuted
+													font.pixelSize: Theme.fontCaption
+													elide: Text.ElideRight
+												}
+											}
+										}
+
 										Image {
 											id: cachedStaticHandoffImage
-											anchors.fill: parent
-											anchors.margins: 1
+											x: asyncMessageDelegate.cachedStaticHandoffCompact
+												? Theme.space3 : 1
+											y: asyncMessageDelegate.cachedStaticHandoffCompact
+												? 50 : 44
+											width: asyncMessageDelegate.cachedStaticHandoffCompact
+												? Math.min(92, Math.max(1, parent.width * 0.22))
+												: Math.max(1, parent.width - 2)
+											height: asyncMessageDelegate.cachedStaticHandoffCompact
+												? Math.min(64, Math.max(1, parent.height - y - Theme.space3))
+												: Math.min(asyncMessageDelegate.cachedStaticHandoffMediaHeight,
+													Math.max(1, parent.height - y - 56))
 											source: asyncRichHandoff.visible
+												&& !asyncMessageDelegate.accessibilityPooled
 												&& asyncMessageDelegate.cachedStaticHandoffReady
 												? asyncMessageDelegate.cachedStaticHandoffSource : ""
 											asynchronous: true
 											cache: true
 											sourceSize: Qt.size(1280, 960)
-											fillMode: Image.PreserveAspectFit
+											fillMode: Image.PreserveAspectCrop
 											smooth: true
 											mipmap: false
 											Accessible.ignored: true
+										}
+
+										Column {
+											x: asyncMessageDelegate.cachedStaticHandoffCompact
+												? cachedStaticHandoffImage.x + cachedStaticHandoffImage.width
+													+ Theme.space2 : Theme.space3
+											y: asyncMessageDelegate.cachedStaticHandoffCompact
+												? cachedStaticHandoffImage.y
+												: cachedStaticHandoffImage.y + cachedStaticHandoffImage.height
+													+ Theme.space2
+											width: Math.max(1, parent.width - x - Theme.space3)
+											spacing: 3
+
+											Label {
+												width: parent.width
+												textFormat: Text.PlainText
+												text: asyncMessageDelegate.cachedStaticHandoffTitle
+												color: Theme.textStrong
+												font.pixelSize: Theme.fontLabel
+												font.weight: Font.DemiBold
+												elide: Text.ElideRight
+												maximumLineCount: 1
+											}
+
+											Label {
+												width: parent.width
+												visible: text.length > 0
+												textFormat: Text.PlainText
+												text: asyncMessageDelegate.cachedStaticHandoffDescription
+												color: Theme.textMuted
+												font.pixelSize: Theme.fontCaption
+												elide: Text.ElideRight
+												maximumLineCount: 1
+											}
 										}
 									}
 								}

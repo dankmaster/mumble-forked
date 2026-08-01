@@ -548,7 +548,7 @@ TestCase {
 			finishRecoverySource))
 		verify(/id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisibleDeferredMaterialization\(\)[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
 		verify(/richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*256[\s\S]*property string nearViewportPrefetchActiveId:\s*""[\s\S]*property string nearViewportWarmId:\s*""[\s\S]*property string nearViewportPrefetchReadyId:\s*""/.test(mainSource))
-		verify(/staticPreviewLookaheadDistance:[\s\S]{0,160}Math\.min\(baseCacheBuffer,\s*height \* 0\.90\)[\s\S]*staticPreviewPreheatActiveSource:\s*""[\s\S]*staticPreviewPreheatQueue:\s*\[\]/.test(mainSource))
+		verify(/staticPreviewLookaheadDistance:[\s\S]{0,160}Math\.min\(baseCacheBuffer,\s*height \* 1\.35\)[\s\S]*staticPreviewPreheatActiveSource:\s*""[\s\S]*staticPreviewPreheatQueue:\s*\[\]/.test(mainSource))
 		verify(/function\s+safeStaticPreviewSource\(value\)[\s\S]*image:\\\/\\\/mumble[\s\S]*qrc:[\s\S]*function\s+staticPreviewSourceFor\(preview\)[\s\S]*mediaAnimated[\s\S]*animated-image[\s\S]*preview\.thumbnailUrl[\s\S]*preview\.posterUrl/.test(mainSource))
 		const staticMediaSourceStart =
 			mainSource.indexOf("function staticPreviewMediaSource(item)")
@@ -590,7 +590,7 @@ TestCase {
 		verify(/id:\s*staticPreviewPreheater[\s\S]*onStatusChanged:\s*\{[\s\S]*observedSource\s*=\s*String\(source\s*\|\|\s*""\)[\s\S]*Qt\.callLater\(function\(\)[\s\S]*staticPreviewPreheater\.source[\s\S]*staticPreviewPreheatActiveSource\s*===\s*observedSource[\s\S]*completeStaticPreviewPreheat\(observedStatus\)/.test(mainSource))
 		verify(!/onStatusChanged:\s*timeline\.completeStaticPreviewPreheat\(status\)/.test(
 			mainSource))
-		verify(/maximumRetainedStaticPreviews:\s*4[\s\S]*function\s+touchRetainedStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.move[\s\S]*function\s+retainStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.remove\(0\)[\s\S]*delete completed\[evicted\][\s\S]*staticPreviewRetainedModel\.append/.test(mainSource))
+		verify(/maximumRetainedStaticPreviews:\s*6[\s\S]*function\s+touchRetainedStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.move[\s\S]*function\s+retainStaticPreviewSource\(source\)[\s\S]*staticPreviewRetainedModel\.remove\(0\)[\s\S]*delete completed\[evicted\][\s\S]*staticPreviewRetainedModel\.append/.test(mainSource))
 		verify(/function\s+completeStaticPreviewPreheat\(status\)[\s\S]*status\s*===\s*Image\.Ready[\s\S]*retainStaticPreviewSource\(completedSource\)[\s\S]*coolDownStaticPreviewSource\(completedSource\)/.test(mainSource))
 		verify(/function\s+coolDownStaticPreviewSource\(source\)[\s\S]*Date\.now\(\)\s*\+\s*10000[\s\S]*maximumStaticPreviewRetryEntries/.test(mainSource))
 		verify(/function\s+retryCooledStaticPreviews\(\)[\s\S]*delete attempted\[key\][\s\S]*staticPreviewSweepRemainingAttempts[\s\S]*id:\s*staticPreviewRetryTimer[\s\S]*retryCooledStaticPreviews\(\)/.test(mainSource))
@@ -1175,10 +1175,27 @@ TestCase {
 			&& cachedStaticHandoffEnd > cachedStaticHandoffStart)
 		const cachedStaticHandoffSource = mainSource.slice(cachedStaticHandoffStart,
 			cachedStaticHandoffEnd)
-		verify(/cachedStaticHandoffSource:[\s\S]*previewOnlyAtomicHandoff[\s\S]*timeline\.staticPreviewSourceFor\(preview\s*\|\|\s*\(\{\}\)\)[\s\S]*cachedStaticHandoffReady:[\s\S]*staticPreviewPreheatCompletedSources/.test(
+		verify(/cachedStaticHandoffSource:[\s\S]*!accessibilityPooled\s*&&\s*cachedStaticHandoffEligible[\s\S]*timeline\.staticPreviewSourceFor\(preview\s*\|\|\s*\(\{\}\)\)[\s\S]*cachedStaticHandoffReady:[\s\S]*staticPreviewPreheatCompletedSources/.test(
 			cachedStaticHandoffSource))
-		verify(/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]*cachedStaticHandoffReady[\s\S]*cachedStaticHandoffImage\.status\s*===\s*Image\.Ready[\s\S]*source:\s*asyncRichHandoff\.visible[\s\S]*cachedStaticHandoffSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)[\s\S]*fillMode:\s*Image\.PreserveAspectFit/.test(
+		verify(!/cachedStaticHandoffSource:[\s\S]{0,120}previewOnlyAtomicHandoff/.test(
 			cachedStaticHandoffSource))
+		verify(/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]*x:\s*asyncMessageDelegate\.cachedStaticHandoffCardX[\s\S]*visible:\s*!asyncMessageDelegate\.accessibilityPooled[\s\S]*cachedStaticHandoffReady[\s\S]*source:\s*asyncRichHandoff\.visible[\s\S]*!asyncMessageDelegate\.accessibilityPooled[\s\S]*cachedStaticHandoffSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)[\s\S]*fillMode:\s*Image\.PreserveAspectCrop/.test(
+			cachedStaticHandoffSource))
+		verify(!/visible:[\s\S]{0,180}cachedStaticHandoffImage\.status\s*===\s*Image\.Ready/.test(
+			cachedStaticHandoffSource))
+		verify(/function\s+staticPreviewHandoffMediaItem\(preview\)[\s\S]*staticPreviewMediaSource\(item\)\.eligible\s*===\s*true[\s\S]*function\s+staticPreviewHandoffMediaExpanded\(item\)[\s\S]*safeStaticPreviewDirectMediaUrl[\s\S]*safeStaticPreviewExternalUrl[\s\S]*function\s+staticPreviewHandoffUsesCompactHeader\(preview\)[\s\S]*!staticPreviewHandoffMediaExpanded\(currentMedia\)/.test(mainSource))
+		verify(/typedDocument\s*&&\s*currentKind\.length\s*>\s*0[\s\S]*return false[\s\S]*cachedStaticHandoffItemKind:[\s\S]*cachedStaticHandoffMediaExpanded:[\s\S]*cachedStaticHandoffItemKind\.length\s*>\s*0/.test(mainSource))
+		verify(/function\s+staticPreviewHandoffEmbedGeometry\(preview\)[\s\S]*\^https:\\\/\\\/[\s\S]*reserveEmbedGeometry[\s\S]*cachedStaticHandoffEmbedGeometry:[\s\S]*staticPreviewHandoffEmbedGeometry/.test(mainSource))
+		verify(/function\s+staticPreviewHandoffAspect\(preview\)[\s\S]*portrait[\s\S]*9:16[\s\S]*instagram[\s\S]*spotify[\s\S]*soundcloud[\s\S]*bandcamp/.test(mainSource))
+		verify(/mediaKind\s*===\s*"reel"\s*\?\s*"short"\s*:\s*"square"/.test(mainSource))
+		verify(/function\s+staticPreviewHandoffSize\(preview,\s*savedSizePreset\)[\s\S]*small[\s\S]*expanded[\s\S]*richPreviewSizePreset\(stableId\)/.test(mainSource))
+		verify(/cachedStaticHandoffEligible:[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0[\s\S]*replyActor[\s\S]*replySnippet[\s\S]*!bodyHydrationPending[\s\S]*!deleted[\s\S]*!activeScope\.activity[\s\S]*!root\.messageContainsInlineImage\(bodySegments\)/.test(cachedStaticHandoffSource))
+		verify(/cachedStaticHandoffSystemMessage[\s\S]*Math\.min\(cachedStaticHandoffLaneWidth,\s*680\)[\s\S]*cachedStaticHandoffMessageX/.test(cachedStaticHandoffSource))
+		verify(/cachedStaticHandoffAspect\s*===\s*"twitch"[\s\S]*cachedStaticHandoffEmbedMediaWidth \* 3 \/ 4[\s\S]*cachedStaticHandoffDirectVideo[\s\S]*cachedStaticHandoffCardWidth \* 9 \/ 16[\s\S]*cachedStaticHandoffCardHeight:[\s\S]*cachedStaticHandoffMediaHeight \+ 132/.test(cachedStaticHandoffSource))
+		verify(/cachedStaticHandoffY:[\s\S]*height - 1[\s\S]*cachedStaticHandoffVisibleHeight:[\s\S]*height - cachedStaticHandoffY/.test(cachedStaticHandoffSource))
+		verify(!/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]{0,500}parent\.height - height/.test(cachedStaticHandoffSource))
+		verify(/function\s+staticPreviewSourceFor\(preview\)[\s\S]*metadata\.contentWarning[\s\S]*thumbnailBlur[\s\S]*return ""[\s\S]*state\s*!==\s*"ready"/.test(mainSource))
+		verify(/staticPreviewLookaheadDistance:[\s\S]{0,100}height \* 1\.35/.test(mainSource))
 		verify(!/AnimatedImage|InlineMediaPlayer|MediaPlayer/.test(
 			cachedStaticHandoffSource))
 		verify(/id:\s*messageBody[\s\S]*visible:\s*!messageDelegate\.deleted[\s\S]*!messageDelegate\.previewSourceOnly/.test(mainSource))
