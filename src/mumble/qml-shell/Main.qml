@@ -2059,6 +2059,8 @@ ApplicationWindow {
 					timeline.automaticLayoutMovementCount,
 				"deferredMaterializationQueueCount":
 					timeline.deferredMaterializationQueue.length,
+				"deferredMaterializationActiveId":
+					timeline.deferredMaterializationActiveId,
 				"deferredMaterializationRunning": deferredMaterializationTimer.running,
 				"coldMaterializationDelayRunning":
 					coldScopeMaterializationDelayTimer.running,
@@ -3314,6 +3316,10 @@ ApplicationWindow {
 								timeline.requestBottomFollow()
 								if (!timeline.stickToBottom)
 									timeline.captureViewportAnchor()
+								// A fixed RangeValue jump can release without another
+								// movement signal. Reuse the settled membership recovery
+								// point instead of starting a competing resume here.
+								timeline.scheduleViewportMembershipUpdate()
 							}
 						}
 					}
@@ -4871,7 +4877,7 @@ ApplicationWindow {
 					function completeDeferredMaterialization(stableId) {
 						const key = String(stableId || "")
 						if (key.length === 0 || key !== deferredMaterializationActiveId)
-							return
+							return false
 						deferredMaterializationActiveId = ""
 						if (scopePresentationFinalizing && stickToBottom) {
 							positionTailImmediately()
@@ -4886,6 +4892,7 @@ ApplicationWindow {
 							timeline.queueVisibleDeferredMaterialization(
 								timeline.scopePresentationFinalizing)
 						})
+						return true
 					}
 
 					function finishRichContentRecoveryIfIdle() {
@@ -5332,6 +5339,8 @@ ApplicationWindow {
 										viewportMembershipTimer.start()
 									return
 								}
+								if (!timeline.richScrollInProgress)
+									timeline.scheduleRichContentResume()
 								timeline.scheduleNearViewportPrefetch()
 							})
 						}
@@ -5805,10 +5814,9 @@ ApplicationWindow {
 								width: timeline.width
 								height: Math.max(timeline.deferredMessageRowHeight,
 									deferredPresentationHeight)
-								radius: Theme.innerRadius
-								color: Theme.surfaceRaised
-								border.width: 1
-								border.color: Theme.divider
+								radius: 0
+								color: "transparent"
+								border.width: 0
 								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								Accessible.role: Accessible.ListItem
 								Accessible.name: presentationSummary
@@ -5817,7 +5825,12 @@ ApplicationWindow {
 								ListView.onReused: accessibilityPooled = false
 
 								RowLayout {
-									anchors.fill: parent
+									anchors.left: parent.left
+									anchors.right: parent.right
+									anchors.top: parent.top
+									anchors.topMargin: Theme.space2
+									height: Math.min(48, Math.max(1, parent.height
+										- Theme.space2 * 2))
 									anchors.leftMargin: Theme.space3
 									anchors.rightMargin: Theme.space3
 									spacing: Theme.space2
@@ -5882,6 +5895,14 @@ ApplicationWindow {
 								property bool resumeDuringFinalization: false
 								property bool resumeAdmitsPreview: false
 								property string resumeOwnedStableId: ""
+								property string deferredMaterializationCleanupId: ""
+								function releaseDeferredMaterialization(stableIdOverride) {
+									if (typeof timeline === "undefined" || !timeline)
+										return
+									const key = String(stableIdOverride || stableId || "")
+									if (key.length > 0)
+										timeline.completeDeferredMaterialization(key)
+								}
 								property bool outerLoaderReady: false
 								property bool outerLoaderIncubationSuppressed: false
 								property double outerLoaderIncubationWatchdogStartedAt: 0
@@ -6269,6 +6290,7 @@ ApplicationWindow {
 									if (!timeline.abandonNearViewportPrefetch(
 											ownedStableId, true))
 										timeline.cancelRichLoaderResume(ownedStableId)
+									releaseDeferredMaterialization(ownedStableId)
 								}
 								Timer {
 									id: viewportProbeUpdateTimer
@@ -6295,6 +6317,7 @@ ApplicationWindow {
 									if (!timeline.abandonNearViewportPrefetch(
 											retiredStableId, true))
 										timeline.cancelRichLoaderResume(retiredStableId)
+									releaseDeferredMaterialization(retiredStableId)
 									resumeRequested = false
 									resumeDuringFinalization = false
 									resumeAdmitsPreview = false
@@ -6315,6 +6338,13 @@ ApplicationWindow {
 								onStableIdChanged: {
 									scheduleViewportProbeReset()
 									timeline.scheduleViewportMembershipUpdate()
+									const retiredMaterializationId =
+										deferredMaterializationCleanupId
+									const currentMaterializationId = String(stableId || "")
+									if (retiredMaterializationId.length > 0
+										&& retiredMaterializationId !== currentMaterializationId)
+										releaseDeferredMaterialization(retiredMaterializationId)
+									deferredMaterializationCleanupId = currentMaterializationId
 									const ownedStableId = resumeOwnedStableId
 									if (ownedStableId.length > 0
 											&& ownedStableId !== stableId
@@ -6328,6 +6358,7 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 								}
 								Component.onCompleted: {
+									deferredMaterializationCleanupId = String(stableId || "")
 									scheduleViewportProbeReset()
 									updateViewportMembership()
 								}
@@ -6339,6 +6370,7 @@ ApplicationWindow {
 											retiredStableId, true)
 										if (resumeOwnedStableId.length > 0 && !abandoned)
 											timeline.cancelRichLoaderResume(resumeOwnedStableId)
+										releaseDeferredMaterialization(retiredStableId)
 									}
 								}
 								onLoaded: {

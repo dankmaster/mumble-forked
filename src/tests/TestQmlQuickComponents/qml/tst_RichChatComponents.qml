@@ -236,6 +236,36 @@ TestCase {
 		}
 	}
 
+	QtObject {
+		id: deferredRecoveryProbe
+		property bool richScrollInProgress: false
+		property bool membershipTimerRunning: false
+		property bool membershipUpdatePending: false
+		property int membershipSnapshots: 0
+		property int resumeRequests: 0
+		function reset() {
+			richScrollInProgress = false
+			membershipTimerRunning = false
+			membershipUpdatePending = false
+			membershipSnapshots = 0
+			resumeRequests = 0
+		}
+		function requestMembership() {
+			membershipUpdatePending = true
+			if (!membershipTimerRunning)
+				membershipTimerRunning = true
+		}
+		function publishMembership() {
+			membershipTimerRunning = false
+			if (!membershipUpdatePending)
+				return
+			membershipUpdatePending = false
+			membershipSnapshots += 1
+			if (!richScrollInProgress)
+				resumeRequests += 1
+		}
+	}
+
     function init() {
         tryVerify(function() {
             return bodyLoader.item !== null && previewLoader.item !== null && attachmentLoader.item !== null
@@ -312,6 +342,7 @@ TestCase {
 		mediaRuntime.runtimePreparing = false
 		mediaRuntime.runtimeError = ""
 		mediaRuntime.retryCalls = 0
+		deferredRecoveryProbe.reset()
 		attachmentLoader.item.attachments = [{
 			"id": "asset:1",
 			"kind": "image",
@@ -336,6 +367,23 @@ TestCase {
 					|| details.providerToken === expectedProviderToken)
 		})
 		return details
+	}
+
+	function test_scroll_membership_coalesces_one_resume_and_blocks_during_scroll() {
+		deferredRecoveryProbe.requestMembership()
+		deferredRecoveryProbe.requestMembership()
+		compare(deferredRecoveryProbe.membershipSnapshots, 0)
+		verify(deferredRecoveryProbe.membershipTimerRunning)
+		deferredRecoveryProbe.publishMembership()
+		compare(deferredRecoveryProbe.membershipSnapshots, 1)
+		compare(deferredRecoveryProbe.resumeRequests, 1)
+
+		deferredRecoveryProbe.requestMembership()
+		deferredRecoveryProbe.requestMembership()
+		deferredRecoveryProbe.richScrollInProgress = true
+		deferredRecoveryProbe.publishMembership()
+		compare(deferredRecoveryProbe.membershipSnapshots, 2)
+		compare(deferredRecoveryProbe.resumeRequests, 1)
 	}
 
 	function test_cold_hidden_provider_details_do_not_incubate_unused_trees() {
