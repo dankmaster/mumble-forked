@@ -84,6 +84,7 @@ private slots:
 	void sessionParsesSemanticMotdDocument();
 	void motdServerViewStateIsIsolatedByServer();
 	void sessionAppliesTypedConnectionState();
+	void sessionConnectionTransitionsStaySnapshotConsistent();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
 	void updateReminderIsWeeklyAndClosingIsSessionOnly();
@@ -1216,9 +1217,33 @@ void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
 		methodBody(QStringLiteral("QVariantMap MainWindow::buildQmlRoomState()"),
 				   QStringLiteral("QVariantMap modernServerLogMessageState"));
 	QVERIFY(!roomState.isEmpty());
-	QVERIFY(roomState.contains(QStringLiteral("!m_qmlConnectionHandoffPending")));
+	QVERIFY(roomState.contains(QStringLiteral("qmlConnectionSessionUsable()")));
+	QVERIFY(roomState.contains(QStringLiteral("appState.insert(QStringLiteral(\"connected\"), connected)")));
+	QVERIFY(roomState.contains(QStringLiteral("insertModernShellConnectionStatus(appState, qtReconnect")));
 	QVERIFY(roomState.contains(QStringLiteral("if (connected && hasPersistentChatCapabilities())")));
 	QVERIFY(roomState.contains(QStringLiteral("if (connected && target.directMessage && target.user)")));
+
+	const QString connectionStatus =
+		methodBody(QStringLiteral("QVariantMap modernShellConnectionStatus("),
+				   QStringLiteral("void insertModernShellConnectionStatus("));
+	QVERIFY(!connectionStatus.isEmpty());
+	QVERIFY(connectionStatus.contains(QStringLiteral("sessionUsable && handler && handler->isRunning()")));
+	QVERIFY(!connectionStatus.contains(QStringLiteral("handler->isConnected()")));
+
+	const QString probeMethod =
+		methodBody(QStringLiteral("void MainWindow::applyQmlConnectionStateProbe("),
+				   QStringLiteral("void MainWindow::applyQmlScreenShareStateProbe("));
+	QVERIFY(!probeMethod.isEmpty());
+	QVERIFY(probeMethod.contains(QStringLiteral("typedState.insert(QStringLiteral(\"connected\"), connected)")));
+	QVERIFY(probeMethod.indexOf(QStringLiteral("insertModernShellConnectionStatus"))
+		< probeMethod.indexOf(QStringLiteral("overlayModernShellConnectionStateProbe")));
+
+	const QString applyRoomMethod =
+		methodBody(QStringLiteral("void MainWindow::applyQmlRoomState("),
+				   QStringLiteral("void MainWindow::applyQmlDirectMessagesState("));
+	QVERIFY(!applyRoomMethod.isEmpty());
+	QVERIFY(applyRoomMethod.contains(QStringLiteral("app.contains(QStringLiteral(\"connected\"))")));
+	QVERIFY(applyRoomMethod.contains(QStringLiteral("session->setConnected(connected)")));
 
 	const QString connectedMethod =
 		methodBody(QStringLiteral("void MainWindow::serverConnected()"),
@@ -5052,6 +5077,51 @@ void TestQmlClientModels::sessionAppliesTypedConnectionState() {
 	QCOMPARE(session.connectionRetryRemainingMs(), 0);
 	QVERIFY(session.canConnect());
 	QVERIFY(!session.canCancel());
+}
+
+void TestQmlClientModels::sessionConnectionTransitionsStaySnapshotConsistent() {
+	ClientSessionController session;
+	QSignalSpy connectedSpy(&session, &ClientSessionController::connectedChanged);
+
+	session.applyState({ { QStringLiteral("connected"), false },
+		{ QStringLiteral("connectionState"), QStringLiteral("connecting") },
+		{ QStringLiteral("connectionTone"), QStringLiteral("warning") },
+		{ QStringLiteral("canCancelConnection"), true } });
+	QVERIFY(!session.connected());
+	QCOMPARE(session.connectionState(), QStringLiteral("connecting"));
+
+	// ServerSync/authentication is the authoritative transition for the QML
+	// session. A late/empty certificate digest must not leave the model in the
+	// initial connecting presentation once the snapshot is usable.
+	session.applyState({ { QStringLiteral("connected"), true },
+		{ QStringLiteral("connectionState"), QStringLiteral("connected") },
+		{ QStringLiteral("connectionTone"), QStringLiteral("success") },
+		{ QStringLiteral("canCancelConnection"), true } });
+	QVERIFY(session.connected());
+	QCOMPARE(session.connectionState(), QStringLiteral("connected"));
+
+	// A connection-state probe deliberately overrides the presentation and
+	// must carry its own connected bit so it cannot leave stale authenticated
+	// chrome behind while exercising retry/disconnect surfaces.
+	session.applyState({ { QStringLiteral("connected"), false },
+		{ QStringLiteral("connectionState"), QStringLiteral("retrying") },
+		{ QStringLiteral("connectionTone"), QStringLiteral("retry") },
+		{ QStringLiteral("connectionRetryRemainingMs"), 12000 },
+		{ QStringLiteral("canCancelConnection"), true } });
+	QVERIFY(!session.connected());
+	QCOMPARE(session.connectionState(), QStringLiteral("retrying"));
+	QCOMPARE(session.connectionRetryRemainingMs(), 12000);
+
+	session.applyState({ { QStringLiteral("connected"), false },
+		{ QStringLiteral("connectionState"), QStringLiteral("disconnected") },
+		{ QStringLiteral("connectionTone"), QStringLiteral("danger") },
+		{ QStringLiteral("connectionRetryRemainingMs"), 0 },
+		{ QStringLiteral("canConnect"), true },
+		{ QStringLiteral("canCancelConnection"), false } });
+	QVERIFY(!session.connected());
+	QCOMPARE(session.connectionState(), QStringLiteral("disconnected"));
+	QCOMPARE(session.connectionRetryRemainingMs(), 0);
+	QCOMPARE(connectedSpy.count(), 2);
 }
 
 void TestQmlClientModels::sessionDerivesTypedMotdState() {

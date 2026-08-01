@@ -148,6 +148,7 @@ TestCase {
 		motdLoader.item.maximumImageHeight = 180
 		connectionLoader.item.showDisconnectedAction = true
 		connectionLoader.item.animationsEnabled = true
+		connectionLoader.item.connectingRevealDelayMs = 220
 		connectionLoader.item.height = connectionLoader.height
 		session.motdSegments = [
 			{ "text": "Welcome", "bold": true },
@@ -185,6 +186,45 @@ TestCase {
 		if (endButton)
 			endButton.text = "End"
     }
+
+	function test_connecting_delay_cancels_on_authenticated_state_and_keeps_recovery_visible() {
+		const banner = connectionLoader.item
+		const busy = findChild(banner, "connectionBannerBusyIndicator")
+		verify(busy !== null)
+		banner.animationsEnabled = false
+		banner.connectingRevealDelayMs = 90
+
+		session.connectionState = "connecting"
+		session.connectionTone = "warning"
+		session.connectionDetail = "Connecting to the test server."
+		session.canConnect = false
+		session.canCancel = true
+		verify(banner.connectingRevealPending)
+		verify(!banner.bannerVisible)
+		verify(!busy.visible)
+		wait(30)
+		verify(!banner.bannerVisible)
+
+		// A fast successful handshake must cancel the delayed banner entirely.
+		session.connectionState = "connected"
+		verify(!banner.connectingRevealPending)
+		verify(!banner.bannerVisible)
+		wait(120)
+		verify(!banner.bannerVisible)
+
+		// A real retry/failure state is actionable immediately and is not hidden
+		// behind the initial-handshake delay.
+		session.connectionState = "connecting"
+		tryVerify(function() { return banner.bannerVisible }, 500)
+		verify(busy.visible && busy.running)
+		session.connectionState = "retrying"
+		session.connectionTone = "retry"
+		session.connectionRetryRemainingMs = 12000
+		verify(banner.bannerVisible)
+		session.connectionState = "disconnected"
+		session.connectionTone = "danger"
+		verify(banner.bannerVisible)
+	}
 
     function test_connection_state_and_keyboard_action() {
         const banner = connectionLoader.item
@@ -224,6 +264,9 @@ TestCase {
 		session.canConnect = false
 		session.canCancel = false
 		banner.animationsEnabled = false
+		verify(banner.connectingRevealPending)
+		verify(!banner.bannerVisible)
+		tryVerify(function() { return banner.bannerVisible }, 1000)
 		verify(busy.visible && busy.running)
 		compare(busy.animated, false)
 		compare(busy.Accessible.role, Accessible.ProgressBar)

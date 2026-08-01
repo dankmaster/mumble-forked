@@ -1936,6 +1936,8 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 	}
 	{
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.connection");
+		if (state.contains(QStringLiteral("connected")))
+			setConnected(state.value(QStringLiteral("connected")).toBool());
 		if (state.contains(QStringLiteral("connectionLabel")))
 			setConnectionLabel(state.value(QStringLiteral("connectionLabel")).toString());
 		if (state.contains(QStringLiteral("selfStatusLabel")))

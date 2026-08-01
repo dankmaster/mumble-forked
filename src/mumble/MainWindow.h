@@ -307,6 +307,7 @@ public:
 	void runQmlShellStateSync();
 	void enterQmlShellSteadyState();
 	void clearQmlConnectionState();
+	bool qmlConnectionSessionUsable() const;
 	void applyQmlStonksProbeState(QVariantMap state);
 	void applyQmlConnectionStateProbe(QVariantMap state);
 	void applyQmlScreenShareStateProbe(QVariantMap state);

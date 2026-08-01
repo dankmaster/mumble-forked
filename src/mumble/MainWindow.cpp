@@ -719,10 +719,11 @@ QString modernShellConnectionToneForPing(const double pingMs) {
 	return QStringLiteral("danger");
 }
 
-QVariantMap modernShellConnectionStatus(QTimer *reconnectTimer, const bool connectionAttemptActive) {
+QVariantMap modernShellConnectionStatus(QTimer *reconnectTimer, const bool connectionAttemptActive,
+										const bool sessionUsable) {
 	QVariantMap state;
 	const ServerHandlerPtr handler = Global::get().serverHandlerSnapshot();
-	const bool connected           = Global::get().uiSession != 0 && handler && handler->isConnected();
+	const bool connected           = sessionUsable && handler && handler->isRunning();
 	const bool retrying            = !connected && reconnectTimer && reconnectTimer->isActive();
 	const bool connecting          = !connected && connectionAttemptActive && handler && handler->isRunning();
 
@@ -784,8 +785,9 @@ QVariantMap modernShellConnectionStatus(QTimer *reconnectTimer, const bool conne
 }
 
 void insertModernShellConnectionStatus(QVariantMap &appState, QTimer *reconnectTimer,
-									   const bool connectionAttemptActive) {
-	const QVariantMap connectionState = modernShellConnectionStatus(reconnectTimer, connectionAttemptActive);
+										const bool connectionAttemptActive, const bool sessionUsable) {
+	const QVariantMap connectionState =
+		modernShellConnectionStatus(reconnectTimer, connectionAttemptActive, sessionUsable);
 	for (auto it = connectionState.cbegin(); it != connectionState.cend(); ++it) {
 		appState.insert(it.key(), it.value());
 	}
@@ -794,6 +796,14 @@ void insertModernShellConnectionStatus(QVariantMap &appState, QTimer *reconnectT
 void overlayModernShellConnectionStateProbe(QVariantMap &appState, const QVariantMap &connectionProbe) {
 	for (auto it = connectionProbe.cbegin(); it != connectionProbe.cend(); ++it) {
 		appState.insert(it.key(), it.value());
+	}
+	// Automation probes intentionally replace the live connection presentation. Keep
+	// the typed `connected` property in the same state so a probe cannot leave the
+	// sidebar/session model authenticated while its banner says "Connecting".
+	if (connectionProbe.contains(QStringLiteral("connectionState"))) {
+		appState.insert(QStringLiteral("connected"),
+			connectionProbe.value(QStringLiteral("connectionState")).toString().trimmed().toLower()
+				== QLatin1String("connected"));
 	}
 }
 
@@ -24306,6 +24316,11 @@ void MainWindow::clearQmlConnectionState() {
 	}
 }
 
+bool MainWindow::qmlConnectionSessionUsable() const {
+	const ServerHandlerPtr handler = Global::get().serverHandlerSnapshot();
+	return !m_qmlConnectionHandoffPending && Global::get().uiSession != 0 && handler && handler->isRunning();
+}
+
 void MainWindow::applyQmlStonksProbeState(QVariantMap state) {
 	m_stonksState = std::move(state);
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
@@ -24328,8 +24343,10 @@ void MainWindow::applyQmlConnectionStateProbe(QVariantMap state) {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
 
 	QVariantMap typedState;
+	const bool connected = qmlConnectionSessionUsable();
 	insertModernShellConnectionStatus(
-		typedState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled());
+		typedState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled(), connected);
+	typedState.insert(QStringLiteral("connected"), connected);
 	overlayModernShellConnectionStateProbe(typedState, m_modernConnectionStateProbe);
 	m_qmlShellHost->sessionController()->applyState(typedState);
 	mumble::chatperf::recordValue("qml.session.connection_probe.direct", 1);
@@ -26847,8 +26864,7 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	QVariantList textRooms;
 	QVariantList voiceRooms;
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	const bool connected = !m_qmlConnectionHandoffPending && Global::get().uiSession != 0
-						   && Global::get().sh && Global::get().sh->isRunning();
+	const bool connected = qmlConnectionSessionUsable();
 	const Channel *joinedVoiceChannel = connected ? currentVoiceChannel() : nullptr;
 	const Channel *participantVoiceChannel = nullptr;
 	if (connected && !target.directMessage) {
@@ -26880,7 +26896,9 @@ QVariantMap MainWindow::buildQmlRoomState() {
 														: (Global::get().s.bMute ? QStringLiteral("warning")
 																				 : QStringLiteral("success"))));
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
-	insertModernShellConnectionStatus(appState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled());
+	appState.insert(QStringLiteral("connected"), connected);
+	insertModernShellConnectionStatus(
+		appState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled(), connected);
 	overlayModernShellConnectionStateProbe(appState, m_modernConnectionStateProbe);
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
@@ -31255,7 +31273,8 @@ void MainWindow::applyQmlRoomState(const QVariantMap &state) {
 		mumble::chatperf::ScopedDuration modelTrace("qml.rooms.apply.session");
 		session->applyState(app);
 	}
-	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const bool connected = app.contains(QStringLiteral("connected"))
+		? app.value(QStringLiteral("connected")).toBool() : qmlConnectionSessionUsable();
 	session->setConnected(connected);
 	if (connected) {
 		QString serverName = Global::get().qsServerDisplayName.trimmed();
@@ -31315,7 +31334,7 @@ void MainWindow::syncQmlShellState() {
 	}
 	mumble::chatperf::recordValue("qml.full_bootstrap", 1);
 
-	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const bool connected = qmlConnectionSessionUsable();
 	QString host;
 	QString username;
 	QString password;
@@ -31381,7 +31400,7 @@ void MainWindow::syncQmlShellState() {
 
 void MainWindow::refreshQmlServerIdentity() {
 	if (!m_qmlShellHost) return;
-	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const bool connected = qmlConnectionSessionUsable();
 	QString serverName = Global::get().qsServerDisplayName.trimmed();
 	if (serverName.isEmpty() && connected) {
 		if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);

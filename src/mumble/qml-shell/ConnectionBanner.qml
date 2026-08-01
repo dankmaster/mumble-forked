@@ -12,6 +12,8 @@ Rectangle {
 	// status banner and all retry/failure actions.
 	property bool showDisconnectedAction: true
 	property bool animationsEnabled: true
+	property int connectingRevealDelayMs: 220
+	property bool connectingRevealElapsed: true
     signal actionRequested(string actionId, var payload)
 
     readonly property string connectionState: session ? String(session.connectionState || "").toLowerCase() : ""
@@ -49,9 +51,11 @@ Rectangle {
                                                            && session && session.canCancel ? "server.disconnect" : ""
 	readonly property string primaryActionLabel: connectionState === "disconnected"
 		? (failed ? qsTr("Try again") : qsTr("Connect")) : qsTr("Cancel")
-	readonly property bool progressVisible: connectionState === "connecting"
-		|| connectionState === "retrying"
-    readonly property bool bannerVisible: connectionState.length > 0 && connectionState !== "connected"
+	readonly property bool connectingRevealPending: connectionState === "connecting" && !connectingRevealElapsed
+	readonly property bool progressVisible: connectionState === "retrying"
+		|| (connectionState === "connecting" && connectingRevealElapsed)
+	readonly property bool bannerVisible: connectionState.length > 0 && connectionState !== "connected"
+		&& (connectionState !== "connecting" || connectingRevealElapsed)
     readonly property bool compactLayout: width < 560
     readonly property color toneColor: tone === "danger" || tone === "error" ? Theme.danger
                                               : tone === "warning" || tone === "retry" || tone === "orange" ? Theme.warning
@@ -83,9 +87,39 @@ Rectangle {
 			? retryClockEpochMs + reportedRetryRemainingMs : 0
 	}
 
+	function updateConnectingReveal() {
+		if (connectionState !== "connecting") {
+			connectingRevealTimer.stop()
+			connectingRevealElapsed = true
+			return
+		}
+		connectingRevealElapsed = false
+		if (connectingRevealDelayMs <= 0) {
+			connectingRevealTimer.stop()
+			connectingRevealElapsed = true
+		} else {
+			connectingRevealTimer.restart()
+		}
+	}
+
 	onReportedRetryRemainingMsChanged: resetRetryDeadline()
-	onConnectionStateChanged: resetRetryDeadline()
-	Component.onCompleted: resetRetryDeadline()
+	onConnectionStateChanged: {
+		resetRetryDeadline()
+		updateConnectingReveal()
+	}
+	onConnectingRevealDelayMsChanged: updateConnectingReveal()
+	Component.onCompleted: {
+		resetRetryDeadline()
+		updateConnectingReveal()
+	}
+
+	Timer {
+		id: connectingRevealTimer
+		objectName: "connectionBannerConnectingDelayTimer"
+		interval: root.connectingRevealDelayMs
+		repeat: false
+		onTriggered: root.connectingRevealElapsed = true
+	}
 
 	Timer {
 		interval: 1000
