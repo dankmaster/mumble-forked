@@ -467,8 +467,22 @@ TestCase {
 		const quietReleaseSource = mainSource.slice(quietReleaseStart, quietReleaseEnd)
 		verify(/function\s+scheduleViewportAnchorQuietRelease\(\)[\s\S]*if\s*\(viewportAnchorQuietReleaseActive\)[\s\S]*viewportAnchorQuietReleaseObservedContentHeight[\s\S]*viewportAnchorQuietReleaseStartedAt[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)/.test(quietReleaseSource))
 		verify(/function\s+observeViewportAnchorQuietRelease\(generation\)[\s\S]*generation\s*!==\s*viewportAnchorQuietReleaseGeneration[\s\S]*!viewportAnchorActive[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*viewportAnchorQuietReleaseGeometryBlocked\(\)[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)/.test(quietReleaseSource))
+		const cohortStart = mainSource.indexOf(
+			"function visiblePresentationHeightConvergencePending()")
+		const cohortEnd = mainSource.indexOf(
+			"function historyLoadProbeAnchorState", cohortStart)
+		verify(cohortStart >= 0 && cohortEnd > cohortStart)
+		const cohortSource = mainSource.slice(cohortStart, cohortEnd)
+		verify(/presentationHeightPendingCount\s*>\s*0[\s\S]*presentationHeightMismatchCount\s*>\s*0[\s\S]*diagnostics\.rows\.length[\s\S]*row\.lightweight\s*===\s*true[\s\S]*row\.presentationHeightReleased\s*!==\s*true[\s\S]*row\.richGeometrySettling\s*===\s*true[\s\S]*row\.inactiveRichResources\s*===\s*true[\s\S]*return\s+false/.test(
+			cohortSource))
+		verify(!/releaseViewportAnchor\(/.test(cohortSource))
+		verify(/restoreViewportAnchor\(\)[\s\S]*visiblePresentationHeightConvergencePending\(\)[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*return[\s\S]*const currentContentHeight/.test(
+			quietReleaseSource))
+		verify(!/visiblePresentationHeightConvergencePending\(\)[\s\S]{0,180}releaseViewportAnchor\(\)/.test(
+			quietReleaseSource))
 		verify(/restoreViewportAnchor\(\)[\s\S]*Math\.abs\(currentContentHeight[\s\S]*<=\s*0\.5[\s\S]*viewportAnchorQuietReleaseQuietObservations[\s\S]*>=\s*2[\s\S]*deadlineReached[\s\S]*restoreViewportAnchor\(true\)/.test(quietReleaseSource))
-		verify(/restoreViewportAnchor\(true\)[\s\S]*if\s*\(viewportAnchorActive\)[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)[\s\S]*return/.test(quietReleaseSource))
+		verify(/const\s+releaseRestored\s*=\s*restoreViewportAnchor\(true\)[\s\S]*if\s*\(viewportAnchorActive\)[\s\S]*!releaseRestored\s*&&\s*!viewportAnchorReleasePending[\s\S]*stickToBottom\s*=\s*false[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)/.test(
+			quietReleaseSource))
 		verify(!/viewportAnchorReleasePending\)\s*\{[\s\S]*viewportAnchorQuietReleaseTimer\.stop\(\)[\s\S]*return/.test(quietReleaseSource))
 		verify(/function\s+releaseViewportAnchor\(\)[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*nearViewportPrefetchOwnsViewportAnchor\s*=\s*false/.test(mainSource))
 		const restoreAnchorStart = mainSource.indexOf(
@@ -479,6 +493,8 @@ TestCase {
 		const restoreAnchorSource = mainSource.slice(restoreAnchorStart, restoreAnchorEnd)
 		verify(/if\s*\(!viewportAnchorActive\)\s*\{[\s\S]*viewportAnchorReleasePending\s*=\s*false[\s\S]*return\s+false[\s\S]*if\s*\(releaseWhenRestored\s*===\s*true\)[\s\S]*viewportAnchorReleasePending\s*=\s*true/.test(restoreAnchorSource))
 		verify(/if\s*\(restoreBlocked\)\s*return\s+false/.test(restoreAnchorSource))
+		verify(/const\s+requestedY\s*=\s*contentY\s*\+\s*currentOffset\s*-\s*viewportAnchorOffset[\s\S]*const\s+restoredOffset[\s\S]*const\s+offsetRestored[\s\S]*if\s*\(viewportAnchorReleasePending\)[\s\S]*if\s*\(offsetRestored\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*viewportAnchorReleasePending\s*=\s*false[\s\S]*stickToBottom\s*=\s*false[\s\S]*return\s+offsetRestored/.test(
+			restoreAnchorSource))
 		const prefetchAbandonStart = mainSource.indexOf(
 			"function abandonNearViewportPrefetch")
 		const prefetchRetireStart = mainSource.indexOf(

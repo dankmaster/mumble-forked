@@ -4366,6 +4366,23 @@ ApplicationWindow {
 							&& diagnostics.inactiveRichResourceCount === 0
 					}
 
+					function visiblePresentationHeightConvergencePending() {
+						const diagnostics = visiblePresentationDiagnostics()
+						if (diagnostics.presentationHeightPendingCount > 0
+								|| diagnostics.presentationHeightMismatchCount > 0)
+							return true
+						for (let index = 0; index < diagnostics.rows.length; ++index) {
+							const row = diagnostics.rows[index]
+							if (row.lightweight === true)
+								continue
+							if (row.presentationHeightReleased !== true
+									&& (row.richGeometrySettling === true
+										|| row.inactiveRichResources === true))
+								return true
+						}
+						return false
+					}
+
 					function historyLoadProbeAnchorState() {
 						const stableId = performanceHistoryProbeAnchorId
 						if (stableId.length === 0)
@@ -4516,6 +4533,14 @@ ApplicationWindow {
 							clearViewportAnchorQuietRelease()
 							return
 						}
+						// A release transaction belongs to the whole visible height cohort,
+						// not only the first rich row that commits. Keep the same anchor,
+						// clear only the quiet phase, and let the next eligible row commit
+						// serially under that anchor. A later commit rearms this timer.
+						if (visiblePresentationHeightConvergencePending()) {
+							clearViewportAnchorQuietRelease()
+							return
+						}
 						const currentContentHeight = Number(contentHeight || 0)
 						if (!isFinite(currentContentHeight)) {
 							viewportAnchorQuietReleaseTimer.restart()
@@ -4536,8 +4561,16 @@ ApplicationWindow {
 							|| deadlineReached) {
 							// The existing anchor writer performs the final correction and
 							// releases only after the new ListView geometry is observable.
-							restoreViewportAnchor(true)
+							const releaseRestored = restoreViewportAnchor(true)
 							if (viewportAnchorActive) {
+								if (!releaseRestored && !viewportAnchorReleasePending) {
+									// StopAtBounds can make the requested offset temporarily
+									// infeasible near the tail. Retain non-tail anchor intent
+									// without leaving the timeline in a busy release state.
+									stickToBottom = false
+									clearViewportAnchorQuietRelease()
+									return
+								}
 								// Missing-row retries or a just-drained ownership blocker
 								// still own the release; keep the bounded timer alive until
 								// restoreViewportAnchor() can finish it.
@@ -6087,16 +6120,26 @@ ApplicationWindow {
 						const currentOffset = item.mapToItem(timeline, 0, 0).y
 						const minimumY = originY
 						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						const requestedY = contentY + currentOffset - viewportAnchorOffset
 						const desiredY = Math.max(minimumY,
 							Math.min(maximumY,
-								contentY + currentOffset - viewportAnchorOffset))
+								requestedY))
 						if (Math.abs(contentY - desiredY) > 0.5)
 							contentY = desiredY
+						const restoredOffset = item.mapToItem(timeline, 0, 0).y
+						const offsetRestored = Math.abs(restoredOffset
+							- viewportAnchorOffset) <= 1
 						restoringViewportAnchor = false
 						viewportAnchorRetries = 0
-						if (viewportAnchorReleasePending)
-							releaseViewportAnchor()
-						return true
+						if (viewportAnchorReleasePending) {
+							if (offsetRestored)
+								releaseViewportAnchor()
+							else {
+								viewportAnchorReleasePending = false
+								stickToBottom = false
+							}
+						}
+						return offsetRestored
 					}
 
 					function releasePrependAnchor(preserveViewportAnchor) {
