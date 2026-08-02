@@ -15,6 +15,7 @@
 #include <QtQml/QQmlEngine>
 #include <QtQml/qqml.h>
 #include <QtQuick/QQuickImageProvider>
+#include <QtTest/qtestwheel.h>
 #include <QtQuickTest/quicktest.h>
 
 namespace {
@@ -653,6 +654,23 @@ private:
 	}
 };
 
+class WheelEventDispatcher final : public QObject {
+	Q_OBJECT
+
+public:
+	explicit WheelEventDispatcher(QObject *parent = nullptr) : QObject(parent) {}
+
+	Q_INVOKABLE bool dispatch(QWindow *window, const qreal x, const qreal y,
+			const int angleDeltaY, const int pixelDeltaY, const int phase) const {
+		if (!window)
+			return false;
+		QTest::wheelEvent(window, QPointF(x, y), QPoint(0, angleDeltaY),
+			QPoint(0, pixelDeltaY), Qt::NoModifier,
+			static_cast< Qt::ScrollPhase >(phase));
+		return true;
+	}
+};
+
 class QmlQuickComponentsSetup final : public QObject {
 	Q_OBJECT
 
@@ -695,7 +713,9 @@ public slots:
 		engine->rootContext()->setContextProperty(QStringLiteral("manualPlugin"),
 											 new FakeManualPluginController(engine));
 		engine->rootContext()->setContextProperty(QStringLiteral("accessibilityProbe"),
-											 new AccessibilityProbe(engine));
+																 new AccessibilityProbe(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("wheelEventDispatcher"),
+																 new WheelEventDispatcher(engine));
 	}
 };
 

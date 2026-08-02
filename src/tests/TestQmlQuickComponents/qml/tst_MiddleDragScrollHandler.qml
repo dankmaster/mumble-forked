@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtTest
 import "qrc:/qml-shell" as Shell
 
@@ -9,6 +10,21 @@ TestCase {
 	visible: true
 	width: 420
 	height: 320
+	property bool recordingWheel: false
+	property var wheelYSamples: []
+	property var wheelYSampleTimestamps: []
+	property int contentYChangeCount: 0
+	property int wheelPacketsSent: 0
+	property real peakWheelFrameDisplacement: 0
+	property real peakWheelFrameVelocity: 0
+	property real peakWheelFrameBudgetExcess: 0
+	property bool recordingScrollBar: false
+	property var scrollBarEvents: []
+	property var scrollBarYSamples: []
+	property bool sawMovementEndedWhilePressed: false
+	property real scrollBarReleaseY: 0
+	property double scrollBarReleaseTimestamp: 0
+	property int scrollBarReleaseSampleIndex: 0
 
 	Flickable {
 		id: flickable
@@ -19,8 +35,20 @@ TestCase {
 		height: 200
 		contentWidth: 620
 		contentHeight: 840
-		interactive: false
+		interactive: true
 		boundsBehavior: Flickable.StopAtBounds
+		onContentYChanged: {
+			testCase.contentYChangeCount += 1
+			if (testCase.recordingWheel) {
+				testCase.wheelYSamples = testCase.wheelYSamples.concat([contentY])
+				testCase.wheelYSampleTimestamps =
+					testCase.wheelYSampleTimestamps.concat([Date.now()])
+			}
+			if (testCase.recordingScrollBar)
+				testCase.scrollBarYSamples = testCase.scrollBarYSamples.concat([contentY])
+		}
+		onMovementStarted: testCase.recordScrollBarEvent("movementStarted")
+		onMovementEnded: testCase.recordScrollBarEvent("movementEnded")
 
 		Rectangle {
 			width: flickable.contentWidth
@@ -32,6 +60,19 @@ TestCase {
 			id: middleDrag
 			targetFlickable: flickable
 			smoothWheelEnabled: true
+		}
+
+		ScrollBar.vertical: ScrollBar {
+			id: timelineScrollBar
+			objectName: "middleDragFixtureScrollBar"
+			policy: ScrollBar.AlwaysOn
+			interactive: true
+		}
+	}
+	Connections {
+		target: timelineScrollBar
+		function onPressedChanged() {
+			testCase.recordScrollBarEvent(timelineScrollBar.pressed ? "pressed" : "released")
 		}
 	}
 	SignalSpy {
@@ -51,19 +92,124 @@ TestCase {
 	}
 
 	function init() {
+		recordingWheel = false
+		recordingScrollBar = false
+		wheelYSamples = []
+		wheelYSampleTimestamps = []
+		scrollBarEvents = []
+		scrollBarYSamples = []
+		sawMovementEndedWhilePressed = false
+		scrollBarReleaseY = 0
+		scrollBarReleaseTimestamp = 0
+		scrollBarReleaseSampleIndex = 0
+		contentYChangeCount = 0
+		wheelPacketsSent = 0
+		peakWheelFrameDisplacement = 0
+		peakWheelFrameVelocity = 0
+		peakWheelFrameBudgetExcess = 0
 		middleDrag.cancelSmoothWheel()
+		middleDrag.smoothWheelEnabled = true
 		scrollingStartedSpy.clear()
 		scrollingEndedSpy.clear()
 		wheelInputObservedSpy.clear()
 		flickable.contentX = 120
 		flickable.contentY = 180
+		flickable.contentHeight = 840
 		wait(1)
 		verify(middleDrag.enabled, "middle-drag handler must be enabled for overflowing content")
 	}
 
 	function cleanup() {
+		recordingWheel = false
+		recordingScrollBar = false
 		middleDrag.cancelSmoothWheel()
+		middleDrag.smoothWheelEnabled = true
 		middleDrag.endDrag()
+	}
+
+	function recordScrollBarEvent(kind) {
+		if (!recordingScrollBar)
+			return
+		const pressed = timelineScrollBar.pressed
+		const event = { "kind": kind, "pressed": pressed, "contentY": flickable.contentY,
+			"at": Date.now() }
+		scrollBarEvents = scrollBarEvents.concat([event])
+		if (kind === "movementEnded" && pressed)
+			sawMovementEndedWhilePressed = true
+		if (kind === "released") {
+			scrollBarReleaseY = flickable.contentY
+			scrollBarReleaseTimestamp = event.at
+			scrollBarReleaseSampleIndex = scrollBarYSamples.length
+		}
+	}
+
+	function dispatchCoarseWheel(angleDeltaY, delay) {
+		++wheelPacketsSent
+		mouseWheel(middleDrag, middleDrag.width / 2, 100, 0, angleDeltaY,
+			Qt.NoButton, Qt.NoModifier, delay)
+	}
+
+	function dispatchNativeWheel(angleDeltaY, pixelDeltaY, phase) {
+		const point = flickable.mapToItem(null, flickable.width / 2, 100)
+		verify(wheelEventDispatcher.dispatch(testCase.Window.window, point.x, point.y,
+			angleDeltaY, pixelDeltaY, phase))
+	}
+
+	function beginWheelObservation() {
+		middleDrag.cancelSmoothWheel()
+		middleDrag.smoothWheelEnabled = true
+		flickable.cancelFlick()
+		flickable.contentX = 120
+		flickable.contentY = 180
+		wheelYSamples = []
+		wheelYSampleTimestamps = []
+		contentYChangeCount = 0
+		wheelPacketsSent = 0
+		peakWheelFrameDisplacement = 0
+		peakWheelFrameVelocity = 0
+		peakWheelFrameBudgetExcess = 0
+		recordingWheel = true
+		wait(1)
+	}
+
+	function computeWheelFrameBudget() {
+		peakWheelFrameDisplacement = 0
+		peakWheelFrameVelocity = 0
+		peakWheelFrameBudgetExcess = 0
+		for (let i = 1; i < wheelYSamples.length; ++i) {
+			const displacement = Math.abs(wheelYSamples[i] - wheelYSamples[i - 1])
+			const elapsed = wheelYSampleTimestamps[i] - wheelYSampleTimestamps[i - 1]
+			peakWheelFrameDisplacement = Math.max(peakWheelFrameDisplacement, displacement)
+			const frameBudget = 960 * Math.min(Math.max(elapsed, 0) / 1000, 1 / 30)
+			peakWheelFrameBudgetExcess = Math.max(peakWheelFrameBudgetExcess,
+				displacement - frameBudget)
+			if (elapsed > 0)
+				peakWheelFrameVelocity = Math.max(peakWheelFrameVelocity,
+					displacement * 1000 / elapsed)
+		}
+	}
+
+	function finishWheelObservation(expectedY, startedAt, direction) {
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		fuzzyCompare(flickable.contentY, expectedY, 1.0)
+		verify(Date.now() - startedAt <= 850,
+			"bounded wheel input must settle within the quiet cadence window")
+		const wheelDirection = direction === undefined ? 1 : direction
+		for (let i = 1; i < wheelYSamples.length; ++i) {
+			if (wheelDirection > 0) {
+				verify(wheelYSamples[i] >= wheelYSamples[i - 1] - 0.01,
+					"forward wheel samples must not reverse")
+				verify(wheelYSamples[i] <= expectedY + 1.0,
+					"forward wheel samples must not overshoot")
+			} else {
+				verify(wheelYSamples[i] <= wheelYSamples[i - 1] + 0.01,
+					"reversed wheel samples must not reverse")
+				verify(wheelYSamples[i] >= expectedY - 1.0,
+					"reversed wheel samples must not overshoot")
+			}
+		}
+		computeWheelFrameBudget()
+		recordingWheel = false
 	}
 
 	function test_discrete_wheel_step_is_interpolated_per_frame() {
@@ -74,7 +220,6 @@ TestCase {
 		verify(middleDrag.wheelAnimationActive)
 		compare(scrollingStartedSpy.count, 1)
 		compare(wheelInputObservedSpy.count, 1)
-		compare(middleDrag.wheelTargetY, expectedY)
 		tryVerify(function() { return flickable.contentY > 180 }, 500)
 		verify(flickable.contentY < expectedY,
 			"the first presented frame must not teleport to the complete wheel step")
@@ -83,45 +228,74 @@ TestCase {
 		compare(scrollingEndedSpy.count, 1)
 	}
 
-	function test_repeated_wheel_steps_extend_the_active_target() {
-		verify(middleDrag.queueSmoothWheelDelta(-120))
-		const firstTarget = middleDrag.wheelTargetY
-		verify(middleDrag.queueSmoothWheelDelta(-120))
-		compare(middleDrag.wheelTargetY, firstTarget + middleDrag.wheelStep)
-		verify(middleDrag.queueSmoothWheelDelta(-120))
-		compare(middleDrag.wheelTargetY, firstTarget + middleDrag.wheelStep,
-			"a third same-direction notch must not extend the bounded runway")
-		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
-		fuzzyCompare(flickable.contentY, firstTarget + middleDrag.wheelStep, 0.5)
+	function test_rapid_wheel_pulses_preserve_three_ordinary_notches() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		dispatchCoarseWheel(-120, 0)
+		dispatchCoarseWheel(-120, 5)
+		dispatchCoarseWheel(-120, 5)
+		compare(wheelInputObservedSpy.count, 3)
+		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
 	}
 
 	function test_reversal_retargets_from_the_current_viewport() {
-		verify(middleDrag.queueSmoothWheelDelta(-120))
-		const currentY = flickable.contentY
-		const forwardTarget = middleDrag.wheelTargetY
-		verify(middleDrag.queueSmoothWheelDelta(120))
-		compare(middleDrag.wheelTargetY,
-			Math.max(flickable.originY, currentY - middleDrag.wheelStep))
-		verify(middleDrag.wheelTargetY < forwardTarget)
-		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		beginWheelObservation()
+		const startedAt = Date.now()
+		dispatchCoarseWheel(-120, 0)
+		dispatchCoarseWheel(120, 0)
+		finishWheelObservation(Math.max(flickable.originY, 180 - middleDrag.wheelStep), startedAt, -1)
 	}
 
-	function test_large_angle_delta_is_capped_to_two_steps() {
-		verify(middleDrag.shouldSmoothWheel(240, 0))
-		verify(middleDrag.queueSmoothWheelDelta(-240))
-		compare(middleDrag.wheelTargetY, 180 + 2 * middleDrag.wheelStep)
-		verify(middleDrag.queueSmoothWheelDelta(-120))
-		compare(middleDrag.wheelTargetY, 180 + 2 * middleDrag.wheelStep)
-		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+	function test_large_angle_then_ordinary_notch_preserves_three_steps() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		dispatchCoarseWheel(-240, 0)
+		dispatchCoarseWheel(-120, 5)
+		compare(wheelInputObservedSpy.count, 2)
+		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
 	}
 
-	function test_coarse_wheel_can_be_canceled_by_native_precision_input() {
-		verify(middleDrag.queueSmoothWheelDelta(-120))
+	function test_twenty_millisecond_wheel_cadence_preserves_three_steps() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		dispatchCoarseWheel(-120, 0)
+		dispatchCoarseWheel(-120, 20)
+		dispatchCoarseWheel(-120, 20)
+		compare(wheelInputObservedSpy.count, 3)
+		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
+	}
+
+	function test_reversal_after_partial_advance_rebases_without_stale_tail() {
+		beginWheelObservation()
+		dispatchCoarseWheel(-120, 0)
+		tryVerify(function() { return flickable.contentY > 180 }, 500)
+		const partialY = flickable.contentY
+		dispatchCoarseWheel(120, 0)
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		computeWheelFrameBudget()
+		fuzzyCompare(flickable.contentY,
+			Math.max(flickable.originY, partialY - middleDrag.wheelStep), 1.0)
+		const settledY = flickable.contentY
+		wait(378)
+		fuzzyCompare(flickable.contentY, settledY, 1.0)
+		recordingWheel = false
+	}
+
+	function test_coarse_wheel_can_be_canceled_by_true_pixel_delta_input() {
+		beginWheelObservation()
+		dispatchCoarseWheel(-120, 0)
 		verify(middleDrag.wheelAnimationActive)
-		verify(!middleDrag.shouldSmoothWheel(120, 4))
-		middleDrag.cancelSmoothWheel()
+		const beforeNativeChangeCount = contentYChangeCount
+		const beforeNativeY = flickable.contentY
+		dispatchNativeWheel(120, -24, Qt.ScrollUpdate)
 		verify(!middleDrag.wheelAnimationActive)
-		fuzzyCompare(middleDrag.wheelTargetY, flickable.contentY, 0.01)
+		tryVerify(function() { return contentYChangeCount > beforeNativeChangeCount }, 250)
+		verify(Math.abs(flickable.contentY - beforeNativeY) > 0.01,
+			"interactive Flickable must receive the true pixelDelta event")
+		const nativeSettledY = flickable.contentY
+		wait(378)
+		fuzzyCompare(flickable.contentY, nativeSettledY, 1.0)
+		recordingWheel = false
 	}
 
 	function test_precision_wheel_stays_on_the_native_flickable_path() {
@@ -133,6 +307,68 @@ TestCase {
 		verify(!middleDrag.wheelAnimationActive)
 	}
 
+	function test_native_coarse_delivery_is_the_comparison_path() {
+		beginWheelObservation()
+		middleDrag.smoothWheelEnabled = false
+		const beforeChangeCount = contentYChangeCount
+		dispatchCoarseWheel(-120, 0)
+		verify(!middleDrag.wheelAnimationActive)
+		tryVerify(function() { return contentYChangeCount > beforeChangeCount }, 250)
+		verify(Math.abs(flickable.contentY - 180) > 0.01,
+			"interactive Flickable must receive native coarse delivery when custom smoothing is disabled")
+		middleDrag.smoothWheelEnabled = true
+		recordingWheel = false
+	}
+
+	function test_native_coarse_burst_is_recorded_without_custom_backlog() {
+		beginWheelObservation()
+		middleDrag.smoothWheelEnabled = false
+		const startedAt = Date.now()
+		for (let i = 0; i < 12; ++i)
+			dispatchCoarseWheel(-120, i === 0 ? 0 : 5)
+		compare(wheelInputObservedSpy.count, 12)
+		verify(!middleDrag.wheelAnimationActive)
+		wait(378)
+		const settledAt = Date.now()
+		console.log("native coarse burst packets=" + wheelPacketsSent
+			+ " startY=180 finalY=" + flickable.contentY
+			+ " settleMs=" + (settledAt - startedAt))
+		verify(!middleDrag.wheelAnimationActive)
+		middleDrag.smoothWheelEnabled = true
+		recordingWheel = false
+	}
+
+	function test_long_wheel_burst_reports_bounded_travel_and_frame_budget() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		for (let i = 0; i < 12; ++i)
+			dispatchCoarseWheel(-120, 0)
+		compare(wheelInputObservedSpy.count, 12)
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		computeWheelFrameBudget()
+		// This TEST_HARNESS baseline measures aggregate travel only. The FIX adds
+		// explicit admitted/dropped signals; do not infer that contract from target
+		// displacement after the production implementation changes.
+		const aggregateAdmittedSteps = Math.round((flickable.contentY - 180)
+			/ middleDrag.wheelStep)
+		compare(aggregateAdmittedSteps, 4,
+			"the bounded contract must preserve four admitted steps")
+		console.log("wheel burst baseline packets=" + wheelPacketsSent
+			+ " aggregateAdmittedSteps=" + aggregateAdmittedSteps
+			+ " peakFramePixels=" + peakWheelFrameDisplacement
+			+ " peakFrameVelocity=" + peakWheelFrameVelocity)
+		fuzzyCompare(flickable.contentY, 180 + 4 * middleDrag.wheelStep, 1.0)
+		verify(Date.now() - startedAt <= 850)
+		verify(peakWheelFrameBudgetExcess <= 1.0,
+			"the custom frame budget must follow the actual timer cadence")
+		verify(peakWheelFrameVelocity <= 1000.0,
+			"the custom frame velocity must stay within the 960 px/s budget")
+		const settledY = flickable.contentY
+		wait(378)
+		fuzzyCompare(flickable.contentY, settledY, 1.0)
+		recordingWheel = false
+	}
+
 	function test_smooth_wheel_target_is_clamped_to_content_bounds() {
 		flickable.contentY = flickable.contentHeight - flickable.height - 8
 		verify(middleDrag.queueSmoothWheelDelta(-120))
@@ -141,6 +377,46 @@ TestCase {
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
 		compare(flickable.contentY,
 			flickable.originY + flickable.contentHeight - flickable.height)
+	}
+
+	function test_attached_scrollbar_records_pointer_order_supporting_evidence() {
+		recordingScrollBar = true
+		flickable.contentY = 180
+		wait(1)
+		verify(timelineScrollBar.visible)
+		verify(timelineScrollBar.size > 0 && timelineScrollBar.size < 1)
+		const thumbCenter = timelineScrollBar.position * timelineScrollBar.height
+			+ timelineScrollBar.size * timelineScrollBar.height / 2
+		const pressY = Math.max(2, Math.min(timelineScrollBar.height - 2, thumbCenter))
+		const moveY = Math.max(2, Math.min(timelineScrollBar.height - 2,
+			pressY + timelineScrollBar.height * 0.18))
+		mousePress(timelineScrollBar, timelineScrollBar.width / 2, pressY, Qt.LeftButton)
+		verify(timelineScrollBar.pressed,
+			"the attached ScrollBar must enter pressed state through real pointer input")
+		mouseMove(timelineScrollBar, timelineScrollBar.width / 2, moveY, 20)
+		mouseRelease(timelineScrollBar, timelineScrollBar.width / 2, moveY, Qt.LeftButton)
+		tryVerify(function() { return !timelineScrollBar.pressed }, 500)
+		verify(scrollBarEvents.some(function(event) { return event.kind === "pressed" }))
+		verify(scrollBarEvents.some(function(event) { return event.kind === "released" }))
+		const movementEndedEvents = scrollBarEvents.filter(function(event) {
+			return event.kind === "movementEnded"
+		})
+		if (movementEndedEvents.length === 0)
+			console.warn("Qt fixture did not emit movementEnded; Main guard remains client-acceptance-only")
+		else if (!sawMovementEndedWhilePressed)
+			console.warn("Qt fixture emitted movementEnded only after release; Main guard remains client-acceptance-only")
+		const releaseY = scrollBarReleaseY
+		flickable.contentHeight = 900
+		wait(16)
+		fuzzyCompare(flickable.contentY, releaseY, 1.0)
+		wait(378)
+		for (let i = scrollBarReleaseSampleIndex; i < scrollBarYSamples.length; ++i)
+			verify(Math.abs(scrollBarYSamples[i] - releaseY) <= 1.0,
+				"post-release ScrollBar samples must not show a delayed positional correction")
+		verify(Math.abs(flickable.contentY - releaseY) <= 1.0,
+			"attached ScrollBar must not introduce a delayed positional correction")
+		verify(Date.now() - scrollBarReleaseTimestamp >= 378)
+		recordingScrollBar = false
 	}
 
 	function test_held_middle_button_scrolls_continuously() {
