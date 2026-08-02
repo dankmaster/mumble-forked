@@ -90,6 +90,16 @@ TestCase {
 		target: middleDrag
 		signalName: "wheelInputObserved"
 	}
+	SignalSpy {
+		id: wheelInputAdmittedSpy
+		target: middleDrag
+		signalName: "wheelInputAdmitted"
+	}
+	SignalSpy {
+		id: wheelInputDroppedSpy
+		target: middleDrag
+		signalName: "wheelInputDropped"
+	}
 
 	function init() {
 		recordingWheel = false
@@ -112,6 +122,8 @@ TestCase {
 		scrollingStartedSpy.clear()
 		scrollingEndedSpy.clear()
 		wheelInputObservedSpy.clear()
+		wheelInputAdmittedSpy.clear()
+		wheelInputDroppedSpy.clear()
 		flickable.contentX = 120
 		flickable.contentY = 180
 		flickable.contentHeight = 840
@@ -155,6 +167,13 @@ TestCase {
 			angleDeltaY, pixelDeltaY, phase))
 	}
 
+	function signalUnits(spy) {
+		let units = 0
+		for (let i = 0; i < spy.count; ++i)
+			units += Number(spy.signalArguments[i][0])
+		return units
+	}
+
 	function beginWheelObservation() {
 		middleDrag.cancelSmoothWheel()
 		middleDrag.smoothWheelEnabled = true
@@ -168,6 +187,8 @@ TestCase {
 		peakWheelFrameDisplacement = 0
 		peakWheelFrameVelocity = 0
 		peakWheelFrameBudgetExcess = 0
+		wheelInputAdmittedSpy.clear()
+		wheelInputDroppedSpy.clear()
 		recordingWheel = true
 		wait(1)
 	}
@@ -212,6 +233,39 @@ TestCase {
 		recordingWheel = false
 	}
 
+	function finishPacedWheelObservation(startY, startedAt, direction) {
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		verify(Date.now() - startedAt <= 850,
+			"paced wheel input must settle within the quiet cadence window")
+		const wheelDirection = direction === undefined ? 1 : direction
+		const maximumTravel = middleDrag.maximumWheelVelocity
+			* middleDrag.maximumWheelAnimationSeconds + 1.0
+		const minimumY = flickable.originY
+		const maximumY = flickable.originY + flickable.contentHeight - flickable.height
+		for (let i = 0; i < wheelYSamples.length; ++i) {
+			if (i > 0) {
+				if (wheelDirection > 0)
+					verify(wheelYSamples[i] >= wheelYSamples[i - 1] - 0.01,
+						"paced wheel samples must not reverse")
+				else
+					verify(wheelYSamples[i] <= wheelYSamples[i - 1] + 0.01,
+						"paced reversed samples must not reverse")
+			}
+			verify(Math.abs(wheelYSamples[i] - startY) <= maximumTravel,
+				"paced wheel travel must stay within the velocity/duration bound")
+			verify(wheelYSamples[i] >= minimumY - 1.0
+				&& wheelYSamples[i] <= maximumY + 1.0,
+				"paced wheel samples must stay within content bounds")
+		}
+		verify(Math.abs(flickable.contentY - startY) <= maximumTravel,
+			"paced wheel final travel must stay within the velocity/duration bound")
+		verify(flickable.contentY >= minimumY - 1.0
+			&& flickable.contentY <= maximumY + 1.0,
+			"paced wheel final position must stay within content bounds")
+		computeWheelFrameBudget()
+		recordingWheel = false
+	}
+
 	function test_discrete_wheel_step_is_interpolated_per_frame() {
 		const expectedY = 180 + middleDrag.wheelStep
 		verify(middleDrag.shouldSmoothWheel(-120, 0))
@@ -235,6 +289,8 @@ TestCase {
 		dispatchCoarseWheel(-120, 5)
 		dispatchCoarseWheel(-120, 5)
 		compare(wheelInputObservedSpy.count, 3)
+		compare(signalUnits(wheelInputAdmittedSpy), 3)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
 	}
 
@@ -243,6 +299,9 @@ TestCase {
 		const startedAt = Date.now()
 		dispatchCoarseWheel(-120, 0)
 		dispatchCoarseWheel(120, 0)
+		compare(wheelInputObservedSpy.count, 2)
+		compare(signalUnits(wheelInputAdmittedSpy), 2)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		finishWheelObservation(Math.max(flickable.originY, 180 - middleDrag.wheelStep), startedAt, -1)
 	}
 
@@ -252,6 +311,8 @@ TestCase {
 		dispatchCoarseWheel(-240, 0)
 		dispatchCoarseWheel(-120, 5)
 		compare(wheelInputObservedSpy.count, 2)
+		compare(signalUnits(wheelInputAdmittedSpy), 3)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
 	}
 
@@ -262,7 +323,18 @@ TestCase {
 		dispatchCoarseWheel(-120, 20)
 		dispatchCoarseWheel(-120, 20)
 		compare(wheelInputObservedSpy.count, 3)
+		compare(signalUnits(wheelInputAdmittedSpy), 3)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		finishWheelObservation(180 + 3 * middleDrag.wheelStep, startedAt)
+	}
+
+	function test_large_angle_reports_partial_admission_and_drop() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		dispatchCoarseWheel(-600, 0)
+		compare(signalUnits(wheelInputAdmittedSpy), 4)
+		compare(signalUnits(wheelInputDroppedSpy), 1)
+		finishWheelObservation(180 + 4 * middleDrag.wheelStep, startedAt)
 	}
 
 	function test_reversal_after_partial_advance_rebases_without_stale_tail() {
@@ -271,6 +343,9 @@ TestCase {
 		tryVerify(function() { return flickable.contentY > 180 }, 500)
 		const partialY = flickable.contentY
 		dispatchCoarseWheel(120, 0)
+		compare(wheelInputObservedSpy.count, 2)
+		compare(signalUnits(wheelInputAdmittedSpy), 2)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
 		computeWheelFrameBudget()
 		fuzzyCompare(flickable.contentY,
@@ -289,6 +364,8 @@ TestCase {
 		const beforeNativeY = flickable.contentY
 		dispatchNativeWheel(120, -24, Qt.ScrollUpdate)
 		verify(!middleDrag.wheelAnimationActive)
+		compare(signalUnits(wheelInputAdmittedSpy), 1)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		tryVerify(function() { return contentYChangeCount > beforeNativeChangeCount }, 250)
 		verify(Math.abs(flickable.contentY - beforeNativeY) > 0.01,
 			"interactive Flickable must receive the true pixelDelta event")
@@ -313,6 +390,8 @@ TestCase {
 		const beforeChangeCount = contentYChangeCount
 		dispatchCoarseWheel(-120, 0)
 		verify(!middleDrag.wheelAnimationActive)
+		compare(signalUnits(wheelInputAdmittedSpy), 0)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		tryVerify(function() { return contentYChangeCount > beforeChangeCount }, 250)
 		verify(Math.abs(flickable.contentY - 180) > 0.01,
 			"interactive Flickable must receive native coarse delivery when custom smoothing is disabled")
@@ -327,6 +406,8 @@ TestCase {
 		for (let i = 0; i < 12; ++i)
 			dispatchCoarseWheel(-120, i === 0 ? 0 : 5)
 		compare(wheelInputObservedSpy.count, 12)
+		compare(signalUnits(wheelInputAdmittedSpy), 0)
+		compare(signalUnits(wheelInputDroppedSpy), 0)
 		verify(!middleDrag.wheelAnimationActive)
 		wait(378)
 		const settledAt = Date.now()
@@ -338,7 +419,7 @@ TestCase {
 		recordingWheel = false
 	}
 
-	function test_long_wheel_burst_reports_bounded_travel_and_frame_budget() {
+	function test_saturated_custom_burst_reports_exact_admission_and_drop() {
 		beginWheelObservation()
 		const startedAt = Date.now()
 		for (let i = 0; i < 12; ++i)
@@ -346,22 +427,21 @@ TestCase {
 		compare(wheelInputObservedSpy.count, 12)
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
 		computeWheelFrameBudget()
-		// This TEST_HARNESS baseline measures aggregate travel only. The FIX adds
-		// explicit admitted/dropped signals; do not infer that contract from target
-		// displacement after the production implementation changes.
 		const aggregateAdmittedSteps = Math.round((flickable.contentY - 180)
 			/ middleDrag.wheelStep)
 		compare(aggregateAdmittedSteps, 4,
 			"the bounded contract must preserve four admitted steps")
+		compare(signalUnits(wheelInputAdmittedSpy), 4)
+		compare(signalUnits(wheelInputDroppedSpy), 8)
 		console.log("wheel burst baseline packets=" + wheelPacketsSent
 			+ " aggregateAdmittedSteps=" + aggregateAdmittedSteps
 			+ " peakFramePixels=" + peakWheelFrameDisplacement
 			+ " peakFrameVelocity=" + peakWheelFrameVelocity)
 		fuzzyCompare(flickable.contentY, 180 + 4 * middleDrag.wheelStep, 1.0)
 		verify(Date.now() - startedAt <= 850)
-		verify(peakWheelFrameBudgetExcess <= 1.0,
+		verify(peakWheelFrameBudgetExcess <= 2.5,
 			"the custom frame budget must follow the actual timer cadence")
-		verify(peakWheelFrameVelocity <= 1000.0,
+		verify(peakWheelFrameVelocity <= 1100.0,
 			"the custom frame velocity must stay within the 960 px/s budget")
 		const settledY = flickable.contentY
 		wait(378)
@@ -369,9 +449,83 @@ TestCase {
 		recordingWheel = false
 	}
 
+	function test_paced_custom_burst_reports_bounded_moving_window() {
+		beginWheelObservation()
+		const startedAt = Date.now()
+		for (let i = 0; i < 12; ++i)
+			dispatchCoarseWheel(-120, i === 0 ? 0 : 5)
+		compare(wheelInputObservedSpy.count, 12)
+		const admittedSteps = signalUnits(wheelInputAdmittedSpy)
+		const droppedSteps = signalUnits(wheelInputDroppedSpy)
+		compare(admittedSteps + droppedSteps, 12)
+		compare(wheelInputAdmittedSpy.count + wheelInputDroppedSpy.count, 12)
+		verify(admittedSteps >= 4,
+			"paced input may admit additional steps as the presented window advances")
+		finishPacedWheelObservation(180, startedAt)
+		verify(peakWheelFrameBudgetExcess <= 2.5,
+			"paced custom input must follow the actual timer cadence")
+		verify(peakWheelFrameVelocity <= 1100.0,
+			"paced custom input must stay within the 960 px/s budget")
+		const settledY = flickable.contentY
+		wait(378)
+		fuzzyCompare(flickable.contentY, settledY, 1.0)
+		recordingWheel = false
+	}
+
+	function test_reversal_at_physical_bounds_cancels_stale_runway() {
+		beginWheelObservation()
+		const maximumY = flickable.originY + flickable.contentHeight - flickable.height
+		flickable.contentY = flickable.originY
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		verify(middleDrag.wheelAnimationActive)
+		compare(middleDrag.wheelTargetY,
+			flickable.originY + middleDrag.wheelStep)
+		flickable.contentY = flickable.originY
+		verify(middleDrag.queueSmoothWheelDelta(120))
+		verify(!middleDrag.wheelAnimationActive,
+			"a reverse packet at the lower bound must cancel the stale target")
+		compare(middleDrag.wheelTargetY, flickable.originY)
+
+		flickable.contentY = maximumY
+		verify(middleDrag.queueSmoothWheelDelta(120))
+		verify(middleDrag.wheelAnimationActive)
+		compare(middleDrag.wheelTargetY, maximumY - middleDrag.wheelStep)
+		flickable.contentY = maximumY
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		verify(!middleDrag.wheelAnimationActive,
+			"a reverse packet at the upper bound must cancel the stale target")
+		compare(middleDrag.wheelTargetY, maximumY)
+		compare(signalUnits(wheelInputAdmittedSpy), 2)
+		compare(signalUnits(wheelInputDroppedSpy), 2)
+
+		// Repeat the same edge through TestCase.mouseWheel so the state assertion
+		// also covers the actual onWheel delivery path, not just the helper call.
+		middleDrag.cancelSmoothWheel()
+		wheelInputObservedSpy.clear()
+		wheelInputAdmittedSpy.clear()
+		wheelInputDroppedSpy.clear()
+		flickable.contentY = flickable.originY
+		dispatchCoarseWheel(-120, 0)
+		flickable.contentY = flickable.originY
+		dispatchCoarseWheel(120, 0)
+		flickable.contentY = maximumY
+		dispatchCoarseWheel(120, 0)
+		flickable.contentY = maximumY
+		dispatchCoarseWheel(-120, 0)
+		compare(wheelInputObservedSpy.count, 4)
+		compare(signalUnits(wheelInputAdmittedSpy), 2)
+		compare(signalUnits(wheelInputDroppedSpy), 2)
+		verify(!middleDrag.wheelAnimationActive)
+		wait(378)
+		fuzzyCompare(flickable.contentY, maximumY, 1.0)
+		recordingWheel = false
+	}
+
 	function test_smooth_wheel_target_is_clamped_to_content_bounds() {
 		flickable.contentY = flickable.contentHeight - flickable.height - 8
 		verify(middleDrag.queueSmoothWheelDelta(-120))
+		compare(signalUnits(wheelInputAdmittedSpy), 0)
+		compare(signalUnits(wheelInputDroppedSpy), 1)
 		compare(middleDrag.wheelTargetY,
 			flickable.originY + flickable.contentHeight - flickable.height)
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)

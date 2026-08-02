@@ -100,6 +100,13 @@ ApplicationWindow {
 	property var performanceChatScrollDiagnosticsBefore: ({})
 	property var performanceChatScrollRetainedRichIds: ({})
 	property int performanceChatScrollRetainedRichResourceDropCount: 0
+	// Cumulative coarse-wheel telemetry is observational only. Keep it on the
+	// persistent shell so automation can distinguish OS delivery from the bounded
+	// handler's admitted and deliberately consumed overflow without resetting a
+	// live gesture or exposing ownership state.
+	property int timelineWheelInputObservedCount: 0
+	property int timelineWheelInputAdmittedNotchUnits: 0
+	property int timelineWheelInputDroppedNotchUnits: 0
 	readonly property bool compactNavigation: width < 900
 	readonly property bool narrowShell: width < 600
 	readonly property string normalizedConnectionState: String(clientSession.connectionState || "").toLowerCase()
@@ -2053,6 +2060,11 @@ ApplicationWindow {
 				"flicking": timeline.flicking,
 				"scrollHandlerScrolling": timelineScrollHandler.scrolling,
 				"scrollbarPressed": timelineScrollBar.pressed,
+				"wheelInputObservedCount": root.timelineWheelInputObservedCount,
+				"wheelInputAdmittedNotchUnits":
+					root.timelineWheelInputAdmittedNotchUnits,
+				"wheelInputDroppedNotchUnits":
+					root.timelineWheelInputDroppedNotchUnits,
 				"explicitWheelInputPending": timeline.explicitWheelInputPending,
 				"explicitNavigationMovement": timeline.explicitNavigationMovement,
 				"lastMovementClassification": timeline.lastMovementClassification,
@@ -3345,7 +3357,14 @@ ApplicationWindow {
 								timeline.captureViewportAnchor()
 							timeline.scheduleRichContentResume()
 						}
-						onWheelInputObserved: timeline.noteExplicitWheelInput()
+					onWheelInputObserved: {
+						timeline.noteExplicitWheelInput()
+						++root.timelineWheelInputObservedCount
+					}
+					onWheelInputAdmitted: notchUnits =>
+						root.timelineWheelInputAdmittedNotchUnits += notchUnits
+					onWheelInputDropped: notchUnits =>
+						root.timelineWheelInputDroppedNotchUnits += notchUnits
 					}
 					// Keep less than one extra viewport of delegates warm. Rich preview
 					// loaders incubate asynchronously, so a multi-viewport cache only makes

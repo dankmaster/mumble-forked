@@ -29,12 +29,20 @@ MouseArea {
 	property real wheelResponse: 28
 	// Keep a short, bounded input runway so a burst cannot turn into a long
 	// delayed scroll. A reversal is retargeted from the viewport immediately.
-	readonly property int maximumQueuedWheelSteps: 2
+	readonly property int maximumQueuedWheelSteps: 4
+	readonly property real maximumWheelVelocity: 960
+	readonly property real maximumWheelAnimationSeconds: 0.65
+	readonly property real maximumWheelBufferedDistance: Math.min(
+		Math.abs(wheelStep) * maximumQueuedWheelSteps,
+		maximumWheelVelocity * maximumWheelAnimationSeconds)
 	property real wheelTargetY: 0
 	property bool wheelAnimationActive: false
+	property double wheelAnimationStartedAt: 0
 	signal scrollingStarted()
 	signal scrollingEnded()
 	signal wheelInputObserved()
+	signal wheelInputAdmitted(int notchUnits)
+	signal wheelInputDropped(int notchUnits)
 
 	anchors.fill: parent
 	acceptedButtons: Qt.MiddleButton
@@ -145,29 +153,51 @@ MouseArea {
 		targetFlickable.cancelFlick()
 		const currentY = targetFlickable.contentY
 		const requestedOffset = -(angle / 120) * wheelStep
-		const requestedDistance = Math.abs(requestedOffset)
-		const maximumDistance = Math.max(Math.abs(wheelStep),
-			Math.abs(wheelStep) * Math.max(1, maximumQueuedWheelSteps))
-		let targetDistance = Math.min(maximumDistance, requestedDistance)
+		const requestedSteps = Math.max(1, Math.round(Math.abs(angle) / 120))
+		const stepMagnitude = Math.max(0.01, Math.abs(Number(wheelStep) || 0))
+		const maximumDistance = Math.max(0.01, maximumWheelBufferedDistance)
+		const direction = requestedOffset < 0 ? -1 : 1
+		let baseY = currentY
+		let sameDirection = false
 		if (wheelAnimationActive) {
 			wheelTargetY = clampedContentY(wheelTargetY)
 			const activeOffset = wheelTargetY - currentY
-			const sameDirection = Math.abs(activeOffset) > 0.01
+			sameDirection = Math.abs(activeOffset) > 0.01
 				&& (activeOffset < 0) === (requestedOffset < 0)
-			// Same-direction notches may extend the runway, but never beyond the
-			// bounded coalescing window. Opposite-direction input starts from the
-			// current viewport instead of walking back through stale backlog.
+			// Same-direction notches extend the existing runway. Opposite-direction
+			// input starts from the current viewport instead of walking back through
+			// stale backlog.
 			if (sameDirection)
-				targetDistance = Math.min(maximumDistance,
-					Math.abs(activeOffset) + requestedDistance)
+				baseY = wheelTargetY
 		}
-		const direction = requestedOffset < 0 ? -1 : 1
-		const nextTargetY = clampedContentY(currentY + direction * targetDistance)
-		if (Math.abs(nextTargetY - currentY) <= 0.01) {
-			if (wheelAnimationActive)
+		const requestedTargetY = clampedContentY(baseY + requestedOffset)
+		const maximumTargetY = clampedContentY(currentY + direction * maximumDistance)
+		let nextTargetY = requestedTargetY
+		if (direction < 0)
+			nextTargetY = Math.max(nextTargetY, maximumTargetY)
+		else
+			nextTargetY = Math.min(nextTargetY, maximumTargetY)
+		nextTargetY = clampedContentY(nextTargetY)
+		const admittedDistance = Math.abs(nextTargetY - baseY)
+		const admittedSteps = Math.min(requestedSteps,
+			Math.max(0, Math.floor(admittedDistance / stepMagnitude + 0.01)))
+		const droppedSteps = Math.max(0, requestedSteps - admittedSteps)
+		if (admittedSteps > 0)
+			wheelInputAdmitted(admittedSteps)
+		if (droppedSteps > 0)
+			wheelInputDropped(droppedSteps)
+		// A deliberate cap/bound drop is still consumed by this handler. Letting it
+		// fall through would make Flickable apply the same coarse packet natively.
+		if (Math.abs(nextTargetY - baseY) <= 0.01) {
+			// An opposite packet at a physical bound must also cancel the old target.
+			// Otherwise the consumed packet leaves a stale runway active and the next
+			// frame resumes motion in the direction the user just rejected.
+			if (wheelAnimationActive && !sameDirection)
 				finishSmoothWheel()
-			return false
+			return true
 		}
+		if (!wheelAnimationActive || !sameDirection)
+			wheelAnimationStartedAt = Date.now()
 		wheelTargetY = nextTargetY
 		wheelAnimationActive = true
 		beginScrollingActivity()
@@ -179,6 +209,7 @@ MouseArea {
 			return
 		wheelAnimationActive = false
 		wheelTargetY = clampedContentY(targetFlickable.contentY)
+		wheelAnimationStartedAt = 0
 		endScrollingActivityIfIdle()
 	}
 
@@ -206,10 +237,26 @@ MouseArea {
 			return false
 		const response = Math.max(1, Number(wheelResponse) || 1)
 		const progress = 1 - Math.exp(-response * frameSeconds)
-		const nextY = clampedContentY(currentY + distance * progress)
+		const requestedDisplacement = Math.abs(distance) * progress
+		const maximumFrameDisplacement = maximumWheelVelocity * frameSeconds
+		const frameDisplacement = Math.min(requestedDisplacement, maximumFrameDisplacement)
+		const nextY = clampedContentY(currentY
+			+ (distance < 0 ? -frameDisplacement : frameDisplacement))
 		targetFlickable.contentY = nextY
 		if (Math.abs(wheelTargetY - targetFlickable.contentY) <= 0.35) {
 			targetFlickable.contentY = wheelTargetY
+			finishSmoothWheel()
+		} else if (wheelAnimationStartedAt > 0
+				&& (Date.now() - wheelAnimationStartedAt) / 1000
+				>= maximumWheelAnimationSeconds) {
+			const remainingDistance = Math.abs(wheelTargetY - targetFlickable.contentY)
+			const finalFrameBudget = Math.max(0,
+				maximumFrameDisplacement - frameDisplacement) + 0.35
+			// Expiry may only close a legal residual. If a stalled renderer left more
+			// distance than one frame can cover, finish at the already-presented value
+			// and clear the target rather than teleporting beyond the velocity budget.
+			if (remainingDistance <= finalFrameBudget)
+				targetFlickable.contentY = wheelTargetY
 			finishSmoothWheel()
 		}
 		return Math.abs(targetFlickable.contentY - currentY) > 0.01

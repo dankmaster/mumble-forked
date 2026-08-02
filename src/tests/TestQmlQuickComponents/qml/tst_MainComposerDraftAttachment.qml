@@ -770,7 +770,7 @@ TestCase {
 		verify(/function\s+restoreTopAnchor\(\)[\s\S]*timelineScrollHandler\.scrolling[\s\S]*contentY\s*=\s*originY/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*restoreTopAnchor\(\)/.test(mainSource))
 		verify(/id:\s*topAnchorProgrammaticMovementGuardTimer[\s\S]*interval:\s*96[\s\S]*topAnchorProgrammaticMovementGuard\s*=\s*false/.test(mainSource))
-		verify(/onWheelInputObserved:\s*timeline\.noteExplicitWheelInput\(\)[\s\S]*property bool explicitWheelInputPending:\s*false[\s\S]*property bool explicitNavigationMovement:\s*false/.test(mainSource))
+		verify(/onWheelInputObserved:\s*\{[\s\S]*timeline\.noteExplicitWheelInput\(\)[\s\S]*\+\+root\.timelineWheelInputObservedCount/.test(mainSource))
 		verify(/function\s+noteExplicitWheelInput\(\)[\s\S]*\+\+explicitWheelInputGeneration[\s\S]*explicitWheelInputStartY\s*=\s*contentY[\s\S]*explicitWheelInputPending\s*=\s*true[\s\S]*Qt\.callLater[\s\S]*generation\s*===\s*timeline\.explicitWheelInputGeneration[\s\S]*explicitWheelInputPending\s*=\s*false/.test(mainSource))
 		verify(/function\s+takeExplicitNavigationOwnership\(classification\)[\s\S]*explicitNavigationMovement\s*=\s*true[\s\S]*explicitWheelInputPending\s*=\s*false[\s\S]*stickToBottom\s*=\s*false[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
 		verify(/onContentYChanged:[\s\S]*explicitWheelInputPending[\s\S]*explicitWheelInputStartY[\s\S]*takeExplicitNavigationOwnership\("native-wheel"\)/.test(mainSource))
@@ -1273,6 +1273,26 @@ TestCase {
 		verify(/onUnreadCountChanged\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
 		verify(/onMovementEnded:[\s\S]*stickToBottom\s*=\s*isAtBottom\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
 		verify(/onActiveChanged:[\s\S]*timeline\.markVisibleScopeReadIfEligible\(\)/.test(mainSource))
+	}
+
+	function test_chat_scroll_exposes_cumulative_wheel_admission_telemetry() {
+		verify(/property int timelineWheelInputObservedCount:\s*0/.test(mainSource))
+		verify(/property int timelineWheelInputAdmittedNotchUnits:\s*0/.test(mainSource))
+		verify(/property int timelineWheelInputDroppedNotchUnits:\s*0/.test(mainSource))
+		const handlerStart = mainSource.indexOf("id: timelineScrollHandler")
+		const handlerEnd = mainSource.indexOf(
+			"readonly property real baseCacheBuffer", handlerStart)
+		verify(handlerStart >= 0 && handlerEnd > handlerStart)
+		const handlerSource = mainSource.slice(handlerStart, handlerEnd)
+		verify(/onWheelInputObserved:\s*\{[\s\S]*timeline\.noteExplicitWheelInput\(\)[\s\S]*\+\+root\.timelineWheelInputObservedCount/.test(
+			handlerSource))
+		verify(/onWheelInputAdmitted:\s*notchUnits\s*=>\s*\n?\s*root\.timelineWheelInputAdmittedNotchUnits\s*\+=\s*notchUnits/.test(
+			handlerSource))
+		verify(/onWheelInputDropped:\s*notchUnits\s*=>\s*\n?\s*root\.timelineWheelInputDroppedNotchUnits\s*\+=\s*notchUnits/.test(
+			handlerSource))
+		verify(/"wheelInputObservedCount":\s*root\.timelineWheelInputObservedCount/.test(mainSource))
+		verify(/"wheelInputAdmittedNotchUnits":\s*[\s\S]*root\.timelineWheelInputAdmittedNotchUnits/.test(mainSource))
+		verify(/"wheelInputDroppedNotchUnits":\s*[\s\S]*root\.timelineWheelInputDroppedNotchUnits/.test(mainSource))
 	}
 
 	function test_chat_scroll_reports_delegate_materialization_diagnostics() {
