@@ -21,6 +21,8 @@ TestCase {
 	property bool recordingScrollBar: false
 	property var scrollBarEvents: []
 	property var scrollBarYSamples: []
+	property int passiveWheelReceiptCount: 0
+	property var passiveWheelReceipts: []
 	property bool sawMovementEndedWhilePressed: false
 	property real scrollBarReleaseY: 0
 	property double scrollBarReleaseTimestamp: 0
@@ -60,6 +62,13 @@ TestCase {
 			id: middleDrag
 			targetFlickable: flickable
 			smoothWheelEnabled: true
+		}
+
+		WheelHandler {
+			id: passiveWheelReceiptHandler
+			target: null
+			blocking: false
+			onWheel: event => testCase.recordPassiveWheel(event)
 		}
 
 		ScrollBar.vertical: ScrollBar {
@@ -108,6 +117,8 @@ TestCase {
 		wheelYSampleTimestamps = []
 		scrollBarEvents = []
 		scrollBarYSamples = []
+		passiveWheelReceiptCount = 0
+		passiveWheelReceipts = []
 		sawMovementEndedWhilePressed = false
 		scrollBarReleaseY = 0
 		scrollBarReleaseTimestamp = 0
@@ -124,6 +135,8 @@ TestCase {
 		wheelInputObservedSpy.clear()
 		wheelInputAdmittedSpy.clear()
 		wheelInputDroppedSpy.clear()
+		verify(wheelEventDispatcher.watchWindow(testCase.Window.window))
+		wheelEventDispatcher.clearReceipt()
 		flickable.contentX = 120
 		flickable.contentY = 180
 		flickable.contentHeight = 840
@@ -162,9 +175,27 @@ TestCase {
 	}
 
 	function dispatchNativeWheel(angleDeltaY, pixelDeltaY, phase) {
+		++wheelPacketsSent
 		const point = flickable.mapToItem(null, flickable.width / 2, 100)
 		verify(wheelEventDispatcher.dispatch(testCase.Window.window, point.x, point.y,
 			angleDeltaY, pixelDeltaY, phase))
+	}
+
+	function wheelReceipt() {
+		return wheelEventDispatcher.receipt()
+	}
+
+	function recordPassiveWheel(event) {
+		++passiveWheelReceiptCount
+		passiveWheelReceipts = passiveWheelReceipts.concat([{
+			"angleDeltaY": event.angleDelta.y,
+			"pixelDeltaY": event.pixelDelta.y
+		}])
+	}
+
+	function lastPassiveWheelReceipt() {
+		return passiveWheelReceipts.length > 0
+			? passiveWheelReceipts[passiveWheelReceipts.length - 1] : ({})
 	}
 
 	function signalUnits(spy) {
@@ -182,6 +213,8 @@ TestCase {
 		flickable.contentY = 180
 		wheelYSamples = []
 		wheelYSampleTimestamps = []
+		passiveWheelReceiptCount = 0
+		passiveWheelReceipts = []
 		contentYChangeCount = 0
 		wheelPacketsSent = 0
 		peakWheelFrameDisplacement = 0
@@ -360,18 +393,30 @@ TestCase {
 		beginWheelObservation()
 		dispatchCoarseWheel(-120, 0)
 		verify(middleDrag.wheelAnimationActive)
-		const beforeNativeChangeCount = contentYChangeCount
-		const beforeNativeY = flickable.contentY
+		const beforeObservedCount = wheelInputObservedSpy.count
+		const admittedBefore = signalUnits(wheelInputAdmittedSpy)
+		const droppedBefore = signalUnits(wheelInputDroppedSpy)
+		const beforePassiveCount = passiveWheelReceiptCount
+		wheelEventDispatcher.clearReceipt()
 		dispatchNativeWheel(120, -24, Qt.ScrollUpdate)
 		verify(!middleDrag.wheelAnimationActive)
-		compare(signalUnits(wheelInputAdmittedSpy), 1)
-		compare(signalUnits(wheelInputDroppedSpy), 0)
-		tryVerify(function() { return contentYChangeCount > beforeNativeChangeCount }, 250)
-		verify(Math.abs(flickable.contentY - beforeNativeY) > 0.01,
-			"interactive Flickable must receive the true pixelDelta event")
-		const nativeSettledY = flickable.contentY
+		compare(wheelInputObservedSpy.count, beforeObservedCount + 1)
+		compare(signalUnits(wheelInputAdmittedSpy), admittedBefore)
+		compare(signalUnits(wheelInputDroppedSpy), droppedBefore)
+		const receipt = wheelReceipt()
+		compare(receipt.count, 1)
+		compare(receipt.angleDeltaY, 120)
+		compare(receipt.pixelDeltaY, -24)
+		compare(receipt.phase, Qt.ScrollUpdate)
+		tryVerify(function() { return passiveWheelReceiptCount > beforePassiveCount }, 250)
+		const passiveReceipt = lastPassiveWheelReceipt()
+		compare(passiveReceipt.angleDeltaY, 120)
+		compare(passiveReceipt.pixelDeltaY, -24)
 		wait(378)
-		fuzzyCompare(flickable.contentY, nativeSettledY, 1.0)
+		verify(!middleDrag.wheelAnimationActive,
+			"pixelDelta must not resurrect the canceled smooth-wheel tail")
+		compare(signalUnits(wheelInputAdmittedSpy), admittedBefore)
+		compare(signalUnits(wheelInputDroppedSpy), droppedBefore)
 		recordingWheel = false
 	}
 
@@ -387,14 +432,22 @@ TestCase {
 	function test_native_coarse_delivery_is_the_comparison_path() {
 		beginWheelObservation()
 		middleDrag.smoothWheelEnabled = false
-		const beforeChangeCount = contentYChangeCount
-		dispatchCoarseWheel(-120, 0)
+		const beforePassiveCount = passiveWheelReceiptCount
+		wheelEventDispatcher.clearReceipt()
+		dispatchNativeWheel(-120, 0, Qt.NoScrollPhase)
 		verify(!middleDrag.wheelAnimationActive)
+		compare(wheelInputObservedSpy.count, 1)
 		compare(signalUnits(wheelInputAdmittedSpy), 0)
 		compare(signalUnits(wheelInputDroppedSpy), 0)
-		tryVerify(function() { return contentYChangeCount > beforeChangeCount }, 250)
-		verify(Math.abs(flickable.contentY - 180) > 0.01,
-			"interactive Flickable must receive native coarse delivery when custom smoothing is disabled")
+		const receipt = wheelReceipt()
+		compare(receipt.count, 1)
+		compare(receipt.angleDeltaY, -120)
+		compare(receipt.pixelDeltaY, 0)
+		compare(receipt.phase, Qt.NoScrollPhase)
+		tryVerify(function() { return passiveWheelReceiptCount > beforePassiveCount }, 250)
+		const passiveReceipt = lastPassiveWheelReceipt()
+		compare(passiveReceipt.angleDeltaY, -120)
+		compare(passiveReceipt.pixelDeltaY, 0)
 		middleDrag.smoothWheelEnabled = true
 		recordingWheel = false
 	}
@@ -403,12 +456,26 @@ TestCase {
 		beginWheelObservation()
 		middleDrag.smoothWheelEnabled = false
 		const startedAt = Date.now()
-		for (let i = 0; i < 12; ++i)
-			dispatchCoarseWheel(-120, i === 0 ? 0 : 5)
+		const beforePassiveCount = passiveWheelReceiptCount
+		wheelEventDispatcher.clearReceipt()
+		for (let i = 0; i < 12; ++i) {
+			dispatchNativeWheel(-120, 0, Qt.NoScrollPhase)
+			if (i < 11)
+				wait(5)
+		}
 		compare(wheelInputObservedSpy.count, 12)
 		compare(signalUnits(wheelInputAdmittedSpy), 0)
 		compare(signalUnits(wheelInputDroppedSpy), 0)
 		verify(!middleDrag.wheelAnimationActive)
+		const receipt = wheelReceipt()
+		compare(receipt.count, 12)
+		compare(receipt.angleDeltaY, -120)
+		compare(receipt.pixelDeltaY, 0)
+		compare(receipt.phase, Qt.NoScrollPhase)
+		compare(passiveWheelReceiptCount, beforePassiveCount + 12)
+		const passiveReceipt = lastPassiveWheelReceipt()
+		compare(passiveReceipt.angleDeltaY, -120)
+		compare(passiveReceipt.pixelDeltaY, 0)
 		wait(378)
 		const settledAt = Date.now()
 		console.log("native coarse burst packets=" + wheelPacketsSent

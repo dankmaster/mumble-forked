@@ -1,8 +1,10 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QDir>
+#include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
@@ -10,6 +12,7 @@
 #include <QtGui/QAccessible>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QWheelEvent>
 #include <QtGui/QWindow>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -660,6 +663,35 @@ class WheelEventDispatcher final : public QObject {
 public:
 	explicit WheelEventDispatcher(QObject *parent = nullptr) : QObject(parent) {}
 
+	Q_INVOKABLE bool watchWindow(QWindow *window) {
+		if (!window)
+			return false;
+		if (m_window != window) {
+			if (m_window)
+				m_window->removeEventFilter(this);
+			m_window = window;
+			m_window->installEventFilter(this);
+		}
+		clearReceipt();
+		return true;
+	}
+
+	Q_INVOKABLE void clearReceipt() {
+		m_receiptCount = 0;
+		m_lastAngleDeltaY = 0;
+		m_lastPixelDeltaY = 0;
+		m_lastPhase = Qt::NoScrollPhase;
+	}
+
+	Q_INVOKABLE QVariantMap receipt() const {
+		return {
+			{QStringLiteral("count"), m_receiptCount},
+			{QStringLiteral("angleDeltaY"), m_lastAngleDeltaY},
+			{QStringLiteral("pixelDeltaY"), m_lastPixelDeltaY},
+			{QStringLiteral("phase"), static_cast<int>(m_lastPhase)}
+		};
+	}
+
 	Q_INVOKABLE bool dispatch(QWindow *window, const qreal x, const qreal y,
 			const int angleDeltaY, const int pixelDeltaY, const int phase) const {
 		if (!window)
@@ -669,6 +701,25 @@ public:
 			static_cast< Qt::ScrollPhase >(phase));
 		return true;
 	}
+
+protected:
+	bool eventFilter(QObject *watched, QEvent *event) override {
+		if (watched == m_window && event && event->type() == QEvent::Wheel) {
+			const auto *wheelEvent = static_cast< const QWheelEvent * >(event);
+			++m_receiptCount;
+			m_lastAngleDeltaY = wheelEvent->angleDelta().y();
+			m_lastPixelDeltaY = wheelEvent->pixelDelta().y();
+			m_lastPhase = wheelEvent->phase();
+		}
+		return QObject::eventFilter(watched, event);
+	}
+
+private:
+	QPointer< QWindow > m_window;
+	int m_receiptCount = 0;
+	int m_lastAngleDeltaY = 0;
+	int m_lastPixelDeltaY = 0;
+	Qt::ScrollPhase m_lastPhase = Qt::NoScrollPhase;
 };
 
 class QmlQuickComponentsSetup final : public QObject {
