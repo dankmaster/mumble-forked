@@ -253,7 +253,19 @@ TestCase {
 		verify(/id:\s*chatMessageFrameWarmupLoader[\s\S]*active:\s*true[\s\S]*asynchronous:\s*false[\s\S]*visible:\s*false[\s\S]*stableId:\s*"__shell_warmup__"[\s\S]*accessibilityBarrierEnabled:\s*false/.test(mainSource))
 		verify(!/id:\s*chatMessageFrameWarmupLoader[\s\S]{0,360}active\s*=\s*false/.test(mainSource))
 		verify(/id:\s*chatMessageDelegateWarmupModel[\s\S]*"stableId":\s*"__delegate_warmup__"[\s\S]*"preview":\s*\(\{\}\)[\s\S]*"attachments":\s*\[\][\s\S]*id:\s*chatMessageDelegateWarmupList[\s\S]*visible:\s*false[\s\S]*model:\s*chatMessageDelegateWarmupModel[\s\S]*delegate:\s*timeline\.delegate[\s\S]*Accessible\.ignored:\s*true/.test(mainSource))
-		verify(/id:\s*asyncMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending[\s\S]*presentationHeightCommittedHeight[\s\S]*height:\s*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0[\s\S]*clip:\s*richGeometrySettling[\s\S]*function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(mainSource))
+		const asyncDelegateStart = mainSource.indexOf("id: asyncMessageDelegate")
+		const asyncDelegateEnd = mainSource.indexOf("id: messageDelegate", asyncDelegateStart)
+		verify(asyncDelegateStart >= 0 && asyncDelegateEnd > asyncDelegateStart)
+		const asyncDelegateSource = mainSource.slice(asyncDelegateStart, asyncDelegateEnd)
+		verify(/required property int deferredPresentationHeight/.test(asyncDelegateSource))
+		verify(/presentationHeightCommittedHeight[\s\S]*height:\s*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
+			asyncDelegateSource))
+		verify(/readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending/.test(
+			asyncDelegateSource))
+		verify(/clip:\s*richGeometrySettling\s*\|\|\s*\(item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5\)/.test(
+			asyncDelegateSource))
+		verify(/function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(
+			asyncDelegateSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*readonly property string presentationSummary:[\s\S]*\[title,\s*subtitle,\s*timestamp\][\s\S]*visible:\s*asyncMessageDelegate\.active[\s\S]*!asyncMessageDelegate\.item[\s\S]*!asyncMessageDelegate\.item\.currentMessagePresentationReady[\s\S]*richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive[\s\S]*richLoaderSuspended[\s\S]*richResourcesRequired[\s\S]*previewNeedsHydration[\s\S]*previewLoaderIncubationSuppressed[\s\S]*text:\s*asyncMessageDelegate\.title[\s\S]*text:\s*asyncMessageDelegate\.subtitle[\s\S]*text:\s*asyncMessageDelegate\.timestamp/.test(mainSource))
 		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*chatModel\.count\s*>\s*0[\s\S]*visible:[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*Preparing conversation/.test(mainSource))
