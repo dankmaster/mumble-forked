@@ -46,6 +46,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QRectF>
 #include <QtCore/QReadLocker>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimer>
@@ -5584,6 +5585,60 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 									 && layout.value(QStringLiteral("settled")).toBool()
 									 && !layout.value(QStringLiteral("firstVisibleId")).toString().isEmpty()
 									 && frames > m_chatPerformanceWorkload.presentedFramesBeforeSeed);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatStructuralStimulus")) {
+			if (!m_chatPerformanceWorkload.active || m_chatPerformanceWorkload.liveMode)
+				return errorResponse(tr("No deterministic chat performance fixture is active."));
+			if (m_chatPerformanceWorkload.running)
+				return errorResponse(tr("Wait for the chat-scroll performance workload to settle first."));
+			const QString mode = request.value(QStringLiteral("mode"), QStringLiteral("append"))
+				.toString().trimmed().toLower();
+			if (mode != QLatin1String("append"))
+				return errorResponse(tr("Unsupported chat performance structural stimulus."));
+			const bool requireScrollbarReleasePending =
+				request.value(QStringLiteral("requireScrollbarReleasePending"), false).toBool();
+			QVariant timelineStateValue;
+			const bool timelineStateInvoked = QMetaObject::invokeMethod(host->window(),
+				"timelinePresentationState", Q_RETURN_ARG(QVariant, timelineStateValue));
+			const bool scrollbarReleasePendingAtMutation = timelineStateInvoked
+				&& timelineStateValue.toMap().value(QStringLiteral("scrollbarReleasePending")).toBool();
+			if (requireScrollbarReleasePending && !scrollbarReleasePendingAtMutation)
+				return errorResponse(tr("The scrollbar release guard is not active for the structural stimulus."));
+			ChatTimelineModel *chat = host->chatModel();
+			const int beforeCount = chat->rowCount();
+			const QString messageKey = QStringLiteral("qml-perf-stimulus-%1-%2")
+				.arg(beforeCount).arg(++m_performanceInputSequence);
+			if (chat->rowForStableId(messageKey) >= 0)
+				return errorResponse(tr("The deterministic chat structural stimulus key already exists."));
+			const QVariantMap message {
+				{ QStringLiteral("messageKey"), messageKey },
+				{ QStringLiteral("actor"), QStringLiteral("Performance peer") },
+				{ QStringLiteral("bodyText"), QStringLiteral("Deterministic appended chat geometry stimulus %1 %2")
+					.arg(beforeCount).arg(QString(80, QLatin1Char('y'))) },
+				{ QStringLiteral("timeLabel"), QStringLiteral("13:%1").arg(beforeCount % 60, 2, 10, QLatin1Char('0')) },
+				{ QStringLiteral("deliveryState"), QStringLiteral("sent") },
+				{ QStringLiteral("own"), false }
+			};
+			int appended = 0;
+			{
+				host->setVisualFixtureMutationActive(true);
+				const auto mutationGuard = qScopeGuard(
+					[host]() { host->setVisualFixtureMutationActive(false); });
+				appended = chat->appendMessages(QVariantList { message });
+			}
+			const int afterCount = chat->rowCount();
+			if (appended != 1 || afterCount != beforeCount + 1
+				|| chat->rowForStableId(messageKey) < 0)
+				return errorResponse(tr("The deterministic chat structural stimulus was not appended."));
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("mode"), mode);
+			response.insert(QStringLiteral("messageKey"), messageKey);
+			response.insert(QStringLiteral("beforeCount"), beforeCount);
+			response.insert(QStringLiteral("afterCount"), afterCount);
+			response.insert(QStringLiteral("appended"), appended);
+			response.insert(QStringLiteral("scrollbarReleasePendingAtMutation"),
+				scrollbarReleasePendingAtMutation);
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatScrollRun")) {
 			if (!m_chatPerformanceWorkload.active) return errorResponse(tr("No chat performance fixture is active."));

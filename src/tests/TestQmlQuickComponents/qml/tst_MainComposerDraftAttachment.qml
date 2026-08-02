@@ -375,6 +375,8 @@ TestCase {
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {
 		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*timeline\.invalidateBottomFollow\(\)[\s\S]*timeline\.stickToBottom\s*=\s*false[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
+		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*liveRangeUnavailable\s*\|\|\s*fixtureRangeUnavailable[\s\S]*performanceChatScrollOwnershipActive\s*=\s*true[\s\S]*timelineScrollHandler\.cancelNavigationForOwnershipLoss\(\)[\s\S]*performanceChatScrollStartY\s*=\s*timeline\.contentY[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
+		verify(/function\s+completePerformanceChatScrollWorkload\(\)[\s\S]*performanceChatScrollRunning\s*=\s*false[\s\S]*performanceChatScrollOwnershipActive\s*=\s*false/.test(mainSource))
 		verify(/fullRangeToStart\s*===\s*true[\s\S]{0,280}performanceChatScrollTargetY\s*=\s*minimumY/.test(mainSource))
 		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*Math\.max\(currentOriginY,\s*previousY\s*-\s*wheelStep\)[\s\S]*reachedTarget/.test(mainSource))
 		verify(/const\s+availableUp\s*=\s*Math\.max\(0,\s*timeline\.contentY\s*-\s*minimumY\)[\s\S]*const\s+availableDown\s*=\s*Math\.max\(0,\s*maximumY\s*-\s*timeline\.contentY\)[\s\S]*maximumDirectionalTravel/.test(mainSource))
@@ -621,8 +623,8 @@ TestCase {
 		verify(/reevaluatePresentationHeightIdentity\(\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*resetViewportProbeHeight\(\)/.test(reusedSource))
 		verify(/onPreviewLoaderIncubationIdentityChanged:[\s\S]*asyncMessageDelegate\.reevaluatePresentationHeightIdentity\(\)[\s\S]*asyncMessageDelegate\.resetViewportProbeHeight\(\)/.test(mainSource))
 		verify(/onStableIdChanged:[\s\S]*asyncMessageDelegate\.resetPresentationHeightIdentity\(\)[\s\S]*asyncMessageDelegate\.resetViewportProbeHeight\(\)/.test(mainSource))
-		verify(/"viewportY":\s*Number\(point\.y\s*\|\|\s*0\)[\s\S]*"viewportProbeHeight"[\s\S]*"richGeometrySettling"[\s\S]*"reservedExcess"/.test(mainSource))
-		verify(/id:\s*timelineScrollHandler[\s\S]*smoothWheelEnabled:\s*false/.test(mainSource))
+		verify(/"modelIndex":\s*isFinite\(Number\(item\.index\)\)[\s\S]*"viewportY":\s*Number\(point\.y\s*\|\|\s*0\)[\s\S]*"viewportProbeHeight"[\s\S]*"richGeometrySettling"[\s\S]*"reservedExcess"/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*smoothWheelEnabled:\s*true/.test(mainSource))
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
@@ -679,13 +681,22 @@ TestCase {
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,1600}ColumnLayout\s*\{/.test(mainSource))
 		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*const wheelStep\s*=\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
-		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*false[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*navigationEnabled:\s*timeline\.interactive[\s\S]*!timeline\.scopePresentationPending[\s\S]*!timeline\.scrollbarDragActive[\s\S]*!timeline\.scrollbarReleasePending[\s\S]*!timelineScrollBar\.pressed[\s\S]*!root\.performanceChatScrollOwnershipActive[\s\S]*!root\.performanceChatScrollRunning[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
+		const beginScopeStart = mainSource.indexOf("function beginScopeChange()")
+		const beginScopeEnd = mainSource.indexOf("function scheduleScopePresentationFastPath()",
+			beginScopeStart)
+		verify(beginScopeStart >= 0 && beginScopeEnd > beginScopeStart)
+		const beginScopeSource = mainSource.slice(beginScopeStart, beginScopeEnd)
+		verify(/scopePresentationPending\s*=\s*true[\s\S]*timelineScrollHandler\.cancelNavigationForOwnershipLoss\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)/.test(beginScopeSource))
+		verify(/function\s+onScopeTokenChanged\(\)\s*\{\s*timeline\.beginScopeChange\(\)[\s\S]*root\.closeQuickReactions\(\)[\s\S]*root\.clearPreviewHydrationQueue\(\)/.test(mainSource))
+		verify(/onScrollingEnded:\s*\{\s*if\s*\(!timelineScrollHandler\.navigationAvailable\)\s*return[\s\S]*timeline\.scrollbarDragActive[\s\S]*timeline\.stickToBottom/.test(mainSource))
+		verify(/onMovementEnded:\s*\{[\s\S]*timelineScrollHandler\.navigationTransitionActive[\s\S]*timelineScrollHandler\.gestureActive[\s\S]*timelineScrollHandler\.scrolling[\s\S]*scopePresentationPending[\s\S]*performanceChatScrollOwnershipActive[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*return[\s\S]*scrollbarDragActive/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*onScrollingStarted:[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
 		const scrollbarStart = mainSource.indexOf("id: timelineScrollBar")
 		const scrollbarEnd = mainSource.indexOf("MiddleDragScrollHandler", scrollbarStart)
 		verify(scrollbarStart >= 0 && scrollbarEnd > scrollbarStart)
 		const scrollbarSource = mainSource.slice(scrollbarStart, scrollbarEnd)
-		verify(/onPressedChanged:\s*\{[\s\S]*if\s*\(pressed\)[\s\S]*scrollbarDragActive\s*=\s*true[\s\S]*takeExplicitNavigationOwnership\("scrollbar"\)[\s\S]*cancelSmoothWheel\(\)[\s\S]*else[\s\S]*finishScrollbarDrag\(\)/.test(scrollbarSource))
+		verify(/onPressedChanged:\s*\{[\s\S]*if\s*\(pressed\)[\s\S]*scrollbarDragActive\s*=\s*true[\s\S]*cancelNavigationForOwnershipLoss\(\)[\s\S]*takeExplicitNavigationOwnership\("scrollbar"\)[\s\S]*else[\s\S]*finishScrollbarDrag\(\)/.test(scrollbarSource))
 		const finishScrollbarStart = mainSource.indexOf("function finishScrollbarDrag()")
 		const finishScrollbarEnd = mainSource.indexOf("function requestBottomFollow()",
 			finishScrollbarStart)
@@ -1001,8 +1012,32 @@ TestCase {
 		verify(/function\s+restoreTopAnchor\(\)[\s\S]*timelineScrollHandler\.scrolling[\s\S]*contentY\s*=\s*originY/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*restoreTopAnchor\(\)/.test(mainSource))
 		verify(/id:\s*topAnchorProgrammaticMovementGuardTimer[\s\S]*interval:\s*96[\s\S]*topAnchorProgrammaticMovementGuard\s*=\s*false/.test(mainSource))
-		verify(/onWheelInputObserved:\s*\{[\s\S]*timeline\.noteExplicitWheelInput\(\)[\s\S]*\+\+root\.timelineWheelInputObservedCount/.test(mainSource))
-		verify(/function\s+noteExplicitWheelInput\(\)[\s\S]*\+\+explicitWheelInputGeneration[\s\S]*explicitWheelInputStartY\s*=\s*contentY[\s\S]*explicitWheelInputPending\s*=\s*true[\s\S]*Qt\.callLater[\s\S]*generation\s*===\s*timeline\.explicitWheelInputGeneration[\s\S]*explicitWheelInputPending\s*=\s*false/.test(mainSource))
+		const releaseScrollbarGuardForWheelInputStart =
+			mainSource.indexOf("function releaseScrollbarGuardForWheelInput()")
+		const releaseScrollbarGuardForWheelInputEnd = mainSource.indexOf(
+			"function noteExplicitWheelInput", releaseScrollbarGuardForWheelInputStart)
+		verify(releaseScrollbarGuardForWheelInputStart >= 0
+			&& releaseScrollbarGuardForWheelInputEnd
+				> releaseScrollbarGuardForWheelInputStart)
+		const releaseScrollbarGuardForWheelInputSource = mainSource.slice(
+			releaseScrollbarGuardForWheelInputStart,
+			releaseScrollbarGuardForWheelInputEnd)
+		verify(/!scrollbarReleasePending[\s\S]*scrollbarDragActive[\s\S]*timelineScrollBar\.pressed[\s\S]*scopePresentationPending[\s\S]*!interactive[\s\S]*performanceChatScrollOwnershipActive[\s\S]*performanceChatScrollRunning[\s\S]*return\s+false[\s\S]*scrollbarReleaseGuardTimer\.restart\(\)[\s\S]*scrollbarReleasePending\s*=\s*false[\s\S]*\+\+root\.timelineScrollbarReleaseWheelTakeoverCount[\s\S]*return\s+true/.test(
+			releaseScrollbarGuardForWheelInputSource))
+		verify(!/scrollbarReleaseGuardTimer\.stop\(\)/.test(
+			releaseScrollbarGuardForWheelInputSource))
+		const noteExplicitWheelInputStart =
+			mainSource.indexOf("function noteExplicitWheelInput()")
+		const noteExplicitWheelInputEnd = mainSource.indexOf(
+			"function takeExplicitNavigationOwnership", noteExplicitWheelInputStart)
+		verify(noteExplicitWheelInputStart >= 0
+			&& noteExplicitWheelInputEnd > noteExplicitWheelInputStart)
+		const noteExplicitWheelInputSource = mainSource.slice(
+			noteExplicitWheelInputStart, noteExplicitWheelInputEnd)
+		verify(/releaseScrollbarGuardForWheelInput\(\)/.test(
+			noteExplicitWheelInputSource))
+		verify(/\+\+explicitWheelInputGeneration[\s\S]*explicitWheelInputStartY\s*=\s*contentY[\s\S]*explicitWheelInputPending\s*=\s*true[\s\S]*Qt\.callLater[\s\S]*generation\s*===\s*timeline\.explicitWheelInputGeneration[\s\S]*explicitWheelInputPending\s*=\s*false/.test(
+			noteExplicitWheelInputSource))
 		verify(/function\s+takeExplicitNavigationOwnership\(classification\)[\s\S]*explicitNavigationMovement\s*=\s*true[\s\S]*explicitWheelInputPending\s*=\s*false[\s\S]*stickToBottom\s*=\s*false[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
 		verify(/onContentYChanged:[\s\S]*explicitWheelInputPending[\s\S]*explicitWheelInputStartY[\s\S]*takeExplicitNavigationOwnership\("native-wheel"\)/.test(mainSource))
 		verify(/property bool explicitNavigationMovement:\s*false[\s\S]*onMovementStarted:[\s\S]*const\s+pendingNativeWheel\s*=\s*explicitWheelInputPending[\s\S]*const\s+explicitNavigation\s*=\s*dragging[\s\S]*timelineScrollHandler\.scrolling[\s\S]*timelineScrollBar\.pressed[\s\S]*performanceChatScrollRunning[\s\S]*pendingNativeWheel[\s\S]*explicitWheelInputPending\s*=\s*false[\s\S]*takeExplicitNavigationOwnership[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*viewportAnchorActive[\s\S]*restoreViewportAnchor\(\)/.test(mainSource))
@@ -1508,22 +1543,47 @@ TestCase {
 
 	function test_chat_scroll_exposes_cumulative_wheel_admission_telemetry() {
 		verify(/property int timelineWheelInputObservedCount:\s*0/.test(mainSource))
+		verify(/property int timelineWheelObservedNotchUnits:\s*0/.test(mainSource))
+		verify(/property int timelineWheelObservedSignedNotchBalance:\s*0/.test(mainSource))
 		verify(/property int timelineWheelInputAdmittedNotchUnits:\s*0/.test(mainSource))
 		verify(/property int timelineWheelInputDroppedNotchUnits:\s*0/.test(mainSource))
+		verify(/property int timelineWheelInputBlockedCount:\s*0/.test(mainSource))
+		verify(/property int timelineWheelBlockedNotchUnits:\s*0/.test(mainSource))
+		verify(/property int timelineWheelBlockedSignedNotchBalance:\s*0/.test(mainSource))
+		verify(/property int timelineWheelBlockedPrecisionCount:\s*0/.test(mainSource))
+		verify(/property int timelineScrollbarReleaseWheelTakeoverCount:\s*0/.test(mainSource))
+		verify(/property real timelineWheelExpiredDistance:\s*0/.test(mainSource))
 		const handlerStart = mainSource.indexOf("id: timelineScrollHandler")
 		const handlerEnd = mainSource.indexOf(
 			"readonly property real baseCacheBuffer", handlerStart)
 		verify(handlerStart >= 0 && handlerEnd > handlerStart)
 		const handlerSource = mainSource.slice(handlerStart, handlerEnd)
-		verify(/onWheelInputObserved:\s*\{[\s\S]*timeline\.noteExplicitWheelInput\(\)[\s\S]*\+\+root\.timelineWheelInputObservedCount/.test(
+		verify(/onWheelInputObserved:\s*\{[\s\S]*\+\+root\.timelineWheelInputObservedCount[\s\S]*releaseScrollbarGuardForWheelInput\(\)[\s\S]*\}/.test(
+			handlerSource))
+		verify(/onWheelInputPassedThrough:\s*if\s*\(timelineScrollHandler\.navigationAvailable\)[\s\S]*timeline\.noteExplicitWheelInput\(\)/.test(
+			handlerSource))
+		verify(/onWheelAngleUnitsObserved:\s*\(notchUnits,\s*signedNotchUnits\)\s*=>[\s\S]*timelineWheelObservedNotchUnits\s*\+=\s*notchUnits[\s\S]*timelineWheelObservedSignedNotchBalance\s*\+=\s*signedNotchUnits/.test(
 			handlerSource))
 		verify(/onWheelInputAdmitted:\s*notchUnits\s*=>\s*\n?\s*root\.timelineWheelInputAdmittedNotchUnits\s*\+=\s*notchUnits/.test(
 			handlerSource))
 		verify(/onWheelInputDropped:\s*notchUnits\s*=>\s*\n?\s*root\.timelineWheelInputDroppedNotchUnits\s*\+=\s*notchUnits/.test(
 			handlerSource))
+		verify(/onWheelInputBlocked:\s*\(notchUnits,\s*signedNotchUnits,\s*precision\)\s*=>[\s\S]*timelineWheelInputBlockedCount[\s\S]*timelineWheelBlockedNotchUnits\s*\+=\s*notchUnits[\s\S]*timelineWheelBlockedSignedNotchBalance\s*\+=\s*signedNotchUnits[\s\S]*timelineWheelBlockedPrecisionCount/.test(
+			handlerSource))
+		verify(/onWheelInputExpired:\s*distance\s*=>\s*\n?\s*root\.timelineWheelExpiredDistance\s*\+=\s*distance/.test(
+			handlerSource))
 		verify(/"wheelInputObservedCount":\s*root\.timelineWheelInputObservedCount/.test(mainSource))
+		verify(/"wheelObservedNotchUnits":\s*root\.timelineWheelObservedNotchUnits/.test(mainSource))
+		verify(/"wheelObservedSignedNotchBalance":\s*[\s\S]*root\.timelineWheelObservedSignedNotchBalance/.test(mainSource))
 		verify(/"wheelInputAdmittedNotchUnits":\s*[\s\S]*root\.timelineWheelInputAdmittedNotchUnits/.test(mainSource))
 		verify(/"wheelInputDroppedNotchUnits":\s*[\s\S]*root\.timelineWheelInputDroppedNotchUnits/.test(mainSource))
+		verify(/"wheelInputBlockedCount":\s*root\.timelineWheelInputBlockedCount/.test(mainSource))
+		verify(/"wheelBlockedNotchUnits":\s*root\.timelineWheelBlockedNotchUnits/.test(mainSource))
+		verify(/"wheelBlockedSignedNotchBalance":\s*[\s\S]*root\.timelineWheelBlockedSignedNotchBalance/.test(mainSource))
+		verify(/"wheelBlockedPrecisionCount":\s*root\.timelineWheelBlockedPrecisionCount/.test(mainSource))
+		verify(/"scrollbarReleaseWheelTakeoverCount":\s*[\s\S]*root\.timelineScrollbarReleaseWheelTakeoverCount/.test(mainSource))
+		verify(/"wheelExpiredDistance":\s*root\.timelineWheelExpiredDistance/.test(mainSource))
+		verify(/"scrollbarReleasePending":\s*timeline\.scrollbarReleasePending/.test(mainSource))
 	}
 
 	function test_chat_scroll_reports_delegate_materialization_diagnostics() {

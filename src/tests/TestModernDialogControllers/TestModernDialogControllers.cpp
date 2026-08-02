@@ -3860,6 +3860,25 @@ void TestModernDialogControllers::persistentChatHistoryWarmupStaysViewportBounde
 	QVERIFY(automationSource.contains(QStringLiteral("qmlRequestOlderMessages")));
 	QVERIFY(automationSource.contains(QStringLiteral("requestOlderMessagesPreservingAnchor")));
 	QVERIFY(automationSource.contains(QStringLiteral("qmlPrepareHistoryLoadPerformanceProbe")));
+	QVERIFY(automationSource.contains(QStringLiteral("qmlPerformanceChatStructuralStimulus")));
+	const qsizetype stimulusCommandStart = automationSource.indexOf(
+		QStringLiteral("command == QLatin1String(\"qmlPerformanceChatStructuralStimulus\")"));
+	const qsizetype stimulusCommandEnd = automationSource.indexOf(
+		QStringLiteral("command == QLatin1String(\"qmlPerformanceChatScrollRun\")"),
+		stimulusCommandStart);
+	QVERIFY(stimulusCommandStart >= 0);
+	QVERIFY(stimulusCommandEnd > stimulusCommandStart);
+	const QString stimulusCommand = automationSource.mid(
+		stimulusCommandStart, stimulusCommandEnd - stimulusCommandStart);
+	QVERIFY(stimulusCommand.contains(QStringLiteral("arg(++m_performanceInputSequence)")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("requireScrollbarReleasePending")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("scrollbarReleasePendingAtMutation")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("chat->rowForStableId(messageKey) >= 0")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("chat->appendMessages(QVariantList { message })")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("afterCount != beforeCount + 1")));
+	QVERIFY(stimulusCommand.contains(QStringLiteral("chat->rowForStableId(messageKey) < 0")));
+	QVERIFY(automationSource.contains(QStringLiteral("host->setVisualFixtureMutationActive(true)")));
+	QVERIFY(automationSource.contains(QStringLiteral("qScopeGuard")));
 	const QString historyProbeQml =
 		readTestSource(QFINDTESTDATA("../../mumble/qml-shell/Main.qml"));
 	QVERIFY(historyProbeQml.contains(QStringLiteral("prepareHistoryLoadPerformanceProbe")));

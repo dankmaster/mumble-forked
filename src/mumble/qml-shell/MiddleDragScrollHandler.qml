@@ -8,6 +8,13 @@ import QtQuick
 MouseArea {
 	id: handler
 	required property Flickable targetFlickable
+	// The surface owner can temporarily reserve contentY for a scope transaction,
+	// an attached scrollbar gesture, or a deterministic performance workload.
+	// Keep the overlay present so blocked wheel packets are consumed instead of
+	// leaking to Flickable, while all pointer-driven writes remain disabled.
+	property bool navigationEnabled: true
+	readonly property bool navigationAvailable: navigationEnabled
+		&& targetFlickable !== null && targetFlickable.interactive
 	property bool horizontalEnabled: true
 	property bool verticalEnabled: true
 	property real deadZone: 10
@@ -20,29 +27,42 @@ MouseArea {
 	property double lastTickTimestamp: 0
 	property bool gestureActive: false
 	property bool scrolling: false
+	// cancelFlick() may synchronously emit Flickable.movementEnded. Publish this
+	// narrow handoff token before canceling the native writer so the surface owner
+	// cannot settle tail/anchor state between the old and new input owners.
+	property bool navigationTransitionActive: false
 	// Traditional mouse wheels arrive as coarse 120-unit angle steps. Let product
 	// surfaces opt into a frame-synchronised interpolation for those steps so a
 	// virtualized list does not have to construct and present a new row in the
 	// same instant. Pixel-based touchpads remain on Flickable's native path.
 	property bool smoothWheelEnabled: false
 	property real wheelStep: 96
-	property real wheelResponse: 28
-	// Keep a short, bounded input runway so a burst cannot turn into a long
-	// delayed scroll. A reversal is retargeted from the viewport immediately.
-	readonly property int maximumQueuedWheelSteps: 4
-	readonly property real maximumWheelVelocity: 960
-	readonly property real maximumWheelAnimationSeconds: 0.65
-	readonly property real maximumWheelBufferedDistance: Math.min(
-		Math.abs(wheelStep) * maximumQueuedWheelSteps,
-		maximumWheelVelocity * maximumWheelAnimationSeconds)
+	// Preserve every conventional wheel notch the app actually receives, while
+	// bounding the outstanding distance to a short physical gesture. The linear
+	// drain is intentionally fast: smoothing must not make the wheel feel slower.
+	readonly property int maximumBufferedWheelUnits: 12
+	readonly property int maximumQueuedWheelSteps: maximumBufferedWheelUnits
+	readonly property real maximumWheelDrainUnitsPerSecond: 50
+	readonly property real maximumWheelFrameUnits: 1.5
+	readonly property real maximumWheelVelocity: Math.abs(wheelStep)
+		* maximumWheelDrainUnitsPerSecond
+	readonly property real maximumWheelAnimationSeconds: 0.4
+	readonly property real maximumWheelBufferedDistance: Math.abs(wheelStep)
+		* maximumBufferedWheelUnits
+	property real wheelPendingDistance: 0
 	property real wheelTargetY: 0
 	property bool wheelAnimationActive: false
-	property double wheelAnimationStartedAt: 0
+	property double wheelLastInputAt: 0
+	property real wheelExpiredDistance: 0
 	signal scrollingStarted()
 	signal scrollingEnded()
 	signal wheelInputObserved()
+	signal wheelAngleUnitsObserved(int notchUnits, int signedNotchUnits)
 	signal wheelInputAdmitted(int notchUnits)
 	signal wheelInputDropped(int notchUnits)
+	signal wheelInputExpired(real distance)
+	signal wheelInputBlocked(int notchUnits, int signedNotchUnits, bool precision)
+	signal wheelInputPassedThrough()
 
 	anchors.fill: parent
 	acceptedButtons: Qt.MiddleButton
@@ -69,18 +89,24 @@ MouseArea {
 	}
 
 	function beginDrag(x, y) {
+		if (!navigationAvailable)
+			return false
 		if (gestureActive)
 			endDrag()
-		targetFlickable.cancelFlick()
 		originX = x
 		originY = y
 		pointerX = x
 		pointerY = y
 		lastTickTimestamp = Date.now()
 		gestureActive = true
+		beginScrollingActivity()
+		navigationTransitionActive = true
+		targetFlickable.cancelFlick()
 		// A middle drag takes ownership without briefly ending the active scrolling
 		// state between the wheel animation and the pointer-driven continuation.
 		cancelSmoothWheel()
+		navigationTransitionActive = false
+		return true
 	}
 
 	function dragTo(x, y) {
@@ -112,6 +138,10 @@ MouseArea {
 	}
 
 	function advanceScroll(elapsedMilliseconds) {
+		if (!navigationAvailable) {
+			cancelNavigationForOwnershipLoss()
+			return false
+		}
 		if (!gestureActive)
 			return false
 		// Avoid a large jump when rendering or the process was temporarily stalled.
@@ -135,96 +165,160 @@ MouseArea {
 	}
 
 	function shouldSmoothWheel(angleDeltaY, pixelDeltaY) {
-		if (!smoothWheelEnabled || !verticalEnabled)
+		if (!navigationAvailable || !smoothWheelEnabled || !verticalEnabled)
 			return false
 		const pixels = Math.abs(Number(pixelDeltaY) || 0)
 		const angle = Math.abs(Number(angleDeltaY) || 0)
 		// High-resolution wheels and precision touchpads already provide fine-grained
 		// deltas. Only replace the coarse, conventional mouse-wheel step.
+		const units = angle / 120
 		return pixels < 0.01 && angle >= 120
+			&& Math.abs(units - Math.round(units)) <= 0.001
+	}
+
+	function wheelPendingRange(currentY, stepMagnitude) {
+		return {
+			"maximumDistance": Math.max(stepMagnitude, maximumWheelBufferedDistance),
+			"minimumPending": targetFlickable.originY - currentY,
+			"maximumPending": clampedContentY(Number.POSITIVE_INFINITY) - currentY
+		}
+	}
+
+	function normalizeWheelPendingDistance(pending, range) {
+		return Math.max(range.minimumPending, Math.min(range.maximumPending,
+			Math.max(-range.maximumDistance, Math.min(range.maximumDistance, pending))))
+	}
+
+	function accountWheelPendingNormalization(previousPending, normalizedPending) {
+		const expiredDistance = Math.abs(previousPending - normalizedPending)
+		if (expiredDistance <= 0.35)
+			return
+		wheelExpiredDistance += expiredDistance
+		wheelInputExpired(expiredDistance)
 	}
 
 	function queueSmoothWheelDelta(angleDeltaY) {
-		if (!smoothWheelEnabled || !verticalEnabled)
+		if (!navigationAvailable || !smoothWheelEnabled || !verticalEnabled)
 			return false
 		const angle = Number(angleDeltaY) || 0
-		if (Math.abs(angle) < 0.01)
+		const requestedUnits = Math.round(Math.abs(angle) / 120)
+		if (requestedUnits <= 0
+				|| Math.abs(Math.abs(angle) / 120 - requestedUnits) > 0.001)
 			return false
-		targetFlickable.cancelFlick()
 		const currentY = targetFlickable.contentY
-		const requestedOffset = -(angle / 120) * wheelStep
-		const requestedSteps = Math.max(1, Math.round(Math.abs(angle) / 120))
 		const stepMagnitude = Math.max(0.01, Math.abs(Number(wheelStep) || 0))
-		const maximumDistance = Math.max(0.01, maximumWheelBufferedDistance)
-		const direction = requestedOffset < 0 ? -1 : 1
-		let baseY = currentY
-		let sameDirection = false
-		if (wheelAnimationActive) {
-			wheelTargetY = clampedContentY(wheelTargetY)
-			const activeOffset = wheelTargetY - currentY
-			sameDirection = Math.abs(activeOffset) > 0.01
-				&& (activeOffset < 0) === (requestedOffset < 0)
-			// Same-direction notches extend the existing runway. Opposite-direction
-			// input starts from the current viewport instead of walking back through
-			// stale backlog.
-			if (sameDirection)
-				baseY = wheelTargetY
+		const direction = angle < 0 ? 1 : -1
+		const pendingRange = wheelPendingRange(currentY, stepMagnitude)
+		const previousPending = wheelAnimationActive ? wheelPendingDistance : 0
+		let pending = normalizeWheelPendingDistance(previousPending, pendingRange)
+		accountWheelPendingNormalization(previousPending, pending)
+		// A direction reversal is a new gesture, not a request to drain the old
+		// runway first. Rebase at the presented viewport so no stale-direction tail
+		// survives behind the opposite packet.
+		if (Math.abs(pending) > 0.35 && direction * pending < 0)
+			pending = 0
+		let admittedUnits = 0
+		let droppedUnits = 0
+		// A signed transition can cross at most the full negative-to-positive
+		// runway. Bound synchronous work to that state space, then account every
+		// remaining unit as one aggregate drop instead of looping on raw input size.
+		const maximumTransitionUnits = Math.max(1,
+			maximumBufferedWheelUnits * 2 + 2)
+		const transitionUnits = Math.min(requestedUnits, maximumTransitionUnits)
+		for (let unit = 0; unit < transitionUnits; ++unit) {
+			const candidate = Math.max(-pendingRange.maximumDistance,
+				Math.min(pendingRange.maximumDistance,
+				pending + direction * stepMagnitude))
+			const boundedCandidate = Math.max(pendingRange.minimumPending,
+				Math.min(pendingRange.maximumPending, candidate))
+			const admittedDistance = direction * (boundedCandidate - pending)
+			pending = boundedCandidate
+			if (admittedDistance >= stepMagnitude - 0.5)
+				++admittedUnits
+			else
+				++droppedUnits
 		}
-		const requestedTargetY = clampedContentY(baseY + requestedOffset)
-		const maximumTargetY = clampedContentY(currentY + direction * maximumDistance)
-		let nextTargetY = requestedTargetY
-		if (direction < 0)
-			nextTargetY = Math.max(nextTargetY, maximumTargetY)
-		else
-			nextTargetY = Math.min(nextTargetY, maximumTargetY)
-		nextTargetY = clampedContentY(nextTargetY)
-		const admittedDistance = Math.abs(nextTargetY - baseY)
-		const admittedSteps = Math.min(requestedSteps,
-			Math.max(0, Math.floor(admittedDistance / stepMagnitude + 0.01)))
-		const droppedSteps = Math.max(0, requestedSteps - admittedSteps)
-		if (admittedSteps > 0)
-			wheelInputAdmitted(admittedSteps)
-		if (droppedSteps > 0)
-			wheelInputDropped(droppedSteps)
-		// A deliberate cap/bound drop is still consumed by this handler. Letting it
-		// fall through would make Flickable apply the same coarse packet natively.
-		if (Math.abs(nextTargetY - baseY) <= 0.01) {
-			// An opposite packet at a physical bound must also cancel the old target.
-			// Otherwise the consumed packet leaves a stale runway active and the next
-			// frame resumes motion in the direction the user just rejected.
-			if (wheelAnimationActive && !sameDirection)
-				finishSmoothWheel()
+		droppedUnits += requestedUnits - transitionUnits
+		if (admittedUnits > 0)
+			wheelInputAdmitted(admittedUnits)
+		if (droppedUnits > 0)
+			wheelInputDropped(droppedUnits)
+		wheelPendingDistance = pending
+		wheelTargetY = clampedContentY(currentY + wheelPendingDistance)
+		wheelLastInputAt = Date.now()
+		// Capacity and physical-bound drops are consumed here. Falling through would
+		// let Flickable apply the same coarse packet a second time.
+		if (Math.abs(wheelPendingDistance) <= 0.35) {
+			// Even a consumed physical-bound no-op owns this input turn. Publish a
+			// balanced start/end pair so synchronous native movementEnded is ignored,
+			// then settle exactly once through scrollingEnded below.
+			navigationTransitionActive = true
+			wheelAnimationActive = true
+			beginScrollingActivity()
+			targetFlickable.cancelFlick()
+			navigationTransitionActive = false
+			finishSmoothWheel()
 			return true
 		}
-		if (!wheelAnimationActive || !sameDirection)
-			wheelAnimationStartedAt = Date.now()
-		wheelTargetY = nextTargetY
+		navigationTransitionActive = true
 		wheelAnimationActive = true
 		beginScrollingActivity()
+		targetFlickable.cancelFlick()
+		navigationTransitionActive = false
 		return true
 	}
 
 	function finishSmoothWheel() {
-		if (!wheelAnimationActive)
-			return
+		const wasActive = wheelAnimationActive
 		wheelAnimationActive = false
-		wheelTargetY = clampedContentY(targetFlickable.contentY)
-		wheelAnimationStartedAt = 0
-		endScrollingActivityIfIdle()
+		wheelPendingDistance = 0
+		wheelTargetY = targetFlickable !== null
+			? clampedContentY(targetFlickable.contentY) : 0
+		wheelLastInputAt = 0
+		if (wasActive)
+			endScrollingActivityIfIdle()
 	}
 
 	function cancelSmoothWheel() {
 		finishSmoothWheel()
 	}
 
+	function cancelNavigationForOwnershipLoss() {
+		// Another owner is about to write contentY. Do not emit scrollingEnded:
+		// ordinary wheel settlement may classify tail intent or capture an anchor,
+		// neither of which belongs inside a scope/thumb/performance handoff.
+		gestureActive = false
+		wheelAnimationActive = false
+		wheelPendingDistance = 0
+		wheelTargetY = targetFlickable !== null
+			? clampedContentY(targetFlickable.contentY) : 0
+		wheelLastInputAt = 0
+		scrolling = false
+		// Pixel wheels and non-discrete angle packets deliberately use Flickable's
+		// native kinetic path. Ownership transitions that have already published
+		// their guard must stop that writer as well as the custom runway.
+		if (targetFlickable !== null) {
+			navigationTransitionActive = true
+			targetFlickable.cancelFlick()
+			navigationTransitionActive = false
+		}
+	}
+
 	function advanceSmoothWheel(elapsedSeconds) {
 		if (!wheelAnimationActive)
 			return false
-		wheelTargetY = clampedContentY(wheelTargetY)
+		if (!navigationAvailable) {
+			cancelNavigationForOwnershipLoss()
+			return false
+		}
 		const currentY = targetFlickable.contentY
-		const distance = wheelTargetY - currentY
-		if (Math.abs(distance) <= 0.35) {
-			targetFlickable.contentY = wheelTargetY
+		const stepMagnitude = Math.max(0.01, Math.abs(Number(wheelStep) || 0))
+		const pendingRange = wheelPendingRange(currentY, stepMagnitude)
+		const previousPending = wheelPendingDistance
+		wheelPendingDistance = normalizeWheelPendingDistance(previousPending, pendingRange)
+		accountWheelPendingNormalization(previousPending, wheelPendingDistance)
+		wheelTargetY = clampedContentY(currentY + wheelPendingDistance)
+		if (Math.abs(wheelPendingDistance) <= 0.35) {
 			finishSmoothWheel()
 			return false
 		}
@@ -235,28 +329,29 @@ MouseArea {
 			Math.min(1 / 30, Number(elapsedSeconds) || 0))
 		if (frameSeconds <= 0)
 			return false
-		const response = Math.max(1, Number(wheelResponse) || 1)
-		const progress = 1 - Math.exp(-response * frameSeconds)
-		const requestedDisplacement = Math.abs(distance) * progress
-		const maximumFrameDisplacement = maximumWheelVelocity * frameSeconds
-		const frameDisplacement = Math.min(requestedDisplacement, maximumFrameDisplacement)
+		const maximumFrameDisplacement = Math.min(
+			stepMagnitude * maximumWheelFrameUnits,
+			maximumWheelVelocity * frameSeconds)
+		const frameDisplacement = Math.min(Math.abs(wheelPendingDistance),
+			maximumFrameDisplacement)
 		const nextY = clampedContentY(currentY
-			+ (distance < 0 ? -frameDisplacement : frameDisplacement))
+			+ (wheelPendingDistance < 0 ? -frameDisplacement : frameDisplacement))
 		targetFlickable.contentY = nextY
-		if (Math.abs(wheelTargetY - targetFlickable.contentY) <= 0.35) {
-			targetFlickable.contentY = wheelTargetY
+		const appliedDisplacement = targetFlickable.contentY - currentY
+		wheelPendingDistance -= appliedDisplacement
+		wheelTargetY = clampedContentY(targetFlickable.contentY + wheelPendingDistance)
+		if (Math.abs(appliedDisplacement) + 0.01 < frameDisplacement) {
+			// Geometry changed or a physical bound was reached after admission. Never
+			// leave an unreachable target running behind the user's next gesture.
 			finishSmoothWheel()
-		} else if (wheelAnimationStartedAt > 0
-				&& (Date.now() - wheelAnimationStartedAt) / 1000
+		} else if (Math.abs(wheelPendingDistance) <= 0.35) {
+			finishSmoothWheel()
+		} else if (wheelLastInputAt > 0
+				&& (Date.now() - wheelLastInputAt) / 1000
 				>= maximumWheelAnimationSeconds) {
-			const remainingDistance = Math.abs(wheelTargetY - targetFlickable.contentY)
-			const finalFrameBudget = Math.max(0,
-				maximumFrameDisplacement - frameDisplacement) + 0.35
-			// Expiry may only close a legal residual. If a stalled renderer left more
-			// distance than one frame can cover, finish at the already-presented value
-			// and clear the target rather than teleporting beyond the velocity budget.
-			if (remainingDistance <= finalFrameBudget)
-				targetFlickable.contentY = wheelTargetY
+			const expiredDistance = Math.abs(wheelPendingDistance)
+			wheelExpiredDistance += expiredDistance
+			wheelInputExpired(expiredDistance)
 			finishSmoothWheel()
 		}
 		return Math.abs(targetFlickable.contentY - currentY) > 0.01
@@ -298,25 +393,59 @@ MouseArea {
 
 	FrameAnimation {
 		id: smoothWheelFrame
-		running: handler.enabled && handler.wheelAnimationActive
+		running: handler.enabled && handler.navigationAvailable
+			&& handler.wheelAnimationActive
 		onTriggered: handler.advanceSmoothWheel(frameTime)
 	}
 
 	onWheel: event => {
 		const angleY = event.angleDelta ? event.angleDelta.y : 0
 		const pixelY = event.pixelDelta ? event.pixelDelta.y : 0
+		const hasWheelInput = Math.abs(angleY) > 0.01 || Math.abs(pixelY) > 0.01
+		const observedNotchUnits = Math.floor(Math.abs(angleY) / 120 + 0.0001)
+		const observedSignedNotchUnits = angleY < 0
+			? observedNotchUnits : -observedNotchUnits
 		// Owners need to classify native wheel/touchpad movement before this
 		// handler deliberately passes precision deltas through to Flickable.
-		if (Math.abs(angleY) > 0.01 || Math.abs(pixelY) > 0.01)
+		if (hasWheelInput) {
 			wheelInputObserved()
+			if (observedNotchUnits > 0)
+				wheelAngleUnitsObserved(observedNotchUnits,
+					observedSignedNotchUnits)
+		}
+		if (!navigationAvailable) {
+			cancelNavigationForOwnershipLoss()
+			event.accepted = hasWheelInput
+			if (hasWheelInput)
+				wheelInputBlocked(observedNotchUnits,
+					observedSignedNotchUnits, Math.abs(pixelY) > 0.01)
+			return
+		}
+		if (gestureActive) {
+			// The held middle-button gesture already owns contentY. Consume wheel
+			// packets instead of starting a second custom or native writer.
+			event.accepted = hasWheelInput
+			if (hasWheelInput)
+				wheelInputBlocked(observedNotchUnits,
+					observedSignedNotchUnits, Math.abs(pixelY) > 0.01)
+			return
+		}
 		if (shouldSmoothWheel(angleY, pixelY)) {
 			event.accepted = queueSmoothWheelDelta(angleY)
 			return
 		}
-		// The underlying Flickable keeps native precision-wheel/touchpad kinetics.
-		cancelSmoothWheel()
+		// Phase-only native lifecycle packets (notably a delayed ScrollEnd) must not
+		// cancel a newer custom coarse-wheel runway. Only a packet with actual delta
+		// hands motion back to Flickable and cancels custom work.
+		if (hasWheelInput)
+			cancelSmoothWheel()
 		event.accepted = false
+		if (hasWheelInput)
+			wheelInputPassedThrough()
 	}
 
-	onEnabledChanged: if (!enabled) cancelSmoothWheel()
+	onEnabledChanged: if (!enabled) cancelNavigationForOwnershipLoss()
+	onNavigationAvailableChanged: if (!navigationAvailable) {
+		cancelNavigationForOwnershipLoss()
+	}
 }

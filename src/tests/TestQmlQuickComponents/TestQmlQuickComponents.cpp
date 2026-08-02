@@ -680,6 +680,9 @@ public:
 		m_receiptCount = 0;
 		m_lastAngleDeltaY = 0;
 		m_lastPixelDeltaY = 0;
+		m_angleDeltaYTotal = 0;
+		m_pixelDeltaYTotal = 0;
+		m_scrollEndReceiptCount = 0;
 		m_lastPhase = Qt::NoScrollPhase;
 	}
 
@@ -688,6 +691,9 @@ public:
 			{QStringLiteral("count"), m_receiptCount},
 			{QStringLiteral("angleDeltaY"), m_lastAngleDeltaY},
 			{QStringLiteral("pixelDeltaY"), m_lastPixelDeltaY},
+			{QStringLiteral("angleDeltaYTotal"), m_angleDeltaYTotal},
+			{QStringLiteral("pixelDeltaYTotal"), m_pixelDeltaYTotal},
+			{QStringLiteral("scrollEndCount"), m_scrollEndReceiptCount},
 			{QStringLiteral("phase"), static_cast<int>(m_lastPhase)}
 		};
 	}
@@ -709,7 +715,11 @@ protected:
 			++m_receiptCount;
 			m_lastAngleDeltaY = wheelEvent->angleDelta().y();
 			m_lastPixelDeltaY = wheelEvent->pixelDelta().y();
+			m_angleDeltaYTotal += m_lastAngleDeltaY;
+			m_pixelDeltaYTotal += m_lastPixelDeltaY;
 			m_lastPhase = wheelEvent->phase();
+			if (m_lastPhase == Qt::ScrollEnd)
+				++m_scrollEndReceiptCount;
 		}
 		return QObject::eventFilter(watched, event);
 	}
@@ -719,6 +729,9 @@ private:
 	int m_receiptCount = 0;
 	int m_lastAngleDeltaY = 0;
 	int m_lastPixelDeltaY = 0;
+	int m_angleDeltaYTotal = 0;
+	int m_pixelDeltaYTotal = 0;
+	int m_scrollEndReceiptCount = 0;
 	Qt::ScrollPhase m_lastPhase = Qt::NoScrollPhase;
 };
 

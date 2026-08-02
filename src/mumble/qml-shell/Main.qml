@@ -88,6 +88,7 @@ ApplicationWindow {
     color: Theme.strip
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
+	property bool performanceChatScrollOwnershipActive: false
 	property bool performanceChatScrollRunning: false
 	property bool performanceChatScrollFullRangeToStart: false
 	property int performanceChatScrollCompletedSteps: 0
@@ -105,8 +106,16 @@ ApplicationWindow {
 	// handler's admitted and deliberately consumed overflow without resetting a
 	// live gesture or exposing ownership state.
 	property int timelineWheelInputObservedCount: 0
+	property int timelineWheelObservedNotchUnits: 0
+	property int timelineWheelObservedSignedNotchBalance: 0
 	property int timelineWheelInputAdmittedNotchUnits: 0
 	property int timelineWheelInputDroppedNotchUnits: 0
+	property int timelineWheelInputBlockedCount: 0
+	property int timelineWheelBlockedNotchUnits: 0
+	property int timelineWheelBlockedSignedNotchBalance: 0
+	property int timelineWheelBlockedPrecisionCount: 0
+	property int timelineScrollbarReleaseWheelTakeoverCount: 0
+	property real timelineWheelExpiredDistance: 0
 	readonly property bool compactNavigation: width < 900
 	readonly property bool narrowShell: width < 600
 	readonly property string normalizedConnectionState: String(clientSession.connectionState || "").toLowerCase()
@@ -1784,6 +1793,12 @@ ApplicationWindow {
 		if (liveRangeUnavailable || fixtureRangeUnavailable)
 			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
+		// The deterministic workload owns contentY from this point onward. Retire
+		// native Flickable kinetics and the custom runway before capturing its start
+		// position. Publish the guard first because cancelFlick() may synchronously
+		// emit movementEnded.
+		performanceChatScrollOwnershipActive = true
+		timelineScrollHandler.cancelNavigationForOwnershipLoss()
 		performanceChatScrollStartY = timeline.contentY
 		if (fullRangeToStart === true) {
 			// The release gate starts from the real tail and traverses every loaded
@@ -1914,6 +1929,7 @@ ApplicationWindow {
 				timeline.captureViewportAnchor()
 		}
 		performanceChatScrollRunning = false
+		performanceChatScrollOwnershipActive = false
 		performanceChatScrollFullRangeToStart = false
 		// A programmatic workload has no pointer/flick movementEnded signal.
 		// Wake only after the scrolling bindings have observed the stopped
@@ -2060,11 +2076,23 @@ ApplicationWindow {
 				"flicking": timeline.flicking,
 				"scrollHandlerScrolling": timelineScrollHandler.scrolling,
 				"scrollbarPressed": timelineScrollBar.pressed,
+				"scrollbarReleasePending": timeline.scrollbarReleasePending,
 				"wheelInputObservedCount": root.timelineWheelInputObservedCount,
+				"wheelObservedNotchUnits": root.timelineWheelObservedNotchUnits,
+				"wheelObservedSignedNotchBalance":
+					root.timelineWheelObservedSignedNotchBalance,
 				"wheelInputAdmittedNotchUnits":
 					root.timelineWheelInputAdmittedNotchUnits,
 				"wheelInputDroppedNotchUnits":
 					root.timelineWheelInputDroppedNotchUnits,
+				"wheelInputBlockedCount": root.timelineWheelInputBlockedCount,
+				"wheelBlockedNotchUnits": root.timelineWheelBlockedNotchUnits,
+				"wheelBlockedSignedNotchBalance":
+					root.timelineWheelBlockedSignedNotchBalance,
+				"wheelBlockedPrecisionCount": root.timelineWheelBlockedPrecisionCount,
+				"scrollbarReleaseWheelTakeoverCount":
+					root.timelineScrollbarReleaseWheelTakeoverCount,
+				"wheelExpiredDistance": root.timelineWheelExpiredDistance,
 				"explicitWheelInputPending": timeline.explicitWheelInputPending,
 				"explicitNavigationMovement": timeline.explicitNavigationMovement,
 				"lastMovementClassification": timeline.lastMovementClassification,
@@ -2275,9 +2303,9 @@ ApplicationWindow {
     Connections {
         target: activeScope
 		function onScopeTokenChanged() {
+			timeline.beginScopeChange()
 			root.closeQuickReactions()
 			root.clearPreviewHydrationQueue()
-			timeline.beginScopeChange()
 			if (root.conversationSearchOpen)
 				root.closeConversationSearch(false)
 		}
@@ -3327,10 +3355,10 @@ ApplicationWindow {
 								timeline.scrollbarReleaseGuardTimer.stop()
 								timeline.scrollbarReleasePending = false
 								timeline.scrollbarDragActive = true
+								// Publish thumb ownership before cancelFlick(), which can emit
+								// movementEnded synchronously for native precision-wheel kinetics.
+								timelineScrollHandler.cancelNavigationForOwnershipLoss()
 								timeline.takeExplicitNavigationOwnership("scrollbar")
-								// Cancel after ownership changes so a smooth-wheel finish
-								// cannot publish tail intent into the thumb gesture.
-								timelineScrollHandler.cancelSmoothWheel()
 							} else {
 								timeline.finishScrollbarDrag()
 							}
@@ -3340,11 +3368,20 @@ ApplicationWindow {
 						id: timelineScrollHandler
 						targetFlickable: timeline
 						horizontalEnabled: false
-						smoothWheelEnabled: false
+						navigationEnabled: timeline.interactive
+							&& !timeline.scopePresentationPending
+							&& !timeline.scrollbarDragActive
+							&& !timeline.scrollbarReleasePending
+							&& !timelineScrollBar.pressed
+							&& !root.performanceChatScrollOwnershipActive
+							&& !root.performanceChatScrollRunning
+						smoothWheelEnabled: true
 						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
 						onScrollingStarted:
 							timeline.takeExplicitNavigationOwnership("wheel-or-middle-drag")
 						onScrollingEnded: {
+							if (!timelineScrollHandler.navigationAvailable)
+								return
 							if (timeline.scrollbarDragActive
 									|| timeline.scrollbarReleasePending
 									|| timelineScrollBar.pressed) {
@@ -3358,13 +3395,28 @@ ApplicationWindow {
 							timeline.scheduleRichContentResume()
 						}
 					onWheelInputObserved: {
-						timeline.noteExplicitWheelInput()
 						++root.timelineWheelInputObservedCount
+						timeline.releaseScrollbarGuardForWheelInput()
+					}
+					onWheelInputPassedThrough: if (timelineScrollHandler.navigationAvailable)
+						timeline.noteExplicitWheelInput()
+					onWheelAngleUnitsObserved: (notchUnits, signedNotchUnits) => {
+						root.timelineWheelObservedNotchUnits += notchUnits
+						root.timelineWheelObservedSignedNotchBalance += signedNotchUnits
 					}
 					onWheelInputAdmitted: notchUnits =>
 						root.timelineWheelInputAdmittedNotchUnits += notchUnits
 					onWheelInputDropped: notchUnits =>
 						root.timelineWheelInputDroppedNotchUnits += notchUnits
+					onWheelInputBlocked: (notchUnits, signedNotchUnits, precision) => {
+						++root.timelineWheelInputBlockedCount
+						root.timelineWheelBlockedNotchUnits += notchUnits
+						root.timelineWheelBlockedSignedNotchBalance += signedNotchUnits
+						if (precision)
+							++root.timelineWheelBlockedPrecisionCount
+					}
+					onWheelInputExpired: distance =>
+						root.timelineWheelExpiredDistance += distance
 					}
 					// Keep less than one extra viewport of delegates warm. Rich preview
 					// loaders incubate asynchronously, so a multi-viewport cache only makes
@@ -3640,6 +3692,10 @@ ApplicationWindow {
 					}
 
 					function beginScopeChange() {
+						// Publish the scope owner before cancelFlick(): Qt may synchronously
+						// emit movementEnded while retiring a native precision-wheel flick.
+						scopePresentationPending = true
+						timelineScrollHandler.cancelNavigationForOwnershipLoss()
 						richScrollRetentionRampTimer.stop()
 						viewportMembershipTimer.stop()
 						viewportMembershipUpdatePending = false
@@ -3700,7 +3756,6 @@ ApplicationWindow {
 						scopePresentationFinalizeDeadlineTimer.stop()
 						scopePresentationObservationTimer.stop()
 						++scopePresentationGeneration
-						scopePresentationPending = true
 						scopePresentationFinalizing = false
 						scopePresentationFastPath = false
 						scopePresentationObservationActive = false
@@ -4131,6 +4186,8 @@ ApplicationWindow {
 								&& loadedImplicitHeight > 0
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
+								"modelIndex": isFinite(Number(item.index))
+									? Number(item.index) : -1,
 								"title": String(item.title || ""),
 								"subtitle": String(item.subtitle || ""),
 								"height": Number(item.height || 0),
@@ -5107,11 +5164,24 @@ ApplicationWindow {
 						staticPreviewSweepCompleted = true
 					}
 
+					function releaseScrollbarGuardForWheelInput() {
+						if (!scrollbarReleasePending || scrollbarDragActive
+								|| timelineScrollBar.pressed || scopePresentationPending
+								|| !interactive || root.performanceChatScrollOwnershipActive
+								|| root.performanceChatScrollRunning)
+							return false
+						// Keep one bounded fallback wakeup. Actual coarse/native movement
+						// transfers ownership and stops this timer; an edge-clamped precision
+						// packet has no movement signal, so the fallback must still resume
+						// membership and rich-content recovery after the input turn.
+						scrollbarReleaseGuardTimer.restart()
+						scrollbarReleasePending = false
+						++root.timelineScrollbarReleaseWheelTakeoverCount
+						return true
+					}
+
 					function noteExplicitWheelInput() {
-						if (scrollbarReleasePending && !scrollbarDragActive) {
-							scrollbarReleaseGuardTimer.stop()
-							scrollbarReleasePending = false
-						}
+						releaseScrollbarGuardForWheelInput()
 						const generation = ++explicitWheelInputGeneration
 						explicitWheelInputStartY = contentY
 						explicitWheelInputPending = true
@@ -6267,6 +6337,13 @@ ApplicationWindow {
 					onMovementEnded: {
 						const explicitNavigation = explicitNavigationMovement
 						explicitNavigationMovement = false
+						if (timelineScrollHandler.navigationTransitionActive
+								|| timelineScrollHandler.gestureActive
+								|| timelineScrollHandler.scrolling || scopePresentationPending
+								|| root.performanceChatScrollOwnershipActive) {
+							scheduleViewportMembershipUpdate()
+							return
+						}
 						if (scrollbarDragActive || scrollbarReleasePending
 								|| timelineScrollBar.pressed) {
 							scheduleViewportMembershipUpdate()
