@@ -253,7 +253,7 @@ TestCase {
 		verify(/id:\s*chatMessageFrameWarmupLoader[\s\S]*active:\s*true[\s\S]*asynchronous:\s*false[\s\S]*visible:\s*false[\s\S]*stableId:\s*"__shell_warmup__"[\s\S]*accessibilityBarrierEnabled:\s*false/.test(mainSource))
 		verify(!/id:\s*chatMessageFrameWarmupLoader[\s\S]{0,360}active\s*=\s*false/.test(mainSource))
 		verify(/id:\s*chatMessageDelegateWarmupModel[\s\S]*"stableId":\s*"__delegate_warmup__"[\s\S]*"preview":\s*\(\{\}\)[\s\S]*"attachments":\s*\[\][\s\S]*id:\s*chatMessageDelegateWarmupList[\s\S]*visible:\s*false[\s\S]*model:\s*chatMessageDelegateWarmupModel[\s\S]*delegate:\s*timeline\.delegate[\s\S]*Accessible\.ignored:\s*true/.test(mainSource))
-		verify(/id:\s*asyncMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending[\s\S]*height:\s*Math\.max\(timeline\.deferredMessageRowHeight,[\s\S]*deferredPresentationHeight,[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0,[\s\S]*!richGeometrySettling\s*&&\s*item\s*\?\s*item\.implicitHeight\s*:\s*0\)[\s\S]*clip:\s*richGeometrySettling[\s\S]*function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(mainSource))
+		verify(/id:\s*asyncMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending[\s\S]*presentationHeightCommittedHeight[\s\S]*height:\s*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0[\s\S]*clip:\s*richGeometrySettling[\s\S]*function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(mainSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*readonly property string presentationSummary:[\s\S]*\[title,\s*subtitle,\s*timestamp\][\s\S]*visible:\s*asyncMessageDelegate\.active[\s\S]*!asyncMessageDelegate\.item[\s\S]*!asyncMessageDelegate\.item\.currentMessagePresentationReady[\s\S]*richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive[\s\S]*richLoaderSuspended[\s\S]*richResourcesRequired[\s\S]*previewNeedsHydration[\s\S]*previewLoaderIncubationSuppressed[\s\S]*text:\s*asyncMessageDelegate\.title[\s\S]*text:\s*asyncMessageDelegate\.subtitle[\s\S]*text:\s*asyncMessageDelegate\.timestamp/.test(mainSource))
 		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*chatModel\.count\s*>\s*0[\s\S]*visible:[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*Preparing conversation/.test(mainSource))
@@ -394,6 +394,225 @@ TestCase {
 		verify(/Loading older messages[\s\S]*onClicked:\s*root\.requestOlderMessagesPreservingAnchor\(\)/.test(mainSource))
 	}
 
+	function test_chat_scroll_uses_identity_safe_presentation_height_latch() {
+		const asyncStart = mainSource.indexOf("id: asyncMessageDelegate")
+		const innerStart = mainSource.indexOf("id: messageDelegate", asyncStart)
+		verify(asyncStart >= 0 && innerStart > asyncStart)
+		const asyncSource = mainSource.slice(asyncStart, innerStart)
+		verify(/property string presentationHeightStableId:\s*""[\s\S]*property string presentationHeightPreviewIdentity:\s*""[\s\S]*property string presentationHeightSettledIdentity:\s*""[\s\S]*property real presentationHeightSettledHeight:\s*0[\s\S]*presentationHeightQuietPolishObservations:\s*0/.test(asyncSource))
+		verify(/function\s+currentPresentationHeightIdentity\(\)[\s\S]*const currentPreviewIdentity\s*=\s*item[\s\S]*presentationHeightPreviewIdentity/.test(asyncSource))
+		verify(/function\s+reevaluatePresentationHeightIdentity\(\)[\s\S]*if\s*\(!item\)\s*return\s+false[\s\S]*clearPresentationHeightReleaseState\(\)[\s\S]*presentationHeightPreviewIdentity\s*=\s*currentPreviewIdentity/.test(asyncSource))
+		verify(/function\s+observePresentationHeight\(\)[\s\S]*presentationHeightQuietPolishObservations\s*<\s*2[\s\S]*schedulePresentationHeightObservation\(\)[\s\S]*commitPresentationHeight\(/.test(asyncSource))
+		const eligibilityStart = asyncSource.indexOf(
+			"readonly property bool presentationHeightQuietObservationEligible:")
+		const eligibilityEnd = asyncSource.indexOf(
+			"onPresentationHeightQuietObservationEligibleChanged:", eligibilityStart)
+		verify(eligibilityStart >= 0 && eligibilityEnd > eligibilityStart)
+		const eligibilitySource = asyncSource.slice(eligibilityStart, eligibilityEnd)
+		verify(/presentationHeightQuietObservationEligible:[\s\S]*!accessibilityPooled[\s\S]*messageRowReady[\s\S]*!richGeometrySettling[\s\S]*!richResourceActivationPending[\s\S]*isFinite\(presentationHeightMeasuredHeight\)[\s\S]*!timeline\.scopePresentationObservationActive[\s\S]*!timeline\.explicitWheelInputPending[\s\S]*!root\.performanceChatScrollRunning/.test(eligibilitySource))
+		// A stable existing anchor is ownership, not a reason to recapture and
+		// overwrite the selected message/offset. Only its restore/release phases
+		// remain ineligible.
+		verify(!/!\s*timeline\.viewportAnchorActive/.test(eligibilitySource))
+		verify(/!timeline\.viewportAnchorReleasePending[\s\S]*!timeline\.restoringViewportAnchor/.test(eligibilitySource))
+		verify(/!timeline\.viewportAnchorQuietReleaseActive/.test(eligibilitySource))
+		const prepareStart = asyncSource.indexOf(
+			"function preparePresentationHeightCommit()")
+		const prepareEnd = asyncSource.indexOf(
+			"function presentationHeightCommitValue", prepareStart)
+		verify(prepareStart >= 0 && prepareEnd > prepareStart)
+		const prepareSource = asyncSource.slice(prepareStart, prepareEnd)
+		verify(/presentationHeightTailIntent\s*=\s*false[\s\S]*const exactTailAtPrepare\s*=\s*timeline\.isAtBottom\(\)[\s\S]*timeline\.stickToBottom\s*\|\|\s*exactTailAtPrepare[\s\S]*presentationHeightTailIntent\s*=\s*true/.test(prepareSource))
+		verify(/timeline\.restoringViewportAnchor[\s\S]*timeline\.viewportAnchorReleasePending[\s\S]*return false/.test(prepareSource))
+		verify(/if\s*\(timeline\.viewportAnchorActive\)[\s\S]*return true[\s\S]*return timeline\.captureViewportAnchor\(\)/.test(prepareSource))
+		const commitStart = asyncSource.indexOf("function commitPresentationHeight")
+		const commitEnd = asyncSource.indexOf("function observePresentationHeight", commitStart)
+		verify(commitStart >= 0 && commitEnd > commitStart)
+		const commitSource = asyncSource.slice(commitStart, commitEnd)
+		verify(/!preparePresentationHeightCommit\(\)\)[\s\S]*return\s+false/.test(commitSource))
+		verify(/if\s*\(presentationHeightTailIntent\)[\s\S]*timeline\.stickToBottom\s*=\s*true[\s\S]*presentationHeightSettledIdentity/.test(commitSource))
+		verify(/presentationHeightSettledIdentity\s*=\s*identity[\s\S]*presentationHeightCommitValue\(measuredHeight\)[\s\S]*viewportProbeHeight\s*=\s*Math\.max\([\s\S]*presentationHeightSettledHeight/.test(commitSource))
+		verify(/presentationHeightTailIntent[\s\S]*timeline\.requestBottomFollow\(\)[\s\S]*else\s+if\s*\(timeline\.viewportAnchorActive\)[\s\S]*timeline\.scheduleViewportAnchorQuietRelease\(\)/.test(commitSource))
+		verify(/if\s*\(presentationHeightTailIntent\)[\s\S]*if\s*\(timeline\.viewportAnchorActive\)[\s\S]*timeline\.releaseViewportAnchor\(\)[\s\S]*timeline\.stickToBottom\s*=\s*true/.test(commitSource))
+		verify(/timeline\.scheduleViewportAnchorQuietRelease\(\)/.test(commitSource))
+		verify(!/Qt\.callLater\([\s\S]*restoreViewportAnchor\(true\)/.test(commitSource))
+		// The second row may commit a different quiet height on the same identity;
+		// the first commit's anchor is reused and then released by the same path.
+		verify(/presentationHeightReleased[\s\S]*presentationHeightSettledIdentity\s*===\s*identity[\s\S]*presentationHeightSettledHeight[\s\S]*committedHeight[\s\S]*if\s*\(!commitPresentationHeight\(/.test(asyncSource))
+		verify(/function\s+finishScrollbarDrag\(\)[\s\S]*scrollbarReleasePending\s*=\s*true[\s\S]*captureViewportAnchor\(true\)/.test(mainSource))
+		verify(/property\s+bool\s+viewportAnchorQuietReleaseActive:\s*false[\s\S]*property\s+int\s+viewportAnchorQuietReleaseGeneration[\s\S]*viewportAnchorQuietReleaseObservedContentHeight[\s\S]*viewportAnchorQuietReleaseQuietObservations[\s\S]*viewportAnchorQuietReleaseStartedAt/.test(mainSource))
+		verify(/readonly\s+property\s+int\s+viewportAnchorQuietReleaseDeadlineMs:\s*192/.test(mainSource))
+		verify(/id:\s*viewportAnchorQuietReleaseTimer[\s\S]*interval:\s*16[\s\S]*observeViewportAnchorQuietRelease\([\s\S]*viewportAnchorQuietReleaseGeneration/.test(mainSource))
+		const quietReleaseStart = mainSource.indexOf(
+			"function clearViewportAnchorQuietRelease()")
+		const quietReleaseEnd = mainSource.indexOf(
+			"function safeStaticPreviewSource", quietReleaseStart)
+		verify(quietReleaseStart >= 0 && quietReleaseEnd > quietReleaseStart)
+		const quietReleaseSource = mainSource.slice(quietReleaseStart, quietReleaseEnd)
+		verify(/function\s+scheduleViewportAnchorQuietRelease\(\)[\s\S]*if\s*\(viewportAnchorQuietReleaseActive\)[\s\S]*viewportAnchorQuietReleaseObservedContentHeight[\s\S]*viewportAnchorQuietReleaseStartedAt[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)/.test(quietReleaseSource))
+		verify(/function\s+observeViewportAnchorQuietRelease\(generation\)[\s\S]*generation\s*!==\s*viewportAnchorQuietReleaseGeneration[\s\S]*!viewportAnchorActive[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*viewportAnchorQuietReleaseGeometryBlocked\(\)[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)/.test(quietReleaseSource))
+		verify(/restoreViewportAnchor\(\)[\s\S]*Math\.abs\(currentContentHeight[\s\S]*<=\s*0\.5[\s\S]*viewportAnchorQuietReleaseQuietObservations[\s\S]*>=\s*2[\s\S]*deadlineReached[\s\S]*restoreViewportAnchor\(true\)/.test(quietReleaseSource))
+		verify(/restoreViewportAnchor\(true\)[\s\S]*if\s*\(viewportAnchorActive\)[\s\S]*viewportAnchorQuietReleaseTimer\.restart\(\)[\s\S]*return/.test(quietReleaseSource))
+		verify(!/viewportAnchorReleasePending\)\s*\{[\s\S]*viewportAnchorQuietReleaseTimer\.stop\(\)[\s\S]*return/.test(quietReleaseSource))
+		verify(/function\s+releaseViewportAnchor\(\)[\s\S]*clearViewportAnchorQuietRelease\(\)[\s\S]*nearViewportPrefetchOwnsViewportAnchor\s*=\s*false/.test(mainSource))
+		const restoreAnchorStart = mainSource.indexOf(
+			"function restoreViewportAnchor(releaseWhenRestored)")
+		const restoreAnchorEnd = mainSource.indexOf(
+			"function releasePrependAnchor", restoreAnchorStart)
+		verify(restoreAnchorStart >= 0 && restoreAnchorEnd > restoreAnchorStart)
+		const restoreAnchorSource = mainSource.slice(restoreAnchorStart, restoreAnchorEnd)
+		verify(/if\s*\(!viewportAnchorActive\)\s*\{[\s\S]*viewportAnchorReleasePending\s*=\s*false[\s\S]*return\s+false[\s\S]*if\s*\(releaseWhenRestored\s*===\s*true\)[\s\S]*viewportAnchorReleasePending\s*=\s*true/.test(restoreAnchorSource))
+		verify(/if\s*\(restoreBlocked\)\s*return\s+false/.test(restoreAnchorSource))
+		const prefetchAbandonStart = mainSource.indexOf(
+			"function abandonNearViewportPrefetch")
+		const prefetchRetireStart = mainSource.indexOf(
+			"function retireTerminalNearViewportPrefetch")
+		const prefetchReadyStart = mainSource.indexOf(
+			"function completeNearViewportPrefetchIfReady")
+		const prefetchReadyEnd = mainSource.indexOf(
+			"function suspendRichContentForScroll", prefetchReadyStart)
+		verify(prefetchAbandonStart >= 0 && prefetchRetireStart > prefetchAbandonStart
+			&& prefetchReadyStart > prefetchRetireStart
+			&& prefetchReadyEnd > prefetchReadyStart)
+		const prefetchAbandonSource = mainSource.slice(
+			prefetchAbandonStart, prefetchRetireStart)
+		const prefetchReadySource = mainSource.slice(
+			prefetchReadyStart, prefetchReadyEnd)
+		verify(/restoreOwnedAnchor\s*===\s*true[\s\S]*scheduleViewportAnchorQuietRelease\(\)/.test(
+			prefetchAbandonSource))
+		verify(/nearViewportPrefetchOwnsViewportAnchor[\s\S]*scheduleViewportAnchorQuietRelease\(\)/.test(
+			prefetchReadySource))
+		verify(!/restoreViewportAnchor\(true\)/.test(prefetchAbandonSource))
+		verify(!/restoreViewportAnchor\(true\)/.test(prefetchReadySource))
+		verify(/function\s+viewportAnchorQuietReleaseGeometryBlocked\(\)[\s\S]*scrollbarReleasePending/.test(mainSource))
+		// A prefetch schedule request uses the same bounded transaction even when
+		// no height commit has previously armed a quiet timer.
+		verify(/scheduleViewportAnchorQuietRelease\(\)/.test(prefetchAbandonSource))
+		verify(/scheduleViewportAnchorQuietRelease\(\)/.test(prefetchReadySource))
+		verify(/function\s+observeViewportAnchorQuietRelease\(generation\)[\s\S]*restoreViewportAnchor\(true\)/.test(
+			quietReleaseSource))
+		const timelineModelResetStart = mainSource.indexOf(
+			"function onModelReset()", mainSource.indexOf("function onRowsInserted"))
+		const timelineCountChangedStart = mainSource.indexOf(
+			"function onCountChanged()", timelineModelResetStart)
+		const timelineModelConnectionsEnd = mainSource.indexOf(
+			"TapHandler {", timelineCountChangedStart)
+		verify(timelineModelResetStart >= 0
+			&& timelineCountChangedStart > timelineModelResetStart
+			&& timelineModelConnectionsEnd > timelineCountChangedStart)
+		const timelineModelResetSource = mainSource.slice(
+			timelineModelResetStart, timelineCountChangedStart)
+		const timelineCountChangedSource = mainSource.slice(
+			timelineCountChangedStart, timelineModelConnectionsEnd)
+		verify(/releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*stickToBottom\s*=\s*true/.test(
+			timelineModelResetSource))
+		verify(/timeline\.count\s*===\s*0[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*stickToBottom\s*=\s*true/.test(
+			timelineCountChangedSource))
+		const tailRowsInsertedStart = mainSource.indexOf(
+			"function onRowsInserted(parentIndex, first, last)")
+		const tailRowsInsertedEnd = mainSource.indexOf(
+			"function onModelReset()", tailRowsInsertedStart)
+		verify(tailRowsInsertedStart >= 0 && tailRowsInsertedEnd > tailRowsInsertedStart)
+		const tailRowsInsertedSource = mainSource.slice(
+			tailRowsInsertedStart, tailRowsInsertedEnd)
+		verify(/followTailAfterInsert[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*stickToBottom\s*=\s*true[\s\S]*requestBottomFollow\(\)/.test(
+			tailRowsInsertedSource))
+		const jumpToLatestStart = mainSource.indexOf("id: jumpToLatestButton")
+		const jumpToLatestEnd = mainSource.indexOf("Loader {", jumpToLatestStart)
+		verify(jumpToLatestStart >= 0 && jumpToLatestEnd > jumpToLatestStart)
+		const jumpToLatestSource = mainSource.slice(jumpToLatestStart, jumpToLatestEnd)
+		verify(/onClicked:[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*invalidateBottomFollow\(\)[\s\S]*stickToBottom\s*=\s*true[\s\S]*requestBottomFollow\(\)/.test(
+			jumpToLatestSource))
+		const capturePrependStart = mainSource.indexOf(
+			"function capturePrependAnchor()")
+		const captureViewportStart = mainSource.indexOf(
+			"function captureViewportAnchor", capturePrependStart)
+		verify(capturePrependStart >= 0 && captureViewportStart > capturePrependStart)
+		const capturePrependSource = mainSource.slice(
+			capturePrependStart, captureViewportStart)
+		verify(/scrollbarDragActive[\s\S]*return false[\s\S]*const item[\s\S]*nextPrependAnchorId[\s\S]*releaseViewportAnchor\(\)[\s\S]*prependAnchorId\s*=\s*nextPrependAnchorId[\s\S]*prependAnchorActive\s*=\s*true/.test(
+			capturePrependSource))
+		verify(!/clearViewportAnchorQuietRelease\(\)/.test(capturePrependSource))
+		const captureViewportEnd = mainSource.indexOf(
+			"function clearViewportAnchorQuietRelease", captureViewportStart)
+		verify(captureViewportEnd > captureViewportStart)
+		const captureViewportSource = mainSource.slice(
+			captureViewportStart, captureViewportEnd)
+		verify(/stickToBottom[\s\S]*return false[\s\S]*Math\.abs\(contentY\s*-\s*originY\)[\s\S]*beginTopAnchor\(\)[\s\S]*const item[\s\S]*nextViewportAnchorId[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*viewportAnchorId\s*=\s*nextViewportAnchorId[\s\S]*viewportAnchorActive\s*=\s*true/.test(
+			captureViewportSource))
+		verify(!/clearViewportAnchorQuietRelease\(\)/.test(captureViewportSource))
+		// Delegate identity/reuse/pooling must not cancel the global settle owned
+		// by another visible row; only timeline ownership cancellation may do so.
+		verify(!/timeline\.clearViewportAnchorQuietRelease\(\)/.test(asyncSource))
+		const localReleaseStateStart = asyncSource.indexOf(
+			"function clearPresentationHeightReleaseState()")
+		const localReleaseStateEnd = asyncSource.indexOf(
+			"function resetPresentationHeightIdentity", localReleaseStateStart)
+		verify(localReleaseStateStart >= 0 && localReleaseStateEnd > localReleaseStateStart)
+		verify(!/timeline\.clearViewportAnchorQuietRelease/.test(
+			asyncSource.slice(localReleaseStateStart, localReleaseStateEnd)))
+		// A shrink that lands exactly at the maximum establishes tail intent for
+		// the following growth; a 1..47 px near-tail gap remains an anchor case.
+		const exactTailGapAfterShrink = 0.25
+		const nearTailGap = 12
+		compare(exactTailGapAfterShrink <= 0.5, true)
+		compare(nearTailGap <= 0.5, false)
+		verify(/function\s+isAtBottom\(\)[\s\S]*<=\s*0\.5/.test(mainSource))
+		verify(/function\s+isNearBottom\(\)[\s\S]*bottomFollowThreshold/.test(mainSource))
+		const commitValueStart = asyncSource.indexOf(
+			"function presentationHeightCommitValue")
+		const commitValueEnd = asyncSource.indexOf(
+			"function commitPresentationHeight", commitValueStart)
+		verify(commitValueStart >= 0 && commitValueEnd > commitValueStart)
+		const commitValueSource = asyncSource.slice(commitValueStart, commitValueEnd)
+		verify(/Math\.max\(timeline\.deferredMessageRowHeight,\s*measuredHeight\)/.test(
+			commitValueSource))
+		verify(!/lightweightMessageRowHeight|deferredPresentationHeight|previewReservedHeight/.test(
+			commitValueSource))
+		const finiteMeasuredHeight = 328
+		const conservativeEstimate = 548
+		verify(finiteMeasuredHeight > 0
+			&& finiteMeasuredHeight < conservativeEstimate)
+		compare(Math.max(58, finiteMeasuredHeight), finiteMeasuredHeight)
+		const heightStart = asyncSource.indexOf("height: presentationHeightCommittedHeight")
+		const heightEnd = asyncSource.indexOf("onHeightChanged:", heightStart)
+		verify(heightStart >= 0 && heightEnd > heightStart)
+		const heightSource = asyncSource.slice(heightStart, heightEnd)
+		verify(/presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
+		verify(!/item\.implicitHeight/.test(heightSource))
+		const clipStart = asyncSource.indexOf("clip: richGeometrySettling")
+		const clipEnd = asyncSource.indexOf("opacity:", clipStart)
+		verify(clipStart >= 0 && clipEnd > clipStart)
+		const clipSource = asyncSource.slice(clipStart, clipEnd)
+		verify(/clip:\s*richGeometrySettling[\s\S]*item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5/.test(clipSource))
+		verify(!/presentationHeightCommittedHeight\s*<=\s*0/.test(clipSource))
+		// A late post-commit growth clips only while it exceeds the retained
+		// outer height; once the gated commit catches up, clipping turns off.
+		const retainedHeight = 328
+		const lateGrowthHeight = 360
+		const caughtUpOuterHeight = 360
+		const caughtUpMeasuredHeight = 360
+		compare(lateGrowthHeight > retainedHeight + 0.5, true)
+		compare(caughtUpMeasuredHeight > caughtUpOuterHeight + 0.5, false)
+		const probeStart = asyncSource.indexOf("function updateViewportProbeHeight()")
+		const probeEnd = asyncSource.indexOf("function updateViewportMembership()", probeStart)
+		verify(probeStart >= 0 && probeEnd > probeStart)
+		verify(!/item\.implicitHeight/.test(asyncSource.slice(probeStart, probeEnd)))
+		const pooledStart = asyncSource.indexOf("ListView.onPooled:")
+		const reusedStart = asyncSource.indexOf("ListView.onReused:", pooledStart)
+		verify(pooledStart >= 0 && reusedStart > pooledStart)
+		const pooledSource = asyncSource.slice(pooledStart, reusedStart)
+		verify(/stopPresentationHeightObservation\(\)/.test(pooledSource))
+		verify(!/resetPresentationHeightIdentity\(\)|resetViewportProbeHeight\(\)/.test(pooledSource))
+		const reusedEnd = asyncSource.indexOf("onStableIdChanged:", reusedStart)
+		const reusedSource = asyncSource.slice(reusedStart, reusedEnd)
+		verify(/reevaluatePresentationHeightIdentity\(\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*resetViewportProbeHeight\(\)/.test(reusedSource))
+		verify(/onPreviewLoaderIncubationIdentityChanged:[\s\S]*asyncMessageDelegate\.reevaluatePresentationHeightIdentity\(\)[\s\S]*asyncMessageDelegate\.resetViewportProbeHeight\(\)/.test(mainSource))
+		verify(/onStableIdChanged:[\s\S]*asyncMessageDelegate\.resetPresentationHeightIdentity\(\)[\s\S]*asyncMessageDelegate\.resetViewportProbeHeight\(\)/.test(mainSource))
+		verify(/"viewportY":\s*Number\(point\.y\s*\|\|\s*0\)[\s\S]*"viewportProbeHeight"[\s\S]*"richGeometrySettling"[\s\S]*"reservedExcess"/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*smoothWheelEnabled:\s*false/.test(mainSource))
+	}
+
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
 		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*256[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
@@ -448,7 +667,7 @@ TestCase {
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,350}required property var source/.test(mainSource))
 		verify(!/id:\s*deferredHistoryRow[\s\S]{0,1600}ColumnLayout\s*\{/.test(mainSource))
 		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*const wheelStep\s*=\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
-		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*true[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*targetFlickable:\s*timeline[\s\S]*horizontalEnabled:\s*false[\s\S]*smoothWheelEnabled:\s*false[\s\S]*wheelStep:\s*Math\.max\(80,\s*Math\.min\(112,\s*timeline\.height \* 0\.14\)\)/.test(mainSource))
 		verify(/id:\s*timelineScrollHandler[\s\S]*onScrollingStarted:[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
 		const scrollbarStart = mainSource.indexOf("id: timelineScrollBar")
 		const scrollbarEnd = mainSource.indexOf("MiddleDragScrollHandler", scrollbarStart)
@@ -689,7 +908,7 @@ TestCase {
 		verify(abandonPrefetchStart >= 0 && abandonPrefetchEnd > abandonPrefetchStart)
 		const abandonPrefetchSource =
 			mainSource.slice(abandonPrefetchStart, abandonPrefetchEnd)
-		verify(/nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*richLoaderResumeQueue\.filter[\s\S]*deferredMaterializationActiveId\s*===\s*key[\s\S]*nearViewportPrefetchActiveId\s*=\s*""[\s\S]*nearViewportWarmId\s*=\s*""[\s\S]*nearViewportPrefetchReadyId\s*=\s*""[\s\S]*restoreOwnedAnchor\s*===\s*true[\s\S]*restoreViewportAnchor\(true\)[\s\S]*else[\s\S]*releaseViewportAnchor\(\)/.test(
+		verify(/nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*richLoaderResumeQueue\.filter[\s\S]*deferredMaterializationActiveId\s*===\s*key[\s\S]*nearViewportPrefetchActiveId\s*=\s*""[\s\S]*nearViewportWarmId\s*=\s*""[\s\S]*nearViewportPrefetchReadyId\s*=\s*""[\s\S]*restoreOwnedAnchor\s*===\s*true[\s\S]*scheduleViewportAnchorQuietRelease\(\)[\s\S]*else[\s\S]*releaseViewportAnchor\(\)/.test(
 			abandonPrefetchSource))
 		const invalidatePrefetchStart =
 			mainSource.indexOf("function invalidateNearViewportPrefetchReady")
@@ -724,7 +943,7 @@ TestCase {
 			completePrefetchSource))
 		verify(/if\s*\(item\.previewLoaderIncubationSuppressed\s*===\s*true\s*\|\|\s*item\.previewLoaderFailed\s*===\s*true\s*\|\|\s*item\.richResourcesRequired\s*!==\s*true\)\s*\{\s*retireTerminalNearViewportPrefetch\(key\)\s*return false\s*\}/.test(
 			completePrefetchSource))
-		verify(/if\s*\(item\.richResourcesActive\s*!==\s*true\s*\|\|\s*item\.richResourceActivationPending\s*===\s*true\)\s*return false[\s\S]*item\.previewPrewarmVisualReady\s*!==\s*true[\s\S]*return false[\s\S]*nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*nearViewportPrefetchReadyId\s*=\s*key[\s\S]*restoreViewportAnchor\(true\)/.test(
+		verify(/if\s*\(item\.richResourcesActive\s*!==\s*true\s*\|\|\s*item\.richResourceActivationPending\s*===\s*true\)\s*return false[\s\S]*item\.previewPrewarmVisualReady\s*!==\s*true[\s\S]*return false[\s\S]*nearViewportPrefetchDeadlineTimer\.stop\(\)[\s\S]*nearViewportPrefetchReadyId\s*=\s*key[\s\S]*scheduleViewportAnchorQuietRelease\(\)/.test(
 			completePrefetchSource))
 		verify(/function\s+recoverOuterLoaderIncubationTimeout\(\)[\s\S]*abandonNearViewportPrefetch\([\s\S]*ownedStableId,\s*true\)/.test(mainSource))
 		verify(/function\s+recoverOuterLoaderIncubationTimeout\(\)[\s\S]*const ownedStableId\s*=\s*resumeOwnedStableId[\s\S]*outerLoaderIncubationWatchdogStartedAt\s*=\s*0[\s\S]*?if\s*\(!inVisibleViewport\s*&&\s*timeline\.nearViewportPrefetchActiveId\s*===\s*ownedStableId\)\s*return\s*outerLoaderIncubationSuppressed\s*=\s*true/.test(mainSource))
@@ -1047,7 +1266,7 @@ TestCase {
 			&& viewportProbeUpdateEnd > viewportProbeUpdateStart)
 		const viewportProbeUpdateSource =
 			asyncDelegateSource.slice(viewportProbeUpdateStart, viewportProbeUpdateEnd)
-		verify(/viewportProbeStableId\s*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*Math\.max\([\s\S]*item\.lightweightMessageRowHeight[\s\S]*item\.implicitHeight[\s\S]*Number\(height\s*\|\|\s*0\)[\s\S]*settledHeight\s*>\s*viewportProbeHeight[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
+		verify(/reevaluatePresentationHeightIdentity\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*presentationHeightCommittedHeight[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*Math\.max\([\s\S]*item\.lightweightMessageRowHeight[\s\S]*Number\(height\s*\|\|\s*0\)[\s\S]*settledHeight\s*>\s*viewportProbeHeight[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
 			viewportProbeUpdateSource))
 		const viewportMembershipUpdateStart =
 			asyncDelegateSource.indexOf("function updateViewportMembership()")
@@ -1066,15 +1285,15 @@ TestCase {
 			asyncDelegateSource))
 		verify(/id:\s*viewportProbeUpdateTimer[\s\S]*interval:\s*0[\s\S]*repeat:\s*false[\s\S]*updateViewportProbeHeight\(\)/.test(
 			asyncDelegateSource))
-		verify(/onRichGeometrySettlingChanged:[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*height:\s*Math\.max[\s\S]*onHeightChanged:[\s\S]*item\.richResourcesRequired[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+		verify(/onRichGeometrySettlingChanged:[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)[\s\S]*height:\s*presentationHeightCommittedHeight[\s\S]*onHeightChanged:[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)/.test(
 			asyncDelegateSource))
 		verify(/function scheduleViewportProbeReset\(\)[\s\S]*viewportProbeStableId[\s\S]*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
 			asyncDelegateSource))
 		verify(/onViewportProbeHeightChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*onYChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
 			asyncDelegateSource))
-		verify(/ListView\.onPooled:\s*\{\s*accessibilityPooled\s*=\s*true\s*updateViewportMembership\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:\s*\{[\s\S]*viewportProbeUpdateTimer\.stop\(\)\s*resetViewportProbeHeight\(\)\s*if\s*\(item\)\s*item\.handleListViewReused\(\)\s*accessibilityPooled\s*=\s*false\s*updateViewportMembership\(\)\s*scheduleViewportProbeHeightUpdate\(\)/.test(
+		verify(/ListView\.onPooled:\s*\{\s*accessibilityPooled\s*=\s*true\s*updateViewportMembership\(\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:\s*\{[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)\s*resetViewportProbeHeight\(\)[\s\S]*if\s*\(item\)\s*item\.handleListViewReused\(\)\s*accessibilityPooled\s*=\s*false\s*updateViewportMembership\(\)\s*scheduleViewportProbeHeightUpdate\(\)/.test(
 			asyncDelegateSource))
-		verify(/onStableIdChanged:\s*\{\s*scheduleViewportProbeReset\(\)\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*Component\.onCompleted:\s*\{\s*(?:deferredMaterializationCleanupId\s*=\s*String\(stableId\s*\|\|\s*""\)\s*)?scheduleViewportProbeReset\(\)\s*updateViewportMembership\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
+		verify(/onStableIdChanged:\s*\{[\s\S]*resetPresentationHeightIdentity\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*Component\.onCompleted:\s*\{[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*updateViewportMembership\(\)[\s\S]*schedulePresentationHeightObservation\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)/.test(
 			asyncDelegateSource))
 		verify(!/property bool inVisibleViewport:\s*!accessibilityPooled/.test(
 			asyncDelegateSource))

@@ -3340,7 +3340,7 @@ ApplicationWindow {
 						id: timelineScrollHandler
 						targetFlickable: timeline
 						horizontalEnabled: false
-						smoothWheelEnabled: true
+						smoothWheelEnabled: false
 						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
 						onScrollingStarted:
 							timeline.takeExplicitNavigationOwnership("wheel-or-middle-drag")
@@ -3506,6 +3506,15 @@ ApplicationWindow {
 					property bool restoringViewportAnchor: false
 					property int viewportAnchorRetries: 0
 					property bool viewportAnchorReleasePending: false
+					// A committed rich-row height must let ListView polish before the
+					// existing anchor is released. Keep this as timeline ownership state;
+					// restoreViewportAnchor() remains the only contentY writer.
+					property bool viewportAnchorQuietReleaseActive: false
+					property int viewportAnchorQuietReleaseGeneration: 0
+					property real viewportAnchorQuietReleaseObservedContentHeight: 0
+					property int viewportAnchorQuietReleaseQuietObservations: 0
+					property double viewportAnchorQuietReleaseStartedAt: 0
+					readonly property int viewportAnchorQuietReleaseDeadlineMs: 192
 					// Scrollbar input owns the viewport until delayed ListView movement
 					// signals have drained. No tail-follow or anchor writer may reinterpret
 					// the thumb-selected position during that window.
@@ -4116,14 +4125,28 @@ ApplicationWindow {
 								timeline.richResourceRecoveryPending(item)
 							if (inactiveRichResources)
 								++diagnostics.inactiveRichResourceCount
+							const loadedImplicitHeight = item.item
+								? Number(item.item.implicitHeight || 0) : 0
+							const hasLoadedImplicitHeight = isFinite(loadedImplicitHeight)
+								&& loadedImplicitHeight > 0
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
 								"title": String(item.title || ""),
 								"subtitle": String(item.subtitle || ""),
 								"height": Number(item.height || 0),
 								"estimatedHeight": Number(item.deferredPresentationHeight || 0),
-								"loadedImplicitHeight": item.item
-									? Number(item.item.implicitHeight || 0) : 0,
+								"loadedImplicitHeight": hasLoadedImplicitHeight
+									? loadedImplicitHeight : 0,
+								"viewportY": Number(point.y || 0),
+								"viewportProbeHeight": Number(item.viewportProbeHeight || 0),
+								"richGeometrySettling": item.richGeometrySettling === true,
+								"reservedExcess": hasLoadedImplicitHeight
+									? Math.max(0, Number(item.height || 0)
+										- Math.max(58, loadedImplicitHeight)) : 0,
+								"presentationHeightReleased":
+									item.presentationHeightReleased === true,
+								"presentationHeightSettledHeight": Number(
+									item.presentationHeightSettledHeight || 0),
 								"lightweight": item.lightweightDeferredPresentation === true,
 								"outerReady": item.outerLoaderReady === true,
 								"messageReady": item.messageRowReady === true,
@@ -4225,9 +4248,14 @@ ApplicationWindow {
 						const item = firstVisibleMessageDelegate()
 						if (!item)
 							return false
-						prependAnchorId = String(item.stableId || "")
-						if (prependAnchorId.length === 0)
+						const nextPrependAnchorId = String(item.stableId || "")
+						if (nextPrependAnchorId.length === 0)
 							return false
+						// A successful structural prepend supersedes any ordinary viewport
+						// correction, including a missing-row final-release retry. Failed or
+						// input-blocked capture leaves that existing transaction untouched.
+						releaseViewportAnchor()
+						prependAnchorId = nextPrependAnchorId
 						// Holding the absolute top is correct while the existing loaded
 						// range recovers after a scroll. Once older rows are requested,
 						// however, originY moves to the newly inserted prefix. Hand off
@@ -4259,13 +4287,18 @@ ApplicationWindow {
 							beginTopAnchor()
 							return true
 						}
-						releaseTopAnchor()
 						const item = firstVisibleMessageDelegate()
 						if (!item)
 							return false
-						viewportAnchorId = String(item.stableId || "")
-						if (viewportAnchorId.length === 0)
+						const nextViewportAnchorId = String(item.stableId || "")
+						if (nextViewportAnchorId.length === 0)
 							return false
+						// Validate the replacement first so a transient empty viewport cannot
+						// orphan an existing quiet release. A successful recapture explicitly
+						// invalidates old prefetch/release ownership before installing the ID.
+						releaseViewportAnchor()
+						releaseTopAnchor()
+						viewportAnchorId = nextViewportAnchorId
 						viewportAnchorOffset = item.mapToItem(timeline, 0, 0).y
 						viewportAnchorRetries = 0
 						viewportAnchorReleasePending = false
@@ -4273,7 +4306,114 @@ ApplicationWindow {
 						return true
 					}
 
+					function clearViewportAnchorQuietRelease() {
+						++viewportAnchorQuietReleaseGeneration
+						if (typeof viewportAnchorQuietReleaseTimer !== "undefined")
+							viewportAnchorQuietReleaseTimer.stop()
+						viewportAnchorQuietReleaseActive = false
+						viewportAnchorQuietReleaseObservedContentHeight = 0
+						viewportAnchorQuietReleaseQuietObservations = 0
+						viewportAnchorQuietReleaseStartedAt = 0
+					}
+
+					function scheduleViewportAnchorQuietRelease() {
+						if (!viewportAnchorActive) {
+							clearViewportAnchorQuietRelease()
+							return false
+						}
+						if (viewportAnchorQuietReleaseActive) {
+							++viewportAnchorQuietReleaseGeneration
+							viewportAnchorQuietReleaseObservedContentHeight =
+								Number(contentHeight || 0)
+							viewportAnchorQuietReleaseQuietObservations = 0
+							viewportAnchorQuietReleaseStartedAt = Date.now()
+							viewportAnchorQuietReleaseTimer.restart()
+							return true
+						}
+						++viewportAnchorQuietReleaseGeneration
+						viewportAnchorQuietReleaseActive = true
+						viewportAnchorQuietReleaseObservedContentHeight =
+							Number(contentHeight || 0)
+						viewportAnchorQuietReleaseQuietObservations = 0
+						viewportAnchorQuietReleaseStartedAt = Date.now()
+						viewportAnchorQuietReleaseTimer.restart()
+						return true
+					}
+
+					function viewportAnchorQuietReleaseGeometryBlocked() {
+						return stickToBottom || richScrollInProgress || moving || dragging || flicking
+							|| timelineScrollHandler.scrolling
+							|| scrollbarDragActive || scrollbarReleasePending
+							|| timelineScrollBar.pressed
+							|| scopePresentationPending || scopePresentationFinalizing
+							|| scopePresentationObservationActive || scopeResetPending
+							|| prependAnchorActive || deferredPrependAnchorActive
+							|| prependMutationInProgress || chatModel.prependPending
+							|| restoringPrependAnchor || topAnchorActive
+							|| restoringTopAnchor || restoringViewportAnchor
+							|| restoringBottom || explicitWheelInputPending
+							|| explicitNavigationMovement
+							|| root.performanceChatScrollRunning
+					}
+
+					function observeViewportAnchorQuietRelease(generation) {
+						if (!viewportAnchorQuietReleaseActive
+							|| generation !== viewportAnchorQuietReleaseGeneration)
+							return
+						if (!viewportAnchorActive) {
+							viewportAnchorReleasePending = false
+							clearViewportAnchorQuietRelease()
+							return
+						}
+						if (viewportAnchorQuietReleaseGeometryBlocked()) {
+							viewportAnchorQuietReleaseTimer.restart()
+							return
+						}
+						restoreViewportAnchor()
+						if (!viewportAnchorActive) {
+							clearViewportAnchorQuietRelease()
+							return
+						}
+						const currentContentHeight = Number(contentHeight || 0)
+						if (!isFinite(currentContentHeight)) {
+							viewportAnchorQuietReleaseTimer.restart()
+							return
+						}
+						if (Math.abs(currentContentHeight
+							- viewportAnchorQuietReleaseObservedContentHeight) <= 0.5)
+							++viewportAnchorQuietReleaseQuietObservations
+						else {
+							viewportAnchorQuietReleaseObservedContentHeight =
+								currentContentHeight
+							viewportAnchorQuietReleaseQuietObservations = 1
+						}
+						const deadlineReached = Date.now()
+							- viewportAnchorQuietReleaseStartedAt
+							>= viewportAnchorQuietReleaseDeadlineMs
+						if (viewportAnchorQuietReleaseQuietObservations >= 2
+							|| deadlineReached) {
+							// The existing anchor writer performs the final correction and
+							// releases only after the new ListView geometry is observable.
+							restoreViewportAnchor(true)
+							if (viewportAnchorActive) {
+								// Missing-row retries or a just-drained ownership blocker
+								// still own the release; keep the bounded timer alive until
+								// restoreViewportAnchor() can finish it.
+								viewportAnchorQuietReleaseTimer.restart()
+								return
+							}
+							clearViewportAnchorQuietRelease()
+							return
+						}
+						viewportAnchorQuietReleaseTimer.restart()
+					}
+
 					function releaseViewportAnchor() {
+						clearViewportAnchorQuietRelease()
+						// An explicit release invalidates any speculative prefetch
+						// ownership. Its late completion must not release a newer anchor
+						// captured by scrollbar or navigation input.
+						nearViewportPrefetchOwnsViewportAnchor = false
 						viewportAnchorActive = false
 						viewportAnchorId = ""
 						viewportAnchorRetries = 0
@@ -5017,6 +5157,7 @@ ApplicationWindow {
 					}
 
 					function releaseTopAnchor() {
+						clearViewportAnchorQuietRelease()
 						topAnchorActive = false
 						topAnchorProgrammaticMovementGuard = false
 						topAnchorProgrammaticMovementGuardTimer.stop()
@@ -5299,7 +5440,7 @@ ApplicationWindow {
 						if (nearViewportPrefetchOwnsViewportAnchor
 								&& viewportAnchorActive) {
 							if (restoreOwnedAnchor === true)
-								restoreViewportAnchor(true)
+								scheduleViewportAnchorQuietRelease()
 							else
 								releaseViewportAnchor()
 						}
@@ -5378,7 +5519,7 @@ ApplicationWindow {
 						nearViewportPrefetchReadyId = key
 						if (nearViewportPrefetchOwnsViewportAnchor
 								&& viewportAnchorActive) {
-							restoreViewportAnchor(true)
+							scheduleViewportAnchorQuietRelease()
 						}
 						nearViewportPrefetchOwnsViewportAnchor = false
 						Qt.callLater(function() { timeline.scheduleStaticPreviewSweep() })
@@ -5764,12 +5905,20 @@ ApplicationWindow {
 					}
 
 					function restoreViewportAnchor(releaseWhenRestored) {
+						// A stale coalesced callback must be idempotent after input or
+						// identity cancellation. Only an active anchor may record a pending
+						// release for a blocked or temporarily missing-row retry.
+						if (!viewportAnchorActive) {
+							viewportAnchorReleasePending = false
+							return false
+						}
 						if (releaseWhenRestored === true)
 							viewportAnchorReleasePending = true
-						if (!viewportAnchorActive || restoringViewportAnchor || stickToBottom
-								|| prependAnchorActive || scopePresentationPending
-								|| moving || dragging || flicking || scrollbarDragActive
-								|| scrollbarReleasePending || timelineScrollBar.pressed)
+						const restoreBlocked = restoringViewportAnchor || stickToBottom
+							|| prependAnchorActive || scopePresentationPending
+							|| moving || dragging || flicking || scrollbarDragActive
+							|| scrollbarReleasePending || timelineScrollBar.pressed
+						if (restoreBlocked)
 							return false
 						const item = timelineDelegateForStableId(viewportAnchorId)
 						if (!item) {
@@ -5796,6 +5945,7 @@ ApplicationWindow {
 					}
 
 					function releasePrependAnchor(preserveViewportAnchor) {
+						clearViewportAnchorQuietRelease()
 						// The structural prepend settles before its deferred rich rows are
 						// allowed to replace their fixed-height summaries. Hand the exact
 						// message/offset to the ordinary viewport anchor on the quiet path
@@ -6388,6 +6538,15 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: viewportAnchorQuietReleaseTimer
+						interval: 16
+						repeat: false
+						onTriggered:
+							timeline.observeViewportAnchorQuietRelease(
+								timeline.viewportAnchorQuietReleaseGeneration)
+					}
+
+					Timer {
 						id: deferredMaterializationTimer
 						interval: 16
 						repeat: false
@@ -6644,6 +6803,8 @@ ApplicationWindow {
 									timeline.prependMutationInProgress = false
 								})
 							} else if (timeline.followTailAfterInsert) {
+								timeline.releaseViewportAnchor()
+								timeline.releaseTopAnchor()
 								timeline.stickToBottom = true
 								// Scope replacement happens before the next scene render. Position
 								// the newly inserted tail synchronously so an old scroll offset is
@@ -6662,6 +6823,8 @@ ApplicationWindow {
 						function onModelReset() {
 							timeline.scheduleViewportMembershipUpdate()
 							timeline.releasePrependAnchor()
+							timeline.releaseViewportAnchor()
+							timeline.releaseTopAnchor()
 							timeline.clearDeferredPrependRichRows()
 							timeline.pendingTailInsertCount = 0
 							timeline.pendingTailMessageCount = 0
@@ -6679,6 +6842,8 @@ ApplicationWindow {
 							}
 							if (timeline.count === 0) {
 								timeline.releasePrependAnchor()
+								timeline.releaseViewportAnchor()
+								timeline.releaseTopAnchor()
 								timeline.stickToBottom = true
 							}
 						}
@@ -6908,6 +7073,185 @@ ApplicationWindow {
 								property bool outerLoaderReady: false
 								property bool outerLoaderIncubationSuppressed: false
 								property double outerLoaderIncubationWatchdogStartedAt: 0
+								// A released rich row owns a committed height for its stable
+								// presentation identity. Pooling may remove the nested item, but it
+								// must not put the old estimate back into ListView geometry.
+								property string presentationHeightStableId: ""
+								property string presentationHeightPreviewIdentity: ""
+								property string presentationHeightSettledIdentity: ""
+								property real presentationHeightSettledHeight: 0
+								property real presentationHeightObservedHeight: 0
+								property int presentationHeightQuietPolishObservations: 0
+								property bool presentationHeightReleasePending: false
+								property bool presentationHeightReleased: false
+								property bool presentationHeightTailIntent: false
+								function clearPresentationHeightReleaseState() {
+									// Identity/reuse state is local to this delegate. Never cancel
+									// the timeline-owned settle for another visible row here.
+									presentationHeightSettledIdentity = ""
+									presentationHeightSettledHeight = 0
+									presentationHeightObservedHeight = 0
+									presentationHeightQuietPolishObservations = 0
+									presentationHeightReleasePending = false
+									presentationHeightReleased = false
+									presentationHeightTailIntent = false
+									if (typeof presentationHeightReleaseTimer !== "undefined")
+										presentationHeightReleaseTimer.stop()
+								}
+								function resetPresentationHeightIdentity() {
+									clearPresentationHeightReleaseState()
+									presentationHeightStableId = String(stableId || "")
+									presentationHeightPreviewIdentity = ""
+								}
+								function presentationHeightIdentityFor(stable, preview) {
+									const stableKey = String(stable || "")
+									const previewKey = String(preview || "")
+									return stableKey.length > 0 && previewKey.length > 0
+										? stableKey + "|" + previewKey : ""
+								}
+								function currentPresentationHeightIdentity() {
+									const currentStableId = String(stableId || "")
+									if (currentStableId.length === 0)
+										return ""
+									const currentPreviewIdentity = item
+										? String(item.previewLoaderIncubationIdentity || "")
+										: (presentationHeightStableId === currentStableId
+											? presentationHeightPreviewIdentity : "")
+									return presentationHeightIdentityFor(currentStableId,
+										currentPreviewIdentity)
+								}
+								function reevaluatePresentationHeightIdentity() {
+									const currentStableId = String(stableId || "")
+									if (currentStableId !== presentationHeightStableId) {
+										resetPresentationHeightIdentity()
+										return true
+									}
+									if (!item)
+										return false
+									const currentPreviewIdentity =
+										String(item.previewLoaderIncubationIdentity || "")
+									const identityChanged =
+										presentationHeightPreviewIdentity !== currentPreviewIdentity
+									const hadIdentity =
+										presentationHeightPreviewIdentity.length > 0
+										|| currentPreviewIdentity.length > 0
+									if (identityChanged && hadIdentity)
+										clearPresentationHeightReleaseState()
+									presentationHeightPreviewIdentity = currentPreviewIdentity
+									return identityChanged && hadIdentity
+								}
+								function stopPresentationHeightObservation() {
+									if (typeof presentationHeightReleaseTimer !== "undefined")
+										presentationHeightReleaseTimer.stop()
+									presentationHeightReleasePending = false
+									presentationHeightObservedHeight = 0
+									presentationHeightQuietPolishObservations = 0
+								}
+								function schedulePresentationHeightObservation() {
+									if (!presentationHeightQuietObservationEligible
+										|| presentationHeightReleaseTimer.running)
+									return
+									presentationHeightReleasePending = true
+									presentationHeightReleaseTimer.restart()
+								}
+				function preparePresentationHeightCommit() {
+					// The existing tail path owns bottom correction. It must not
+					// acquire a viewport anchor merely because a card settled.
+					presentationHeightTailIntent = false
+					const exactTailAtPrepare = timeline.isAtBottom()
+					if (timeline.stickToBottom || exactTailAtPrepare) {
+						presentationHeightTailIntent = true
+						return true
+					}
+					if (timeline.restoringViewportAnchor
+						|| timeline.viewportAnchorReleasePending
+						|| timeline.topAnchorActive
+						|| timeline.restoringTopAnchor)
+						return false
+					// Reuse an existing stable anchor. Capturing again here would overwrite
+					// the selected message/offset and can leave the latch waiting forever.
+					if (timeline.viewportAnchorActive)
+						return true
+					return timeline.captureViewportAnchor()
+				}
+								function presentationHeightCommitValue(measuredHeight) {
+									return Math.max(timeline.deferredMessageRowHeight, measuredHeight)
+								}
+				function commitPresentationHeight(identity, measuredHeight) {
+					const currentIdentity = currentPresentationHeightIdentity()
+					if (identity.length === 0 || identity !== currentIdentity
+						|| !isFinite(measuredHeight) || measuredHeight <= 0)
+						return false
+					if (!preparePresentationHeightCommit())
+						return false
+					if (presentationHeightTailIntent) {
+						// An exact-tail commit supersedes any stale viewport anchor.
+						// Releasing it does not write contentY; the existing bottom-follow
+						// path owns the correction after the new height is assigned.
+						if (timeline.viewportAnchorActive)
+							timeline.releaseViewportAnchor()
+						timeline.stickToBottom = true
+					}
+					presentationHeightSettledIdentity = identity
+									presentationHeightSettledHeight =
+										presentationHeightCommitValue(measuredHeight)
+									presentationHeightReleased = true
+									presentationHeightReleasePending = false
+									presentationHeightObservedHeight = measuredHeight
+									presentationHeightQuietPolishObservations = 0
+									viewportProbeStableId = String(stableId || "")
+					viewportProbeHeight = Math.max(
+						timeline.deferredMessageRowHeight,
+						presentationHeightSettledHeight)
+					if (presentationHeightTailIntent)
+						timeline.requestBottomFollow()
+					else if (timeline.viewportAnchorActive)
+						timeline.scheduleViewportAnchorQuietRelease()
+					timeline.scheduleViewportMembershipUpdate()
+					return true
+								}
+								function observePresentationHeight() {
+									presentationHeightReleasePending = false
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
+										resetViewportProbeHeight()
+									if (!presentationHeightQuietObservationEligible) {
+										stopPresentationHeightObservation()
+										return
+									}
+									const identity = currentPresentationHeightIdentity()
+									const measuredHeight = presentationHeightMeasuredHeight
+									if (!isFinite(measuredHeight) || measuredHeight <= 0) {
+										stopPresentationHeightObservation()
+										return
+									}
+									if (presentationHeightObservedHeight > 0
+										&& Math.abs(presentationHeightObservedHeight
+											- measuredHeight) <= 0.5)
+										++presentationHeightQuietPolishObservations
+									else {
+										presentationHeightObservedHeight = measuredHeight
+										presentationHeightQuietPolishObservations = 1
+									}
+									if (presentationHeightQuietPolishObservations < 2) {
+										schedulePresentationHeightObservation()
+										return
+									}
+									const committedHeight =
+										presentationHeightCommitValue(measuredHeight)
+									if (presentationHeightReleased
+										&& presentationHeightSettledIdentity === identity
+										&& Math.abs(presentationHeightSettledHeight - committedHeight)
+											<= 0.5) {
+										presentationHeightQuietPolishObservations = 0
+										return
+									}
+									if (!commitPresentationHeight(identity, measuredHeight)) {
+										presentationHeightReleasePending = true
+										presentationHeightReleaseTimer.restart()
+									}
+								}
 								readonly property bool performanceTimelineDelegate: true
 								readonly property bool lightweightDeferredPresentation: false
 								readonly property string presentationSummary:
@@ -7116,17 +7460,28 @@ ApplicationWindow {
 								readonly property real cachedStaticHandoffVisibleHeight: Math.min(
 									cachedStaticHandoffCardHeight, Math.max(1,
 										height - cachedStaticHandoffY))
-								// Viewport membership controls provider activation, which
-								// refines the delegate's final height. Start with model
-								// geometry, then grow this imperative latch only after the
-								// real row has settled. Visibility never binds back to item
-								// or live height, while tall media keeps its painted tail.
+								// Viewport membership controls provider activation. Before the
+								// release latch commits a real height, keep the model estimate
+								// as the probe floor. Afterward, the probe is the same cached
+								// committed height as the outer delegate, including while the
+								// nested Loader is temporarily absent.
 								property string viewportProbeStableId: ""
 								property real viewportProbeHeight: Math.max(
 									timeline.deferredMessageRowHeight,
 									deferredPresentationHeight)
 								property bool viewportMembershipUpdating: false
+								readonly property real presentationHeightCommittedHeight:
+									presentationHeightReleased
+									&& presentationHeightSettledIdentity.length > 0
+									&& presentationHeightSettledIdentity
+										=== currentPresentationHeightIdentity()
+									&& isFinite(Number(presentationHeightSettledHeight))
+									&& Number(presentationHeightSettledHeight) > 0
+									? Math.max(timeline.deferredMessageRowHeight,
+										Number(presentationHeightSettledHeight)) : 0
 								function viewportProbeBaseHeight() {
+									if (presentationHeightCommittedHeight > 0)
+										return presentationHeightCommittedHeight
 									return Math.max(timeline.deferredMessageRowHeight,
 										Number(deferredPresentationHeight || 0))
 								}
@@ -7135,15 +7490,21 @@ ApplicationWindow {
 									viewportProbeHeight = viewportProbeBaseHeight()
 								}
 								function updateViewportProbeHeight() {
-									const identity = String(stableId || "")
-									if (viewportProbeStableId !== identity)
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
 										resetViewportProbeHeight()
+									const committedHeight = presentationHeightCommittedHeight
+									if (committedHeight > 0) {
+										if (Math.abs(viewportProbeHeight - committedHeight) > 0.5)
+											viewportProbeHeight = committedHeight
+										return
+									}
 									if (accessibilityPooled || richGeometrySettling || !item)
 										return
 									const settledHeight = Math.max(
 										viewportProbeBaseHeight(),
 										Number(item.lightweightMessageRowHeight || 0),
-										Number(item.implicitHeight || 0),
 										Number(height || 0))
 									if (settledHeight > viewportProbeHeight)
 										viewportProbeHeight = settledHeight
@@ -7197,12 +7558,15 @@ ApplicationWindow {
 									})
 								}
 								onDeferredPresentationHeightChanged: {
-									if (viewportProbeStableId !== String(stableId || ""))
-										scheduleViewportProbeReset()
-									else
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
+										resetViewportProbeHeight()
+									else if (!presentationHeightReleased)
 										viewportProbeHeight = Math.max(
 											viewportProbeHeight,
 											viewportProbeBaseHeight())
+									schedulePresentationHeightObservation()
 								}
 								onViewportProbeHeightChanged:
 									timeline.scheduleViewportMembershipUpdate()
@@ -7279,25 +7643,73 @@ ApplicationWindow {
 									&& (!item.messageRowReady
 										|| item.richResourceActivationPending
 										|| !item.richResourcesActive)
+								readonly property real presentationHeightMeasuredHeight: item
+									? Number(item.implicitHeight || 0) : 0
+								readonly property bool presentationHeightQuietObservationEligible:
+									!accessibilityPooled && !!item
+									&& currentPresentationHeightIdentity().length > 0
+									&& messageRowReady && !richGeometrySettling
+									&& !richResourceActivationPending
+									&& !previewLoaderIncubationWatchdogRunning
+									&& isFinite(presentationHeightMeasuredHeight)
+									&& presentationHeightMeasuredHeight > 0
+									&& !timeline.richScrollInProgress
+									&& !timeline.moving && !timeline.dragging && !timeline.flicking
+									&& !timeline.scrollbarDragActive
+									&& !timeline.scrollbarReleasePending
+									&& !timelineScrollBar.pressed
+									&& !timeline.prependAnchorActive
+									&& !timeline.prependMutationInProgress
+									&& !chatModel.prependPending
+									&& !timeline.scopePresentationPending
+									&& !timeline.scopePresentationFinalizing
+									&& !timeline.scopeResetPending
+									&& !timeline.scopePresentationObservationActive
+									&& !timeline.restoringPrependAnchor
+									&& !timeline.deferredPrependAnchorActive
+									&& !timeline.restoringBottom
+									&& !timeline.explicitWheelInputPending
+									&& !timeline.explicitNavigationMovement
+									&& !timelineScrollHandler.scrolling
+					&& !timeline.topAnchorActive
+					&& !timeline.restoringTopAnchor
+					&& !timeline.viewportAnchorQuietReleaseActive
+					&& !timeline.viewportAnchorReleasePending
+					&& !timeline.restoringViewportAnchor
+									&& !bottomFollowTimer.running
+									&& !root.performanceChatScrollRunning
+								onPresentationHeightQuietObservationEligibleChanged: {
+									if (presentationHeightQuietObservationEligible)
+										schedulePresentationHeightObservation()
+									else
+										stopPresentationHeightObservation()
+								}
+								onPresentationHeightMeasuredHeightChanged: {
+									scheduleViewportProbeHeightUpdate()
+									schedulePresentationHeightObservation()
+								}
 								onRichGeometrySettlingChanged: {
 									if (!richGeometrySettling)
 										scheduleViewportProbeHeightUpdate()
+									schedulePresentationHeightObservation()
 								}
 								// Incubation and provider-resource activation can briefly
-								// expose both placeholder and provider heights. The outer
-								// delegate owns one reserved geometry until the provider's
-								// resource/polish window settles; settled real content may
-								// still grow beyond that estimate.
-								height: Math.max(timeline.deferredMessageRowHeight,
-									deferredPresentationHeight,
-									item ? item.lightweightMessageRowHeight : 0,
-									!richGeometrySettling && item ? item.implicitHeight : 0)
+								// expose both placeholder and provider heights. Keep that
+								// reservation until the two-observation latch commits a
+								// measured height; after that, use only the cached height.
+								height: presentationHeightCommittedHeight > 0
+									? presentationHeightCommittedHeight
+									: Math.max(timeline.deferredMessageRowHeight,
+										deferredPresentationHeight,
+										item ? item.lightweightMessageRowHeight : 0)
 								onHeightChanged: {
-									if (item && item.richResourcesRequired
-											&& !richGeometrySettling)
+									if (item) {
 										scheduleViewportProbeHeightUpdate()
+										schedulePresentationHeightObservation()
+									}
 								}
-								clip: richGeometrySettling
+								clip: richGeometrySettling || (item
+									&& presentationHeightMeasuredHeight > height + 0.5)
 								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								asynchronous: true
 								// A cold row stays as a fixed-height placeholder until the
@@ -7307,6 +7719,7 @@ ApplicationWindow {
 								active: !deferredPresentation
 								onActiveChanged: {
 									if (!active) {
+										stopPresentationHeightObservation()
 										const ownedStableId = resumeOwnedStableId
 										outerLoaderReady = false
 										resumeRequested = false
@@ -7316,7 +7729,8 @@ ApplicationWindow {
 										resetOuterLoaderIncubationWatchdog(true)
 										if (ownedStableId.length > 0)
 											timeline.cancelRichLoaderResume(ownedStableId)
-									}
+									} else
+										schedulePresentationHeightObservation()
 								}
 
 								// DelegateChooser replaces the lightweight source delegate
@@ -7608,6 +8022,13 @@ ApplicationWindow {
 									releaseDeferredMaterialization(ownedStableId)
 								}
 								Timer {
+									id: presentationHeightReleaseTimer
+									interval: 16
+									repeat: false
+									onTriggered:
+										asyncMessageDelegate.observePresentationHeight()
+								}
+								Timer {
 									id: viewportProbeUpdateTimer
 									interval: 0
 									repeat: false
@@ -7625,6 +8046,10 @@ ApplicationWindow {
 								ListView.onPooled: {
 									accessibilityPooled = true
 									updateViewportMembership()
+									// Pooling the same stable presentation must not restore
+									// the conservative estimate. Only abandon the in-flight
+									// quiet observation; retain the committed cache.
+									stopPresentationHeightObservation()
 									viewportProbeUpdateTimer.stop()
 									resetOuterLoaderIncubationWatchdog(true)
 									const retiredStableId = resumeOwnedStableId.length > 0
@@ -7641,6 +8066,9 @@ ApplicationWindow {
 										item.handleListViewPooled()
 								}
 								ListView.onReused: {
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									stopPresentationHeightObservation()
 									resetOuterLoaderIncubationWatchdog(true)
 									viewportProbeUpdateTimer.stop()
 									resetViewportProbeHeight()
@@ -7649,8 +8077,12 @@ ApplicationWindow {
 									accessibilityPooled = false
 									updateViewportMembership()
 									scheduleViewportProbeHeightUpdate()
+									if (identityChanged || presentationHeightReleased)
+										schedulePresentationHeightObservation()
 								}
 								onStableIdChanged: {
+									resetPresentationHeightIdentity()
+									resetViewportProbeHeight()
 									scheduleViewportProbeReset()
 									timeline.scheduleViewportMembershipUpdate()
 									const retiredMaterializationId =
@@ -7673,11 +8105,17 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 								}
 								Component.onCompleted: {
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
+										resetViewportProbeHeight()
 									deferredMaterializationCleanupId = String(stableId || "")
 									scheduleViewportProbeReset()
 									updateViewportMembership()
+									schedulePresentationHeightObservation()
 								}
 								Component.onDestruction: {
+									stopPresentationHeightObservation()
 									if (typeof timeline !== "undefined" && timeline) {
 										const retiredStableId = resumeOwnedStableId.length > 0
 											? resumeOwnedStableId : stableId
@@ -7689,12 +8127,17 @@ ApplicationWindow {
 									}
 								}
 								onLoaded: {
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
+										resetViewportProbeHeight()
 									const outerIncubationRecovered =
 										outerLoaderIncubationSuppressed
 									resetOuterLoaderIncubationWatchdog(true)
 									outerLoaderReady = true
 									item.accessibilityPooled = accessibilityPooled
 									scheduleViewportProbeHeightUpdate()
+									schedulePresentationHeightObservation()
 									if (resumeRequested) {
 										const allowDuringFinalization = resumeDuringFinalization
 										const admitPreviewMaterialization =
@@ -7709,6 +8152,16 @@ ApplicationWindow {
 									}
 									if (outerIncubationRecovered)
 										timeline.scheduleRichContentResume()
+								}
+								onItemChanged: {
+									const identityChanged =
+										reevaluatePresentationHeightIdentity()
+									if (identityChanged)
+										resetViewportProbeHeight()
+									if (item)
+										schedulePresentationHeightObservation()
+									else
+										stopPresentationHeightObservation()
 								}
 
 								sourceComponent: Component {
@@ -8437,6 +8890,13 @@ ApplicationWindow {
 							}
 						}
 						onPreviewLoaderIncubationIdentityChanged: {
+							const presentationIdentityChanged =
+								asyncMessageDelegate.reevaluatePresentationHeightIdentity()
+							if (presentationIdentityChanged) {
+								asyncMessageDelegate.resetViewportProbeHeight()
+								asyncMessageDelegate.updateViewportMembership()
+							}
+							asyncMessageDelegate.schedulePresentationHeightObservation()
 							const suppressionChanged =
 								previewLoaderIncubationSuppressed
 								&& previewLoaderIncubationIdentity
@@ -8485,6 +8945,8 @@ ApplicationWindow {
 								reconcileViewportMembership()
 						}
 						onStableIdChanged: {
+							asyncMessageDelegate.resetPresentationHeightIdentity()
+							asyncMessageDelegate.resetViewportProbeHeight()
 							closeMessageActionsForReuse()
 							richResourcesActive = false
 							resetPreviewLoaderIncubationWatchdog(true)
@@ -9843,6 +10305,10 @@ ApplicationWindow {
 						? qsTr("Scroll to %n new message(s)", "", timeline.pendingTailMessageCount)
 						: qsTr("Scroll to the newest message")
 					onClicked: {
+						timeline.releasePrependAnchor()
+						timeline.releaseViewportAnchor()
+						timeline.releaseTopAnchor()
+						timeline.invalidateBottomFollow()
 						timeline.stickToBottom = true
 						timeline.requestBottomFollow()
 					}
