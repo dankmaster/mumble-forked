@@ -151,7 +151,7 @@ TestCase {
 
 	function test_delayed_rich_card_height_changes_preserve_the_visible_message() {
 		verify(/property string viewportAnchorId:\s*""[\s\S]*property bool viewportAnchorActive:\s*false[\s\S]*property bool viewportAnchorReleasePending:\s*false/.test(mainSource))
-		verify(/function\s+captureViewportAnchor\(\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y/.test(mainSource))
+		verify(/function\s+captureViewportAnchor\(allowDuringInput\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y/.test(mainSource))
 		verify(/function\s+timelineDelegateForStableId\(stableId\)[\s\S]*contentItem\.children[\s\S]*headerItem[\s\S]*deferredRepeater\.itemAt\(childIndex\)[\s\S]*String\(item\.stableId\s*\|\|\s*""\)\s*===\s*key/.test(mainSource))
 		verify(/function\s+restoreViewportAnchor\(releaseWhenRestored\)[\s\S]*releaseWhenRestored\s*===\s*true[\s\S]*viewportAnchorReleasePending\s*=\s*true[\s\S]*timelineDelegateForStableId\(viewportAnchorId\)[\s\S]*viewportAnchorRetries\s*<=\s*8[\s\S]*currentOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y[\s\S]*contentY\s*\+\s*currentOffset\s*-\s*viewportAnchorOffset[\s\S]*contentY\s*=\s*desiredY[\s\S]*viewportAnchorReleasePending[\s\S]*releaseViewportAnchor\(\)/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*viewportAnchorActive[\s\S]*Qt\.callLater\(function\(\)\s*\{\s*timeline\.restoreViewportAnchor\(\)/.test(mainSource))
@@ -213,7 +213,7 @@ TestCase {
 		verify(/onContentHeightChanged:\s*\{[\s\S]*scopePresentationObservationActive\s*&&\s*stickToBottom[\s\S]*!dragging\s*&&\s*!flicking[\s\S]*setTailContentY\(maximumY\)[\s\S]*containTailMessageWhenPossible\(\)/.test(mainSource))
 		verify(/onMovementStarted:\s*\{[\s\S]*const\s+explicitNavigation\s*=\s*dragging[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*if\s*\(stickToBottom\)[\s\S]*requestBottomFollow\(\)[\s\S]*return/.test(mainSource))
 		verify(!/onMovementStarted:\s*\{[\s\S]{0,900}scopePresentationObservationActive\s*&&\s*stickToBottom/.test(mainSource))
-		verify(/onMovementEnded:\s*\{[\s\S]*if\s*\(!restoringBottom\)[\s\S]*if\s*\(!stickToBottom\)[\s\S]*stickToBottom\s*=\s*isNearBottom\(\)[\s\S]*requestBottomFollow\(\)/.test(mainSource))
+		verify(/onMovementEnded:\s*\{[\s\S]*if\s*\(scrollbarDragActive\s*\|\|\s*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*return[\s\S]*if\s*\(!restoringBottom\)[\s\S]*isAtBottom\(\)[\s\S]*requestBottomFollow\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationQuietTimer[\s\S]*interval:\s*120[\s\S]*finishScopePresentation\(false\)/.test(mainSource))
 		verify(/function\s+pendingScopeHydrationCount\(\)[\s\S]*contentNeedsHydration[\s\S]*inHydrationWindow/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]{0,420}scopePresentationFinalizing\s*=\s*true/.test(mainSource))
@@ -362,7 +362,7 @@ TestCase {
 	}
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {
-		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*bottomFollowTimer\.stop\(\)[\s\S]*timeline\.stickToBottom\s*=\s*false[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
+		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*timeline\.invalidateBottomFollow\(\)[\s\S]*timeline\.stickToBottom\s*=\s*false[\s\S]*performanceChatScrollRunning\s*=\s*true/.test(mainSource))
 		verify(/fullRangeToStart\s*===\s*true[\s\S]{0,280}performanceChatScrollTargetY\s*=\s*minimumY/.test(mainSource))
 		verify(/performanceChatScrollFullRangeToStart[\s\S]*currentOriginY\s*=\s*timeline\.originY[\s\S]*Math\.max\(currentOriginY,\s*previousY\s*-\s*wheelStep\)[\s\S]*reachedTarget/.test(mainSource))
 		verify(/const\s+availableUp\s*=\s*Math\.max\(0,\s*timeline\.contentY\s*-\s*minimumY\)[\s\S]*const\s+availableDown\s*=\s*Math\.max\(0,\s*maximumY\s*-\s*timeline\.contentY\)[\s\S]*maximumDirectionalTravel/.test(mainSource))
@@ -453,9 +453,20 @@ TestCase {
 		const scrollbarStart = mainSource.indexOf("id: timelineScrollBar")
 		const scrollbarEnd = mainSource.indexOf("MiddleDragScrollHandler", scrollbarStart)
 		verify(scrollbarStart >= 0 && scrollbarEnd > scrollbarStart)
-		verify(/onPressedChanged:\s*\{[\s\S]*if\s*\(!timeline\.stickToBottom\)[\s\S]*timeline\.captureViewportAnchor\(\)[\s\S]*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
-			mainSource.slice(scrollbarStart, scrollbarEnd)))
-		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*performanceChatScrollRunning/.test(mainSource))
+		const scrollbarSource = mainSource.slice(scrollbarStart, scrollbarEnd)
+		verify(/onPressedChanged:\s*\{[\s\S]*if\s*\(pressed\)[\s\S]*scrollbarDragActive\s*=\s*true[\s\S]*takeExplicitNavigationOwnership\("scrollbar"\)[\s\S]*cancelSmoothWheel\(\)[\s\S]*else[\s\S]*finishScrollbarDrag\(\)/.test(scrollbarSource))
+		const finishScrollbarStart = mainSource.indexOf("function finishScrollbarDrag()")
+		const finishScrollbarEnd = mainSource.indexOf("function requestBottomFollow()",
+			finishScrollbarStart)
+		verify(finishScrollbarStart >= 0 && finishScrollbarEnd > finishScrollbarStart)
+		const finishScrollbarSource = mainSource.slice(finishScrollbarStart, finishScrollbarEnd)
+		verify(/scrollbarReleasePending\s*=\s*true[\s\S]*scrollbarDragActive\s*=\s*false[\s\S]*invalidateBottomFollow\(\)[\s\S]*isAtBottom\(\)[\s\S]*captureViewportAnchor\(true\)[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*scrollbarReleaseGuardTimer\.restart\(\)/.test(finishScrollbarSource))
+		verify(!/requestBottomFollow\(\)/.test(finishScrollbarSource))
+		verify(/function\s+isAtBottom\(\)[\s\S]*maximumY\s*-\s*contentY\s*<=\s*0\.5/.test(mainSource))
+		verify(!/isNearBottom\(\)/.test(finishScrollbarSource))
+		verify(/property bool richScrollInProgress:[\s\S]*timelineScrollHandler\.scrolling[\s\S]*timelineScrollBar\.pressed[\s\S]*scrollbarReleasePending[\s\S]*performanceChatScrollRunning/.test(mainSource))
+		verify(/id:\s*scrollbarReleaseGuardTimer[\s\S]*interval:\s*128[\s\S]*scrollbarReleasePending\s*=\s*false[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*scheduleRichContentResume\(\)[\s\S]*requestBottomFollow\(\)/.test(mainSource))
+		verify(/onContentHeightChanged:\s*\{[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*if\s*\(scrollbarDragActive\s*\|\|\s*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed\)[\s\S]*return/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*suspendRichContentForScroll\(\)/.test(mainSource))
 		const richScrollChangeStart =
 			mainSource.indexOf("onRichScrollInProgressChanged:")
@@ -754,7 +765,7 @@ TestCase {
 		verify(/function\s+preparePerformanceChatScrollWorkload\(stepCount,\s*fullRangeToStart\)[\s\S]*retainedRichIds[\s\S]*item\.richResourcesRequired\s*!==\s*true[\s\S]*item\.richResourcesActive\s*!==\s*true[\s\S]*visibleNow[\s\S]*visibleAtTarget[\s\S]*performanceChatScrollRetainedRichIds\s*=\s*retainedRichIds/.test(mainSource))
 		verify(/onRichResourcesActiveChanged:[\s\S]*!richResourcesActive[\s\S]*timeline\.richScrollInProgress[\s\S]*performanceChatScrollRetainedRichIds[\s\S]*performanceChatScrollRetainedRichResourceDropCount/.test(mainSource))
 		verify(/function\s+performanceChatScrollState\(\)[\s\S]*"retainedRichResourceIds":[\s\S]*Object\.keys\(performanceChatScrollRetainedRichIds[\s\S]*"retainedRichResourceDropCount":[\s\S]*performanceChatScrollRetainedRichResourceDropCount/.test(mainSource))
-		verify(/function\s+captureViewportAnchor\(\)[\s\S]*Math\.abs\(contentY\s*-\s*originY\)\s*<=\s*0\.5[\s\S]*beginTopAnchor\(\)[\s\S]*function\s+beginTopAnchor\(guardProgrammaticMovement\)[\s\S]*topAnchorActive\s*=\s*true[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*function\s+restoreTopAnchor\(\)[\s\S]*contentY\s*=\s*originY/.test(mainSource))
+		verify(/function\s+captureViewportAnchor\(allowDuringInput\)[\s\S]*Math\.abs\(contentY\s*-\s*originY\)\s*<=\s*0\.5[\s\S]*beginTopAnchor\(\)[\s\S]*function\s+beginTopAnchor\(guardProgrammaticMovement\)[\s\S]*topAnchorActive\s*=\s*true[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*function\s+restoreTopAnchor\(\)[\s\S]*contentY\s*=\s*originY/.test(mainSource))
 		verify(/function\s+capturePrependAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*prependAnchorOffset[\s\S]*prependAnchorActive\s*=\s*true/.test(mainSource))
 		verify(/function\s+restoreTopAnchor\(\)[\s\S]*timelineScrollHandler\.scrolling[\s\S]*contentY\s*=\s*originY/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*restoreTopAnchor\(\)/.test(mainSource))
@@ -766,7 +777,13 @@ TestCase {
 		verify(/property bool explicitNavigationMovement:\s*false[\s\S]*onMovementStarted:[\s\S]*const\s+pendingNativeWheel\s*=\s*explicitWheelInputPending[\s\S]*const\s+explicitNavigation\s*=\s*dragging[\s\S]*timelineScrollHandler\.scrolling[\s\S]*timelineScrollBar\.pressed[\s\S]*performanceChatScrollRunning[\s\S]*pendingNativeWheel[\s\S]*explicitWheelInputPending\s*=\s*false[\s\S]*takeExplicitNavigationOwnership[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*viewportAnchorActive[\s\S]*restoreViewportAnchor\(\)/.test(mainSource))
 		verify(!/const\s+explicitNavigation\s*=\s*dragging\s*\|\|\s*flicking/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"stickToBottom"[\s\S]*"moving"[\s\S]*"dragging"[\s\S]*"flicking"[\s\S]*"explicitWheelInputPending"[\s\S]*"explicitNavigationMovement"[\s\S]*"lastMovementClassification"[\s\S]*"automaticLayoutMovementCount"/.test(mainSource))
-		verify(/onMovementEnded:[\s\S]*const\s+explicitNavigation\s*=\s*explicitNavigationMovement[\s\S]*explicitNavigationMovement\s*=\s*false[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*viewportAnchorActive[\s\S]*restoreViewportAnchor\(\)[\s\S]*else[\s\S]*stickToBottom\s*=\s*isNearBottom\(\)[\s\S]*requestBottomFollow\(\)[\s\S]*captureViewportAnchor\(\)[\s\S]*return[\s\S]*stickToBottom\s*=\s*isNearBottom\(\)/.test(mainSource))
+		verify(/onMovementEnded:[\s\S]*const\s+explicitNavigation\s*=\s*explicitNavigationMovement[\s\S]*explicitNavigationMovement\s*=\s*false[\s\S]*if\s*\(scrollbarDragActive\s*\|\|\s*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*return[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*viewportAnchorActive[\s\S]*restoreViewportAnchor\(\)[\s\S]*isAtBottom\(\)[\s\S]*requestBottomFollow\(\)[\s\S]*captureViewportAnchor\(\)/.test(mainSource))
+		verify(/function\s+restoreViewportAnchor\(releaseWhenRestored\)[\s\S]*scrollbarDragActive[\s\S]*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed/.test(mainSource))
+		verify(/function\s+capturePrependAnchor\(\)[\s\S]*scrollbarDragActive[\s\S]*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed[\s\S]*return\s*false/.test(mainSource))
+		verify(/function\s+restorePrependAnchor\(\)[\s\S]*scrollbarDragActive[\s\S]*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed/.test(mainSource))
+		verify(/function\s+restoreTopAnchor\(\)[\s\S]*scrollbarDragActive[\s\S]*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed/.test(mainSource))
+		verify(/function\s+setTailContentY\(nextY\)[\s\S]*scrollbarDragActive[\s\S]*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed[\s\S]*return/.test(mainSource))
+		verify(/const\s+generation\s*=\s*timeline\.pendingBottomFollowGeneration[\s\S]*generation\s*!==\s*timeline\.bottomFollowGeneration[\s\S]*timeline\.restoringBottom\s*=\s*false[\s\S]*Qt\.callLater\(function\(\)[\s\S]*generation\s*!==\s*timeline\.bottomFollowGeneration[\s\S]*timeline\.restoringBottom\s*=\s*false/.test(mainSource))
 		verify(/function\s+revealConversationSearchMatch\(row,\s*stableId\)[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*positionViewAtIndex\(presentationRow,\s*ListView\.Center\)/.test(mainSource))
 		verify(/function\s+positionVisualFixtureTimelineAt\(stableId\)[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*positionViewAtIndex\(row,\s*ListView\.Beginning\)/.test(mainSource))
 		verify(/id:\s*topAnchorFrameTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*false[\s\S]*id:\s*topAnchorSettleTimer[\s\S]*interval:\s*180[\s\S]*recoveryPending[\s\S]*pendingScopeHydrationCount\(\)[\s\S]*pendingVisibleRichRecoveryCount\(\)[\s\S]*restoreTopAnchor\(\)[\s\S]*restart\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
@@ -1254,7 +1271,7 @@ TestCase {
 	function test_visible_tail_marks_the_active_scope_read_without_clearing_scrolled_history() {
 		verify(/function\s+markVisibleScopeReadIfEligible\(\)[\s\S]*!root\.active[\s\S]*scopePresentationPending[\s\S]*unreadCount[\s\S]*!isNearBottom\(\)[\s\S]*uiCommands\.markActiveScopeRead\(\)/.test(mainSource))
 		verify(/onUnreadCountChanged\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
-		verify(/onMovementEnded:[\s\S]*stickToBottom\s*=\s*isNearBottom\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
+		verify(/onMovementEnded:[\s\S]*stickToBottom\s*=\s*isAtBottom\(\)[\s\S]*markVisibleScopeReadIfEligible\(\)/.test(mainSource))
 		verify(/onActiveChanged:[\s\S]*timeline\.markVisibleScopeReadIfEligible\(\)/.test(mainSource))
 	}
 

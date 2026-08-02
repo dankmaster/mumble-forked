@@ -88,8 +88,40 @@ TestCase {
 		const firstTarget = middleDrag.wheelTargetY
 		verify(middleDrag.queueSmoothWheelDelta(-120))
 		compare(middleDrag.wheelTargetY, firstTarget + middleDrag.wheelStep)
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		compare(middleDrag.wheelTargetY, firstTarget + middleDrag.wheelStep,
+			"a third same-direction notch must not extend the bounded runway")
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
 		fuzzyCompare(flickable.contentY, firstTarget + middleDrag.wheelStep, 0.5)
+	}
+
+	function test_reversal_retargets_from_the_current_viewport() {
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		const currentY = flickable.contentY
+		const forwardTarget = middleDrag.wheelTargetY
+		verify(middleDrag.queueSmoothWheelDelta(120))
+		compare(middleDrag.wheelTargetY,
+			Math.max(flickable.originY, currentY - middleDrag.wheelStep))
+		verify(middleDrag.wheelTargetY < forwardTarget)
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+	}
+
+	function test_large_angle_delta_is_capped_to_two_steps() {
+		verify(middleDrag.shouldSmoothWheel(240, 0))
+		verify(middleDrag.queueSmoothWheelDelta(-240))
+		compare(middleDrag.wheelTargetY, 180 + 2 * middleDrag.wheelStep)
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		compare(middleDrag.wheelTargetY, 180 + 2 * middleDrag.wheelStep)
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+	}
+
+	function test_coarse_wheel_can_be_canceled_by_native_precision_input() {
+		verify(middleDrag.queueSmoothWheelDelta(-120))
+		verify(middleDrag.wheelAnimationActive)
+		verify(!middleDrag.shouldSmoothWheel(120, 4))
+		middleDrag.cancelSmoothWheel()
+		verify(!middleDrag.wheelAnimationActive)
+		fuzzyCompare(middleDrag.wheelTargetY, flickable.contentY, 0.01)
 	}
 
 	function test_precision_wheel_stays_on_the_native_flickable_path() {

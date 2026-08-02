@@ -27,6 +27,9 @@ MouseArea {
 	property bool smoothWheelEnabled: false
 	property real wheelStep: 96
 	property real wheelResponse: 28
+	// Keep a short, bounded input runway so a burst cannot turn into a long
+	// delayed scroll. A reversal is retargeted from the viewport immediately.
+	readonly property int maximumQueuedWheelSteps: 2
 	property real wheelTargetY: 0
 	property bool wheelAnimationActive: false
 	signal scrollingStarted()
@@ -140,11 +143,31 @@ MouseArea {
 		if (Math.abs(angle) < 0.01)
 			return false
 		targetFlickable.cancelFlick()
-		const baseY = wheelAnimationActive ? wheelTargetY : targetFlickable.contentY
-		const nextTargetY = clampedContentY(baseY - (angle / 120) * wheelStep)
-		if (!wheelAnimationActive
-				&& Math.abs(nextTargetY - targetFlickable.contentY) <= 0.01)
+		const currentY = targetFlickable.contentY
+		const requestedOffset = -(angle / 120) * wheelStep
+		const requestedDistance = Math.abs(requestedOffset)
+		const maximumDistance = Math.max(Math.abs(wheelStep),
+			Math.abs(wheelStep) * Math.max(1, maximumQueuedWheelSteps))
+		let targetDistance = Math.min(maximumDistance, requestedDistance)
+		if (wheelAnimationActive) {
+			wheelTargetY = clampedContentY(wheelTargetY)
+			const activeOffset = wheelTargetY - currentY
+			const sameDirection = Math.abs(activeOffset) > 0.01
+				&& (activeOffset < 0) === (requestedOffset < 0)
+			// Same-direction notches may extend the runway, but never beyond the
+			// bounded coalescing window. Opposite-direction input starts from the
+			// current viewport instead of walking back through stale backlog.
+			if (sameDirection)
+				targetDistance = Math.min(maximumDistance,
+					Math.abs(activeOffset) + requestedDistance)
+		}
+		const direction = requestedOffset < 0 ? -1 : 1
+		const nextTargetY = clampedContentY(currentY + direction * targetDistance)
+		if (Math.abs(nextTargetY - currentY) <= 0.01) {
+			if (wheelAnimationActive)
+				finishSmoothWheel()
 			return false
+		}
 		wheelTargetY = nextTargetY
 		wheelAnimationActive = true
 		beginScrollingActivity()

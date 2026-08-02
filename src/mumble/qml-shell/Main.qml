@@ -1169,6 +1169,7 @@ ApplicationWindow {
 		timeline.releasePrependAnchor()
 		timeline.releaseViewportAnchor()
 		timeline.releaseTopAnchor()
+		timeline.invalidateBottomFollow()
 		timeline.stickToBottom = false
 		timeline.currentIndex = presentationRow
 		timeline.positionViewAtIndex(presentationRow, ListView.Center)
@@ -1183,7 +1184,7 @@ ApplicationWindow {
 		timeline.releasePrependAnchor()
 		timeline.releaseViewportAnchor()
 		timeline.releaseTopAnchor()
-		bottomFollowTimer.stop()
+		timeline.invalidateBottomFollow()
 		timeline.followTailAfterInsert = false
 		timeline.pendingTailInsertCount = 0
 		timeline.pendingTailMessageCount = 0
@@ -1793,7 +1794,7 @@ ApplicationWindow {
 				? performanceChatScrollStartY - travelDistance
 				: performanceChatScrollStartY + travelDistance
 		}
-		bottomFollowTimer.stop()
+		timeline.invalidateBottomFollow()
 		timeline.stickToBottom = false
 		timeline.releaseViewportAnchor()
 		timeline.releaseTopAnchor()
@@ -2121,7 +2122,7 @@ ApplicationWindow {
 				"reason": "The active timeline has not been scrolled completely to the start." }
 		timeline.releasePrependAnchor()
 		timeline.releaseViewportAnchor()
-		bottomFollowTimer.stop()
+		timeline.invalidateBottomFollow()
 		timeline.followTailAfterInsert = false
 		timeline.pendingTailInsertCount = 0
 		timeline.pendingTailMessageCount = 0
@@ -3311,17 +3312,15 @@ ApplicationWindow {
 						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
 							if (pressed) {
-								timelineScrollHandler.cancelSmoothWheel()
+								timeline.scrollbarReleaseGuardTimer.stop()
+								timeline.scrollbarReleasePending = false
+								timeline.scrollbarDragActive = true
 								timeline.takeExplicitNavigationOwnership("scrollbar")
+								// Cancel after ownership changes so a smooth-wheel finish
+								// cannot publish tail intent into the thumb gesture.
+								timelineScrollHandler.cancelSmoothWheel()
 							} else {
-								timeline.stickToBottom = timeline.isNearBottom()
-								timeline.requestBottomFollow()
-								if (!timeline.stickToBottom)
-									timeline.captureViewportAnchor()
-								// A fixed RangeValue jump can release without another
-								// movement signal. Reuse the settled membership recovery
-								// point instead of starting a competing resume here.
-								timeline.scheduleViewportMembershipUpdate()
+								timeline.finishScrollbarDrag()
 							}
 						}
 					}
@@ -3334,7 +3333,13 @@ ApplicationWindow {
 						onScrollingStarted:
 							timeline.takeExplicitNavigationOwnership("wheel-or-middle-drag")
 						onScrollingEnded: {
-							timeline.stickToBottom = timeline.isNearBottom()
+							if (timeline.scrollbarDragActive
+									|| timeline.scrollbarReleasePending
+									|| timelineScrollBar.pressed) {
+								timeline.scheduleViewportMembershipUpdate()
+								return
+							}
+							timeline.stickToBottom = timeline.isAtBottom()
 							timeline.requestBottomFollow()
 							if (!timeline.stickToBottom)
 								timeline.captureViewportAnchor()
@@ -3375,7 +3380,10 @@ ApplicationWindow {
 						? maximumRichScrollRetentionBuffer
 						: Math.max(baseCacheBuffer, richScrollRetentionBuffer)
 					readonly property bool richScrollInProgress: moving || dragging || flicking
-						|| timelineScrollHandler.scrolling || root.performanceChatScrollRunning
+						|| timelineScrollHandler.scrolling || scrollbarDragActive
+						|| timelineScrollBar.pressed
+						|| scrollbarReleasePending
+						|| root.performanceChatScrollRunning
 					property var richLoaderResumeQueue: []
 					// Asynchronous Loader incubation can span several polish turns. Do
 					// not activate another complete message tree until the previous one
@@ -3479,6 +3487,14 @@ ApplicationWindow {
 					property bool restoringViewportAnchor: false
 					property int viewportAnchorRetries: 0
 					property bool viewportAnchorReleasePending: false
+					// Scrollbar input owns the viewport until delayed ListView movement
+					// signals have drained. No tail-follow or anchor writer may reinterpret
+					// the thumb-selected position during that window.
+					property bool scrollbarDragActive: false
+					property bool scrollbarReleasePending: false
+					property int bottomFollowGeneration: 0
+					property int pendingBottomFollowGeneration: 0
+					property bool pendingBottomFollowOwnsScopeReset: false
 					property bool topAnchorActive: false
 					property bool restoringTopAnchor: false
 					property bool topAnchorProgrammaticMovementGuard: false
@@ -3529,6 +3545,13 @@ ApplicationWindow {
 						return maximumY - contentY <= bottomFollowThreshold
 					}
 
+					function isAtBottom() {
+						if (count === 0 || atYEnd)
+							return true
+						const maximumY = Math.max(originY, originY + contentHeight - height)
+						return maximumY - contentY <= 0.5
+					}
+
 					function markVisibleScopeReadIfEligible() {
 						if (!root.active || scopePresentationPending || activeScope.activity
 								|| Number(activeScope.unreadCount || 0) <= 0 || !isNearBottom())
@@ -3537,7 +3560,37 @@ ApplicationWindow {
 						return true
 					}
 
+					function invalidateBottomFollow() {
+						++bottomFollowGeneration
+						bottomFollowTimer.stop()
+					}
+
+					function finishScrollbarDrag() {
+						if (!scrollbarDragActive)
+							return
+						scrollbarReleasePending = true
+						scrollbarDragActive = false
+						invalidateBottomFollow()
+						const atBottom = isAtBottom()
+						stickToBottom = atBottom
+						if (atBottom)
+							markVisibleScopeReadIfEligible()
+						else {
+							// Capture only the selected viewport identity/offset. Any later
+							// rich-height recovery can preserve it without a tail jump.
+							captureViewportAnchor(true)
+						}
+						// Release does not request a positional correction. These are the
+						// bounded, non-positional wakeups needed after a fixed RangeValue
+						// jump or thumb drag.
+						scheduleViewportMembershipUpdate()
+						scrollbarReleaseGuardTimer.restart()
+					}
+
 					function requestBottomFollow() {
+						if (scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
+							return
 						if (stickToBottom && !prependAnchorActive && !restoringBottom
 								&& !scopePresentationPending && !bottomFollowTimer.running
 								&& !root.performanceChatScrollRunning) {
@@ -3552,6 +3605,8 @@ ApplicationWindow {
 								markVisibleScopeReadIfEligible()
 								return
 							}
+							pendingBottomFollowGeneration = bottomFollowGeneration
+							pendingBottomFollowOwnsScopeReset = scopeResetPending
 							bottomFollowTimer.start()
 						}
 					}
@@ -3600,7 +3655,7 @@ ApplicationWindow {
 						clearDeferredPrependRichRows()
 						releaseViewportAnchor()
 						releaseTopAnchor()
-						bottomFollowTimer.stop()
+						invalidateBottomFollow()
 						richContentResumeTimer.stop()
 						richLoaderResumeTimer.stop()
 						richLoaderResumeQueue = []
@@ -3941,6 +3996,9 @@ ApplicationWindow {
 					}
 
 					function setTailContentY(nextY) {
+						if (scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
+							return
 						const minimumY = originY
 						const maximumY = Math.max(minimumY, originY + contentHeight - height)
 						const boundedY = Math.max(minimumY, Math.min(maximumY, nextY))
@@ -3952,7 +4010,8 @@ ApplicationWindow {
 					}
 
 					function positionTailImmediately() {
-						if (!stickToBottom || prependAnchorActive)
+						if (!stickToBottom || prependAnchorActive || scrollbarDragActive
+								|| scrollbarReleasePending || timelineScrollBar.pressed)
 							return
 						const maximumY = Math.max(originY, originY + contentHeight - height)
 						restoringBottom = true
@@ -4141,6 +4200,9 @@ ApplicationWindow {
 					}
 
 					function capturePrependAnchor() {
+						if (scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
+							return false
 						const item = firstVisibleMessageDelegate()
 						if (!item)
 							return false
@@ -4170,9 +4232,9 @@ ApplicationWindow {
 						return true
 					}
 
-					function captureViewportAnchor() {
+					function captureViewportAnchor(allowDuringInput) {
 						if (stickToBottom || prependAnchorActive || scopePresentationPending
-								|| moving || dragging || flicking)
+								|| (allowDuringInput !== true && (moving || dragging || flicking)))
 							return false
 						if (Math.abs(contentY - originY) <= 0.5) {
 							beginTopAnchor()
@@ -4887,6 +4949,10 @@ ApplicationWindow {
 					}
 
 					function noteExplicitWheelInput() {
+						if (scrollbarReleasePending && !scrollbarDragActive) {
+							scrollbarReleaseGuardTimer.stop()
+							scrollbarReleasePending = false
+						}
 						const generation = ++explicitWheelInputGeneration
 						explicitWheelInputStartY = contentY
 						explicitWheelInputPending = true
@@ -4901,6 +4967,11 @@ ApplicationWindow {
 					}
 
 					function takeExplicitNavigationOwnership(classification) {
+						if (String(classification || "") !== "scrollbar"
+								&& !scrollbarDragActive) {
+							scrollbarReleaseGuardTimer.stop()
+							scrollbarReleasePending = false
+						}
 						if (!explicitNavigationMovement)
 							++explicitNavigationMovementCount
 						explicitNavigationMovement = true
@@ -4911,7 +4982,7 @@ ApplicationWindow {
 						releasePrependAnchor()
 						releaseViewportAnchor()
 						releaseTopAnchor()
-						bottomFollowTimer.stop()
+						invalidateBottomFollow()
 						richContentResumeTimer.stop()
 					}
 
@@ -4935,7 +5006,8 @@ ApplicationWindow {
 
 					function restoreTopAnchor() {
 						if (!topAnchorActive || restoringTopAnchor || moving || dragging || flicking
-								|| timelineScrollHandler.scrolling)
+								|| timelineScrollHandler.scrolling || scrollbarDragActive
+								|| scrollbarReleasePending || timelineScrollBar.pressed)
 							return
 						restoringTopAnchor = true
 						contentY = originY
@@ -5677,7 +5749,8 @@ ApplicationWindow {
 							viewportAnchorReleasePending = true
 						if (!viewportAnchorActive || restoringViewportAnchor || stickToBottom
 								|| prependAnchorActive || scopePresentationPending
-								|| moving || dragging || flicking)
+								|| moving || dragging || flicking || scrollbarDragActive
+								|| scrollbarReleasePending || timelineScrollBar.pressed)
 							return false
 						const item = timelineDelegateForStableId(viewportAnchorId)
 						if (!item) {
@@ -5744,7 +5817,8 @@ ApplicationWindow {
 
 					function restoreDeferredPrependAnchor() {
 						if (!prependAnchorActive || !deferredPrependAnchorActive
-								|| restoringPrependAnchor)
+								|| restoringPrependAnchor || scrollbarDragActive
+								|| scrollbarReleasePending || timelineScrollBar.pressed)
 							return
 						// The technical prefix starts with a fixed estimate, but each row
 						// can become a differently sized text, gallery, or media card as
@@ -5794,7 +5868,9 @@ ApplicationWindow {
 					}
 
 					function restorePrependAnchor() {
-						if (!prependAnchorActive || restoringPrependAnchor)
+						if (!prependAnchorActive || restoringPrependAnchor
+								|| scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
 							return
 						const row = chatModel.presentationModel.rowForStableId(prependAnchorId)
 						if (row < 0) {
@@ -5822,7 +5898,8 @@ ApplicationWindow {
 					}
 
 					function containTailMessageWhenPossible() {
-						if (count <= 0)
+						if (count <= 0 || scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
 							return
 						const item = itemAtIndex(count - 1)
 						if (!item || !item.visible)
@@ -5907,6 +5984,9 @@ ApplicationWindow {
 					onHeightChanged: scheduleViewportMembershipUpdate()
 					onContentHeightChanged: {
 						scheduleViewportMembershipUpdate()
+						if (scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed)
+							return
 						if (scopePresentationPending) {
 							noteScopePresentationMutation()
 							// Keep the hidden cold transaction anchored to its real tail
@@ -5921,7 +6001,8 @@ ApplicationWindow {
 						if (scopePresentationObservationActive)
 							++scopePresentationExposedHeightChangeCount
 						if (scopePresentationObservationActive && stickToBottom
-								&& !dragging && !flicking) {
+								&& !dragging && !flicking && !scrollbarDragActive
+								&& !scrollbarReleasePending && !timelineScrollBar.pressed) {
 							// A late provider/card refinement is layout movement, not user
 							// navigation. Keep the freshly opened conversation pinned to its
 							// current tail in the same turn so ListView cannot reinterpret the
@@ -5970,12 +6051,20 @@ ApplicationWindow {
 					}
 					onMovementStarted: {
 						const pendingNativeWheel = explicitWheelInputPending
+						const scrollbarRelease = scrollbarReleasePending
+							&& !scrollbarDragActive && !timelineScrollBar.pressed
 						const explicitNavigation = dragging
 							|| timelineScrollHandler.scrolling
 							|| timelineScrollBar.pressed
+							|| scrollbarDragActive || scrollbarRelease
 							|| root.performanceChatScrollRunning
 							|| pendingNativeWheel
 						explicitWheelInputPending = false
+						if (scrollbarRelease) {
+							explicitNavigationMovement = true
+							lastMovementClassification = "scrollbar-release"
+							return
+						}
 						if (!explicitNavigation) {
 							explicitNavigationMovement = false
 							++automaticLayoutMovementCount
@@ -6009,6 +6098,11 @@ ApplicationWindow {
 					onMovementEnded: {
 						const explicitNavigation = explicitNavigationMovement
 						explicitNavigationMovement = false
+						if (scrollbarDragActive || scrollbarReleasePending
+								|| timelineScrollBar.pressed) {
+							scheduleViewportMembershipUpdate()
+							return
+						}
 						if (!restoringBottom) {
 							if (!explicitNavigation) {
 								if (stickToBottom)
@@ -6029,7 +6123,7 @@ ApplicationWindow {
 									// anchors before changing contentY. Re-establish tail
 									// intent when such a jump lands on the latest row;
 									// otherwise protect the newly revealed message.
-									stickToBottom = isNearBottom()
+									stickToBottom = isAtBottom()
 									if (stickToBottom)
 										requestBottomFollow()
 									else
@@ -6046,9 +6140,9 @@ ApplicationWindow {
 							// coalesced bottom-follow timer gets its next frame. Preserve an
 							// existing tail intent here; explicit input paths clear it before
 							// movement starts and still recompute whether the gesture ended
-							// back inside the tail threshold.
+							// back at the exact tail.
 							if (!stickToBottom)
-								stickToBottom = isNearBottom()
+								stickToBottom = isAtBottom()
 							requestBottomFollow()
 							if (!stickToBottom)
 								captureViewportAnchor()
@@ -6374,24 +6468,54 @@ ApplicationWindow {
 					}
 
 					Timer {
+						id: scrollbarReleaseGuardTimer
+						interval: 128
+						repeat: false
+						onTriggered: {
+							timeline.scrollbarReleasePending = false
+							timeline.scheduleViewportMembershipUpdate()
+							timeline.scheduleRichContentResume()
+							timeline.requestBottomFollow()
+						}
+					}
+
+					Timer {
 						id: bottomFollowTimer
 						// Coalesce the height churn produced by delegate creation, rich-text
 						// layout and asynchronous media into at most one correction per frame.
 						interval: 16
 						repeat: false
-						onTriggered: {
-							if (!timeline.stickToBottom || timeline.prependAnchorActive)
+							onTriggered: {
+								const generation = timeline.pendingBottomFollowGeneration
+								const ownsScopeReset = timeline.pendingBottomFollowOwnsScopeReset
+								if (generation !== timeline.bottomFollowGeneration
+										|| !timeline.stickToBottom || timeline.prependAnchorActive
+										|| timeline.scrollbarDragActive
+										|| timeline.scrollbarReleasePending
+										|| timelineScrollBar.pressed) {
+								timeline.restoringBottom = false
 								return
+							}
 							const maximumY = Math.max(timeline.originY,
 								timeline.originY + timeline.contentHeight - timeline.height)
-							if (!timeline.scopeResetPending && Math.abs(maximumY - timeline.contentY) <= 0.5)
+							if (!timeline.scopeResetPending && Math.abs(maximumY - timeline.contentY) <= 0.5) {
+								timeline.restoringBottom = false
 								return
+							}
 							timeline.restoringBottom = true
 							timeline.setTailContentY(maximumY)
 							Qt.callLater(function() {
+								if (generation !== timeline.bottomFollowGeneration
+										|| timeline.scrollbarDragActive
+										|| timeline.scrollbarReleasePending
+										|| timelineScrollBar.pressed) {
+									timeline.restoringBottom = false
+									return
+								}
 								timeline.containTailMessageWhenPossible()
 								timeline.restoringBottom = false
-								timeline.scopeResetPending = false
+								if (ownsScopeReset)
+									timeline.scopeResetPending = false
 								if (timeline.stickToBottom && !timeline.isNearBottom())
 									timeline.requestBottomFollow()
 								else
