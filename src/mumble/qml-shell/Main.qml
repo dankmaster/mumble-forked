@@ -930,10 +930,7 @@ ApplicationWindow {
 			return
 		}
 		if (coldPreviewHydrationPacingActive && timeline
-				&& timeline.richLoaderResumeTimer
-				&& (timeline.richLoaderResumeTimer.running
-					|| timeline.richLoaderResumeQueue.length > 0
-					|| timeline.richLoaderResumeActiveId.length > 0)) {
+				&& timeline.richLoaderResumeBusy) {
 			// Do not let two independent per-frame queues converge on the same GUI
 			// turn. Finish the lightweight row shells before cached preview results
 			// begin instantiating their provider trees.
@@ -2032,6 +2029,12 @@ ApplicationWindow {
 				"viewportAnchorActive": timeline.viewportAnchorActive,
 				"viewportAnchorId": timeline.viewportAnchorId,
 				"viewportAnchorOffset": timeline.viewportAnchorOffset,
+				"viewportAnchorReleasePending": timeline.viewportAnchorReleasePending,
+				"viewportAnchorQuietReleaseActive":
+					timeline.viewportAnchorQuietReleaseActive,
+				"viewportAnchorQuietReleaseGeneration":
+					timeline.viewportAnchorQuietReleaseGeneration,
+				"restoringViewportAnchor": timeline.restoringViewportAnchor,
 				"presentationPending": timeline.scopePresentationPending,
 				"presentationFinalizing": timeline.scopePresentationFinalizing,
 				"scopeResetPending": timeline.scopeResetPending,
@@ -2075,8 +2078,13 @@ ApplicationWindow {
 				"dragging": timeline.dragging,
 				"flicking": timeline.flicking,
 				"scrollHandlerScrolling": timelineScrollHandler.scrolling,
+				"scrollHandlerGestureActive": timelineScrollHandler.gestureActive,
+				"scrollHandlerNavigationTransitionActive":
+					timelineScrollHandler.navigationTransitionActive,
 				"scrollbarPressed": timelineScrollBar.pressed,
+				"scrollbarDragActive": timeline.scrollbarDragActive,
 				"scrollbarReleasePending": timeline.scrollbarReleasePending,
+				"scrollbarReleaseGuardRunning": scrollbarReleaseGuardTimer.running,
 				"wheelInputObservedCount": root.timelineWheelInputObservedCount,
 				"wheelObservedNotchUnits": root.timelineWheelObservedNotchUnits,
 				"wheelObservedSignedNotchBalance":
@@ -2128,6 +2136,12 @@ ApplicationWindow {
 					visiblePresentation.blankPreviewSurfaceCount,
 				"visibleInactiveRichResourceCount":
 					visiblePresentation.inactiveRichResourceCount,
+				"visiblePresentationHeightPendingCount":
+					visiblePresentation.presentationHeightPendingCount,
+				"visiblePresentationHeightMismatchCount":
+					visiblePresentation.presentationHeightMismatchCount,
+				"maximumVisiblePresentationHeightError":
+					visiblePresentation.maximumPresentationHeightError,
 				"visibleRows": visiblePresentation.rows,
 				"durationMs": timeline.scopePresentationStartedAt > 0
 					? Math.max(0, completedAt - timeline.scopePresentationStartedAt) : 0,
@@ -2140,6 +2154,13 @@ ApplicationWindow {
 				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
+					&& !timeline.viewportAnchorReleasePending
+					&& !timeline.viewportAnchorQuietReleaseActive
+					&& !timeline.explicitNavigationMovement
+					&& !timeline.scrollbarDragActive && !timeline.scrollbarReleasePending
+					&& !timelineScrollBar.pressed && !timelineScrollHandler.scrolling
+					&& !timelineScrollHandler.gestureActive
+					&& !timelineScrollHandler.navigationTransitionActive
 					&& !viewportMembershipTimer.running
 					&& !timeline.viewportMembershipUpdatePending
 					&& !chatModel.appendPending && !chatModel.prependPending
@@ -2147,6 +2168,7 @@ ApplicationWindow {
 						|| (visiblePresentation.visibleCount > 0
 							&& visiblePresentation.blankCount === 0
 							&& visiblePresentation.inactiveRichResourceCount === 0
+							&& visiblePresentation.presentationHeightPendingCount === 0
 							&& pendingVisibleRichRecoveryCount === 0))
 			}
 		} catch (error) {
@@ -3351,15 +3373,9 @@ ApplicationWindow {
 						Accessible.ignored: !visible
 						enabled: !timeline.scopePresentationPending
 						onPressedChanged: {
-							if (pressed) {
-								timeline.scrollbarReleaseGuardTimer.stop()
-								timeline.scrollbarReleasePending = false
-								timeline.scrollbarDragActive = true
-								// Publish thumb ownership before cancelFlick(), which can emit
-								// movementEnded synchronously for native precision-wheel kinetics.
-								timelineScrollHandler.cancelNavigationForOwnershipLoss()
-								timeline.takeExplicitNavigationOwnership("scrollbar")
-							} else {
+							if (pressed)
+								timeline.beginScrollbarDrag()
+							else {
 								timeline.finishScrollbarDrag()
 							}
 						}
@@ -3388,6 +3404,11 @@ ApplicationWindow {
 								timeline.scheduleViewportMembershipUpdate()
 								return
 							}
+							// Direct custom-wheel and middle-drag contentY writes do not
+							// guarantee a matching ListView movementEnded signal. Clear only
+							// after rejecting a newer thumb owner, so a stale end cannot erase
+							// the newer owner's explicit-navigation latch.
+							timeline.explicitNavigationMovement = false
 							timeline.stickToBottom = timeline.isAtBottom()
 							timeline.requestBottomFollow()
 							if (!timeline.stickToBottom)
@@ -3461,6 +3482,9 @@ ApplicationWindow {
 					// reports Ready (or Error), otherwise their final polish work can
 					// converge into one long GUI heartbeat gap.
 					property string richLoaderResumeActiveId: ""
+					readonly property bool richLoaderResumeBusy:
+						richLoaderResumeTimer.running || richLoaderResumeQueue.length > 0
+						|| richLoaderResumeActiveId.length > 0
 					// Once the visible viewport is fully quiet, warm exactly one row no
 					// farther away than a native 112 px wheel step. The stable-id grants
 					// that row narrowly scoped access to the existing serial hydration and
@@ -3645,17 +3669,42 @@ ApplicationWindow {
 						bottomFollowTimer.stop()
 					}
 
+					function beginScrollbarDrag() {
+						if (scrollbarDragActive)
+							return true
+						// Timer ids are lexical QML ids, not properties on this ListView.
+						// Keep the complete press transition here so a failed lookup cannot
+						// leave the previous viewport anchor alive under the thumb.
+						scrollbarReleaseGuardTimer.stop()
+						scrollbarReleasePending = false
+						scrollbarDragActive = true
+						// Publish thumb ownership before cancelFlick(), which can emit
+						// movementEnded synchronously for native precision-wheel kinetics.
+						timelineScrollHandler.cancelNavigationForOwnershipLoss()
+						takeExplicitNavigationOwnership("scrollbar")
+						return true
+					}
+
 					function finishScrollbarDrag() {
 						if (!scrollbarDragActive)
 							return
 						scrollbarReleasePending = true
 						scrollbarDragActive = false
+						// Attached ScrollBar writes do not guarantee a ListView
+						// movementEnded pair. Release the explicit-navigation latch here
+						// so delegate-height convergence cannot remain blocked forever.
+						explicitNavigationMovement = false
 						invalidateBottomFollow()
 						const atBottom = isAtBottom()
 						stickToBottom = atBottom
-						if (atBottom)
+						if (atBottom) {
+							// Exact-tail ownership supersedes every message anchor. This is
+							// normally already true after beginScrollbarDrag(), but keeping it
+							// explicit makes release robust against queued recovery callbacks.
+							releaseViewportAnchor()
+							releaseTopAnchor()
 							markVisibleScopeReadIfEligible()
-						else {
+						} else {
 							// Capture only the selected viewport identity/offset. Any later
 							// rich-height recovery can preserve it without a tail jump.
 							captureViewportAnchor(true)
@@ -4150,6 +4199,9 @@ ApplicationWindow {
 							"previewReadyCount": 0,
 							"blankPreviewSurfaceCount": 0,
 							"inactiveRichResourceCount": 0,
+							"presentationHeightPendingCount": 0,
+							"presentationHeightMismatchCount": 0,
+							"maximumPresentationHeightError": 0,
 							"rows": []
 						}
 
@@ -4184,10 +4236,30 @@ ApplicationWindow {
 								? Number(item.item.implicitHeight || 0) : 0
 							const hasLoadedImplicitHeight = isFinite(loadedImplicitHeight)
 								&& loadedImplicitHeight > 0
+							const expectedPresentationHeight = hasLoadedImplicitHeight
+								? Math.max(timeline.deferredMessageRowHeight,
+									loadedImplicitHeight) : 0
+							const presentationHeightError = hasLoadedImplicitHeight
+								? Math.abs(Number(item.height || 0)
+									- expectedPresentationHeight) : 0
+							const presentationHeightPending = hasLoadedImplicitHeight
+								&& item.messageRowReady === true
+								&& item.richGeometrySettling !== true
+								&& (item.presentationHeightReleased !== true
+									|| presentationHeightError > 1)
+							if (presentationHeightPending)
+								++diagnostics.presentationHeightPendingCount
+							if (presentationHeightError > 1)
+								++diagnostics.presentationHeightMismatchCount
+							diagnostics.maximumPresentationHeightError = Math.max(
+								diagnostics.maximumPresentationHeightError,
+								presentationHeightError)
+							const presentationRow = Number(
+								chatModel.presentationModel.rowForStableId(
+									String(item.stableId || "")))
 							diagnostics.rows.push({
 								"id": String(item.stableId || ""),
-								"modelIndex": isFinite(Number(item.index))
-									? Number(item.index) : -1,
+								"modelIndex": isFinite(presentationRow) ? presentationRow : -1,
 								"title": String(item.title || ""),
 								"subtitle": String(item.subtitle || ""),
 								"height": Number(item.height || 0),
@@ -4200,6 +4272,17 @@ ApplicationWindow {
 								"reservedExcess": hasLoadedImplicitHeight
 									? Math.max(0, Number(item.height || 0)
 										- Math.max(58, loadedImplicitHeight)) : 0,
+								"presentationHeightError": presentationHeightError,
+								"presentationHeightPending": presentationHeightPending,
+								"presentationHeightEligible":
+									item.presentationHeightQuietObservationEligible === true,
+								"presentationHeightReleasePending":
+									item.presentationHeightReleasePending === true,
+								"presentationHeightIdentity":
+									String(item.currentPresentationHeightIdentity
+										? item.currentPresentationHeightIdentity() : ""),
+								"presentationHeightSettledIdentity":
+									String(item.presentationHeightSettledIdentity || ""),
 								"presentationHeightReleased":
 									item.presentationHeightReleased === true,
 								"presentationHeightSettledHeight": Number(
@@ -4338,7 +4421,9 @@ ApplicationWindow {
 
 					function captureViewportAnchor(allowDuringInput) {
 						if (stickToBottom || prependAnchorActive || scopePresentationPending
-								|| (allowDuringInput !== true && (moving || dragging || flicking)))
+								|| (allowDuringInput !== true && (moving || dragging || flicking
+									|| scrollbarDragActive || scrollbarReleasePending
+									|| timelineScrollBar.pressed)))
 							return false
 						if (Math.abs(contentY - originY) <= 0.5) {
 							beginTopAnchor()
