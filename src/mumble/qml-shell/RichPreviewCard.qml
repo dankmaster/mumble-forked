@@ -130,9 +130,7 @@ Rectangle {
 		&& inlineMediaStageVisible && !inlinePlaybackActive && !mediaRequiresReveal
 		&& effectiveEmbedPosterSource.length > 0 && !currentMediaManagedAnimated
 		&& !embedPosterFallbackActive && embedPoster.status !== Image.Ready
-	readonly property bool staticCompactImageRevealPending: previewState === "ready"
-		&& !inlineMediaStageVisible && !mediaRequiresReveal && imageSource.length > 0
-		&& !currentMediaManagedAnimated
+	readonly property bool staticCompactImageRevealPending: staticCompactImageCacheActive
 		&& (previewImage.status === Image.Null || previewImage.status === Image.Loading)
 	readonly property bool staticTypedMediaRevealPending: previewState === "ready"
 		&& embedDocumentMediaGallery.visible && embedDocumentMediaGallery.viewportVisible

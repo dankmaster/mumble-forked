@@ -260,7 +260,7 @@ TestCase {
 		verify(asyncDelegateStart >= 0 && asyncDelegateEnd > asyncDelegateStart)
 		const asyncDelegateSource = mainSource.slice(asyncDelegateStart, asyncDelegateEnd)
 		verify(/required property int deferredPresentationHeight/.test(asyncDelegateSource))
-		verify(/presentationHeightCommittedHeight[\s\S]*height:\s*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
+		verify(/height:\s*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
 			asyncDelegateSource))
 		verify(/readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending/.test(
 			asyncDelegateSource))
@@ -447,7 +447,7 @@ TestCase {
 		const commitSource = asyncSource.slice(commitStart, commitEnd)
 		verify(/!preparePresentationHeightCommit\(\)\)[\s\S]*return\s+false/.test(commitSource))
 		verify(/if\s*\(presentationHeightTailIntent\)[\s\S]*timeline\.stickToBottom\s*=\s*true[\s\S]*presentationHeightSettledIdentity/.test(commitSource))
-		verify(/presentationHeightSettledIdentity\s*=\s*identity[\s\S]*presentationHeightCommitValue\(measuredHeight\)[\s\S]*viewportProbeHeight\s*=\s*Math\.max\([\s\S]*presentationHeightSettledHeight/.test(commitSource))
+		verify(/presentationHeightSettledIdentity\s*=\s*identity[\s\S]*committedOuterHeight\s*=[\s\S]*presentationHeightCommitValue\(measuredHeight\)[\s\S]*committedProbeHeight\s*=\s*Math\.max\([\s\S]*presentationHeightSettledHeight\s*=\s*committedOuterHeight[\s\S]*viewportProbeHeight\s*=\s*committedProbeHeight/.test(commitSource))
 		verify(/presentationHeightTailIntent[\s\S]*timeline\.requestBottomFollow\(\)[\s\S]*else\s+if\s*\(timeline\.viewportAnchorActive\)[\s\S]*timeline\.scheduleViewportAnchorQuietRelease\(\)/.test(commitSource))
 		verify(/if\s*\(presentationHeightTailIntent\)[\s\S]*if\s*\(timeline\.viewportAnchorActive\)[\s\S]*timeline\.releaseViewportAnchor\(\)[\s\S]*timeline\.stickToBottom\s*=\s*true/.test(commitSource))
 		verify(/timeline\.scheduleViewportAnchorQuietRelease\(\)/.test(commitSource))
@@ -763,7 +763,16 @@ TestCase {
 		verify(/item\.richLoaderSuspended\s*!==\s*true[\s\S]*item\.messageRowReady\s*===\s*true/.test(mainSource))
 		verify(/function\s+richResourceRecoveryPending\(item\)[\s\S]*item\.richResourcesRequired\s*===\s*true[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*item\.richResourcesActive\s*!==\s*true/.test(mainSource))
 		verify(/function\s+pendingVisibleHydrationCount\(\)[\s\S]*item\.contentNeedsHydration\s*===\s*true[\s\S]*item\.inVisibleViewport\s*===\s*true[\s\S]*item\.accessibilityPooled\s*!==\s*true/.test(mainSource))
-		verify(/"pendingVisibleHydrationCount":[\s\S]*timeline\.pendingVisibleHydrationCount\(\)/.test(mainSource))
+		const pendingHydrationStateStart = mainSource.indexOf(
+			"function timelinePresentationState()")
+		const pendingHydrationStateEnd = mainSource.indexOf(
+			"function prepareHistoryLoadPerformanceProbe()", pendingHydrationStateStart)
+		verify(pendingHydrationStateStart >= 0
+			&& pendingHydrationStateEnd > pendingHydrationStateStart)
+		const pendingHydrationStateSource = mainSource.slice(
+			pendingHydrationStateStart, pendingHydrationStateEnd)
+		verify(/const\s+pendingVisibleHydrationCount\s*=[\s\S]*timeline\.pendingVisibleHydrationCount\(\)[\s\S]*"pendingVisibleHydrationCount":\s*pendingVisibleHydrationCount/.test(
+			pendingHydrationStateSource))
 		verify(/function\s+pendingVisibleRichRecoveryCount\(\)[\s\S]*richResourceRecoveryPending\(item\)/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*const\s+pendingVisibleRichRecoveryCount\s*=[\s\S]*timeline\.pendingVisibleRichRecoveryCount\(\)/.test(mainSource))
 		verify(/"pendingVisibleRichRecoveryCount":\s*[\s\S]*pendingVisibleRichRecoveryCount/.test(mainSource))
@@ -1663,7 +1672,7 @@ TestCase {
 			&& updateStart > visibleEnd)
 		const visibleSource = mainSource.slice(visibleStart, visibleEnd)
 		const admissionSource = mainSource.slice(visibleStart, updateStart)
-		verify(/stationaryThumbDelegateActuallyVisible[\s\S]*contentItem\s*\?\s*contentItem\.children[\s\S]*candidates\.sort/.test(
+		verify(/contentItem\s*\?\s*contentItem\.children[\s\S]*stationaryThumbDelegateActuallyVisible[\s\S]*candidates\.sort/.test(
 			visibleSource))
 		verify(!/lightweightDeferredPresentation\s*===\s*true/.test(visibleSource))
 		const installStart = admissionSource.indexOf("function installStationaryThumbWarmPin")

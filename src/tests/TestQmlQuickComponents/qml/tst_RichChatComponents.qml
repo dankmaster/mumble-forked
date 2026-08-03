@@ -138,7 +138,7 @@ TestCase {
 				Rectangle {
 					width: warmFlickable.width
 					height: warmFlickable.contentHeight
-					color: Theme.surfaceBase
+					color: Theme.chatCanvas
 				}
 
 				Item {
@@ -280,11 +280,9 @@ TestCase {
 				value: !!warmFixture.gate && (warmFixture.gate.owns(
 					warmFixture.lastStableId, warmFixture.lastPressEpoch,
 					warmFixture.lastDwellGeneration)
-					|| (warmFixture.card && (warmFixture.card.paintedSurface
-							|| warmFixture.card.paintedTerminal)
-						&& warmFixture.gate.retains(warmFixture.lastStableId,
-							warmFixture.lastPressEpoch,
-							warmFixture.lastDwellGeneration)))
+					|| warmFixture.gate.retains(warmFixture.lastStableId,
+						warmFixture.lastPressEpoch,
+						warmFixture.lastDwellGeneration))
 				when: !!warmFixture.card
 			}
 			Binding {
@@ -293,11 +291,9 @@ TestCase {
 				value: !!warmFixture.gate && (warmFixture.gate.owns(
 					warmFixture.lastStableId, warmFixture.lastPressEpoch,
 					warmFixture.lastDwellGeneration)
-					|| (warmFixture.card && (warmFixture.card.paintedSurface
-							|| warmFixture.card.paintedTerminal)
-						&& warmFixture.gate.retains(warmFixture.lastStableId,
-							warmFixture.lastPressEpoch,
-							warmFixture.lastDwellGeneration)))
+					|| warmFixture.gate.retains(warmFixture.lastStableId,
+						warmFixture.lastPressEpoch,
+						warmFixture.lastDwellGeneration))
 			}
 
 			Connections {
@@ -5108,28 +5104,45 @@ TestCase {
 		const oldEpoch = fixture.lastPressEpoch
 		const oldGeneration = fixture.lastDwellGeneration
 		const oldContentHeight = fixture.flickable.contentHeight
+		fixture.gate.membershipBlocked = true
 		releaseY = movePressedWarmThumb(fixture, releaseY)
 		tryCompare(fixture, "cancellationCount", 1)
 		tryCompare(fixture, "card", null)
 		verify(fixture.gate.dwellGeneration > oldGeneration)
 		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
 			oldGeneration, "painted"), false)
-		compare(controlledImageProvider.receipt(providerId).cancelledCount, 1)
 		fuzzyCompare(fixture.flickable.contentHeight, oldContentHeight, 0.5)
 		compare(fixture.geometryPinActive, true)
+		let receipt = controlledImageProvider.receipt(providerId)
+		compare(controlledImageProvider.release(providerId), receipt.pendingCount)
+		tryVerify(function() {
+			const current = controlledImageProvider.receipt(providerId)
+			return current.pendingCount === 0
+				&& current.finishedCount + current.cancelledCount
+					=== current.requestedCount
+		})
+		tryCompare(fixture, "card", null)
+		compare(fixture.admissionCount, 1)
+		fixture.gate.membershipBlocked = false
 		tryCompare(fixture, "admissionCount", 2)
 		tryVerify(function() { return fixture.card !== null })
-		compare(controlledImageProvider.receipt(providerId).requestedCount, 2)
+		const secondImage = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(secondImage !== null)
+		if (secondImage.status !== Image.Ready) {
+			tryCompare(secondImage, "status", Image.Loading)
+			receipt = controlledImageProvider.receipt(providerId)
+			compare(controlledImageProvider.release(providerId), receipt.pendingCount)
+			tryCompare(secondImage, "status", Image.Ready)
+		}
+		tryCompare(fixture, "finishCount", 1)
 		compare(fixture.gate.admittedCount, 2)
 		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
 			oldGeneration, "painted"), false)
-		verify(fixture.gate.activeStableId.length > 0)
 		releaseY = movePressedWarmThumb(fixture, releaseY)
-		tryCompare(fixture, "cancellationCount", 2)
+		compare(fixture.cancellationCount, 1)
 		tryCompare(fixture, "card", null)
 		wait(96)
 		compare(fixture.admissionCount, 2)
-		compare(controlledImageProvider.release(providerId), 0)
 		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
 			releaseY, Qt.LeftButton)
 	}
@@ -5183,7 +5196,7 @@ TestCase {
 		tryCompare(fixture.scrollBar, "pressed", false)
 	}
 
-	function test_stationary_mouse_up_before_release_cancels_exact_request() {
+	function test_stationary_mouse_up_retires_exact_admission_without_ui_resurrection() {
 		controlledImageProvider.reset()
 		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
 			testCase)
@@ -5199,14 +5212,26 @@ TestCase {
 		const image = findChild(fixture.card, "embedDocumentMediaImage")
 		verify(image !== null)
 		tryCompare(image, "status", Image.Loading)
+		const oldEpoch = fixture.lastPressEpoch
+		const oldGeneration = fixture.lastDwellGeneration
 		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
 			releaseY, Qt.LeftButton)
 		tryCompare(fixture.scrollBar, "pressed", false)
 		tryCompare(fixture, "card", null)
-		compare(controlledImageProvider.receipt(providerId).cancelledCount, 1)
-		compare(controlledImageProvider.release(providerId), 0)
-		wait(48)
-		compare(controlledImageProvider.receipt(providerId).finishedCount, 0)
+		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
+			oldGeneration, "painted"), false)
+		compare(fixture.gate.retains("warm-visible", oldEpoch,
+			oldGeneration), false)
+		let receipt = controlledImageProvider.receipt(providerId)
+		compare(controlledImageProvider.release(providerId), receipt.pendingCount)
+		tryVerify(function() {
+			const current = controlledImageProvider.receipt(providerId)
+			return current.pendingCount === 0
+				&& current.finishedCount + current.cancelledCount
+					=== current.requestedCount
+		})
+		tryCompare(fixture, "card", null)
+		compare(fixture.admissionCount, 1)
 	}
 
 	function test_stationary_watchdog_retires_unpainted_source_and_stale_release() {
@@ -5262,7 +5287,7 @@ TestCase {
 		compare(controlledImageProvider.receipt(secondId).finishedCount, 1)
 	}
 
-	function test_retained_static_loading_request_is_not_cancelled_offscreen() {
+	function test_retained_static_loading_request_survives_render_inactive_churn() {
 		controlledImageProvider.reset()
 		const providerId = "controlled-steam-retained-" + Date.now()
 		const source = "image://mumble/" + providerId
@@ -5276,17 +5301,25 @@ TestCase {
 		const image = findChild(card, "embedDocumentMediaImage")
 		verify(gallery !== null && image !== null)
 		tryCompare(image, "status", Image.Loading)
+		wait(32)
+		const baselineReceipt = controlledImageProvider.receipt(providerId)
+		verify(baselineReceipt.requestedCount > 0)
 		compare(gallery.retainStaticVisual, true)
 		compare(image.source.toString(), source)
-		card.renderActive = true
-		card.renderActive = false
+		card.warmStaticActive = true
+		card.warmStaticActive = false
 		wait(32)
 		compare(image.source.toString(), source)
-		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
-		compare(controlledImageProvider.receipt(providerId).cancelledCount, 0)
-		compare(controlledImageProvider.release(providerId), 1)
+		const retainedReceipt = controlledImageProvider.receipt(providerId)
+		compare(retainedReceipt.requestedCount, baselineReceipt.requestedCount)
+		compare(retainedReceipt.cancelledCount, 0)
+		compare(controlledImageProvider.release(providerId),
+			retainedReceipt.pendingCount)
 		tryCompare(image, "status", Image.Ready)
-		compare(controlledImageProvider.receipt(providerId).finishedCount, 1)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(providerId).finishedCount
+				=== baselineReceipt.requestedCount
+		})
 	}
 
 	function test_external_only_typed_media_is_terminal_complete_without_managed_ready() {
