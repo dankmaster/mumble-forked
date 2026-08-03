@@ -1768,10 +1768,28 @@ TestCase {
 
 		const reconcileStart = mainSource.indexOf(
 			"function reconcileStationaryThumbWarmPins")
+		const reconcileControlStart = mainSource.indexOf(
+			"property bool stationaryThumbWarmReconcilePending")
+		const reconcileScheduleStart = mainSource.indexOf(
+			"function scheduleStationaryThumbWarmReconcile", reconcileControlStart)
+		verify(reconcileControlStart >= 0 && reconcileScheduleStart > reconcileControlStart
+			&& reconcileStart > reconcileScheduleStart)
+		const reconcileControlSource = mainSource.slice(reconcileControlStart,
+			reconcileScheduleStart)
+		const reconcileScheduleSource = mainSource.slice(reconcileScheduleStart,
+			reconcileStart)
+		verify(/readonly property bool stationaryThumbWarmReconcileBlockerActive:[\s\S]*timelineScrollBar\.pressed[\s\S]*scrollbarReleasePending[\s\S]*performanceChatScrollRunning[\s\S]*prependAnchorActive[\s\S]*prependMutationInProgress[\s\S]*viewportMembershipUpdatePending[\s\S]*viewportMembershipTimer\.running/.test(
+			reconcileControlSource))
+		verify(/onStationaryThumbWarmReconcileBlockerActiveChanged:[\s\S]*!stationaryThumbWarmReconcileBlockerActive[\s\S]*stationaryThumbWarmReconcilePending[\s\S]*stationaryThumbWarmPinCount\s*>\s*0[\s\S]*scheduleStationaryThumbWarmReconcile\(\)/.test(
+			reconcileControlSource), "one aggregate blocked-to-unblocked transition must drain latched pins")
+		verify(/onStationaryThumbWarmPinCountChanged:[\s\S]*stationaryThumbWarmPinCount\s*>\s*0[\s\S]*return[\s\S]*stationaryThumbWarmReconcilePending\s*=\s*false[\s\S]*stationaryThumbWarmReconcileTimer\.stop\(\)/.test(
+			reconcileControlSource))
+		verify(/function scheduleStationaryThumbWarmReconcile\(\)[\s\S]*stationaryThumbWarmReconcilePending\s*=\s*true[\s\S]*if\s*\(stationaryThumbWarmReconcileBlocked\(\)\)[\s\S]*return[\s\S]*stationaryThumbWarmReconcilePending\s*=\s*false[\s\S]*stationaryThumbWarmReconcileTimer\.restart\(\)/.test(
+			reconcileScheduleSource), "blocked scheduling must latch without polling and resume once unblocked")
 		const queueStart = mainSource.indexOf("property var richLoaderResumeQueue", reconcileStart)
 		verify(reconcileStart >= 0 && queueStart > reconcileStart)
 		const reconcileSource = mainSource.slice(reconcileStart, queueStart)
-		verify(/stationaryThumbWarmReconcileBlocked\(\)[\s\S]*return[\s\S]*\+\+stationaryThumbWarmReconcilePass/.test(
+		verify(/stationaryThumbWarmReconcileBlocked\(\)[\s\S]*stationaryThumbWarmReconcilePending\s*=\s*true[\s\S]*return[\s\S]*stationaryThumbWarmReconcilePending\s*=\s*false[\s\S]*\+\+stationaryThumbWarmReconcilePass/.test(
 			reconcileSource), "blocked time must not consume the bounded reconciliation passes")
 		verify(/!modelGeometry\.available[\s\S]*clearStationaryThumbWarmPin\(key\)/.test(
 			reconcileSource))
@@ -1805,6 +1823,8 @@ TestCase {
 			"static warm ownership must never activate sibling attachment resources")
 
 		verify(/"stationaryThumbWarmPinnedIds":\s*[\s\S]*Object\.keys\(timeline\.stationaryThumbWarmPins\)[\s\S]*"stationaryThumbWarmPins":\s*timeline\.stationaryThumbWarmPins/.test(
+			mainSource))
+		verify(/"stationaryThumbWarmReconcilePending":\s*[\s\S]*timeline\.stationaryThumbWarmReconcilePending[\s\S]*"stationaryThumbWarmReconcileBlocked":\s*[\s\S]*timeline\.stationaryThumbWarmReconcileBlockerActive/.test(
 			mainSource))
 		const diagnosticsStart = mainSource.indexOf(
 			"function visiblePresentationDiagnostics()")

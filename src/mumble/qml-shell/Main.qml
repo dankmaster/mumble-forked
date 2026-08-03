@@ -2154,6 +2154,10 @@ ApplicationWindow {
 				"stationaryThumbWarmPinnedIds":
 					Object.keys(timeline.stationaryThumbWarmPins),
 				"stationaryThumbWarmPins": timeline.stationaryThumbWarmPins,
+				"stationaryThumbWarmReconcilePending":
+					timeline.stationaryThumbWarmReconcilePending,
+				"stationaryThumbWarmReconcileBlocked":
+					timeline.stationaryThumbWarmReconcileBlockerActive,
 				"visibleInactiveRichResourceCount":
 					visiblePresentation.inactiveRichResourceCount,
 				"visiblePresentationHeightPendingCount":
@@ -3723,6 +3727,29 @@ ApplicationWindow {
 					}
 					property int stationaryThumbWarmReconcilePass: 0
 					readonly property int maximumStationaryThumbWarmReconcilePasses: 32
+					property bool stationaryThumbWarmReconcilePending: false
+					readonly property bool stationaryThumbWarmReconcileBlockerActive:
+						timelineScrollBar.pressed || scrollbarDragActive
+						|| scrollbarReleasePending || moving || dragging || flicking
+						|| timelineScrollHandler.scrolling
+						|| root.performanceChatScrollRunning
+						|| scopePresentationPending || scopePresentationFinalizing
+						|| scopeResetPending || prependAnchorActive
+						|| prependMutationInProgress || viewportMembershipUpdatePending
+						|| viewportMembershipTimer.running
+					onStationaryThumbWarmReconcileBlockerActiveChanged: {
+						if (!stationaryThumbWarmReconcileBlockerActive
+								&& stationaryThumbWarmReconcilePending
+								&& stationaryThumbWarmPinCount > 0)
+							scheduleStationaryThumbWarmReconcile()
+					}
+					onStationaryThumbWarmPinCountChanged: {
+						if (stationaryThumbWarmPinCount > 0)
+							return
+						stationaryThumbWarmReconcilePending = false
+						stationaryThumbWarmReconcilePass = 0
+						stationaryThumbWarmReconcileTimer.stop()
+					}
 					function stationaryThumbWarmModelGeometry(stableId) {
 						const key = String(stableId || "")
 						const rowIndex = key.length > 0
@@ -3739,32 +3766,41 @@ ApplicationWindow {
 						}
 					}
 					function stationaryThumbWarmReconcileBlocked() {
-						return timelineScrollBar.pressed || scrollbarDragActive
-							|| scrollbarReleasePending || moving || dragging || flicking
-							|| timelineScrollHandler.scrolling
-							|| root.performanceChatScrollRunning
-							|| scopePresentationPending || scopePresentationFinalizing
-							|| scopeResetPending || prependAnchorActive
-							|| prependMutationInProgress || viewportMembershipUpdatePending
-							|| viewportMembershipTimer.running
+						return stationaryThumbWarmReconcileBlockerActive
 					}
 					function scheduleStationaryThumbWarmReconcile() {
-						if (stationaryThumbWarmPinCount === 0)
+						if (stationaryThumbWarmPinCount === 0) {
+							stationaryThumbWarmReconcilePending = false
 							return
+						}
+						stationaryThumbWarmReconcilePending = true
+						if (stationaryThumbWarmReconcileBlocked())
+							return
+						stationaryThumbWarmReconcilePending = false
 						stationaryThumbWarmReconcilePass = 0
 						stationaryThumbWarmReconcileTimer.restart()
 					}
 					function rearmStationaryThumbWarmReconcile() {
 						if (stationaryThumbWarmPinCount > 0
 								&& stationaryThumbWarmReconcilePass
-									< maximumStationaryThumbWarmReconcilePasses)
+									< maximumStationaryThumbWarmReconcilePasses) {
+							stationaryThumbWarmReconcilePending = true
+							if (stationaryThumbWarmReconcileBlocked())
+								return
+							stationaryThumbWarmReconcilePending = false
 							stationaryThumbWarmReconcileTimer.restart()
+						}
 					}
 					function reconcileStationaryThumbWarmPins() {
-						if (stationaryThumbWarmPinCount === 0)
+						if (stationaryThumbWarmPinCount === 0) {
+							stationaryThumbWarmReconcilePending = false
 							return
-						if (stationaryThumbWarmReconcileBlocked())
+						}
+						if (stationaryThumbWarmReconcileBlocked()) {
+							stationaryThumbWarmReconcilePending = true
 							return
+						}
+						stationaryThumbWarmReconcilePending = false
 						++stationaryThumbWarmReconcilePass
 						let retryNeeded = false
 						const pinnedIds = Object.keys(stationaryThumbWarmPins)
