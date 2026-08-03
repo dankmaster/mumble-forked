@@ -673,8 +673,23 @@ TestCase {
 			mainSource))
 		verify(/function\s+nearViewportPrefetchAllowed\(\)[\s\S]*viewportMembershipTimer\.running\s*!==\s*true[\s\S]*viewportMembershipUpdatePending\s*!==\s*true/.test(
 			mainSource))
-		verify(/if\s*\(viewportMembershipTimer\.running\s*\|\|\s*(?:timeline\.)?viewportMembershipUpdatePending\)\s*\{\s*scopePresentationFinalizeQuietTimer\.restart\(\)\s*return/.test(
-			mainSource))
+		const finalizationFunctionStart = mainSource.indexOf(
+			"function completeScopePresentationFinalization(forcedByDeadline)")
+		const finalizationFunctionEnd = mainSource.indexOf(
+			"function recordTailCorrection", finalizationFunctionStart)
+		verify(finalizationFunctionStart >= 0
+			&& finalizationFunctionEnd > finalizationFunctionStart)
+		const finalizationSource = mainSource.slice(finalizationFunctionStart,
+			finalizationFunctionEnd)
+		const finalizationCallLaterStart = finalizationSource.indexOf(
+			"Qt.callLater(function()")
+		verify(finalizationCallLaterStart >= 0)
+		const finalizationCallLaterSource = finalizationSource.slice(
+			finalizationCallLaterStart)
+		verify(/if\s*\(!forcedByDeadline\s*&&\s*\(viewportMembershipTimer\.running\s*\|\|\s*timeline\.viewportMembershipUpdatePending\)\)\s*\{\s*scopePresentationFinalizeQuietTimer\.restart\(\)\s*return/.test(
+			finalizationCallLaterSource))
+		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationFinalizing\s*=\s*false/.test(
+			finalizationCallLaterSource))
 		verify(/onContentYChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(
 			mainSource))
 		verify(/onContentHeightChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(

@@ -4450,8 +4450,12 @@ ApplicationWindow {
 							timeline.restoringBottom = true
 							timeline.containTailMessageWhenPossible()
 							timeline.restoringBottom = false
-							if (viewportMembershipTimer.running
-									|| timeline.viewportMembershipUpdatePending) {
+							// The deadline is the hard input-liveness boundary. Membership
+							// reconciliation is non-positional background work and may still
+							// be queued in this callLater turn; it must not turn the consumed
+							// single-shot deadline into an unbounded quiet-timer loop.
+							if (!forcedByDeadline && (viewportMembershipTimer.running
+									|| timeline.viewportMembershipUpdatePending)) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
